@@ -2,9 +2,9 @@ use crate::app::{AddProjectOutcome, AppState, RemoveProjectError};
 use crate::close::CloseAssessment;
 use crate::command::AppCommand;
 use crate::project::ProjectId;
+use crate::project::recent::RecentProjectState;
+use crate::project::root::ProjectRootValidationError;
 use crate::project_board::ProjectBoardViewModel;
-use crate::project_root::ProjectRootValidationError;
-use crate::recent_project::RecentProjectState;
 use crate::route::AppRoute;
 
 #[derive(Debug, Default)]

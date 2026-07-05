@@ -35,7 +35,7 @@ Observed test result:
 Isolated restore run:
 
 ```text
-XDG_STATE_HOME=.git-exclude/tmp/manual-state cargo run -p tekstide_app
+XDG_STATE_HOME=.git-exclude/tmp/manual-state cargo run -p tekstide
 ```
 
 Rendered row:
@@ -47,7 +47,7 @@ manual-project | .git-exclude/tmp/manual-project -> /home/nabbisen/Desktop/tekst
 Invalid path evidence from PR-005-C:
 
 ```text
-cargo run -p tekstide_app -- LICENSE
+cargo run -p tekstide -- LICENSE
 path is not a folder: LICENSE
 ```
 
@@ -97,4 +97,3 @@ No RFC-005 operation deletes project files or directories.
 The Project Board currently sorts by attention, row kind, display name, and ProjectId. RFC-005 asks for attention, recent activity, recent open, and display name. Timestamp-aware sorting is deferred until the UI layer consumes persisted timestamp fields; this should be revisited before any release that claims final Project Board UX polish.
 
 The current executable is a CLI harness. The desktop GUI layer remains deferred, but the core shell, state, persistence, and view-model boundaries are implemented for GUI integration.
-

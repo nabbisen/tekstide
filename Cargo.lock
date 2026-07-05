@@ -181,14 +181,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "tekstide_app"
+name = "tekstide"
 version = "0.1.0"
 dependencies = [
- "tekstide_core",
+ "tekstide-core",
 ]
 
 [[package]]
-name = "tekstide_core"
+name = "tekstide-core"
 version = "0.1.0"
 dependencies = [
  "serde",

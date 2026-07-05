@@ -1,6 +1,6 @@
 use crate::app::AppState;
+use crate::project::recent::{RecentProjectAvailability, RestoredRecentProject};
 use crate::project::{ProjectId, ProjectRuntimeSummary, ProjectSession};
-use crate::recent_project::{RecentProjectAvailability, RestoredRecentProject};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CountDisplay {

@@ -3,9 +3,10 @@ use crate::app::{AddProjectOutcome, RemoveProjectError};
 use crate::close::{
     CloseAssessment, CloseReason, CloseReasonCode, CloseResourceProviderState, CloseResourceSummary,
 };
+use crate::domain::DomainTimestamp;
+use crate::project::recent::{RecentProject, RecentProjectState, Timestamp};
+use crate::project::root::{ProjectRootValidationError, SymlinkPolicy};
 use crate::project::{ProjectId, ProjectRuntimeSummary};
-use crate::project_root::{ProjectRootValidationError, SymlinkPolicy};
-use crate::recent_project::{RecentProject, RecentProjectState, Timestamp};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -174,6 +175,30 @@ fn recent_project_state_uses_uuid_project_ids() {
     let project_id = recent_state.projects[0].project_id.as_str();
     assert_eq!(project_id.len(), 36);
     assert_eq!(project_id.as_bytes()[14], b'4');
+}
+
+#[test]
+fn recent_project_state_exports_project_session_timestamps() {
+    let mut state = AppState::default();
+    let project_id =
+        state.add_project_session("Project", "/workspace/project", "/workspace/project");
+    let opened_at = DomainTimestamp::from_utc_string("2026-07-05T01:02:03Z").unwrap();
+    let activity_at = DomainTimestamp::from_utc_string("2026-07-05T04:05:06Z").unwrap();
+    let project = state.project_mut(&project_id).unwrap();
+    project.mark_opened_at(opened_at);
+    project.record_activity_at(activity_at);
+
+    let recent_state = state.recent_project_state();
+    let recent_project = &recent_state.projects[0];
+
+    assert_eq!(
+        recent_project.last_opened_at.as_str(),
+        "2026-07-05T01:02:03Z"
+    );
+    assert_eq!(
+        recent_project.last_activity.as_str(),
+        "2026-07-05T04:05:06Z"
+    );
 }
 
 #[test]
@@ -363,10 +388,8 @@ impl TestSandbox {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "tekstide-app-{name}-{}-{nonce}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("tekstide-{name}-{}-{nonce}", std::process::id()));
         fs::create_dir(&root).unwrap();
         Self { root }
     }

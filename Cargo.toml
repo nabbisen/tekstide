@@ -1,12 +1,11 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/tekstide_app",
-    "crates/tekstide_core",
+    "crates/tekstide",
+    "crates/tekstide-core",
 ]
 
 [workspace.package]
 edition = "2024"
 license = "Apache-2.0"
 authors = ["nabbisen"]
-

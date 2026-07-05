@@ -2,8 +2,8 @@ use super::{
     AttentionState, BoardRowKind, CountDisplay, ProjectBoardViewModel, calculate_attention,
 };
 use crate::app::AppState;
+use crate::project::recent::{RecentProject, RecentProjectState, Timestamp};
 use crate::project::{ProjectId, ProjectRuntimeSummary};
-use crate::recent_project::{RecentProject, RecentProjectState, Timestamp};
 
 #[test]
 fn empty_project_board_has_first_run_state() {

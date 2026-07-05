@@ -1,5 +1,5 @@
 [package]
-name = "tekstide_app"
+name = "tekstide"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -10,5 +10,4 @@ name = "tekstide"
 path = "src/main.rs"
 
 [dependencies]
-tekstide_core = { path = "../tekstide_core" }
-
+tekstide-core = { path = "../tekstide-core" }

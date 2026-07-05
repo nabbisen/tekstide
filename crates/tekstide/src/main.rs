@@ -2,8 +2,8 @@ use tekstide_core::shell::ApplicationShell;
 
 fn main() -> std::process::ExitCode {
     let mut shell = ApplicationShell::new();
-    let store = match tekstide_core::recent_project::AppStatePathProvider::linux_default() {
-        Ok(path_provider) => Some(tekstide_core::recent_project::RecentProjectStore::new(
+    let store = match tekstide_core::project::recent::AppStatePathProvider::linux_default() {
+        Ok(path_provider) => Some(tekstide_core::project::recent::RecentProjectStore::new(
             path_provider,
         )),
         Err(error) => {

@@ -1,12 +1,12 @@
 use crate::close::{CloseAssessment, assess_close};
-use crate::project::{ProjectId, ProjectSession};
-use crate::project_root::{
+use crate::project::recent::{
+    RECENT_PROJECT_STATE_VERSION, RecentProject, RecentProjectAvailability, RecentProjectState,
+    RestoredRecentProject, Timestamp, assess_recent_project_availability,
+};
+use crate::project::root::{
     ProjectRootValidationError, ProjectRootValidator, SymlinkPolicy, ValidProjectRoot,
 };
-use crate::recent_project::{
-    RecentProject, RecentProjectAvailability, RecentProjectState, RestoredRecentProject, Timestamp,
-    assess_recent_project_availability,
-};
+use crate::project::{ProjectId, ProjectSession};
 
 #[derive(Debug, Default)]
 pub struct AppState {
@@ -52,19 +52,20 @@ impl AppState {
         for project in &self.projects {
             upsert_recent_project(
                 &mut projects,
-                RecentProject::new(
+                RecentProject::with_timestamps(
                     project.id().clone(),
                     project.display_name(),
                     project.root_path().clone(),
                     project.canonical_root_path().clone(),
-                    Timestamp::now_utc(),
+                    Timestamp::from_domain(project.last_opened_at()),
+                    Timestamp::from_domain(project.last_activity_at()),
                     project.trust_state().label(),
                 ),
             );
         }
 
         RecentProjectState {
-            state_version: crate::recent_project::RECENT_PROJECT_STATE_VERSION,
+            state_version: RECENT_PROJECT_STATE_VERSION,
             projects,
         }
     }
@@ -148,10 +149,15 @@ impl AppState {
     }
 
     pub fn switch_active_project(&mut self, project_id: &ProjectId) -> bool {
-        if self.project(project_id).is_none() {
+        let Some(project) = self
+            .projects
+            .iter_mut()
+            .find(|project| project.id() == project_id)
+        else {
             return false;
-        }
+        };
 
+        project.mark_opened();
         self.active_project_id = Some(project_id.clone());
         true
     }
@@ -241,12 +247,13 @@ impl AppState {
         let Some(project) = self.project(&project_id) else {
             return;
         };
-        let recent_project = RecentProject::new(
+        let recent_project = RecentProject::with_timestamps(
             project.id().clone(),
             project.display_name(),
             project.root_path().clone(),
             project.canonical_root_path().clone(),
-            Timestamp::now_utc(),
+            Timestamp::from_domain(project.last_opened_at()),
+            Timestamp::from_domain(project.last_activity_at()),
             project.trust_state().label(),
         );
 
