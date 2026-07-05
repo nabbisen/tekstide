@@ -17,10 +17,10 @@ Depends on:
 
 - [RFC-001](../proposed/001-product-scope-mvp-and-non-goals.md)
 - [RFC-002](./002-core-domain-model-projectsession-terminalsession-agentrun-auditevent.md)
-- [RFC-003](../proposed/003-information-architecture-and-ui-mode-model.md)
+- [RFC-003](./003-information-architecture-and-ui-mode-model.md)
 - [RFC-004](./004-security-baseline-and-restricted-mode.md)
 
-These links reflect the current four-folder RFC policy. RFC-001 and RFC-003 remain under `rfcs/proposed/` until implemented, even though review response 002 accepted them for foundation implementation planning.
+These links reflect the current four-folder RFC policy. RFC-001 remains under `rfcs/proposed/` until implemented, even though review response 002 accepted it for foundation implementation planning.
 
 ## Summary
 

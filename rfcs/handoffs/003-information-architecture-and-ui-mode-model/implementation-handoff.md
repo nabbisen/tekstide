@@ -1,6 +1,6 @@
 # RFC-003 Implementation Handoff
 
-Source RFC: [RFC-003](../../proposed/003-information-architecture-and-ui-mode-model.md)
+Source RFC: [RFC-003](../../done/003-information-architecture-and-ui-mode-model.md)
 Target: information architecture and navigation model
 
 ## Purpose

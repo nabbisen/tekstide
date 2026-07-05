@@ -1,6 +1,6 @@
 # RFC-003: Information Architecture and UI Mode Model
 
-Status: Proposed  
+Status: Implemented  
 Target milestone: M0-M1  
 Date: 2026-07-04
 
@@ -203,6 +203,25 @@ Security UI must be contextual and global:
 - Terminal Mode never displays more than two visible terminal panes in MVP.
 - Content Mode never displays arbitrary multi-editor splits in MVP.
 - AgentRun detail and Diff Review are accessible as main content surfaces.
+
+## Implementation Closeout
+
+RFC-003 is implemented for the foundation stage as navigation and mode policy/state:
+
+- Project Board remains the global control plane.
+- Active Project Workspace requires an active ProjectSession.
+- ProjectSession owns Content Mode / Terminal Immersion Mode state.
+- Content surfaces are represented as one-primary-surface placeholders.
+- Terminal pane visibility is capped by TerminalPanePolicy.
+- Keybinding posture is represented as configurable policy data.
+
+The following are intentionally deferred to later RFCs or implementation slices:
+
+- real desktop GUI widgets and responsive layout engine;
+- real keyboard event handling and user keybinding persistence;
+- editor, terminal/PTY, AgentRun detail, approval, diff, command palette, and safe-close dialogs;
+- terminal multiplexer UI;
+- arbitrary editor splits, arbitrary terminal pane counts, multi-window, and plugin UI slots.
 
 ## Risks and Mitigations
 
