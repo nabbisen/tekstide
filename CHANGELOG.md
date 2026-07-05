@@ -2,7 +2,7 @@
 
 ## 0.1.0 - Foundation Release
 
-Status: release-candidate preparation; not yet tagged.
+Status: released on 2026-07-06.
 
 Tekstide `0.1.0` is scoped as a core/shell foundation release through RFC-006. It is not the full AI CLI workbench.
 
@@ -35,7 +35,7 @@ Tekstide `0.1.0` is scoped as a core/shell foundation release through RFC-006. I
 
 ### Release Gate Status
 
-Required before tagging:
+Completed before release:
 
 - clean working tree;
 - `git diff --check`;
@@ -46,9 +46,8 @@ Required before tagging:
 - `cargo package -p tekstide-core --locked`;
 - `cargo package -p tekstide --locked`;
 - package smoke test from generated package artifacts;
-- release-candidate review package accepted.
-
-Do not create the `v0.1.0` tag until the release-candidate review package is accepted.
+- release-candidate review package accepted;
+- `tekstide-core` and `tekstide` published to crates.io.
 
 ### Future Work Themes
 
