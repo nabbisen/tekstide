@@ -1,6 +1,6 @@
 # RFC-002 Implementation Handoff
 
-Source RFC: [RFC-002](../../proposed/002-core-domain-model-projectsession-terminalsession-agentrun-auditevent.md)
+Source RFC: [RFC-002](../../done/002-core-domain-model-projectsession-terminalsession-agentrun-auditevent.md)
 Target: core domain model
 
 ## Purpose

@@ -1,6 +1,6 @@
 # RFC-002: Core Domain Model: ProjectSession, TerminalSession, AgentRun, AuditEvent
 
-Status: Proposed  
+Status: Implemented  
 Target milestone: M0-M1  
 Date: 2026-07-04
 

@@ -16,7 +16,7 @@ Related baseline documents:
 Depends on:
 
 - [RFC-001](../proposed/001-product-scope-mvp-and-non-goals.md)
-- [RFC-002](../proposed/002-core-domain-model-projectsession-terminalsession-agentrun-auditevent.md)
+- [RFC-002](./002-core-domain-model-projectsession-terminalsession-agentrun-auditevent.md)
 - [RFC-003](../proposed/003-information-architecture-and-ui-mode-model.md)
 - [RFC-004](../proposed/004-security-baseline-and-restricted-mode.md)
 
