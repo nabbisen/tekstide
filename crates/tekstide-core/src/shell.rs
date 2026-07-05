@@ -1,6 +1,7 @@
 use crate::app::{AddProjectOutcome, AppState, RemoveProjectError};
 use crate::close::CloseAssessment;
 use crate::command::AppCommand;
+use crate::navigation::{TerminalLayoutClass, TerminalPanePolicy};
 use crate::project::ProjectId;
 use crate::project::recent::RecentProjectState;
 use crate::project::root::ProjectRootValidationError;
@@ -44,7 +45,19 @@ impl ApplicationShell {
                 self.route = AppRoute::ProjectBoard;
             }
             AppCommand::OpenActiveProjectWorkspace => {
-                self.route = AppRoute::ActiveProjectWorkspace;
+                if self.state.active_project().is_some() {
+                    self.route = AppRoute::ActiveProjectWorkspace;
+                }
+            }
+            AppCommand::ToggleActiveProjectMode => {
+                if self.state.toggle_active_project_mode() {
+                    self.route = AppRoute::ActiveProjectWorkspace;
+                }
+            }
+            AppCommand::OpenActiveProjectSurface(surface) => {
+                if self.state.open_active_project_surface(surface) {
+                    self.route = AppRoute::ActiveProjectWorkspace;
+                }
             }
         }
     }
@@ -81,11 +94,36 @@ impl ApplicationShell {
     pub fn render_text(&self) -> String {
         match self.route {
             AppRoute::ProjectBoard => render_project_board(&self.project_board()),
-            AppRoute::ActiveProjectWorkspace => {
-                "Active Project Workspace\n\nNo project surface is open yet.\n".to_owned()
-            }
+            AppRoute::ActiveProjectWorkspace => render_active_project_workspace(&self.state),
         }
     }
+}
+
+fn render_active_project_workspace(state: &AppState) -> String {
+    let Some(project) = state.active_project() else {
+        return "Active Project Workspace\n\nNo project surface is open yet.\n".to_owned();
+    };
+
+    let mut output = String::from("Active Project Workspace\n\n");
+    output.push_str(project.display_name());
+    output.push_str(" | ");
+    output.push_str(project.mode().label());
+    output.push_str(" | surface: ");
+    output.push_str(project.open_surface().label());
+    output.push_str(" | visible terminal panes: ");
+    let pane_policy = TerminalPanePolicy::for_layout(TerminalLayoutClass::Wide);
+    let requested_panes = requested_visible_panes(project.resource_limits().visible_terminal_limit);
+    output.push_str(&pane_policy.visible_pane_count(requested_panes).to_string());
+    output.push('\n');
+    output
+}
+
+fn requested_visible_panes(limit: Option<u32>) -> u8 {
+    limit
+        .unwrap_or(u32::from(
+            TerminalPanePolicy::for_layout(TerminalLayoutClass::Wide).max_visible_panes,
+        ))
+        .min(u32::from(u8::MAX)) as u8
 }
 
 fn render_project_board(view_model: &ProjectBoardViewModel) -> String {

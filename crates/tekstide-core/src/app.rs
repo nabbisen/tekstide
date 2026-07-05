@@ -6,7 +6,7 @@ use crate::project::recent::{
 use crate::project::root::{
     ProjectRootValidationError, ProjectRootValidator, SymlinkPolicy, ValidProjectRoot,
 };
-use crate::project::{ProjectId, ProjectSession};
+use crate::project::{ProjectId, ProjectMode, ProjectOpenSurface, ProjectSession};
 
 #[derive(Debug, Default)]
 pub struct AppState {
@@ -73,6 +73,13 @@ impl AppState {
     pub fn active_project(&self) -> Option<&ProjectSession> {
         let active_id = self.active_project_id.as_ref()?;
         self.project(active_id)
+    }
+
+    fn active_project_mut(&mut self) -> Option<&mut ProjectSession> {
+        let active_id = self.active_project_id.clone()?;
+        self.projects
+            .iter_mut()
+            .find(|project| project.id() == &active_id)
     }
 
     pub fn project(&self, project_id: &ProjectId) -> Option<&ProjectSession> {
@@ -170,6 +177,25 @@ impl AppState {
         };
 
         assess_close(project.close_resource_summary())
+    }
+
+    pub fn toggle_active_project_mode(&mut self) -> bool {
+        let Some(project) = self.active_project_mut() else {
+            return false;
+        };
+
+        project.toggle_mode();
+        true
+    }
+
+    pub fn open_active_project_surface(&mut self, surface: ProjectOpenSurface) -> bool {
+        let Some(project) = self.active_project_mut() else {
+            return false;
+        };
+
+        project.set_open_surface(surface);
+        project.set_mode(ProjectMode::Content);
+        true
     }
 
     pub fn close_project(

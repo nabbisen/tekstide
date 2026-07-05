@@ -30,10 +30,40 @@ pub enum ProjectOpenSurface {
     TrustSettings,
 }
 
+impl ProjectOpenSurface {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ProjectDashboard => "Project Dashboard",
+            Self::TextEditor => "Text Editor",
+            Self::GitStatus => "Git Status",
+            Self::AgentRunDetail => "AgentRun Detail",
+            Self::DiffReview => "Diff Review",
+            Self::HandoffReport => "Handoff Report",
+            Self::TrustSettings => "Trust Settings",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProjectMode {
     Content,
     TerminalImmersion,
+}
+
+impl ProjectMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Content => "Content Mode",
+            Self::TerminalImmersion => "Terminal / Agent Immersion Mode",
+        }
+    }
+
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::Content => Self::TerminalImmersion,
+            Self::TerminalImmersion => Self::Content,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

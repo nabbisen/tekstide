@@ -321,6 +321,10 @@ impl ProjectSession {
         self.record_activity();
     }
 
+    pub fn toggle_mode(&mut self) {
+        self.set_mode(self.mode.toggled());
+    }
+
     pub fn set_resource_limits(&mut self, resource_limits: ProjectResourceLimits) {
         self.resource_limits = resource_limits;
         self.record_activity();

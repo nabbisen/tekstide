@@ -1,5 +1,6 @@
 use super::ApplicationShell;
 use crate::command::AppCommand;
+use crate::project::{ProjectMode, ProjectOpenSurface, ProjectResourceLimits};
 use crate::route::AppRoute;
 
 #[test]
@@ -12,11 +13,117 @@ fn shell_starts_on_project_board_route() {
 #[test]
 fn command_router_changes_top_level_route() {
     let mut shell = ApplicationShell::new();
+    shell
+        .state_mut()
+        .add_project_session("Tekstide", "/workspace/tekstide", "/workspace/tekstide");
 
     shell.dispatch(AppCommand::OpenActiveProjectWorkspace);
     assert_eq!(shell.route(), AppRoute::ActiveProjectWorkspace);
 
     shell.dispatch(AppCommand::OpenProjectBoard);
+    assert_eq!(shell.route(), AppRoute::ProjectBoard);
+}
+
+#[test]
+fn direct_workspace_open_without_active_project_stays_on_project_board() {
+    let mut shell = ApplicationShell::new();
+
+    shell.dispatch(AppCommand::OpenActiveProjectWorkspace);
+
+    assert_eq!(shell.route(), AppRoute::ProjectBoard);
+    assert!(shell.render_text().contains("Project Board"));
+}
+
+#[test]
+fn active_project_workspace_toggles_between_content_and_terminal_modes() {
+    let mut shell = ApplicationShell::new();
+    let project_id = shell.state_mut().add_project_session(
+        "Tekstide",
+        "/workspace/tekstide",
+        "/workspace/tekstide",
+    );
+
+    shell.dispatch(AppCommand::OpenActiveProjectWorkspace);
+    assert_eq!(shell.route(), AppRoute::ActiveProjectWorkspace);
+    assert_eq!(
+        shell.state().project(&project_id).unwrap().mode(),
+        ProjectMode::Content
+    );
+
+    shell.dispatch(AppCommand::ToggleActiveProjectMode);
+    assert_eq!(
+        shell.state().project(&project_id).unwrap().mode(),
+        ProjectMode::TerminalImmersion
+    );
+    assert!(
+        shell
+            .render_text()
+            .contains("Terminal / Agent Immersion Mode")
+    );
+    assert!(shell.render_text().contains("visible terminal panes: 2"));
+
+    shell.dispatch(AppCommand::ToggleActiveProjectMode);
+    assert_eq!(
+        shell.state().project(&project_id).unwrap().mode(),
+        ProjectMode::Content
+    );
+}
+
+#[test]
+fn active_workspace_visible_panes_are_capped_by_navigation_policy() {
+    let mut shell = ApplicationShell::new();
+    let project_id = shell.state_mut().add_project_session(
+        "Tekstide",
+        "/workspace/tekstide",
+        "/workspace/tekstide",
+    );
+    shell
+        .state_mut()
+        .project_mut(&project_id)
+        .expect("project should exist")
+        .set_resource_limits(ProjectResourceLimits {
+            visible_terminal_limit: Some(8),
+            terminal_session_limit: None,
+            agent_run_limit: None,
+            approval_request_limit: None,
+        });
+
+    shell.dispatch(AppCommand::OpenActiveProjectWorkspace);
+
+    assert!(shell.render_text().contains("visible terminal panes: 2"));
+}
+
+#[test]
+fn opening_content_surface_returns_to_content_mode_without_losing_active_project() {
+    let mut shell = ApplicationShell::new();
+    let project_id = shell.state_mut().add_project_session(
+        "Tekstide",
+        "/workspace/tekstide",
+        "/workspace/tekstide",
+    );
+
+    shell.dispatch(AppCommand::ToggleActiveProjectMode);
+    shell.dispatch(AppCommand::OpenActiveProjectSurface(
+        ProjectOpenSurface::DiffReview,
+    ));
+
+    let project = shell.state().project(&project_id).unwrap();
+    assert_eq!(shell.route(), AppRoute::ActiveProjectWorkspace);
+    assert_eq!(project.mode(), ProjectMode::Content);
+    assert_eq!(project.open_surface(), ProjectOpenSurface::DiffReview);
+    assert!(shell.render_text().contains("surface: Diff Review"));
+}
+
+#[test]
+fn workspace_commands_without_active_project_do_not_leave_project_board() {
+    let mut shell = ApplicationShell::new();
+
+    shell.dispatch(AppCommand::ToggleActiveProjectMode);
+    assert_eq!(shell.route(), AppRoute::ProjectBoard);
+
+    shell.dispatch(AppCommand::OpenActiveProjectSurface(
+        ProjectOpenSurface::AgentRunDetail,
+    ));
     assert_eq!(shell.route(), AppRoute::ProjectBoard);
 }
 
