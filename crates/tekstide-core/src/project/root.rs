@@ -5,6 +5,13 @@ use std::path::{Component, Path, PathBuf};
 
 use super::{ProjectId, ProjectSession};
 
+mod explorer;
+
+pub use explorer::{
+    ExplorerDirectoryScan, ExplorerNode, ExplorerNodeKind, ExplorerNodeState, ExplorerScanError,
+    FileExplorerScanPolicy, FileExplorerScanner,
+};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SymlinkPolicy {
     FailClosed,
@@ -52,6 +59,7 @@ pub enum FileAccessSymlinkStatus {
     /// symlink/junction/reparse-point behavior must be reviewed before
     /// Windows support is claimed.
     InRootSymlink,
+    UnresolvedSymlink,
     EscapesRoot,
 }
 
