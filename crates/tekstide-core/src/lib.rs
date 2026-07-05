@@ -1,6 +1,7 @@
 pub mod app;
 pub mod close;
 pub mod command;
+pub mod content;
 pub mod domain;
 pub mod navigation;
 pub mod project;
