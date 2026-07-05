@@ -21,6 +21,7 @@ RFC-001 was accepted for foundation implementation planning by review response 0
 | RFC | Title | Target |
 | --- | --- | --- |
 | 001 | [Product Scope, MVP, and Non-Goals](./proposed/001-product-scope-mvp-and-non-goals.md) | M0 |
+| 006 | [ProjectSession State and File Explorer / Editor Basics](./proposed/006-projectsession-state-and-file-explorer-editor-basics.md) | M3 |
 
 ## Handoffs
 
@@ -31,6 +32,7 @@ RFC-001 was accepted for foundation implementation planning by review response 0
 | 003 | [Information Architecture and UI Mode Model](./handoffs/003-information-architecture-and-ui-mode-model/README.md) |
 | 004 | [Security Baseline and Restricted Mode](./handoffs/004-security-baseline-and-restricted-mode/README.md) |
 | 005 | [Application Shell and Project Board](./handoffs/005-application-shell-and-project-board/README.md) |
+| 006 | [ProjectSession State and File Explorer / Editor Basics](./handoffs/006-projectsession-state-and-file-explorer-editor-basics/README.md) |
 
 ## Implemented
 
