@@ -1,6 +1,6 @@
 # RFC-004: Security Baseline and Restricted Mode
 
-Status: Proposed  
+Status: Implemented  
 Target milestone: M0-M1  
 Date: 2026-07-04
 
@@ -178,13 +178,25 @@ This entire RFC is security-relevant. Implementations must add tests for each se
 
 ## Acceptance Criteria
 
+Closed by this RFC at the policy/read-model baseline:
+
 - Newly opened projects enter Restricted/Unknown state.
-- Restricted Mode prevents auto LSP/profile/plugin/env/task loading.
-- Trust decisions are explicit and audited.
-- AI CLI sessions display managed/supervised/plain level.
-- Managed command approval records decisions.
-- Transcripts are stored locally and purgeable.
-- Safe Close appears for running processes.
+- Restricted Mode policy prevents auto LSP/profile/plugin/env/task loading.
+- Trust decisions are explicit and audited at the domain level.
+- AI CLI sessions have managed/supervised/plain policy labels.
+- Managed command approval is represented as Managed-only eligibility and audit vocabulary.
+- Transcript persistence is blocked until local, bounded, opt-out-capable, purgeable storage exists.
+- Safe-close assessment requires confirmation for running processes and other active resources.
+
+Deferred runtime/storage/GUI enforcement:
+
+- command approval execution UI and adapter integration;
+- transcript byte storage and purge backend;
+- terminal and AgentRun launch enforcement;
+- paste protection behavior;
+- LSP/plugin/profile/prompt/environment launch wiring;
+- GUI trust dialogs and safe-close dialogs;
+- audit persistence backend.
 
 ## Risks and Mitigations
 
@@ -201,3 +213,30 @@ This entire RFC is security-relevant. Implementations must add tests for each se
 - Implement Restricted Mode checks as policy functions, not scattered UI conditionals.
 - Add audit event creation to trust and approval transitions.
 - Make compatibility level visible in all AgentRun/terminal surfaces.
+
+## Implementation Scope Closed By This RFC
+
+RFC-004 is closed for the foundation stage as the security policy and read-model baseline.
+
+Implemented:
+
+- central Restricted Mode policy functions;
+- trust-state vocabulary and effective trust mapping;
+- display-facing Restricted Mode summaries;
+- AI session security labels and Managed-only approval eligibility;
+- transcript persistence guardrails;
+- narrow redaction-scope vocabulary;
+- trust/audit helper constructors;
+- safe-close assessment vocabulary and conservative close-resource evaluation.
+
+Deferred to later RFCs/slices:
+
+- terminal process launch enforcement;
+- AgentRun launch enforcement;
+- command approval execution UI and adapter integration;
+- paste protection behavior;
+- LSP/plugin/profile/prompt/environment launch wiring;
+- transcript byte storage and purge backend;
+- GUI trust dialogs and safe-close dialogs;
+- audit persistence backend;
+- OS sandboxing/container isolation, which remains a non-goal unless separately designed.

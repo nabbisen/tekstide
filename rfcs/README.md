@@ -16,13 +16,12 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 ## Proposed
 
-RFC-001 through RFC-004 were accepted for foundation implementation planning by review response 002. They remain under `proposed/` until implemented, because RFC 000 uses the four-folder lifecycle without a separate `accepted/` state.
+RFC-001 and RFC-003 were accepted for foundation implementation planning by review response 002. They remain under `proposed/` until implemented, because RFC 000 uses the four-folder lifecycle without a separate `accepted/` state.
 
 | RFC | Title | Target |
 | --- | --- | --- |
 | 001 | [Product Scope, MVP, and Non-Goals](./proposed/001-product-scope-mvp-and-non-goals.md) | M0 |
 | 003 | [Information Architecture and UI Mode Model](./proposed/003-information-architecture-and-ui-mode-model.md) | M0-M1 |
-| 004 | [Security Baseline and Restricted Mode](./proposed/004-security-baseline-and-restricted-mode.md) | M0-M1 |
 
 ## Handoffs
 
@@ -40,6 +39,7 @@ RFC-001 through RFC-004 were accepted for foundation implementation planning by 
 | --- | --- | --- |
 | 000 | [RFC lifecycle policy](./done/000-rfc-lifecycle-policy.md) | Implemented |
 | 002 | [Core Domain Model: ProjectSession, TerminalSession, AgentRun, AuditEvent](./done/002-core-domain-model-projectsession-terminalsession-agentrun-auditevent.md) | Implemented |
+| 004 | [Security Baseline and Restricted Mode](./done/004-security-baseline-and-restricted-mode.md) | Implemented |
 | 005 | [Application Shell and Project Board](./done/005-application-shell-and-project-board.md) | Implemented |
 
 ## Archive

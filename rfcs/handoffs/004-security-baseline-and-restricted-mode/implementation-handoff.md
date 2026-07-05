@@ -1,6 +1,6 @@
 # RFC-004 Implementation Handoff
 
-Source RFC: [RFC-004](../../proposed/004-security-baseline-and-restricted-mode.md)
+Source RFC: [RFC-004](../../done/004-security-baseline-and-restricted-mode.md)
 Target: security baseline and Restricted Mode
 
 ## Purpose
