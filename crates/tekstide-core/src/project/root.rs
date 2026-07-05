@@ -3,6 +3,8 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use super::{ProjectId, ProjectSession};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SymlinkPolicy {
     FailClosed,
@@ -14,6 +16,214 @@ pub struct ValidProjectRoot {
     pub display_name: String,
     pub selected_path: PathBuf,
     pub canonical_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectRootHandle {
+    project_id: ProjectId,
+    valid_root: ValidProjectRoot,
+}
+
+impl ProjectRootHandle {
+    pub fn from_project_session(project: &ProjectSession) -> Self {
+        Self {
+            project_id: project.id().clone(),
+            valid_root: ValidProjectRoot {
+                display_name: project.display_name().to_owned(),
+                selected_path: project.root_path().clone(),
+                canonical_path: project.canonical_root_path().clone(),
+            },
+        }
+    }
+
+    pub fn project_id(&self) -> &ProjectId {
+        &self.project_id
+    }
+
+    pub fn valid_root(&self) -> &ValidProjectRoot {
+        &self.valid_root
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileAccessSymlinkStatus {
+    NoSymlink,
+    /// Unix symlink handling is covered for the Linux MVP. Windows
+    /// symlink/junction/reparse-point behavior must be reviewed before
+    /// Windows support is claimed.
+    InRootSymlink,
+    EscapesRoot,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileAccessContainmentStatus {
+    InsideRoot,
+    OutsideRoot,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileAccessTarget {
+    pub project_id: ProjectId,
+    pub selected_relative_path: PathBuf,
+    pub selected_absolute_path: PathBuf,
+    pub canonical_path: PathBuf,
+    pub root_canonical_path: PathBuf,
+    pub symlink_status: FileAccessSymlinkStatus,
+    pub containment_status: FileAccessContainmentStatus,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileAccessBlockedReason {
+    AbsolutePathNotAllowed,
+    InvalidRelativePath,
+    MissingPath,
+    PermissionDenied,
+    CannotReadPath,
+    RootEscape,
+    SymlinkEscape,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileAccessError {
+    pub project_id: ProjectId,
+    pub selected_relative_path: PathBuf,
+    pub selected_absolute_path: PathBuf,
+    pub root_canonical_path: PathBuf,
+    pub reason: FileAccessBlockedReason,
+}
+
+impl fmt::Display for FileAccessError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "blocked file access for project {} at {}: {:?}",
+            self.project_id,
+            self.selected_relative_path.display(),
+            self.reason
+        )
+    }
+}
+
+impl std::error::Error for FileAccessError {}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ProjectFileAccessPolicy;
+
+impl ProjectFileAccessPolicy {
+    /// Resolves only existing explorer/open targets.
+    ///
+    /// New-file and save targets must use a separate save-time resolver that
+    /// revalidates root containment and symlink safety.
+    pub fn resolve_existing(
+        self,
+        root: &ProjectRootHandle,
+        selected_relative_path: impl AsRef<Path>,
+    ) -> Result<FileAccessTarget, FileAccessError> {
+        let selected_path_raw = selected_relative_path.as_ref().to_path_buf();
+
+        let selected_relative_path =
+            normalize_project_relative_path(&selected_path_raw).map_err(|reason| {
+                let selected_absolute_path = if selected_path_raw.is_absolute() {
+                    selected_path_raw.clone()
+                } else {
+                    root.valid_root.selected_path.join(&selected_path_raw)
+                };
+                file_access_error(
+                    root.project_id.clone(),
+                    selected_path_raw.clone(),
+                    selected_absolute_path,
+                    root,
+                    reason,
+                )
+            })?;
+
+        let selected_absolute_path = root.valid_root.selected_path.join(&selected_relative_path);
+
+        let canonical_path = fs::canonicalize(&selected_absolute_path).map_err(|error| {
+            file_access_error(
+                root.project_id.clone(),
+                selected_relative_path.clone(),
+                selected_absolute_path.clone(),
+                root,
+                map_file_access_error(error),
+            )
+        })?;
+
+        let containment_status = if is_inside_root(&canonical_path, &root.valid_root.canonical_path)
+        {
+            FileAccessContainmentStatus::InsideRoot
+        } else {
+            FileAccessContainmentStatus::OutsideRoot
+        };
+
+        let has_symlink = contains_symlink_component(&selected_absolute_path).map_err(|error| {
+            file_access_error(
+                root.project_id.clone(),
+                selected_relative_path.clone(),
+                selected_absolute_path.clone(),
+                root,
+                map_file_access_error(error),
+            )
+        })?;
+
+        let symlink_status = match (has_symlink, containment_status) {
+            (false, _) => FileAccessSymlinkStatus::NoSymlink,
+            (true, FileAccessContainmentStatus::InsideRoot) => {
+                FileAccessSymlinkStatus::InRootSymlink
+            }
+            (true, FileAccessContainmentStatus::OutsideRoot) => {
+                FileAccessSymlinkStatus::EscapesRoot
+            }
+        };
+
+        match (containment_status, symlink_status) {
+            (_, FileAccessSymlinkStatus::EscapesRoot) => Err(file_access_error(
+                root.project_id.clone(),
+                selected_relative_path,
+                selected_absolute_path,
+                root,
+                FileAccessBlockedReason::SymlinkEscape,
+            )),
+            (FileAccessContainmentStatus::OutsideRoot, _) => Err(file_access_error(
+                root.project_id.clone(),
+                selected_relative_path,
+                selected_absolute_path,
+                root,
+                FileAccessBlockedReason::RootEscape,
+            )),
+            (FileAccessContainmentStatus::InsideRoot, _) => Ok(FileAccessTarget {
+                project_id: root.project_id.clone(),
+                selected_relative_path,
+                selected_absolute_path,
+                canonical_path,
+                root_canonical_path: root.valid_root.canonical_path.clone(),
+                symlink_status,
+                containment_status,
+            }),
+        }
+    }
+}
+
+fn normalize_project_relative_path(
+    selected_path: &Path,
+) -> Result<PathBuf, FileAccessBlockedReason> {
+    if selected_path.is_absolute() {
+        return Err(FileAccessBlockedReason::AbsolutePathNotAllowed);
+    }
+
+    let mut normalized = PathBuf::new();
+
+    for component in selected_path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(FileAccessBlockedReason::InvalidRelativePath);
+            }
+        }
+    }
+
+    Ok(normalized)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -133,6 +343,34 @@ fn map_metadata_error(error: io::Error, path: PathBuf) -> ProjectRootValidationE
         io::ErrorKind::PermissionDenied => ProjectRootValidationError::PermissionDenied { path },
         _ => ProjectRootValidationError::CannotReadFolder { path },
     }
+}
+
+fn map_file_access_error(error: io::Error) -> FileAccessBlockedReason {
+    match error.kind() {
+        io::ErrorKind::NotFound => FileAccessBlockedReason::MissingPath,
+        io::ErrorKind::PermissionDenied => FileAccessBlockedReason::PermissionDenied,
+        _ => FileAccessBlockedReason::CannotReadPath,
+    }
+}
+
+fn file_access_error(
+    project_id: ProjectId,
+    selected_relative_path: PathBuf,
+    selected_absolute_path: PathBuf,
+    root: &ProjectRootHandle,
+    reason: FileAccessBlockedReason,
+) -> FileAccessError {
+    FileAccessError {
+        project_id,
+        selected_relative_path,
+        selected_absolute_path,
+        root_canonical_path: root.valid_root.canonical_path.clone(),
+        reason,
+    }
+}
+
+fn is_inside_root(path: &Path, root: &Path) -> bool {
+    path == root || path.strip_prefix(root).is_ok()
 }
 
 fn contains_symlink_component(path: &Path) -> io::Result<bool> {
