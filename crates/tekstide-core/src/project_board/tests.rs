@@ -4,6 +4,7 @@ use super::{
 use crate::app::AppState;
 use crate::project::recent::{RecentProject, RecentProjectState, Timestamp};
 use crate::project::{ProjectId, ProjectRuntimeSummary};
+use crate::security::RestrictedModeFeature;
 
 #[test]
 fn empty_project_board_has_first_run_state() {
@@ -39,7 +40,41 @@ fn project_rows_preserve_placeholder_field_shape_without_probing() {
     assert_eq!(row.review_count, CountDisplay::KnownCount(0));
     assert_eq!(row.dirty_file_count, CountDisplay::KnownCount(0));
     assert_eq!(row.trust_label, "Restricted");
+    assert_eq!(row.security_mode_label, "Restricted Mode");
+    assert!(row.restricted_mode);
+    assert_eq!(
+        row.blocked_automation_count,
+        u32::try_from(RestrictedModeFeature::ALL.len()).unwrap()
+    );
+    assert_eq!(
+        row.blocked_automation_labels.len(),
+        RestrictedModeFeature::ALL.len()
+    );
+    assert!(
+        row.blocked_automation_labels
+            .contains(&"workspace AI prompt loading".to_owned())
+    );
     assert_eq!(row.row_kind, BoardRowKind::ActiveSession);
+}
+
+#[test]
+fn trusted_project_board_row_uses_security_policy_summary() {
+    let mut state = AppState::default();
+    let project_id =
+        state.add_project_session("Trusted", "/workspace/trusted", "/workspace/trusted");
+    state
+        .project_mut(&project_id)
+        .expect("project should exist")
+        .grant_trust("trusted for test");
+
+    let view_model = ProjectBoardViewModel::from_app_state(&state);
+    let row = &view_model.rows[0];
+
+    assert_eq!(row.trust_label, "Trusted");
+    assert_eq!(row.security_mode_label, "Trusted Mode");
+    assert!(!row.restricted_mode);
+    assert_eq!(row.blocked_automation_count, 0);
+    assert!(row.blocked_automation_labels.is_empty());
 }
 
 #[test]
@@ -67,6 +102,12 @@ fn restored_stale_recent_project_is_displayed_without_active_session() {
         Some("Folder missing")
     );
     assert_eq!(view_model.rows[0].trust_label, "Restricted");
+    assert_eq!(view_model.rows[0].security_mode_label, "Restricted Mode");
+    assert!(view_model.rows[0].restricted_mode);
+    assert_eq!(
+        view_model.rows[0].blocked_automation_labels.len(),
+        RestrictedModeFeature::ALL.len()
+    );
     assert_eq!(view_model.rows[0].row_kind, BoardRowKind::RecentMissing);
 }
 

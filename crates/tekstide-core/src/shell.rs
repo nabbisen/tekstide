@@ -116,6 +116,10 @@ fn render_project_board(view_model: &ProjectBoardViewModel) -> String {
         }
         output.push_str(" | trust: ");
         output.push_str(&row.trust_label);
+        output.push_str(" | security: ");
+        output.push_str(&row.security_mode_label);
+        output.push_str(" | blocked automation: ");
+        output.push_str(&row.blocked_automation_count.to_string());
         output.push_str(" | branch/status: ");
         output.push_str(&row.branch_status.label());
         output.push_str(" | terminals: ");

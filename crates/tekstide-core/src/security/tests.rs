@@ -1,8 +1,8 @@
 use super::{
     AiSessionSecurityLevel, BoundedTranscriptRetention, RedactionClaimScope, RestrictedModeFeature,
-    SecurityPolicyDecision, TranscriptCaptureDefault, TranscriptPrivacyPolicy,
-    TranscriptSearchIndexing, TranscriptStoragePolicy, assess_restricted_mode_feature,
-    effective_workspace_trust, is_restricted_mode,
+    RestrictedModeSummary, SecurityPolicyDecision, TranscriptCaptureDefault,
+    TranscriptPrivacyPolicy, TranscriptSearchIndexing, TranscriptStoragePolicy,
+    assess_restricted_mode_feature, effective_workspace_trust, is_restricted_mode,
 };
 use crate::domain::AgentCompatibilityLevel;
 use crate::domain::TerminalKind;
@@ -40,6 +40,24 @@ fn restricted_mode_blocks_workspace_local_automation_paths() {
 }
 
 #[test]
+fn restricted_mode_summary_exposes_ui_ready_blocked_feature_labels() {
+    let summary = RestrictedModeSummary::from_trust(WorkspaceTrust::Unknown);
+
+    assert_eq!(summary.effective_trust, WorkspaceTrust::Restricted);
+    assert!(summary.restricted_mode);
+    assert_eq!(summary.mode_label, "Restricted Mode");
+    assert_eq!(
+        summary.blocked_features.len(),
+        RestrictedModeFeature::ALL.len()
+    );
+    assert!(
+        summary
+            .blocked_feature_labels()
+            .contains(&"workspace AI prompt loading")
+    );
+}
+
+#[test]
 fn trusted_workspace_allows_policy_checked_automation_paths() {
     for feature in RestrictedModeFeature::ALL {
         assert_eq!(
@@ -47,6 +65,12 @@ fn trusted_workspace_allows_policy_checked_automation_paths() {
             SecurityPolicyDecision::Allowed
         );
     }
+
+    let summary = RestrictedModeSummary::from_trust(WorkspaceTrust::Trusted);
+    assert_eq!(summary.effective_trust, WorkspaceTrust::Trusted);
+    assert!(!summary.restricted_mode);
+    assert_eq!(summary.mode_label, "Trusted Mode");
+    assert!(summary.blocked_features.is_empty());
 }
 
 #[test]
@@ -66,6 +90,14 @@ fn compatibility_labels_do_not_overclaim_command_approval() {
     assert!(!plain_terminal.can_claim_managed_command_approval());
     assert!(!supervised_terminal.can_claim_managed_command_approval());
     assert!(managed_agent.can_claim_managed_command_approval());
+    assert_eq!(
+        plain_agent.command_approval_claim_label(),
+        "Managed command approval not guaranteed"
+    );
+    assert_eq!(
+        managed_agent.command_approval_claim_label(),
+        "Managed command approval eligible"
+    );
 }
 
 #[test]

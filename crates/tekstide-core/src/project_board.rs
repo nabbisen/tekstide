@@ -1,6 +1,7 @@
 use crate::app::AppState;
 use crate::project::recent::{RecentProjectAvailability, RestoredRecentProject};
 use crate::project::{ProjectId, ProjectRuntimeSummary, ProjectSession};
+use crate::security::RestrictedModeSummary;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CountDisplay {
@@ -75,6 +76,10 @@ pub struct ProjectBoardRow {
     pub secondary_path_hint: Option<String>,
     pub availability_label: Option<String>,
     pub trust_label: String,
+    pub security_mode_label: String,
+    pub restricted_mode: bool,
+    pub blocked_automation_count: u32,
+    pub blocked_automation_labels: Vec<String>,
     pub branch_status: CountDisplay,
     pub terminal_count: CountDisplay,
     pub agent_run_count: CountDisplay,
@@ -165,6 +170,7 @@ pub fn calculate_attention(runtime_summary: &ProjectRuntimeSummary) -> Attention
 fn active_project_row(project: &ProjectSession) -> ProjectBoardRow {
     let runtime_summary = project.runtime_summary();
     let attention = calculate_attention(runtime_summary);
+    let security_summary = RestrictedModeSummary::from_trust(project.trust_state());
 
     ProjectBoardRow {
         project_id: project.id().clone(),
@@ -174,6 +180,14 @@ fn active_project_row(project: &ProjectSession) -> ProjectBoardRow {
             .then(|| project.canonical_root_path().display().to_string()),
         availability_label: None,
         trust_label: project.trust_state().label().to_owned(),
+        security_mode_label: security_summary.mode_label.to_owned(),
+        restricted_mode: security_summary.restricted_mode,
+        blocked_automation_count: len_as_u32(security_summary.blocked_features.len()),
+        blocked_automation_labels: security_summary
+            .blocked_feature_labels()
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
         branch_status: CountDisplay::Unavailable,
         terminal_count: runtime_summary
             .terminal_count
@@ -208,6 +222,9 @@ fn recent_project_row(restored: &RestoredRecentProject) -> ProjectBoardRow {
         RecentProjectAvailability::PathChanged => BoardRowKind::RecentPathChanged,
     };
 
+    let security_summary =
+        RestrictedModeSummary::from_trust(crate::project::WorkspaceTrust::Restricted);
+
     ProjectBoardRow {
         project_id: recent_project.project_id.clone(),
         display_name: recent_project.display_name.clone(),
@@ -216,6 +233,14 @@ fn recent_project_row(restored: &RestoredRecentProject) -> ProjectBoardRow {
             .then(|| recent_project.canonical_root_path.display().to_string()),
         availability_label,
         trust_label: "Restricted".to_owned(),
+        security_mode_label: "Restricted Mode".to_owned(),
+        restricted_mode: true,
+        blocked_automation_count: len_as_u32(security_summary.blocked_features.len()),
+        blocked_automation_labels: security_summary
+            .blocked_feature_labels()
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
         branch_status: CountDisplay::Unavailable,
         terminal_count: CountDisplay::NotImplemented,
         agent_run_count: CountDisplay::NotImplemented,
@@ -226,6 +251,10 @@ fn recent_project_row(restored: &RestoredRecentProject) -> ProjectBoardRow {
         attention_label: AttentionState::Calm.label().to_owned(),
         row_kind,
     }
+}
+
+fn len_as_u32(len: usize) -> u32 {
+    u32::try_from(len).unwrap_or(u32::MAX)
 }
 
 fn compare_rows(left: &ProjectBoardRow, right: &ProjectBoardRow) -> std::cmp::Ordering {

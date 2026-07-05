@@ -43,6 +43,8 @@ fn populated_project_board_renders_placeholder_branch_status_without_process_pro
 
     assert!(rendered.contains("branch/status: not available"));
     assert!(rendered.contains("trust: Restricted"));
+    assert!(rendered.contains("security: Restricted Mode"));
+    assert!(rendered.contains("blocked automation: 9"));
 }
 
 #[test]

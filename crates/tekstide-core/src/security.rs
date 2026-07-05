@@ -80,6 +80,44 @@ pub fn assess_restricted_mode_feature(
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RestrictedModeSummary {
+    pub effective_trust: WorkspaceTrust,
+    pub restricted_mode: bool,
+    pub mode_label: &'static str,
+    pub blocked_features: Vec<RestrictedModeFeature>,
+}
+
+impl RestrictedModeSummary {
+    pub fn from_trust(trust: WorkspaceTrust) -> Self {
+        let effective_trust = effective_workspace_trust(trust);
+        let restricted_mode = effective_trust == WorkspaceTrust::Restricted;
+        let blocked_features = if restricted_mode {
+            RestrictedModeFeature::ALL.to_vec()
+        } else {
+            Vec::new()
+        };
+
+        Self {
+            effective_trust,
+            restricted_mode,
+            mode_label: if restricted_mode {
+                "Restricted Mode"
+            } else {
+                "Trusted Mode"
+            },
+            blocked_features,
+        }
+    }
+
+    pub fn blocked_feature_labels(&self) -> Vec<&'static str> {
+        self.blocked_features
+            .iter()
+            .map(|feature| feature.label())
+            .collect()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AiSessionSecurityLevel {
     Plain,
@@ -106,6 +144,14 @@ impl AiSessionSecurityLevel {
 
     pub fn can_claim_managed_command_approval(self) -> bool {
         self == Self::Managed
+    }
+
+    pub fn command_approval_claim_label(self) -> &'static str {
+        if self.can_claim_managed_command_approval() {
+            "Managed command approval eligible"
+        } else {
+            "Managed command approval not guaranteed"
+        }
     }
 }
 
