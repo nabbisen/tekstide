@@ -67,4 +67,4 @@ Status: active for `0.1.0` release preparation.
 - Keep the release checklist current.
 - Add release build, package, and package smoke evidence before tagging.
 - Decide whether future releases need scripts, `xtask`, or CI gates.
-- Keep release notes aligned with implemented and deferred scope.
+- Keep the changelog aligned with implemented and deferred scope.

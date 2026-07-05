@@ -1,6 +1,15 @@
-# Tekstide
+# Tekst IDE
 
-Tekstide is a local-first, multi-project workbench for supervising terminal-based AI development workflows.
+![Status](https://img.shields.io/badge/status-early--implementation-orange)
+[![license](https://img.shields.io/crates/l/tekstide.svg)](LICENSE)
+[![crates.io](https://img.shields.io/crates/v/tekstide.svg?label=tekstide)](https://crates.io/crates/tekstide)
+[![docs.rs](https://img.shields.io/docsrs/tekstide?version=latest)](https://docs.rs/tekstide)
+[![Dependency Status](https://deps.rs/crate/tekstide/latest/status.svg)](https://deps.rs/crate/tekstide)
+[![crates.io](https://img.shields.io/crates/v/tekstide-core.svg?label=core)](https://crates.io/crates/tekstide-core)
+[![docs.rs](https://img.shields.io/docsrs/tekstide-core?version=latest)](https://docs.rs/tekstide-core)
+[![Dependency Status](https://deps.rs/crate/tekstide-core/latest/status.svg)](https://deps.rs/crate/tekstide-core)
+
+Tekst IDE (`tekstide`) is a local-first, multi-project workbench for supervising terminal-based AI development workflows.
 
 ## Current Status
 
@@ -31,4 +40,4 @@ cargo run -p tekstide -- /path/to/project
 
 Implemented foundation RFCs live under [`rfcs/done/`](rfcs/done/). The release-scope RFC remains under [`rfcs/proposed/`](rfcs/proposed/) until the amendment is reviewed and accepted under the RFC lifecycle.
 
-Release scope and deferred work are tracked in [`rfcs/proposed/001-product-scope-mvp-and-non-goals.md`](rfcs/proposed/001-product-scope-mvp-and-non-goals.md), [`RELEASE_NOTES.md`](RELEASE_NOTES.md), and [`rfcs/future-work.md`](rfcs/future-work.md).
+Release scope and deferred work are tracked in [`rfcs/proposed/001-product-scope-mvp-and-non-goals.md`](rfcs/proposed/001-product-scope-mvp-and-non-goals.md), [`CHANGELOG.md`](CHANGELOG.md), and [`rfcs/future-work.md`](rfcs/future-work.md).

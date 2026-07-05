@@ -192,7 +192,7 @@ The user should always be able to answer:
 - Which generated changes need review?
 - Which processes will continue or stop if I close the app?
 
-For `0.1.0`, user-facing text and release notes must be explicit that the executable is a CLI/text foundation harness, not the final desktop GUI.
+For `0.1.0`, user-facing text and the changelog must be explicit that the executable is a CLI/text foundation harness, not the final desktop GUI.
 
 ## Security and Privacy Impact
 
@@ -214,7 +214,7 @@ Security-sensitive capabilities must not be misrepresented. `0.1.0` includes Res
 - External file modifications are detected and conflicted saves do not overwrite silently.
 - Symlink escape and root traversal do not silently open or save outside the project root.
 - Restricted Mode does not auto-run project-specific automation.
-- Release notes clearly identify deferred terminal/PTY, AgentRun, transcript/review, GUI, watcher, overwrite-confirmation, and durable-audit work.
+- The changelog clearly identifies deferred terminal/PTY, AgentRun, transcript/review, GUI, watcher, overwrite-confirmation, and durable-audit work.
 
 Deferred acceptance criteria for later milestones:
 
@@ -227,8 +227,8 @@ Deferred acceptance criteria for later milestones:
 
 ## Risks and Mitigations
 
-- Foundation release may be mistaken for the full AI CLI workbench. Mitigation: README, release notes, and RFC status must list implemented and deferred scope explicitly.
-- Future work may drift after a foundation release. Mitigation: keep deferred themes visible in this RFC and release notes, then create follow-up RFCs or issue records for terminal/PTY, AgentRun, transcript/review, durable audit, GUI, and release process.
+- Foundation release may be mistaken for the full AI CLI workbench. Mitigation: README, changelog, and RFC status must list implemented and deferred scope explicitly.
+- Future work may drift after a foundation release. Mitigation: keep deferred themes visible in this RFC and changelog, then create follow-up RFCs or issue records for terminal/PTY, AgentRun, transcript/review, durable audit, GUI, and release process.
 - AI CLI differences may make command approval inconsistent. Mitigation: compatibility levels remain part of the product contract for later runtime work.
 
 ## Open Questions
@@ -241,4 +241,4 @@ Deferred acceptance criteria for later milestones:
 
 - Treat this RFC as the scope freeze for the `0.1.0` foundation release.
 - Do not pull deferred plugin, remote, debugger, marketplace, or cloud features into `0.1.0` unless a later RFC explicitly reprioritizes them.
-- Preserve the future-work list when creating release notes, review requests, and later RFCs.
+- Preserve the future-work list when creating changelog entries, review requests, and later RFCs.

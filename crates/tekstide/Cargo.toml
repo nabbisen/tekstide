@@ -1,13 +1,18 @@
 [package]
-name = "tekstide"
-version = "0.1.0"
-edition.workspace = true
-license.workspace = true
-authors.workspace = true
+name        = "tekstide"
+description = "Core/shell foundation for a local-first multi-project AI development workbench."
+readme      = "../../README.md"
+version.workspace       = true
+edition.workspace       = true
+license.workspace       = true
+authors.workspace       = true
+repository.workspace    = true
+categories.workspace    = true
+keywords.workspace      = true
 
 [[bin]]
 name = "tekstide"
 path = "src/main.rs"
 
 [dependencies]
-tekstide-core = { path = "../tekstide-core" }
+tekstide-core               = { workspace = true }

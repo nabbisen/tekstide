@@ -24,7 +24,7 @@ Preserve the `0.1.0` foundation scope boundary while later implementation RFCs a
 - Reject scope additions that pull deferred features into `0.1.0` without a later accepted RFC.
 - Keep feature flags or abstraction points small and dormant; do not ship deferred behavior through them.
 - Make every user-visible feature traceable to foundation release scope or an explicit later RFC.
-- Preserve the future-work themes in release notes, review requests, and later handoffs.
+- Preserve the future-work themes in the changelog, review requests, and later handoffs.
 
 ## Stop Conditions
 

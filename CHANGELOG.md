@@ -1,4 +1,4 @@
-# Release Notes
+# Changelog
 
 ## 0.1.0 - Foundation Release
 
