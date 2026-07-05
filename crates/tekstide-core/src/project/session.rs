@@ -159,6 +159,26 @@ impl ProjectSession {
         &self.audit_events
     }
 
+    pub fn grant_trust(&mut self, summary: impl Into<String>) -> &AuditEvent {
+        self.trust_state = WorkspaceTrust::Trusted;
+        self.audit_events
+            .push(AuditEvent::trust_granted(self.id.clone(), summary));
+        self.record_activity();
+        self.audit_events
+            .last()
+            .expect("trust audit event should be present after push")
+    }
+
+    pub fn revoke_trust(&mut self, summary: impl Into<String>) -> &AuditEvent {
+        self.trust_state = WorkspaceTrust::Revoked;
+        self.audit_events
+            .push(AuditEvent::trust_revoked(self.id.clone(), summary));
+        self.record_activity();
+        self.audit_events
+            .last()
+            .expect("trust audit event should be present after push")
+    }
+
     pub fn add_terminal_session(
         &mut self,
         terminal: TerminalSession,

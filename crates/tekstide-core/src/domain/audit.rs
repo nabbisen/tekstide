@@ -1,6 +1,6 @@
 use super::{
-    AgentRun, AgentRunId, ApprovalId, ApprovalRequest, AuditEventId, DomainTimestamp,
-    OwnershipError, TerminalId, TerminalSession,
+    AgentRun, AgentRunId, ApprovalDecision, ApprovalId, ApprovalRequest, AuditEventId,
+    DomainTimestamp, OwnershipError, TerminalId, TerminalSession,
 };
 use crate::domain::ownership::ensure_same_project;
 use crate::project::ProjectId;
@@ -54,6 +54,55 @@ impl AuditEvent {
         Ok(self)
     }
 
+    pub fn trust_granted(project_id: ProjectId, summary: impl Into<String>) -> Self {
+        Self::new(Some(project_id), AuditEventClass::TrustGranted, summary)
+    }
+
+    pub fn trust_revoked(project_id: ProjectId, summary: impl Into<String>) -> Self {
+        Self::new(Some(project_id), AuditEventClass::TrustRevoked, summary)
+    }
+
+    pub fn command_approval_requested(
+        approval: &ApprovalRequest,
+        summary: impl Into<String>,
+    ) -> Result<Self, OwnershipError> {
+        Self::new(
+            Some(approval.project_id.clone()),
+            AuditEventClass::CommandApprovalRequested,
+            summary,
+        )
+        .for_approval(approval)
+    }
+
+    pub fn command_approval_decided(
+        approval: &ApprovalRequest,
+        summary: impl Into<String>,
+    ) -> Result<Self, AuditEventError> {
+        let class = match approval.decision {
+            ApprovalDecision::ApprovedOnce | ApprovalDecision::EditedAndApproved => {
+                AuditEventClass::CommandApproved
+            }
+            ApprovalDecision::Rejected => AuditEventClass::CommandRejected,
+            ApprovalDecision::Pending => return Err(AuditEventError::ApprovalStillPending),
+        };
+
+        Self::new(Some(approval.project_id.clone()), class, summary)
+            .for_approval(approval)
+            .map_err(AuditEventError::Ownership)
+    }
+
+    pub fn transcript_purged(project_id: ProjectId, summary: impl Into<String>) -> Self {
+        Self::new(Some(project_id), AuditEventClass::TranscriptPurged, summary)
+    }
+
+    pub fn safe_close_decision(project_id: ProjectId, summary: impl Into<String>) -> Self {
+        Self::new(
+            Some(project_id),
+            AuditEventClass::SafeCloseDecision,
+            summary,
+        )
+    }
+
     fn ensure_or_adopt_project_id(
         &mut self,
         linked_project_id: &ProjectId,
@@ -82,4 +131,10 @@ pub enum AuditEventClass {
     SafeCloseDecision,
     ConfigChanged,
     TranscriptPurged,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AuditEventError {
+    ApprovalStillPending,
+    Ownership(OwnershipError),
 }

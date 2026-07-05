@@ -2,13 +2,19 @@ use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkspaceTrust {
+    Unknown,
     Restricted,
+    Trusted,
+    Revoked,
 }
 
 impl WorkspaceTrust {
     pub fn label(self) -> &'static str {
         match self {
+            Self::Unknown => "Unknown",
             Self::Restricted => "Restricted",
+            Self::Trusted => "Trusted",
+            Self::Revoked => "Revoked",
         }
     }
 }

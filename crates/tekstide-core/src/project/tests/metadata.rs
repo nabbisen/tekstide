@@ -2,11 +2,12 @@ use super::project_session;
 use crate::close::{
     CloseAssessment, CloseResourceProviderState, CloseResourceSummary, assess_close,
 };
-use crate::domain::DomainTimestamp;
+use crate::domain::{AuditEventClass, DomainTimestamp};
 use crate::project::{
     ProjectFileState, ProjectGitDisplayStatus, ProjectGitSummary, ProjectMetadataCountStatus,
     ProjectMode, ProjectOpenSurface, ProjectProviderState, ProjectResourceLimits,
     ProjectRuntimeSummary, ProjectWarning, ProjectWarningLevel, ProjectWarningState,
+    WorkspaceTrust,
 };
 
 #[test]
@@ -51,6 +52,26 @@ fn new_project_initializes_rfc002_session_metadata_with_inert_provider_defaults(
         project.git_summary().provider_state,
         ProjectProviderState::NotImplemented
     );
+    assert_eq!(project.trust_state(), WorkspaceTrust::Restricted);
+}
+
+#[test]
+fn trust_decisions_are_explicit_and_audited() {
+    let mut project = project_session(1);
+    let project_id = project.id().clone();
+
+    let granted = project.grant_trust("user trusted workspace").clone();
+
+    assert_eq!(project.trust_state(), WorkspaceTrust::Trusted);
+    assert_eq!(granted.project_id, Some(project_id.clone()));
+    assert_eq!(granted.class, AuditEventClass::TrustGranted);
+
+    let revoked = project.revoke_trust("user revoked workspace trust").clone();
+
+    assert_eq!(project.trust_state(), WorkspaceTrust::Revoked);
+    assert_eq!(revoked.project_id, Some(project_id));
+    assert_eq!(revoked.class, AuditEventClass::TrustRevoked);
+    assert_eq!(project.audit_events().len(), 2);
 }
 
 #[test]

@@ -5,4 +5,5 @@ pub mod domain;
 pub mod project;
 pub mod project_board;
 pub mod route;
+pub mod security;
 pub mod shell;
