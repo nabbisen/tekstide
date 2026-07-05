@@ -1,4 +1,5 @@
 use crate::close::{CloseAssessment, assess_close};
+use crate::content::{ExternalChangeDecision, SaveDecision};
 use crate::project::recent::{
     RECENT_PROJECT_STATE_VERSION, RecentProject, RecentProjectAvailability, RecentProjectState,
     RestoredRecentProject, Timestamp, assess_recent_project_availability,
@@ -6,7 +7,9 @@ use crate::project::recent::{
 use crate::project::root::{
     ProjectRootValidationError, ProjectRootValidator, SymlinkPolicy, ValidProjectRoot,
 };
-use crate::project::{ProjectId, ProjectMode, ProjectOpenSurface, ProjectSession};
+use crate::project::{
+    ProjectContentError, ProjectId, ProjectMode, ProjectOpenSurface, ProjectSession,
+};
 
 #[derive(Debug, Default)]
 pub struct AppState {
@@ -196,6 +199,48 @@ impl AppState {
         project.set_open_surface(surface);
         project.set_mode(ProjectMode::Content);
         true
+    }
+
+    pub fn open_active_project_text_document(
+        &mut self,
+        selected_relative_path: impl AsRef<std::path::Path>,
+    ) -> Result<(), ProjectContentError> {
+        let Some(project) = self.active_project_mut() else {
+            return Err(ProjectContentError::NoActiveProject);
+        };
+
+        project.open_text_document(selected_relative_path)
+    }
+
+    pub fn replace_active_project_text(
+        &mut self,
+        text: impl Into<String>,
+    ) -> Result<(), ProjectContentError> {
+        let Some(project) = self.active_project_mut() else {
+            return Err(ProjectContentError::NoActiveProject);
+        };
+
+        project.replace_active_text(text)
+    }
+
+    pub fn save_active_project_text_document(
+        &mut self,
+    ) -> Result<SaveDecision, ProjectContentError> {
+        let Some(project) = self.active_project_mut() else {
+            return Err(ProjectContentError::NoActiveProject);
+        };
+
+        project.save_active_text_document()
+    }
+
+    pub fn refresh_active_project_text_document(
+        &mut self,
+    ) -> Result<ExternalChangeDecision, ProjectContentError> {
+        let Some(project) = self.active_project_mut() else {
+            return Err(ProjectContentError::NoActiveProject);
+        };
+
+        project.refresh_active_text_document()
     }
 
     pub fn close_project(

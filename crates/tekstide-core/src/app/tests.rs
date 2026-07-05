@@ -6,7 +6,7 @@ use crate::close::{
 use crate::domain::DomainTimestamp;
 use crate::project::recent::{RecentProject, RecentProjectState, Timestamp};
 use crate::project::root::{ProjectRootValidationError, SymlinkPolicy};
-use crate::project::{ProjectId, ProjectRuntimeSummary};
+use crate::project::{ProjectId, ProjectProviderState, ProjectRuntimeSummary};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -336,6 +336,43 @@ fn active_project_with_resources_needs_confirmation_and_stays_open() {
         }
     );
     assert!(state.project(&project_id).is_some());
+}
+
+#[test]
+fn active_text_document_dirty_state_updates_project_runtime_summary() {
+    let sandbox = TestSandbox::new("content-dirty-runtime");
+    let project_dir = sandbox.create_dir("project");
+    fs::write(project_dir.join("file.txt"), b"original\n").unwrap();
+    let mut state = AppState::default();
+    let project_id = state
+        .add_project_from_path(&project_dir)
+        .expect("project should add")
+        .project_id()
+        .clone();
+
+    state
+        .open_active_project_text_document("file.txt")
+        .expect("text file should open");
+    state
+        .replace_active_project_text("changed\n")
+        .expect("text edit should succeed");
+    let project = state.project(&project_id).unwrap();
+
+    assert_eq!(
+        project.file_state().provider_state,
+        ProjectProviderState::Complete
+    );
+    assert_eq!(project.file_state().open_buffer_count, 1);
+    assert_eq!(project.file_state().dirty_file_count, 1);
+    assert_eq!(project.runtime_summary().dirty_files, 1);
+    assert_eq!(project.close_resource_summary().dirty_files, 1);
+
+    state
+        .save_active_project_text_document()
+        .expect("save should clear dirty state");
+    let project = state.project(&project_id).unwrap();
+    assert_eq!(project.file_state().dirty_file_count, 0);
+    assert_eq!(project.runtime_summary().dirty_files, 0);
 }
 
 #[test]

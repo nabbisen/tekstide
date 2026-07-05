@@ -1,16 +1,18 @@
 use std::path::PathBuf;
 
 use crate::close::{CloseResourceProviderState, CloseResourceSummary};
+use crate::content::{ExternalChangeDecision, SaveDecision, TextDocumentOpenPolicy};
 use crate::domain::{
     AgentRun, AgentRunId, AgentRunStatus, ApprovalDecision, ApprovalId, ApprovalRequest,
     AuditEvent, ChangeSet, DomainTimestamp, OwnershipError, ReviewState, TerminalId,
     TerminalSession, TerminalStatus, Transcript,
 };
 
+use super::root::ProjectRootHandle;
 use super::{
-    ProjectFileState, ProjectGitSummary, ProjectId, ProjectMode, ProjectOpenSurface,
-    ProjectProviderState, ProjectResourceLimits, ProjectRuntimeSummary, ProjectWarningState,
-    WorkspaceTrust,
+    ProjectContentError, ProjectContentWorkspace, ProjectFileState, ProjectGitSummary, ProjectId,
+    ProjectMode, ProjectOpenSurface, ProjectProviderState, ProjectResourceLimits,
+    ProjectRuntimeSummary, ProjectWarningState, WorkspaceTrust,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,6 +28,7 @@ pub struct ProjectSession {
     open_surface: ProjectOpenSurface,
     mode: ProjectMode,
     resource_limits: ProjectResourceLimits,
+    content_workspace: ProjectContentWorkspace,
     file_state: ProjectFileState,
     git_summary: ProjectGitSummary,
     warning_state: ProjectWarningState,
@@ -58,6 +61,7 @@ impl ProjectSession {
             open_surface: ProjectOpenSurface::ProjectDashboard,
             mode: ProjectMode::Content,
             resource_limits: ProjectResourceLimits::default(),
+            content_workspace: ProjectContentWorkspace::default(),
             file_state: ProjectFileState::default(),
             git_summary: ProjectGitSummary::default(),
             warning_state: ProjectWarningState::default(),
@@ -113,6 +117,10 @@ impl ProjectSession {
 
     pub fn resource_limits(&self) -> ProjectResourceLimits {
         self.resource_limits
+    }
+
+    pub fn content_workspace(&self) -> &ProjectContentWorkspace {
+        &self.content_workspace
     }
 
     pub fn file_state(&self) -> &ProjectFileState {
@@ -330,6 +338,54 @@ impl ProjectSession {
         self.record_activity();
     }
 
+    pub fn open_text_document(
+        &mut self,
+        selected_relative_path: impl AsRef<std::path::Path>,
+    ) -> Result<(), ProjectContentError> {
+        let root = ProjectRootHandle::from_project_session(self);
+        let result = self.content_workspace.open_text_document(
+            &root,
+            selected_relative_path,
+            TextDocumentOpenPolicy::linux_mvp(),
+        );
+        self.sync_file_state_from_content_workspace();
+        self.set_open_surface(ProjectOpenSurface::TextEditor);
+        self.set_mode(ProjectMode::Content);
+        result
+    }
+
+    pub fn replace_active_text(
+        &mut self,
+        text: impl Into<String>,
+    ) -> Result<(), ProjectContentError> {
+        let result = self.content_workspace.replace_active_text(text);
+        self.sync_file_state_from_content_workspace();
+        self.record_activity();
+        result
+    }
+
+    pub fn save_active_text_document(&mut self) -> Result<SaveDecision, ProjectContentError> {
+        let root = ProjectRootHandle::from_project_session(self);
+        let result = self
+            .content_workspace
+            .save_active_document(&root, TextDocumentOpenPolicy::linux_mvp());
+        self.sync_file_state_from_content_workspace();
+        self.record_activity();
+        result
+    }
+
+    pub fn refresh_active_text_document(
+        &mut self,
+    ) -> Result<ExternalChangeDecision, ProjectContentError> {
+        let root = ProjectRootHandle::from_project_session(self);
+        let result = self
+            .content_workspace
+            .refresh_active_document(&root, TextDocumentOpenPolicy::linux_mvp());
+        self.sync_file_state_from_content_workspace();
+        self.record_activity();
+        result
+    }
+
     pub fn set_file_state(&mut self, file_state: ProjectFileState) {
         self.runtime_summary.dirty_files = file_state.dirty_file_count;
         self.runtime_summary.close_resources.dirty_files =
@@ -357,6 +413,15 @@ impl ProjectSession {
         self.runtime_summary.risk_warning = warning_state.has_risk_warning();
         self.warning_state = warning_state;
         self.record_activity();
+    }
+
+    fn sync_file_state_from_content_workspace(&mut self) {
+        self.set_file_state(ProjectFileState {
+            provider_state: ProjectProviderState::Complete,
+            open_buffer_count: self.content_workspace.open_buffer_count(),
+            dirty_file_count: self.content_workspace.dirty_file_count(),
+            active_path_hint: self.content_workspace.active_path_hint(),
+        });
     }
 
     #[cfg(test)]

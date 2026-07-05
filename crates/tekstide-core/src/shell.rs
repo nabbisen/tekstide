@@ -1,10 +1,11 @@
 use crate::app::{AddProjectOutcome, AppState, RemoveProjectError};
 use crate::close::CloseAssessment;
 use crate::command::AppCommand;
+use crate::content::{ExternalChangeDecision, SaveDecision};
 use crate::navigation::{TerminalLayoutClass, TerminalPanePolicy};
-use crate::project::ProjectId;
 use crate::project::recent::RecentProjectState;
 use crate::project::root::ProjectRootValidationError;
+use crate::project::{ProjectContentError, ProjectId, text_document_state_label};
 use crate::project_board::ProjectBoardViewModel;
 use crate::route::AppRoute;
 
@@ -87,6 +88,50 @@ impl ApplicationShell {
         self.state.remove_recent_project(project_id)
     }
 
+    pub fn open_active_project_text_document(
+        &mut self,
+        selected_relative_path: impl AsRef<std::path::Path>,
+    ) -> Result<(), ProjectContentError> {
+        let result = self
+            .state
+            .open_active_project_text_document(selected_relative_path);
+        if self.state.active_project().is_some() {
+            self.route = AppRoute::ActiveProjectWorkspace;
+        }
+        result
+    }
+
+    pub fn replace_active_project_text(
+        &mut self,
+        text: impl Into<String>,
+    ) -> Result<(), ProjectContentError> {
+        let result = self.state.replace_active_project_text(text);
+        if self.state.active_project().is_some() {
+            self.route = AppRoute::ActiveProjectWorkspace;
+        }
+        result
+    }
+
+    pub fn save_active_project_text_document(
+        &mut self,
+    ) -> Result<SaveDecision, ProjectContentError> {
+        let result = self.state.save_active_project_text_document();
+        if self.state.active_project().is_some() {
+            self.route = AppRoute::ActiveProjectWorkspace;
+        }
+        result
+    }
+
+    pub fn refresh_active_project_text_document(
+        &mut self,
+    ) -> Result<ExternalChangeDecision, ProjectContentError> {
+        let result = self.state.refresh_active_project_text_document();
+        if self.state.active_project().is_some() {
+            self.route = AppRoute::ActiveProjectWorkspace;
+        }
+        result
+    }
+
     pub fn project_board(&self) -> ProjectBoardViewModel {
         ProjectBoardViewModel::from_app_state(&self.state)
     }
@@ -115,6 +160,40 @@ fn render_active_project_workspace(state: &AppState) -> String {
     let requested_panes = requested_visible_panes(project.resource_limits().visible_terminal_limit);
     output.push_str(&pane_policy.visible_pane_count(requested_panes).to_string());
     output.push('\n');
+
+    let content_workspace = project.content_workspace();
+    output.push_str("content status: ");
+    output.push_str(content_workspace.status().label());
+    output.push_str(" | selected: ");
+    let selected = content_workspace.selected_explorer_path();
+    if selected.as_os_str().is_empty() {
+        output.push_str("(project root)");
+    } else {
+        output.push_str(&selected.display().to_string());
+    }
+    if let Some(document) = content_workspace.active_document() {
+        output.push_str(" | active file: ");
+        output.push_str(
+            &document
+                .target()
+                .selected_relative_path
+                .display()
+                .to_string(),
+        );
+        output.push_str(" | document: ");
+        output.push_str(text_document_state_label(document.state()));
+        output.push_str(" | dirty files: ");
+        output.push_str(&project.runtime_summary().dirty_files.to_string());
+    } else {
+        output.push_str(" | active file: none | dirty files: ");
+        output.push_str(&project.runtime_summary().dirty_files.to_string());
+    }
+    if let Some(message) = content_workspace.status().message() {
+        output.push_str(" | message: ");
+        output.push_str(message);
+    }
+    output.push('\n');
+    output.push_str("content panes: 1\n");
     output
 }
 

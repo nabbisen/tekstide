@@ -2,6 +2,7 @@ use super::ApplicationShell;
 use crate::command::AppCommand;
 use crate::project::{ProjectMode, ProjectOpenSurface, ProjectResourceLimits};
 use crate::route::AppRoute;
+use std::fs;
 
 #[test]
 fn shell_starts_on_project_board_route() {
@@ -170,6 +171,188 @@ fn shell_add_project_uses_shared_validation_and_returns_to_project_board() {
     assert!(shell.render_text().contains("trust: Restricted"));
 }
 
+#[test]
+fn text_document_workflow_is_visible_in_active_content_workspace() {
+    let sandbox = TestSandbox::new("shell-content-workflow");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/src/lib.rs", b"original\n");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+
+    shell
+        .open_active_project_text_document("src/lib.rs")
+        .expect("text document should open");
+    let rendered = shell.render_text();
+
+    assert_eq!(shell.route(), AppRoute::ActiveProjectWorkspace);
+    assert!(rendered.contains("surface: Text Editor"));
+    assert!(rendered.contains("content status: open"));
+    assert!(rendered.contains("active file: src/lib.rs"));
+    assert!(rendered.contains("document: clean"));
+    assert!(rendered.contains("content panes: 1"));
+
+    shell
+        .replace_active_project_text("changed\n")
+        .expect("active document should edit");
+    let rendered = shell.render_text();
+    assert!(rendered.contains("document: dirty"));
+    assert!(rendered.contains("dirty files: 1"));
+
+    shell
+        .save_active_project_text_document()
+        .expect("active document should save");
+    let rendered = shell.render_text();
+    assert!(rendered.contains("content status: saved"));
+    assert!(rendered.contains("document: clean"));
+    assert!(rendered.contains("dirty files: 0"));
+    assert_eq!(
+        fs::read_to_string(project_dir.join("src/lib.rs")).unwrap(),
+        "changed\n"
+    );
+}
+
+#[test]
+fn opening_text_document_from_terminal_mode_forces_content_mode() {
+    let sandbox = TestSandbox::new("shell-content-forces-mode");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/file.txt", b"original\n");
+    let mut shell = ApplicationShell::new();
+    let project_id = shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added")
+        .project_id()
+        .clone();
+
+    shell.dispatch(AppCommand::OpenActiveProjectWorkspace);
+    shell.dispatch(AppCommand::ToggleActiveProjectMode);
+    assert_eq!(
+        shell.state().project(&project_id).unwrap().mode(),
+        ProjectMode::TerminalImmersion
+    );
+
+    shell
+        .open_active_project_text_document("file.txt")
+        .expect("text document should open");
+
+    let project = shell.state().project(&project_id).unwrap();
+    assert_eq!(shell.route(), AppRoute::ActiveProjectWorkspace);
+    assert_eq!(project.mode(), ProjectMode::Content);
+    assert_eq!(project.open_surface(), ProjectOpenSurface::TextEditor);
+    assert!(shell.render_text().contains("Content Mode"));
+    assert!(
+        !shell
+            .render_text()
+            .contains("Terminal / Agent Immersion Mode | surface: Text Editor")
+    );
+}
+
+#[test]
+fn unsupported_text_open_error_is_rendered_without_losing_workspace() {
+    let sandbox = TestSandbox::new("shell-content-open-error");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/binary.dat", b"text\0more");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+
+    let error = shell
+        .open_active_project_text_document("binary.dat")
+        .expect_err("binary-looking file should be rejected");
+    let rendered = shell.render_text();
+
+    assert!(error.to_string().contains("binary.dat"));
+    assert!(rendered.contains("content status: open error"));
+    assert!(rendered.contains("active file: none"));
+    assert!(rendered.contains("message: file appears to be binary: binary.dat"));
+}
+
+#[test]
+fn failed_open_preserves_existing_dirty_active_document_without_ambiguous_selection() {
+    let sandbox = TestSandbox::new("shell-content-failed-open-preserves");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/file.txt", b"original\n");
+    sandbox.create_file_with_contents("project/binary.dat", b"text\0more");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+    shell
+        .open_active_project_text_document("file.txt")
+        .expect("text document should open");
+    shell
+        .replace_active_project_text("changed\n")
+        .expect("text edit should succeed");
+
+    shell
+        .open_active_project_text_document("binary.dat")
+        .expect_err("binary-looking file should be rejected");
+    let rendered = shell.render_text();
+
+    assert!(rendered.contains("content status: open error"));
+    assert!(rendered.contains("selected: file.txt"));
+    assert!(rendered.contains("active file: file.txt"));
+    assert!(rendered.contains("document: dirty"));
+    assert!(rendered.contains("dirty files: 1"));
+    assert!(rendered.contains("message: file appears to be binary: binary.dat"));
+}
+
+#[test]
+fn identical_replacement_does_not_report_edited_clean_document() {
+    let sandbox = TestSandbox::new("shell-content-identical-edit");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/file.txt", b"same\n");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+    shell
+        .open_active_project_text_document("file.txt")
+        .expect("text document should open");
+
+    shell
+        .replace_active_project_text("same\n")
+        .expect("identical replacement should succeed");
+    let rendered = shell.render_text();
+
+    assert!(rendered.contains("content status: open"));
+    assert!(rendered.contains("document: clean"));
+    assert!(!rendered.contains("content status: edited | document: clean"));
+}
+
+#[test]
+fn external_dirty_conflict_is_visible_without_overwriting_disk() {
+    let sandbox = TestSandbox::new("shell-content-conflict");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/file.txt", b"original\n");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+    shell
+        .open_active_project_text_document("file.txt")
+        .expect("text document should open");
+    shell
+        .replace_active_project_text("tekstide edit\n")
+        .expect("active document should edit");
+    fs::write(project_dir.join("file.txt"), b"external edit\n").unwrap();
+
+    shell
+        .save_active_project_text_document()
+        .expect_err("external change should block save");
+    let rendered = shell.render_text();
+
+    assert!(rendered.contains("content status: conflict"));
+    assert!(rendered.contains("document: conflict"));
+    assert!(rendered.contains("dirty files: 1"));
+    assert_eq!(
+        fs::read_to_string(project_dir.join("file.txt")).unwrap(),
+        "external edit\n"
+    );
+}
+
 struct TestSandbox {
     root: std::path::PathBuf,
 }
@@ -190,7 +373,16 @@ impl TestSandbox {
 
     fn create_dir(&self, name: &str) -> std::path::PathBuf {
         let path = self.root.join(name);
-        std::fs::create_dir(&path).unwrap();
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn create_file_with_contents(&self, name: &str, contents: &[u8]) -> std::path::PathBuf {
+        let path = self.root.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, contents).unwrap();
         path
     }
 }
