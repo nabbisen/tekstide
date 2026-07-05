@@ -13,7 +13,7 @@ The current implementation is a core/shell foundation through RFC-006. It includ
 - safe save and external-change detection;
 - shell-visible Content Mode evidence.
 
-It is not yet the full RFC-001 `v0.1.0` AI CLI MVP. The desktop GUI, PTY terminal runtime, AgentRun launch, AI CLI workflow, transcript/review flow, file watcher, overwrite-confirmation UI, and durable audit storage are deferred.
+It is not yet the full AI CLI workbench. The desktop GUI, PTY terminal runtime, AgentRun launch, AI CLI workflow, transcript/review flow, file watcher, overwrite-confirmation UI, and durable audit storage are deferred.
 
 ## Quick Start
 
@@ -29,4 +29,6 @@ cargo run -p tekstide -- /path/to/project
 
 ## RFCs
 
-Implemented foundation RFCs live under [`rfcs/done/`](rfcs/done/). The broader product-scope RFC remains under [`rfcs/proposed/`](rfcs/proposed/) until the release scope is finalized.
+Implemented foundation RFCs live under [`rfcs/done/`](rfcs/done/). The release-scope RFC remains under [`rfcs/proposed/`](rfcs/proposed/) until the amendment is reviewed and accepted under the RFC lifecycle.
+
+Release scope and deferred work are tracked in [`rfcs/proposed/001-product-scope-mvp-and-non-goals.md`](rfcs/proposed/001-product-scope-mvp-and-non-goals.md), [`RELEASE_NOTES.md`](RELEASE_NOTES.md), and [`rfcs/future-work.md`](rfcs/future-work.md).

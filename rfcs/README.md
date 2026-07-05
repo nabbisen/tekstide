@@ -20,13 +20,13 @@ RFC-001 was accepted for foundation implementation planning by review response 0
 
 | RFC | Title | Target |
 | --- | --- | --- |
-| 001 | [Product Scope, MVP, and Non-Goals](./proposed/001-product-scope-mvp-and-non-goals.md) | M0 |
+| 001 | [Product Scope, Foundation Release, and Non-Goals](./proposed/001-product-scope-mvp-and-non-goals.md) | M0 |
 
 ## Handoffs
 
 | RFC | Handoff Pack |
 | --- | --- |
-| 001 | [Product Scope, MVP, and Non-Goals](./handoffs/001-product-scope-mvp-and-non-goals/README.md) |
+| 001 | [Product Scope, Foundation Release, and Non-Goals](./handoffs/001-product-scope-mvp-and-non-goals/README.md) |
 | 002 | [Core Domain Model: ProjectSession, TerminalSession, AgentRun, AuditEvent](./handoffs/002-core-domain-model-projectsession-terminalsession-agentrun-auditevent/README.md) |
 | 003 | [Information Architecture and UI Mode Model](./handoffs/003-information-architecture-and-ui-mode-model/README.md) |
 | 004 | [Security Baseline and Restricted Mode](./handoffs/004-security-baseline-and-restricted-mode/README.md) |

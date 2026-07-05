@@ -1,4 +1,4 @@
-# RFC-001 Handoff Pack
+# RFC-001: Product Scope, Foundation Release, and Non-Goals — Handoff Pack
 
 Source RFC: [RFC-001](../../proposed/001-product-scope-mvp-and-non-goals.md)
 
