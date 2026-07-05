@@ -1,6 +1,6 @@
 # RFC-001 Implementation Handoff
 
-Source RFC: [RFC-001](../../proposed/001-product-scope-mvp-and-non-goals.md)
+Source RFC: [RFC-001](../../done/001-product-scope-mvp-and-non-goals.md)
 Target: foundation release planning for `0.1.0`
 
 ## Purpose

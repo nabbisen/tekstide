@@ -40,4 +40,4 @@ cargo run -p tekstide -- /path/to/project
 
 Implemented foundation RFCs live under [`rfcs/done/`](rfcs/done/). The release-scope RFC remains under [`rfcs/proposed/`](rfcs/proposed/) until the amendment is reviewed and accepted under the RFC lifecycle.
 
-Release scope and deferred work are tracked in [`rfcs/proposed/001-product-scope-mvp-and-non-goals.md`](rfcs/proposed/001-product-scope-mvp-and-non-goals.md), [`CHANGELOG.md`](CHANGELOG.md), and [`rfcs/future-work.md`](rfcs/future-work.md).
+Release scope and deferred work are tracked in [`rfcs/done/001-product-scope-mvp-and-non-goals.md`](rfcs/done/001-product-scope-mvp-and-non-goals.md), [`CHANGELOG.md`](CHANGELOG.md), and [`rfcs/future-work.md`](rfcs/future-work.md).

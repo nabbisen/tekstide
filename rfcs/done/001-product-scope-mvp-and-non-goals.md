@@ -1,6 +1,6 @@
 # RFC-001: Product Scope, Foundation Release, and Non-Goals
 
-Status: Proposed  
+Status: Implemented (0.1.0 foundation release scope)  
 Target release: 0.1.0 foundation
 Date: 2026-07-04
 
@@ -242,3 +242,21 @@ Deferred acceptance criteria for later milestones:
 - Treat this RFC as the scope freeze for the `0.1.0` foundation release.
 - Do not pull deferred plugin, remote, debugger, marketplace, or cloud features into `0.1.0` unless a later RFC explicitly reprioritizes them.
 - Preserve the future-work list when creating changelog entries, review requests, and later RFCs.
+
+## Release Scope Closeout
+
+RFC-001 is implemented as the `0.1.0` foundation release scope decision.
+
+Evidence:
+
+- implemented foundation RFCs: RFC-002 through RFC-006;
+- deferred work index: [Future Work Themes](../future-work.md);
+- release notes: [Changelog](../../CHANGELOG.md);
+- release-candidate evidence: `.git-exclude/review-request/032-v0.1.0-foundation-rc-review.md`;
+- RC review response: `.git-exclude/reviewed/tekstide-review-request-032-v010-foundation-rc-response.md`.
+
+Accepted limitations:
+
+- `0.1.0` does not claim the full AI CLI workbench;
+- desktop GUI, PTY terminal runtime, AgentRun launch, transcript/review flow, file watcher, overwrite-confirmation UI, and durable audit storage are deferred;
+- final publish/tag still requires dependency-order crates.io checks and a final reviewed release sequence.

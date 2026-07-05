@@ -16,11 +16,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 ## Proposed
 
-RFC-001 was accepted for foundation implementation planning by review response 002. It remains under `proposed/` until implemented, because RFC 000 uses the four-folder lifecycle without a separate `accepted/` state.
-
-| RFC | Title | Target |
-| --- | --- | --- |
-| 001 | [Product Scope, Foundation Release, and Non-Goals](./proposed/001-product-scope-mvp-and-non-goals.md) | M0 |
+No proposed RFCs are pending.
 
 ## Handoffs
 
@@ -38,6 +34,7 @@ RFC-001 was accepted for foundation implementation planning by review response 0
 | RFC | Title | Status |
 | --- | --- | --- |
 | 000 | [RFC lifecycle policy](./done/000-rfc-lifecycle-policy.md) | Implemented |
+| 001 | [Product Scope, Foundation Release, and Non-Goals](./done/001-product-scope-mvp-and-non-goals.md) | Implemented for 0.1.0 foundation |
 | 002 | [Core Domain Model: ProjectSession, TerminalSession, AgentRun, AuditEvent](./done/002-core-domain-model-projectsession-terminalsession-agentrun-auditevent.md) | Implemented |
 | 003 | [Information Architecture and UI Mode Model](./done/003-information-architecture-and-ui-mode-model.md) | Implemented |
 | 004 | [Security Baseline and Restricted Mode](./done/004-security-baseline-and-restricted-mode.md) | Implemented |

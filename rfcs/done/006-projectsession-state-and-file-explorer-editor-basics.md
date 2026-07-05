@@ -22,9 +22,9 @@ Depends on:
 
 Related scope gate:
 
-- [RFC-001](../proposed/001-product-scope-mvp-and-non-goals.md)
+- [RFC-001](./001-product-scope-mvp-and-non-goals.md)
 
-These links reflect the current four-folder RFC policy. RFC-001 remains under `rfcs/proposed/` until implemented, even though review response 002 accepted it for foundation implementation planning.
+These links reflect the current four-folder RFC policy.
 
 ## Summary
 
