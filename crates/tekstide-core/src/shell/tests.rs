@@ -214,6 +214,115 @@ fn text_document_workflow_is_visible_in_active_content_workspace() {
 }
 
 #[test]
+fn content_workspace_renders_bounded_explorer_scan_without_file_contents() {
+    let sandbox = TestSandbox::new("shell-content-explorer");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/src/lib.rs", b"pub fn secret() {}\n");
+    sandbox.create_dir("project/target");
+    sandbox.create_file_with_contents("project/README.md", b"# private readme\n");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+
+    shell
+        .scan_active_project_explorer_directory("")
+        .expect("project root should scan");
+    let rendered = shell.render_text();
+
+    assert!(rendered.contains("explorer: ready"));
+    assert!(rendered.contains("explorer directory: (project root)"));
+    assert!(rendered.contains("README.md [file | available"));
+    assert!(rendered.contains("src [directory | available"));
+    assert!(rendered.contains("target [directory | collapsed"));
+    assert!(rendered.contains("symlink: none"));
+    assert!(rendered.contains("content panes: 1"));
+    assert!(!rendered.contains("pub fn secret"));
+    assert!(!rendered.contains("private readme"));
+}
+
+#[test]
+fn content_explorer_scan_error_is_visible_without_replacing_active_document() {
+    let sandbox = TestSandbox::new("shell-content-explorer-error");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/file.txt", b"original\n");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+    shell
+        .open_active_project_text_document("file.txt")
+        .expect("text document should open");
+
+    shell
+        .scan_active_project_explorer_directory("file.txt")
+        .expect_err("file target is not a directory");
+    let rendered = shell.render_text();
+
+    assert!(rendered.contains("explorer: error"));
+    assert!(rendered.contains("active file: file.txt"));
+    assert!(rendered.contains("document: clean"));
+    assert!(rendered.contains("explorer message:"));
+}
+
+#[test]
+fn failed_explorer_scan_clears_previous_scan_result() {
+    let sandbox = TestSandbox::new("shell-content-explorer-stale");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/file.txt", b"original\n");
+    sandbox.create_file_with_contents("project/README.md", b"# readme\n");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+
+    shell
+        .scan_active_project_explorer_directory("")
+        .expect("project root should scan");
+    assert!(shell.render_text().contains("README.md [file | available"));
+
+    shell
+        .scan_active_project_explorer_directory("file.txt")
+        .expect_err("file target is not a directory");
+    let rendered = shell.render_text();
+
+    assert!(rendered.contains("explorer: error"));
+    assert!(rendered.contains("explorer message:"));
+    assert!(!rendered.contains("README.md [file | available"));
+    assert!(!rendered.contains("explorer directory: (project root)"));
+}
+
+#[test]
+fn explorer_scan_from_terminal_mode_forces_content_mode() {
+    let sandbox = TestSandbox::new("shell-content-explorer-forces-mode");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/file.txt", b"original\n");
+    let mut shell = ApplicationShell::new();
+    let project_id = shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added")
+        .project_id()
+        .clone();
+
+    shell.dispatch(AppCommand::OpenActiveProjectWorkspace);
+    shell.dispatch(AppCommand::ToggleActiveProjectMode);
+    assert_eq!(
+        shell.state().project(&project_id).unwrap().mode(),
+        ProjectMode::TerminalImmersion
+    );
+
+    shell
+        .scan_active_project_explorer_directory("")
+        .expect("project root should scan");
+
+    let project = shell.state().project(&project_id).unwrap();
+    assert_eq!(shell.route(), AppRoute::ActiveProjectWorkspace);
+    assert_eq!(project.mode(), ProjectMode::Content);
+    assert_eq!(project.open_surface(), ProjectOpenSurface::TextEditor);
+    assert!(shell.render_text().contains("explorer: ready"));
+}
+
+#[test]
 fn opening_text_document_from_terminal_mode_forces_content_mode() {
     let sandbox = TestSandbox::new("shell-content-forces-mode");
     let project_dir = sandbox.create_dir("project");

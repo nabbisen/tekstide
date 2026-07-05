@@ -5,7 +5,10 @@ use crate::content::{ExternalChangeDecision, SaveDecision};
 use crate::navigation::{TerminalLayoutClass, TerminalPanePolicy};
 use crate::project::recent::RecentProjectState;
 use crate::project::root::ProjectRootValidationError;
-use crate::project::{ProjectContentError, ProjectId, text_document_state_label};
+use crate::project::{
+    ProjectContentError, ProjectId, explorer_node_kind_label, explorer_node_state_label,
+    explorer_symlink_status_label, text_document_state_label,
+};
 use crate::project_board::ProjectBoardViewModel;
 use crate::route::AppRoute;
 
@@ -101,6 +104,19 @@ impl ApplicationShell {
         result
     }
 
+    pub fn scan_active_project_explorer_directory(
+        &mut self,
+        selected_relative_path: impl Into<std::path::PathBuf>,
+    ) -> Result<(), ProjectContentError> {
+        let result = self
+            .state
+            .scan_active_project_explorer_directory(selected_relative_path);
+        if self.state.active_project().is_some() {
+            self.route = AppRoute::ActiveProjectWorkspace;
+        }
+        result
+    }
+
     pub fn replace_active_project_text(
         &mut self,
         text: impl Into<String>,
@@ -164,6 +180,8 @@ fn render_active_project_workspace(state: &AppState) -> String {
     let content_workspace = project.content_workspace();
     output.push_str("content status: ");
     output.push_str(content_workspace.status().label());
+    output.push_str(" | explorer: ");
+    output.push_str(content_workspace.explorer_status().label());
     output.push_str(" | selected: ");
     let selected = content_workspace.selected_explorer_path();
     if selected.as_os_str().is_empty() {
@@ -193,6 +211,37 @@ fn render_active_project_workspace(state: &AppState) -> String {
         output.push_str(message);
     }
     output.push('\n');
+    if let Some(message) = content_workspace.explorer_status().message() {
+        output.push_str("explorer message: ");
+        output.push_str(message);
+        output.push('\n');
+    }
+    if let Some(scan) = content_workspace.explorer_scan() {
+        output.push_str("explorer directory: ");
+        let directory = &scan.directory.selected_relative_path;
+        if directory.as_os_str().is_empty() {
+            output.push_str("(project root)");
+        } else {
+            output.push_str(&directory.display().to_string());
+        }
+        output.push_str(" | entries: ");
+        output.push_str(&scan.nodes.len().to_string());
+        output.push_str(" | truncated: ");
+        output.push_str(if scan.truncated { "yes" } else { "no" });
+        output.push('\n');
+
+        for node in &scan.nodes {
+            output.push_str(" - ");
+            output.push_str(&node.relative_path.display().to_string());
+            output.push_str(" [");
+            output.push_str(explorer_node_kind_label(node.kind));
+            output.push_str(" | ");
+            output.push_str(explorer_node_state_label(&node.state));
+            output.push_str(" | symlink: ");
+            output.push_str(explorer_symlink_status_label(node.symlink_status));
+            output.push_str("]\n");
+        }
+    }
     output.push_str("content panes: 1\n");
     output
 }

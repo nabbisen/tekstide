@@ -212,6 +212,17 @@ impl AppState {
         project.open_text_document(selected_relative_path)
     }
 
+    pub fn scan_active_project_explorer_directory(
+        &mut self,
+        selected_relative_path: impl Into<std::path::PathBuf>,
+    ) -> Result<(), ProjectContentError> {
+        let Some(project) = self.active_project_mut() else {
+            return Err(ProjectContentError::NoActiveProject);
+        };
+
+        project.scan_content_explorer_directory(selected_relative_path)
+    }
+
     pub fn replace_active_project_text(
         &mut self,
         text: impl Into<String>,

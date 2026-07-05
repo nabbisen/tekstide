@@ -1,3 +1,4 @@
+use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 
@@ -79,6 +80,26 @@ pub enum ExplorerScanError {
     NotDirectory { target: Box<FileAccessTarget> },
     CannotReadDirectory { target: Box<FileAccessTarget> },
 }
+
+impl fmt::Display for ExplorerScanError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Access(error) => write!(formatter, "file access blocked: {error}"),
+            Self::NotDirectory { target } => write!(
+                formatter,
+                "not an explorer directory: {}",
+                target.selected_relative_path.display()
+            ),
+            Self::CannotReadDirectory { target } => write!(
+                formatter,
+                "could not read directory: {}",
+                target.selected_relative_path.display()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ExplorerScanError {}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FileExplorerScanner;

@@ -6,11 +6,16 @@ use crate::content::{
     TextDocumentOpenError, TextDocumentOpenPolicy, TextDocumentRefreshError, TextDocumentSaveError,
     TextDocumentState,
 };
-use crate::project::root::ProjectRootHandle;
+use crate::project::root::{
+    ExplorerDirectoryScan, ExplorerNodeKind, ExplorerNodeState, ExplorerScanError,
+    FileAccessSymlinkStatus, FileExplorerScanPolicy, FileExplorerScanner, ProjectRootHandle,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectContentWorkspace {
     selected_explorer_path: PathBuf,
+    explorer_scan: Option<ExplorerDirectoryScan>,
+    explorer_status: ProjectExplorerStatus,
     active_document: Option<TextDocument>,
     status: ProjectContentStatus,
 }
@@ -20,12 +25,45 @@ impl ProjectContentWorkspace {
         &self.selected_explorer_path
     }
 
+    pub fn explorer_scan(&self) -> Option<&ExplorerDirectoryScan> {
+        self.explorer_scan.as_ref()
+    }
+
+    pub fn explorer_status(&self) -> &ProjectExplorerStatus {
+        &self.explorer_status
+    }
+
     pub fn active_document(&self) -> Option<&TextDocument> {
         self.active_document.as_ref()
     }
 
     pub fn status(&self) -> &ProjectContentStatus {
         &self.status
+    }
+
+    pub fn scan_explorer_directory(
+        &mut self,
+        root: &ProjectRootHandle,
+        selected_relative_path: impl Into<PathBuf>,
+        policy: &FileExplorerScanPolicy,
+    ) -> Result<(), ProjectContentError> {
+        let selected_relative_path = selected_relative_path.into();
+
+        match FileExplorerScanner.scan_directory(root, selected_relative_path, policy) {
+            Ok(scan) => {
+                self.selected_explorer_path = scan.directory.selected_relative_path.clone();
+                self.explorer_scan = Some(scan);
+                self.explorer_status = ProjectExplorerStatus::Ready;
+                Ok(())
+            }
+            Err(error) => {
+                self.explorer_scan = None;
+                self.explorer_status = ProjectExplorerStatus::Error {
+                    message: error.to_string(),
+                };
+                Err(ProjectContentError::Explorer(error))
+            }
+        }
     }
 
     pub fn open_text_document(
@@ -165,9 +203,61 @@ impl Default for ProjectContentWorkspace {
     fn default() -> Self {
         Self {
             selected_explorer_path: PathBuf::new(),
+            explorer_scan: None,
+            explorer_status: ProjectExplorerStatus::Empty,
             active_document: None,
             status: ProjectContentStatus::Empty,
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProjectExplorerStatus {
+    Empty,
+    Ready,
+    Error { message: String },
+}
+
+impl ProjectExplorerStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Empty => "empty",
+            Self::Ready => "ready",
+            Self::Error { .. } => "error",
+        }
+    }
+
+    pub fn message(&self) -> Option<&str> {
+        match self {
+            Self::Error { message } => Some(message),
+            _ => None,
+        }
+    }
+}
+
+pub fn explorer_node_kind_label(kind: ExplorerNodeKind) -> &'static str {
+    match kind {
+        ExplorerNodeKind::File => "file",
+        ExplorerNodeKind::Directory => "directory",
+        ExplorerNodeKind::Other => "other",
+    }
+}
+
+pub fn explorer_node_state_label(state: &ExplorerNodeState) -> &'static str {
+    match state {
+        ExplorerNodeState::Available => "available",
+        ExplorerNodeState::Collapsed => "collapsed",
+        ExplorerNodeState::Blocked(_) => "blocked",
+        ExplorerNodeState::Unreadable => "unreadable",
+    }
+}
+
+pub fn explorer_symlink_status_label(status: FileAccessSymlinkStatus) -> &'static str {
+    match status {
+        FileAccessSymlinkStatus::NoSymlink => "none",
+        FileAccessSymlinkStatus::InRootSymlink => "in-root symlink",
+        FileAccessSymlinkStatus::UnresolvedSymlink => "unresolved symlink",
+        FileAccessSymlinkStatus::EscapesRoot => "escapes root",
     }
 }
 
@@ -226,6 +316,7 @@ pub fn text_document_state_label(state: TextDocumentState) -> &'static str {
 pub enum ProjectContentError {
     NoActiveProject,
     NoActiveDocument,
+    Explorer(ExplorerScanError),
     Open(TextDocumentOpenError),
     Edit(TextDocumentEditError),
     Save(TextDocumentSaveError),
@@ -237,6 +328,7 @@ impl fmt::Display for ProjectContentError {
         match self {
             Self::NoActiveProject => write!(formatter, "no active project"),
             Self::NoActiveDocument => write!(formatter, "no active text document"),
+            Self::Explorer(error) => write!(formatter, "{error}"),
             Self::Open(error) => write!(formatter, "{error}"),
             Self::Edit(error) => write!(formatter, "{error}"),
             Self::Save(error) => write!(formatter, "{error}"),

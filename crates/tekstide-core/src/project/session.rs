@@ -8,7 +8,7 @@ use crate::domain::{
     TerminalSession, TerminalStatus, Transcript,
 };
 
-use super::root::ProjectRootHandle;
+use super::root::{FileExplorerScanPolicy, ProjectRootHandle};
 use super::{
     ProjectContentError, ProjectContentWorkspace, ProjectFileState, ProjectGitSummary, ProjectId,
     ProjectMode, ProjectOpenSurface, ProjectProviderState, ProjectResourceLimits,
@@ -349,6 +349,21 @@ impl ProjectSession {
             TextDocumentOpenPolicy::linux_mvp(),
         );
         self.sync_file_state_from_content_workspace();
+        self.set_open_surface(ProjectOpenSurface::TextEditor);
+        self.set_mode(ProjectMode::Content);
+        result
+    }
+
+    pub fn scan_content_explorer_directory(
+        &mut self,
+        selected_relative_path: impl Into<PathBuf>,
+    ) -> Result<(), ProjectContentError> {
+        let root = ProjectRootHandle::from_project_session(self);
+        let result = self.content_workspace.scan_explorer_directory(
+            &root,
+            selected_relative_path,
+            &FileExplorerScanPolicy::linux_mvp(),
+        );
         self.set_open_surface(ProjectOpenSurface::TextEditor);
         self.set_mode(ProjectMode::Content);
         result
