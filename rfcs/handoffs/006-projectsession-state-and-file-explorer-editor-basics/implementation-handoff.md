@@ -1,10 +1,10 @@
 ---
 title: "RFC-006: ProjectSession State and File Explorer / Editor Basics — Implementation Handoff"
 rfc: "RFC-006"
-rfc_file: "../../proposed/006-projectsession-state-and-file-explorer-editor-basics.md"
-status: "Proposed developer handoff - do not implement before RFC acceptance"
+rfc_file: "../../done/006-projectsession-state-and-file-explorer-editor-basics.md"
+status: "Implemented with documented limitations"
 target_milestone: "M3"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented"
 created: "2026-07-04"
 ---
 
@@ -21,7 +21,7 @@ This RFC implements the basic per-project Content Mode: explorer, file open/edit
 ## Dependencies and Sequencing
 
 - Target milestone: **M3**
-- Source RFC status: **Proposed**
+- Source RFC status: **Implemented with documented limitations**
 - Required predecessor RFCs: RFC-002, RFC-003, RFC-004, RFC-005
 - Implementation may begin only when predecessor interfaces are stable enough to avoid rework.
 - If a predecessor is still draft, implement only a narrow spike or no-op seam and record the limitation in release evidence.

@@ -1,10 +1,10 @@
 ---
 title: "RFC-006: ProjectSession State and File Explorer / Editor Basics — Task Breakdown / PR Plan"
 rfc: "RFC-006"
-rfc_file: "../../proposed/006-projectsession-state-and-file-explorer-editor-basics.md"
-status: "Proposed developer handoff - do not implement before RFC acceptance"
+rfc_file: "../../done/006-projectsession-state-and-file-explorer-editor-basics.md"
+status: "Implemented with documented limitations"
 target_milestone: "M3"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented"
 created: "2026-07-04"
 ---
 

@@ -1,6 +1,6 @@
 # RFC-006: ProjectSession State and File Explorer / Editor Basics
 
-Status: Proposed  
+Status: Implemented (core/shell baseline; GUI/runtime follow-ups deferred)  
 Target milestone: M3  
 Date: 2026-07-04
 
@@ -15,14 +15,16 @@ Related baseline documents:
 
 Depends on:
 
-- [RFC-002](../done/002-core-domain-model-projectsession-terminalsession-agentrun-auditevent.md)
-- [RFC-003](../done/003-information-architecture-and-ui-mode-model.md)
-- [RFC-004](../done/004-security-baseline-and-restricted-mode.md)
-- [RFC-005](../done/005-application-shell-and-project-board.md)
+- [RFC-002](./002-core-domain-model-projectsession-terminalsession-agentrun-auditevent.md)
+- [RFC-003](./003-information-architecture-and-ui-mode-model.md)
+- [RFC-004](./004-security-baseline-and-restricted-mode.md)
+- [RFC-005](./005-application-shell-and-project-board.md)
 
 Related scope gate:
 
-- [RFC-001](./001-product-scope-mvp-and-non-goals.md)
+- [RFC-001](../proposed/001-product-scope-mvp-and-non-goals.md)
+
+These links reflect the current four-folder RFC policy. RFC-001 remains under `rfcs/proposed/` until implemented, even though review response 002 accepted it for foundation implementation planning.
 
 ## Summary
 
@@ -258,6 +260,33 @@ The editor should be intentionally plain. Avoid visual clutter. Main content rem
 - External modification tests.
 - Symlink tests.
 - Large file guard tests.
+
+## Implementation Closeout
+
+RFC-006 is implemented for the core/shell foundation stage.
+
+Implemented:
+
+- root-bound file access policy;
+- bounded explorer read model;
+- UTF-8 text document buffer;
+- safe save and external-change detection;
+- ProjectSession-owned Content Mode workspace;
+- shell-visible explorer/text workflow evidence;
+- dirty-state propagation to project/runtime summaries;
+- one primary content surface without arbitrary splits.
+
+Accepted with documented limitations:
+
+- the current executable remains a CLI/text harness;
+- GUI editor/tree widgets are deferred;
+- one active text document only;
+- file watcher, overwrite confirmation UI, durable audit persistence, and multi-document behavior are deferred;
+- no LSP, formatter, task, plugin/profile, process, PTY, network, Git probing, or `.env` behavior is implemented.
+
+Evidence:
+
+- see [RFC-006 QA Evidence](../handoffs/006-projectsession-state-and-file-explorer-editor-basics/qa-evidence.md).
 
 ## Acceptance Criteria
 
