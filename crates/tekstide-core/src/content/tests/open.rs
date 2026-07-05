@@ -1,15 +1,10 @@
-use super::{
-    TextCursor, TextDocument, TextDocumentEditError, TextDocumentOpenError, TextDocumentOpenPolicy,
-    TextDocumentState, TextViewport, enforce_editable_size_cap,
-};
-use crate::project::root::{
-    FileAccessBlockedReason, ProjectRootHandle, ProjectRootValidator, SymlinkPolicy,
-    ValidProjectRoot,
-};
-use crate::project::{ProjectId, ProjectSession};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use super::{TestSandbox, root_handle, validate};
+use crate::content::open::enforce_editable_size_cap;
+use crate::content::{TextCursor, TextDocument, TextDocumentOpenError, TextDocumentOpenPolicy};
+use crate::content::{TextDocumentState, TextViewport};
+use crate::project::ProjectId;
+use crate::project::root::FileAccessBlockedReason;
+use std::path::PathBuf;
 
 #[test]
 fn opens_valid_utf8_file_as_clean_string_backed_document() {
@@ -131,70 +126,6 @@ fn post_read_size_cap_rejects_bytes_above_cap() {
 }
 
 #[test]
-fn edit_transitions_document_to_dirty_without_saving() {
-    let sandbox = TestSandbox::new("text-edit-dirty");
-    let project_dir = sandbox.create_dir("project");
-    sandbox.create_file_with_contents("project/src/lib.rs", b"original\n");
-    let root = root_handle(ProjectId::for_test(1), validate(&project_dir));
-    let mut document =
-        TextDocument::open(&root, "src/lib.rs", TextDocumentOpenPolicy::linux_mvp()).unwrap();
-
-    document.set_cursor(TextCursor { line: 3, column: 5 });
-    document.set_viewport(TextViewport {
-        first_visible_line: 2,
-    });
-    document.replace_text("changed\n").unwrap();
-
-    assert_eq!(document.text(), "changed\n");
-    assert_eq!(document.state(), TextDocumentState::Dirty);
-    assert!(document.is_dirty());
-    assert_eq!(document.cursor(), TextCursor { line: 3, column: 5 });
-    assert_eq!(
-        document.viewport(),
-        TextViewport {
-            first_visible_line: 2
-        }
-    );
-    assert_eq!(
-        fs::read_to_string(project_dir.join("src/lib.rs")).unwrap(),
-        "original\n",
-        "PR-006-C must not save edited buffers"
-    );
-}
-
-#[test]
-fn replacing_text_with_same_contents_keeps_clean_document_clean() {
-    let sandbox = TestSandbox::new("text-edit-same");
-    let project_dir = sandbox.create_dir("project");
-    sandbox.create_file_with_contents("project/file.txt", b"same\n");
-    let root = root_handle(ProjectId::for_test(1), validate(&project_dir));
-    let mut document =
-        TextDocument::open(&root, "file.txt", TextDocumentOpenPolicy::linux_mvp()).unwrap();
-
-    document.replace_text("same\n").unwrap();
-
-    assert_eq!(document.state(), TextDocumentState::Clean);
-}
-
-#[test]
-fn replacing_text_with_nul_is_rejected_and_keeps_existing_buffer() {
-    let sandbox = TestSandbox::new("text-edit-nul");
-    let project_dir = sandbox.create_dir("project");
-    sandbox.create_file_with_contents("project/file.txt", b"original\n");
-    let root = root_handle(ProjectId::for_test(1), validate(&project_dir));
-    let mut document =
-        TextDocument::open(&root, "file.txt", TextDocumentOpenPolicy::linux_mvp()).unwrap();
-
-    let error = document
-        .replace_text("changed\0text")
-        .expect_err("NUL-containing replacement text should be rejected");
-
-    assert_eq!(error, TextDocumentEditError::ContainsNul);
-    assert_eq!(document.text(), "original\n");
-    assert_eq!(document.state(), TextDocumentState::Clean);
-}
-
-#[test]
 fn editable_open_uses_root_policy_for_cross_project_isolation() {
     let sandbox = TestSandbox::new("text-open-cross-project");
     let project_one_dir = sandbox.create_dir("project-one");
@@ -253,58 +184,4 @@ fn editable_open_blocks_escaping_symlink_file() {
         TextDocumentOpenError::Access(access)
             if access.reason == FileAccessBlockedReason::SymlinkEscape
     ));
-}
-
-fn validate(path: &Path) -> ValidProjectRoot {
-    ProjectRootValidator
-        .validate(path, SymlinkPolicy::FailClosed)
-        .expect("project root should validate")
-}
-
-fn root_handle(project_id: ProjectId, root: ValidProjectRoot) -> ProjectRootHandle {
-    let project = ProjectSession::new(
-        project_id,
-        root.display_name,
-        root.selected_path,
-        root.canonical_path,
-    );
-    ProjectRootHandle::from_project_session(&project)
-}
-
-struct TestSandbox {
-    root: PathBuf,
-}
-
-impl TestSandbox {
-    fn new(name: &str) -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("tekstide-{name}-{}-{nonce}", std::process::id()));
-        fs::create_dir(&root).unwrap();
-        Self { root }
-    }
-
-    fn create_dir(&self, name: &str) -> PathBuf {
-        let path = self.root.join(name);
-        fs::create_dir_all(&path).unwrap();
-        path
-    }
-
-    fn create_file_with_contents(&self, name: &str, contents: &[u8]) -> PathBuf {
-        let path = self.root.join(name);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(&path, contents).unwrap();
-        path
-    }
-}
-
-impl Drop for TestSandbox {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
 }
