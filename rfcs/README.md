@@ -16,7 +16,9 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 ## Proposed
 
-No proposed RFCs are pending.
+| RFC | Title | Status |
+| --- | --- | --- |
+| 007 | [Runtime Substrate and PTY Feasibility Gate](./proposed/007-runtime-substrate-pty-feasibility.md) | Proposed |
 
 ## Handoffs
 
@@ -28,6 +30,7 @@ No proposed RFCs are pending.
 | 004 | [Security Baseline and Restricted Mode](./handoffs/004-security-baseline-and-restricted-mode/README.md) |
 | 005 | [Application Shell and Project Board](./handoffs/005-application-shell-and-project-board/README.md) |
 | 006 | [ProjectSession State and File Explorer / Editor Basics](./handoffs/006-projectsession-state-and-file-explorer-editor-basics/README.md) |
+| 007 | [Runtime Substrate and PTY Feasibility Gate](./handoffs/007-runtime-substrate-pty-feasibility/README.md) |
 
 ## Implemented
 

@@ -1,0 +1,15 @@
+[package]
+name        = "tekstide-pty-spike"
+description = "Quarantined RFC-007 feasibility harness for Tekstide PTY/runtime investigation."
+publish     = false
+version.workspace       = true
+edition.workspace       = true
+license.workspace       = true
+authors.workspace       = true
+repository.workspace    = true
+
+[[bin]]
+name = "tekstide-pty-spike"
+path = "src/main.rs"
+
+[dependencies]

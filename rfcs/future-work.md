@@ -62,9 +62,13 @@ Status: deferred after `0.1.0`.
 
 ### Release Process
 
-Status: active for `0.1.0` release preparation.
+Status: active after `0.1.0`.
 
 - Keep the release checklist current.
-- Add release build, package, and package smoke evidence before tagging.
+- Add release build, package, and package smoke evidence before each release.
 - Decide whether future releases need scripts, `xtask`, or CI gates.
 - Keep the changelog aligned with implemented and deferred scope.
+
+## Milestone Roadmap
+
+See [`../ROADMAP.md`](../ROADMAP.md) for the milestone schedule.

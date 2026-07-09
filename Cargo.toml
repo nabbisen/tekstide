@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/tekstide",
     "crates/tekstide-core",
+    "crates/tekstide-pty-spike",
 ]
 
 [workspace.package]
