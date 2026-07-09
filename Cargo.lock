@@ -199,6 +199,9 @@ dependencies = [
 [[package]]
 name = "tekstide-pty-spike"
 version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "unicode-ident"

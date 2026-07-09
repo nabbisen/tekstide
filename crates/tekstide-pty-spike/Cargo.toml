@@ -13,3 +13,4 @@ name = "tekstide-pty-spike"
 path = "src/main.rs"
 
 [dependencies]
+libc                        = { workspace = true }
