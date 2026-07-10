@@ -14,11 +14,11 @@ use crate::project::{ProjectId, ProjectSession};
 use super::pty::{OpenPty, close_fd, resize_master};
 use super::{
     BoundedRuntimeSummary, TerminalDimensions, TerminalLaunchSpec, TerminalOutputSummary,
-    TerminalRuntimeEvent, TerminalRuntimeHandle, TerminationOutcome,
+    TerminalRuntimeEvent, TerminalRuntimeHandle,
 };
 
 pub struct LinuxTerminalRuntime {
-    sessions: HashMap<TerminalId, RunningTerminal>,
+    pub(super) sessions: HashMap<TerminalId, RunningTerminal>,
 }
 
 impl LinuxTerminalRuntime {
@@ -59,6 +59,7 @@ impl LinuxTerminalRuntime {
             terminal.id.clone(),
             RunningTerminal {
                 project_id: spec.project_id,
+                process_group_id: child.id() as libc::pid_t,
                 child,
                 master: pty.into_master(),
             },
@@ -169,40 +170,26 @@ impl LinuxTerminalRuntime {
         })
     }
 
-    pub fn wait_for_exit(
-        &mut self,
+    pub(super) fn session(
+        &self,
         handle: &TerminalRuntimeHandle,
-        timeout: Duration,
-    ) -> Result<Option<TerminationOutcome>, TerminalRuntimeError> {
-        let session = self.session_mut(handle)?;
-        let started = Instant::now();
+    ) -> Result<&RunningTerminal, TerminalRuntimeError> {
+        let session = self.sessions.get(&handle.terminal_id).ok_or(
+            TerminalRuntimeError::UnknownTerminal {
+                terminal_id: handle.terminal_id.clone(),
+            },
+        )?;
 
-        loop {
-            if let Some(status) =
-                session
-                    .child
-                    .try_wait()
-                    .map_err(|error| TerminalRuntimeError::Io {
-                        summary: BoundedRuntimeSummary::new(format!(
-                            "failed to inspect terminal process: {error}"
-                        )),
-                    })?
-            {
-                self.sessions.remove(&handle.terminal_id);
-                return Ok(status
-                    .code()
-                    .map(|exit_status| TerminationOutcome::Exited { exit_status }));
-            }
-
-            if started.elapsed() > timeout {
-                return Ok(None);
-            }
-
-            std::thread::sleep(Duration::from_millis(10));
+        if session.project_id != handle.project_id {
+            return Err(TerminalRuntimeError::CrossProjectHandle {
+                terminal_id: handle.terminal_id.clone(),
+            });
         }
+
+        Ok(session)
     }
 
-    fn session_mut(
+    pub(super) fn session_mut(
         &mut self,
         handle: &TerminalRuntimeHandle,
     ) -> Result<&mut RunningTerminal, TerminalRuntimeError> {
@@ -248,10 +235,11 @@ pub enum TerminalRuntimeError {
     Io { summary: BoundedRuntimeSummary },
 }
 
-struct RunningTerminal {
-    project_id: ProjectId,
-    child: Child,
-    master: fs::File,
+pub(super) struct RunningTerminal {
+    pub(super) project_id: ProjectId,
+    pub(super) process_group_id: libc::pid_t,
+    pub(super) child: Child,
+    pub(super) master: fs::File,
 }
 
 fn validate_launch_spec(

@@ -37,7 +37,11 @@ impl OpenPty {
             )));
         }
 
-        set_nonblocking(master).map_err(BoundedRuntimeSummary::new)?;
+        if let Err(error) = set_nonblocking(master) {
+            close_fd(master);
+            close_fd(slave);
+            return Err(BoundedRuntimeSummary::new(error));
+        }
 
         Ok(Self {
             master: Some(unsafe { fs::File::from_raw_fd(master) }),

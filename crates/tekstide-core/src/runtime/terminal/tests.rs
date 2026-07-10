@@ -301,6 +301,235 @@ fn linux_runtime_routes_resize_to_project_terminal() {
     cleanup_root(root);
 }
 
+#[test]
+fn linux_runtime_terminates_process_group_with_sigterm() {
+    let root = test_root("terminate-sigterm");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Cat", &root, "/bin/cat");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain terminal process launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+
+    let request = TerminationRequest {
+        source: TerminationRequestSource::TestHarness,
+        reason: BoundedRuntimeSummary::new("terminate process group smoke"),
+    };
+    let events = runtime
+        .request_terminate(
+            &handle,
+            request.clone(),
+            Duration::from_secs(2),
+            Duration::from_secs(2),
+        )
+        .expect("termination request should complete");
+
+    assert_eq!(
+        events.first(),
+        Some(&TerminalRuntimeEvent::TerminationRequested {
+            handle: handle.clone(),
+            request,
+        })
+    );
+    assert!(
+        events.contains(&TerminalRuntimeEvent::TerminationSignalSent {
+            handle: handle.clone(),
+            signal: TerminationSignal::Sigterm,
+        })
+    );
+    assert_eq!(
+        events.last(),
+        Some(&TerminalRuntimeEvent::Terminated {
+            handle: handle.clone(),
+            outcome: TerminationOutcome::TerminatedBySignal {
+                signal: TerminationSignal::Sigterm,
+            },
+        })
+    );
+
+    let error = runtime
+        .write_input(&handle, b"printf 'after-close\\n'\n")
+        .expect_err("terminated runtime session must be removed");
+    assert_eq!(
+        error,
+        TerminalRuntimeError::UnknownTerminal {
+            terminal_id: terminal.id,
+        }
+    );
+    cleanup_root(root);
+}
+
+#[test]
+fn linux_runtime_rejects_cross_project_termination_handle() {
+    let root = test_root("cross-project-terminate");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    let cross_project_handle =
+        TerminalRuntimeHandle::new(terminal.id.clone(), ProjectId::for_test(2));
+    let request = TerminationRequest {
+        source: TerminationRequestSource::TestHarness,
+        reason: BoundedRuntimeSummary::new("cross-project terminate smoke"),
+    };
+
+    let error = runtime
+        .request_terminate(
+            &cross_project_handle,
+            request,
+            Duration::from_millis(100),
+            Duration::from_millis(100),
+        )
+        .expect_err("cross-project termination handle must be rejected");
+
+    assert_eq!(
+        error,
+        TerminalRuntimeError::CrossProjectHandle {
+            terminal_id: terminal.id.clone(),
+        }
+    );
+
+    runtime
+        .write_input(&handle, b"exit\n")
+        .expect("cleanup exit should write to PTY");
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("shell wait should not fail");
+    assert_eq!(outcome, Some(TerminationOutcome::Exited { exit_status: 0 }));
+    cleanup_root(root);
+}
+
+#[test]
+fn linux_runtime_uses_sigkill_fallback_for_foreground_child_after_sigterm_timeout() {
+    let root = test_root("terminate-sigkill-fallback");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+
+    runtime
+        .write_input(&handle, b"printf 'sleep-started\\n'; sleep 30\n")
+        .expect("foreground child command should write to PTY");
+    let output = read_until_contains(&mut runtime, &handle, b"sleep-started");
+    assert!(
+        contains_subsequence(&output, b"sleep-started"),
+        "PTY output should contain foreground-child marker; captured: {}",
+        String::from_utf8_lossy(&output)
+    );
+
+    let request = TerminationRequest {
+        source: TerminationRequestSource::TestHarness,
+        reason: BoundedRuntimeSummary::new("force foreground child fallback smoke"),
+    };
+    let events = runtime
+        .request_terminate(
+            &handle,
+            request,
+            Duration::from_millis(100),
+            Duration::from_secs(2),
+        )
+        .expect("termination request should complete with fallback");
+
+    assert!(
+        events.contains(&TerminalRuntimeEvent::TerminationSignalSent {
+            handle: handle.clone(),
+            signal: TerminationSignal::Sigterm,
+        })
+    );
+    assert!(events.contains(&TerminalRuntimeEvent::TerminationTimedOut {
+        handle: handle.clone(),
+        after_signal: TerminationSignal::Sigterm,
+    }));
+    assert!(
+        events.contains(&TerminalRuntimeEvent::TerminationSignalSent {
+            handle: handle.clone(),
+            signal: TerminationSignal::Sigkill,
+        })
+    );
+    assert_eq!(
+        events.last(),
+        Some(&TerminalRuntimeEvent::Terminated {
+            handle,
+            outcome: TerminationOutcome::KilledAfterTimeout {
+                initial_signal: TerminationSignal::Sigterm,
+                fallback_signal: TerminationSignal::Sigkill,
+            },
+        })
+    );
+    cleanup_root(root);
+}
+
+#[test]
+fn linux_runtime_does_not_overclaim_when_child_outlives_direct_shell_after_sigterm() {
+    let root = test_root("terminate-descendant-outlives-shell");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+
+    runtime
+        .write_input(
+            &handle,
+            b"(trap '' TERM; printf 'descendant-ready\\n'; while :; do sleep 1; done) & wait\n",
+        )
+        .expect("SIGTERM-ignoring descendant command should write to PTY");
+    let output = read_until_contains(&mut runtime, &handle, b"descendant-ready");
+    assert!(
+        contains_subsequence(&output, b"descendant-ready"),
+        "PTY output should contain descendant marker; captured: {}",
+        String::from_utf8_lossy(&output)
+    );
+
+    let request = TerminationRequest {
+        source: TerminationRequestSource::TestHarness,
+        reason: BoundedRuntimeSummary::new("descendant outlives direct shell smoke"),
+    };
+    let events = runtime
+        .request_terminate(
+            &handle,
+            request,
+            Duration::from_millis(100),
+            Duration::from_secs(2),
+        )
+        .expect("termination request should continue to SIGKILL fallback");
+
+    assert!(events.contains(&TerminalRuntimeEvent::TerminationTimedOut {
+        handle: handle.clone(),
+        after_signal: TerminationSignal::Sigterm,
+    }));
+    assert!(
+        events.contains(&TerminalRuntimeEvent::TerminationSignalSent {
+            handle: handle.clone(),
+            signal: TerminationSignal::Sigkill,
+        })
+    );
+    assert_eq!(
+        events.last(),
+        Some(&TerminalRuntimeEvent::Terminated {
+            handle,
+            outcome: TerminationOutcome::KilledAfterTimeout {
+                initial_signal: TerminationSignal::Sigterm,
+                fallback_signal: TerminationSignal::Sigkill,
+            },
+        })
+    );
+    cleanup_root(root);
+}
+
 fn project_session(project_id: ProjectId, root: &Path) -> ProjectSession {
     ProjectSession::new(project_id, "Project", root, root)
 }

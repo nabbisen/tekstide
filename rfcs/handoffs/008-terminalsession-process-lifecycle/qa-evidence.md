@@ -1,6 +1,6 @@
 # RFC-008: TerminalSession and Process Lifecycle — QA Evidence
 
-Status: PR-008-C implementation ready for review
+Status: PR-008-D follow-up ready for re-review
 Date opened: 2026-07-10
 
 ## Scope
@@ -136,9 +136,73 @@ Known limitations:
 - PR-008-C does not implement RFC-009 ANSI/VT, paste, clipboard, or approval-dialog security policy.
 - PR-008-C does not introduce transcript persistence or durable audit records.
 
+### PR-008-D — Process-Group Termination and Lifecycle Closeout
+
+Status: ready for implementation review.
+
+Implemented:
+
+- Added `runtime::terminal::termination` to keep process cleanup policy separate from launch and IO plumbing.
+- `LinuxTerminalRuntime` now stores the launched process group id as runtime-only state.
+- Added `LinuxTerminalRuntime::request_terminate`.
+- Termination requests emit ordered lifecycle events for request receipt, signal sends, timeout, and final termination outcome.
+- Termination sends SIGTERM to the process group rather than killing only the child process handle.
+- SIGTERM timeout falls back to SIGKILL against the process group.
+- SIGKILL timeout checks whether the process group remains observable with `kill(-pgid, 0)` and records `OrphanedUnknown` when cleanup cannot be proven.
+- Termination finality is based on process-group disappearance, not only direct child exit.
+- Direct child exit during termination handling no longer removes runtime session state while same-process-group descendants remain observable.
+- `wait_for_exit` now maps Unix signal exits into bounded `TerminationOutcome` values instead of losing non-code exits.
+- Cross-project termination handles are rejected before signal delivery.
+- PTY creation now closes both raw descriptors if nonblocking setup fails after `openpty` succeeds.
+- Added Linux smoke tests for SIGTERM process-group termination, cross-project termination rejection, and SIGKILL fallback for a foreground-child shell scenario.
+- Added a regression test where the direct shell exits on SIGTERM while a same-process-group descendant ignores SIGTERM; the runtime now continues to timeout and SIGKILL fallback instead of overclaiming final termination.
+
+Observed gates on 2026-07-10:
+
+- `cargo test -p tekstide-core runtime::terminal::tests` passed; 15 runtime terminal tests passed.
+- `cargo check --workspace` passed.
+- `cargo fmt --check --all` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo test --workspace` passed; 185 `tekstide-core` tests passed, `tekstide` had 0 tests, `tekstide-pty-spike` had 0 tests, and doc tests had 0 tests.
+- `git diff --check` passed.
+
+Review follow-up after `.git-exclude/reviewed/tekstide-review-request-042-rfc008-pr008d-process-group-termination-response.md`:
+
+- Fixed the blocking issue where direct child exit was treated as sufficient proof of terminal process-group termination.
+- Added process-group observation during termination waits. The runtime now keeps the process group id and session state available until `kill(-pgid, 0)` reports the group is gone or cleanup is honestly reported as unresolved.
+- If the direct child exits after SIGTERM but the process group remains observable, termination continues to the SIGTERM timeout and SIGKILL fallback path.
+- After SIGKILL, `KilledAfterTimeout` is reported only when process-group disappearance is observed; otherwise `OrphanedUnknown` remains the honest unresolved outcome.
+
+Observed follow-up gates on 2026-07-11:
+
+- `cargo test -p tekstide-core runtime::terminal::tests` passed; 16 runtime terminal tests passed.
+- `cargo check --workspace` passed.
+- `cargo fmt --check --all` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo test --workspace` passed; 186 `tekstide-core` tests passed, `tekstide` had 0 tests, `tekstide-pty-spike` had 0 tests, and doc tests had 0 tests.
+- `git diff --check` passed.
+
+Security/privacy note:
+
+- Termination tests use synthetic temporary roots and short marker strings only.
+- Tests do not print environment dumps, shell history, project files, token-like values, or private output.
+- This slice still does not implement RFC-009 ANSI/VT filtering, paste protection, clipboard policy, approval-dialog containment, transcript retention, command approval, or durable audit storage.
+
+Migration note:
+
+- No local data schema or persisted state migration is introduced.
+- Process ids and process group ids remain runtime-only and are not persisted as durable truth.
+
+Known limitations:
+
+- PR-008-D does not integrate launched terminals into `ProjectSession` collections.
+- PR-008-D does not update safe-close summaries from live runtime state.
+- PR-008-D does not implement final GUI terminal behavior.
+- PR-008-D does not implement RFC-009 ANSI/VT, paste, clipboard, or approval-dialog security policy.
+- PR-008-D does not introduce transcript persistence or durable audit records.
+
 Required future evidence will be recorded per later implementation slice:
 
-- process-group termination evidence;
 - ProjectSession visible-slot and mode-switch evidence;
 - safe-close evidence;
 - security and privacy notes;

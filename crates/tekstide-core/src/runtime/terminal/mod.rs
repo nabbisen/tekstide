@@ -1,5 +1,6 @@
 mod launch;
 mod pty;
+mod termination;
 #[cfg(test)]
 mod tests;
 mod types;
