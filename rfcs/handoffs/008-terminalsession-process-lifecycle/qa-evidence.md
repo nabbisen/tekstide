@@ -1,6 +1,6 @@
 # RFC-008: TerminalSession and Process Lifecycle — QA Evidence
 
-Status: PR-008-B implementation ready for review
+Status: PR-008-C implementation ready for review
 Date opened: 2026-07-10
 
 ## Scope
@@ -96,9 +96,48 @@ Review follow-up:
 - After review request 040 was accepted with notes, launch validation was tightened to reject non-executable shell files before PTY creation.
 - `spawn_shell` now closes the duplicated controlling-terminal fd even when `Command::spawn` fails.
 
+### PR-008-C — Bounded IO and Resize Event Plumbing
+
+Status: ready for implementation review.
+
+Implemented:
+
+- Replaced the temporary unbounded PTY read helper with `LinuxTerminalRuntime::read_available_bounded_for`.
+- PTY output reads now accept an explicit maximum buffered-byte cap before data is returned to callers.
+- Output beyond the caller-supplied cap is dropped from the returned chunk and recorded in `TerminalOutputSummary::dropped_bytes`.
+- `TerminalOutputSummary::truncated` is set when output was dropped.
+- Input writes continue to route through `TerminalRuntimeHandle` identity and reject cross-project handles before writing to the PTY.
+- Added `LinuxTerminalRuntime::resize` to route terminal dimension changes to the PTY master and emit a `TerminalRuntimeEvent::Resized` event.
+- Added Linux PTY smoke tests for cross-project input rejection, bounded output truncation/drop accounting, and resize propagation through `stty size`.
+
+Observed gates on 2026-07-10:
+
+- `cargo test -p tekstide-core runtime::terminal::tests` passed; 12 runtime terminal tests passed.
+- `cargo check --workspace` passed.
+- `cargo fmt --check --all` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo test --workspace` passed; 182 `tekstide-core` tests passed, `tekstide` had 0 tests, `tekstide-pty-spike` had 0 tests, and doc tests had 0 tests.
+- `git diff --check` passed.
+
+Security/privacy note:
+
+- The bounded-output smoke uses synthetic shell output generated inside a temporary test root and asserts only byte-cap/drop behavior.
+- The resize smoke reads only `stty size` output from the synthetic PTY session.
+- This slice still does not implement RFC-009 ANSI/VT filtering, paste protection, clipboard policy, approval-dialog containment, transcript retention, command approval, or durable audit storage.
+
+Migration note:
+
+- No local data schema or persisted state migration is introduced.
+
+Known limitations:
+
+- PR-008-C does not integrate launched terminals into `ProjectSession` collections.
+- PR-008-C does not implement process-group termination policy or safe-close behavior.
+- PR-008-C does not implement RFC-009 ANSI/VT, paste, clipboard, or approval-dialog security policy.
+- PR-008-C does not introduce transcript persistence or durable audit records.
+
 Required future evidence will be recorded per later implementation slice:
 
-- bounded output/input/resize evidence;
 - process-group termination evidence;
 - ProjectSession visible-slot and mode-switch evidence;
 - safe-close evidence;

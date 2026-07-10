@@ -1,6 +1,6 @@
 use std::fs;
 use std::io;
-use std::os::fd::{FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 
 use super::{BoundedRuntimeSummary, TerminalDimensions};
 
@@ -84,6 +84,28 @@ impl Drop for OpenPty {
 pub(super) fn close_fd(fd: RawFd) {
     unsafe {
         libc::close(fd);
+    }
+}
+
+pub(super) fn resize_master(
+    master: &fs::File,
+    dimensions: TerminalDimensions,
+) -> Result<(), BoundedRuntimeSummary> {
+    let winsize = libc::winsize {
+        ws_row: dimensions.rows,
+        ws_col: dimensions.cols,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let result = unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ, &winsize) };
+
+    if result == -1 {
+        Err(BoundedRuntimeSummary::new(format!(
+            "failed to resize PTY: {}",
+            io::Error::last_os_error()
+        )))
+    } else {
+        Ok(())
     }
 }
 

@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 use crate::domain::{TerminalId, TerminalKind, TerminalSession, TerminalStatus};
 use crate::project::{ProjectId, ProjectSession};
 
-use super::pty::{OpenPty, close_fd};
+use super::pty::{OpenPty, close_fd, resize_master};
 use super::{
-    BoundedRuntimeSummary, TerminalLaunchSpec, TerminalOutputSummary, TerminalRuntimeEvent,
-    TerminalRuntimeHandle, TerminationOutcome,
+    BoundedRuntimeSummary, TerminalDimensions, TerminalLaunchSpec, TerminalOutputSummary,
+    TerminalRuntimeEvent, TerminalRuntimeHandle, TerminationOutcome,
 };
 
 pub struct LinuxTerminalRuntime {
@@ -100,20 +100,27 @@ impl LinuxTerminalRuntime {
         })
     }
 
-    pub fn read_available_for(
+    pub fn read_available_bounded_for(
         &mut self,
         handle: &TerminalRuntimeHandle,
         duration: Duration,
+        max_buffered_bytes: usize,
     ) -> Result<(Vec<u8>, TerminalRuntimeEvent), TerminalRuntimeError> {
         let session = self.session_mut(handle)?;
         let started = Instant::now();
         let mut output = Vec::new();
+        let mut dropped_bytes = 0;
         let mut buffer = [0_u8; 4096];
 
         while started.elapsed() < duration {
             match session.master.read(&mut buffer) {
                 Ok(0) => break,
-                Ok(bytes_read) => output.extend_from_slice(&buffer[..bytes_read]),
+                Ok(bytes_read) => {
+                    let remaining_capacity = max_buffered_bytes.saturating_sub(output.len());
+                    let accepted_bytes = remaining_capacity.min(bytes_read);
+                    output.extend_from_slice(&buffer[..accepted_bytes]);
+                    dropped_bytes += bytes_read - accepted_bytes;
+                }
                 Err(error)
                     if error.kind() == io::ErrorKind::Interrupted
                         || error.raw_os_error() == Some(libc::EIO) =>
@@ -133,7 +140,7 @@ impl LinuxTerminalRuntime {
             }
         }
 
-        let summary = TerminalOutputSummary::new(output.len(), 0);
+        let summary = TerminalOutputSummary::new(output.len(), dropped_bytes);
         Ok((
             output,
             TerminalRuntimeEvent::OutputBuffered {
@@ -141,6 +148,25 @@ impl LinuxTerminalRuntime {
                 summary,
             },
         ))
+    }
+
+    pub fn resize(
+        &mut self,
+        handle: &TerminalRuntimeHandle,
+        dimensions: TerminalDimensions,
+    ) -> Result<TerminalRuntimeEvent, TerminalRuntimeError> {
+        let session = self.session_mut(handle)?;
+        resize_master(&session.master, dimensions).map_err(|summary| TerminalRuntimeError::Io {
+            summary: BoundedRuntimeSummary::new(format!(
+                "failed to route PTY resize: {}",
+                summary.as_str()
+            )),
+        })?;
+
+        Ok(TerminalRuntimeEvent::Resized {
+            handle: handle.clone(),
+            dimensions,
+        })
     }
 
     pub fn wait_for_exit(

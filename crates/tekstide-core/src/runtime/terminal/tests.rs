@@ -179,6 +179,128 @@ fn linux_runtime_launches_project_shell_and_reads_marker() {
     cleanup_root(root);
 }
 
+#[test]
+fn linux_runtime_rejects_cross_project_input_handle() {
+    let root = test_root("cross-project-input");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    let cross_project_handle =
+        TerminalRuntimeHandle::new(terminal.id.clone(), ProjectId::for_test(2));
+
+    let error = runtime
+        .write_input(&cross_project_handle, b"printf 'must-not-write\\n'\n")
+        .expect_err("cross-project input handle must be rejected");
+
+    assert_eq!(
+        error,
+        TerminalRuntimeError::CrossProjectHandle {
+            terminal_id: terminal.id.clone(),
+        }
+    );
+
+    runtime
+        .write_input(&handle, b"exit\n")
+        .expect("cleanup exit should write to PTY");
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("shell wait should not fail");
+    assert_eq!(outcome, Some(TerminationOutcome::Exited { exit_status: 0 }));
+    cleanup_root(root);
+}
+
+#[test]
+fn linux_runtime_reads_output_through_bounded_buffer() {
+    let root = test_root("bounded-output");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+
+    runtime
+        .write_input(
+            &handle,
+            b"i=0; while [ \"$i\" -lt 200 ]; do printf 'tekstide-output-%03d-abcdefghijklmnopqrstuvwxyz\\n' \"$i\"; i=$((i + 1)); done\nexit\n",
+        )
+        .expect("output flood command should write to PTY");
+    let (output, event) = runtime
+        .read_available_bounded_for(&handle, Duration::from_secs(2), 256)
+        .expect("bounded PTY read should succeed");
+
+    assert_eq!(output.len(), 256);
+    assert!(matches!(
+        event,
+        TerminalRuntimeEvent::OutputBuffered {
+            summary:
+                TerminalOutputSummary {
+                    buffered_bytes: 256,
+                    dropped_bytes,
+                    truncated: true,
+                },
+            ..
+        } if dropped_bytes > 0
+    ));
+
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("shell wait should not fail");
+    assert_eq!(outcome, Some(TerminationOutcome::Exited { exit_status: 0 }));
+    cleanup_root(root);
+}
+
+#[test]
+fn linux_runtime_routes_resize_to_project_terminal() {
+    let root = test_root("resize-terminal");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    let dimensions = TerminalDimensions {
+        rows: 40,
+        cols: 100,
+    };
+
+    let event = runtime
+        .resize(&handle, dimensions)
+        .expect("PTY resize should be routed");
+    assert_eq!(
+        event,
+        TerminalRuntimeEvent::Resized {
+            handle: handle.clone(),
+            dimensions,
+        }
+    );
+
+    runtime
+        .write_input(&handle, b"stty size\nexit\n")
+        .expect("stty command should write to PTY");
+    let output = read_until_contains(&mut runtime, &handle, b"40 100");
+    assert!(
+        contains_subsequence(&output, b"40 100"),
+        "PTY output should contain resized dimensions; captured: {}",
+        String::from_utf8_lossy(&output)
+    );
+
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("shell wait should not fail");
+    assert_eq!(outcome, Some(TerminationOutcome::Exited { exit_status: 0 }));
+    cleanup_root(root);
+}
+
 fn project_session(project_id: ProjectId, root: &Path) -> ProjectSession {
     ProjectSession::new(project_id, "Project", root, root)
 }
@@ -207,7 +329,7 @@ fn read_until_contains(
 
     while started.elapsed() < Duration::from_secs(5) {
         let (chunk, _) = runtime
-            .read_available_for(handle, Duration::from_millis(50))
+            .read_available_bounded_for(handle, Duration::from_millis(50), 16 * 1024)
             .expect("PTY read should succeed");
         output.extend_from_slice(&chunk);
         if contains_subsequence(&output, marker) {
