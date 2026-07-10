@@ -10,6 +10,7 @@ Current scope:
 - PR-007-B: start a real Linux PTY-backed shell, send scripted input, render sanitized output, and record evidence.
 - PR-007-C: resize the PTY, verify child-observed dimensions, and record foreground-child termination/orphan behavior.
 - PR-007-D: enforce output-flood capture bounds and record basic scripted input/echo latency measurements.
+- PR-007-E: record security-boundary observations, multiline paste pre-write interception feasibility, and final RFC-007 closeout recommendation.
 
 Still out of scope:
 

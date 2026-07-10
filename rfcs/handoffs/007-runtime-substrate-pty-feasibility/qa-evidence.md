@@ -1,6 +1,6 @@
 # RFC-007: Runtime Substrate and PTY Feasibility Gate — QA Evidence
 
-Status: PR-007-D evidence started
+Status: PR-007-E closeout evidence ready for review
 Date opened: 2026-07-09
 
 ## Scope
@@ -11,7 +11,7 @@ RFC-007 is a feasibility gate. This evidence file must not be used to claim prod
 
 - Location: `crates/tekstide-pty-spike/`
 - Run command: `cargo run -p tekstide-pty-spike`
-- Observed run result: passed on 2026-07-09; command prints explicit PR-007-A spike-only scope and does not start PTY/runtime behavior.
+- PR-007-A run result: passed on 2026-07-09; command printed explicit PR-007-A spike-only scope and did not start PTY/runtime behavior.
 - Workspace check result: `cargo check --workspace` passed on 2026-07-09.
 - Workspace test result: `cargo test --workspace` passed on 2026-07-09; 166 core tests passed and spike crate test target had 0 tests.
 - Formatting result: `cargo fmt --all` passed on 2026-07-09.
@@ -33,6 +33,12 @@ RFC-007 is a feasibility gate. This evidence file must not be used to claim prod
 - PR-007-D workspace check result: `cargo check --workspace` passed on 2026-07-09.
 - PR-007-D workspace test result: `cargo test --workspace` passed on 2026-07-09; 166 core tests passed and spike crate test target had 0 tests.
 - PR-007-D diff hygiene result: `git diff --check` passed on 2026-07-09.
+- PR-007-E run result: `cargo run -p tekstide-pty-spike` passed on 2026-07-10 with security-boundary observations, multiline paste pre-write detection, and closeout evidence.
+- PR-007-E formatting result: `cargo fmt --check --all` passed on 2026-07-10.
+- PR-007-E clippy result: `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed on 2026-07-10.
+- PR-007-E workspace check result: `cargo check --workspace` passed on 2026-07-10.
+- PR-007-E workspace test result: `cargo test --workspace` passed on 2026-07-10; 166 core tests passed and spike crate test target had 0 tests.
+- PR-007-E diff hygiene result: `git diff --check` passed on 2026-07-10.
 
 ## Dependency Notes
 
@@ -87,19 +93,26 @@ RFC-007 is a feasibility gate. This evidence file must not be used to claim prod
 - Reference machine summary: local Linux development environment used by this session; no private host details recorded.
 - Terminal dimensions: 24x80.
 - Measurement procedure: write `printf` marker to PTY, wait until the marker is observed in PTY output, repeat 20 times.
-- p50: 1054 us in the final PR-007-D run.
-- p95: 1061 us in the final PR-007-D run.
-- Worst observed: 1061 us in the final PR-007-D run.
+- p50: 1055 us in the final PR-007-E run.
+- p95: 1065 us in the final PR-007-E run.
+- Worst observed: 1065 us in the final PR-007-E run.
 - Measurement limitations: single local run, scripted shell, stdout renderer only, includes shell echo/prompt overhead.
 
 ## Security Observations
 
-- Terminal output containment: PR-007-B renders captured output only inside the spike process stdout. No Tekstide app state, trust state, approval state, clipboard, or command history integration exists in this slice.
-- Unsupported control-sequence behavior: observed shell output included bracketed-paste control sequences (`<ESC>[?2004h` / `<ESC>[?2004l`) in sanitized output. PR-007-B does not implement ANSI/VT policy; this is evidence for RFC-009.
-- Application chrome/trust/approval/clipboard/history effects: no production app chrome or state is connected to the spike.
-- Multiline paste interception before PTY write: Pending later RFC-007 slice; PR-007-B writes scripted input directly.
-- Future native dialog separation risk: Pending later GUI/substrate work; PR-007-B has no native dialog surface.
-- RFC-009 follow-up notes: terminal renderer must preserve or sanitize unsupported control sequences intentionally; simply stripping ESC would be misleading because it can leave visible suffix text.
+- Terminal output containment: PR-007-E captures PTY bytes into process-local buffers and prints sanitized text only. No Tekstide app chrome, trust state, approval state, clipboard, or command history integration exists in this spike.
+- Unsupported control-sequence behavior: PR-007-E emitted an OSC 52 clipboard-style sequence, BEL/control byte, and CSI clear-screen sequence from the child shell. The spike rendered them inertly as visible markers such as `<ESC>]52`, `<CTRL>`, and `<ESC>[2J`; raw ESC reached the harness console output: false.
+- Application chrome/trust/approval/clipboard/history effects: no production app chrome or state is connected to the spike. The observation only proves the spike sanitizer did not forward raw escape bytes to its own console output; it does not prove production renderer safety.
+- Multiline paste interception before PTY write: PR-007-E classified a multiline paste candidate before writing to the PTY, did not write that candidate to the PTY, and then wrote a harmless recovery command. The recovery marker `tekstide-paste-intercept-ok` was observed, while the blocked paste markers were not observed.
+- Future native dialog separation risk: plausible but not proven by the TUI spike. RFC-009 must require native approval and paste dialogs outside terminal-rendered bytes, with a visual boundary that terminal output cannot spoof.
+- RFC-009 follow-up notes: define supported ANSI/VT subset, paste approval UX, output containment boundaries, clipboard policy, and approval-dialog spoofing boundary before production terminal claims. Terminal renderer policy must preserve or sanitize unsupported control sequences intentionally; simply stripping ESC would be misleading because it can leave visible suffix text.
+
+## Linux-Only and Portability Notes
+
+- Linux-only assumption: PR-007 uses Linux PTY APIs through `openpty`, `setsid`, `TIOCSCTTY`, `TIOCSWINSZ`, `kill(-pgid, ...)`, and `/proc/self/status`.
+- macOS risk: PTY startup and resize concepts are similar, but process-group behavior, shell defaults, `/proc` memory observation, and signal/orphan checks need separate evidence.
+- Windows risk: ConPTY and Windows process-tree termination semantics are different enough that RFC-008 must not assume the Linux process-group model transfers directly.
+- GUI risk: the TUI/stdout sanitizer proves PTY/process feasibility, not a desktop terminal widget, native dialog boundary, clipboard policy, or renderer performance under real GUI event-loop pressure.
 
 ## Known Limitations
 
@@ -107,10 +120,21 @@ RFC-007 is a feasibility gate. This evidence file must not be used to claim prod
 - PR-007-B starts a shell, writes scripted input, renders sanitized captured PTY output, and detects a marker.
 - PR-007-C verifies PTY resize propagation and records foreground-child process-group termination behavior.
 - PR-007-D enforces a temporary output-flood cap and records basic scripted input/echo latency measurements.
+- PR-007-E records spike-local terminal containment, unsupported control-sequence sanitization, multiline paste pre-write detection, and closeout recommendation.
 - No TUI full-screen/raw-mode renderer exists yet; output rendering is a deterministic spike stdout rendering.
-- Paste-interception and stronger terminal-containment evidence remain pending.
+- No complete ANSI/VT safety claim is made.
+- Native approval and paste dialogs remain future GUI work.
+- Production lifecycle cleanup must use process-group/session semantics; the spike read helpers are not production TerminalSession APIs.
 
 ## Go / No-Go Recommendation
 
-- Recommendation: Pending
+- Recommendation: Go to RFC-008 after PR-007-E review accepts this closeout.
 - Rationale:
+  - Real Linux PTY shell startup, output rendering, scripted input, resize propagation, foreground-child termination observation, output-flood bounds, recovery, latency measurement, and security-boundary observations were collected.
+  - Output flood was explicitly capped before execution and the harness remained usable afterward.
+  - Final PR-007-E latency observation was p95 1065 us, below the RFC-007 target threshold, with the limitation that this is input/echo latency in a local scripted shell and not production GUI renderer latency.
+  - Terminal output did not obviously escape the spike surface: unsupported escape/control bytes were rendered as inert markers by the spike sanitizer and raw ESC did not reach the harness console output.
+  - Multiline paste interception appears feasible before PTY write in the selected direction.
+  - The TUI-first direction remains compatible as a feasibility harness, but not as a product UI decision.
+  - RFC-008 must design production TerminalSession lifecycle, process-group timeout/fallback policy, and cleanup semantics before implementation hardens.
+  - RFC-009 must be designed alongside RFC-008 for ANSI/VT subset policy, paste protection, clipboard behavior, and native approval-dialog spoofing boundaries.

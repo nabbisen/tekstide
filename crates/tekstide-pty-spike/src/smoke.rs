@@ -28,6 +28,7 @@ pub struct SpikeReport {
     termination: TerminationSmokeReport,
     output_flood: OutputFloodSmokeReport,
     latency: LatencySmokeReport,
+    security: SecuritySmokeReport,
 }
 
 impl SpikeReport {
@@ -113,6 +114,53 @@ impl SpikeReport {
         println!("p95: {} us", self.latency.p95_micros);
         println!("worst observed: {} us", self.latency.worst_micros);
         println!("measurement limitations: {}", self.latency.limitations);
+
+        println!();
+        println!("security observation result: passed");
+        println!(
+            "terminal output containment: {}",
+            self.security.terminal_output_containment
+        );
+        println!(
+            "unsupported control sequence handling: {}",
+            self.security.unsupported_control_sequence_handling
+        );
+        println!(
+            "control probe contains marker: {}",
+            self.security.control_probe_contains_marker
+        );
+        println!(
+            "sanitized ESC marker observed: {}",
+            self.security.sanitized_escape_marker_observed
+        );
+        println!(
+            "sanitized control marker observed: {}",
+            self.security.sanitized_control_marker_observed
+        );
+        println!(
+            "raw ESC reaches console output: {}",
+            self.security.raw_escape_reaches_console_output
+        );
+        println!(
+            "multiline paste detected before PTY write: {}",
+            self.security.multiline_paste_detected_before_write
+        );
+        println!(
+            "multiline paste written to PTY: {}",
+            self.security.multiline_paste_written_to_pty
+        );
+        println!(
+            "paste recovery marker observed: {}",
+            self.security.paste_recovery_marker_observed
+        );
+        println!(
+            "native dialog separation assessment: {}",
+            self.security.native_dialog_separation_assessment
+        );
+        println!("RFC-009 follow-up: {}", self.security.rfc009_follow_up);
+        println!("captured bytes: {}", self.security.captured_bytes);
+        println!("--- security PTY output (sanitized) ---");
+        print_sanitized_output(&self.security.rendered_output);
     }
 }
 
@@ -175,6 +223,23 @@ struct LatencySmokeReport {
     limitations: &'static str,
 }
 
+#[derive(Debug)]
+struct SecuritySmokeReport {
+    terminal_output_containment: &'static str,
+    unsupported_control_sequence_handling: &'static str,
+    control_probe_contains_marker: bool,
+    sanitized_escape_marker_observed: bool,
+    sanitized_control_marker_observed: bool,
+    raw_escape_reaches_console_output: bool,
+    multiline_paste_detected_before_write: bool,
+    multiline_paste_written_to_pty: bool,
+    paste_recovery_marker_observed: bool,
+    native_dialog_separation_assessment: &'static str,
+    rfc009_follow_up: &'static str,
+    captured_bytes: usize,
+    rendered_output: String,
+}
+
 pub fn run_all_smokes() -> Result<SpikeReport, String> {
     let shell = PathBuf::from("/bin/sh");
     if !shell.exists() {
@@ -190,6 +255,7 @@ pub fn run_all_smokes() -> Result<SpikeReport, String> {
         termination: run_termination_smoke(&shell)?,
         output_flood: run_output_flood_smoke(&shell)?,
         latency: run_latency_smoke(&shell)?,
+        security: run_security_smoke(&shell)?,
     })
 }
 
@@ -432,6 +498,92 @@ fn run_latency_smoke(shell: &PathBuf) -> Result<LatencySmokeReport, String> {
     })
 }
 
+fn run_security_smoke(shell: &PathBuf) -> Result<SecuritySmokeReport, String> {
+    let mut pty = OpenPty::new(SPIKE_ROWS, SPIKE_COLS)?;
+    let mut child = spawn_spike_shell(shell, &mut pty)?;
+
+    let multiline_paste = "printf 'tekstide-paste-line-1\\n'\nprintf 'tekstide-paste-line-2\\n'\n";
+    let multiline_paste_detected_before_write = is_multiline_paste(multiline_paste);
+    let mut multiline_paste_written_to_pty = false;
+
+    if !multiline_paste_detected_before_write {
+        multiline_paste_written_to_pty = true;
+        pty.master
+            .write_all(multiline_paste.as_bytes())
+            .map_err(|error| format!("failed to write multiline paste probe to PTY: {error}"))?;
+    }
+
+    let control_probe = "printf '\\033]52;c;dGVrc3RpZGU=\\a\\033[2Jtekstide-control-probe\\n'\n";
+    let recovery_probe = "printf 'tekstide-paste-intercept-ok\\n'\nexit\n";
+    pty.master
+        .write_all(control_probe.as_bytes())
+        .map_err(|error| format!("failed to write control-sequence probe to PTY: {error}"))?;
+    pty.master
+        .write_all(recovery_probe.as_bytes())
+        .map_err(|error| format!("failed to write paste recovery probe to PTY: {error}"))?;
+    pty.master
+        .flush()
+        .map_err(|error| format!("failed to flush security probe input: {error}"))?;
+
+    let output = pty::read_until_child_exits(&mut pty.master, &mut child, READ_TIMEOUT)?;
+    let status = child
+        .wait()
+        .map_err(|error| format!("failed to wait for security probe shell: {error}"))?;
+
+    if !status.success() {
+        return Err(format!(
+            "security probe shell exited unsuccessfully: {status}"
+        ));
+    }
+
+    let rendered_output = sanitize_pty_output(&output);
+    let control_probe_contains_marker = rendered_output.contains("tekstide-control-probe");
+    let sanitized_escape_marker_observed =
+        rendered_output.contains("<ESC>]52") && rendered_output.contains("<ESC>[2J");
+    let sanitized_control_marker_observed = rendered_output.contains("<CTRL>");
+    let raw_escape_reaches_console_output = rendered_output.contains('\u{1b}');
+    let paste_recovery_marker_observed = rendered_output.contains("tekstide-paste-intercept-ok");
+    let blocked_paste_reached_pty = rendered_output.contains("tekstide-paste-line-1")
+        || rendered_output.contains("tekstide-paste-line-2");
+
+    if !control_probe_contains_marker {
+        return Err("security probe did not observe control marker output".to_string());
+    }
+    if !sanitized_escape_marker_observed {
+        return Err("security probe did not render ESC bytes as inert markers".to_string());
+    }
+    if !sanitized_control_marker_observed {
+        return Err("security probe did not render BEL/control byte as inert marker".to_string());
+    }
+    if raw_escape_reaches_console_output {
+        return Err("security probe rendered a raw ESC byte to console output".to_string());
+    }
+    if !paste_recovery_marker_observed {
+        return Err(
+            "security probe did not recover after intercepting multiline paste".to_string(),
+        );
+    }
+    if blocked_paste_reached_pty {
+        return Err("multiline paste probe reached PTY despite pre-write detection".to_string());
+    }
+
+    Ok(SecuritySmokeReport {
+        terminal_output_containment: "spike captures PTY bytes into process-local buffers and prints sanitized text only; no Tekstide app chrome, trust state, approvals, clipboard, or command history exists in this harness",
+        unsupported_control_sequence_handling: "OSC/CSI/control bytes are observed as PTY output and rendered inertly as <ESC>/<CTRL> markers by the spike sanitizer; this is not a complete ANSI/VT policy",
+        control_probe_contains_marker,
+        sanitized_escape_marker_observed,
+        sanitized_control_marker_observed,
+        raw_escape_reaches_console_output,
+        multiline_paste_detected_before_write,
+        multiline_paste_written_to_pty,
+        paste_recovery_marker_observed,
+        native_dialog_separation_assessment: "plausible but not proven by the TUI spike; RFC-009 must require native approval/paste dialogs outside terminal-rendered bytes",
+        rfc009_follow_up: "define supported ANSI/VT subset, paste approval UX, output containment boundaries, clipboard policy, and approval-dialog spoofing boundary before production terminal claims",
+        captured_bytes: output.len(),
+        rendered_output,
+    })
+}
+
 fn spawn_spike_shell(shell: &PathBuf, pty: &mut OpenPty) -> Result<Child, String> {
     let root = synthetic_root()?;
     let stdin_fd = pty.duplicate_slave("duplicate PTY slave for stdin")?;
@@ -574,6 +726,10 @@ fn shorten_rendered_sample(rendered: &str, max_chars: usize) -> String {
         sample.push_str("\n<SAMPLE SHORTENED FOR CONSOLE OUTPUT>\n");
     }
     sample
+}
+
+fn is_multiline_paste(input: &str) -> bool {
+    input.lines().take(2).count() > 1
 }
 
 fn percentile(sorted_samples: &[u128], percentile: usize) -> u128 {

@@ -3,9 +3,7 @@ mod smoke;
 
 fn main() -> std::process::ExitCode {
     println!("Tekstide RFC-007 PTY feasibility harness");
-    println!(
-        "scope: PR-007-D PTY input/output, resize, termination, output flood, and latency observations"
-    );
+    println!("scope: PR-007-E PTY feasibility, security observations, and closeout recommendation");
     println!(
         "status: spike-only; no production TerminalSession, AgentRun, transcript, or audit behavior"
     );
