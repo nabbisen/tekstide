@@ -497,7 +497,7 @@ impl ProjectSession {
         let running_processes = len_as_u32(
             self.terminal_sessions
                 .iter()
-                .filter(|terminal| terminal_status_is_active(terminal.status))
+                .filter(|terminal| terminal_status_is_active(terminal.status()))
                 .count()
                 + self
                     .agent_runs
@@ -508,7 +508,7 @@ impl ProjectSession {
         let failed_processes = len_as_u32(
             self.terminal_sessions
                 .iter()
-                .filter(|terminal| terminal.status == TerminalStatus::Failed)
+                .filter(|terminal| terminal.status() == TerminalStatus::Failed)
                 .count()
                 + self
                     .agent_runs

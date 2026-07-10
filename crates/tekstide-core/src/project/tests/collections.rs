@@ -17,7 +17,7 @@ fn terminal_collection_updates_project_runtime_counts_without_claiming_safe_clos
         "/workspace/project-1",
         "bash",
     );
-    terminal.status = TerminalStatus::Running;
+    terminal.transition_to(TerminalStatus::Running).unwrap();
 
     project
         .add_terminal_session(terminal.clone())

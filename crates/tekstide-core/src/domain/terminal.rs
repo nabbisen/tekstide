@@ -42,8 +42,8 @@ pub struct TerminalSession {
     pub environment_policy_ref: Option<String>,
     // Runtime state summary. Future process handles/PIDs remain runtime-only and must not be
     // persisted through this metadata shape.
-    pub status: TerminalStatus,
-    pub visible_slot: VisibleSlot,
+    status: TerminalStatus,
+    visible_slot: VisibleSlot,
 }
 
 impl TerminalSession {
@@ -70,4 +70,52 @@ impl TerminalSession {
             visible_slot: VisibleSlot::Hidden,
         }
     }
+
+    pub fn status(&self) -> TerminalStatus {
+        self.status
+    }
+
+    pub fn visible_slot(&self) -> VisibleSlot {
+        self.visible_slot
+    }
+
+    pub fn transition_to(&mut self, next: TerminalStatus) -> Result<(), TerminalTransitionError> {
+        if can_transition_terminal(self.status, next) {
+            self.status = next;
+            Ok(())
+        } else {
+            Err(TerminalTransitionError {
+                from: self.status,
+                to: next,
+            })
+        }
+    }
+
+    pub fn assign_visible_slot(&mut self, visible_slot: VisibleSlot) {
+        self.visible_slot = visible_slot;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerminalTransitionError {
+    pub from: TerminalStatus,
+    pub to: TerminalStatus,
+}
+
+fn can_transition_terminal(from: TerminalStatus, to: TerminalStatus) -> bool {
+    use TerminalStatus::{Exited, Failed, OrphanedUnknown, Running, Starting, Terminating};
+
+    matches!(
+        (from, to),
+        (Starting, Running)
+            | (Starting, Failed)
+            | (Running, Terminating)
+            | (Running, Exited)
+            | (Running, Failed)
+            | (Running, OrphanedUnknown)
+            | (Terminating, Exited)
+            | (Terminating, Failed)
+            | (Terminating, OrphanedUnknown)
+            | (OrphanedUnknown, Exited)
+    )
 }

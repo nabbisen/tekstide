@@ -14,7 +14,9 @@ pub use audit::{AuditEvent, AuditEventClass, AuditEventError};
 pub use changeset::{ChangeSet, ReviewState};
 pub use ids::{AgentRunId, ApprovalId, AuditEventId, ChangeSetId, TerminalId, TranscriptId};
 pub use ownership::OwnershipError;
-pub use terminal::{TerminalKind, TerminalSession, TerminalStatus, VisibleSlot};
+pub use terminal::{
+    TerminalKind, TerminalSession, TerminalStatus, TerminalTransitionError, VisibleSlot,
+};
 pub use time::{DomainTimestamp, TimestampParseError};
 pub use transcript::{Transcript, TruncationState};
 
