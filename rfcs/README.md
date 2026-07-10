@@ -18,7 +18,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 007 | [Runtime Substrate and PTY Feasibility Gate](./proposed/007-runtime-substrate-pty-feasibility.md) | Proposed |
+| 008 | [TerminalSession and Process Lifecycle](./proposed/008-terminalsession-process-lifecycle.md) | Proposed |
 
 ## Handoffs
 
@@ -31,6 +31,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 005 | [Application Shell and Project Board](./handoffs/005-application-shell-and-project-board/README.md) |
 | 006 | [ProjectSession State and File Explorer / Editor Basics](./handoffs/006-projectsession-state-and-file-explorer-editor-basics/README.md) |
 | 007 | [Runtime Substrate and PTY Feasibility Gate](./handoffs/007-runtime-substrate-pty-feasibility/README.md) |
+| 008 | [TerminalSession and Process Lifecycle](./handoffs/008-terminalsession-process-lifecycle/README.md) |
 
 ## Implemented
 
@@ -43,6 +44,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 004 | [Security Baseline and Restricted Mode](./done/004-security-baseline-and-restricted-mode.md) | Implemented |
 | 005 | [Application Shell and Project Board](./done/005-application-shell-and-project-board.md) | Implemented |
 | 006 | [ProjectSession State and File Explorer / Editor Basics](./done/006-projectsession-state-and-file-explorer-editor-basics.md) | Implemented with documented limitations |
+| 007 | [Runtime Substrate and PTY Feasibility Gate](./done/007-runtime-substrate-pty-feasibility.md) | Implemented feasibility gate |
 
 ## Archive
 

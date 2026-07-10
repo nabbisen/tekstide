@@ -1,10 +1,10 @@
 ---
 title: "RFC-007: Runtime Substrate and PTY Feasibility Gate — Implementation Handoff"
 rfc: "RFC-007"
-rfc_file: "../../proposed/007-runtime-substrate-pty-feasibility.md"
-status: "Proposed"
+rfc_file: "../../done/007-runtime-substrate-pty-feasibility.md"
+status: "Implemented"
 target_milestone: "M4 feasibility gate"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented"
 created: "2026-07-09"
 ---
 
@@ -23,7 +23,7 @@ RFC-007 selects a narrow TUI-first feasibility harness. The harness must prove a
 ## Dependencies and Sequencing
 
 - Target milestone: **M4 feasibility gate**
-- Source RFC status: **Proposed**
+- Source RFC status: **Implemented**
 - Required predecessor RFCs: RFC-002, RFC-003, RFC-004, RFC-005, RFC-006
 - Implementation should start only after this handoff is reviewed.
 - RFC-008 implementation must not start until RFC-007 evidence receives a Go decision or a reviewed replacement plan.
@@ -112,4 +112,3 @@ Pause and request review before continuing if:
 - termination leaves child processes in an unknown state without a clear RFC-008 blocker note;
 - the TUI harness creates assumptions that cannot plausibly carry into a desktop GUI;
 - a new dependency materially changes the workspace or release posture.
-

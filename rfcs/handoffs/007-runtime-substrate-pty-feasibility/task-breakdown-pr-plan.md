@@ -1,10 +1,10 @@
 ---
 title: "RFC-007: Runtime Substrate and PTY Feasibility Gate — Task Breakdown / PR Plan"
 rfc: "RFC-007"
-rfc_file: "../../proposed/007-runtime-substrate-pty-feasibility.md"
-status: "Proposed"
+rfc_file: "../../done/007-runtime-substrate-pty-feasibility.md"
+status: "Implemented"
 target_milestone: "M4 feasibility gate"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented"
 created: "2026-07-09"
 ---
 
@@ -135,4 +135,3 @@ Review focus:
 5. **Performance gate:** output flood and latency evidence recorded.
 6. **Security gate:** terminal containment and paste-interception observations recorded.
 7. **Decision gate:** Go/No-Go recommendation reviewed before RFC-008 starts.
-

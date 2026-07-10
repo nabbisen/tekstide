@@ -1,7 +1,7 @@
 # RFC-007: Runtime Substrate and PTY Feasibility Gate
 
-Status: Proposed  
-Target milestone: M4 feasibility gate  
+Status: Implemented (feasibility gate complete; production runtime deferred to RFC-008/RFC-009)
+Target milestone: M4 feasibility gate
 Date: 2026-07-09
 
 Related baseline documents:
@@ -15,11 +15,16 @@ Related baseline documents:
 
 Depends on:
 
-- [RFC-002](../done/002-core-domain-model-projectsession-terminalsession-agentrun-auditevent.md)
-- [RFC-003](../done/003-information-architecture-and-ui-mode-model.md)
-- [RFC-004](../done/004-security-baseline-and-restricted-mode.md)
-- [RFC-005](../done/005-application-shell-and-project-board.md)
-- [RFC-006](../done/006-projectsession-state-and-file-explorer-editor-basics.md)
+- [RFC-002](./002-core-domain-model-projectsession-terminalsession-agentrun-auditevent.md)
+- [RFC-003](./003-information-architecture-and-ui-mode-model.md)
+- [RFC-004](./004-security-baseline-and-restricted-mode.md)
+- [RFC-005](./005-application-shell-and-project-board.md)
+- [RFC-006](./006-projectsession-state-and-file-explorer-editor-basics.md)
+
+Closeout evidence:
+
+- [RFC-007 QA evidence](../handoffs/007-runtime-substrate-pty-feasibility/qa-evidence.md)
+- Review accepted PR-007-E closeout and Go recommendation on 2026-07-10.
 
 ## Summary
 

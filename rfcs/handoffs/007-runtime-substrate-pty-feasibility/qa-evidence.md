@@ -1,6 +1,6 @@
 # RFC-007: Runtime Substrate and PTY Feasibility Gate — QA Evidence
 
-Status: PR-007-E closeout evidence ready for review
+Status: Accepted closeout evidence; Go to RFC-008
 Date opened: 2026-07-09
 
 ## Scope
@@ -39,6 +39,7 @@ RFC-007 is a feasibility gate. This evidence file must not be used to claim prod
 - PR-007-E workspace check result: `cargo check --workspace` passed on 2026-07-10.
 - PR-007-E workspace test result: `cargo test --workspace` passed on 2026-07-10; 166 core tests passed and spike crate test target had 0 tests.
 - PR-007-E diff hygiene result: `git diff --check` passed on 2026-07-10.
+- PR-007-E review result: accepted with notes on 2026-07-10; RFC-007 Go recommendation accepted.
 
 ## Dependency Notes
 
