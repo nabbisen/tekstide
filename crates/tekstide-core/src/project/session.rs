@@ -5,7 +5,7 @@ use crate::content::{ExternalChangeDecision, SaveDecision, TextDocumentOpenPolic
 use crate::domain::{
     AgentRun, AgentRunId, AgentRunStatus, ApprovalDecision, ApprovalId, ApprovalRequest,
     AuditEvent, ChangeSet, DomainTimestamp, OwnershipError, ReviewState, TerminalId,
-    TerminalSession, TerminalStatus, Transcript,
+    TerminalSession, TerminalStatus, TerminalTransitionError, Transcript, VisibleSlot,
 };
 
 use super::root::{FileExplorerScanPolicy, ProjectRootHandle};
@@ -147,6 +147,18 @@ impl ProjectSession {
         &self.terminal_sessions
     }
 
+    pub fn terminal_session(&self, terminal_id: &TerminalId) -> Option<&TerminalSession> {
+        self.terminal_sessions
+            .iter()
+            .find(|terminal| terminal.id == *terminal_id)
+    }
+
+    pub fn visible_terminal_sessions(&self) -> impl Iterator<Item = &TerminalSession> {
+        self.terminal_sessions
+            .iter()
+            .filter(|terminal| terminal.visible_slot() != VisibleSlot::Hidden)
+    }
+
     pub fn agent_runs(&self) -> &[AgentRun] {
         &self.agent_runs
     }
@@ -202,6 +214,52 @@ impl ProjectSession {
         self.terminal_sessions.push(terminal);
         self.record_activity();
         self.refresh_runtime_summary_from_collections();
+        Ok(())
+    }
+
+    pub fn transition_terminal_status(
+        &mut self,
+        terminal_id: &TerminalId,
+        status: TerminalStatus,
+    ) -> Result<(), ProjectTerminalError> {
+        let terminal = self.terminal_session_mut(terminal_id)?;
+        terminal.transition_to(status)?;
+        self.record_activity();
+        self.refresh_runtime_summary_from_collections();
+        Ok(())
+    }
+
+    pub fn mark_terminal_exited(
+        &mut self,
+        terminal_id: &TerminalId,
+        exit_status: Option<i32>,
+    ) -> Result<(), ProjectTerminalError> {
+        let terminal = self.terminal_session_mut(terminal_id)?;
+        terminal.transition_to(TerminalStatus::Exited)?;
+        terminal.exit_status = exit_status;
+        self.record_activity();
+        self.refresh_runtime_summary_from_collections();
+        Ok(())
+    }
+
+    pub fn assign_terminal_visible_slot(
+        &mut self,
+        terminal_id: &TerminalId,
+        visible_slot: VisibleSlot,
+    ) -> Result<(), ProjectTerminalError> {
+        self.ensure_terminal_exists(terminal_id)?;
+
+        if visible_slot != VisibleSlot::Hidden {
+            for terminal in &mut self.terminal_sessions {
+                if terminal.id != *terminal_id && terminal.visible_slot() == visible_slot {
+                    terminal.assign_visible_slot(VisibleSlot::Hidden);
+                }
+            }
+        }
+
+        let terminal = self.terminal_session_mut(terminal_id)?;
+        terminal.assign_visible_slot(visible_slot);
+        self.record_activity();
         Ok(())
     }
 
@@ -463,6 +521,16 @@ impl ProjectSession {
             .ok_or(OwnershipError::MissingReference)
     }
 
+    fn terminal_session_mut(
+        &mut self,
+        terminal_id: &TerminalId,
+    ) -> Result<&mut TerminalSession, OwnershipError> {
+        self.terminal_sessions
+            .iter_mut()
+            .find(|terminal| terminal.id == *terminal_id)
+            .ok_or(OwnershipError::MissingReference)
+    }
+
     fn ensure_agent_run_exists(&self, agent_run_id: &AgentRunId) -> Result<(), OwnershipError> {
         self.agent_runs
             .iter()
@@ -528,6 +596,24 @@ impl ProjectSession {
         self.runtime_summary.close_resources.dirty_files = dirty_files;
         self.runtime_summary.close_resources.pending_approvals = pending_approvals;
         self.runtime_summary.close_resources.review_ready_changes = review_ready_changes;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProjectTerminalError {
+    Ownership(OwnershipError),
+    InvalidTransition(TerminalTransitionError),
+}
+
+impl From<OwnershipError> for ProjectTerminalError {
+    fn from(error: OwnershipError) -> Self {
+        Self::Ownership(error)
+    }
+}
+
+impl From<TerminalTransitionError> for ProjectTerminalError {
+    fn from(error: TerminalTransitionError) -> Self {
+        Self::InvalidTransition(error)
     }
 }
 

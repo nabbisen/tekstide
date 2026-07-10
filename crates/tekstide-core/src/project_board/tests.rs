@@ -2,6 +2,7 @@ use super::{
     AttentionState, BoardRowKind, CountDisplay, ProjectBoardViewModel, calculate_attention,
 };
 use crate::app::AppState;
+use crate::domain::{TerminalKind, TerminalSession, TerminalStatus};
 use crate::project::recent::{RecentProject, RecentProjectState, Timestamp};
 use crate::project::{ProjectId, ProjectRuntimeSummary};
 use crate::security::RestrictedModeFeature;
@@ -199,6 +200,32 @@ fn view_model_uses_runtime_summary_for_known_counts_and_attention() {
     assert_eq!(row.dirty_file_count, CountDisplay::KnownCount(5));
     assert_eq!(row.attention, AttentionState::ApprovalNeeded);
     assert_eq!(view_model.global_attention_summary, "Approval needed");
+}
+
+#[test]
+fn view_model_uses_real_terminal_collection_summary() {
+    let mut state = AppState::default();
+    let project_id = state.add_project_session("Active", "/workspace/active", "/workspace/active");
+    let mut terminal = TerminalSession::new(
+        project_id.clone(),
+        TerminalKind::Plain,
+        "Shell",
+        "/workspace/active",
+        "bash",
+    );
+    terminal.transition_to(TerminalStatus::Running).unwrap();
+    state
+        .project_mut(&project_id)
+        .expect("project should exist")
+        .add_terminal_session(terminal)
+        .unwrap();
+
+    let view_model = ProjectBoardViewModel::from_app_state(&state);
+
+    let row = &view_model.rows[0];
+    assert_eq!(row.terminal_count, CountDisplay::KnownCount(1));
+    assert_eq!(row.attention, AttentionState::Running);
+    assert_eq!(view_model.global_attention_summary, "Running");
 }
 
 #[test]

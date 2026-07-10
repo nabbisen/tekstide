@@ -18,7 +18,7 @@ pub use metadata::{
     ProjectWarningLevel, ProjectWarningState, WorkspaceTrust,
 };
 pub use runtime::ProjectRuntimeSummary;
-pub use session::ProjectSession;
+pub use session::{ProjectSession, ProjectTerminalError};
 
 #[cfg(test)]
 mod tests;

@@ -1,6 +1,6 @@
 # RFC-008: TerminalSession and Process Lifecycle — QA Evidence
 
-Status: PR-008-D follow-up ready for re-review
+Status: PR-008-E implementation ready for review
 Date opened: 2026-07-10
 
 ## Scope
@@ -201,9 +201,59 @@ Known limitations:
 - PR-008-D does not implement RFC-009 ANSI/VT, paste, clipboard, or approval-dialog security policy.
 - PR-008-D does not introduce transcript persistence or durable audit records.
 
+Review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-043-rfc008-pr008d-process-group-termination-rereview-response.md` accepted PR-008-D with notes.
+- Later ProjectSession/safe-close integration must not treat child-only `wait_for_exit` as durable process-group cleanup proof.
+- The new `runtime::terminal::termination` source file was included in the PR-008-D commit.
+
+### PR-008-E — ProjectSession Integration and Visibility
+
+Status: ready for implementation review.
+
+Implemented:
+
+- Added project-level terminal lookup with `ProjectSession::terminal_session`.
+- Added `ProjectSession::visible_terminal_sessions`.
+- Added `ProjectSession::transition_terminal_status` for controlled lifecycle updates from observed runtime state.
+- Added `ProjectSession::mark_terminal_exited` to record known exit status and refresh runtime summaries.
+- Added `ProjectSession::assign_terminal_visible_slot`.
+- Visible slot assignment supports `Hidden`, `Primary`, and `Secondary`; assigning a primary or secondary slot hides any previous terminal in that same slot, preserving at most two visible terminals.
+- Added `ProjectTerminalError` to distinguish ownership/reference failures from invalid terminal lifecycle transitions.
+- Project runtime summaries now refresh after terminal lifecycle updates, so running/failed process counts and Project Board terminal attention derive from real terminal collection state.
+- Added tests for terminal lifecycle summary updates, invalid transition rejection, visible-slot replacement/cap behavior, mode-switch preservation, missing terminal mutation rejection, and Project Board summary derivation from an actual terminal collection.
+
+Observed gates on 2026-07-11:
+
+- `cargo test -p tekstide-core project::tests::collections` passed; 10 project collection tests passed.
+- `cargo test -p tekstide-core project_board::tests` passed; 8 project board tests passed.
+- `cargo check --workspace` passed.
+- `cargo fmt --check --all` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo test --workspace` passed; 192 `tekstide-core` tests passed, `tekstide` had 0 tests, `tekstide-pty-spike` had 0 tests, and doc tests had 0 tests.
+- `git diff --check` passed.
+
+Security/privacy note:
+
+- PR-008-E is in-memory project state integration only.
+- It does not read terminal output, inspect environment variables, print shell history, persist transcript bytes, or start workspace automation.
+- This slice still does not implement RFC-009 ANSI/VT filtering, paste protection, clipboard policy, approval-dialog containment, transcript retention, command approval, or durable audit storage.
+
+Migration note:
+
+- No local data schema or persisted state migration is introduced.
+- Runtime handles, process ids, process group ids, PTY descriptors, and terminal output buffers remain outside `TerminalSession` durable metadata.
+
+Known limitations:
+
+- PR-008-E does not introduce app/UI commands for launching or selecting terminals.
+- PR-008-E does not integrate safe-close summaries from terminal termination choices; PR-008-F owns that.
+- PR-008-E does not implement final GUI terminal behavior.
+- PR-008-E does not implement RFC-009 ANSI/VT, paste, clipboard, or approval-dialog security policy.
+- PR-008-E does not introduce transcript persistence or durable audit records.
+
 Required future evidence will be recorded per later implementation slice:
 
-- ProjectSession visible-slot and mode-switch evidence;
 - safe-close evidence;
 - security and privacy notes;
 - migration note;
