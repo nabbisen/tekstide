@@ -12,20 +12,20 @@ created: "2026-07-11"
 
 ## Acceptance Status
 
-This checklist is prepared for RFC-009 design review. Acceptance means the project has reviewed the terminal security boundary and implementation plan, not that production terminal security behavior is already implemented.
+This checklist tracks RFC-009 implementation evidence. PR-009-A covers the policy model and bounded diagnostics only; parser, paste, spoofing, GUI, and closeout items remain pending for later slices.
 
 ## Scope Checklist
 
-- [ ] Terminal output bytes are treated as untrusted input.
-- [ ] Terminal effects are limited to terminal-local display/model state.
+- [x] Terminal output bytes are treated as untrusted input.
+- [x] Terminal effects are limited to terminal-local display/model state.
 - [ ] Unsupported control sequences fail inertly.
 - [ ] Paste is classified before PTY write.
 - [ ] Approval/security UI remains outside terminal output.
 - [ ] Plain/Supervised/Managed labels remain honest.
-- [ ] No AgentRun launch is introduced.
-- [ ] No transcript retention is introduced.
-- [ ] No durable audit storage is introduced.
-- [ ] No final GUI terminal widget claim is introduced.
+- [x] No AgentRun launch is introduced.
+- [x] No transcript retention is introduced.
+- [x] No durable audit storage is introduced.
+- [x] No final GUI terminal widget claim is introduced.
 
 ## ANSI / VT / OSC Checklist
 
@@ -61,19 +61,19 @@ This checklist is prepared for RFC-009 design review. Acceptance means the proje
 
 ## Security and Privacy Checklist
 
-- [ ] Diagnostics are bounded.
-- [ ] Diagnostics include sequence-family and policy-reason metadata for review.
-- [ ] Diagnostics avoid raw private terminal output.
-- [ ] Diagnostics avoid raw OSC payloads, pasted text, shell output, and environment-like values.
+- [x] Diagnostics are bounded.
+- [x] Diagnostics include sequence-family and policy-reason metadata for review.
+- [x] Diagnostics avoid raw private terminal output.
+- [x] Diagnostics avoid raw OSC payloads, pasted text, shell output, and environment-like values.
 - [ ] No clipboard writes occur from terminal output.
 - [ ] Terminal output cannot mutate trust state, approvals, command history, audit state, file buffers, or project metadata.
 - [ ] RFC-010/RFC-011/RFC-012 dependencies remain visible where relevant.
 
 ## Automated Test Checklist
 
-- [ ] Parser/policy tests cover supported sequence families.
-- [ ] Parser/policy tests cover blocked sequence families.
-- [ ] Parser/policy tests cover terminal-generated reply policy.
+- [x] Parser/policy tests cover supported sequence-family metadata.
+- [x] Parser/policy tests cover blocked app-effect vocabulary.
+- [x] Parser/policy tests cover terminal-generated reply policy vocabulary.
 - [ ] Tests prove OSC 52 does not mutate clipboard.
 - [ ] Tests prove title/app-chrome sequences do not mutate app chrome.
 - [ ] Tests prove terminal output cannot mutate trust/approval/file/project state.

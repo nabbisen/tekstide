@@ -1,6 +1,6 @@
 # RFC-009: Terminal Security Boundary — QA Evidence
 
-Status: design accepted; implementation pending
+Status: PR-009-A implementation ready for review
 Date opened: 2026-07-11
 
 ## Scope
@@ -20,19 +20,69 @@ Carry-forward requirements:
 
 ## Implementation Evidence
 
-Pending.
-
 ### PR-009-A — Security Policy Model
 
-Status: pending.
+Status: ready for implementation review.
 
-Evidence to record:
+Implementation:
 
-- policy type/module locations;
-- supported terminal-local effect vocabulary;
-- blocked app-level effect vocabulary;
-- bounded diagnostic behavior;
-- tests run.
+- Added `crates/tekstide-core/src/runtime/terminal/security.rs`.
+- Exported terminal security policy model types from `runtime::terminal`.
+- Added terminal-local display effect vocabulary:
+  - `TerminalSurfaceEffect`
+  - `TerminalTextEffect`
+  - `TerminalCursorEffect`
+  - `TerminalStyleEffect`
+  - `TerminalModeEffect`
+  - `TerminalScrollbackEffect`
+- Added blocked app-level effect vocabulary:
+  - `TerminalBlockedAppEffect::ClipboardAccess`
+  - `TerminalBlockedAppEffect::AppChromeMutation`
+  - `TerminalBlockedAppEffect::TrustedUiMutation`
+  - `TerminalBlockedAppEffect::TrustStateMutation`
+  - `TerminalBlockedAppEffect::ApprovalStateMutation`
+  - `TerminalBlockedAppEffect::CommandHistoryMutation`
+  - `TerminalBlockedAppEffect::AuditStateMutation`
+  - `TerminalBlockedAppEffect::FileStateMutation`
+  - `TerminalBlockedAppEffect::ProjectMetadataMutation`
+  - `TerminalBlockedAppEffect::HostIntegration`
+  - `TerminalBlockedAppEffect::TerminalGeneratedReply`
+- Added bounded diagnostic model:
+  - `TerminalSecurityDiagnostic`
+  - `TerminalSequenceFamily`
+  - `TerminalPolicyReason`
+
+Security/privacy notes:
+
+- Diagnostics retain sequence-family, policy-reason, and payload byte count metadata.
+- Diagnostics use `BoundedRuntimeSummary` for bounded human-readable summaries.
+- `blocked_sequence` / `blocked_app_effect` constructors do not accept raw payload text, which keeps OSC payloads, pasted text, shell output, and environment-like values out of summaries.
+- The free-form diagnostic summary helper is private to the module; public diagnostic constructors derive summaries from non-payload metadata.
+- This slice introduces no parser, paste router, PTY write behavior, transcript storage, durable audit persistence, AgentRun launch, command approval, or GUI terminal behavior.
+
+Observed gates on 2026-07-11:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core runtime::terminal::security` passed; 6 security policy model tests passed.
+- `cargo check --workspace` passed.
+- `cargo test -p tekstide-core runtime::terminal::tests` passed; 16 terminal runtime tests passed.
+- `cargo test -p tekstide-core` passed; 200 tests passed, 0 failed, 0 ignored; doc tests had 0 tests.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
+Review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-048-rfc009-pr009a-security-policy-model-response.md` requested changes because public `TerminalSecurityDiagnostic::new` accepted arbitrary summary text.
+- The raw-summary constructor was changed to private `with_summary`.
+- Public regression tests now cover both public diagnostic constructors and prove raw payload strings are not stored in summaries.
+
+Known limitations:
+
+- PR-009-A does not parse PTY bytes.
+- PR-009-A does not enumerate exact accepted/inert sequence grammar for parser coverage; PR-009-B owns that.
+- PR-009-A does not implement terminal-generated reply handling; PR-009-B owns blocked/default reply behavior.
+- PR-009-A does not classify or gate paste bytes before PTY write; PR-009-C owns that.
+- PR-009-A does not model active/modal trusted UI state; PR-009-C/PR-009-D own that.
+- PR-009-A does not provide spoofing examples or GUI evidence; PR-009-D and later GUI milestones own those.
 
 ### PR-009-B — ANSI/VT/OSC Parser Boundary
 
@@ -86,4 +136,4 @@ Evidence to record:
 
 ## Recommendation
 
-Pending.
+Request implementation review for PR-009-A before proceeding to PR-009-B.
