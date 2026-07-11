@@ -3,7 +3,7 @@ use crate::app::{AddProjectOutcome, RemoveProjectError};
 use crate::close::{
     CloseAssessment, CloseReason, CloseReasonCode, CloseResourceProviderState, CloseResourceSummary,
 };
-use crate::domain::DomainTimestamp;
+use crate::domain::{DomainTimestamp, TerminalKind, TerminalSession, TerminalStatus};
 use crate::project::recent::{RecentProject, RecentProjectState, Timestamp};
 use crate::project::root::{ProjectRootValidationError, SymlinkPolicy};
 use crate::project::{ProjectId, ProjectProviderState, ProjectRuntimeSummary};
@@ -333,6 +333,47 @@ fn active_project_with_resources_needs_confirmation_and_stays_open() {
                     message: "2 dirty files".to_owned(),
                 },
             ]
+        }
+    );
+    assert!(state.project(&project_id).is_some());
+}
+
+#[test]
+fn active_project_with_real_running_terminal_needs_confirmation_and_stays_open() {
+    let mut state = AppState::default();
+    let project_id =
+        state.add_project_session("Project", "/workspace/project", "/workspace/project");
+    let mut terminal = TerminalSession::new(
+        project_id.clone(),
+        TerminalKind::Plain,
+        "Shell",
+        "/workspace/project",
+        "bash",
+    );
+    terminal.transition_to(TerminalStatus::Running).unwrap();
+    state
+        .project_mut(&project_id)
+        .unwrap()
+        .add_terminal_session(terminal)
+        .unwrap();
+
+    let assessment = state
+        .close_project(&project_id)
+        .expect("assessment should be returned");
+
+    assert_eq!(
+        assessment,
+        CloseAssessment::NeedsConfirmation {
+            reasons: vec![
+                CloseReason {
+                    code: CloseReasonCode::RunningProcess,
+                    message: "1 running process".to_owned(),
+                },
+                CloseReason {
+                    code: CloseReasonCode::ProviderUnavailable,
+                    message: "active-resource state is unavailable".to_owned(),
+                },
+            ],
         }
     );
     assert!(state.project(&project_id).is_some());

@@ -1,6 +1,6 @@
 # RFC-008: TerminalSession and Process Lifecycle — QA Evidence
 
-Status: PR-008-E implementation ready for review
+Status: PR-008-F implementation ready for review
 Date opened: 2026-07-10
 
 ## Scope
@@ -252,9 +252,53 @@ Known limitations:
 - PR-008-E does not implement RFC-009 ANSI/VT, paste, clipboard, or approval-dialog security policy.
 - PR-008-E does not introduce transcript persistence or durable audit records.
 
+### PR-008-F — Safe-Close Integration for Real Running Terminals
+
+Status: ready for implementation review.
+
+Implemented:
+
+- `assess_close` now preserves known active-resource blockers before handling incomplete provider state.
+- A real running terminal can now cause `CloseAssessment::NeedsConfirmation` even when other active-resource provider state remains unavailable.
+- Incomplete provider state is still surfaced as an additional close reason when known blockers exist.
+- Idle projects with unavailable/not-implemented/unknown provider state still return `UnsupportedOrUnknown`; this slice does not make unknown projects safe to close.
+- `AppState::close_project` now refuses to remove a project with a real running `TerminalSession` because the project close assessment returns confirmation-required.
+- Added close assessment coverage for known resources with unavailable provider state.
+- Added app-level coverage for a real running terminal attached through `ProjectSession::add_terminal_session`.
+
+Observed gates on 2026-07-11:
+
+- `cargo test -p tekstide-core close::tests` passed; 5 close tests passed.
+- `cargo test -p tekstide-core app::tests::active_project_with_real_running_terminal_needs_confirmation_and_stays_open` passed.
+- `cargo test -p tekstide-core project::tests::metadata` passed; 7 project metadata tests passed.
+- `cargo test -p tekstide-core app::tests` passed; 18 app tests passed.
+- `cargo check --workspace` passed.
+- `cargo fmt --check --all` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo test --workspace` passed; 194 `tekstide-core` tests passed, `tekstide` had 0 tests, `tekstide-pty-spike` had 0 tests, and doc tests had 0 tests.
+- `git diff --check` passed.
+
+Security/privacy note:
+
+- PR-008-F is assessment-only close integration.
+- It does not terminate processes, read terminal output, inspect environment variables, print shell history, persist transcript bytes, or start workspace automation.
+- This slice still does not implement RFC-009 ANSI/VT filtering, paste protection, clipboard policy, approval-dialog containment, transcript retention, command approval, or durable audit storage.
+
+Migration note:
+
+- No local data schema or persisted state migration is introduced.
+- Runtime handles, process ids, process group ids, PTY descriptors, and terminal output buffers remain outside `TerminalSession` durable metadata.
+
+Known limitations:
+
+- PR-008-F does not add terminate/keep UI choices for confirmation dialogs.
+- PR-008-F does not introduce app/UI commands for launching or selecting terminals.
+- PR-008-F does not implement final GUI terminal behavior.
+- PR-008-F does not implement RFC-009 ANSI/VT, paste, clipboard, or approval-dialog security policy.
+- PR-008-F does not introduce transcript persistence or durable audit records.
+
 Required future evidence will be recorded per later implementation slice:
 
-- safe-close evidence;
 - security and privacy notes;
 - migration note;
 - known limitations.

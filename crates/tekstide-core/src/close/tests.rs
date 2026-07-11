@@ -78,3 +78,30 @@ fn active_resources_need_confirmation() {
         }
     );
 }
+
+#[test]
+fn known_resources_need_confirmation_even_when_provider_is_unavailable() {
+    let assessment = assess_close(&CloseResourceSummary {
+        provider_state: CloseResourceProviderState::Unavailable,
+        running_processes: 1,
+        dirty_files: 0,
+        pending_approvals: 0,
+        review_ready_changes: 0,
+    });
+
+    assert_eq!(
+        assessment,
+        CloseAssessment::NeedsConfirmation {
+            reasons: vec![
+                CloseReason {
+                    code: CloseReasonCode::RunningProcess,
+                    message: "1 running process".to_owned(),
+                },
+                CloseReason {
+                    code: CloseReasonCode::ProviderUnavailable,
+                    message: "active-resource state is unavailable".to_owned(),
+                },
+            ],
+        }
+    );
+}

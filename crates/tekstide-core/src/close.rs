@@ -60,25 +60,6 @@ pub enum CloseResourceProviderState {
 }
 
 pub fn assess_close(summary: &CloseResourceSummary) -> CloseAssessment {
-    match summary.provider_state {
-        CloseResourceProviderState::Complete => {}
-        CloseResourceProviderState::Unavailable => {
-            return CloseAssessment::UnsupportedOrUnknown {
-                reason: "active-resource state is unavailable".to_owned(),
-            };
-        }
-        CloseResourceProviderState::NotImplemented => {
-            return CloseAssessment::UnsupportedOrUnknown {
-                reason: "active-resource provider is not implemented".to_owned(),
-            };
-        }
-        CloseResourceProviderState::Unknown => {
-            return CloseAssessment::UnsupportedOrUnknown {
-                reason: "active-resource state is unknown".to_owned(),
-            };
-        }
-    }
-
     let mut reasons = Vec::new();
     push_reason(
         &mut reasons,
@@ -105,10 +86,54 @@ pub fn assess_close(summary: &CloseResourceSummary) -> CloseAssessment {
         "review-ready change",
     );
 
+    match summary.provider_state {
+        CloseResourceProviderState::Complete => {}
+        CloseResourceProviderState::Unavailable => {
+            if reasons.is_empty() {
+                return CloseAssessment::UnsupportedOrUnknown {
+                    reason: "active-resource state is unavailable".to_owned(),
+                };
+            }
+            reasons.push(provider_reason(
+                CloseReasonCode::ProviderUnavailable,
+                "active-resource state is unavailable",
+            ));
+        }
+        CloseResourceProviderState::NotImplemented => {
+            if reasons.is_empty() {
+                return CloseAssessment::UnsupportedOrUnknown {
+                    reason: "active-resource provider is not implemented".to_owned(),
+                };
+            }
+            reasons.push(provider_reason(
+                CloseReasonCode::ProviderNotImplemented,
+                "active-resource provider is not implemented",
+            ));
+        }
+        CloseResourceProviderState::Unknown => {
+            if reasons.is_empty() {
+                return CloseAssessment::UnsupportedOrUnknown {
+                    reason: "active-resource state is unknown".to_owned(),
+                };
+            }
+            reasons.push(provider_reason(
+                CloseReasonCode::ProviderUnknown,
+                "active-resource state is unknown",
+            ));
+        }
+    }
+
     if reasons.is_empty() {
         CloseAssessment::SafeToClose
     } else {
         CloseAssessment::NeedsConfirmation { reasons }
+    }
+}
+
+fn provider_reason(code: CloseReasonCode, message: &'static str) -> CloseReason {
+    CloseReason {
+        code,
+        message: message.to_owned(),
     }
 }
 
