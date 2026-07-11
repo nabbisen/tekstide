@@ -1,10 +1,10 @@
 ---
 title: "RFC-008: TerminalSession and Process Lifecycle — Implementation Handoff"
 rfc: "RFC-008"
-rfc_file: "../../proposed/008-terminalsession-process-lifecycle.md"
-status: "Proposed"
+rfc_file: "../../done/008-terminalsession-process-lifecycle.md"
+status: "Implemented with documented limitations"
 target_milestone: "M4"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented with documented limitations"
 created: "2026-07-10"
 ---
 

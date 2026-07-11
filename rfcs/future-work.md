@@ -6,14 +6,16 @@ This file tracks deferred themes after the `0.1.0` foundation release scope. It 
 
 ### Terminal / PTY Runtime
 
-Status: deferred after `0.1.0`.
+Status: partially implemented by RFC-007/RFC-008; product UI/security work remains.
 
-- Start local shell sessions per project.
-- Maintain background terminal sessions.
-- Preserve running processes across mode switches.
-- Show at most two visible terminals in Terminal / Agent Immersion Mode.
-- Implement paste protection for real terminal input.
-- Provide running-process safe close behavior.
+- Linux project-owned PTY shell lifecycle foundation is implemented by RFC-008 with documented limitations.
+- Background terminal sessions, mode-switch preservation, visible-slot policy, and project-close assessment are implemented at the core/project layer.
+- Add app/UI commands for launching, selecting, and closing terminals.
+- Add app-wide close aggregation for running terminals.
+- Add terminate/keep confirmation actions and visible terminal consequence text.
+- Implement paste protection for real terminal input under RFC-009.
+- Implement safe ANSI/VT rendering and terminal-output containment under RFC-009 and the GUI milestone.
+- Add macOS/Windows terminal runtime evidence before claiming cross-platform terminal support.
 
 ### AgentRun And AI CLI Execution
 

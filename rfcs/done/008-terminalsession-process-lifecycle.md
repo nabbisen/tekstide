@@ -1,6 +1,6 @@
 # RFC-008: TerminalSession and Process Lifecycle
 
-Status: Proposed
+Status: Implemented with documented limitations
 Target milestone: M4
 Date: 2026-07-10
 

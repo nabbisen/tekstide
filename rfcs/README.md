@@ -16,9 +16,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 ## Proposed
 
-| RFC | Title | Status |
-| --- | --- | --- |
-| 008 | [TerminalSession and Process Lifecycle](./proposed/008-terminalsession-process-lifecycle.md) | Proposed |
+No proposed RFCs.
 
 ## Handoffs
 
@@ -45,6 +43,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 005 | [Application Shell and Project Board](./done/005-application-shell-and-project-board.md) | Implemented |
 | 006 | [ProjectSession State and File Explorer / Editor Basics](./done/006-projectsession-state-and-file-explorer-editor-basics.md) | Implemented with documented limitations |
 | 007 | [Runtime Substrate and PTY Feasibility Gate](./done/007-runtime-substrate-pty-feasibility.md) | Implemented feasibility gate |
+| 008 | [TerminalSession and Process Lifecycle](./done/008-terminalsession-process-lifecycle.md) | Implemented with documented limitations |
 
 ## Archive
 

@@ -1,8 +1,8 @@
 # RFC-008: TerminalSession and Process Lifecycle — Developer Handoff Pack
 
-Source RFC: [RFC-008](../../proposed/008-terminalsession-process-lifecycle.md)
+Source RFC: [RFC-008](../../done/008-terminalsession-process-lifecycle.md)
 Target milestone: **M4**
-Source RFC status: **Proposed**
+Source RFC status: **Implemented with documented limitations**
 
 ## Files
 
@@ -13,7 +13,7 @@ Source RFC status: **Proposed**
 
 Review disposition: RFC-008 design/handoff accepted with notes on 2026-07-10. See `.git-exclude/reviewed/tekstide-review-request-038-rfc008-terminalsession-process-lifecycle-design-response.md`.
 
-This handoff inherits the source RFC lifecycle state. RFC-008 remains in `proposed/` until reviewed and implemented.
+Implementation closeout disposition: accepted with documented limitations on 2026-07-11. See `.git-exclude/reviewed/tekstide-review-request-046-rfc008-closeout-evidence-response.md`.
 
 ## Source Summary
 

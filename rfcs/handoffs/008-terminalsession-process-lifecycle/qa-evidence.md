@@ -1,7 +1,8 @@
 # RFC-008: TerminalSession and Process Lifecycle — QA Evidence
 
-Status: PR-008-F implementation ready for review
+Status: Accepted with documented limitations
 Date opened: 2026-07-10
+Date accepted: 2026-07-11
 
 ## Scope
 
@@ -297,12 +298,91 @@ Known limitations:
 - PR-008-F does not implement RFC-009 ANSI/VT, paste, clipboard, or approval-dialog security policy.
 - PR-008-F does not introduce transcript persistence or durable audit records.
 
-Required future evidence will be recorded per later implementation slice:
+Review follow-up:
 
-- security and privacy notes;
-- migration note;
-- known limitations.
+- `.git-exclude/reviewed/tekstide-review-request-045-rfc008-pr008f-safe-close-running-terminals-response.md` accepted PR-008-F with notes.
+- Future app-wide close aggregation should preserve per-project provider uncertainty while surfacing known running terminal blockers.
+
+### PR-008-G — Closeout Evidence and Recommendation
+
+Status: accepted with documented limitations.
+
+Committed slice list:
+
+- `82ca416 Add RFC-008 terminal lifecycle design`
+- `b581be1 Add RFC-008 terminal runtime boundary`
+- `97d0bdd Add RFC-008 project-owned PTY shell launch`
+- `8195578 Implement bounded terminal IO and resize plumbing`
+- `a6b4e97 Implement terminal process-group termination`
+- `e90b955 Integrate terminal sessions with project visibility`
+- `a5308b7 Require close confirmation for running terminals`
+
+Implemented foundation:
+
+- Linux project-owned PTY shell launch through `/bin/sh` or a requested executable shell path.
+- Launch validation for project ownership, canonical root, cwd containment, supported terminal kind, and executable shell path.
+- Minimal shell environment and no explicit login/startup-file loading.
+- Runtime-only PTY/process/session ownership; no PTY descriptors, process ids, process groups, reader threads, or output bytes persisted through `TerminalSession`.
+- Bounded PTY output reads with dropped-byte accounting.
+- Project-addressed terminal input writes and cross-project rejection.
+- PTY resize routing and child-observed row/column evidence.
+- Process-group termination with SIGTERM, timeout, SIGKILL fallback, process-group observation, and honest `OrphanedUnknown` fallback when cleanup cannot be proven.
+- Regression evidence that direct child exit is not treated as process-group cleanup proof.
+- ProjectSession terminal collection integration, visible-slot policy, mode-switch preservation, and Project Board/runtime summaries from real terminal state.
+- Project-close assessment requiring confirmation for real running terminals.
+
+Documented limitations:
+
+- No app/UI command for launching, selecting, or closing terminals.
+- No app-wide close aggregation surface.
+- No terminate/keep confirmation action UI.
+- No final GUI terminal widget or terminal renderer.
+- No AgentRun launch or AI CLI profile execution.
+- No transcript capture, transcript retention, or durable audit storage.
+- No command approval.
+- No production ANSI/VT parser, paste protection, clipboard behavior, or approval-dialog spoofing boundary; RFC-009 owns these.
+- Linux-only runtime evidence; macOS and Windows terminal/process behavior need later evidence.
+- `LinuxTerminalRuntime::wait_for_exit` remains child-status oriented and must not be used as durable process-group cleanup proof by later safe-close/app integration.
+
+Observed closeout gates on 2026-07-11:
+
+- `cargo check --workspace` passed.
+- `cargo fmt --check --all` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo test -p tekstide-core runtime::terminal::tests` passed; 16 runtime terminal tests passed.
+- `cargo test -p tekstide-core project::tests::collections` passed; 10 project collection tests passed.
+- `cargo test -p tekstide-core close::tests` passed; 5 close tests passed.
+- `cargo test -p tekstide-core app::tests::active_project_with_real_running_terminal_needs_confirmation_and_stays_open` passed.
+- `cargo test --workspace` passed; 194 `tekstide-core` tests passed, `tekstide` had 0 tests, `tekstide-pty-spike` had 0 tests, and doc tests had 0 tests.
+- `git diff --check` passed.
+
+Security/privacy note:
+
+- RFC-008 evidence uses synthetic temporary roots and short marker strings.
+- No environment dumps, shell history, private project files, token-like values, or private output are printed in evidence.
+- Plain terminal sessions remain labeled honestly; no managed command approval, transcript retention, or durable audit behavior is claimed.
+- Terminal output does not mutate trust state, approvals, clipboard, command history, or app chrome in this implementation.
+- RFC-009 remains a required follow-up before production terminal rendering, paste protection, clipboard, or approval-dialog spoofing claims.
+
+Migration note:
+
+- No local data schema or persisted state migration is introduced.
+- Runtime handles, PTY descriptors, process ids, process group ids, terminal output bytes, and transcript bytes are not persisted as durable truth.
+
+Closeout disposition:
+
+- RFC-008 closeout was accepted with documented limitations on 2026-07-11.
+- Source RFC moved from `rfcs/proposed/` to `rfcs/done/`.
+- `rfcs/README.md` and handoff metadata were updated to reflect the done-state.
+
+Future evidence will be recorded under later RFCs or milestone slices:
+
+- RFC-009 terminal security boundary;
+- RFC-010 AgentRun launch model;
+- transcript/audit storage RFCs;
+- app/UI terminal controls and app-wide close aggregation;
+- GUI terminal renderer and cross-platform runtime evidence.
 
 ## Recommendation
 
-Pending.
+RFC-008 is accepted as implemented with documented limitations.
