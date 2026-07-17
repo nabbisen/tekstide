@@ -12,14 +12,14 @@ created: "2026-07-11"
 
 ## Acceptance Status
 
-This checklist tracks RFC-009 implementation evidence. PR-009-A covers the policy model and bounded diagnostics. PR-009-B covers the conservative ANSI/VT/OSC parser boundary. Paste, trusted-UI active state, spoofing, GUI, labels, and closeout items remain pending for later slices.
+This checklist tracks RFC-009 implementation evidence. PR-009-A covers the policy model and bounded diagnostics. PR-009-B covers the conservative ANSI/VT/OSC parser boundary. PR-009-C covers paste classification and pre-PTY write decisions. Spoofing, GUI, labels, and closeout items remain pending for later slices.
 
 ## Scope Checklist
 
 - [x] Terminal output bytes are treated as untrusted input.
 - [x] Terminal effects are limited to terminal-local display/model state.
 - [x] Unsupported control sequences fail inertly.
-- [ ] Paste is classified before PTY write.
+- [x] Paste is classified before PTY write.
 - [ ] Approval/security UI remains outside terminal output.
 - [ ] Plain/Supervised/Managed labels remain honest.
 - [x] No AgentRun launch is introduced.
@@ -41,15 +41,15 @@ This checklist tracks RFC-009 implementation evidence. PR-009-A covers the polic
 
 ## Paste Checklist
 
-- [ ] Typed input and paste input are distinguished.
-- [ ] Single-line paste policy is explicit.
-- [ ] Multiline paste requires confirmation.
-- [ ] Control-containing paste is blocked or requires explicit policy.
-- [ ] Paste bytes requiring confirmation are not written to the PTY before decision.
-- [ ] Paste routing is ProjectId/TerminalId addressed.
-- [ ] Cross-project paste routing is rejected.
-- [ ] Paste is blocked or queued while trusted approval/security UI is active or modal.
-- [ ] Paste blocking does not depend only on focus state.
+- [x] Typed input and paste input are distinguished.
+- [x] Single-line paste policy is explicit.
+- [x] Multiline paste requires confirmation.
+- [x] Control-containing paste is blocked or requires explicit policy.
+- [x] Paste bytes requiring confirmation are not written to the PTY before decision.
+- [x] Paste routing is ProjectId/TerminalId addressed.
+- [x] Cross-project paste routing is rejected.
+- [x] Paste is blocked or queued while trusted approval/security UI is active or modal.
+- [x] Paste blocking does not depend only on focus state.
 
 ## Trusted UI / Spoofing Checklist
 
@@ -77,8 +77,8 @@ This checklist tracks RFC-009 implementation evidence. PR-009-A covers the polic
 - [x] Parser-boundary tests keep OSC 52 as inert diagnostics without clipboard-write effects.
 - [x] Parser-boundary tests keep title/app-chrome sequences as inert diagnostics without app-chrome effects.
 - [x] Parser-boundary tests restrict terminal output to terminal-local effects or diagnostics, with no trust/approval/file/project effect type.
-- [ ] Paste policy tests cover typed, single-line, multiline, control-containing, and cross-project cases.
-- [ ] Tests prove confirmation-required paste bytes are withheld before PTY write.
+- [x] Paste policy tests cover typed, single-line, multiline, control-containing, and cross-project cases.
+- [x] Tests prove confirmation-required paste bytes are withheld before PTY write.
 - [ ] Spoofing tests cover approval-like terminal output.
 - [ ] Label tests or evidence prove no command-approval overclaim.
 

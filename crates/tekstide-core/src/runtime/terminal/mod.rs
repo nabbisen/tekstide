@@ -9,9 +9,11 @@ mod types;
 pub use launch::{LinuxTerminalRuntime, TerminalLaunchError, TerminalRuntimeError};
 pub use security::{
     TerminalAcceptedSequence, TerminalBlockedAppEffect, TerminalCursorEffect,
-    TerminalInertSequence, TerminalModeEffect, TerminalPolicyReason, TerminalScrollbackEffect,
-    TerminalSecurityDiagnostic, TerminalSecurityParser, TerminalSequenceFamily,
-    TerminalSequencePolicy, TerminalStyleEffect, TerminalSurfaceEffect, TerminalTextEffect,
+    TerminalInertSequence, TerminalInputDecision, TerminalInputDecisionReason, TerminalInputPolicy,
+    TerminalInputSource, TerminalModeEffect, TerminalPasteClass, TerminalPolicyReason,
+    TerminalScrollbackEffect, TerminalSecurityDiagnostic, TerminalSecurityParser,
+    TerminalSequenceFamily, TerminalSequencePolicy, TerminalStyleEffect, TerminalSurfaceEffect,
+    TerminalTextEffect, TerminalTrustedUiState,
 };
 pub use types::{
     BoundedRuntimeSummary, TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec,

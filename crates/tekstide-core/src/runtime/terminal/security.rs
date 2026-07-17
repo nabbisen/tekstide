@@ -1,9 +1,14 @@
 use super::BoundedRuntimeSummary;
 
 mod parser;
+mod paste;
 
 pub use parser::{
     TerminalAcceptedSequence, TerminalInertSequence, TerminalSecurityParser, TerminalSequencePolicy,
+};
+pub use paste::{
+    TerminalInputDecision, TerminalInputDecisionReason, TerminalInputPolicy, TerminalInputSource,
+    TerminalPasteClass, TerminalTrustedUiState,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

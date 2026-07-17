@@ -1,6 +1,6 @@
 # RFC-009: Terminal Security Boundary — QA Evidence
 
-Status: PR-009-B implementation ready for review
+Status: PR-009-C implementation ready for review
 Date opened: 2026-07-11
 
 ## Scope
@@ -165,16 +165,65 @@ Known limitations:
 
 ### PR-009-C — Paste Policy
 
-Status: pending.
+Status: ready for implementation review.
 
-Evidence to record:
+Implementation:
 
-- typed/single-line/multiline/control-containing paste classification;
-- allow/block/requires-confirmation behavior;
-- proof that confirmation-required bytes are withheld before PTY write;
-- cross-project paste rejection;
-- trusted UI active-state behavior;
-- tests run.
+- Added `crates/tekstide-core/src/runtime/terminal/security/paste.rs`.
+- Exported paste policy types from `runtime::terminal`:
+  - `TerminalInputPolicy`
+  - `TerminalInputSource`
+  - `TerminalPasteClass`
+  - `TerminalInputDecision`
+  - `TerminalInputDecisionReason`
+  - `TerminalTrustedUiState`
+- Added typed-input vs paste-input classification.
+- Added paste classes:
+  - empty;
+  - single-line;
+  - multiline;
+  - control-containing.
+- Added pre-PTY write decisions:
+  - typed input is allowed;
+  - empty/single-line paste is allowed;
+  - multiline paste requires confirmation;
+  - control-containing paste is blocked;
+  - wrong-project and wrong-terminal routing are blocked;
+  - paste is blocked while trusted UI is active or modal.
+
+Security/privacy notes:
+
+- `TerminalInputDecision` returns metadata only: source, paste class, byte count, and decision reason.
+- `RequiresConfirmation` does not carry pasted bytes, so confirmation-required content is withheld from PTY write by the policy result.
+- Single-line paste decisions do not store raw pasted content.
+- C0, DEL, and C1 control bytes are classified as control-containing paste and blocked.
+- Non-control binary bytes are currently classified by line/control policy; if they contain no blocked controls or line breaks, they are treated as single-line paste.
+- Active/modal trusted UI state is explicit through `TerminalTrustedUiState`; paste blocking does not depend on focus state.
+- This slice introduces no GUI dialog, spoofing examples, terminal renderer behavior, AgentRun launch, transcript storage, durable audit persistence, or command approval.
+
+Observed gates on 2026-07-17:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core runtime::terminal::security` passed; 25 security/parser/paste tests passed.
+- `cargo check --workspace` passed.
+- `cargo test -p tekstide-core runtime::terminal::tests` passed; 16 terminal runtime tests passed.
+- `cargo test -p tekstide-core` passed; 219 tests passed, 0 failed, 0 ignored; doc tests had 0 tests.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
+Review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-052-rfc009-pr009c-paste-policy-response.md` requested changes because C1 control bytes could be classified as single-line paste.
+- `classify_paste` now treats `0x80..=0x9f` as control-containing paste.
+- Regression tests cover representative C1 DCS (`0x90`), CSI (`0x9b`), and OSC (`0x9d`) paste bytes.
+- A regression test documents the current non-control binary behavior.
+- `.git-exclude/reviewed/tekstide-review-request-053-rfc009-pr009c-paste-policy-rereview-response.md` accepted PR-009-C with notes.
+
+Known limitations:
+
+- PR-009-C does not implement rendered paste confirmation UI.
+- PR-009-C does not write, queue, or replay paste bytes after confirmation.
+- PR-009-C does not provide spoofing examples or GUI evidence; PR-009-D and later GUI milestones own those.
+- PR-009-C does not introduce transcript storage, durable audit persistence, AgentRun launch, command approval, or GUI terminal behavior.
 
 ### PR-009-D — Trusted UI / Spoofing Boundary
 
@@ -202,4 +251,4 @@ Evidence to record:
 
 ## Recommendation
 
-Request PR-009-B re-review before proceeding to PR-009-C.
+PR-009-C was accepted after re-review. Proceed to PR-009-D after commit.
