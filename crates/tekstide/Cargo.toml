@@ -1,6 +1,6 @@
 [package]
 name        = "tekstide"
-description = "Core/shell foundation for a local-first multi-project AI development workbench."
+description = "Terminal/runtime foundation for a local-first multi-project AI development workbench."
 readme      = "../../README.md"
 version.workspace       = true
 edition.workspace       = true

@@ -13,16 +13,22 @@ Tekst IDE (`tekstide`) is a local-first, multi-project workbench for supervising
 
 ## Current Status
 
-The current implementation is a core/shell foundation through RFC-006. It includes:
+The current implementation is a terminal/runtime/security foundation through RFC-009. It includes:
 
 - Project Board and ProjectSession state;
 - root-bound file access policy;
 - bounded explorer read model;
 - UTF-8 text document buffer;
 - safe save and external-change detection;
-- shell-visible Content Mode evidence.
+- shell-visible Content Mode evidence;
+- Linux PTY feasibility evidence;
+- project-owned Linux TerminalSession lifecycle foundation;
+- bounded terminal IO, resize, process-group termination, and running-terminal close assessment;
+- conservative terminal output security policy;
+- paste classification before PTY write;
+- model-level trusted UI / terminal spoofing boundary.
 
-It is not yet the full AI CLI workbench. The desktop GUI, PTY terminal runtime, AgentRun launch, AI CLI workflow, transcript/review flow, file watcher, overwrite-confirmation UI, and durable audit storage are deferred.
+It is not yet the full AI CLI workbench. The desktop GUI, app/UI terminal commands, rendered paste dialogs, rendered trusted dialogs, AgentRun launch, AI CLI workflow, transcript/review flow, file watcher, overwrite-confirmation UI, durable audit storage, command approval, and cross-platform terminal evidence are deferred.
 
 ## Quick Start
 

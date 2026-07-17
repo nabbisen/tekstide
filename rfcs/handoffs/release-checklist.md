@@ -38,7 +38,7 @@ For crates.io releases, run the crate checks in dependency order:
 - [ ] Inspect generated package contents for missing README, license, Cargo manifests, and source files.
 - [ ] Build or test from generated package artifacts rather than only the working tree.
 - [ ] Confirm package output does not include `.git/`, `.git-exclude/`, local agent config, `target/`, or temporary state.
-- [ ] Confirm crates.io package pages and README badges describe `0.1.0` as a foundation release, not the full AI CLI workbench.
+- [ ] Confirm crates.io package pages and README badges describe the intended release scope and do not overclaim the full AI CLI workbench.
 
 ## Review
 
