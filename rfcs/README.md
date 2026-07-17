@@ -16,9 +16,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 ## Proposed
 
-| RFC | Title | Status |
-| --- | --- | --- |
-| 009 | [Terminal Security Boundary](./proposed/009-terminal-security-boundary.md) | Proposed |
+No proposed RFCs.
 
 ## Handoffs
 
@@ -47,6 +45,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 006 | [ProjectSession State and File Explorer / Editor Basics](./done/006-projectsession-state-and-file-explorer-editor-basics.md) | Implemented with documented limitations |
 | 007 | [Runtime Substrate and PTY Feasibility Gate](./done/007-runtime-substrate-pty-feasibility.md) | Implemented feasibility gate |
 | 008 | [TerminalSession and Process Lifecycle](./done/008-terminalsession-process-lifecycle.md) | Implemented with documented limitations |
+| 009 | [Terminal Security Boundary](./done/009-terminal-security-boundary.md) | Implemented with documented limitations |
 
 ## Archive
 

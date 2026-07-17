@@ -1,10 +1,10 @@
 ---
 title: "RFC-009: Terminal Security Boundary — Acceptance / QA Checklist"
 rfc: "RFC-009"
-rfc_file: "../../proposed/009-terminal-security-boundary.md"
-status: "Accepted for implementation"
+rfc_file: "../../done/009-terminal-security-boundary.md"
+status: "Accepted with documented limitations"
 target_milestone: "M4"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented with documented limitations"
 created: "2026-07-11"
 ---
 
@@ -12,7 +12,7 @@ created: "2026-07-11"
 
 ## Acceptance Status
 
-This checklist tracks RFC-009 implementation evidence. PR-009-A covers the policy model and bounded diagnostics. PR-009-B covers the conservative ANSI/VT/OSC parser boundary. PR-009-C covers paste classification and pre-PTY write decisions. PR-009-D covers the model-level trusted UI/spoofing boundary and honest label checks. GUI renderer evidence and closeout items remain pending for later slices.
+This checklist records accepted RFC-009 implementation closeout evidence. Acceptance means the project has reviewed the core model/security boundary and its documented limitations, not that final GUI terminal rendering, app/UI paste wiring, AgentRun launch, transcript retention, durable audit storage, or command approval are implemented.
 
 ## Scope Checklist
 
@@ -67,7 +67,7 @@ This checklist tracks RFC-009 implementation evidence. PR-009-A covers the polic
 - [x] Diagnostics avoid raw OSC payloads, pasted text, shell output, and environment-like values.
 - [x] No clipboard writes occur from terminal output.
 - [x] Terminal output cannot mutate trust state, approvals, command history, audit state, file buffers, or project metadata.
-- [ ] RFC-010/RFC-011/RFC-012 dependencies remain visible where relevant.
+- [x] RFC-010/RFC-011/RFC-012 dependencies remain visible where relevant.
 
 ## Automated Test Checklist
 
@@ -86,20 +86,20 @@ This checklist tracks RFC-009 implementation evidence. PR-009-A covers the polic
 
 Attach or link the following evidence before marking RFC-009 implemented:
 
-- [ ] Commit/PR list.
-- [ ] Test command output.
-- [ ] Supported/blocked sequence summary.
-- [ ] Paste policy evidence.
+- [x] Commit/PR list.
+- [x] Test command output.
+- [x] Supported/blocked sequence summary.
+- [x] Paste policy evidence.
 - [x] Spoofing-boundary evidence.
-- [ ] Security/privacy note.
-- [ ] Migration note or "no migration" statement.
-- [ ] Known limitations.
-- [ ] Follow-up RFCs/issues for GUI terminal, AgentRun, transcript, audit, and command approval work.
+- [x] Security/privacy note.
+- [x] Migration note or "no migration" statement.
+- [x] Known limitations.
+- [x] Follow-up RFCs/issues for GUI terminal, AgentRun, transcript, audit, and command approval work.
 
 ## Final Acceptance Decision
 
 - [ ] Accepted as complete.
-- [ ] Accepted with documented limitations.
+- [x] Accepted with documented limitations.
 - [ ] Blocked pending fixes.
 - [ ] Requires RFC amendment.
 
@@ -107,10 +107,24 @@ Reviewer notes:
 
 ```text
 Design/handoff accepted with notes on 2026-07-11.
+Closeout accepted with documented limitations on 2026-07-17.
 
 Carry-forward notes:
 - PR-009-B must enumerate exact accepted and inert sequence families before claiming parser coverage.
 - Terminal-generated replies are explicit capabilities and are blocked by default.
 - Paste blocking must use active/modal trusted UI state, not focus alone.
 - Diagnostics need sequence-family and policy-reason metadata without raw private payloads.
+
+Implemented foundation:
+- Conservative terminal output parser/security boundary.
+- Bounded diagnostics without raw private payloads.
+- Paste classification and pre-PTY write decisions.
+- Model-level trusted UI/spoofing boundary.
+- Honest Plain/Supervised/Managed labels.
+
+Documented limitations:
+- No final GUI terminal renderer or terminal widget acceptance.
+- No app/UI paste-event integration or rendered paste confirmation UI.
+- No screenshot-backed visual spoofing evidence.
+- No AgentRun launch, transcript retention, durable audit storage, or command approval.
 ```

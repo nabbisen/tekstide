@@ -1,10 +1,10 @@
 ---
 title: "RFC-009: Terminal Security Boundary — Implementation Handoff"
 rfc: "RFC-009"
-rfc_file: "../../proposed/009-terminal-security-boundary.md"
-status: "Accepted for implementation"
+rfc_file: "../../done/009-terminal-security-boundary.md"
+status: "Implemented with documented limitations"
 target_milestone: "M4"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented with documented limitations"
 created: "2026-07-11"
 ---
 
@@ -25,7 +25,7 @@ Paste handling must classify bytes before PTY write. Multiline paste and control
 ## Dependencies and Sequencing
 
 - Target milestone: **M4**
-- Source RFC status: **Proposed**
+- Source RFC status: **Implemented with documented limitations**
 - Required predecessors: RFC-004, RFC-007, RFC-008.
 - RFC-009 should be reviewed before implementation begins.
 - RFC-010 AgentRun launch should not claim terminal security guarantees until this boundary has implementation evidence.

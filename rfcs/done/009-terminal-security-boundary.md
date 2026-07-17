@@ -1,6 +1,6 @@
 # RFC-009: Terminal Security Boundary
 
-Status: Proposed
+Status: Implemented with documented limitations
 Target milestone: M4
 Date: 2026-07-11
 
@@ -26,10 +26,11 @@ Blocks:
 - native approval-dialog spoofing boundary claims;
 - AgentRun launch surfaces that imply terminal security guarantees.
 
-Design review:
+Review disposition:
 
 - Accepted with notes on 2026-07-11 in `.git-exclude/reviewed/tekstide-review-request-047-rfc009-terminal-security-boundary-design-response.md`.
-- Implementation must carry the review notes into PR-009-A/B/C: exact sequence-family enumeration, terminal-generated reply policy, modal trusted UI active-state handling, and bounded diagnostics with sequence-family metadata.
+- Closeout accepted with notes on 2026-07-17 in `.git-exclude/reviewed/tekstide-review-request-055-rfc009-closeout-evidence-response.md`.
+- Implemented scope is the core model/security boundary with documented limitations. It does not claim final GUI terminal renderer readiness, app/UI paste-event wiring, rendered trusted dialogs, screenshot-backed spoofing evidence, AgentRun launch, transcript retention, durable audit storage, or command approval.
 
 ## Summary
 

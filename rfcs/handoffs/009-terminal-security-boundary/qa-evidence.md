@@ -1,7 +1,8 @@
 # RFC-009: Terminal Security Boundary — QA Evidence
 
-Status: PR-009-D implementation ready for review
+Status: Accepted with documented limitations
 Date opened: 2026-07-11
+Date accepted: 2026-07-17
 
 ## Scope
 
@@ -10,6 +11,8 @@ RFC-009 defines Tekstide's terminal security boundary for untrusted terminal out
 ## Design Review
 
 RFC-009 design/handoff review was accepted with notes on 2026-07-11 in `.git-exclude/reviewed/tekstide-review-request-047-rfc009-terminal-security-boundary-design-response.md`.
+
+RFC-009 closeout review was accepted with notes on 2026-07-17 in `.git-exclude/reviewed/tekstide-review-request-055-rfc009-closeout-evidence-response.md`.
 
 Carry-forward requirements:
 
@@ -279,17 +282,77 @@ Known limitations:
 
 ### PR-009-E — Closeout Evidence
 
-Status: pending.
+Status: ready for closeout review.
 
-Evidence to record:
+Committed slice list:
 
-- final implemented scope;
-- known limitations;
-- security/privacy note;
-- migration note;
-- future-work alignment;
-- closeout recommendation.
+- `7152024 docs: add RFC-009 terminal security boundary`
+- `7e2dd78 feat: add terminal security policy model`
+- `3d481fe feat: add terminal parser security boundary`
+- `2f3b54a feat: add terminal paste input policy`
+- `978e688 Implement RFC-009 trusted UI spoofing boundary`
+
+Implemented foundation:
+
+- Terminal output bytes are treated as untrusted input behind a conservative parser/security boundary.
+- Terminal parser output is limited to terminal-local surface effects and bounded diagnostics.
+- Exact accepted and inert sequence families are enumerated in `TerminalSequencePolicy`.
+- OSC 52 clipboard, OSC title, OSC 8 hyperlink, unsupported OSC, DCS, PM, APC, private modes, mouse/focus reporting, keyboard protocol, terminal queries, terminal-generated replies, unsupported CSI, unknown ESC, unsupported C0, C1, and invalid bytes are inert/diagnostic by policy.
+- Terminal-generated replies are blocked by default unless a future reviewed capability enables a bounded terminal-local reply.
+- Terminal security diagnostics include sequence-family and policy-reason metadata without raw terminal output, OSC payloads, pasted text, shell output, or environment-like values.
+- Paste input is distinguished from typed input before PTY write.
+- Paste policy classifies empty, single-line, multiline, and control-containing paste.
+- Multiline paste returns `RequiresConfirmation` before bytes are written to the PTY.
+- C0, DEL, and C1 control-containing paste is blocked.
+- Paste routing is addressed by `ProjectId` and `TerminalId`; wrong-project and wrong-terminal routing is rejected.
+- Paste is blocked while trusted UI is active or modal and does not depend only on focus state.
+- Approval/trust/paste/destructive/security-looking terminal output remains terminal content only in the core boundary model.
+- Plain/Supervised/Managed labels remain honest and do not claim managed command approval for Plain or Supervised sessions.
+
+Security/privacy note:
+
+- RFC-009 introduces no transcript persistence, durable audit storage, AgentRun launch, command approval, final GUI terminal widget, final rendered dialogs, or cross-platform GUI security claim.
+- Parser diagnostics and paste/input decisions store metadata only; they do not store raw terminal payloads or pasted text.
+- The trusted UI/spoofing boundary is structural at the model layer. It does not rely on semantic detection of approval-looking words.
+- The model-level spoofing boundary does not replace later GUI renderer evidence for focus, overlap, modality, screenshots, or native/app dialog containment.
+
+Migration note:
+
+- No local data schema or persisted state migration is introduced.
+- RFC-009 adds in-memory policy/parser/input/read-model types only.
+- No transcript bytes, terminal output bytes, pasted bytes, process handles, process ids, audit records, or trust decisions are persisted by this RFC.
+
+Known limitations:
+
+- No final GUI terminal renderer or terminal widget acceptance.
+- No rendered trusted dialogs or screenshot-based spoofing evidence.
+- No focus/window-manager integration.
+- No app/UI command path that applies the paste policy to real user paste events.
+- No paste confirmation UI, paste queue, or post-confirmation replay path.
+- No full terminal emulator compatibility.
+- No enabled terminal-generated replies.
+- No hyperlink open/copy UI capability.
+- No AgentRun launch, AI CLI profile execution, transcript retention, durable audit storage, or command approval.
+- No macOS/Windows GUI security evidence.
+
+Future-work alignment:
+
+- RFC-010 should build AgentRun launch on top of this boundary without claiming command approval for Plain/Supervised sessions.
+- RFC-011 should define transcript retention before serious AgentRun transcript capture.
+- RFC-012 should define durable audit storage before security decisions become persistent audit claims.
+- The GUI terminal milestone must add renderer/dialog/focus/screenshot evidence before claiming final visual spoofing resistance.
+- Future terminal capability increments must document exact sequence family, terminal-local effect, cross-platform behavior, and tests before enabling currently inert behavior.
+
+Observed closeout gates on 2026-07-17:
+
+- `cargo fmt --all --check` passed.
+- `cargo check --workspace` passed.
+- `cargo test -p tekstide-core runtime::terminal::security` passed; 29 security/parser/paste/spoofing tests passed.
+- `cargo test -p tekstide-core runtime::terminal::tests` passed; 16 terminal runtime tests passed.
+- `cargo test -p tekstide-core` passed; 223 tests passed, 0 failed, 0 ignored; doc tests had 0 tests.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `git diff --check` passed.
 
 ## Recommendation
 
-PR-009-D is ready for implementation review. Request review before proceeding to PR-009-E closeout evidence.
+PR-009-E is ready for closeout review. Recommend accepting RFC-009 as implemented with documented limitations.

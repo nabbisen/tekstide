@@ -1,8 +1,8 @@
 # RFC-009: Terminal Security Boundary — Developer Handoff Pack
 
-Source RFC: [RFC-009](../../proposed/009-terminal-security-boundary.md)
+Source RFC: [RFC-009](../../done/009-terminal-security-boundary.md)
 Target milestone: **M4**
-Source RFC status: **Proposed**
+Source RFC status: **Implemented with documented limitations**
 
 ## Files
 
@@ -11,9 +11,12 @@ Source RFC status: **Proposed**
 - `acceptance-qa-checklist.md` — acceptance traceability, QA checklist, and evidence requirements.
 - `qa-evidence.md` — placeholder for observed implementation gates, security notes, and known limitations.
 
-Review disposition: RFC-009 design/handoff accepted with notes on 2026-07-11. See `.git-exclude/reviewed/tekstide-review-request-047-rfc009-terminal-security-boundary-design-response.md`.
+Review disposition:
 
-This handoff inherits the source RFC lifecycle state. RFC-009 remains in `proposed/` until implemented and accepted.
+- RFC-009 design/handoff accepted with notes on 2026-07-11. See `.git-exclude/reviewed/tekstide-review-request-047-rfc009-terminal-security-boundary-design-response.md`.
+- RFC-009 closeout accepted with documented limitations on 2026-07-17. See `.git-exclude/reviewed/tekstide-review-request-055-rfc009-closeout-evidence-response.md`.
+
+This handoff inherits the source RFC lifecycle state. RFC-009 is implemented with documented limitations and now lives in `rfcs/done/`.
 
 Design review notes to carry into implementation:
 

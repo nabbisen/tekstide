@@ -1,10 +1,10 @@
 ---
 title: "RFC-009: Terminal Security Boundary — Task Breakdown / PR Plan"
 rfc: "RFC-009"
-rfc_file: "../../proposed/009-terminal-security-boundary.md"
-status: "Accepted for implementation"
+rfc_file: "../../done/009-terminal-security-boundary.md"
+status: "Implemented with documented limitations"
 target_milestone: "M4"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented with documented limitations"
 created: "2026-07-11"
 ---
 
