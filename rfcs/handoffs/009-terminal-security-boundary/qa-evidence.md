@@ -1,6 +1,6 @@
 # RFC-009: Terminal Security Boundary — QA Evidence
 
-Status: PR-009-C implementation ready for review
+Status: PR-009-D implementation ready for review
 Date opened: 2026-07-11
 
 ## Scope
@@ -227,14 +227,55 @@ Known limitations:
 
 ### PR-009-D — Trusted UI / Spoofing Boundary
 
-Status: pending.
+Status: ready for implementation review.
 
-Evidence to record:
+Implementation:
 
-- trusted UI state model;
-- approval-like terminal-output spoofing examples;
-- label/read-model checks;
-- tests run.
+- Added `crates/tekstide-core/src/runtime/terminal/security/trusted_ui.rs`.
+- Exported trusted UI/spoofing boundary types from `runtime::terminal`:
+  - `TerminalTrustedSurfaceKind`
+  - `TerminalTrustedUiEffect`
+  - `TerminalTrustedUiBoundary`
+  - `TerminalSpoofingAssessment`
+  - `TerminalOutputContentClass`
+  - `TerminalSecurityLabelView`
+- Added trusted surface kinds for approval, trust, paste confirmation, destructive decision, and security dialogs.
+- Added trusted UI effect vocabulary for decisions and app-owned state that terminal output must not synthesize:
+  - focus movement;
+  - dismiss;
+  - approve;
+  - reject;
+  - trust workspace;
+  - Project Board state mutation;
+  - trusted chrome mutation.
+- Added `TerminalTrustedUiBoundary::assess_terminal_output`, which classifies parsed terminal effects as `UntrustedTerminalContent` and returns no trusted UI effect.
+- Added `TerminalSecurityLabelView`, derived from `AiSessionSecurityLevel`, so Plain/Supervised/Managed labels reuse the existing RFC-004-compatible wording and command-approval claim rules.
+
+Security/privacy notes:
+
+- The spoofing boundary is structural. It does not try to detect "scary" terminal text or approval-looking words.
+- Terminal output that looks like approval, trust, paste confirmation, destructive decision, or security dialog text remains terminal content only.
+- Terminal output cannot synthesize approve/reject/trust decisions through the `TerminalSpoofingAssessment` model.
+- Terminal output cannot mutate trusted chrome, Project Board state, or trusted-dialog focus through the trusted UI effect model.
+- Plain and Supervised labels continue to report `Managed command approval not guaranteed`.
+- Managed labels report only `Managed command approval eligible`; this remains an eligibility label and does not introduce command approval.
+- This slice introduces no rendered GUI dialog, terminal renderer screenshot evidence, AgentRun launch, transcript storage, durable audit persistence, or command approval.
+
+Observed gates on 2026-07-17:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core runtime::terminal::security` passed; 29 security/parser/paste/spoofing tests passed.
+- `cargo check --workspace` passed.
+- `cargo test -p tekstide-core runtime::terminal::tests` passed; 16 terminal runtime tests passed.
+- `cargo test -p tekstide-core` passed; 223 tests passed, 0 failed, 0 ignored; doc tests had 0 tests.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
+Known limitations:
+
+- PR-009-D does not implement rendered trusted dialogs.
+- PR-009-D does not provide GUI screenshot evidence or terminal-widget visual spoofing evidence.
+- PR-009-D does not wire focus/window-manager behavior; it only establishes that terminal output cannot produce trusted UI effects in the core boundary model.
+- PR-009-D does not introduce AgentRun launch, transcript storage, durable audit persistence, or command approval.
 
 ### PR-009-E — Closeout Evidence
 
@@ -251,4 +292,4 @@ Evidence to record:
 
 ## Recommendation
 
-PR-009-C was accepted after re-review. Proceed to PR-009-D after commit.
+PR-009-D is ready for implementation review. Request review before proceeding to PR-009-E closeout evidence.

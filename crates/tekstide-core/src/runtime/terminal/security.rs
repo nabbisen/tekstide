@@ -2,6 +2,7 @@ use super::BoundedRuntimeSummary;
 
 mod parser;
 mod paste;
+mod trusted_ui;
 
 pub use parser::{
     TerminalAcceptedSequence, TerminalInertSequence, TerminalSecurityParser, TerminalSequencePolicy,
@@ -9,6 +10,10 @@ pub use parser::{
 pub use paste::{
     TerminalInputDecision, TerminalInputDecisionReason, TerminalInputPolicy, TerminalInputSource,
     TerminalPasteClass, TerminalTrustedUiState,
+};
+pub use trusted_ui::{
+    TerminalOutputContentClass, TerminalSecurityLabelView, TerminalSpoofingAssessment,
+    TerminalTrustedSurfaceKind, TerminalTrustedUiBoundary, TerminalTrustedUiEffect,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

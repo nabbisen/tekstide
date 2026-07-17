@@ -10,10 +10,12 @@ pub use launch::{LinuxTerminalRuntime, TerminalLaunchError, TerminalRuntimeError
 pub use security::{
     TerminalAcceptedSequence, TerminalBlockedAppEffect, TerminalCursorEffect,
     TerminalInertSequence, TerminalInputDecision, TerminalInputDecisionReason, TerminalInputPolicy,
-    TerminalInputSource, TerminalModeEffect, TerminalPasteClass, TerminalPolicyReason,
-    TerminalScrollbackEffect, TerminalSecurityDiagnostic, TerminalSecurityParser,
-    TerminalSequenceFamily, TerminalSequencePolicy, TerminalStyleEffect, TerminalSurfaceEffect,
-    TerminalTextEffect, TerminalTrustedUiState,
+    TerminalInputSource, TerminalModeEffect, TerminalOutputContentClass, TerminalPasteClass,
+    TerminalPolicyReason, TerminalScrollbackEffect, TerminalSecurityDiagnostic,
+    TerminalSecurityLabelView, TerminalSecurityParser, TerminalSequenceFamily,
+    TerminalSequencePolicy, TerminalSpoofingAssessment, TerminalStyleEffect, TerminalSurfaceEffect,
+    TerminalTextEffect, TerminalTrustedSurfaceKind, TerminalTrustedUiBoundary,
+    TerminalTrustedUiEffect, TerminalTrustedUiState,
 };
 pub use types::{
     BoundedRuntimeSummary, TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec,

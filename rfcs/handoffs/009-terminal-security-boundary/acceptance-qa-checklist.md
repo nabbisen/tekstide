@@ -12,7 +12,7 @@ created: "2026-07-11"
 
 ## Acceptance Status
 
-This checklist tracks RFC-009 implementation evidence. PR-009-A covers the policy model and bounded diagnostics. PR-009-B covers the conservative ANSI/VT/OSC parser boundary. PR-009-C covers paste classification and pre-PTY write decisions. Spoofing, GUI, labels, and closeout items remain pending for later slices.
+This checklist tracks RFC-009 implementation evidence. PR-009-A covers the policy model and bounded diagnostics. PR-009-B covers the conservative ANSI/VT/OSC parser boundary. PR-009-C covers paste classification and pre-PTY write decisions. PR-009-D covers the model-level trusted UI/spoofing boundary and honest label checks. GUI renderer evidence and closeout items remain pending for later slices.
 
 ## Scope Checklist
 
@@ -20,8 +20,8 @@ This checklist tracks RFC-009 implementation evidence. PR-009-A covers the polic
 - [x] Terminal effects are limited to terminal-local display/model state.
 - [x] Unsupported control sequences fail inertly.
 - [x] Paste is classified before PTY write.
-- [ ] Approval/security UI remains outside terminal output.
-- [ ] Plain/Supervised/Managed labels remain honest.
+- [x] Approval/security UI remains outside terminal output.
+- [x] Plain/Supervised/Managed labels remain honest.
 - [x] No AgentRun launch is introduced.
 - [x] No transcript retention is introduced.
 - [x] No durable audit storage is introduced.
@@ -53,11 +53,11 @@ This checklist tracks RFC-009 implementation evidence. PR-009-A covers the polic
 
 ## Trusted UI / Spoofing Checklist
 
-- [ ] Approval/trust/paste/destructive dialogs are trusted app/native UI, not terminal output.
-- [ ] Terminal output cannot synthesize approve/reject/trust decisions.
-- [ ] Terminal output cannot mutate app chrome, Project Board state, or focus for trusted dialogs.
-- [ ] Spoofing examples remain terminal content only.
-- [ ] Plain terminals do not claim managed command approval.
+- [x] Approval/trust/paste/destructive dialogs are trusted app/native UI, not terminal output.
+- [x] Terminal output cannot synthesize approve/reject/trust decisions.
+- [x] Terminal output cannot mutate app chrome, Project Board state, or focus for trusted dialogs.
+- [x] Spoofing examples remain terminal content only.
+- [x] Plain terminals do not claim managed command approval.
 
 ## Security and Privacy Checklist
 
@@ -79,8 +79,8 @@ This checklist tracks RFC-009 implementation evidence. PR-009-A covers the polic
 - [x] Parser-boundary tests restrict terminal output to terminal-local effects or diagnostics, with no trust/approval/file/project effect type.
 - [x] Paste policy tests cover typed, single-line, multiline, control-containing, and cross-project cases.
 - [x] Tests prove confirmation-required paste bytes are withheld before PTY write.
-- [ ] Spoofing tests cover approval-like terminal output.
-- [ ] Label tests or evidence prove no command-approval overclaim.
+- [x] Spoofing tests cover approval-like terminal output.
+- [x] Label tests or evidence prove no command-approval overclaim.
 
 ## Release Evidence Required
 
@@ -90,7 +90,7 @@ Attach or link the following evidence before marking RFC-009 implemented:
 - [ ] Test command output.
 - [ ] Supported/blocked sequence summary.
 - [ ] Paste policy evidence.
-- [ ] Spoofing-boundary evidence.
+- [x] Spoofing-boundary evidence.
 - [ ] Security/privacy note.
 - [ ] Migration note or "no migration" statement.
 - [ ] Known limitations.
