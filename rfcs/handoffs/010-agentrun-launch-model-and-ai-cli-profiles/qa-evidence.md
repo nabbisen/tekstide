@@ -30,9 +30,80 @@ Accepted design carry-forward requirements:
 
 ## Implementation Evidence
 
-Pending.
+### PR-010-B — AI CLI Profile Model and Launch Validation
+
+Status: ready for implementation review.
+
+Implementation:
+
+- Added `crates/tekstide-core/src/agent.rs`.
+- Added `crates/tekstide-core/src/agent/profile.rs`.
+- Added `crates/tekstide-core/src/agent/launch.rs`.
+- Added `crates/tekstide-core/src/agent/tests.rs`.
+- Exported the new `agent` module from `crates/tekstide-core/src/lib.rs`.
+- Added AI CLI profile vocabulary:
+  - `AiCliProfile`
+  - `AiCliProfileSource`
+  - `AiCliExecutable`
+  - `AiCliExecutableProvenance`
+  - `ExecutableLookupPath`
+  - `AiCliPromptPolicy`
+  - `AiCliEnvironmentPolicy`
+  - `AiCliWorkspaceDiscoveryPolicy`
+  - `AiCliAdapterCapabilities`
+- Added launch validation vocabulary:
+  - `AgentRunLaunchRequest`
+  - `AgentRunLaunchValidation`
+  - `AgentRunLaunchValidationError`
+  - `AgentRunLaunchValidator`
+  - `AgentLaunchSummary`
+
+Implemented validation gates:
+
+- project id must match the ProjectSession;
+- profile id must match the selected profile;
+- project root and cwd must canonicalize to directories;
+- cwd must stay inside the canonical project root;
+- workspace-local profiles are blocked in Restricted Mode;
+- workspace-local prompt templates are blocked in Restricted Mode;
+- workspace-local environment files are blocked in Restricted Mode;
+- workspace-local executables are blocked in Restricted Mode;
+- executable symlinks or wrappers resolving inside the project root are blocked in Restricted Mode;
+- project-local reviewed `PATH` lookup entries are blocked in Restricted Mode;
+- implicit CLI workspace discovery is blocked in Restricted Mode unless the profile declares reviewed disabling/no-discovery evidence;
+- Managed profiles require structured action approval capability;
+- transcript byte persistence remains blocked pending RFC-011.
+
+Security/privacy notes:
+
+- Launch errors use bounded `AgentLaunchSummary`.
+- Environment summaries list policy and variable names only, not values.
+- The slice does not launch a process, attach AgentRuns to TerminalSessions, retain transcript bytes, persist durable audit, or implement GUI surfaces.
+- The slice does not claim Managed command approval without `structured_action_approval` capability.
+
+Observed gates on 2026-07-17:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core agent` passed; 28 tests passed, 0 failed.
+- `cargo test -p tekstide-core` passed; 235 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `git diff --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
+Review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-066-rfc010-pr010b-profile-launch-validation-response.md` requested changes because Restricted Mode `PATH` lookup rejection trusted caller-provided `ExecutableLookupPath::project_local` metadata without validating the lookup directory against the project root.
+- `resolve_executable` now validates each lookup directory in Restricted Mode by canonicalizing the lookup directory and rejecting it when it is inside the canonical project root, regardless of the caller-provided metadata.
+- Added regression tests for:
+  - `ExecutableLookupPath::reviewed_system(project_root.join("bin"))` containing a project-local executable;
+  - `ExecutableLookupPath::reviewed_system(project_root.join("bin"))` containing a symlink to an outside executable, proving project-local lookup is rejected before symlink target resolution.
+- `.git-exclude/reviewed/tekstide-review-request-067-rfc010-pr010b-path-lookup-rereview-response.md` accepted PR-010-B with notes on 2026-07-18.
+- Carry forward before runtime-backed launch: transcript policy must stay metadata-only unless RFC-011 defines retention/purge behavior; PR-010-B does not justify transcript persistence, GUI readiness, durable audit readiness, or runtime launch claims.
 
 ## Known Limitations
 
-- Implementation is pending.
+- PR-010-B does not launch an AgentRun process.
+- PR-010-B does not construct or start a `TerminalLaunchSpec`.
+- PR-010-B does not attach AgentRuns to TerminalSessions.
+- PR-010-B does not implement active-file safety.
 - No transcript retention, durable audit storage, GUI launch/review surfaces, general command approval, provider-specific cloud integration, full watcher behavior, or multi-document conflict UI is claimed by RFC-010 design acceptance.
