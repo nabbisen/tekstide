@@ -1,5 +1,11 @@
 use super::BoundedRuntimeSummary;
 
+mod parser;
+
+pub use parser::{
+    TerminalAcceptedSequence, TerminalInertSequence, TerminalSecurityParser, TerminalSequencePolicy,
+};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TerminalSurfaceEffect {
     Text(TerminalTextEffect),

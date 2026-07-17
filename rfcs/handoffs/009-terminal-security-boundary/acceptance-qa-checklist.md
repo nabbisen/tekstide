@@ -12,13 +12,13 @@ created: "2026-07-11"
 
 ## Acceptance Status
 
-This checklist tracks RFC-009 implementation evidence. PR-009-A covers the policy model and bounded diagnostics only; parser, paste, spoofing, GUI, and closeout items remain pending for later slices.
+This checklist tracks RFC-009 implementation evidence. PR-009-A covers the policy model and bounded diagnostics. PR-009-B covers the conservative ANSI/VT/OSC parser boundary. Paste, trusted-UI active state, spoofing, GUI, labels, and closeout items remain pending for later slices.
 
 ## Scope Checklist
 
 - [x] Terminal output bytes are treated as untrusted input.
 - [x] Terminal effects are limited to terminal-local display/model state.
-- [ ] Unsupported control sequences fail inertly.
+- [x] Unsupported control sequences fail inertly.
 - [ ] Paste is classified before PTY write.
 - [ ] Approval/security UI remains outside terminal output.
 - [ ] Plain/Supervised/Managed labels remain honest.
@@ -29,15 +29,15 @@ This checklist tracks RFC-009 implementation evidence. PR-009-A covers the polic
 
 ## ANSI / VT / OSC Checklist
 
-- [ ] Supported sequence subset is documented.
-- [ ] Unsupported sequence behavior is documented.
-- [ ] Exact accepted and inert sequence families are enumerated before parser coverage is claimed.
-- [ ] OSC 52 clipboard behavior is blocked or inert.
-- [ ] App/window title mutation is blocked or terminal-local only.
-- [ ] Desktop notification / host integration sequences are blocked or inert.
-- [ ] Hyperlinks cannot auto-open or mutate app state.
-- [ ] Terminal-generated replies are blocked by default or explicitly bounded and terminal-local.
-- [ ] Invalid bytes are handled without leaking private output in diagnostics.
+- [x] Supported sequence subset is documented.
+- [x] Unsupported sequence behavior is documented.
+- [x] Exact accepted and inert sequence families are enumerated before parser coverage is claimed.
+- [x] OSC 52 clipboard behavior is blocked or inert.
+- [x] App/window title mutation is blocked or terminal-local only.
+- [x] Desktop notification / host integration sequences are blocked or inert.
+- [x] Hyperlinks cannot auto-open or mutate app state.
+- [x] Terminal-generated replies are blocked by default or explicitly bounded and terminal-local.
+- [x] Invalid bytes are handled without leaking private output in diagnostics.
 
 ## Paste Checklist
 
@@ -65,8 +65,8 @@ This checklist tracks RFC-009 implementation evidence. PR-009-A covers the polic
 - [x] Diagnostics include sequence-family and policy-reason metadata for review.
 - [x] Diagnostics avoid raw private terminal output.
 - [x] Diagnostics avoid raw OSC payloads, pasted text, shell output, and environment-like values.
-- [ ] No clipboard writes occur from terminal output.
-- [ ] Terminal output cannot mutate trust state, approvals, command history, audit state, file buffers, or project metadata.
+- [x] No clipboard writes occur from terminal output.
+- [x] Terminal output cannot mutate trust state, approvals, command history, audit state, file buffers, or project metadata.
 - [ ] RFC-010/RFC-011/RFC-012 dependencies remain visible where relevant.
 
 ## Automated Test Checklist
@@ -74,9 +74,9 @@ This checklist tracks RFC-009 implementation evidence. PR-009-A covers the polic
 - [x] Parser/policy tests cover supported sequence-family metadata.
 - [x] Parser/policy tests cover blocked app-effect vocabulary.
 - [x] Parser/policy tests cover terminal-generated reply policy vocabulary.
-- [ ] Tests prove OSC 52 does not mutate clipboard.
-- [ ] Tests prove title/app-chrome sequences do not mutate app chrome.
-- [ ] Tests prove terminal output cannot mutate trust/approval/file/project state.
+- [x] Parser-boundary tests keep OSC 52 as inert diagnostics without clipboard-write effects.
+- [x] Parser-boundary tests keep title/app-chrome sequences as inert diagnostics without app-chrome effects.
+- [x] Parser-boundary tests restrict terminal output to terminal-local effects or diagnostics, with no trust/approval/file/project effect type.
 - [ ] Paste policy tests cover typed, single-line, multiline, control-containing, and cross-project cases.
 - [ ] Tests prove confirmation-required paste bytes are withheld before PTY write.
 - [ ] Spoofing tests cover approval-like terminal output.

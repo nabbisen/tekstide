@@ -1,6 +1,6 @@
 # RFC-009: Terminal Security Boundary — QA Evidence
 
-Status: PR-009-A implementation ready for review
+Status: PR-009-B implementation ready for review
 Date opened: 2026-07-11
 
 ## Scope
@@ -86,16 +86,82 @@ Known limitations:
 
 ### PR-009-B — ANSI/VT/OSC Parser Boundary
 
-Status: pending.
+Status: ready for implementation review.
 
-Evidence to record:
+Implementation:
 
-- supported sequence families;
-- blocked or inert sequence families;
-- OSC 52 behavior;
-- title/app-chrome behavior;
-- private/control sequence behavior;
-- tests run.
+- Added `crates/tekstide-core/src/runtime/terminal/security/parser.rs`.
+- Exported parser boundary types from `runtime::terminal`:
+  - `TerminalSecurityParser`
+  - `TerminalSequencePolicy`
+  - `TerminalAcceptedSequence`
+  - `TerminalInertSequence`
+- Added exact accepted sequence-family enumeration before parser coverage is claimed:
+  - printable UTF-8;
+  - C0 carriage return;
+  - C0 line feed;
+  - C0 tab;
+  - C0 backspace;
+  - CSI SGR;
+  - CSI cursor movement;
+  - CSI clear line;
+  - CSI clear screen.
+- Added exact inert sequence-family enumeration:
+  - invalid UTF-8;
+  - unsupported C0 controls;
+  - C1 controls;
+  - OSC 52 clipboard;
+  - OSC 8 hyperlink;
+  - OSC title;
+  - unsupported OSC;
+  - DCS;
+  - PM;
+  - APC;
+  - private modes;
+  - mouse/focus reporting;
+  - keyboard protocol;
+  - terminal queries;
+  - terminal-generated replies;
+  - unsupported CSI;
+  - unknown ESC.
+- Added a conservative parser that converts accepted sequences into terminal-local `TerminalSurfaceEffect` values.
+- Added inert diagnostics for unsupported/high-risk sequences using non-payload metadata only.
+- Added default blocking for terminal-generated replies through `TerminalSecurityParser::block_terminal_generated_reply`.
+
+Security/privacy notes:
+
+- OSC 52 clipboard payloads are blocked as `Osc52Clipboard` / `ClipboardAccessBlocked`.
+- OSC title mutation is blocked as `OscTitle` / `AppChromeMutationBlocked`.
+- OSC 8 hyperlinks and unsupported OSC are blocked as host integration.
+- DCS, PM, and APC are blocked as host integration.
+- Private modes, mouse/focus reporting, keyboard protocol, terminal queries, and terminal-generated replies are blocked by default.
+- Invalid UTF-8 is represented as `InvalidBytesReplaced` plus bounded `InvalidBytes` diagnostics.
+- Diagnostics record sequence family, policy reason, and byte counts without raw OSC payloads, pasted text, shell output, or environment-like values.
+- This slice introduces no paste classification, trusted UI active/modal state, spoofing examples, GUI terminal behavior, AgentRun launch, transcript storage, durable audit persistence, or command approval.
+
+Observed gates on 2026-07-11:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core runtime::terminal::security` passed; 13 security/parser tests passed.
+- `cargo check --workspace` passed.
+- `cargo test -p tekstide-core runtime::terminal::tests` passed; 16 terminal runtime tests passed.
+- `cargo test -p tekstide-core` passed; 207 tests passed, 0 failed, 0 ignored; doc tests had 0 tests.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
+Review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-050-rfc009-pr009b-parser-boundary-response.md` requested changes because C1 string controls and over-cap blocked string controls could allow payload bytes to re-enter printable text parsing.
+- C1 OSC/DCS/PM/APC now route to blocked string-control handling instead of one-byte C1 diagnostics.
+- Blocked OSC/DCS/PM/APC recovery now consumes through the terminator when present, or consumes the remaining available blocked payload when no terminator is present.
+- Regression tests cover C1 string controls, over-cap terminated string controls, over-cap unterminated string controls, and exact inert policy enumeration.
+
+Known limitations:
+
+- PR-009-B does not implement full terminal emulator compatibility.
+- PR-009-B does not implement paste classification or pre-PTY write gating; PR-009-C owns that.
+- PR-009-B does not model active/modal trusted UI state; PR-009-C/PR-009-D own that.
+- PR-009-B does not provide spoofing examples or GUI evidence; PR-009-D and later GUI milestones own those.
+- PR-009-B does not introduce transcript storage, durable audit persistence, AgentRun launch, command approval, or GUI terminal behavior.
 
 ### PR-009-C — Paste Policy
 
@@ -136,4 +202,4 @@ Evidence to record:
 
 ## Recommendation
 
-Request implementation review for PR-009-A before proceeding to PR-009-B.
+Request PR-009-B re-review before proceeding to PR-009-C.
