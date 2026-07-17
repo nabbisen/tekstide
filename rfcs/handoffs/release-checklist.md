@@ -19,19 +19,16 @@ This checklist applies before creating a tag or package for a Tekstide release.
 - [ ] `cargo build --release --locked`
 - [ ] `cargo package -p tekstide-core --locked`
 - [ ] `cargo package -p tekstide --locked`
-- [ ] `cargo publish -p tekstide-core --dry-run --locked`
-- [ ] `cargo publish -p tekstide --dry-run --locked`
+- [ ] `cargo publish --workspace --dry-run --locked`
 
-For crates.io releases, run the crate checks in dependency order:
+For crates.io releases, use the workspace publish flow:
 
 1. `cargo package -p tekstide-core --locked`
-2. `cargo publish -p tekstide-core --dry-run --locked`
-3. Publish `tekstide-core`.
-4. `cargo package -p tekstide --locked`
-5. `cargo publish -p tekstide --dry-run --locked`
-6. Publish `tekstide`.
+2. `cargo package -p tekstide --locked`
+3. `cargo publish --workspace --dry-run --locked`
+4. Publish with `cargo publish --workspace --locked`.
 
-`tekstide` package verification requires `tekstide-core` to be available from the registry because Cargo removes the local path dependency during packaging.
+The workspace dry-run is the release-candidate gate for same-workspace dependency pairing. Individual package checks are still useful for package contents, but they are not the final publish-order model.
 
 ## Package Smoke
 
@@ -50,5 +47,5 @@ For crates.io releases, run the crate checks in dependency order:
 ## Tagging
 
 - [ ] Tag name matches the release version.
-- [ ] Tag points at the reviewed commit.
-- [ ] Post-tag package or artifact verification is recorded.
+- [ ] Tag points at the reviewed release commit.
+- [ ] Post-publish/post-tag package or artifact verification is recorded.

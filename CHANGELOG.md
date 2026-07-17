@@ -2,7 +2,7 @@
 
 ## 0.2.0 - Terminal Runtime Foundation
 
-Status: release preparation.
+Status: released on 2026-07-17.
 
 Tekstide `0.2.0` is scoped as an M4 terminal/runtime/security foundation release through RFC-009. It is not the full AI CLI workbench.
 
@@ -50,20 +50,21 @@ Tekstide `0.2.0` is scoped as an M4 terminal/runtime/security foundation release
 
 ### Release Gate Status
 
-Pending before release:
+Completed before release:
 
-- release-candidate review package;
 - clean working tree;
 - `git diff --check`;
 - `cargo fmt --all --check`;
-- `cargo test --workspace`;
+- `cargo test --workspace --all-targets`;
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`;
 - `cargo build --release --locked`;
 - `cargo package -p tekstide-core --locked`;
+- `cargo publish --dry-run -p tekstide-core --locked`;
 - `cargo package -p tekstide --locked`;
-- `cargo publish -p tekstide-core --dry-run --locked`;
-- `cargo publish -p tekstide --dry-run --locked`;
-- package smoke test from generated package artifacts.
+- `cargo publish --dry-run -p tekstide --locked`;
+- `cargo publish --workspace --dry-run --locked`;
+- package smoke test from generated package artifacts;
+- release-candidate review package accepted.
 
 ## 0.1.0 - Foundation Release
 
