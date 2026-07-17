@@ -32,7 +32,7 @@ Accepted design carry-forward requirements:
 
 ### PR-010-B — AI CLI Profile Model and Launch Validation
 
-Status: ready for implementation review.
+Status: accepted with notes.
 
 Implementation:
 
@@ -100,10 +100,60 @@ Review follow-up:
 - `.git-exclude/reviewed/tekstide-review-request-067-rfc010-pr010b-path-lookup-rereview-response.md` accepted PR-010-B with notes on 2026-07-18.
 - Carry forward before runtime-backed launch: transcript policy must stay metadata-only unless RFC-011 defines retention/purge behavior; PR-010-B does not justify transcript persistence, GUI readiness, durable audit readiness, or runtime launch claims.
 
+### PR-010-C — AgentRun Launch Spec and Terminal Attachment
+
+Status: ready for implementation review.
+
+Implementation:
+
+- Added `AgentRunLaunchSpec`.
+- Added `AgentRunLaunchPlan`.
+- `AgentRunLaunchPlan::from_validation` turns validated profile/context into:
+  - an `AgentRun` in `Ready` status;
+  - a matching `TerminalLaunchSpec`;
+  - retained launch metadata including executable provenance, environment summary, terminal environment policy, and workspace-discovery summary.
+- Added `ProjectSession::attach_agent_launch_plan`.
+- Added `ProjectAgentLaunchError`.
+- ProjectSession attachment orchestration:
+  - validates plan, terminal launch spec, AgentRun, and TerminalSession project ownership;
+  - rejects duplicate terminal or AgentRun references before mutation;
+  - rejects TerminalSession metadata that does not match the plan's TerminalLaunchSpec;
+  - attaches the AgentRun to the TerminalSession;
+  - records terminal environment policy metadata on the TerminalSession;
+  - updates ProjectSession terminal/AgentRun collections and runtime summaries together.
+
+Security/privacy notes:
+
+- PR-010-C constructs metadata/specs only; it does not start a process or create runtime handles.
+- AgentRun remains in `Ready`; runtime-backed `Preparing` / `Running` lifecycle transitions are deferred to PR-010-D.
+- TerminalSession remains process truth for later runtime slices.
+- No transcript bytes, terminal output, environment values, process ids, durable audit records, GUI surfaces, or command approval behavior are introduced.
+
+Observed gates on 2026-07-18:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core agent` passed; 34 tests passed, 0 failed.
+- `cargo test -p tekstide-core` passed; 241 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `git diff --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
+Review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-068-rfc010-pr010c-launch-spec-attachment-response.md` requested changes because `AiCliEnvironmentPolicy::ExplicitAllowlist(Vec<String>)` was accepted by validation but collapsed to a generic `TerminalEnvironmentPolicy::Named("explicit allowlist")` before reaching `TerminalLaunchSpec`.
+- Added `TerminalEnvironmentPolicy::ExplicitAllowlist(Vec<String>)`.
+- `AgentRunLaunchSpec` and `TerminalLaunchSpec` now preserve explicit allowlist names structurally.
+- ProjectSession terminal metadata records an explicit allowlist summary while leaving the structured launch policy available for PR-010-D runtime behavior.
+- Added regression tests proving:
+  - distinct allowlists such as `["PATH"]` and `["PATH", "HOME"]` remain structurally distinct in `TerminalLaunchSpec`;
+  - attached TerminalSession metadata records explicit allowlist names.
+- `.git-exclude/reviewed/tekstide-review-request-069-rfc010-pr010c-environment-policy-rereview-response.md` accepted PR-010-C with notes on 2026-07-18.
+- Carry forward before broader UI or persistence claims: bound the human-readable `TerminalSession.environment_policy_ref` summary for explicit allowlists. Runtime application of `TerminalEnvironmentPolicy::ExplicitAllowlist` remains a PR-010-D gate.
+
 ## Known Limitations
 
-- PR-010-B does not launch an AgentRun process.
-- PR-010-B does not construct or start a `TerminalLaunchSpec`.
-- PR-010-B does not attach AgentRuns to TerminalSessions.
-- PR-010-B does not implement active-file safety.
+- PR-010-C does not launch an AgentRun process.
+- PR-010-C does not start a `TerminalLaunchSpec`.
+- PR-010-C does not map runtime lifecycle events.
+- PR-010-C does not implement active-file safety.
 - No transcript retention, durable audit storage, GUI launch/review surfaces, general command approval, provider-specific cloud integration, full watcher behavior, or multi-document conflict UI is claimed by RFC-010 design acceptance.

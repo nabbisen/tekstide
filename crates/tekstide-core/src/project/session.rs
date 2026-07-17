@@ -1,11 +1,13 @@
+use crate::agent::AgentRunLaunchPlan;
+use crate::runtime::terminal::TerminalEnvironmentPolicy;
 use std::path::PathBuf;
 
 use crate::close::{CloseResourceProviderState, CloseResourceSummary};
 use crate::content::{ExternalChangeDecision, SaveDecision, TextDocumentOpenPolicy};
 use crate::domain::{
-    AgentRun, AgentRunId, AgentRunStatus, ApprovalDecision, ApprovalId, ApprovalRequest,
-    AuditEvent, ChangeSet, DomainTimestamp, OwnershipError, ReviewState, TerminalId,
-    TerminalSession, TerminalStatus, TerminalTransitionError, Transcript, VisibleSlot,
+    AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError, ApprovalDecision, ApprovalId,
+    ApprovalRequest, AuditEvent, ChangeSet, DomainTimestamp, OwnershipError, ReviewState,
+    TerminalId, TerminalSession, TerminalStatus, TerminalTransitionError, Transcript, VisibleSlot,
 };
 
 use super::root::{FileExplorerScanPolicy, ProjectRootHandle};
@@ -272,6 +274,52 @@ impl ProjectSession {
         self.record_activity();
         self.refresh_runtime_summary_from_collections();
         Ok(())
+    }
+
+    pub fn attach_agent_launch_plan(
+        &mut self,
+        plan: AgentRunLaunchPlan,
+        mut terminal: TerminalSession,
+    ) -> Result<AgentRunId, ProjectAgentLaunchError> {
+        self.ensure_project_member(&plan.spec.project_id)?;
+        self.ensure_project_member(&plan.terminal_launch_spec.project_id)?;
+        self.ensure_project_member(&plan.agent_run.project_id)?;
+        self.ensure_project_member(&terminal.project_id)?;
+
+        if self
+            .terminal_sessions
+            .iter()
+            .any(|existing| existing.id == terminal.id)
+        {
+            return Err(ProjectAgentLaunchError::Ownership(
+                OwnershipError::DuplicateAttachment,
+            ));
+        }
+        if self
+            .agent_runs
+            .iter()
+            .any(|existing| existing.id == plan.agent_run.id)
+        {
+            return Err(ProjectAgentLaunchError::Ownership(
+                OwnershipError::DuplicateAttachment,
+            ));
+        }
+        if !terminal_matches_launch_spec(&terminal, &plan) {
+            return Err(ProjectAgentLaunchError::TerminalDoesNotMatchLaunchSpec);
+        }
+
+        let mut agent_run = plan.agent_run;
+        agent_run.attach_terminal(&terminal)?;
+        terminal.environment_policy_ref =
+            terminal_environment_policy_ref(&plan.terminal_launch_spec.environment_policy);
+        let agent_run_id = agent_run.id.clone();
+
+        self.terminal_sessions.push(terminal);
+        self.agent_runs.push(agent_run);
+        self.record_activity();
+        self.refresh_runtime_summary_from_collections();
+
+        Ok(agent_run_id)
     }
 
     pub fn add_approval_request(
@@ -605,6 +653,25 @@ pub enum ProjectTerminalError {
     InvalidTransition(TerminalTransitionError),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProjectAgentLaunchError {
+    Ownership(OwnershipError),
+    InvalidAgentRunTransition(AgentRunTransitionError),
+    TerminalDoesNotMatchLaunchSpec,
+}
+
+impl From<OwnershipError> for ProjectAgentLaunchError {
+    fn from(error: OwnershipError) -> Self {
+        Self::Ownership(error)
+    }
+}
+
+impl From<AgentRunTransitionError> for ProjectAgentLaunchError {
+    fn from(error: AgentRunTransitionError) -> Self {
+        Self::InvalidAgentRunTransition(error)
+    }
+}
+
 impl From<OwnershipError> for ProjectTerminalError {
     fn from(error: OwnershipError) -> Self {
         Self::Ownership(error)
@@ -632,6 +699,26 @@ fn agent_run_status_is_active(status: AgentRunStatus) -> bool {
         status,
         AgentRunStatus::Preparing | AgentRunStatus::Running | AgentRunStatus::AwaitingApproval
     )
+}
+
+fn terminal_matches_launch_spec(terminal: &TerminalSession, plan: &AgentRunLaunchPlan) -> bool {
+    let spec = &plan.terminal_launch_spec;
+
+    terminal.project_id == spec.project_id
+        && terminal.kind == spec.kind
+        && terminal.title == spec.title
+        && terminal.cwd == spec.cwd
+        && terminal.command_line_summary == spec.command_line_summary
+}
+
+fn terminal_environment_policy_ref(policy: &TerminalEnvironmentPolicy) -> Option<String> {
+    match policy {
+        TerminalEnvironmentPolicy::Minimal => None,
+        TerminalEnvironmentPolicy::Named(name) => Some(name.clone()),
+        TerminalEnvironmentPolicy::ExplicitAllowlist(names) => {
+            Some(format!("explicit allowlist: {}", names.join(", ")))
+        }
+    }
 }
 
 fn len_as_u32(len: usize) -> u32 {

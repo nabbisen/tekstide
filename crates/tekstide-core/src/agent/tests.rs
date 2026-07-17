@@ -2,15 +2,18 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::domain::AgentCompatibilityLevel;
-use crate::project::{ProjectId, ProjectSession};
+use crate::domain::{
+    AgentCompatibilityLevel, AgentRunStatus, OwnershipError, TerminalKind, TerminalSession,
+};
+use crate::project::{ProjectAgentLaunchError, ProjectId, ProjectSession};
+use crate::runtime::terminal::TerminalEnvironmentPolicy;
 use crate::security::{BoundedTranscriptRetention, TranscriptPrivacyPolicy};
 
 use super::{
-    AgentRunLaunchRequest, AgentRunLaunchValidationError, AgentRunLaunchValidator,
-    AiCliAdapterCapabilities, AiCliEnvironmentPolicy, AiCliExecutable, AiCliExecutableProvenance,
-    AiCliProfile, AiCliProfileSource, AiCliPromptPolicy, AiCliWorkspaceDiscoveryPolicy,
-    ExecutableLookupPath,
+    AgentRunLaunchPlan, AgentRunLaunchRequest, AgentRunLaunchValidationError,
+    AgentRunLaunchValidator, AiCliAdapterCapabilities, AiCliEnvironmentPolicy, AiCliExecutable,
+    AiCliExecutableProvenance, AiCliProfile, AiCliProfileSource, AiCliPromptPolicy,
+    AiCliWorkspaceDiscoveryPolicy, ExecutableLookupPath,
 };
 
 #[test]
@@ -345,6 +348,190 @@ fn launch_validation_rejects_cross_project_and_cwd_escape() {
     cleanup_root(bin);
 }
 
+#[test]
+fn launch_plan_builds_ready_agent_run_and_matching_terminal_spec() {
+    let root = test_root("agent-plan-root");
+    let bin = test_root("agent-plan-bin");
+    let executable = executable_file(&bin, "ai-cli");
+    let project = restricted_project(ProjectId::for_test(1), &root);
+    let mut profile = built_in_profile(&executable);
+    profile.environment_policy = AiCliEnvironmentPolicy::Named("agent-minimal".to_owned());
+    let request = request_for(&project, &profile);
+    let validation = AgentRunLaunchValidator
+        .validate(&project, &profile, &request)
+        .expect("profile should validate before plan construction");
+
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Built-in AI")
+        .expect("validated launch should create a plan");
+
+    assert_eq!(plan.spec.project_id, project.id().clone());
+    assert_eq!(plan.agent_run.project_id, project.id().clone());
+    assert_eq!(plan.agent_run.profile_id, "builtin-ai");
+    assert_eq!(plan.agent_run.status, AgentRunStatus::Ready);
+    assert_eq!(plan.agent_run.terminal_id, None);
+    assert_eq!(plan.terminal_launch_spec.project_id, project.id().clone());
+    assert_eq!(plan.terminal_launch_spec.kind, TerminalKind::Supervised);
+    assert_eq!(plan.terminal_launch_spec.cwd, root.canonicalize().unwrap());
+    assert_eq!(
+        plan.terminal_launch_spec.shell,
+        executable.canonicalize().unwrap()
+    );
+    assert_eq!(
+        plan.terminal_launch_spec.environment_policy,
+        TerminalEnvironmentPolicy::Named("agent-minimal".to_owned())
+    );
+
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
+#[test]
+fn launch_plan_preserves_distinct_explicit_environment_allowlists() {
+    let root = test_root("agent-plan-allowlist-root");
+    let bin = test_root("agent-plan-allowlist-bin");
+    let executable = executable_file(&bin, "ai-cli");
+    let project = restricted_project(ProjectId::for_test(1), &root);
+    let mut path_only_profile = built_in_profile(&executable);
+    path_only_profile.environment_policy =
+        AiCliEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned()]);
+    let mut path_home_profile = path_only_profile.clone();
+    path_home_profile.environment_policy =
+        AiCliEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned(), "HOME".to_owned()]);
+
+    let path_only_plan = launch_plan_for(&project, &path_only_profile);
+    let path_home_plan = launch_plan_for(&project, &path_home_profile);
+
+    assert_eq!(
+        path_only_plan.terminal_launch_spec.environment_policy,
+        TerminalEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned()])
+    );
+    assert_eq!(
+        path_home_plan.terminal_launch_spec.environment_policy,
+        TerminalEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned(), "HOME".to_owned()])
+    );
+    assert_ne!(
+        path_only_plan.terminal_launch_spec.environment_policy,
+        path_home_plan.terminal_launch_spec.environment_policy
+    );
+
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
+#[test]
+fn project_session_attaches_launch_plan_to_matching_terminal() {
+    let root = test_root("agent-attach-root");
+    let bin = test_root("agent-attach-bin");
+    let executable = executable_file(&bin, "ai-cli");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let mut profile = built_in_profile(&executable);
+    profile.environment_policy = AiCliEnvironmentPolicy::Named("agent-minimal".to_owned());
+    let plan = launch_plan_for(&project, &profile);
+    let terminal = terminal_from_plan(&plan);
+    let terminal_id = terminal.id.clone();
+    let agent_run_id = plan.agent_run.id.clone();
+
+    let attached_agent_run_id = project
+        .attach_agent_launch_plan(plan, terminal)
+        .expect("matching plan and terminal should attach");
+
+    assert_eq!(attached_agent_run_id, agent_run_id);
+    assert_eq!(project.terminal_sessions().len(), 1);
+    assert_eq!(project.agent_runs().len(), 1);
+    let run = &project.agent_runs()[0];
+    assert_eq!(run.id, agent_run_id);
+    assert_eq!(run.status, AgentRunStatus::Ready);
+    assert_eq!(run.terminal_id, Some(terminal_id));
+    assert_eq!(
+        project.terminal_sessions()[0].environment_policy_ref,
+        Some("agent-minimal".to_owned())
+    );
+    assert_eq!(project.runtime_summary().agent_run_count, Some(1));
+    assert_eq!(project.runtime_summary().terminal_count, Some(1));
+
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
+#[test]
+fn project_session_records_explicit_environment_allowlist_metadata() {
+    let root = test_root("agent-attach-allowlist-root");
+    let bin = test_root("agent-attach-allowlist-bin");
+    let executable = executable_file(&bin, "ai-cli");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let mut profile = built_in_profile(&executable);
+    profile.environment_policy =
+        AiCliEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned(), "HOME".to_owned()]);
+    let plan = launch_plan_for(&project, &profile);
+    let terminal = terminal_from_plan(&plan);
+
+    project
+        .attach_agent_launch_plan(plan, terminal)
+        .expect("explicit allowlist launch plan should attach");
+
+    assert_eq!(
+        project.terminal_sessions()[0].environment_policy_ref,
+        Some("explicit allowlist: PATH, HOME".to_owned())
+    );
+
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
+#[test]
+fn project_session_rejects_mismatched_terminal_without_partial_attachment() {
+    let root = test_root("agent-attach-mismatch-root");
+    let bin = test_root("agent-attach-mismatch-bin");
+    let executable = executable_file(&bin, "ai-cli");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(&executable);
+    let plan = launch_plan_for(&project, &profile);
+    let mut terminal = terminal_from_plan(&plan);
+    terminal.command_line_summary = "different command".to_owned();
+
+    let error = project
+        .attach_agent_launch_plan(plan, terminal)
+        .expect_err("terminal metadata must match launch spec");
+
+    assert_eq!(
+        error,
+        ProjectAgentLaunchError::TerminalDoesNotMatchLaunchSpec
+    );
+    assert!(project.terminal_sessions().is_empty());
+    assert!(project.agent_runs().is_empty());
+
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
+#[test]
+fn project_session_rejects_duplicate_launch_plan_without_extra_attachment() {
+    let root = test_root("agent-attach-duplicate-root");
+    let bin = test_root("agent-attach-duplicate-bin");
+    let executable = executable_file(&bin, "ai-cli");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(&executable);
+    let plan = launch_plan_for(&project, &profile);
+    let terminal = terminal_from_plan(&plan);
+
+    project
+        .attach_agent_launch_plan(plan.clone(), terminal.clone())
+        .expect("first launch plan attachment should succeed");
+    let error = project
+        .attach_agent_launch_plan(plan, terminal)
+        .expect_err("duplicate plan attachment must be rejected");
+
+    assert_eq!(
+        error,
+        ProjectAgentLaunchError::Ownership(OwnershipError::DuplicateAttachment)
+    );
+    assert_eq!(project.terminal_sessions().len(), 1);
+    assert_eq!(project.agent_runs().len(), 1);
+
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
 fn built_in_profile(executable: &Path) -> AiCliProfile {
     let mut profile = AiCliProfile::new(
         "builtin-ai",
@@ -361,6 +548,25 @@ fn built_in_profile(executable: &Path) -> AiCliProfile {
             .to_owned(),
     };
     profile
+}
+
+fn launch_plan_for(project: &ProjectSession, profile: &AiCliProfile) -> AgentRunLaunchPlan {
+    let request = request_for(project, profile);
+    let validation = AgentRunLaunchValidator
+        .validate(project, profile, &request)
+        .expect("profile should validate before launch plan creation");
+    AgentRunLaunchPlan::from_validation(validation, "Built-in AI")
+        .expect("validated launch should produce a launch plan")
+}
+
+fn terminal_from_plan(plan: &AgentRunLaunchPlan) -> TerminalSession {
+    TerminalSession::new(
+        plan.terminal_launch_spec.project_id.clone(),
+        plan.terminal_launch_spec.kind,
+        plan.terminal_launch_spec.title.clone(),
+        plan.terminal_launch_spec.cwd.clone(),
+        plan.terminal_launch_spec.command_line_summary.clone(),
+    )
 }
 
 fn request_for(project: &ProjectSession, profile: &AiCliProfile) -> AgentRunLaunchRequest {

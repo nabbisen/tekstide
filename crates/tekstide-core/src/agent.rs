@@ -2,8 +2,8 @@ mod launch;
 mod profile;
 
 pub use launch::{
-    AgentLaunchSummary, AgentRunLaunchRequest, AgentRunLaunchValidation,
-    AgentRunLaunchValidationError, AgentRunLaunchValidator,
+    AgentLaunchSummary, AgentRunLaunchPlan, AgentRunLaunchRequest, AgentRunLaunchSpec,
+    AgentRunLaunchValidation, AgentRunLaunchValidationError, AgentRunLaunchValidator,
 };
 pub use profile::{
     AiCliAdapterCapabilities, AiCliEnvironmentPolicy, AiCliExecutable, AiCliExecutableProvenance,

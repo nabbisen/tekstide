@@ -2,8 +2,9 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use crate::domain::AgentCompatibilityLevel;
+use crate::domain::{AgentCompatibilityLevel, AgentRun, AgentRunStatus, AgentRunTransitionError};
 use crate::project::{ProjectId, ProjectSession, WorkspaceTrust};
+use crate::runtime::terminal::{TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec};
 use crate::security::is_restricted_mode;
 
 use super::profile::{
@@ -44,7 +45,79 @@ pub struct AgentRunLaunchValidation {
     pub compatibility_level: AgentCompatibilityLevel,
     pub prompt_summary: String,
     pub environment_summary: AgentLaunchSummary,
+    pub terminal_environment_policy: TerminalEnvironmentPolicy,
     pub workspace_discovery_summary: AgentLaunchSummary,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentRunLaunchSpec {
+    pub project_id: ProjectId,
+    pub profile_id: String,
+    pub executable_path: PathBuf,
+    pub executable_provenance: AiCliExecutableProvenance,
+    pub cwd: PathBuf,
+    pub compatibility_level: AgentCompatibilityLevel,
+    pub prompt_summary: String,
+    pub environment_summary: AgentLaunchSummary,
+    pub terminal_environment_policy: TerminalEnvironmentPolicy,
+    pub workspace_discovery_summary: AgentLaunchSummary,
+}
+
+impl From<AgentRunLaunchValidation> for AgentRunLaunchSpec {
+    fn from(validation: AgentRunLaunchValidation) -> Self {
+        Self {
+            project_id: validation.project_id,
+            profile_id: validation.profile_id,
+            executable_path: validation.executable_path,
+            executable_provenance: validation.executable_provenance,
+            cwd: validation.cwd,
+            compatibility_level: validation.compatibility_level,
+            prompt_summary: validation.prompt_summary,
+            environment_summary: validation.environment_summary,
+            terminal_environment_policy: validation.terminal_environment_policy,
+            workspace_discovery_summary: validation.workspace_discovery_summary,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentRunLaunchPlan {
+    pub spec: AgentRunLaunchSpec,
+    pub agent_run: AgentRun,
+    pub terminal_launch_spec: TerminalLaunchSpec,
+}
+
+impl AgentRunLaunchPlan {
+    pub fn from_validation(
+        validation: AgentRunLaunchValidation,
+        terminal_title: impl Into<String>,
+    ) -> Result<Self, AgentRunTransitionError> {
+        let spec = AgentRunLaunchSpec::from(validation);
+        let mut agent_run = AgentRun::draft(
+            spec.project_id.clone(),
+            spec.profile_id.clone(),
+            spec.prompt_summary.clone(),
+            spec.compatibility_level,
+        );
+        agent_run.transition_to(AgentRunStatus::Ready)?;
+
+        let terminal_launch_spec = TerminalLaunchSpec {
+            project_id: spec.project_id.clone(),
+            title: terminal_title.into(),
+            cwd: spec.cwd.clone(),
+            shell: spec.executable_path.clone(),
+            command_line_summary: spec.executable_path.display().to_string(),
+            environment_policy: spec.terminal_environment_policy.clone(),
+            kind: terminal_kind_from_compatibility(spec.compatibility_level),
+            dimensions: TerminalDimensions::default(),
+        };
+
+        Ok(Self {
+            spec,
+            agent_run,
+            terminal_launch_spec,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -162,6 +235,7 @@ impl AgentRunLaunchValidator {
             compatibility_level: profile.compatibility_level,
             prompt_summary: request.prompt_summary.clone(),
             environment_summary: environment_summary(&profile.environment_policy),
+            terminal_environment_policy: terminal_environment_policy(&profile.environment_policy),
             workspace_discovery_summary: AgentLaunchSummary::new(
                 profile.workspace_discovery_policy.evidence(),
             ),
@@ -403,5 +477,30 @@ fn environment_summary(environment_policy: &AiCliEnvironmentPolicy) -> AgentLaun
         AiCliEnvironmentPolicy::WorkspaceLocalEnvFile(_) => {
             AgentLaunchSummary::new("workspace-local environment file")
         }
+    }
+}
+
+fn terminal_environment_policy(
+    environment_policy: &AiCliEnvironmentPolicy,
+) -> TerminalEnvironmentPolicy {
+    match environment_policy {
+        AiCliEnvironmentPolicy::Minimal => TerminalEnvironmentPolicy::Minimal,
+        AiCliEnvironmentPolicy::Named(name) => TerminalEnvironmentPolicy::Named(name.clone()),
+        AiCliEnvironmentPolicy::ExplicitAllowlist(names) => {
+            TerminalEnvironmentPolicy::ExplicitAllowlist(names.clone())
+        }
+        AiCliEnvironmentPolicy::WorkspaceLocalEnvFile(_) => {
+            TerminalEnvironmentPolicy::Named("workspace-local environment file".to_owned())
+        }
+    }
+}
+
+fn terminal_kind_from_compatibility(
+    compatibility_level: AgentCompatibilityLevel,
+) -> crate::domain::TerminalKind {
+    match compatibility_level {
+        AgentCompatibilityLevel::Plain => crate::domain::TerminalKind::Plain,
+        AgentCompatibilityLevel::Supervised => crate::domain::TerminalKind::Supervised,
+        AgentCompatibilityLevel::Managed => crate::domain::TerminalKind::Managed,
     }
 }

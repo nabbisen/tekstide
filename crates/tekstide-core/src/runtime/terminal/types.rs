@@ -40,6 +40,7 @@ impl TerminalLaunchSpec {
 pub enum TerminalEnvironmentPolicy {
     Minimal,
     Named(String),
+    ExplicitAllowlist(Vec<String>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
