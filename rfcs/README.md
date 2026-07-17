@@ -16,7 +16,9 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 ## Proposed
 
-No proposed RFCs.
+| RFC | Title | Status |
+| --- | --- | --- |
+| 010 | [AgentRun Launch Model and AI CLI Profiles](./proposed/010-agentrun-launch-model-and-ai-cli-profiles.md) | Proposed |
 
 ## Handoffs
 
@@ -31,6 +33,7 @@ No proposed RFCs.
 | 007 | [Runtime Substrate and PTY Feasibility Gate](./handoffs/007-runtime-substrate-pty-feasibility/README.md) |
 | 008 | [TerminalSession and Process Lifecycle](./handoffs/008-terminalsession-process-lifecycle/README.md) |
 | 009 | [Terminal Security Boundary](./handoffs/009-terminal-security-boundary/README.md) |
+| 010 | [AgentRun Launch Model and AI CLI Profiles](./handoffs/010-agentrun-launch-model-and-ai-cli-profiles/README.md) |
 
 ## Implemented
 
