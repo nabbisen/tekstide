@@ -37,30 +37,72 @@ impl AgentRunLaunchRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentRunLaunchValidation {
-    pub project_id: ProjectId,
-    pub profile_id: String,
-    pub executable_path: PathBuf,
-    pub executable_provenance: AiCliExecutableProvenance,
-    pub cwd: PathBuf,
-    pub compatibility_level: AgentCompatibilityLevel,
-    pub prompt_summary: String,
-    pub environment_summary: AgentLaunchSummary,
-    pub terminal_environment_policy: TerminalEnvironmentPolicy,
-    pub workspace_discovery_summary: AgentLaunchSummary,
+    project_id: ProjectId,
+    profile_id: String,
+    executable_path: PathBuf,
+    executable_provenance: AiCliExecutableProvenance,
+    cwd: PathBuf,
+    compatibility_level: AgentCompatibilityLevel,
+    prompt_summary: String,
+    environment_summary: AgentLaunchSummary,
+    terminal_environment_policy: TerminalEnvironmentPolicy,
+    workspace_discovery_summary: AgentLaunchSummary,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentRunLaunchSpec {
-    pub project_id: ProjectId,
-    pub profile_id: String,
-    pub executable_path: PathBuf,
-    pub executable_provenance: AiCliExecutableProvenance,
-    pub cwd: PathBuf,
-    pub compatibility_level: AgentCompatibilityLevel,
-    pub prompt_summary: String,
-    pub environment_summary: AgentLaunchSummary,
-    pub terminal_environment_policy: TerminalEnvironmentPolicy,
-    pub workspace_discovery_summary: AgentLaunchSummary,
+    project_id: ProjectId,
+    profile_id: String,
+    executable_path: PathBuf,
+    executable_provenance: AiCliExecutableProvenance,
+    cwd: PathBuf,
+    compatibility_level: AgentCompatibilityLevel,
+    prompt_summary: String,
+    environment_summary: AgentLaunchSummary,
+    terminal_environment_policy: TerminalEnvironmentPolicy,
+    workspace_discovery_summary: AgentLaunchSummary,
+}
+
+impl AgentRunLaunchValidation {
+    pub fn project_id(&self) -> &ProjectId {
+        &self.project_id
+    }
+
+    pub fn profile_id(&self) -> &str {
+        &self.profile_id
+    }
+
+    pub fn executable_path(&self) -> &Path {
+        &self.executable_path
+    }
+
+    pub fn executable_provenance(&self) -> AiCliExecutableProvenance {
+        self.executable_provenance
+    }
+
+    pub fn cwd(&self) -> &Path {
+        &self.cwd
+    }
+
+    pub fn compatibility_level(&self) -> AgentCompatibilityLevel {
+        self.compatibility_level
+    }
+
+    pub fn prompt_summary(&self) -> &str {
+        &self.prompt_summary
+    }
+
+    pub fn environment_summary(&self) -> &AgentLaunchSummary {
+        &self.environment_summary
+    }
+
+    pub fn terminal_environment_policy(&self) -> &TerminalEnvironmentPolicy {
+        &self.terminal_environment_policy
+    }
+
+    pub fn workspace_discovery_summary(&self) -> &AgentLaunchSummary {
+        &self.workspace_discovery_summary
+    }
 }
 
 impl From<AgentRunLaunchValidation> for AgentRunLaunchSpec {
@@ -82,9 +124,9 @@ impl From<AgentRunLaunchValidation> for AgentRunLaunchSpec {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentRunLaunchPlan {
-    pub spec: AgentRunLaunchSpec,
-    pub agent_run: AgentRun,
-    pub terminal_launch_spec: TerminalLaunchSpec,
+    spec: AgentRunLaunchSpec,
+    agent_run: AgentRun,
+    terminal_launch_spec: TerminalLaunchSpec,
 }
 
 impl AgentRunLaunchPlan {
@@ -101,22 +143,92 @@ impl AgentRunLaunchPlan {
         );
         agent_run.transition_to(AgentRunStatus::Ready)?;
 
-        let terminal_launch_spec = TerminalLaunchSpec {
-            project_id: spec.project_id.clone(),
-            title: terminal_title.into(),
-            cwd: spec.cwd.clone(),
-            shell: spec.executable_path.clone(),
-            command_line_summary: spec.executable_path.display().to_string(),
-            environment_policy: spec.terminal_environment_policy.clone(),
-            kind: terminal_kind_from_compatibility(spec.compatibility_level),
-            dimensions: TerminalDimensions::default(),
-        };
+        let mut terminal_launch_spec = TerminalLaunchSpec::plain_shell(
+            spec.project_id.clone(),
+            terminal_title,
+            spec.cwd.clone(),
+            spec.executable_path.clone(),
+        );
+        terminal_launch_spec.command_line_summary = spec.executable_path.display().to_string();
+        terminal_launch_spec.environment_policy = spec.terminal_environment_policy.clone();
+        terminal_launch_spec.kind = terminal_kind_from_compatibility(spec.compatibility_level);
+        terminal_launch_spec.dimensions = TerminalDimensions::default();
+        terminal_launch_spec.authorize_validated_agent_run(spec.compatibility_level);
 
         Ok(Self {
             spec,
             agent_run,
             terminal_launch_spec,
         })
+    }
+
+    pub fn spec(&self) -> &AgentRunLaunchSpec {
+        &self.spec
+    }
+
+    pub fn agent_run(&self) -> &AgentRun {
+        &self.agent_run
+    }
+
+    pub(crate) fn terminal_launch_spec(&self) -> &TerminalLaunchSpec {
+        &self.terminal_launch_spec
+    }
+
+    pub(crate) fn terminal_launch_spec_for_runtime(&self) -> TerminalLaunchSpec {
+        self.terminal_launch_spec.clone()
+    }
+
+    pub(crate) fn transition_agent_run_to(
+        &mut self,
+        status: AgentRunStatus,
+    ) -> Result<(), AgentRunTransitionError> {
+        self.agent_run.transition_to(status)
+    }
+
+    pub(crate) fn into_parts(self) -> (AgentRunLaunchSpec, AgentRun, TerminalLaunchSpec) {
+        (self.spec, self.agent_run, self.terminal_launch_spec)
+    }
+}
+
+impl AgentRunLaunchSpec {
+    pub fn project_id(&self) -> &ProjectId {
+        &self.project_id
+    }
+
+    pub fn profile_id(&self) -> &str {
+        &self.profile_id
+    }
+
+    pub fn executable_path(&self) -> &Path {
+        &self.executable_path
+    }
+
+    pub fn executable_provenance(&self) -> AiCliExecutableProvenance {
+        self.executable_provenance
+    }
+
+    pub fn cwd(&self) -> &Path {
+        &self.cwd
+    }
+
+    pub fn compatibility_level(&self) -> AgentCompatibilityLevel {
+        self.compatibility_level
+    }
+
+    pub fn prompt_summary(&self) -> &str {
+        &self.prompt_summary
+    }
+
+    pub fn environment_summary(&self) -> &AgentLaunchSummary {
+        &self.environment_summary
+    }
+
+    pub fn terminal_environment_policy(&self) -> &TerminalEnvironmentPolicy {
+        &self.terminal_environment_policy
+    }
+
+    pub fn workspace_discovery_summary(&self) -> &AgentLaunchSummary {
+        &self.workspace_discovery_summary
     }
 }
 

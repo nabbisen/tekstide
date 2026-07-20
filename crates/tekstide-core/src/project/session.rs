@@ -1,13 +1,17 @@
 use crate::agent::AgentRunLaunchPlan;
-use crate::runtime::terminal::TerminalEnvironmentPolicy;
+use crate::runtime::terminal::{
+    LinuxTerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntimeEvent,
+    TerminationOutcome,
+};
 use std::path::PathBuf;
 
 use crate::close::{CloseResourceProviderState, CloseResourceSummary};
 use crate::content::{ExternalChangeDecision, SaveDecision, TextDocumentOpenPolicy};
 use crate::domain::{
-    AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError, ApprovalDecision, ApprovalId,
-    ApprovalRequest, AuditEvent, ChangeSet, DomainTimestamp, OwnershipError, ReviewState,
-    TerminalId, TerminalSession, TerminalStatus, TerminalTransitionError, Transcript, VisibleSlot,
+    AgentCompatibilityLevel, AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError,
+    ApprovalDecision, ApprovalId, ApprovalRequest, AuditEvent, ChangeSet, DomainTimestamp,
+    OwnershipError, ReviewState, TerminalId, TerminalKind, TerminalSession, TerminalStatus,
+    TerminalTransitionError, Transcript, VisibleSlot,
 };
 
 use super::root::{FileExplorerScanPolicy, ProjectRootHandle};
@@ -281,9 +285,9 @@ impl ProjectSession {
         plan: AgentRunLaunchPlan,
         mut terminal: TerminalSession,
     ) -> Result<AgentRunId, ProjectAgentLaunchError> {
-        self.ensure_project_member(&plan.spec.project_id)?;
-        self.ensure_project_member(&plan.terminal_launch_spec.project_id)?;
-        self.ensure_project_member(&plan.agent_run.project_id)?;
+        self.ensure_project_member(plan.spec().project_id())?;
+        self.ensure_project_member(&plan.terminal_launch_spec().project_id)?;
+        self.ensure_project_member(&plan.agent_run().project_id)?;
         self.ensure_project_member(&terminal.project_id)?;
 
         if self
@@ -298,7 +302,7 @@ impl ProjectSession {
         if self
             .agent_runs
             .iter()
-            .any(|existing| existing.id == plan.agent_run.id)
+            .any(|existing| existing.id == plan.agent_run().id)
         {
             return Err(ProjectAgentLaunchError::Ownership(
                 OwnershipError::DuplicateAttachment,
@@ -308,10 +312,10 @@ impl ProjectSession {
             return Err(ProjectAgentLaunchError::TerminalDoesNotMatchLaunchSpec);
         }
 
-        let mut agent_run = plan.agent_run;
+        let (_, mut agent_run, terminal_launch_spec) = plan.into_parts();
         agent_run.attach_terminal(&terminal)?;
         terminal.environment_policy_ref =
-            terminal_environment_policy_ref(&plan.terminal_launch_spec.environment_policy);
+            terminal_environment_policy_ref(&terminal_launch_spec.environment_policy);
         let agent_run_id = agent_run.id.clone();
 
         self.terminal_sessions.push(terminal);
@@ -320,6 +324,59 @@ impl ProjectSession {
         self.refresh_runtime_summary_from_collections();
 
         Ok(agent_run_id)
+    }
+
+    pub fn launch_agent_run_with_runtime(
+        &mut self,
+        mut plan: AgentRunLaunchPlan,
+        runtime: &mut LinuxTerminalRuntime,
+    ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
+        self.validate_agent_launch_plan_before_runtime(&plan)?;
+
+        plan.transition_agent_run_to(AgentRunStatus::Preparing)?;
+        let (terminal, events) =
+            runtime.launch_project_shell(self, plan.terminal_launch_spec_for_runtime())?;
+        plan.transition_agent_run_to(AgentRunStatus::Running)?;
+
+        let agent_run_id = self.attach_agent_launch_plan(plan, terminal)?;
+        Ok((agent_run_id, events))
+    }
+
+    pub fn apply_agent_terminal_outcome(
+        &mut self,
+        agent_run_id: &AgentRunId,
+        terminal_id: &TerminalId,
+        outcome: &TerminationOutcome,
+    ) -> Result<(), ProjectAgentRuntimeLaunchError> {
+        self.ensure_terminal_exists(terminal_id)?;
+        self.ensure_agent_run_exists(agent_run_id)?;
+        self.ensure_agent_run_attached_to_terminal(agent_run_id, terminal_id)?;
+
+        match outcome {
+            TerminationOutcome::Exited { exit_status } => {
+                self.mark_terminal_exited(terminal_id, Some(*exit_status))?;
+                if *exit_status == 0 {
+                    self.transition_agent_run_status(agent_run_id, AgentRunStatus::Completed)?;
+                } else {
+                    self.transition_agent_run_status(agent_run_id, AgentRunStatus::Failed)?;
+                }
+            }
+            TerminationOutcome::TerminatedBySignal { .. }
+            | TerminationOutcome::KilledAfterTimeout { .. } => {
+                self.mark_terminal_exited(terminal_id, None)?;
+                self.transition_agent_run_status(agent_run_id, AgentRunStatus::Cancelled)?;
+            }
+            TerminationOutcome::OrphanedUnknown { .. } => {
+                self.transition_terminal_status(terminal_id, TerminalStatus::OrphanedUnknown)?;
+                self.transition_agent_run_status(agent_run_id, AgentRunStatus::Detached)?;
+            }
+            TerminationOutcome::Failed { .. } => {
+                self.transition_terminal_status(terminal_id, TerminalStatus::Failed)?;
+                self.transition_agent_run_status(agent_run_id, AgentRunStatus::Failed)?;
+            }
+        }
+
+        Ok(())
     }
 
     pub fn add_approval_request(
@@ -587,6 +644,70 @@ impl ProjectSession {
             .ok_or(OwnershipError::MissingReference)
     }
 
+    fn agent_run_mut(
+        &mut self,
+        agent_run_id: &AgentRunId,
+    ) -> Result<&mut AgentRun, OwnershipError> {
+        self.agent_runs
+            .iter_mut()
+            .find(|run| run.id == *agent_run_id)
+            .ok_or(OwnershipError::MissingReference)
+    }
+
+    fn ensure_agent_run_attached_to_terminal(
+        &self,
+        agent_run_id: &AgentRunId,
+        terminal_id: &TerminalId,
+    ) -> Result<(), ProjectAgentRuntimeLaunchError> {
+        let run = self
+            .agent_runs
+            .iter()
+            .find(|run| run.id == *agent_run_id)
+            .ok_or(OwnershipError::MissingReference)?;
+
+        if run.terminal_id.as_ref() == Some(terminal_id) {
+            Ok(())
+        } else {
+            Err(ProjectAgentRuntimeLaunchError::AgentTerminalMismatch)
+        }
+    }
+
+    fn transition_agent_run_status(
+        &mut self,
+        agent_run_id: &AgentRunId,
+        status: AgentRunStatus,
+    ) -> Result<(), ProjectAgentRuntimeLaunchError> {
+        let run = self.agent_run_mut(agent_run_id)?;
+        run.transition_to(status)?;
+        self.record_activity();
+        self.refresh_runtime_summary_from_collections();
+        Ok(())
+    }
+
+    fn validate_agent_launch_plan_before_runtime(
+        &self,
+        plan: &AgentRunLaunchPlan,
+    ) -> Result<(), ProjectAgentLaunchError> {
+        self.ensure_project_member(plan.spec().project_id())?;
+        self.ensure_project_member(&plan.terminal_launch_spec().project_id)?;
+        self.ensure_project_member(&plan.agent_run().project_id)?;
+        if self
+            .agent_runs
+            .iter()
+            .any(|existing| existing.id == plan.agent_run().id)
+        {
+            return Err(ProjectAgentLaunchError::Ownership(
+                OwnershipError::DuplicateAttachment,
+            ));
+        }
+        if plan.terminal_launch_spec().kind
+            != terminal_kind_from_compatibility(plan.agent_run().compatibility_level)
+        {
+            return Err(ProjectAgentLaunchError::TerminalDoesNotMatchLaunchSpec);
+        }
+        Ok(())
+    }
+
     fn ensure_approval_exists(&self, approval_id: &ApprovalId) -> Result<(), OwnershipError> {
         self.approval_requests
             .iter()
@@ -619,6 +740,9 @@ impl ProjectSession {
                     .agent_runs
                     .iter()
                     .filter(|run| agent_run_status_is_active(run.status))
+                    .filter(|run| {
+                        !self.agent_run_has_terminal_with_status(run, terminal_status_is_active)
+                    })
                     .count(),
         );
         let failed_processes = len_as_u32(
@@ -630,6 +754,11 @@ impl ProjectSession {
                     .agent_runs
                     .iter()
                     .filter(|run| run.status == AgentRunStatus::Failed)
+                    .filter(|run| {
+                        !self.agent_run_has_terminal_with_status(run, |status| {
+                            status == TerminalStatus::Failed
+                        })
+                    })
                     .count(),
         );
         let dirty_files = self.runtime_summary.dirty_files;
@@ -645,6 +774,18 @@ impl ProjectSession {
         self.runtime_summary.close_resources.pending_approvals = pending_approvals;
         self.runtime_summary.close_resources.review_ready_changes = review_ready_changes;
     }
+
+    fn agent_run_has_terminal_with_status(
+        &self,
+        run: &AgentRun,
+        matches_status: impl Fn(TerminalStatus) -> bool,
+    ) -> bool {
+        run.terminal_id.as_ref().is_some_and(|terminal_id| {
+            self.terminal_sessions
+                .iter()
+                .any(|terminal| terminal.id == *terminal_id && matches_status(terminal.status()))
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -658,6 +799,45 @@ pub enum ProjectAgentLaunchError {
     Ownership(OwnershipError),
     InvalidAgentRunTransition(AgentRunTransitionError),
     TerminalDoesNotMatchLaunchSpec,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProjectAgentRuntimeLaunchError {
+    Launch(ProjectAgentLaunchError),
+    TerminalLaunch(TerminalLaunchError),
+    Terminal(ProjectTerminalError),
+    InvalidAgentRunTransition(AgentRunTransitionError),
+    AgentTerminalMismatch,
+}
+
+impl From<ProjectAgentLaunchError> for ProjectAgentRuntimeLaunchError {
+    fn from(error: ProjectAgentLaunchError) -> Self {
+        Self::Launch(error)
+    }
+}
+
+impl From<TerminalLaunchError> for ProjectAgentRuntimeLaunchError {
+    fn from(error: TerminalLaunchError) -> Self {
+        Self::TerminalLaunch(error)
+    }
+}
+
+impl From<ProjectTerminalError> for ProjectAgentRuntimeLaunchError {
+    fn from(error: ProjectTerminalError) -> Self {
+        Self::Terminal(error)
+    }
+}
+
+impl From<OwnershipError> for ProjectAgentRuntimeLaunchError {
+    fn from(error: OwnershipError) -> Self {
+        Self::Launch(ProjectAgentLaunchError::Ownership(error))
+    }
+}
+
+impl From<AgentRunTransitionError> for ProjectAgentRuntimeLaunchError {
+    fn from(error: AgentRunTransitionError) -> Self {
+        Self::InvalidAgentRunTransition(error)
+    }
 }
 
 impl From<OwnershipError> for ProjectAgentLaunchError {
@@ -702,7 +882,7 @@ fn agent_run_status_is_active(status: AgentRunStatus) -> bool {
 }
 
 fn terminal_matches_launch_spec(terminal: &TerminalSession, plan: &AgentRunLaunchPlan) -> bool {
-    let spec = &plan.terminal_launch_spec;
+    let spec = plan.terminal_launch_spec();
 
     terminal.project_id == spec.project_id
         && terminal.kind == spec.kind
@@ -718,6 +898,14 @@ fn terminal_environment_policy_ref(policy: &TerminalEnvironmentPolicy) -> Option
         TerminalEnvironmentPolicy::ExplicitAllowlist(names) => {
             Some(format!("explicit allowlist: {}", names.join(", ")))
         }
+    }
+}
+
+fn terminal_kind_from_compatibility(level: AgentCompatibilityLevel) -> TerminalKind {
+    match level {
+        AgentCompatibilityLevel::Plain => TerminalKind::Plain,
+        AgentCompatibilityLevel::Supervised => TerminalKind::Supervised,
+        AgentCompatibilityLevel::Managed => TerminalKind::Managed,
     }
 }
 

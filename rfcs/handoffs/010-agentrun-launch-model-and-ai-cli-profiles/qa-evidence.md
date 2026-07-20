@@ -102,7 +102,7 @@ Review follow-up:
 
 ### PR-010-C — AgentRun Launch Spec and Terminal Attachment
 
-Status: ready for implementation review.
+Status: ready for focused implementation re-review.
 
 Implementation:
 
@@ -150,10 +150,109 @@ Review follow-up:
 - `.git-exclude/reviewed/tekstide-review-request-069-rfc010-pr010c-environment-policy-rereview-response.md` accepted PR-010-C with notes on 2026-07-18.
 - Carry forward before broader UI or persistence claims: bound the human-readable `TerminalSession.environment_policy_ref` summary for explicit allowlists. Runtime application of `TerminalEnvironmentPolicy::ExplicitAllowlist` remains a PR-010-D gate.
 
+### PR-010-D — Runtime-Backed AgentRun Launch Lifecycle
+
+Status: ready for implementation review.
+
+Implementation:
+
+- `LinuxTerminalRuntime::launch_project_shell` now accepts AgentRun terminal kinds through the existing PTY launch path.
+- `LinuxTerminalRuntime` rejects non-minimal `TerminalEnvironmentPolicy` values before process start instead of silently ignoring them.
+- `TerminalLaunchSpec` now carries private launch-authority metadata so plain shell callers cannot mint AgentRun labels by mutating `kind`.
+- Added `ProjectSession::launch_agent_run_with_runtime`.
+- Added `ProjectSession::apply_agent_terminal_outcome`.
+- Added `ProjectAgentRuntimeLaunchError`.
+- Runtime-backed launch:
+  - validates AgentRun launch ownership and duplicate AgentRun references before process start;
+  - transitions the AgentRun from `Ready` to `Preparing`;
+  - starts the matching `TerminalLaunchSpec` through `LinuxTerminalRuntime`;
+  - transitions the AgentRun from `Preparing` to `Running`;
+  - attaches the runtime-created TerminalSession and AgentRun to ProjectSession collections.
+- Runtime summaries count an attached AgentRun and its owning active TerminalSession as one running process.
+- Terminal outcomes map into AgentRun lifecycle summaries:
+  - exit status `0` maps to AgentRun `Completed`;
+  - nonzero exit maps to AgentRun `Failed`;
+  - signal termination and timeout kill map to AgentRun `Cancelled`;
+  - orphaned-unknown terminal state maps to AgentRun `Detached`;
+  - terminal failure maps to AgentRun `Failed`.
+
+Security/privacy notes:
+
+- Unsupported environment policies fail closed before process spawn.
+- Raw terminal launch specs cannot claim `TerminalKind::Supervised` or `TerminalKind::Managed`; those kinds require the validated AgentRun launch-authority path.
+- Explicit allowlist variable names are preserved structurally, but the runtime does not apply or read environment values for that policy yet.
+- Runtime handles and process identifiers stay runtime-only; they are not persisted into AgentRun or TerminalSession metadata.
+- No transcript bytes, terminal output content, environment values, durable audit records, GUI surfaces, or command approval behavior are introduced.
+
+Observed gates on 2026-07-18 before review request 070:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core agent -- --quiet` passed; 37 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 244 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `git diff --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
+Review focus:
+
+- Whether routing `TerminalKind::Supervised` and `TerminalKind::Managed` through the current Linux terminal runtime keeps the labels honest for PR-010-D.
+- Whether pre-runtime validation plus runtime-created terminal metadata is sufficient to avoid ordinary partial attachment cases.
+- Whether unsupported non-minimal environment policies should remain fail-closed until a reviewed runtime application model exists.
+- Whether terminal outcome mapping is truthful enough for the M5 lifecycle boundary.
+- Whether process handles and process identifiers remain outside persisted metadata.
+
+Review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-070-rfc010-pr010d-runtime-launch-lifecycle-response.md` requested changes because:
+  - one runtime-backed AgentRun attached to one TerminalSession was double-counted as two running processes;
+  - raw `TerminalLaunchSpec` mutation could launch `TerminalKind::Managed` without AgentRun profile capability evidence.
+- Fixed runtime summary calculation so attached active AgentRuns are counted through their owning active TerminalSession only once.
+- Added a regression proving one runtime-backed AgentRun reports one running process and one close resource.
+- Added private `TerminalLaunchAuthority` metadata to `TerminalLaunchSpec`.
+- Added crate-only `TerminalLaunchSpec::authorize_validated_agent_run`.
+- `LinuxTerminalRuntime` now rejects raw non-Plain terminal specs whose launch authority is still `PlainShell`.
+- `ProjectSession::validate_agent_launch_plan_before_runtime` now rejects launch plans whose terminal kind no longer matches the validated AgentRun compatibility level.
+- Added regressions proving:
+  - raw Managed terminal launch is rejected;
+  - validated Managed AgentRun launch is accepted only through the AgentRun launch path with structured-action capability evidence;
+  - `TerminatedBySignal` maps to AgentRun `Cancelled`;
+  - `KilledAfterTimeout` maps to AgentRun `Cancelled`;
+  - `OrphanedUnknown` maps to AgentRun `Detached`;
+  - terminal `Failed` maps to AgentRun `Failed`.
+
+Observed gates on 2026-07-18 after review request 070 fixes:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core agent -- --quiet` passed; 43 tests passed, 0 failed.
+- `cargo test -p tekstide-core runtime::terminal -- --quiet` passed; 46 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 250 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `git diff --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
+Second review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-071-rfc010-pr010d-runtime-launch-lifecycle-rereview-response.md` requested changes because an already-authorized non-Managed `AgentRunLaunchPlan` still exposed mutable public fields that could be changed into a Managed terminal launch before runtime start.
+- Made `AgentRunLaunchValidation`, `AgentRunLaunchSpec`, and `AgentRunLaunchPlan` internals private.
+- Added read-only accessors for validation/spec/plan metadata.
+- Kept runtime-only AgentRun status transitions and terminal launch-spec extraction crate-local to ProjectSession orchestration.
+- Changed `TerminalLaunchAuthority::ValidatedAgentRun` to carry the validated `AgentCompatibilityLevel`.
+- `LinuxTerminalRuntime` now checks requested terminal kind against the private validated compatibility embedded in the terminal launch authority.
+- Added a regression proving an authorized Supervised terminal spec clone cannot be mutated into a Managed runtime launch.
+
+Observed gates on 2026-07-21 after review request 071 fixes:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core agent -- --quiet` passed; 44 tests passed, 0 failed.
+- `cargo test -p tekstide-core runtime::terminal -- --quiet` passed; 46 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 251 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `git diff --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
 ## Known Limitations
 
-- PR-010-C does not launch an AgentRun process.
-- PR-010-C does not start a `TerminalLaunchSpec`.
-- PR-010-C does not map runtime lifecycle events.
-- PR-010-C does not implement active-file safety.
+- PR-010-D launches through the Linux PTY runtime, but it does not implement active-file safety.
+- PR-010-D does not apply `TerminalEnvironmentPolicy::ExplicitAllowlist` or named policies at runtime; those policies are rejected before process start.
+- PR-010-D does not add post-spawn cleanup machinery for unexpected attachment-invariant failures after `LinuxTerminalRuntime` returns a fresh terminal.
 - No transcript retention, durable audit storage, GUI launch/review surfaces, general command approval, provider-specific cloud integration, full watcher behavior, or multi-document conflict UI is claimed by RFC-010 design acceptance.

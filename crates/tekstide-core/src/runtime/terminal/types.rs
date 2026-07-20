@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use crate::domain::{TerminalId, TerminalKind, TerminalStatus, VisibleSlot};
+use crate::domain::{
+    AgentCompatibilityLevel, TerminalId, TerminalKind, TerminalStatus, VisibleSlot,
+};
 use crate::project::ProjectId;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13,6 +15,7 @@ pub struct TerminalLaunchSpec {
     pub environment_policy: TerminalEnvironmentPolicy,
     pub kind: TerminalKind,
     pub dimensions: TerminalDimensions,
+    launch_authority: TerminalLaunchAuthority,
 }
 
 impl TerminalLaunchSpec {
@@ -32,7 +35,42 @@ impl TerminalLaunchSpec {
             environment_policy: TerminalEnvironmentPolicy::Minimal,
             kind: TerminalKind::Plain,
             dimensions: TerminalDimensions::default(),
+            launch_authority: TerminalLaunchAuthority::PlainShell,
         }
+    }
+
+    pub(crate) fn authorize_validated_agent_run(
+        &mut self,
+        compatibility_level: AgentCompatibilityLevel,
+    ) {
+        self.launch_authority = TerminalLaunchAuthority::ValidatedAgentRun {
+            compatibility_level,
+        };
+    }
+
+    pub(crate) fn has_launch_authority_for_kind(&self) -> bool {
+        match self.launch_authority {
+            TerminalLaunchAuthority::PlainShell => self.kind == TerminalKind::Plain,
+            TerminalLaunchAuthority::ValidatedAgentRun {
+                compatibility_level,
+            } => self.kind == terminal_kind_from_compatibility(compatibility_level),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TerminalLaunchAuthority {
+    PlainShell,
+    ValidatedAgentRun {
+        compatibility_level: AgentCompatibilityLevel,
+    },
+}
+
+fn terminal_kind_from_compatibility(level: AgentCompatibilityLevel) -> TerminalKind {
+    match level {
+        AgentCompatibilityLevel::Plain => TerminalKind::Plain,
+        AgentCompatibilityLevel::Supervised => TerminalKind::Supervised,
+        AgentCompatibilityLevel::Managed => TerminalKind::Managed,
     }
 }
 

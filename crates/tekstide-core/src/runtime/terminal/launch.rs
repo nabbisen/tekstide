@@ -8,13 +8,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::domain::{TerminalId, TerminalKind, TerminalSession, TerminalStatus};
+use crate::domain::{TerminalId, TerminalSession, TerminalStatus};
 use crate::project::{ProjectId, ProjectSession};
 
 use super::pty::{OpenPty, close_fd, resize_master};
 use super::{
-    BoundedRuntimeSummary, TerminalDimensions, TerminalLaunchSpec, TerminalOutputSummary,
-    TerminalRuntimeEvent, TerminalRuntimeHandle,
+    BoundedRuntimeSummary, TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec,
+    TerminalOutputSummary, TerminalRuntimeEvent, TerminalRuntimeHandle,
 };
 
 pub struct LinuxTerminalRuntime {
@@ -215,10 +215,11 @@ impl Default for LinuxTerminalRuntime {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TerminalLaunchError {
     CrossProject,
     UnsupportedTerminalKind,
+    UnsupportedEnvironmentPolicy { summary: BoundedRuntimeSummary },
     MissingProjectRoot { summary: BoundedRuntimeSummary },
     InvalidCwd { summary: BoundedRuntimeSummary },
     CwdEscapesProjectRoot { summary: BoundedRuntimeSummary },
@@ -249,10 +250,9 @@ fn validate_launch_spec(
     if project.id() != &spec.project_id {
         return Err(TerminalLaunchError::CrossProject);
     }
-    if spec.kind != TerminalKind::Plain {
+    if !spec.has_launch_authority_for_kind() {
         return Err(TerminalLaunchError::UnsupportedTerminalKind);
     }
-
     let root = canonical_existing_dir(project.canonical_root_path()).map_err(|summary| {
         TerminalLaunchError::MissingProjectRoot {
             summary: BoundedRuntimeSummary::new(summary),
@@ -281,7 +281,28 @@ fn validate_launch_spec(
         });
     }
 
+    if let Some(summary) = unsupported_environment_policy_summary(&spec.environment_policy) {
+        return Err(TerminalLaunchError::UnsupportedEnvironmentPolicy { summary });
+    }
+
     Ok(())
+}
+
+fn unsupported_environment_policy_summary(
+    policy: &TerminalEnvironmentPolicy,
+) -> Option<BoundedRuntimeSummary> {
+    match policy {
+        TerminalEnvironmentPolicy::Minimal => None,
+        TerminalEnvironmentPolicy::Named(name) => Some(BoundedRuntimeSummary::new(format!(
+            "named terminal environment policy is not applied by the Linux runtime yet: {name}"
+        ))),
+        TerminalEnvironmentPolicy::ExplicitAllowlist(names) => {
+            Some(BoundedRuntimeSummary::new(format!(
+                "explicit terminal environment allowlist is not applied by the Linux runtime yet: {}",
+                names.join(", ")
+            )))
+        }
+    }
 }
 
 fn shell_is_executable_file(path: &Path) -> bool {

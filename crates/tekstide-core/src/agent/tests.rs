@@ -1,12 +1,18 @@
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::domain::{
-    AgentCompatibilityLevel, AgentRunStatus, OwnershipError, TerminalKind, TerminalSession,
+    AgentCompatibilityLevel, AgentRunId, AgentRunStatus, OwnershipError, TerminalId, TerminalKind,
+    TerminalSession, TerminalStatus,
 };
-use crate::project::{ProjectAgentLaunchError, ProjectId, ProjectSession};
-use crate::runtime::terminal::TerminalEnvironmentPolicy;
+use crate::project::{
+    ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError, ProjectId, ProjectSession,
+};
+use crate::runtime::terminal::{
+    BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError,
+    TerminalRuntimeEvent, TerminalRuntimeHandle, TerminationOutcome, TerminationSignal,
+};
 use crate::security::{BoundedTranscriptRetention, TranscriptPrivacyPolicy};
 
 use super::{
@@ -33,24 +39,24 @@ fn built_in_profile_validates_in_restricted_mode_with_reviewed_system_executable
         .validate(&project, &profile, &request)
         .expect("reviewed built-in profile should validate");
 
-    assert_eq!(validation.project_id, project.id().clone());
-    assert_eq!(validation.profile_id, "builtin-ai");
+    assert_eq!(validation.project_id(), project.id());
+    assert_eq!(validation.profile_id(), "builtin-ai");
     assert_eq!(
-        validation.executable_path,
-        executable.canonicalize().unwrap()
+        validation.executable_path(),
+        executable.canonicalize().unwrap().as_path()
     );
     assert_eq!(
-        validation.executable_provenance,
+        validation.executable_provenance(),
         AiCliExecutableProvenance::SystemPathReviewed
     );
-    assert_eq!(validation.cwd, root.canonicalize().unwrap());
+    assert_eq!(validation.cwd(), root.canonicalize().unwrap().as_path());
     assert_eq!(
-        validation.compatibility_level,
+        validation.compatibility_level(),
         AgentCompatibilityLevel::Supervised
     );
-    assert_eq!(validation.prompt_summary, "summarize current project");
+    assert_eq!(validation.prompt_summary(), "summarize current project");
     assert_eq!(
-        validation.workspace_discovery_summary.as_str(),
+        validation.workspace_discovery_summary().as_str(),
         "CLI started with reviewed flag that disables project config discovery"
     );
 
@@ -364,20 +370,23 @@ fn launch_plan_builds_ready_agent_run_and_matching_terminal_spec() {
     let plan = AgentRunLaunchPlan::from_validation(validation, "Built-in AI")
         .expect("validated launch should create a plan");
 
-    assert_eq!(plan.spec.project_id, project.id().clone());
-    assert_eq!(plan.agent_run.project_id, project.id().clone());
-    assert_eq!(plan.agent_run.profile_id, "builtin-ai");
-    assert_eq!(plan.agent_run.status, AgentRunStatus::Ready);
-    assert_eq!(plan.agent_run.terminal_id, None);
-    assert_eq!(plan.terminal_launch_spec.project_id, project.id().clone());
-    assert_eq!(plan.terminal_launch_spec.kind, TerminalKind::Supervised);
-    assert_eq!(plan.terminal_launch_spec.cwd, root.canonicalize().unwrap());
+    assert_eq!(plan.spec().project_id(), project.id());
+    assert_eq!(plan.agent_run().project_id, project.id().clone());
+    assert_eq!(plan.agent_run().profile_id, "builtin-ai");
+    assert_eq!(plan.agent_run().status, AgentRunStatus::Ready);
+    assert_eq!(plan.agent_run().terminal_id, None);
+    assert_eq!(plan.terminal_launch_spec().project_id, project.id().clone());
+    assert_eq!(plan.terminal_launch_spec().kind, TerminalKind::Supervised);
     assert_eq!(
-        plan.terminal_launch_spec.shell,
+        plan.terminal_launch_spec().cwd,
+        root.canonicalize().unwrap()
+    );
+    assert_eq!(
+        plan.terminal_launch_spec().shell,
         executable.canonicalize().unwrap()
     );
     assert_eq!(
-        plan.terminal_launch_spec.environment_policy,
+        plan.terminal_launch_spec().environment_policy,
         TerminalEnvironmentPolicy::Named("agent-minimal".to_owned())
     );
 
@@ -402,16 +411,16 @@ fn launch_plan_preserves_distinct_explicit_environment_allowlists() {
     let path_home_plan = launch_plan_for(&project, &path_home_profile);
 
     assert_eq!(
-        path_only_plan.terminal_launch_spec.environment_policy,
+        path_only_plan.terminal_launch_spec().environment_policy,
         TerminalEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned()])
     );
     assert_eq!(
-        path_home_plan.terminal_launch_spec.environment_policy,
+        path_home_plan.terminal_launch_spec().environment_policy,
         TerminalEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned(), "HOME".to_owned()])
     );
     assert_ne!(
-        path_only_plan.terminal_launch_spec.environment_policy,
-        path_home_plan.terminal_launch_spec.environment_policy
+        path_only_plan.terminal_launch_spec().environment_policy,
+        path_home_plan.terminal_launch_spec().environment_policy
     );
 
     cleanup_root(root);
@@ -429,7 +438,7 @@ fn project_session_attaches_launch_plan_to_matching_terminal() {
     let plan = launch_plan_for(&project, &profile);
     let terminal = terminal_from_plan(&plan);
     let terminal_id = terminal.id.clone();
-    let agent_run_id = plan.agent_run.id.clone();
+    let agent_run_id = plan.agent_run().id.clone();
 
     let attached_agent_run_id = project
         .attach_agent_launch_plan(plan, terminal)
@@ -474,6 +483,295 @@ fn project_session_records_explicit_environment_allowlist_metadata() {
         Some("explicit allowlist: PATH, HOME".to_owned())
     );
 
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
+#[test]
+fn project_session_launches_agent_run_through_terminal_runtime_and_completes() {
+    let root = test_root("agent-runtime-launch-root");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let plan = launch_plan_for(&project, &profile);
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (agent_run_id, events) = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect("validated minimal AgentRun should launch through terminal runtime");
+    let run = project
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .expect("launched AgentRun should be in project collection");
+    let terminal_id = run
+        .terminal_id
+        .clone()
+        .expect("runtime-launched AgentRun should be attached to terminal");
+    let handle = TerminalRuntimeHandle::new(terminal_id.clone(), project.id().clone());
+
+    assert_eq!(run.status, AgentRunStatus::Running);
+    assert_eq!(
+        project.terminal_session(&terminal_id).unwrap().kind,
+        TerminalKind::Supervised
+    );
+    assert_eq!(project.runtime_summary().running_processes, 1);
+    assert_eq!(
+        project.runtime_summary().close_resources.running_processes,
+        1
+    );
+    assert!(matches!(
+        events.as_slice(),
+        [
+            TerminalRuntimeEvent::LaunchAccepted { .. },
+            TerminalRuntimeEvent::ProcessStarted { .. },
+        ]
+    ));
+
+    runtime
+        .write_input(&handle, b"exit 0\n")
+        .expect("cleanup exit should write to AgentRun PTY");
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("AgentRun shell wait should not fail")
+        .expect("AgentRun shell should exit");
+    assert_eq!(outcome, TerminationOutcome::Exited { exit_status: 0 });
+
+    project
+        .apply_agent_terminal_outcome(&agent_run_id, &terminal_id, &outcome)
+        .expect("clean terminal exit should complete AgentRun");
+
+    let run = project
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .unwrap();
+    assert_eq!(run.status, AgentRunStatus::Completed);
+    assert_eq!(
+        project.terminal_session(&terminal_id).unwrap().status(),
+        crate::domain::TerminalStatus::Exited
+    );
+    assert_eq!(project.runtime_summary().running_processes, 0);
+
+    cleanup_root(root);
+}
+
+#[test]
+fn project_session_launches_validated_managed_agent_run_through_terminal_runtime() {
+    let root = test_root("agent-runtime-managed-root");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let mut profile = built_in_profile(Path::new("/bin/sh"));
+    profile.compatibility_level = AgentCompatibilityLevel::Managed;
+    profile.adapter_capabilities = AiCliAdapterCapabilities {
+        structured_action_approval: true,
+    };
+    let plan = launch_plan_for(&project, &profile);
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (agent_run_id, _) = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect("validated Managed AgentRun should launch through terminal runtime");
+    let terminal_id = project.agent_runs()[0]
+        .terminal_id
+        .clone()
+        .expect("runtime-launched AgentRun should have terminal id");
+    let handle = TerminalRuntimeHandle::new(terminal_id.clone(), project.id().clone());
+
+    assert_eq!(project.agent_runs()[0].id, agent_run_id);
+    assert_eq!(project.agent_runs()[0].status, AgentRunStatus::Running);
+    assert_eq!(
+        project.terminal_session(&terminal_id).unwrap().kind,
+        TerminalKind::Managed
+    );
+    assert_eq!(project.runtime_summary().running_processes, 1);
+
+    runtime
+        .write_input(&handle, b"exit 0\n")
+        .expect("cleanup exit should write to Managed AgentRun PTY");
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("Managed AgentRun shell wait should not fail")
+        .expect("Managed AgentRun shell should exit");
+    project
+        .apply_agent_terminal_outcome(&agent_run_id, &terminal_id, &outcome)
+        .expect("Managed AgentRun cleanup outcome should apply");
+
+    cleanup_root(root);
+}
+
+#[test]
+fn authorized_supervised_plan_spec_cannot_be_mutated_to_managed_runtime_launch() {
+    let root = test_root("agent-runtime-authority-mutation-root");
+    let project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let plan = launch_plan_for(&project, &profile);
+    let mut terminal_spec = plan.terminal_launch_spec_for_runtime();
+    terminal_spec.kind = TerminalKind::Managed;
+
+    let error = LinuxTerminalRuntime::new()
+        .launch_project_shell(&project, terminal_spec)
+        .expect_err("authorized Supervised plan spec must not be mutable into Managed launch");
+
+    assert_eq!(error, TerminalLaunchError::UnsupportedTerminalKind);
+    cleanup_root(root);
+}
+
+#[test]
+fn runtime_launch_rejects_non_minimal_environment_policy_without_project_mutation() {
+    let root = test_root("agent-runtime-env-reject-root");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let mut profile = built_in_profile(Path::new("/bin/sh"));
+    profile.environment_policy = AiCliEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned()]);
+    let plan = launch_plan_for(&project, &profile);
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let error = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect_err("runtime must reject unsupported env policy before process launch");
+
+    assert!(matches!(
+        error,
+        ProjectAgentRuntimeLaunchError::TerminalLaunch(
+            TerminalLaunchError::UnsupportedEnvironmentPolicy { .. }
+        )
+    ));
+    assert!(project.terminal_sessions().is_empty());
+    assert!(project.agent_runs().is_empty());
+
+    cleanup_root(root);
+}
+
+#[test]
+fn project_session_maps_nonzero_agent_run_exit_to_failed() {
+    let root = test_root("agent-runtime-nonzero-root");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let plan = launch_plan_for(&project, &profile);
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (agent_run_id, _) = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect("validated minimal AgentRun should launch through terminal runtime");
+    let terminal_id = project.agent_runs()[0]
+        .terminal_id
+        .clone()
+        .expect("runtime-launched AgentRun should have terminal id");
+    let handle = TerminalRuntimeHandle::new(terminal_id.clone(), project.id().clone());
+
+    runtime
+        .write_input(&handle, b"exit 7\n")
+        .expect("nonzero exit should write to AgentRun PTY");
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("AgentRun shell wait should not fail")
+        .expect("AgentRun shell should exit");
+    assert_eq!(outcome, TerminationOutcome::Exited { exit_status: 7 });
+
+    project
+        .apply_agent_terminal_outcome(&agent_run_id, &terminal_id, &outcome)
+        .expect("nonzero terminal exit should update AgentRun");
+
+    assert_eq!(project.agent_runs()[0].status, AgentRunStatus::Failed);
+    assert_eq!(
+        project.terminal_session(&terminal_id).unwrap().status(),
+        crate::domain::TerminalStatus::Exited
+    );
+
+    cleanup_root(root);
+}
+
+#[test]
+fn project_session_maps_signal_agent_run_outcome_to_cancelled() {
+    let (mut project, agent_run_id, terminal_id, root, bin) =
+        project_with_running_agent_for_outcome("agent-outcome-signal");
+
+    project
+        .apply_agent_terminal_outcome(
+            &agent_run_id,
+            &terminal_id,
+            &TerminationOutcome::TerminatedBySignal {
+                signal: TerminationSignal::Sigterm,
+            },
+        )
+        .expect("signal terminal outcome should update AgentRun");
+
+    assert_eq!(project.agent_runs()[0].status, AgentRunStatus::Cancelled);
+    assert_eq!(
+        project.terminal_session(&terminal_id).unwrap().status(),
+        TerminalStatus::Exited
+    );
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
+#[test]
+fn project_session_maps_timeout_agent_run_outcome_to_cancelled() {
+    let (mut project, agent_run_id, terminal_id, root, bin) =
+        project_with_running_agent_for_outcome("agent-outcome-timeout");
+
+    project
+        .apply_agent_terminal_outcome(
+            &agent_run_id,
+            &terminal_id,
+            &TerminationOutcome::KilledAfterTimeout {
+                initial_signal: TerminationSignal::Sigterm,
+                fallback_signal: TerminationSignal::Sigkill,
+            },
+        )
+        .expect("timeout terminal outcome should update AgentRun");
+
+    assert_eq!(project.agent_runs()[0].status, AgentRunStatus::Cancelled);
+    assert_eq!(
+        project.terminal_session(&terminal_id).unwrap().status(),
+        TerminalStatus::Exited
+    );
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
+#[test]
+fn project_session_maps_orphaned_agent_run_outcome_to_detached() {
+    let (mut project, agent_run_id, terminal_id, root, bin) =
+        project_with_running_agent_for_outcome("agent-outcome-orphaned");
+
+    project
+        .apply_agent_terminal_outcome(
+            &agent_run_id,
+            &terminal_id,
+            &TerminationOutcome::OrphanedUnknown {
+                summary: BoundedRuntimeSummary::new("process group state unknown"),
+            },
+        )
+        .expect("orphaned terminal outcome should update AgentRun");
+
+    assert_eq!(project.agent_runs()[0].status, AgentRunStatus::Detached);
+    assert_eq!(
+        project.terminal_session(&terminal_id).unwrap().status(),
+        TerminalStatus::OrphanedUnknown
+    );
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
+#[test]
+fn project_session_maps_failed_agent_run_outcome_to_failed() {
+    let (mut project, agent_run_id, terminal_id, root, bin) =
+        project_with_running_agent_for_outcome("agent-outcome-failed");
+
+    project
+        .apply_agent_terminal_outcome(
+            &agent_run_id,
+            &terminal_id,
+            &TerminationOutcome::Failed {
+                summary: BoundedRuntimeSummary::new("runtime wait failed"),
+            },
+        )
+        .expect("failed terminal outcome should update AgentRun");
+
+    assert_eq!(project.agent_runs()[0].status, AgentRunStatus::Failed);
+    assert_eq!(
+        project.terminal_session(&terminal_id).unwrap().status(),
+        TerminalStatus::Failed
+    );
     cleanup_root(root);
     cleanup_root(bin);
 }
@@ -561,12 +859,37 @@ fn launch_plan_for(project: &ProjectSession, profile: &AiCliProfile) -> AgentRun
 
 fn terminal_from_plan(plan: &AgentRunLaunchPlan) -> TerminalSession {
     TerminalSession::new(
-        plan.terminal_launch_spec.project_id.clone(),
-        plan.terminal_launch_spec.kind,
-        plan.terminal_launch_spec.title.clone(),
-        plan.terminal_launch_spec.cwd.clone(),
-        plan.terminal_launch_spec.command_line_summary.clone(),
+        plan.terminal_launch_spec().project_id.clone(),
+        plan.terminal_launch_spec().kind,
+        plan.terminal_launch_spec().title.clone(),
+        plan.terminal_launch_spec().cwd.clone(),
+        plan.terminal_launch_spec().command_line_summary.clone(),
     )
+}
+
+fn project_with_running_agent_for_outcome(
+    name: &str,
+) -> (ProjectSession, AgentRunId, TerminalId, PathBuf, PathBuf) {
+    let root = test_root(&format!("{name}-root"));
+    let bin = test_root(&format!("{name}-bin"));
+    let executable = executable_file(&bin, "ai-cli");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(&executable);
+    let mut plan = launch_plan_for(&project, &profile);
+    plan.transition_agent_run_to(AgentRunStatus::Preparing)
+        .unwrap();
+    plan.transition_agent_run_to(AgentRunStatus::Running)
+        .unwrap();
+    let agent_run_id = plan.agent_run().id.clone();
+    let mut terminal = terminal_from_plan(&plan);
+    terminal.transition_to(TerminalStatus::Running).unwrap();
+    let terminal_id = terminal.id.clone();
+
+    project
+        .attach_agent_launch_plan(plan, terminal)
+        .expect("running model AgentRun should attach");
+
+    (project, agent_run_id, terminal_id, root, bin)
 }
 
 fn request_for(project: &ProjectSession, profile: &AiCliProfile) -> AgentRunLaunchRequest {

@@ -92,6 +92,21 @@ fn linux_runtime_rejects_cross_project_launch() {
 }
 
 #[test]
+fn linux_runtime_rejects_raw_managed_launch_without_agent_authority() {
+    let root = test_root("raw-managed-launch");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let mut spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    spec.kind = TerminalKind::Managed;
+
+    let error = LinuxTerminalRuntime::new()
+        .launch_project_shell(&project, spec)
+        .expect_err("raw terminal launch must not mint Managed AgentRun label");
+
+    assert_eq!(error, TerminalLaunchError::UnsupportedTerminalKind);
+    cleanup_root(root);
+}
+
+#[test]
 fn linux_runtime_rejects_cwd_escape() {
     let root = test_root("cwd-escape-project");
     let outside = test_root("cwd-escape-outside");
