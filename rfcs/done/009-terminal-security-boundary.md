@@ -272,7 +272,7 @@ Security diagnostics must be bounded and avoid private output:
 - Should hyperlinks be completely disabled initially, or rendered inert with a copy-only action?
 - Should bracketed paste mode change the confirmation copy, or only mark the paste source?
 - What exact terminal parser/renderer dependency should be used for the first product implementation?
-- Should terminal diagnostics be part of future durable audit, or stay ephemeral until RFC-012?
+- Should terminal diagnostics be part of future durable audit, or stay ephemeral until RFC-013?
 - How much terminal sequence support is required before the GUI terminal can be considered usable?
 
 ## Implementation Handoff Checklist

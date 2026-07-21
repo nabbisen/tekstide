@@ -237,7 +237,7 @@ Purge behavior:
 - succeed when bytes are already absent but metadata is present;
 - never delete project files.
 
-RFC-011 may emit in-memory audit events or audit metadata if existing models require it, but durable audit persistence remains RFC-012.
+RFC-011 may emit in-memory audit events or audit metadata if existing models require it, but durable audit persistence remains RFC-013.
 
 ## Privacy and Security Rules
 

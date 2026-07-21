@@ -42,7 +42,7 @@ Developer tasks:
 Review focus:
 
 - Scope is suitable for M5.
-- RFC-011/RFC-012 dependencies are not overclaimed.
+- RFC-011/RFC-012/RFC-013 dependencies are not overclaimed.
 - Active-file safety is placed correctly.
 - Implementation slices are reviewable.
 
@@ -166,7 +166,7 @@ Pause and request RFC amendment or design review if:
 - a selected AI CLI performs implicit workspace-local config/tool/prompt/plugin discovery that cannot be disabled in Restricted Mode;
 - Managed launch requires claims without adapter capability evidence;
 - transcript bytes must be stored before RFC-011;
-- durable audit must be introduced before RFC-012;
+- durable audit must be introduced before RFC-013;
 - launch diagnostics need environment values, raw prompts, terminal output, or file contents;
 - AgentRun state would need to claim process truth independent of TerminalSession/runtime facts;
 - active-file safety requires a full watcher or multi-document UI to be credible;

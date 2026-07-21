@@ -339,7 +339,7 @@ Future-work alignment:
 
 - RFC-010 should build AgentRun launch on top of this boundary without claiming command approval for Plain/Supervised sessions.
 - RFC-011 should define transcript retention before serious AgentRun transcript capture.
-- RFC-012 should define durable audit storage before security decisions become persistent audit claims.
+- RFC-013 should define durable audit storage before security decisions become persistent audit claims.
 - The GUI terminal milestone must add renderer/dialog/focus/screenshot evidence before claiming final visual spoofing resistance.
 - Future terminal capability increments must document exact sequence family, terminal-local effect, cross-platform behavior, and tests before enabling currently inert behavior.
 

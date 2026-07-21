@@ -33,7 +33,7 @@ The implementation must preserve RFC-010 launch validation and lifecycle truth. 
 - No plain terminal transcript retention by default.
 - No search indexing by default.
 - No redaction guarantee. Structured metadata only may be described as redacted/bounded.
-- No durable audit persistence in RFC-011; RFC-012 owns durable audit.
+- No durable audit persistence in RFC-011; RFC-013 owns durable audit.
 
 ## Model Guidance
 

@@ -174,7 +174,7 @@ Developer tasks:
 Review focus:
 
 - Evidence supports every accepted RFC-008 claim.
-- Deferred RFC-009/RFC-010/RFC-011/RFC-012 scope remains visible.
+- Deferred RFC-009/RFC-010/RFC-011/RFC-012/RFC-013 scope remains visible.
 - The implementation is ready for the next milestone slice.
 
 ## Suggested Review Gates

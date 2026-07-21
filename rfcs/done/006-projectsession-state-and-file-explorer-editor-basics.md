@@ -233,7 +233,7 @@ Restricted Mode still blocks or warns before workspace-local automation:
 
 Ordinary user-initiated open and save operations are not required to become audit events in RFC-006.
 
-Security-relevant file access decisions must route through an audit seam or be documented as audit-pending until RFC-012 provides the durable audit store. Examples include:
+Security-relevant file access decisions must route through an audit seam or be documented as audit-pending until RFC-013 provides the durable audit store. Examples include:
 
 - symlink escape blocked;
 - root escape blocked;

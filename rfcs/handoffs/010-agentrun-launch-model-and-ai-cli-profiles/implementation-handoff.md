@@ -27,7 +27,7 @@ Launched AgentRuns attach to project-owned TerminalSessions. TerminalSession rem
 - Target milestone: **M5**.
 - Required predecessors: RFC-002, RFC-004, RFC-006, RFC-008, RFC-009.
 - RFC-011 owns transcript retention.
-- RFC-012 owns durable audit persistence.
+- RFC-013 owns durable audit persistence.
 - M8 or later GUI work owns rendered launch, approval, transcript, and review surfaces.
 
 ## Implementation Boundaries
@@ -91,7 +91,7 @@ Avoid booleans such as `trusted`, `managed`, or `safe` where a caller needs to k
 - Managed launch requires adapter capability evidence; otherwise reject or use a lower compatibility label before launch.
 - Terminal output is untrusted and cannot mutate launch, trust, approval, audit, file, or Project Board state.
 - Transcript remains metadata-only until RFC-011.
-- Durable audit remains deferred to RFC-012.
+- Durable audit remains deferred to RFC-013.
 
 ## Active-File Safety Notes
 

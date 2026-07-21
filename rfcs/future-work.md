@@ -20,22 +20,19 @@ Status: partially implemented by RFC-007/RFC-008/RFC-009; product UI and GUI evi
 
 ### AgentRun And AI CLI Execution
 
-Status: deferred after `0.1.0`.
+Status: partially implemented by RFC-010; GUI launch/review surfaces and command approval remain.
 
-- Define executable AI CLI profiles.
-- Launch AgentRuns from project/profile context.
-- Track runtime lifecycle from real process state.
-- Preserve managed/supervised/plain compatibility labels without overclaiming command interception.
+- Executable AI CLI profile launch, AgentRun attachment, lifecycle tracking, active-file safety, and compatibility labels are implemented by RFC-010 with documented limitations.
 - Add command approval only where an adapter can actually support it.
 
 ### Transcript And Review Workflow
 
-Status: deferred after `0.1.0`.
+Status: transcript retention implemented by RFC-011; generated-change review foundations are proposed in RFC-012.
 
-- Capture bounded transcript/output for Tekstide-created AgentRuns.
-- Provide visible retention and purge controls.
+- Bounded transcript/output capture, retention metadata, opt-out, explicit purge scopes, and metadata-only local-data summaries are implemented by RFC-011 with documented limitations.
 - Link generated diffs/artifacts to AgentRuns when detectable.
-- Add review surfaces for transcript and generated changes.
+- Add headless generated-change review models and harnesses through RFC-012.
+- Add rendered review surfaces for transcript and generated changes in the GUI milestone.
 
 ### Durable Audit Storage
 

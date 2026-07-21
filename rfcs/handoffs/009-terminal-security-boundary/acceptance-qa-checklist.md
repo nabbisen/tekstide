@@ -67,7 +67,7 @@ This checklist records accepted RFC-009 implementation closeout evidence. Accept
 - [x] Diagnostics avoid raw OSC payloads, pasted text, shell output, and environment-like values.
 - [x] No clipboard writes occur from terminal output.
 - [x] Terminal output cannot mutate trust state, approvals, command history, audit state, file buffers, or project metadata.
-- [x] RFC-010/RFC-011/RFC-012 dependencies remain visible where relevant.
+- [x] RFC-010/RFC-011/RFC-012/RFC-013 dependencies remain visible where relevant.
 
 ## Automated Test Checklist
 

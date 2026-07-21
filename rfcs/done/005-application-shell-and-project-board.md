@@ -75,7 +75,7 @@ Flow:
 2. Tekstide opens a folder selection dialog or accepts a path from CLI.
 3. Tekstide validates and canonicalizes the root path.
 4. Tekstide creates a ProjectSession with trust state `Restricted`, unless a valid prior trust decision restores a different state according to RFC-004.
-5. Tekstide records or queues audit event `project_added`. If RFC-012 storage is not available, the event goes through an audit seam/no-op collector.
+5. Tekstide records or queues audit event `project_added`. If RFC-013 storage is not available, the event goes through an audit seam/no-op collector.
 6. Project appears on Project Board.
 
 Trust-state transition:

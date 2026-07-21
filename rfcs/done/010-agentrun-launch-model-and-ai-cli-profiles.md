@@ -270,7 +270,7 @@ RFC-010 does not require a full file watcher or multi-document conflict UI. Thos
 - Restricted Mode blocks workspace-local AI profiles, prompts, environment files, executables, wrappers, shims, auto-discovered CLI config/tool files, plugins, tasks, and background automation.
 - Launch errors, environment summaries, and diagnostics are bounded and metadata-only.
 - No transcript bytes or private terminal output are persisted by this RFC.
-- Durable audit remains deferred to RFC-012; RFC-010 may create in-memory/domain audit metadata only where existing models require it.
+- Durable audit remains deferred to RFC-013; RFC-010 may create in-memory/domain audit metadata only where existing models require it.
 - Terminal output cannot approve launches, mutate trust state, synthesize approvals, or dismiss trusted UI.
 
 ## Persistence
