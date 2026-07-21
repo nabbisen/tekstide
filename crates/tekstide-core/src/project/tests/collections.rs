@@ -2,8 +2,8 @@ use super::project_session;
 use crate::close::CloseResourceProviderState;
 use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunStatus, ApprovalRequest, AuditEvent,
-    AuditEventClass, ChangeSet, OwnershipError, RiskLevel, TerminalKind, TerminalSession,
-    TerminalStatus, TerminalTransitionError, Transcript, VisibleSlot,
+    AuditEventClass, ChangeSet, OwnershipError, ReviewState, RiskLevel, TerminalKind,
+    TerminalSession, TerminalStatus, TerminalTransitionError, Transcript, VisibleSlot,
 };
 use crate::project::{ProjectId, ProjectMode, ProjectTerminalError};
 
@@ -196,6 +196,7 @@ fn agent_approval_and_change_collections_feed_project_runtime_summary() {
 
     project.add_agent_run(run).unwrap();
     project.add_approval_request(approval).unwrap();
+    let change_set_id = change_set.id.clone();
     project.add_change_set(change_set).unwrap();
 
     let summary = project.runtime_summary();
@@ -205,6 +206,43 @@ fn agent_approval_and_change_collections_feed_project_runtime_summary() {
     assert_eq!(summary.running_processes, 1);
     assert_eq!(summary.close_resources.pending_approvals, 1);
     assert_eq!(summary.close_resources.review_ready_changes, 1);
+    let run = project
+        .agent_runs()
+        .iter()
+        .find(|run| run.profile_id == "plain")
+        .unwrap();
+    assert_eq!(run.change_set_ids, vec![change_set_id]);
+}
+
+#[test]
+fn changeset_review_transition_updates_project_runtime_counts_without_file_effects() {
+    let mut project = project_session(1);
+    let change_set = ChangeSet::unreviewed(
+        project.id().clone(),
+        None,
+        vec!["src/lib.rs".into()],
+        "review me",
+    );
+    let change_set_id = change_set.id.clone();
+
+    project.add_change_set(change_set).unwrap();
+    assert_eq!(project.runtime_summary().review_ready_changes, 1);
+
+    project
+        .transition_change_set_review_state(&change_set_id, ReviewState::Accepted)
+        .unwrap();
+
+    assert_eq!(
+        project
+            .change_sets()
+            .iter()
+            .find(|change_set| change_set.id == change_set_id)
+            .unwrap()
+            .review_state,
+        ReviewState::Accepted
+    );
+    assert_eq!(project.runtime_summary().review_ready_changes, 0);
+    assert_eq!(project.close_resource_summary().review_ready_changes, 0);
 }
 
 fn running_terminal(project_id: ProjectId, title: &str) -> TerminalSession {

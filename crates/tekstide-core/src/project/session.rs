@@ -586,7 +586,29 @@ impl ProjectSession {
         {
             return Err(OwnershipError::DuplicateAttachment);
         }
+        if let Some(agent_run_id) = &change_set.agent_run_id {
+            let run = self.agent_run_mut(agent_run_id)?;
+            run.add_change_set(&change_set)?;
+        }
         self.change_sets.push(change_set);
+        self.record_activity();
+        self.refresh_runtime_summary_from_collections();
+        Ok(())
+    }
+
+    pub fn transition_change_set_review_state(
+        &mut self,
+        change_set_id: &crate::domain::ChangeSetId,
+        review_state: ReviewState,
+    ) -> Result<(), ProjectChangeSetError> {
+        let change_set = self
+            .change_sets
+            .iter_mut()
+            .find(|change_set| change_set.id == *change_set_id)
+            .ok_or(ProjectChangeSetError::Ownership(
+                OwnershipError::MissingReference,
+            ))?;
+        change_set.transition_review_to(review_state)?;
         self.record_activity();
         self.refresh_runtime_summary_from_collections();
         Ok(())
@@ -1051,6 +1073,12 @@ pub enum ProjectTerminalError {
     InvalidTransition(TerminalTransitionError),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProjectChangeSetError {
+    Ownership(OwnershipError),
+    InvalidReviewTransition(crate::domain::ReviewStateTransitionError),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectAgentLaunchError {
     Ownership(OwnershipError),
@@ -1138,6 +1166,18 @@ impl From<OwnershipError> for ProjectTerminalError {
 impl From<TerminalTransitionError> for ProjectTerminalError {
     fn from(error: TerminalTransitionError) -> Self {
         Self::InvalidTransition(error)
+    }
+}
+
+impl From<OwnershipError> for ProjectChangeSetError {
+    fn from(error: OwnershipError) -> Self {
+        Self::Ownership(error)
+    }
+}
+
+impl From<crate::domain::ReviewStateTransitionError> for ProjectChangeSetError {
+    fn from(error: crate::domain::ReviewStateTransitionError) -> Self {
+        Self::InvalidReviewTransition(error)
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunStatus, ApprovalDecision, ApprovalDecisionError,
-    ApprovalRequest, OwnershipError, RiskLevel, TerminalKind, TerminalSession,
+    ApprovalRequest, ChangeSet, OwnershipError, RiskLevel, TerminalKind, TerminalSession,
 };
 use crate::project::ProjectId;
 
@@ -231,6 +231,62 @@ fn agent_run_approval_must_match_project_and_run() {
 
     assert_eq!(
         run.add_approval(&wrong_run),
+        Err(OwnershipError::WrongAgentRun)
+    );
+}
+
+#[test]
+fn duplicate_agent_run_changeset_attachment_is_rejected() {
+    let mut run = AgentRun::draft(
+        ProjectId::for_test(1),
+        "codex",
+        "implement feature",
+        AgentCompatibilityLevel::Managed,
+    );
+    let change_set = ChangeSet::unreviewed(
+        ProjectId::for_test(1),
+        Some(run.id.clone()),
+        vec!["src/lib.rs".into()],
+        "generated changes",
+    );
+
+    run.add_change_set(&change_set).unwrap();
+    let error = run
+        .add_change_set(&change_set)
+        .expect_err("duplicate ChangeSet attachment should fail");
+
+    assert_eq!(error, OwnershipError::DuplicateAttachment);
+}
+
+#[test]
+fn agent_run_changeset_must_match_project_and_run() {
+    let mut run = AgentRun::draft(
+        ProjectId::for_test(1),
+        "codex",
+        "implement feature",
+        AgentCompatibilityLevel::Managed,
+    );
+    let wrong_project = ChangeSet::unreviewed(
+        ProjectId::for_test(2),
+        Some(run.id.clone()),
+        vec!["src/lib.rs".into()],
+        "other project changes",
+    );
+
+    assert_eq!(
+        run.add_change_set(&wrong_project),
+        Err(OwnershipError::CrossProject)
+    );
+
+    let wrong_run = ChangeSet::unreviewed(
+        ProjectId::for_test(1),
+        None,
+        vec!["src/lib.rs".into()],
+        "unlinked changes",
+    );
+
+    assert_eq!(
+        run.add_change_set(&wrong_run),
         Err(OwnershipError::WrongAgentRun)
     );
 }
