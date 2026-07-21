@@ -34,12 +34,12 @@ This checklist is proposed. It becomes the implementation acceptance checklist o
 
 ## AgentRun Integration Checklist
 
-- [ ] AgentRun-linked baselines can be captured before or at launch boundary.
-- [ ] Detected changes can be linked to an AgentRun when association is credible.
-- [ ] Ambiguous or overlapping AgentRun scenarios do not overclaim authorship.
-- [ ] AgentRun `change_set_ids` and ProjectSession ChangeSet ownership stay consistent.
-- [ ] AgentRun `ReviewReady` state is used only when review is actually pending.
-- [ ] Terminal/runtime lifecycle remains process truth.
+- [x] AgentRun-linked baselines can be captured before or at launch boundary.
+- [x] Detected changes can be linked to an AgentRun when association is credible.
+- [x] Ambiguous or overlapping AgentRun scenarios do not overclaim authorship.
+- [x] AgentRun `change_set_ids` and ProjectSession ChangeSet ownership stay consistent.
+- [x] AgentRun `ReviewReady` state is used only when review is actually pending.
+- [x] Terminal/runtime lifecycle remains process truth.
 
 ## Project Summary Checklist
 
@@ -49,13 +49,13 @@ This checklist is proposed. It becomes the implementation acceptance checklist o
 
 ## Evidence Required
 
-- [ ] Design review response and any amendment.
+- [x] Design review response and any amendment.
 - [ ] Implementation review responses for each PR-012 slice.
-- [ ] Test command output.
+- [x] Test command output.
 - [x] Model transition evidence.
 - [x] Path containment evidence.
 - [x] Detector unavailable/partial evidence.
-- [ ] AgentRun association evidence.
+- [x] AgentRun association evidence.
 - [x] Project summary/count evidence.
 - [x] Privacy summary evidence.
 - [ ] Migration note or "no migration" statement.

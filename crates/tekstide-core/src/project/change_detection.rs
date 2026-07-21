@@ -5,7 +5,8 @@ use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use crate::domain::{
-    ChangeDetectionFailureReason, ChangeDetectionSource, ChangeDetectionStatus, DomainTimestamp,
+    AgentRunId, ChangeDetectionFailureReason, ChangeDetectionSource, ChangeDetectionStatus,
+    DomainTimestamp,
 };
 
 use super::{ProjectId, ProjectSession};
@@ -31,6 +32,7 @@ impl Default for GeneratedChangeDetectionPolicy {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReviewBaseline {
     pub project_id: ProjectId,
+    pub agent_run_id: Option<AgentRunId>,
     pub captured_at: DomainTimestamp,
     pub source: ChangeDetectionSource,
     pub baseline_snapshot_ref: String,
@@ -107,11 +109,28 @@ impl GeneratedChangeDetector {
     }
 
     pub fn capture_filesystem_baseline(&self, project: &ProjectSession) -> ReviewBaseline {
+        self.capture_filesystem_baseline_for_agent_run(project, None)
+    }
+
+    pub fn capture_agent_run_filesystem_baseline(
+        &self,
+        project: &ProjectSession,
+        agent_run_id: AgentRunId,
+    ) -> ReviewBaseline {
+        self.capture_filesystem_baseline_for_agent_run(project, Some(agent_run_id))
+    }
+
+    fn capture_filesystem_baseline_for_agent_run(
+        &self,
+        project: &ProjectSession,
+        agent_run_id: Option<AgentRunId>,
+    ) -> ReviewBaseline {
         let captured_at = DomainTimestamp::now_utc();
         let scan = scan_filesystem(project, self.policy.max_entries);
         let entry_count = scan.entries.len();
         ReviewBaseline {
             project_id: project.id().clone(),
+            agent_run_id,
             captured_at: captured_at.clone(),
             source: ChangeDetectionSource::FilesystemSnapshot,
             baseline_snapshot_ref: format!(

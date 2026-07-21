@@ -1,8 +1,12 @@
 use super::project_session;
-use crate::domain::{ChangeDetectionFailureReason, ChangeDetectionSource, ChangeDetectionStatus};
+use crate::domain::{
+    AgentCompatibilityLevel, AgentRun, AgentRunStatus, ChangeAssociationConfidence,
+    ChangeDetectionFailureReason, ChangeDetectionSource, ChangeDetectionStatus,
+};
 use crate::project::{
-    ChangePathKind, ChangedPathValidationErrorReason, GeneratedChangeDetectionPolicy,
-    GeneratedChangeDetector, ProjectId, ProjectSession,
+    ChangePathKind, ChangedPathValidationErrorReason, DetectedChangedPath, DetectedChanges,
+    GeneratedChangeDetectionPolicy, GeneratedChangeDetector, ProjectChangeSetError, ProjectId,
+    ProjectSession,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -248,6 +252,281 @@ fn git_status_detection_reports_unavailable_or_unsupported_without_running_git()
     assert!(unsupported.changed_paths.is_empty());
 }
 
+#[test]
+fn projectsession_creates_strong_agent_run_changeset_only_from_complete_detection() {
+    let sandbox = TestSandbox::new("change-detection-strong-association");
+    let mut project = sandbox.project_session(1);
+    sandbox.create_file_with_contents("project/src/lib.rs", b"before\n");
+    let detector = GeneratedChangeDetector::default();
+    let run = completed_agent_run(project.id().clone());
+    let run_id = run.id.clone();
+    let baseline = detector.capture_agent_run_filesystem_baseline(&project, run_id.clone());
+    project.add_agent_run(run).unwrap();
+    fs::write(sandbox.path("project/src/lib.rs"), b"after\n").unwrap();
+    let detected = detector.detect_filesystem_changes(&project, &baseline);
+
+    let change_set_id = project
+        .add_detected_generated_change_set(
+            &baseline,
+            &detected,
+            Some(&run_id),
+            "detected generated changes",
+        )
+        .expect("complete strongly associated detection should create a ChangeSet")
+        .expect("changed paths should create a ChangeSet");
+
+    let change_set = project
+        .change_sets()
+        .iter()
+        .find(|change_set| change_set.id == change_set_id)
+        .unwrap();
+    assert_eq!(change_set.agent_run_id, Some(run_id.clone()));
+    assert_eq!(
+        change_set.association_confidence,
+        ChangeAssociationConfidence::Strong
+    );
+    assert_eq!(
+        change_set.baseline_snapshot_ref,
+        Some(baseline.baseline_snapshot_ref)
+    );
+    assert_eq!(change_set.changed_files, vec![PathBuf::from("src/lib.rs")]);
+    assert_eq!(project.runtime_summary().review_ready_changes, 1);
+    assert_eq!(project.close_resource_summary().review_ready_changes, 1);
+    assert_eq!(
+        project.agent_runs()[0].change_set_ids,
+        vec![change_set_id],
+        "strong association is the only path that attaches the ChangeSet to the AgentRun"
+    );
+}
+
+#[test]
+fn projectsession_refuses_changeset_creation_from_non_complete_detection() {
+    let sandbox = TestSandbox::new("change-detection-non-complete");
+    let mut project = sandbox.project_session(1);
+    let detector = GeneratedChangeDetector::new(GeneratedChangeDetectionPolicy {
+        max_entries: 8,
+        max_changed_paths: 1,
+    });
+    let baseline = detector.capture_filesystem_baseline(&project);
+    sandbox.create_file_with_contents("project/a.txt", b"a\n");
+    sandbox.create_file_with_contents("project/b.txt", b"b\n");
+    let detected = detector.detect_filesystem_changes(&project, &baseline);
+
+    let error = project
+        .add_detected_generated_change_set(&baseline, &detected, None, "partial changes")
+        .expect_err("partial detection should not create review ChangeSets");
+
+    assert_eq!(
+        error,
+        ProjectChangeSetError::DetectionNotComplete(ChangeDetectionStatus::Partial { limit: 1 })
+    );
+    assert!(project.change_sets().is_empty());
+}
+
+#[test]
+fn projectsession_keeps_detached_agentrun_detection_unlinked_and_ambiguous() {
+    let sandbox = TestSandbox::new("change-detection-detached-ambiguous");
+    let mut project = sandbox.project_session(1);
+    sandbox.create_file_with_contents("project/src/lib.rs", b"before\n");
+    let detector = GeneratedChangeDetector::default();
+    let run = detached_agent_run(project.id().clone());
+    let run_id = run.id.clone();
+    let baseline = detector.capture_agent_run_filesystem_baseline(&project, run_id.clone());
+    project.add_agent_run(run).unwrap();
+    fs::write(sandbox.path("project/src/lib.rs"), b"after\n").unwrap();
+    let detected = detector.detect_filesystem_changes(&project, &baseline);
+
+    let change_set_id = project
+        .add_detected_generated_change_set(&baseline, &detected, Some(&run_id), "ambiguous changes")
+        .expect("ambiguous complete detection should still create an unlinked ChangeSet")
+        .unwrap();
+
+    let change_set = project
+        .change_sets()
+        .iter()
+        .find(|change_set| change_set.id == change_set_id)
+        .unwrap();
+    assert_eq!(change_set.agent_run_id, None);
+    assert_eq!(
+        change_set.association_confidence,
+        ChangeAssociationConfidence::Ambiguous
+    );
+    assert!(project.agent_runs()[0].change_set_ids.is_empty());
+}
+
+#[test]
+fn projectsession_blocks_strong_association_when_another_run_is_active() {
+    let sandbox = TestSandbox::new("change-detection-overlapping-run");
+    let mut project = sandbox.project_session(1);
+    sandbox.create_file_with_contents("project/src/lib.rs", b"before\n");
+    let detector = GeneratedChangeDetector::default();
+    let target_run = completed_agent_run(project.id().clone());
+    let target_run_id = target_run.id.clone();
+    let active_run = running_agent_run(project.id().clone());
+    let baseline = detector.capture_agent_run_filesystem_baseline(&project, target_run_id.clone());
+    project.add_agent_run(target_run).unwrap();
+    project.add_agent_run(active_run).unwrap();
+    fs::write(sandbox.path("project/src/lib.rs"), b"after\n").unwrap();
+    let detected = detector.detect_filesystem_changes(&project, &baseline);
+
+    let change_set_id = project
+        .add_detected_generated_change_set(
+            &baseline,
+            &detected,
+            Some(&target_run_id),
+            "overlapping changes",
+        )
+        .expect("complete ambiguous detection should create an unlinked ChangeSet")
+        .unwrap();
+
+    let change_set = project
+        .change_sets()
+        .iter()
+        .find(|change_set| change_set.id == change_set_id)
+        .unwrap();
+    assert_eq!(change_set.agent_run_id, None);
+    assert_eq!(
+        change_set.association_confidence,
+        ChangeAssociationConfidence::Ambiguous
+    );
+    assert!(
+        project
+            .agent_runs()
+            .iter()
+            .find(|run| run.id == target_run_id)
+            .unwrap()
+            .change_set_ids
+            .is_empty()
+    );
+}
+
+#[test]
+fn projectsession_blocks_strong_association_when_another_run_closed_after_baseline() {
+    let sandbox = TestSandbox::new("change-detection-since-closed-overlap");
+    let mut project = sandbox.project_session(1);
+    sandbox.create_file_with_contents("project/src/lib.rs", b"before\n");
+    let detector = GeneratedChangeDetector::default();
+    let target_run = completed_agent_run(project.id().clone());
+    let target_run_id = target_run.id.clone();
+    let baseline = detector.capture_agent_run_filesystem_baseline(&project, target_run_id.clone());
+    let mut overlapping_run = completed_agent_run(project.id().clone());
+    overlapping_run.ended_at = Some(baseline.captured_at.clone());
+    project.add_agent_run(target_run).unwrap();
+    project.add_agent_run(overlapping_run).unwrap();
+    fs::write(sandbox.path("project/src/lib.rs"), b"after\n").unwrap();
+    let detected = detector.detect_filesystem_changes(&project, &baseline);
+
+    let change_set_id = project
+        .add_detected_generated_change_set(
+            &baseline,
+            &detected,
+            Some(&target_run_id),
+            "temporally overlapping changes",
+        )
+        .expect("complete temporally ambiguous detection should create an unlinked ChangeSet")
+        .unwrap();
+
+    let change_set = project
+        .change_sets()
+        .iter()
+        .find(|change_set| change_set.id == change_set_id)
+        .unwrap();
+    assert_eq!(change_set.agent_run_id, None);
+    assert_eq!(
+        change_set.association_confidence,
+        ChangeAssociationConfidence::Ambiguous
+    );
+    assert!(
+        project
+            .agent_runs()
+            .iter()
+            .find(|run| run.id == target_run_id)
+            .unwrap()
+            .change_set_ids
+            .is_empty()
+    );
+}
+
+#[test]
+fn projectsession_blocks_strong_association_when_closed_bystander_has_unknown_end_time() {
+    let sandbox = TestSandbox::new("change-detection-closed-unknown-end");
+    let mut project = sandbox.project_session(1);
+    sandbox.create_file_with_contents("project/src/lib.rs", b"before\n");
+    let detector = GeneratedChangeDetector::default();
+    let target_run = completed_agent_run(project.id().clone());
+    let target_run_id = target_run.id.clone();
+    let baseline = detector.capture_agent_run_filesystem_baseline(&project, target_run_id.clone());
+    let completed_bystander = completed_agent_run(project.id().clone());
+    assert!(
+        completed_bystander.ended_at.is_none(),
+        "normal AgentRun lifecycle currently leaves ended_at unset"
+    );
+    project.add_agent_run(target_run).unwrap();
+    project.add_agent_run(completed_bystander).unwrap();
+    fs::write(sandbox.path("project/src/lib.rs"), b"after\n").unwrap();
+    let detected = detector.detect_filesystem_changes(&project, &baseline);
+
+    let change_set_id = project
+        .add_detected_generated_change_set(
+            &baseline,
+            &detected,
+            Some(&target_run_id),
+            "unknown end-time overlap",
+        )
+        .expect("unknown closed-run ordering should create an unlinked ambiguous ChangeSet")
+        .unwrap();
+
+    let change_set = project
+        .change_sets()
+        .iter()
+        .find(|change_set| change_set.id == change_set_id)
+        .unwrap();
+    assert_eq!(change_set.agent_run_id, None);
+    assert_eq!(
+        change_set.association_confidence,
+        ChangeAssociationConfidence::Ambiguous
+    );
+    assert!(
+        project
+            .agent_runs()
+            .iter()
+            .find(|run| run.id == target_run_id)
+            .unwrap()
+            .change_set_ids
+            .is_empty()
+    );
+}
+
+#[test]
+fn projectsession_revalidates_detector_paths_before_changeset_creation() {
+    let sandbox = TestSandbox::new("change-detection-revalidate");
+    let mut project = sandbox.project_session(1);
+    let detector = GeneratedChangeDetector::default();
+    let baseline = detector.capture_filesystem_baseline(&project);
+    let detected = DetectedChanges {
+        project_id: project.id().clone(),
+        source: ChangeDetectionSource::FilesystemSnapshot,
+        baseline_snapshot_ref: Some(baseline.baseline_snapshot_ref.clone()),
+        changed_paths: vec![DetectedChangedPath {
+            relative_path: PathBuf::from("../outside.rs"),
+            kind: ChangePathKind::File,
+        }],
+        status: ChangeDetectionStatus::Complete,
+        scanned_entry_count: 1,
+    };
+
+    let error = project
+        .add_detected_generated_change_set(&baseline, &detected, None, "invalid path")
+        .expect_err("ProjectSession must not trust detector payloads without validation");
+
+    assert!(matches!(
+        error,
+        ProjectChangeSetError::InvalidChangedPath(error)
+            if error.reason == ChangedPathValidationErrorReason::InvalidRelativePath
+    ));
+    assert!(project.change_sets().is_empty());
+}
+
 struct TestSandbox {
     root: PathBuf,
 }
@@ -299,4 +578,45 @@ impl Drop for TestSandbox {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
     }
+}
+
+fn completed_agent_run(project_id: ProjectId) -> AgentRun {
+    let mut run = AgentRun::draft(
+        project_id,
+        "plain",
+        "generate changes",
+        AgentCompatibilityLevel::Plain,
+    );
+    run.transition_to(AgentRunStatus::Ready).unwrap();
+    run.transition_to(AgentRunStatus::Preparing).unwrap();
+    run.transition_to(AgentRunStatus::Running).unwrap();
+    run.transition_to(AgentRunStatus::Completed).unwrap();
+    run
+}
+
+fn detached_agent_run(project_id: ProjectId) -> AgentRun {
+    let mut run = AgentRun::draft(
+        project_id,
+        "plain",
+        "generate changes",
+        AgentCompatibilityLevel::Plain,
+    );
+    run.transition_to(AgentRunStatus::Ready).unwrap();
+    run.transition_to(AgentRunStatus::Preparing).unwrap();
+    run.transition_to(AgentRunStatus::Running).unwrap();
+    run.transition_to(AgentRunStatus::Detached).unwrap();
+    run
+}
+
+fn running_agent_run(project_id: ProjectId) -> AgentRun {
+    let mut run = AgentRun::draft(
+        project_id,
+        "plain",
+        "generate changes",
+        AgentCompatibilityLevel::Plain,
+    );
+    run.transition_to(AgentRunStatus::Ready).unwrap();
+    run.transition_to(AgentRunStatus::Preparing).unwrap();
+    run.transition_to(AgentRunStatus::Running).unwrap();
+    run
 }

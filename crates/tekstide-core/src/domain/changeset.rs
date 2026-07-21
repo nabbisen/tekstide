@@ -92,6 +92,11 @@ impl ChangeSet {
         self
     }
 
+    pub fn with_baseline_snapshot_ref(mut self, baseline_snapshot_ref: impl Into<String>) -> Self {
+        self.baseline_snapshot_ref = Some(baseline_snapshot_ref.into());
+        self
+    }
+
     pub fn transition_review_to(
         &mut self,
         next: ReviewState,

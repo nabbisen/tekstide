@@ -143,10 +143,83 @@ Observed gates on 2026-07-21 after review request 086 follow-up:
 - `cargo check --workspace` passed.
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
 
+Re-review:
+
+- `.git-exclude/reviewed/tekstide-review-request-087-rfc012-pr012c-baseline-path-detector-harness-rereview-response.md` accepted PR-012-C on 2026-07-21.
+
+### PR-012-D - AgentRun Review Integration
+
+Implementation:
+
+- Updated `crates/tekstide-core/src/project/change_detection.rs`.
+- Updated `crates/tekstide-core/src/project/session.rs`.
+- Updated `crates/tekstide-core/src/domain/changeset.rs`.
+- Updated `crates/tekstide-core/src/project/tests/change_detection.rs`.
+
+Implemented integration behavior:
+
+- `ReviewBaseline` can record the AgentRun id it was captured for.
+- `GeneratedChangeDetector::capture_agent_run_filesystem_baseline` captures AgentRun-linked filesystem baselines.
+- `ProjectSession::add_detected_generated_change_set` creates ChangeSets from detector output only when baseline and detection statuses are `Complete`.
+- ProjectSession revalidates every detector path through `GeneratedChangeDetector::validate_changed_path` before ChangeSet creation.
+- Matching baseline reference is required before ChangeSet creation.
+- Strong AgentRun association requires a baseline captured for the same AgentRun, a closed or review-ready target AgentRun, and no other active, review-ready, or detached AgentRun blocking ownership clarity.
+- Detached, non-closed, missing-baseline, concurrently active, or since-closed temporally overlapping AgentRun scenarios create unlinked ambiguous ChangeSets rather than attaching authorship to an AgentRun.
+- Strongly associated ChangeSets attach to `AgentRun::change_set_ids`; ambiguous ChangeSets do not.
+- Empty complete detections return `None` and create no ChangeSet.
+
+Security/privacy notes:
+
+- PR-012-D does not read file contents, compute diffs, invoke Git, execute workspace automation, scan transcript bytes, persist durable audit records, apply patches, rollback changes, search-index contents, secure-delete files, or claim redaction.
+- Non-`Complete` detection status blocks ChangeSet creation.
+- `ChangeSet::agent_run_detected` remains a convenience constructor; ProjectSession owns the strong-association gate for detector-created ChangeSets.
+- AgentRun lifecycle process truth is preserved. PR-012-D does not rewrite completed, failed, cancelled, or detached runtime status to make review claims.
+
+Observed gates on 2026-07-21 before review request 088:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core project::tests::change_detection -- --quiet` passed; 15 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 310 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `git diff --check` passed.
+
+Review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-088-rfc012-pr012d-agentrun-review-integration-response.md` accepted PR-012-D with required follow-up on 2026-07-21.
+- Updated the strong-association gate so another run with `ended_at >= baseline.captured_at` blocks `Strong` association.
+- Treating equality as overlap is intentional because `DomainTimestamp` is second-granularity.
+- Added regression coverage for a since-closed overlapping run that forces an unlinked ambiguous ChangeSet.
+- Updated evidence wording so "overlapping" includes since-closed temporal overlap, not only concurrently active runs.
+
+Observed gates on 2026-07-21 after review request 088 follow-up:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core project::tests::change_detection -- --quiet` passed; 16 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 311 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `git diff --check` passed.
+
+Re-review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-089-rfc012-pr012d-agentrun-review-integration-rereview-response.md` required follow-up on 2026-07-21 because normal closed AgentRun lifecycle paths leave `ended_at` unset.
+- Updated temporal overlap handling so closed bystander runs with missing `ended_at` block `Strong` association conservatively.
+- Added regression coverage for a normal completed bystander with `ended_at == None` forcing an unlinked ambiguous ChangeSet.
+
+Observed gates on 2026-07-21 after review request 089 follow-up:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core project::tests::change_detection -- --quiet` passed; 17 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 312 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `git diff --check` passed.
+
 ## Known Limitations
 
 - Filesystem snapshot detection is implemented as metadata-only evidence.
 - Git detection is explicitly unavailable/unsupported in PR-012-C; no Git subprocess or safe-library detector behavior is implemented yet.
-- ChangeSet constructors do not validate project-relative root containment for `changed_files`; PR-012-C enforces containment in the detector harness, and PR-012-D must use the harness before creating detected ChangeSets.
-- No AgentRun lifecycle integration is implemented yet.
+- ChangeSet constructors do not validate project-relative root containment for `changed_files`; PR-012-D revalidates detector-created ChangeSets through the detector harness before adding them to ProjectSession.
+- PR-012-D does not store baseline registries or prove wall-clock launch/scan ordering beyond the caller-provided AgentRun-linked baseline.
 - No rendered diff/review UI, durable audit persistence, hunk-level patch application, rollback, search indexing, secure deletion, or redaction is claimed.

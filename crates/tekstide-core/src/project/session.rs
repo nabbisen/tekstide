@@ -15,11 +15,15 @@ use crate::close::{CloseResourceProviderState, CloseResourceSummary};
 use crate::content::{ExternalChangeDecision, SaveDecision, TextDocumentOpenPolicy};
 use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError,
-    ApprovalDecision, ApprovalId, ApprovalRequest, AuditEvent, ChangeSet, DomainTimestamp,
-    OwnershipError, ReviewState, TerminalId, TerminalKind, TerminalSession, TerminalStatus,
-    TerminalTransitionError, Transcript, TranscriptId, TranscriptLifecycleState, VisibleSlot,
+    ApprovalDecision, ApprovalId, ApprovalRequest, AuditEvent, ChangeAssociationConfidence,
+    ChangeDetectionStatus, ChangeSet, ChangeSetId, DomainTimestamp, OwnershipError, ReviewState,
+    TerminalId, TerminalKind, TerminalSession, TerminalStatus, TerminalTransitionError, Transcript,
+    TranscriptId, TranscriptLifecycleState, VisibleSlot,
 };
 
+use super::change_detection::{
+    ChangedPathValidationError, DetectedChanges, GeneratedChangeDetector, ReviewBaseline,
+};
 use super::root::{FileExplorerScanPolicy, ProjectRootHandle};
 use super::{
     ProjectActiveFileLaunchAssessment, ProjectContentError, ProjectContentWorkspace,
@@ -598,7 +602,7 @@ impl ProjectSession {
 
     pub fn transition_change_set_review_state(
         &mut self,
-        change_set_id: &crate::domain::ChangeSetId,
+        change_set_id: &ChangeSetId,
         review_state: ReviewState,
     ) -> Result<(), ProjectChangeSetError> {
         let change_set = self
@@ -612,6 +616,64 @@ impl ProjectSession {
         self.record_activity();
         self.refresh_runtime_summary_from_collections();
         Ok(())
+    }
+
+    pub fn add_detected_generated_change_set(
+        &mut self,
+        baseline: &ReviewBaseline,
+        detected: &DetectedChanges,
+        candidate_agent_run_id: Option<&AgentRunId>,
+        summary: impl Into<String>,
+    ) -> Result<Option<ChangeSetId>, ProjectChangeSetError> {
+        self.ensure_project_member(&baseline.project_id)?;
+        self.ensure_project_member(&detected.project_id)?;
+        if detected.baseline_snapshot_ref.as_ref() != Some(&baseline.baseline_snapshot_ref) {
+            return Err(ProjectChangeSetError::BaselineMismatch);
+        }
+        if baseline.status != ChangeDetectionStatus::Complete {
+            return Err(ProjectChangeSetError::DetectionNotComplete(baseline.status));
+        }
+        if detected.status != ChangeDetectionStatus::Complete {
+            return Err(ProjectChangeSetError::DetectionNotComplete(detected.status));
+        }
+
+        let detector = GeneratedChangeDetector::default();
+        let changed_files = detected
+            .changed_paths
+            .iter()
+            .map(|changed_path| detector.validate_changed_path(self, &changed_path.relative_path))
+            .collect::<Result<Vec<_>, _>>()?;
+        if changed_files.is_empty() {
+            return Ok(None);
+        }
+
+        let association = candidate_agent_run_id
+            .map(|agent_run_id| self.detected_change_association(baseline, agent_run_id))
+            .transpose()?;
+
+        let change_set = match association {
+            Some(DetectedChangeAssociation::Strong(agent_run_id)) => ChangeSet::agent_run_detected(
+                self.id.clone(),
+                agent_run_id,
+                baseline.baseline_snapshot_ref.clone(),
+                changed_files,
+                summary,
+            )
+            .with_detection(detected.source, detected.status),
+            Some(DetectedChangeAssociation::Ambiguous) => {
+                ChangeSet::unreviewed(self.id.clone(), None, changed_files, summary)
+                    .with_detection(detected.source, detected.status)
+                    .with_association_confidence(ChangeAssociationConfidence::Ambiguous)
+                    .with_baseline_snapshot_ref(baseline.baseline_snapshot_ref.clone())
+            }
+            None => ChangeSet::unreviewed(self.id.clone(), None, changed_files, summary)
+                .with_detection(detected.source, detected.status)
+                .with_baseline_snapshot_ref(baseline.baseline_snapshot_ref.clone()),
+        };
+        let change_set_id = change_set.id.clone();
+
+        self.add_change_set(change_set)?;
+        Ok(Some(change_set_id))
     }
 
     pub fn add_audit_event(&mut self, event: AuditEvent) -> Result<(), OwnershipError> {
@@ -892,6 +954,13 @@ impl ProjectSession {
             .ok_or(OwnershipError::MissingReference)
     }
 
+    fn agent_run(&self, agent_run_id: &AgentRunId) -> Result<&AgentRun, OwnershipError> {
+        self.agent_runs
+            .iter()
+            .find(|run| run.id == *agent_run_id)
+            .ok_or(OwnershipError::MissingReference)
+    }
+
     fn agent_run_mut(
         &mut self,
         agent_run_id: &AgentRunId,
@@ -987,6 +1056,29 @@ impl ProjectSession {
         }
     }
 
+    fn detected_change_association(
+        &self,
+        baseline: &ReviewBaseline,
+        agent_run_id: &AgentRunId,
+    ) -> Result<DetectedChangeAssociation, ProjectChangeSetError> {
+        let run = self.agent_run(agent_run_id)?;
+        if baseline.agent_run_id.as_ref() != Some(agent_run_id) {
+            return Ok(DetectedChangeAssociation::Ambiguous);
+        }
+        if !agent_run_status_can_own_strong_changes(run.status) {
+            return Ok(DetectedChangeAssociation::Ambiguous);
+        }
+        if self.agent_runs.iter().any(|other_run| {
+            other_run.id != *agent_run_id
+                && (agent_run_status_blocks_strong_association(other_run.status)
+                    || other_run_temporally_overlaps_baseline(other_run, baseline))
+        }) {
+            return Ok(DetectedChangeAssociation::Ambiguous);
+        }
+
+        Ok(DetectedChangeAssociation::Strong(agent_run_id.clone()))
+    }
+
     fn ensure_approval_exists(&self, approval_id: &ApprovalId) -> Result<(), OwnershipError> {
         self.approval_requests
             .iter()
@@ -1073,10 +1165,13 @@ pub enum ProjectTerminalError {
     InvalidTransition(TerminalTransitionError),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectChangeSetError {
     Ownership(OwnershipError),
     InvalidReviewTransition(crate::domain::ReviewStateTransitionError),
+    BaselineMismatch,
+    DetectionNotComplete(ChangeDetectionStatus),
+    InvalidChangedPath(ChangedPathValidationError),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1181,6 +1276,18 @@ impl From<crate::domain::ReviewStateTransitionError> for ProjectChangeSetError {
     }
 }
 
+impl From<ChangedPathValidationError> for ProjectChangeSetError {
+    fn from(error: ChangedPathValidationError) -> Self {
+        Self::InvalidChangedPath(error)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum DetectedChangeAssociation {
+    Strong(AgentRunId),
+    Ambiguous,
+}
+
 fn terminal_status_is_active(status: TerminalStatus) -> bool {
     matches!(
         status,
@@ -1189,6 +1296,40 @@ fn terminal_status_is_active(status: TerminalStatus) -> bool {
             | TerminalStatus::Terminating
             | TerminalStatus::OrphanedUnknown
     )
+}
+
+fn agent_run_status_can_own_strong_changes(status: AgentRunStatus) -> bool {
+    matches!(
+        status,
+        AgentRunStatus::Completed
+            | AgentRunStatus::Failed
+            | AgentRunStatus::Cancelled
+            | AgentRunStatus::ReviewReady
+    )
+}
+
+fn agent_run_status_blocks_strong_association(status: AgentRunStatus) -> bool {
+    matches!(
+        status,
+        AgentRunStatus::Preparing
+            | AgentRunStatus::Running
+            | AgentRunStatus::AwaitingApproval
+            | AgentRunStatus::ReviewReady
+            | AgentRunStatus::Detached
+    )
+}
+
+fn other_run_temporally_overlaps_baseline(run: &AgentRun, baseline: &ReviewBaseline) -> bool {
+    if !matches!(
+        run.status,
+        AgentRunStatus::Completed | AgentRunStatus::Failed | AgentRunStatus::Cancelled
+    ) {
+        return false;
+    }
+
+    run.ended_at
+        .as_ref()
+        .is_none_or(|ended_at| ended_at.as_str() >= baseline.captured_at.as_str())
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
