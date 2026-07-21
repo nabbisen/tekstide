@@ -37,6 +37,39 @@ impl ProjectContentWorkspace {
         self.active_document.as_ref()
     }
 
+    pub fn active_file_launch_assessment(&self) -> ProjectActiveFileLaunchAssessment {
+        let Some(document) = self.active_document.as_ref() else {
+            return ProjectActiveFileLaunchAssessment {
+                active_path_hint: None,
+                state: None,
+                decision: ProjectActiveFileLaunchDecision::Proceed,
+            };
+        };
+
+        let state = document.state();
+        let decision = match state {
+            TextDocumentState::Clean => ProjectActiveFileLaunchDecision::Proceed,
+            TextDocumentState::Dirty => {
+                ProjectActiveFileLaunchDecision::Blocked(ProjectActiveFileLaunchBlockReason::Dirty)
+            }
+            TextDocumentState::ExternalChanged => ProjectActiveFileLaunchDecision::Blocked(
+                ProjectActiveFileLaunchBlockReason::ExternalChanged,
+            ),
+            TextDocumentState::Conflict => ProjectActiveFileLaunchDecision::Blocked(
+                ProjectActiveFileLaunchBlockReason::Conflict,
+            ),
+            TextDocumentState::SaveError => ProjectActiveFileLaunchDecision::Blocked(
+                ProjectActiveFileLaunchBlockReason::SaveError,
+            ),
+        };
+
+        ProjectActiveFileLaunchAssessment {
+            active_path_hint: Some(document.target().selected_relative_path.clone()),
+            state: Some(state),
+            decision,
+        }
+    }
+
     pub fn status(&self) -> &ProjectContentStatus {
         &self.status
     }
@@ -163,6 +196,16 @@ impl ProjectContentWorkspace {
         match document.refresh_external_state(root, policy) {
             Ok(decision) => {
                 self.status = match decision {
+                    ExternalChangeDecision::Unchanged
+                        if document.state() == TextDocumentState::SaveError =>
+                    {
+                        ProjectContentStatus::SaveError {
+                            message: "active document has save error".to_owned(),
+                        }
+                    }
+                    ExternalChangeDecision::Unchanged if document.is_dirty() => {
+                        ProjectContentStatus::Edited
+                    }
                     ExternalChangeDecision::Unchanged => ProjectContentStatus::Opened,
                     ExternalChangeDecision::ExternalChanged => {
                         ProjectContentStatus::ExternalChanged
@@ -209,6 +252,33 @@ impl Default for ProjectContentWorkspace {
             status: ProjectContentStatus::Empty,
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectActiveFileLaunchAssessment {
+    pub active_path_hint: Option<PathBuf>,
+    pub state: Option<TextDocumentState>,
+    pub decision: ProjectActiveFileLaunchDecision,
+}
+
+impl ProjectActiveFileLaunchAssessment {
+    pub fn allows_launch(&self) -> bool {
+        self.decision == ProjectActiveFileLaunchDecision::Proceed
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProjectActiveFileLaunchDecision {
+    Proceed,
+    Blocked(ProjectActiveFileLaunchBlockReason),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProjectActiveFileLaunchBlockReason {
+    Dirty,
+    ExternalChanged,
+    Conflict,
+    SaveError,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

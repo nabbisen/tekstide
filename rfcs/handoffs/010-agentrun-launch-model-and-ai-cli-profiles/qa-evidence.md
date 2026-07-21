@@ -152,7 +152,7 @@ Review follow-up:
 
 ### PR-010-D — Runtime-Backed AgentRun Launch Lifecycle
 
-Status: ready for implementation review.
+Status: accepted with notes.
 
 Implementation:
 
@@ -250,9 +250,84 @@ Observed gates on 2026-07-21 after review request 071 fixes:
 - `git diff --check` passed.
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
 
+Acceptance:
+
+- `.git-exclude/reviewed/tekstide-review-request-072-rfc010-pr010d-launch-plan-authority-rereview-response.md` accepted PR-010-D with notes on 2026-07-21.
+- Carry forward: post-spawn cleanup for unexpected attachment-invariant failure remains documented.
+- Carry forward: named/explicit environment-policy runtime application remains deferred.
+
+### PR-010-E — Active-File Safety Integration
+
+Status: accepted with required follow-up.
+
+Implementation:
+
+- Added `ProjectActiveFileLaunchAssessment`.
+- Added `ProjectActiveFileLaunchDecision`.
+- Added `ProjectActiveFileLaunchBlockReason`.
+- Added `ProjectSession::assess_agent_launch_active_file_safety`.
+- Added `ProjectAgentActiveFileLaunchError`.
+- `ProjectSession::launch_agent_run_with_runtime` now refreshes active-document external state and assesses active-file safety before transitioning AgentRun to `Preparing` or starting the terminal runtime.
+- Active-file launch assessment:
+  - permits launch when no active text document exists;
+  - permits launch when the active text document is clean and unchanged;
+  - blocks launch when the active text document is dirty;
+  - blocks launch when the active text document is externally changed;
+  - blocks launch when the active text document is conflicted;
+  - blocks launch when the active text document is in save-error state.
+- Dirty active documents remain visibly edited after pre-launch refresh when the disk snapshot is unchanged.
+- Save-error active documents remain visibly in save-error status after pre-launch refresh when the disk snapshot is unchanged.
+- Existing safe-save external-change blocking remains active while an AgentRun is running.
+
+Security/privacy notes:
+
+- Active-file launch errors carry path hints and document state only; they do not include file contents.
+- Blocked active-file launch happens before process start and before ProjectSession terminal/AgentRun mutation.
+- PR-010-E does not add a reviewed "proceed anyway" decision path; dirty/external/conflict/save-error states fail closed for this slice.
+- No file watcher, multi-document conflict UI, transcript byte retention, durable audit records, GUI launch/review surfaces, or command approval behavior are introduced.
+
+Observed gates on 2026-07-21:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core agent -- --quiet` passed; 49 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 256 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `git diff --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
+Review focus:
+
+- Whether active-file assessment is the right minimal read model for RFC-010.
+- Whether dirty, external-changed, conflict, and save-error states should all block by default until a reviewed decision path exists.
+- Whether active-file blocking happens before runtime/process side effects.
+- Whether clean active-document launch still works.
+- Whether existing RFC-006 safe-save external-change blocking remains intact while an AgentRun is active.
+
+Review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-073-rfc010-pr010e-active-file-safety-response.md` accepted PR-010-E with required follow-up on 2026-07-21.
+- Added coverage for `ProjectActiveFileLaunchBlockReason::SaveError`.
+- Preserved `ProjectContentStatus::SaveError` when pre-launch refresh returns unchanged for a save-error document.
+- Carry forward before the first user-facing launch surface:
+  - reviewed "proceed anyway" decision path for dirty/external/conflict active files;
+  - project-summary external-change signal for Project Board visibility.
+- Known limitation recorded: project-level `ProjectFileState` has no external-changed signal yet; external-changed active files are visible through the content workspace status, not through Project Board summary fields.
+- Known limitation recorded: residual refresh-to-spawn TOCTOU window remains inherent without a watcher; safe-save conflict blocking remains the backstop.
+
+Observed gates on 2026-07-21 after review request 073 follow-up:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core agent -- --quiet` passed; 50 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 257 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `git diff --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
 ## Known Limitations
 
-- PR-010-D launches through the Linux PTY runtime, but it does not implement active-file safety.
+- PR-010-E does not implement a reviewed "proceed anyway" decision path for dirty/external/conflict active files.
+- PR-010-E does not add a project-summary external-change signal; external-changed active files are visible through the content workspace status, not Project Board summary fields.
+- PR-010-E has an inherent refresh-to-spawn TOCTOU window because RFC-010 does not add a watcher; safe-save conflict blocking remains the backstop.
 - PR-010-D does not apply `TerminalEnvironmentPolicy::ExplicitAllowlist` or named policies at runtime; those policies are rejected before process start.
 - PR-010-D does not add post-spawn cleanup machinery for unexpected attachment-invariant failures after `LinuxTerminalRuntime` returns a fresh terminal.
-- No transcript retention, durable audit storage, GUI launch/review surfaces, general command approval, provider-specific cloud integration, full watcher behavior, or multi-document conflict UI is claimed by RFC-010 design acceptance.
+- No transcript retention, durable audit storage, GUI launch/review surfaces, general command approval, provider-specific cloud integration, full watcher behavior, or multi-document conflict UI is claimed by RFC-010 implementation evidence.

@@ -7,9 +7,10 @@ mod runtime;
 mod session;
 
 pub use content::{
-    ProjectContentError, ProjectContentStatus, ProjectContentWorkspace, ProjectExplorerStatus,
-    explorer_node_kind_label, explorer_node_state_label, explorer_symlink_status_label,
-    text_document_state_label,
+    ProjectActiveFileLaunchAssessment, ProjectActiveFileLaunchBlockReason,
+    ProjectActiveFileLaunchDecision, ProjectContentError, ProjectContentStatus,
+    ProjectContentWorkspace, ProjectExplorerStatus, explorer_node_kind_label,
+    explorer_node_state_label, explorer_symlink_status_label, text_document_state_label,
 };
 pub use identity::ProjectId;
 pub use metadata::{
@@ -19,7 +20,8 @@ pub use metadata::{
 };
 pub use runtime::ProjectRuntimeSummary;
 pub use session::{
-    ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError, ProjectSession, ProjectTerminalError,
+    ProjectAgentActiveFileLaunchError, ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError,
+    ProjectSession, ProjectTerminalError,
 };
 
 #[cfg(test)]

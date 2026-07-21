@@ -2,12 +2,14 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::content::{SaveDecision, TextDocumentState};
 use crate::domain::{
     AgentCompatibilityLevel, AgentRunId, AgentRunStatus, OwnershipError, TerminalId, TerminalKind,
     TerminalSession, TerminalStatus,
 };
 use crate::project::{
-    ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError, ProjectId, ProjectSession,
+    ProjectActiveFileLaunchBlockReason, ProjectAgentActiveFileLaunchError, ProjectAgentLaunchError,
+    ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectId, ProjectSession,
 };
 use crate::runtime::terminal::{
     BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError,
@@ -616,6 +618,248 @@ fn authorized_supervised_plan_spec_cannot_be_mutated_to_managed_runtime_launch()
 }
 
 #[test]
+fn active_clean_text_document_permits_agent_runtime_launch() {
+    let root = test_root("agent-active-clean-root");
+    std::fs::write(root.join("note.txt"), "original\n").expect("active file should be written");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    project
+        .open_text_document("note.txt")
+        .expect("active clean document should open");
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let plan = launch_plan_for(&project, &profile);
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (agent_run_id, _) = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect("clean active document should permit launch");
+    let terminal_id = project.agent_runs()[0]
+        .terminal_id
+        .clone()
+        .expect("launched AgentRun should attach terminal");
+    let handle = TerminalRuntimeHandle::new(terminal_id.clone(), project.id().clone());
+
+    assert_eq!(project.agent_runs()[0].id, agent_run_id);
+    assert_eq!(project.agent_runs()[0].status, AgentRunStatus::Running);
+    assert_eq!(
+        project
+            .content_workspace()
+            .active_document()
+            .unwrap()
+            .state(),
+        TextDocumentState::Clean
+    );
+
+    runtime
+        .write_input(&handle, b"exit 0\n")
+        .expect("cleanup exit should write to AgentRun PTY");
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("AgentRun shell wait should not fail")
+        .expect("AgentRun shell should exit");
+    project
+        .apply_agent_terminal_outcome(&agent_run_id, &terminal_id, &outcome)
+        .expect("cleanup outcome should apply");
+
+    cleanup_root(root);
+}
+
+#[test]
+fn active_dirty_text_document_blocks_agent_runtime_launch_before_process_start() {
+    let root = test_root("agent-active-dirty-root");
+    std::fs::write(root.join("note.txt"), "original\n").expect("active file should be written");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    project
+        .open_text_document("note.txt")
+        .expect("active document should open");
+    project
+        .replace_active_text("edited\n")
+        .expect("active document should become dirty");
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let plan = launch_plan_for(&project, &profile);
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let error = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect_err("dirty active document should block launch");
+
+    assert_active_file_blocked(error, ProjectActiveFileLaunchBlockReason::Dirty);
+    assert!(project.terminal_sessions().is_empty());
+    assert!(project.agent_runs().is_empty());
+    assert_eq!(project.runtime_summary().dirty_files, 1);
+    assert_eq!(
+        project.content_workspace().status().label(),
+        "edited",
+        "dirty refresh before launch must keep dirty state visible"
+    );
+    cleanup_root(root);
+}
+
+#[test]
+fn active_external_changed_text_document_blocks_agent_runtime_launch_before_process_start() {
+    let root = test_root("agent-active-external-root");
+    std::fs::write(root.join("note.txt"), "original\n").expect("active file should be written");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    project
+        .open_text_document("note.txt")
+        .expect("active document should open");
+    std::fs::write(root.join("note.txt"), "external\n")
+        .expect("active file should be externally changed");
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let plan = launch_plan_for(&project, &profile);
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let error = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect_err("externally changed active document should block launch");
+
+    assert_active_file_blocked(error, ProjectActiveFileLaunchBlockReason::ExternalChanged);
+    assert!(project.terminal_sessions().is_empty());
+    assert!(project.agent_runs().is_empty());
+    assert_eq!(
+        project
+            .content_workspace()
+            .active_document()
+            .unwrap()
+            .state(),
+        TextDocumentState::ExternalChanged
+    );
+    cleanup_root(root);
+}
+
+#[test]
+fn active_conflict_text_document_blocks_agent_runtime_launch_before_process_start() {
+    let root = test_root("agent-active-conflict-root");
+    std::fs::write(root.join("note.txt"), "original\n").expect("active file should be written");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    project
+        .open_text_document("note.txt")
+        .expect("active document should open");
+    project
+        .replace_active_text("edited\n")
+        .expect("active document should become dirty");
+    std::fs::write(root.join("note.txt"), "external\n")
+        .expect("active file should be externally changed");
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let plan = launch_plan_for(&project, &profile);
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let error = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect_err("conflicted active document should block launch");
+
+    assert_active_file_blocked(error, ProjectActiveFileLaunchBlockReason::Conflict);
+    assert!(project.terminal_sessions().is_empty());
+    assert!(project.agent_runs().is_empty());
+    assert_eq!(
+        project
+            .content_workspace()
+            .active_document()
+            .unwrap()
+            .state(),
+        TextDocumentState::Conflict
+    );
+    cleanup_root(root);
+}
+
+#[test]
+fn active_save_error_text_document_blocks_agent_runtime_launch_before_process_start() {
+    let root = test_root("agent-active-save-error-root");
+    std::fs::write(root.join("target.txt"), "original\n").expect("target file should be written");
+    symlink(root.join("target.txt"), root.join("link.txt")).expect("in-root symlink should exist");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    project
+        .open_text_document("link.txt")
+        .expect("in-root symlink document should open");
+    project
+        .replace_active_text("edited\n")
+        .expect("active document should become dirty");
+    project
+        .save_active_text_document()
+        .expect_err("unsafe symlink save should set SaveError state");
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let plan = launch_plan_for(&project, &profile);
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let error = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect_err("save-error active document should block launch");
+
+    assert_active_file_blocked(error, ProjectActiveFileLaunchBlockReason::SaveError);
+    assert!(project.terminal_sessions().is_empty());
+    assert!(project.agent_runs().is_empty());
+    assert_eq!(
+        project
+            .content_workspace()
+            .active_document()
+            .unwrap()
+            .state(),
+        TextDocumentState::SaveError
+    );
+    assert_eq!(project.content_workspace().status().label(), "save error");
+    cleanup_root(root);
+}
+
+#[test]
+fn safe_save_blocks_external_change_while_agent_run_is_active() {
+    let root = test_root("agent-active-safe-save-root");
+    std::fs::write(root.join("note.txt"), "original\n").expect("active file should be written");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    project
+        .open_text_document("note.txt")
+        .expect("active clean document should open");
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let plan = launch_plan_for(&project, &profile);
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (agent_run_id, _) = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect("clean active document should permit launch");
+    let terminal_id = project.agent_runs()[0]
+        .terminal_id
+        .clone()
+        .expect("launched AgentRun should attach terminal");
+    let handle = TerminalRuntimeHandle::new(terminal_id.clone(), project.id().clone());
+
+    project
+        .replace_active_text("edited\n")
+        .expect("active document edit should be accepted while AgentRun is active");
+    std::fs::write(root.join("note.txt"), "external\n")
+        .expect("external change should be written while AgentRun is active");
+
+    let error = project
+        .save_active_text_document()
+        .expect_err("safe-save should block external overwrite while AgentRun is active");
+
+    assert!(matches!(
+        error,
+        ProjectContentError::Save(ref save_error)
+            if save_error.decision() == SaveDecision::BlockedExternalChange
+    ));
+    assert_eq!(
+        project
+            .content_workspace()
+            .active_document()
+            .unwrap()
+            .state(),
+        TextDocumentState::Conflict
+    );
+    assert_eq!(project.agent_runs()[0].status, AgentRunStatus::Running);
+
+    runtime
+        .write_input(&handle, b"exit 0\n")
+        .expect("cleanup exit should write to AgentRun PTY");
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("AgentRun shell wait should not fail")
+        .expect("AgentRun shell should exit");
+    project
+        .apply_agent_terminal_outcome(&agent_run_id, &terminal_id, &outcome)
+        .expect("cleanup outcome should apply");
+
+    cleanup_root(root);
+}
+
+#[test]
 fn runtime_launch_rejects_non_minimal_environment_policy_without_project_mutation() {
     let root = test_root("agent-runtime-env-reject-root");
     let mut project = restricted_project(ProjectId::for_test(1), &root);
@@ -865,6 +1109,25 @@ fn terminal_from_plan(plan: &AgentRunLaunchPlan) -> TerminalSession {
         plan.terminal_launch_spec().cwd.clone(),
         plan.terminal_launch_spec().command_line_summary.clone(),
     )
+}
+
+fn assert_active_file_blocked(
+    error: ProjectAgentRuntimeLaunchError,
+    expected_reason: ProjectActiveFileLaunchBlockReason,
+) {
+    match error {
+        ProjectAgentRuntimeLaunchError::ActiveFile(ProjectAgentActiveFileLaunchError::Blocked(
+            assessment,
+        )) => {
+            assert_eq!(
+                assessment.decision,
+                crate::project::ProjectActiveFileLaunchDecision::Blocked(expected_reason)
+            );
+            assert!(assessment.active_path_hint.is_some());
+            assert!(assessment.state.is_some());
+        }
+        other => panic!("expected active-file launch block, got {other:?}"),
+    }
 }
 
 fn project_with_running_agent_for_outcome(

@@ -16,9 +16,10 @@ use crate::domain::{
 
 use super::root::{FileExplorerScanPolicy, ProjectRootHandle};
 use super::{
-    ProjectContentError, ProjectContentWorkspace, ProjectFileState, ProjectGitSummary, ProjectId,
-    ProjectMode, ProjectOpenSurface, ProjectProviderState, ProjectResourceLimits,
-    ProjectRuntimeSummary, ProjectWarningState, WorkspaceTrust,
+    ProjectActiveFileLaunchAssessment, ProjectContentError, ProjectContentWorkspace,
+    ProjectFileState, ProjectGitSummary, ProjectId, ProjectMode, ProjectOpenSurface,
+    ProjectProviderState, ProjectResourceLimits, ProjectRuntimeSummary, ProjectWarningState,
+    WorkspaceTrust,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -332,6 +333,7 @@ impl ProjectSession {
         runtime: &mut LinuxTerminalRuntime,
     ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
         self.validate_agent_launch_plan_before_runtime(&plan)?;
+        self.ensure_agent_launch_active_file_safety()?;
 
         plan.transition_agent_run_to(AgentRunStatus::Preparing)?;
         let (terminal, events) =
@@ -564,6 +566,22 @@ impl ProjectSession {
         result
     }
 
+    pub fn assess_agent_launch_active_file_safety(
+        &mut self,
+    ) -> Result<ProjectActiveFileLaunchAssessment, ProjectContentError> {
+        if self.content_workspace.active_document().is_some() {
+            let root = ProjectRootHandle::from_project_session(self);
+            let result = self
+                .content_workspace
+                .refresh_active_document(&root, TextDocumentOpenPolicy::linux_mvp());
+            self.sync_file_state_from_content_workspace();
+            self.record_activity();
+            result?;
+        }
+
+        Ok(self.content_workspace.active_file_launch_assessment())
+    }
+
     pub fn set_file_state(&mut self, file_state: ProjectFileState) {
         self.runtime_summary.dirty_files = file_state.dirty_file_count;
         self.runtime_summary.close_resources.dirty_files =
@@ -708,6 +726,19 @@ impl ProjectSession {
         Ok(())
     }
 
+    fn ensure_agent_launch_active_file_safety(
+        &mut self,
+    ) -> Result<ProjectActiveFileLaunchAssessment, ProjectAgentActiveFileLaunchError> {
+        let assessment = self
+            .assess_agent_launch_active_file_safety()
+            .map_err(ProjectAgentActiveFileLaunchError::Refresh)?;
+        if assessment.allows_launch() {
+            Ok(assessment)
+        } else {
+            Err(ProjectAgentActiveFileLaunchError::Blocked(assessment))
+        }
+    }
+
     fn ensure_approval_exists(&self, approval_id: &ApprovalId) -> Result<(), OwnershipError> {
         self.approval_requests
             .iter()
@@ -806,8 +837,15 @@ pub enum ProjectAgentRuntimeLaunchError {
     Launch(ProjectAgentLaunchError),
     TerminalLaunch(TerminalLaunchError),
     Terminal(ProjectTerminalError),
+    ActiveFile(ProjectAgentActiveFileLaunchError),
     InvalidAgentRunTransition(AgentRunTransitionError),
     AgentTerminalMismatch,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProjectAgentActiveFileLaunchError {
+    Refresh(ProjectContentError),
+    Blocked(ProjectActiveFileLaunchAssessment),
 }
 
 impl From<ProjectAgentLaunchError> for ProjectAgentRuntimeLaunchError {
@@ -825,6 +863,12 @@ impl From<TerminalLaunchError> for ProjectAgentRuntimeLaunchError {
 impl From<ProjectTerminalError> for ProjectAgentRuntimeLaunchError {
     fn from(error: ProjectTerminalError) -> Self {
         Self::Terminal(error)
+    }
+}
+
+impl From<ProjectAgentActiveFileLaunchError> for ProjectAgentRuntimeLaunchError {
+    fn from(error: ProjectAgentActiveFileLaunchError) -> Self {
+        Self::ActiveFile(error)
     }
 }
 
