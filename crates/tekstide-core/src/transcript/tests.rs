@@ -4,12 +4,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::AgentRunId;
 use crate::project::ProjectId;
+use crate::transcript::TranscriptStoragePath;
 use crate::transcript::{
-    DEFAULT_TRANSCRIPT_MAX_AGE_DAYS, DEFAULT_TRANSCRIPT_MAX_APP_BYTES,
+    BoundedTranscriptWriter, DEFAULT_TRANSCRIPT_MAX_AGE_DAYS, DEFAULT_TRANSCRIPT_MAX_APP_BYTES,
     DEFAULT_TRANSCRIPT_MAX_PROJECT_BYTES, DEFAULT_TRANSCRIPT_MAX_TRANSCRIPT_BYTES,
     TranscriptBudgetScope, TranscriptCaptureMode, TranscriptCapturePolicy,
     TranscriptLocalDataSummary, TranscriptPathErrorReason, TranscriptPathRequest,
     TranscriptPathResolver, TranscriptRetentionLimits, TranscriptRetentionState,
+    TranscriptWriteErrorReason, TranscriptWriterConfig,
 };
 
 #[test]
@@ -152,11 +154,19 @@ fn transcript_path_resolves_under_state_root_and_outside_project_root() {
 
     let resolved = TranscriptPathResolver.resolve_agent_run(request).unwrap();
 
-    assert!(resolved.transcript_file.starts_with(&resolved.state_root));
-    assert!(!resolved.transcript_file.starts_with(&resolved.project_root));
     assert!(
         resolved
-            .transcript_file
+            .transcript_file()
+            .starts_with(resolved.state_root())
+    );
+    assert!(
+        !resolved
+            .transcript_file()
+            .starts_with(resolved.project_root())
+    );
+    assert!(
+        resolved
+            .transcript_file()
             .ends_with(Path::new("transcript.log"))
     );
 }
@@ -205,7 +215,7 @@ fn transcript_path_rejects_state_root_inside_project_root() {
 }
 
 #[test]
-fn transcript_path_rejects_project_root_inside_state_root_when_transcript_would_be_project_local() {
+fn transcript_path_allows_project_root_inside_state_root_when_output_stays_outside_project() {
     let temp = TestDirs::new("project-inside-state-root");
     let project_inside_state = temp.state_root.join("workspace");
     fs::create_dir_all(&project_inside_state).unwrap();
@@ -219,8 +229,142 @@ fn transcript_path_rejects_project_root_inside_state_root_when_transcript_would_
 
     let resolved = TranscriptPathResolver.resolve_agent_run(request).unwrap();
 
-    assert!(resolved.transcript_file.starts_with(&resolved.state_root));
-    assert!(!resolved.transcript_file.starts_with(&resolved.project_root));
+    assert!(
+        resolved
+            .transcript_file()
+            .starts_with(resolved.state_root())
+    );
+    assert!(
+        !resolved
+            .transcript_file()
+            .starts_with(resolved.project_root())
+    );
+}
+
+#[test]
+fn bounded_writer_creates_file_and_records_byte_count_without_content_summary() {
+    let (temp, storage_path) = resolved_storage_path("writer-records-byte-count");
+    let mut writer = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
+        storage_path.clone(),
+        TranscriptRetentionLimits::agent_run_default(),
+    ))
+    .unwrap();
+
+    let summary = writer.append(b"secret transcript bytes").unwrap();
+    let flushed = writer.flush().unwrap();
+
+    assert_eq!(summary.byte_count, 23);
+    assert_eq!(summary.retention_state, TranscriptRetentionState::Active);
+    assert_eq!(flushed, summary);
+    assert_eq!(fs::read(storage_path.transcript_file()).unwrap().len(), 23);
+    assert!(!format!("{summary:?}").contains("secret"));
+    drop(temp);
+}
+
+#[test]
+fn bounded_writer_truncates_at_per_transcript_limit() {
+    let (_temp, storage_path) = resolved_storage_path("writer-truncates");
+    let limits = TranscriptRetentionLimits::new(5, 5, 5, DEFAULT_TRANSCRIPT_MAX_AGE_DAYS);
+    let mut writer =
+        BoundedTranscriptWriter::create(TranscriptWriterConfig::new(storage_path.clone(), limits))
+            .unwrap();
+
+    let summary = writer.append(b"abcdefghi").unwrap();
+    let after_more = writer.append(b"jkl").unwrap();
+
+    assert_eq!(summary.byte_count, 5);
+    assert_eq!(
+        summary.retention_state,
+        TranscriptRetentionState::Truncated {
+            scope: TranscriptBudgetScope::Transcript
+        }
+    );
+    assert_eq!(after_more, summary);
+    assert_eq!(fs::read(storage_path.transcript_file()).unwrap(), b"abcde");
+}
+
+#[test]
+fn bounded_writer_allows_exact_limit_without_truncation() {
+    let (_temp, storage_path) = resolved_storage_path("writer-exact-limit");
+    let limits = TranscriptRetentionLimits::new(5, 5, 5, DEFAULT_TRANSCRIPT_MAX_AGE_DAYS);
+    let mut writer =
+        BoundedTranscriptWriter::create(TranscriptWriterConfig::new(storage_path.clone(), limits))
+            .unwrap();
+
+    let summary = writer.append(b"abcde").unwrap();
+
+    assert_eq!(summary.byte_count, 5);
+    assert_eq!(summary.retention_state, TranscriptRetentionState::Active);
+    assert_eq!(fs::read(storage_path.transcript_file()).unwrap(), b"abcde");
+}
+
+#[test]
+fn bounded_writer_empty_append_keeps_current_summary() {
+    let (_temp, storage_path) = resolved_storage_path("writer-empty-append");
+    let mut writer = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
+        storage_path,
+        TranscriptRetentionLimits::agent_run_default(),
+    ))
+    .unwrap();
+
+    let summary = writer.append(b"").unwrap();
+
+    assert_eq!(summary.byte_count, 0);
+    assert_eq!(summary.retention_state, TranscriptRetentionState::Active);
+}
+
+#[test]
+fn bounded_writer_rejects_unbounded_retention_without_creating_file() {
+    let (_temp, storage_path) = resolved_storage_path("writer-rejects-unbounded");
+    let limits = TranscriptRetentionLimits::new(0, 0, 0, 0);
+
+    let error =
+        BoundedTranscriptWriter::create(TranscriptWriterConfig::new(storage_path.clone(), limits))
+            .unwrap_err();
+
+    assert_eq!(error.reason, TranscriptWriteErrorReason::UnboundedRetention);
+    assert_eq!(error.byte_count, 0);
+    assert!(!storage_path.transcript_file().exists());
+}
+
+#[test]
+fn bounded_writer_open_error_is_bounded_and_content_free() {
+    let (_temp, storage_path) = resolved_storage_path("writer-open-error");
+    fs::create_dir_all(storage_path.transcript_file()).unwrap();
+
+    let error = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
+        storage_path,
+        TranscriptRetentionLimits::agent_run_default(),
+    ))
+    .unwrap_err();
+
+    assert_eq!(error.reason, TranscriptWriteErrorReason::OpenFileFailed);
+    assert_eq!(error.byte_count, 0);
+    assert!(!format!("{error}").contains("secret transcript bytes"));
+}
+
+#[test]
+fn bounded_writer_rejects_forged_project_root_storage_path_before_side_effects() {
+    let temp = TestDirs::new("writer-rejects-forged-project-path");
+    let forged_dir = temp.project_root.join("transcripts");
+    let forged_file = forged_dir.join("transcript.log");
+    let storage_path = TranscriptStoragePath::for_test_unchecked(
+        temp.state_root.clone(),
+        temp.project_root.clone(),
+        forged_dir.clone(),
+        forged_file.clone(),
+    );
+
+    let error = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
+        storage_path,
+        TranscriptRetentionLimits::agent_run_default(),
+    ))
+    .unwrap_err();
+
+    assert_eq!(error.reason, TranscriptWriteErrorReason::InvalidStoragePath);
+    assert_eq!(error.byte_count, 0);
+    assert!(!forged_dir.exists());
+    assert!(!forged_file.exists());
 }
 
 #[cfg(unix)]
@@ -283,4 +427,16 @@ impl Drop for TestDirs {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.base);
     }
+}
+
+fn resolved_storage_path(label: &str) -> (TestDirs, crate::transcript::TranscriptStoragePath) {
+    let temp = TestDirs::new(label);
+    let request = TranscriptPathRequest::new(
+        &temp.state_root,
+        &temp.project_root,
+        ProjectId::for_test(1),
+        AgentRunId::for_test(1),
+    );
+    let storage_path = TranscriptPathResolver.resolve_agent_run(request).unwrap();
+    (temp, storage_path)
 }

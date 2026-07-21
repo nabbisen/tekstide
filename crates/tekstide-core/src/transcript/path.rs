@@ -32,10 +32,50 @@ impl TranscriptPathRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TranscriptStoragePath {
-    pub state_root: PathBuf,
-    pub project_root: PathBuf,
-    pub transcript_dir: PathBuf,
-    pub transcript_file: PathBuf,
+    state_root: PathBuf,
+    project_root: PathBuf,
+    transcript_dir: PathBuf,
+    transcript_file: PathBuf,
+}
+
+impl TranscriptStoragePath {
+    pub fn state_root(&self) -> &Path {
+        &self.state_root
+    }
+
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
+    }
+
+    pub fn transcript_dir(&self) -> &Path {
+        &self.transcript_dir
+    }
+
+    pub fn transcript_file(&self) -> &Path {
+        &self.transcript_file
+    }
+
+    pub(crate) fn is_safe_for_write(&self) -> bool {
+        path_contains(&self.state_root, &self.transcript_dir)
+            && !path_contains(&self.project_root, &self.transcript_dir)
+            && path_contains(&self.state_root, &self.transcript_file)
+            && !path_contains(&self.project_root, &self.transcript_file)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test_unchecked(
+        state_root: PathBuf,
+        project_root: PathBuf,
+        transcript_dir: PathBuf,
+        transcript_file: PathBuf,
+    ) -> Self {
+        Self {
+            state_root,
+            project_root,
+            transcript_dir,
+            transcript_file,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1,5 +1,6 @@
 mod path;
 mod policy;
+mod writer;
 
 pub use path::{
     TranscriptPathError, TranscriptPathErrorReason, TranscriptPathRequest, TranscriptPathResolver,
@@ -10,6 +11,10 @@ pub use policy::{
     DEFAULT_TRANSCRIPT_MAX_PROJECT_BYTES, DEFAULT_TRANSCRIPT_MAX_TRANSCRIPT_BYTES,
     TranscriptBudgetScope, TranscriptCaptureMode, TranscriptCapturePolicy,
     TranscriptLocalDataSummary, TranscriptRetentionLimits, TranscriptRetentionState,
+};
+pub use writer::{
+    BoundedTranscriptWriter, TranscriptWriteError, TranscriptWriteErrorReason,
+    TranscriptWriteSummary, TranscriptWriterConfig,
 };
 
 #[cfg(test)]
