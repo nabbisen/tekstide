@@ -18,7 +18,7 @@ pub use terminal::{
     TerminalKind, TerminalSession, TerminalStatus, TerminalTransitionError, VisibleSlot,
 };
 pub use time::{DomainTimestamp, TimestampParseError};
-pub use transcript::{Transcript, TruncationState};
+pub use transcript::{Transcript, TranscriptLifecycleState, TruncationState};
 
 #[cfg(test)]
 mod tests;

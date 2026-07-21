@@ -21,7 +21,7 @@ pub use metadata::{
 pub use runtime::ProjectRuntimeSummary;
 pub use session::{
     ProjectAgentActiveFileLaunchError, ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError,
-    ProjectSession, ProjectTerminalError,
+    ProjectSession, ProjectTerminalError, ProjectTranscriptError, ProjectTranscriptPurgeSummary,
 };
 
 #[cfg(test)]

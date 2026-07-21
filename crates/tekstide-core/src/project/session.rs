@@ -4,7 +4,12 @@ use crate::runtime::terminal::{
     LinuxTerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntimeEvent,
     TerminationOutcome,
 };
-use std::path::PathBuf;
+use crate::transcript::{
+    TranscriptLocalDataSummary, TranscriptRetentionLimits, TranscriptRetentionState,
+    TranscriptWriteSummary,
+};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use crate::close::{CloseResourceProviderState, CloseResourceSummary};
 use crate::content::{ExternalChangeDecision, SaveDecision, TextDocumentOpenPolicy};
@@ -12,7 +17,7 @@ use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError,
     ApprovalDecision, ApprovalId, ApprovalRequest, AuditEvent, ChangeSet, DomainTimestamp,
     OwnershipError, ReviewState, TerminalId, TerminalKind, TerminalSession, TerminalStatus,
-    TerminalTransitionError, Transcript, VisibleSlot,
+    TerminalTransitionError, Transcript, TranscriptId, TranscriptLifecycleState, VisibleSlot,
 };
 
 use super::root::{FileExplorerScanPolicy, ProjectRootHandle};
@@ -177,6 +182,26 @@ impl ProjectSession {
 
     pub fn transcripts(&self) -> &[Transcript] {
         &self.transcripts
+    }
+
+    pub fn transcript_local_data_summary(
+        &self,
+        app_retained_bytes: u64,
+        limits: TranscriptRetentionLimits,
+    ) -> TranscriptLocalDataSummary {
+        let project_retained_bytes = self
+            .transcripts
+            .iter()
+            .filter(|transcript| transcript.has_retained_bytes())
+            .map(|transcript| transcript.byte_count)
+            .sum();
+
+        TranscriptLocalDataSummary::new(
+            project_retained_bytes,
+            app_retained_bytes,
+            self.transcripts.len() as u64,
+            limits,
+        )
     }
 
     pub fn change_sets(&self) -> &[ChangeSet] {
@@ -431,6 +456,91 @@ impl ProjectSession {
         self.record_activity();
         self.refresh_runtime_summary_from_collections();
         Ok(())
+    }
+
+    pub fn record_terminal_transcript_write_summary(
+        &mut self,
+        terminal_id: &TerminalId,
+        summary: TranscriptWriteSummary,
+    ) -> Result<(), ProjectTranscriptError> {
+        let transcript_id = self
+            .terminal_sessions
+            .iter()
+            .find(|terminal| terminal.id == *terminal_id)
+            .ok_or(ProjectTranscriptError::Ownership(
+                OwnershipError::MissingReference,
+            ))?
+            .transcript_ref
+            .clone()
+            .ok_or(ProjectTranscriptError::MissingTerminalTranscript)?;
+
+        self.record_transcript_write_summary(&transcript_id, summary)
+    }
+
+    pub fn record_transcript_write_summary(
+        &mut self,
+        transcript_id: &TranscriptId,
+        summary: TranscriptWriteSummary,
+    ) -> Result<(), ProjectTranscriptError> {
+        let transcript = self.transcript_mut(transcript_id)?;
+        match summary.retention_state {
+            TranscriptRetentionState::Active => transcript.record_active_write(summary.byte_count),
+            TranscriptRetentionState::Truncated { .. } => {
+                transcript.record_truncated_write(summary.byte_count)
+            }
+            TranscriptRetentionState::Expired => {
+                transcript.record_lifecycle_state(TranscriptLifecycleState::Expired)
+            }
+            TranscriptRetentionState::DisabledByOptOut => {
+                transcript.record_lifecycle_state(TranscriptLifecycleState::DisabledByOptOut)
+            }
+            TranscriptRetentionState::CaptureFailed => {
+                transcript.record_lifecycle_state(TranscriptLifecycleState::CaptureFailed)
+            }
+            TranscriptRetentionState::Purged => transcript.mark_purged(),
+        }
+        self.record_activity();
+        Ok(())
+    }
+
+    pub fn purge_transcript(
+        &mut self,
+        transcript_id: &TranscriptId,
+    ) -> Result<ProjectTranscriptPurgeSummary, ProjectTranscriptError> {
+        let index = self
+            .transcripts
+            .iter()
+            .position(|transcript| transcript.id == *transcript_id)
+            .ok_or(ProjectTranscriptError::MissingTranscript)?;
+        self.purge_transcript_at(index)
+    }
+
+    pub fn purge_agent_run_transcripts(
+        &mut self,
+        agent_run_id: &AgentRunId,
+    ) -> Result<ProjectTranscriptPurgeSummary, ProjectTranscriptError> {
+        self.ensure_agent_run_exists(agent_run_id)
+            .map_err(ProjectTranscriptError::Ownership)?;
+        let transcript_ids = self
+            .transcripts
+            .iter()
+            .filter(|transcript| transcript.agent_run_id.as_ref() == Some(agent_run_id))
+            .map(|transcript| transcript.id.clone())
+            .collect::<Vec<_>>();
+
+        self.purge_transcripts_by_id(transcript_ids)
+    }
+
+    pub fn purge_project_transcripts(
+        &mut self,
+    ) -> Result<ProjectTranscriptPurgeSummary, ProjectTranscriptError> {
+        let transcript_ids = self
+            .transcripts
+            .iter()
+            .map(|transcript| transcript.id.clone())
+            .collect::<Vec<_>>();
+
+        self.purge_transcripts_by_id(transcript_ids)
     }
 
     fn attach_agent_run_transcript(
@@ -695,6 +805,61 @@ impl ProjectSession {
             .iter_mut()
             .find(|terminal| terminal.id == *terminal_id)
             .ok_or(OwnershipError::MissingReference)
+    }
+
+    fn transcript_mut(
+        &mut self,
+        transcript_id: &TranscriptId,
+    ) -> Result<&mut Transcript, ProjectTranscriptError> {
+        self.transcripts
+            .iter_mut()
+            .find(|transcript| transcript.id == *transcript_id)
+            .ok_or(ProjectTranscriptError::MissingTranscript)
+    }
+
+    fn purge_transcripts_by_id(
+        &mut self,
+        transcript_ids: Vec<TranscriptId>,
+    ) -> Result<ProjectTranscriptPurgeSummary, ProjectTranscriptError> {
+        let mut summary = ProjectTranscriptPurgeSummary::default();
+        for transcript_id in transcript_ids {
+            summary.merge(self.purge_transcript(&transcript_id)?);
+        }
+        Ok(summary)
+    }
+
+    fn purge_transcript_at(
+        &mut self,
+        index: usize,
+    ) -> Result<ProjectTranscriptPurgeSummary, ProjectTranscriptError> {
+        let transcript_id = self.transcripts[index].id.clone();
+        if self.transcripts[index].is_tombstone() {
+            return Ok(ProjectTranscriptPurgeSummary {
+                requested_transcripts: 1,
+                purged_transcripts: 0,
+                bytes_removed: 0,
+                tombstones_preserved: 1,
+            });
+        }
+
+        let storage_path = self.transcripts[index].storage_path.clone();
+        if transcript_path_is_project_local(&storage_path, &self.canonical_root_path) {
+            return Err(ProjectTranscriptError::UnsafeProjectPath {
+                transcript_id,
+                path: storage_path,
+            });
+        }
+
+        let bytes_removed = remove_transcript_file(&transcript_id, &storage_path)?;
+        self.transcripts[index].mark_purged();
+        self.record_activity();
+
+        Ok(ProjectTranscriptPurgeSummary {
+            requested_transcripts: 1,
+            purged_transcripts: 1,
+            bytes_removed,
+            tombstones_preserved: 1,
+        })
     }
 
     fn ensure_agent_run_exists(&self, agent_run_id: &AgentRunId) -> Result<(), OwnershipError> {
@@ -984,6 +1149,89 @@ fn terminal_status_is_active(status: TerminalStatus) -> bool {
             | TerminalStatus::Terminating
             | TerminalStatus::OrphanedUnknown
     )
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ProjectTranscriptPurgeSummary {
+    pub requested_transcripts: u64,
+    pub purged_transcripts: u64,
+    pub bytes_removed: u64,
+    pub tombstones_preserved: u64,
+}
+
+impl ProjectTranscriptPurgeSummary {
+    fn merge(&mut self, other: Self) {
+        self.requested_transcripts += other.requested_transcripts;
+        self.purged_transcripts += other.purged_transcripts;
+        self.bytes_removed += other.bytes_removed;
+        self.tombstones_preserved += other.tombstones_preserved;
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProjectTranscriptError {
+    Ownership(OwnershipError),
+    MissingTranscript,
+    MissingTerminalTranscript,
+    UnsafeProjectPath {
+        transcript_id: TranscriptId,
+        path: PathBuf,
+    },
+    StoragePathIsDirectory {
+        transcript_id: TranscriptId,
+        path: PathBuf,
+    },
+    DeleteFailed {
+        transcript_id: TranscriptId,
+        path: PathBuf,
+    },
+}
+
+impl From<OwnershipError> for ProjectTranscriptError {
+    fn from(error: OwnershipError) -> Self {
+        Self::Ownership(error)
+    }
+}
+
+fn remove_transcript_file(
+    transcript_id: &TranscriptId,
+    storage_path: &Path,
+) -> Result<u64, ProjectTranscriptError> {
+    match fs::symlink_metadata(storage_path) {
+        Ok(metadata) if metadata.is_dir() => Err(ProjectTranscriptError::StoragePathIsDirectory {
+            transcript_id: transcript_id.clone(),
+            path: storage_path.to_path_buf(),
+        }),
+        Ok(metadata) => {
+            let byte_count = metadata.len();
+            fs::remove_file(storage_path).map_err(|_| ProjectTranscriptError::DeleteFailed {
+                transcript_id: transcript_id.clone(),
+                path: storage_path.to_path_buf(),
+            })?;
+            Ok(byte_count)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(_) => Err(ProjectTranscriptError::DeleteFailed {
+            transcript_id: transcript_id.clone(),
+            path: storage_path.to_path_buf(),
+        }),
+    }
+}
+
+fn transcript_path_is_project_local(storage_path: &Path, canonical_root_path: &Path) -> bool {
+    if storage_path.as_os_str().is_empty() || storage_path.is_relative() {
+        return true;
+    }
+    if storage_path.starts_with(canonical_root_path) {
+        return true;
+    }
+    let Ok(canonical_storage_path) = fs::canonicalize(storage_path) else {
+        return false;
+    };
+    let Ok(canonical_project_root) = fs::canonicalize(canonical_root_path) else {
+        return canonical_storage_path.starts_with(canonical_root_path);
+    };
+    canonical_storage_path.starts_with(canonical_project_root)
 }
 
 fn agent_run_status_is_active(status: AgentRunStatus) -> bool {

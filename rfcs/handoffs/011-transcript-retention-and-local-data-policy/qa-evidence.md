@@ -247,9 +247,54 @@ Acceptance:
 - Carry forward to PR-011-D: keep purge/local-data summaries content-free.
 - Carry forward to PR-011-D or closeout: reconcile stored transcript metadata with writer byte count, truncation state, last-write timestamp, and finalization behavior.
 
+### PR-011-D - Purge and Local Data Summaries
+
+Implementation:
+
+- Updated `crates/tekstide-core/src/domain/transcript.rs`.
+- Updated `crates/tekstide-core/src/domain.rs`.
+- Updated `crates/tekstide-core/src/project/session.rs`.
+- Updated `crates/tekstide-core/src/project.rs`.
+- Updated `crates/tekstide-core/src/runtime/terminal/launch.rs`.
+- Added `crates/tekstide-core/src/project/tests/transcripts.rs`.
+- Updated `crates/tekstide-core/src/project/tests/mod.rs`.
+- Updated `crates/tekstide-core/src/domain/tests/constructors.rs`.
+- Updated `crates/tekstide-core/src/agent/tests.rs`.
+
+Implemented purge/local-data behavior:
+
+- Added transcript lifecycle metadata for active, truncated, expired, opt-out disabled, capture failed, and purged states.
+- Added `ProjectSession` metadata reconciliation from `TranscriptWriteSummary`, including byte count, truncation state, lifecycle state, and last-write timestamp.
+- Added read-only runtime access to the current transcript writer summary.
+- Added metadata-only local-data summaries over project transcript metadata.
+- Added purge scopes for one transcript, one AgentRun, and the whole ProjectSession.
+- Purge is idempotent when bytes are already absent or metadata is already a tombstone.
+- Purge deletes only transcript byte files outside the project root.
+- Purge rejects relative, empty, and project-root-contained storage paths instead of deleting them.
+- Purge preserves AgentRun and TerminalSession transcript references by default.
+- Purged transcript metadata is kept as a tombstone with the transcript id and ownership references, but the storage path and byte count are cleared.
+
+Security/privacy notes:
+
+- Purge summaries and local-data summaries expose counts and byte totals only; they do not model transcript snippets, prompts, terminal output, environment values, or file contents.
+- PR-011-D does not claim secure deletion; it removes local transcript byte files through ordinary filesystem deletion.
+- PR-011-D does not add durable audit persistence, GUI transcript/review surfaces, generated-change review UI, search indexing, redaction, or a hidden background capture loop.
+- Metadata reconciliation is explicit: runtime can report writer state, and ProjectSession can record it. There is no background metadata finalizer.
+- Automatic project/app aggregate cleanup is still deferred; PR-011-D adds accounting and explicit purge scopes.
+
+Observed gates on 2026-07-21 before review request 082:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core transcript -- --quiet` passed; 36 tests passed, 0 failed.
+- `cargo test -p tekstide-core project::tests::transcripts -- --quiet` passed; 7 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 288 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `git diff --check` passed.
+
 ## Known Limitations
 
-- PR-011-C does not implement purge operations or tombstone updates.
-- PR-011-C does not implement aggregate cleanup for project/app budgets.
-- PR-011-C does not add a hidden background terminal-output capture loop.
-- PR-011-C does not claim durable audit, GUI review surfaces, generated-change review, search indexing, secure deletion, or redaction.
+- RFC-011 still needs PR-011-E closeout evidence and checklist updates after PR-011-D implementation review is accepted.
+- Automatic aggregate cleanup for project/app transcript budgets is not implemented; explicit purge and metadata-only accounting are implemented.
+- Transcript metadata reconciliation is explicit and caller-driven; there is no hidden background finalizer or output capture loop.
+- RFC-011 does not claim durable audit, GUI review surfaces, generated-change review, search indexing, secure deletion, or redaction.

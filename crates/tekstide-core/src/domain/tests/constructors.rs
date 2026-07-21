@@ -1,4 +1,7 @@
-use crate::domain::{AgentRunId, ChangeSet, ReviewState, TerminalId, Transcript};
+use crate::domain::{
+    AgentRunId, ChangeSet, ReviewState, TerminalId, Transcript, TranscriptLifecycleState,
+    TruncationState,
+};
 use crate::project::ProjectId;
 
 #[test]
@@ -12,6 +15,8 @@ fn transcript_metadata_constructor_sets_safe_defaults_without_writing_bytes() {
     );
 
     assert_eq!(transcript.byte_count, 0);
+    assert_eq!(transcript.truncation_state, TruncationState::Complete);
+    assert_eq!(transcript.lifecycle_state, TranscriptLifecycleState::Active);
     assert_eq!(transcript.retention_policy, "bounded-default");
     assert!(transcript.last_write_at.is_none());
 }

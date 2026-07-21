@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use crate::domain::{TerminalId, TerminalSession, TerminalStatus};
 use crate::project::{ProjectId, ProjectSession};
-use crate::transcript::{BoundedTranscriptWriter, TranscriptWriteError};
+use crate::transcript::{BoundedTranscriptWriter, TranscriptWriteError, TranscriptWriteSummary};
 
 use super::pty::{OpenPty, close_fd, resize_master};
 use super::{
@@ -192,6 +192,17 @@ impl LinuxTerminalRuntime {
             handle: handle.clone(),
             dimensions,
         })
+    }
+
+    pub fn transcript_write_summary(
+        &self,
+        handle: &TerminalRuntimeHandle,
+    ) -> Result<Option<TranscriptWriteSummary>, TerminalRuntimeError> {
+        Ok(self
+            .session(handle)?
+            .transcript_writer
+            .as_ref()
+            .map(BoundedTranscriptWriter::summary))
     }
 
     pub(super) fn session(

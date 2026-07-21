@@ -3,6 +3,7 @@ use super::{ProjectId, ProjectSession};
 mod collections;
 mod metadata;
 mod references;
+mod transcripts;
 
 fn project_session(sequence: u64) -> ProjectSession {
     ProjectSession::new(
