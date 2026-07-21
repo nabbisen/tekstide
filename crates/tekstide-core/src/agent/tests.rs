@@ -15,13 +15,13 @@ use crate::runtime::terminal::{
     BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError,
     TerminalRuntimeEvent, TerminalRuntimeHandle, TerminationOutcome, TerminationSignal,
 };
-use crate::security::{BoundedTranscriptRetention, TranscriptPrivacyPolicy};
+use crate::transcript::{TranscriptCaptureMode, TranscriptRetentionLimits};
 
 use super::{
     AgentRunLaunchPlan, AgentRunLaunchRequest, AgentRunLaunchValidationError,
-    AgentRunLaunchValidator, AiCliAdapterCapabilities, AiCliEnvironmentPolicy, AiCliExecutable,
-    AiCliExecutableProvenance, AiCliProfile, AiCliProfileSource, AiCliPromptPolicy,
-    AiCliWorkspaceDiscoveryPolicy, ExecutableLookupPath,
+    AgentRunLaunchValidator, AgentRunTranscriptCaptureError, AiCliAdapterCapabilities,
+    AiCliEnvironmentPolicy, AiCliExecutable, AiCliExecutableProvenance, AiCliProfile,
+    AiCliProfileSource, AiCliPromptPolicy, AiCliWorkspaceDiscoveryPolicy, ExecutableLookupPath,
 };
 
 #[test]
@@ -303,24 +303,45 @@ fn managed_profile_requires_structured_action_capability() {
 }
 
 #[test]
-fn transcript_byte_persistence_is_blocked_until_rfc011() {
-    let root = test_root("agent-transcript-blocked");
-    let bin = test_root("agent-transcript-bin");
+fn required_transcript_capture_rejects_missing_state_root() {
+    let root = test_root("agent-transcript-required-root");
+    let bin = test_root("agent-transcript-required-bin");
     let executable = executable_file(&bin, "ai-cli");
     let project = restricted_project(ProjectId::for_test(1), &root);
-    let mut profile = built_in_profile(&executable);
-    profile.transcript_policy = TranscriptPrivacyPolicy::local_bounded_agent_run_default(
-        BoundedTranscriptRetention::by_size_and_age(1024, 1),
-    );
-    let request = request_for(&project, &profile);
+    let profile = built_in_profile(&executable);
+    let mut request = request_for(&project, &profile);
+    request.transcript_capture_mode = TranscriptCaptureMode::RequiredLocalBounded;
 
     assert_eq!(
         AgentRunLaunchValidator
             .validate(&project, &profile, &request)
-            .expect_err("transcript bytes remain blocked until RFC-011"),
-        AgentRunLaunchValidationError::TranscriptBytesBlockedUntilRetentionPolicy
+            .expect_err("required transcript capture needs a state root"),
+        AgentRunLaunchValidationError::RequiredTranscriptStateRootMissing
     );
     cleanup_root(root);
+    cleanup_root(bin);
+}
+
+#[test]
+fn required_transcript_capture_rejects_unbounded_policy() {
+    let root = test_root("agent-transcript-unbounded-root");
+    let state_root = test_root("agent-transcript-unbounded-state");
+    let bin = test_root("agent-transcript-unbounded-bin");
+    let executable = executable_file(&bin, "ai-cli");
+    let project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(&executable);
+    let request = request_for(&project, &profile)
+        .with_required_local_bounded_transcript(&state_root)
+        .with_transcript_retention_limits(TranscriptRetentionLimits::new(0, 0, 0, 0));
+
+    assert_eq!(
+        AgentRunLaunchValidator
+            .validate(&project, &profile, &request)
+            .expect_err("required transcript capture needs bounded policy"),
+        AgentRunLaunchValidationError::RequiredTranscriptPolicyDoesNotPermitBytes
+    );
+    cleanup_root(root);
+    cleanup_root(state_root);
     cleanup_root(bin);
 }
 
@@ -553,6 +574,281 @@ fn project_session_launches_agent_run_through_terminal_runtime_and_completes() {
         crate::domain::TerminalStatus::Exited
     );
     assert_eq!(project.runtime_summary().running_processes, 0);
+
+    cleanup_root(root);
+}
+
+#[test]
+fn local_bounded_agent_run_transcript_capture_attaches_metadata_and_writes_output() {
+    let root = test_root("agent-transcript-capture-root");
+    let state_root = test_root("agent-transcript-capture-state");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let validation = AgentRunLaunchValidator
+        .validate(
+            &project,
+            &profile,
+            &request_for(&project, &profile).with_local_bounded_transcript(&state_root),
+        )
+        .expect("local bounded transcript launch should validate");
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (agent_run_id, _) = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect("transcript-enabled AgentRun should launch");
+    let run = project
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .expect("AgentRun should be recorded");
+    let transcript_id = run
+        .transcript_ref
+        .clone()
+        .expect("AgentRun should have transcript metadata");
+    let terminal_id = run
+        .terminal_id
+        .clone()
+        .expect("AgentRun should attach terminal");
+    let terminal = project.terminal_session(&terminal_id).unwrap();
+    let transcript = project
+        .transcripts()
+        .iter()
+        .find(|transcript| transcript.id == transcript_id)
+        .expect("transcript metadata should be recorded");
+
+    assert_eq!(terminal.transcript_ref, Some(transcript_id));
+    assert_eq!(transcript.agent_run_id, Some(agent_run_id.clone()));
+    assert_eq!(transcript.terminal_id, terminal_id);
+    assert!(transcript.storage_path.starts_with(&state_root));
+    assert!(!transcript.storage_path.starts_with(&root));
+
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    runtime
+        .write_input(&handle, b"printf 'tekstide-transcript-ok\\n'\nexit 0\n")
+        .expect("transcript marker command should write to PTY");
+    let output = read_until_contains(&mut runtime, &handle, b"tekstide-transcript-ok");
+    assert!(contains_subsequence(&output, b"tekstide-transcript-ok"));
+    let transcript_bytes = std::fs::read(&transcript.storage_path).unwrap();
+    assert!(contains_subsequence(
+        &transcript_bytes,
+        b"tekstide-transcript-ok"
+    ));
+
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("transcript AgentRun wait should not fail")
+        .expect("transcript AgentRun should exit");
+    project
+        .apply_agent_terminal_outcome(&agent_run_id, &terminal_id, &outcome)
+        .expect("transcript AgentRun cleanup should apply");
+
+    cleanup_root(root);
+    cleanup_root(state_root);
+}
+
+#[test]
+fn transcript_capture_retains_pty_bytes_dropped_from_ui_buffer() {
+    let root = test_root("agent-transcript-dropped-ui-root");
+    let state_root = test_root("agent-transcript-dropped-ui-state");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let validation = AgentRunLaunchValidator
+        .validate(
+            &project,
+            &profile,
+            &request_for(&project, &profile).with_local_bounded_transcript(&state_root),
+        )
+        .expect("local bounded transcript launch should validate");
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (agent_run_id, _) = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect("transcript-enabled AgentRun should launch");
+    let run = project
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .expect("AgentRun should be recorded");
+    let transcript_id = run.transcript_ref.clone().unwrap();
+    let terminal_id = run.terminal_id.clone().unwrap();
+    let transcript_path = project
+        .transcripts()
+        .iter()
+        .find(|transcript| transcript.id == transcript_id)
+        .unwrap()
+        .storage_path
+        .clone();
+    let handle = TerminalRuntimeHandle::new(terminal_id.clone(), project.id().clone());
+
+    runtime
+        .write_input(
+            &handle,
+            b"printf 'aaaaabbbbbccccc-transcript-tail\\n'\nexit 0\n",
+        )
+        .expect("large transcript marker command should write to PTY");
+    let mut returned_output = Vec::new();
+    let mut saw_dropped_bytes = false;
+    for _ in 0..80 {
+        let (chunk, event) = runtime
+            .read_available_bounded_for(&handle, Duration::from_millis(50), 8)
+            .expect("bounded PTY output read should succeed");
+        returned_output.extend_from_slice(&chunk);
+        if let TerminalRuntimeEvent::OutputBuffered { summary, .. } = event
+            && summary.dropped_bytes > 0
+        {
+            saw_dropped_bytes = true;
+            break;
+        }
+    }
+
+    assert!(saw_dropped_bytes);
+    assert!(!contains_subsequence(&returned_output, b"transcript-tail"));
+    let transcript_bytes = std::fs::read(&transcript_path).unwrap();
+    assert!(contains_subsequence(&transcript_bytes, b"transcript-tail"));
+
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("overflow AgentRun wait should not fail")
+        .expect("overflow AgentRun should exit");
+    project
+        .apply_agent_terminal_outcome(&agent_run_id, &terminal_id, &outcome)
+        .expect("overflow AgentRun cleanup should apply");
+
+    cleanup_root(root);
+    cleanup_root(state_root);
+}
+
+#[test]
+fn transcript_opt_out_launches_without_transcript_metadata() {
+    let root = test_root("agent-transcript-opt-out-root");
+    let state_root = test_root("agent-transcript-opt-out-state");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let validation = AgentRunLaunchValidator
+        .validate(
+            &project,
+            &profile,
+            &request_for(&project, &profile)
+                .with_local_bounded_transcript(&state_root)
+                .without_transcript_capture(),
+        )
+        .expect("opted-out transcript launch should validate");
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (agent_run_id, _) = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect("opted-out AgentRun should launch");
+    let run = project
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .expect("AgentRun should be recorded");
+    let terminal_id = run.terminal_id.clone().unwrap();
+    let handle = TerminalRuntimeHandle::new(terminal_id.clone(), project.id().clone());
+
+    assert!(run.transcript_ref.is_none());
+    assert!(
+        project
+            .terminal_session(&terminal_id)
+            .unwrap()
+            .transcript_ref
+            .is_none()
+    );
+    assert!(project.transcripts().is_empty());
+
+    runtime
+        .write_input(&handle, b"exit 0\n")
+        .expect("cleanup exit should write to opted-out AgentRun PTY");
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("opted-out AgentRun wait should not fail")
+        .expect("opted-out AgentRun should exit");
+    project
+        .apply_agent_terminal_outcome(&agent_run_id, &terminal_id, &outcome)
+        .expect("opted-out cleanup should apply");
+
+    cleanup_root(root);
+    cleanup_root(state_root);
+}
+
+#[test]
+fn required_transcript_capture_rejects_project_local_state_root_before_runtime_launch() {
+    let root = test_root("agent-transcript-required-project-root");
+    let state_root = root.join(".tekstide-state");
+    std::fs::create_dir_all(&state_root).unwrap();
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let validation = AgentRunLaunchValidator
+        .validate(
+            &project,
+            &profile,
+            &request_for(&project, &profile).with_required_local_bounded_transcript(&state_root),
+        )
+        .expect("required transcript request should validate before path preflight");
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let error = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect_err("required project-local transcript path must reject before runtime launch");
+
+    assert!(matches!(
+        error,
+        ProjectAgentRuntimeLaunchError::TranscriptCapture(AgentRunTranscriptCaptureError::Path(_))
+    ));
+    assert!(project.agent_runs().is_empty());
+    assert!(project.terminal_sessions().is_empty());
+    assert!(project.transcripts().is_empty());
+    assert!(!state_root.join("transcripts").exists());
+
+    cleanup_root(root);
+}
+
+#[test]
+fn local_bounded_transcript_capture_disables_when_path_preflight_fails() {
+    let root = test_root("agent-transcript-local-disabled-root");
+    let state_root = root.join(".tekstide-state");
+    std::fs::create_dir_all(&state_root).unwrap();
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let validation = AgentRunLaunchValidator
+        .validate(
+            &project,
+            &profile,
+            &request_for(&project, &profile).with_local_bounded_transcript(&state_root),
+        )
+        .expect("local bounded transcript request should validate before path preflight");
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (agent_run_id, _) = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect("local bounded capture should disable when preflight fails");
+    let run = project
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .unwrap();
+    let terminal_id = run.terminal_id.clone().unwrap();
+    let handle = TerminalRuntimeHandle::new(terminal_id.clone(), project.id().clone());
+
+    assert!(run.transcript_ref.is_none());
+    assert!(project.transcripts().is_empty());
+    assert!(!state_root.join("transcripts").exists());
+
+    runtime
+        .write_input(&handle, b"exit 0\n")
+        .expect("cleanup exit should write to local bounded AgentRun PTY");
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("local bounded disabled AgentRun wait should not fail")
+        .expect("local bounded disabled AgentRun should exit");
+    project
+        .apply_agent_terminal_outcome(&agent_run_id, &terminal_id, &outcome)
+        .expect("local bounded disabled cleanup should apply");
 
     cleanup_root(root);
 }
@@ -1188,4 +1484,28 @@ fn test_root(name: &str) -> PathBuf {
 
 fn cleanup_root(root: PathBuf) {
     let _ = std::fs::remove_dir_all(root);
+}
+
+fn read_until_contains(
+    runtime: &mut LinuxTerminalRuntime,
+    handle: &TerminalRuntimeHandle,
+    marker: &[u8],
+) -> Vec<u8> {
+    let mut output = Vec::new();
+    for _ in 0..80 {
+        let (chunk, _) = runtime
+            .read_available_bounded_for(handle, Duration::from_millis(50), 16 * 1024)
+            .expect("PTY output read should succeed");
+        output.extend_from_slice(&chunk);
+        if contains_subsequence(&output, marker) {
+            break;
+        }
+    }
+    output
+}
+
+fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }

@@ -1,4 +1,5 @@
 use crate::agent::AgentRunLaunchPlan;
+use crate::agent::AgentRunTranscriptCaptureError;
 use crate::runtime::terminal::{
     LinuxTerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntimeEvent,
     TerminationOutcome,
@@ -334,13 +335,24 @@ impl ProjectSession {
     ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
         self.validate_agent_launch_plan_before_runtime(&plan)?;
         self.ensure_agent_launch_active_file_safety()?;
+        plan.prepare_transcript_capture()?;
+        let transcript_storage_path = plan.transcript_storage_path().cloned();
 
         plan.transition_agent_run_to(AgentRunStatus::Preparing)?;
         let (terminal, events) =
             runtime.launch_project_shell(self, plan.terminal_launch_spec_for_runtime())?;
+        let terminal_id = terminal.id.clone();
         plan.transition_agent_run_to(AgentRunStatus::Running)?;
 
         let agent_run_id = self.attach_agent_launch_plan(plan, terminal)?;
+        if let Some(storage_path) = transcript_storage_path {
+            self.attach_agent_run_transcript(
+                agent_run_id.clone(),
+                terminal_id,
+                storage_path.transcript_file().to_path_buf(),
+                "local-bounded-agent-run",
+            )?;
+        }
         Ok((agent_run_id, events))
     }
 
@@ -416,6 +428,37 @@ impl ProjectSession {
             return Err(OwnershipError::DuplicateAttachment);
         }
         self.transcripts.push(transcript);
+        self.record_activity();
+        self.refresh_runtime_summary_from_collections();
+        Ok(())
+    }
+
+    fn attach_agent_run_transcript(
+        &mut self,
+        agent_run_id: AgentRunId,
+        terminal_id: TerminalId,
+        storage_path: PathBuf,
+        retention_policy: impl Into<String>,
+    ) -> Result<(), OwnershipError> {
+        self.ensure_terminal_exists(&terminal_id)?;
+        self.ensure_agent_run_exists(&agent_run_id)?;
+        self.ensure_agent_run_attached_to_terminal_for_ownership(&agent_run_id, &terminal_id)?;
+
+        let transcript = Transcript::metadata(
+            self.id.clone(),
+            terminal_id.clone(),
+            Some(agent_run_id.clone()),
+            storage_path,
+            retention_policy,
+        );
+        let transcript_id = transcript.id.clone();
+        self.transcripts.push(transcript);
+
+        let terminal = self.terminal_session_mut(&terminal_id)?;
+        terminal.transcript_ref = Some(transcript_id.clone());
+        let run = self.agent_run_mut(&agent_run_id)?;
+        run.transcript_ref = Some(transcript_id);
+
         self.record_activity();
         self.refresh_runtime_summary_from_collections();
         Ok(())
@@ -690,6 +733,24 @@ impl ProjectSession {
         }
     }
 
+    fn ensure_agent_run_attached_to_terminal_for_ownership(
+        &self,
+        agent_run_id: &AgentRunId,
+        terminal_id: &TerminalId,
+    ) -> Result<(), OwnershipError> {
+        let run = self
+            .agent_runs
+            .iter()
+            .find(|run| run.id == *agent_run_id)
+            .ok_or(OwnershipError::MissingReference)?;
+
+        if run.terminal_id.as_ref() == Some(terminal_id) {
+            Ok(())
+        } else {
+            Err(OwnershipError::WrongAgentRun)
+        }
+    }
+
     fn transition_agent_run_status(
         &mut self,
         agent_run_id: &AgentRunId,
@@ -838,6 +899,7 @@ pub enum ProjectAgentRuntimeLaunchError {
     TerminalLaunch(TerminalLaunchError),
     Terminal(ProjectTerminalError),
     ActiveFile(ProjectAgentActiveFileLaunchError),
+    TranscriptCapture(AgentRunTranscriptCaptureError),
     InvalidAgentRunTransition(AgentRunTransitionError),
     AgentTerminalMismatch,
 }
@@ -869,6 +931,12 @@ impl From<ProjectTerminalError> for ProjectAgentRuntimeLaunchError {
 impl From<ProjectAgentActiveFileLaunchError> for ProjectAgentRuntimeLaunchError {
     fn from(error: ProjectAgentActiveFileLaunchError) -> Self {
         Self::ActiveFile(error)
+    }
+}
+
+impl From<AgentRunTranscriptCaptureError> for ProjectAgentRuntimeLaunchError {
+    fn from(error: AgentRunTranscriptCaptureError) -> Self {
+        Self::TranscriptCapture(error)
     }
 }
 

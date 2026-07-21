@@ -6,6 +6,11 @@ use crate::domain::{AgentCompatibilityLevel, AgentRun, AgentRunStatus, AgentRunT
 use crate::project::{ProjectId, ProjectSession, WorkspaceTrust};
 use crate::runtime::terminal::{TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec};
 use crate::security::is_restricted_mode;
+use crate::transcript::{
+    TranscriptCaptureMode, TranscriptCapturePolicy, TranscriptPathError, TranscriptPathRequest,
+    TranscriptPathResolver, TranscriptRetentionLimits, TranscriptStoragePath,
+    TranscriptWriterConfig,
+};
 
 use super::profile::{
     AiCliEnvironmentPolicy, AiCliExecutable, AiCliExecutableProvenance, AiCliProfile,
@@ -18,6 +23,9 @@ pub struct AgentRunLaunchRequest {
     pub profile_id: String,
     pub prompt_summary: String,
     pub cwd: Option<PathBuf>,
+    pub transcript_capture_mode: TranscriptCaptureMode,
+    pub transcript_state_root: Option<PathBuf>,
+    pub transcript_retention_limits: TranscriptRetentionLimits,
 }
 
 impl AgentRunLaunchRequest {
@@ -31,7 +39,39 @@ impl AgentRunLaunchRequest {
             profile_id: profile_id.into(),
             prompt_summary: prompt_summary.into(),
             cwd: None,
+            transcript_capture_mode: TranscriptCaptureMode::LocalBounded,
+            transcript_state_root: None,
+            transcript_retention_limits: TranscriptRetentionLimits::agent_run_default(),
         }
+    }
+
+    pub fn without_transcript_capture(mut self) -> Self {
+        self.transcript_capture_mode = TranscriptCaptureMode::Disabled;
+        self.transcript_state_root = None;
+        self
+    }
+
+    pub fn with_local_bounded_transcript(mut self, state_root: impl Into<PathBuf>) -> Self {
+        self.transcript_capture_mode = TranscriptCaptureMode::LocalBounded;
+        self.transcript_state_root = Some(state_root.into());
+        self
+    }
+
+    pub fn with_required_local_bounded_transcript(
+        mut self,
+        state_root: impl Into<PathBuf>,
+    ) -> Self {
+        self.transcript_capture_mode = TranscriptCaptureMode::RequiredLocalBounded;
+        self.transcript_state_root = Some(state_root.into());
+        self
+    }
+
+    pub fn with_transcript_retention_limits(
+        mut self,
+        retention_limits: TranscriptRetentionLimits,
+    ) -> Self {
+        self.transcript_retention_limits = retention_limits;
+        self
     }
 }
 
@@ -39,6 +79,7 @@ impl AgentRunLaunchRequest {
 pub struct AgentRunLaunchValidation {
     project_id: ProjectId,
     profile_id: String,
+    project_root: PathBuf,
     executable_path: PathBuf,
     executable_provenance: AiCliExecutableProvenance,
     cwd: PathBuf,
@@ -47,12 +88,14 @@ pub struct AgentRunLaunchValidation {
     environment_summary: AgentLaunchSummary,
     terminal_environment_policy: TerminalEnvironmentPolicy,
     workspace_discovery_summary: AgentLaunchSummary,
+    transcript_capture: AgentRunTranscriptCapture,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentRunLaunchSpec {
     project_id: ProjectId,
     profile_id: String,
+    project_root: PathBuf,
     executable_path: PathBuf,
     executable_provenance: AiCliExecutableProvenance,
     cwd: PathBuf,
@@ -61,6 +104,7 @@ pub struct AgentRunLaunchSpec {
     environment_summary: AgentLaunchSummary,
     terminal_environment_policy: TerminalEnvironmentPolicy,
     workspace_discovery_summary: AgentLaunchSummary,
+    transcript_capture: AgentRunTranscriptCapture,
 }
 
 impl AgentRunLaunchValidation {
@@ -74,6 +118,10 @@ impl AgentRunLaunchValidation {
 
     pub fn executable_path(&self) -> &Path {
         &self.executable_path
+    }
+
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
     }
 
     pub fn executable_provenance(&self) -> AiCliExecutableProvenance {
@@ -103,6 +151,10 @@ impl AgentRunLaunchValidation {
     pub fn workspace_discovery_summary(&self) -> &AgentLaunchSummary {
         &self.workspace_discovery_summary
     }
+
+    pub fn transcript_capture(&self) -> &AgentRunTranscriptCapture {
+        &self.transcript_capture
+    }
 }
 
 impl From<AgentRunLaunchValidation> for AgentRunLaunchSpec {
@@ -110,6 +162,7 @@ impl From<AgentRunLaunchValidation> for AgentRunLaunchSpec {
         Self {
             project_id: validation.project_id,
             profile_id: validation.profile_id,
+            project_root: validation.project_root,
             executable_path: validation.executable_path,
             executable_provenance: validation.executable_provenance,
             cwd: validation.cwd,
@@ -118,6 +171,7 @@ impl From<AgentRunLaunchValidation> for AgentRunLaunchSpec {
             environment_summary: validation.environment_summary,
             terminal_environment_policy: validation.terminal_environment_policy,
             workspace_discovery_summary: validation.workspace_discovery_summary,
+            transcript_capture: validation.transcript_capture,
         }
     }
 }
@@ -127,6 +181,7 @@ pub struct AgentRunLaunchPlan {
     spec: AgentRunLaunchSpec,
     agent_run: AgentRun,
     terminal_launch_spec: TerminalLaunchSpec,
+    transcript_storage_path: Option<TranscriptStoragePath>,
 }
 
 impl AgentRunLaunchPlan {
@@ -159,6 +214,7 @@ impl AgentRunLaunchPlan {
             spec,
             agent_run,
             terminal_launch_spec,
+            transcript_storage_path: None,
         })
     }
 
@@ -176,6 +232,75 @@ impl AgentRunLaunchPlan {
 
     pub(crate) fn terminal_launch_spec_for_runtime(&self) -> TerminalLaunchSpec {
         self.terminal_launch_spec.clone()
+    }
+
+    pub(crate) fn prepare_transcript_capture(
+        &mut self,
+    ) -> Result<(), AgentRunTranscriptCaptureError> {
+        let Some(state_root) = self.spec.transcript_capture.state_root.as_ref() else {
+            if self
+                .spec
+                .transcript_capture
+                .mode
+                .rejects_launch_when_unavailable()
+            {
+                return Err(AgentRunTranscriptCaptureError::StateRootMissing);
+            }
+            self.terminal_launch_spec.set_transcript_writer_config(None);
+            self.transcript_storage_path = None;
+            return Ok(());
+        };
+
+        let capture_policy = self.spec.transcript_capture.capture_policy();
+        if !capture_policy.permits_transcript_byte_persistence() {
+            if self
+                .spec
+                .transcript_capture
+                .mode
+                .rejects_launch_when_unavailable()
+            {
+                return Err(AgentRunTranscriptCaptureError::PolicyDoesNotPermitBytes);
+            }
+            self.terminal_launch_spec.set_transcript_writer_config(None);
+            self.transcript_storage_path = None;
+            return Ok(());
+        }
+
+        let storage_path = TranscriptPathResolver.resolve_agent_run(TranscriptPathRequest::new(
+            state_root,
+            &self.spec.project_root,
+            self.spec.project_id.clone(),
+            self.agent_run.id.clone(),
+        ));
+        let storage_path = match storage_path {
+            Ok(storage_path) => storage_path,
+            Err(error)
+                if self
+                    .spec
+                    .transcript_capture
+                    .mode
+                    .rejects_launch_when_unavailable() =>
+            {
+                return Err(AgentRunTranscriptCaptureError::Path(error));
+            }
+            Err(_) => {
+                self.terminal_launch_spec.set_transcript_writer_config(None);
+                self.transcript_storage_path = None;
+                return Ok(());
+            }
+        };
+
+        self.terminal_launch_spec
+            .set_transcript_writer_config(Some(TranscriptWriterConfig::new(
+                storage_path.clone(),
+                self.spec.transcript_capture.retention_limits,
+            )));
+        self.transcript_storage_path = Some(storage_path);
+        Ok(())
+    }
+
+    pub(crate) fn transcript_storage_path(&self) -> Option<&TranscriptStoragePath> {
+        self.transcript_storage_path.as_ref()
     }
 
     pub(crate) fn transition_agent_run_to(
@@ -201,6 +326,10 @@ impl AgentRunLaunchSpec {
 
     pub fn executable_path(&self) -> &Path {
         &self.executable_path
+    }
+
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
     }
 
     pub fn executable_provenance(&self) -> AiCliExecutableProvenance {
@@ -230,6 +359,39 @@ impl AgentRunLaunchSpec {
     pub fn workspace_discovery_summary(&self) -> &AgentLaunchSummary {
         &self.workspace_discovery_summary
     }
+
+    pub fn transcript_capture(&self) -> &AgentRunTranscriptCapture {
+        &self.transcript_capture
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentRunTranscriptCapture {
+    pub mode: TranscriptCaptureMode,
+    pub state_root: Option<PathBuf>,
+    pub retention_limits: TranscriptRetentionLimits,
+}
+
+impl AgentRunTranscriptCapture {
+    pub fn capture_policy(&self) -> TranscriptCapturePolicy {
+        match self.mode {
+            TranscriptCaptureMode::Disabled => TranscriptCapturePolicy::metadata_only(),
+            TranscriptCaptureMode::LocalBounded => {
+                TranscriptCapturePolicy::local_bounded_agent_run_default()
+                    .with_limits(self.retention_limits)
+            }
+            TranscriptCaptureMode::RequiredLocalBounded => {
+                TranscriptCapturePolicy::required_local_bounded(self.retention_limits)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AgentRunTranscriptCaptureError {
+    StateRootMissing,
+    PolicyDoesNotPermitBytes,
+    Path(TranscriptPathError),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -248,7 +410,8 @@ pub enum AgentRunLaunchValidationError {
     WorkspaceDiscoveryBlocked { summary: AgentLaunchSummary },
     MissingWorkspaceDiscoveryEvidence,
     ManagedCapabilityMissing,
-    TranscriptBytesBlockedUntilRetentionPolicy,
+    RequiredTranscriptStateRootMissing,
+    RequiredTranscriptPolicyDoesNotPermitBytes,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -310,7 +473,7 @@ impl AgentRunLaunchValidator {
         validate_environment_policy(restricted, &profile.environment_policy)?;
         validate_workspace_discovery_policy(restricted, profile)?;
         validate_compatibility(profile)?;
-        validate_transcript_policy(profile)?;
+        validate_transcript_policy(request)?;
 
         let root = canonical_existing_dir(project.canonical_root_path()).map_err(|summary| {
             AgentRunLaunchValidationError::MissingProjectRoot {
@@ -341,6 +504,7 @@ impl AgentRunLaunchValidator {
         Ok(AgentRunLaunchValidation {
             project_id: request.project_id.clone(),
             profile_id: profile.id.clone(),
+            project_root: root.clone(),
             executable_path,
             executable_provenance,
             cwd,
@@ -351,6 +515,11 @@ impl AgentRunLaunchValidator {
             workspace_discovery_summary: AgentLaunchSummary::new(
                 profile.workspace_discovery_policy.evidence(),
             ),
+            transcript_capture: AgentRunTranscriptCapture {
+                mode: request.transcript_capture_mode,
+                state_root: request.transcript_state_root.clone(),
+                retention_limits: request.transcript_retention_limits,
+            },
         })
     }
 }
@@ -432,15 +601,30 @@ fn validate_compatibility(profile: &AiCliProfile) -> Result<(), AgentRunLaunchVa
     }
 }
 
-fn validate_transcript_policy(profile: &AiCliProfile) -> Result<(), AgentRunLaunchValidationError> {
-    if profile
-        .transcript_policy
+fn validate_transcript_policy(
+    request: &AgentRunLaunchRequest,
+) -> Result<(), AgentRunLaunchValidationError> {
+    if !request
+        .transcript_capture_mode
+        .rejects_launch_when_unavailable()
+    {
+        return Ok(());
+    }
+    if request.transcript_state_root.is_none() {
+        return Err(AgentRunLaunchValidationError::RequiredTranscriptStateRootMissing);
+    }
+    let capture = AgentRunTranscriptCapture {
+        mode: request.transcript_capture_mode,
+        state_root: request.transcript_state_root.clone(),
+        retention_limits: request.transcript_retention_limits,
+    };
+    if !capture
+        .capture_policy()
         .permits_transcript_byte_persistence()
     {
-        Err(AgentRunLaunchValidationError::TranscriptBytesBlockedUntilRetentionPolicy)
-    } else {
-        Ok(())
+        return Err(AgentRunLaunchValidationError::RequiredTranscriptPolicyDoesNotPermitBytes);
     }
+    Ok(())
 }
 
 fn resolve_executable(

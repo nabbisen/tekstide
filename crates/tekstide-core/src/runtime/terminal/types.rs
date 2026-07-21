@@ -4,6 +4,7 @@ use crate::domain::{
     AgentCompatibilityLevel, TerminalId, TerminalKind, TerminalStatus, VisibleSlot,
 };
 use crate::project::ProjectId;
+use crate::transcript::TranscriptWriterConfig;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalLaunchSpec {
@@ -15,6 +16,7 @@ pub struct TerminalLaunchSpec {
     pub environment_policy: TerminalEnvironmentPolicy,
     pub kind: TerminalKind,
     pub dimensions: TerminalDimensions,
+    transcript_writer_config: Option<TranscriptWriterConfig>,
     launch_authority: TerminalLaunchAuthority,
 }
 
@@ -35,6 +37,7 @@ impl TerminalLaunchSpec {
             environment_policy: TerminalEnvironmentPolicy::Minimal,
             kind: TerminalKind::Plain,
             dimensions: TerminalDimensions::default(),
+            transcript_writer_config: None,
             launch_authority: TerminalLaunchAuthority::PlainShell,
         }
     }
@@ -55,6 +58,14 @@ impl TerminalLaunchSpec {
                 compatibility_level,
             } => self.kind == terminal_kind_from_compatibility(compatibility_level),
         }
+    }
+
+    pub(crate) fn set_transcript_writer_config(&mut self, config: Option<TranscriptWriterConfig>) {
+        self.transcript_writer_config = config;
+    }
+
+    pub(crate) fn transcript_writer_config(&self) -> Option<&TranscriptWriterConfig> {
+        self.transcript_writer_config.as_ref()
     }
 }
 

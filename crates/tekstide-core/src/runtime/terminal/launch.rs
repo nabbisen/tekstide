@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use crate::domain::{TerminalId, TerminalSession, TerminalStatus};
 use crate::project::{ProjectId, ProjectSession};
+use crate::transcript::{BoundedTranscriptWriter, TranscriptWriteError};
 
 use super::pty::{OpenPty, close_fd, resize_master};
 use super::{
@@ -35,6 +36,14 @@ impl LinuxTerminalRuntime {
     ) -> Result<(TerminalSession, Vec<TerminalRuntimeEvent>), TerminalLaunchError> {
         validate_launch_spec(project, &spec)?;
 
+        let transcript_writer = match spec.transcript_writer_config() {
+            Some(config) => Some(BoundedTranscriptWriter::create(config.clone()).map_err(
+                |error| TerminalLaunchError::TranscriptWriterUnavailable {
+                    summary: transcript_write_error_summary(&error),
+                },
+            )?),
+            None => None,
+        };
         let mut pty = OpenPty::new(spec.dimensions)
             .map_err(|summary| TerminalLaunchError::PtyUnavailable { summary })?;
         let mut terminal = TerminalSession::new(
@@ -62,6 +71,7 @@ impl LinuxTerminalRuntime {
                 process_group_id: child.id() as libc::pid_t,
                 child,
                 master: pty.into_master(),
+                transcript_writer,
             },
         );
 
@@ -117,6 +127,13 @@ impl LinuxTerminalRuntime {
             match session.master.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(bytes_read) => {
+                    if let Some(writer) = session.transcript_writer.as_mut() {
+                        writer.append(&buffer[..bytes_read]).map_err(|error| {
+                            TerminalRuntimeError::TranscriptWrite {
+                                summary: transcript_write_error_summary(&error),
+                            }
+                        })?;
+                    }
                     let remaining_capacity = max_buffered_bytes.saturating_sub(output.len());
                     let accepted_bytes = remaining_capacity.min(bytes_read);
                     output.extend_from_slice(&buffer[..accepted_bytes]);
@@ -142,6 +159,13 @@ impl LinuxTerminalRuntime {
         }
 
         let summary = TerminalOutputSummary::new(output.len(), dropped_bytes);
+        if let Some(writer) = session.transcript_writer.as_mut() {
+            writer
+                .flush()
+                .map_err(|error| TerminalRuntimeError::TranscriptWrite {
+                    summary: transcript_write_error_summary(&error),
+                })?;
+        }
         Ok((
             output,
             TerminalRuntimeEvent::OutputBuffered {
@@ -226,6 +250,7 @@ pub enum TerminalLaunchError {
     ShellUnavailable { summary: BoundedRuntimeSummary },
     PtyUnavailable { summary: BoundedRuntimeSummary },
     SpawnFailed { summary: BoundedRuntimeSummary },
+    TranscriptWriterUnavailable { summary: BoundedRuntimeSummary },
     UnexpectedLifecycleTransition { summary: BoundedRuntimeSummary },
 }
 
@@ -234,6 +259,7 @@ pub enum TerminalRuntimeError {
     UnknownTerminal { terminal_id: TerminalId },
     CrossProjectHandle { terminal_id: TerminalId },
     Io { summary: BoundedRuntimeSummary },
+    TranscriptWrite { summary: BoundedRuntimeSummary },
 }
 
 pub(super) struct RunningTerminal {
@@ -241,6 +267,16 @@ pub(super) struct RunningTerminal {
     pub(super) process_group_id: libc::pid_t,
     pub(super) child: Child,
     pub(super) master: fs::File,
+    pub(super) transcript_writer: Option<BoundedTranscriptWriter>,
+}
+
+fn transcript_write_error_summary(error: &TranscriptWriteError) -> BoundedRuntimeSummary {
+    BoundedRuntimeSummary::new(format!(
+        "transcript write failed: {:?} after {} bytes at {}",
+        error.reason,
+        error.byte_count,
+        error.path.display()
+    ))
 }
 
 fn validate_launch_spec(

@@ -167,10 +167,89 @@ Acceptance:
 - Carry forward to PR-011-C: ensure only resolved `TranscriptStoragePath` values reach the writer.
 - Carry forward to PR-011-D: preserve tombstone references by default and keep purge/local-data summaries content-free.
 
+### PR-011-C - AgentRun Launch Integration
+
+Status: accepted with notes.
+
+Implementation:
+
+- Updated `crates/tekstide-core/src/agent/launch.rs`.
+- Updated `crates/tekstide-core/src/agent.rs`.
+- Updated `crates/tekstide-core/src/project/session.rs`.
+- Updated `crates/tekstide-core/src/runtime/terminal/types.rs`.
+- Updated `crates/tekstide-core/src/runtime/terminal/launch.rs`.
+- Added AgentRun launch transcript capture request fields and helpers:
+  - `transcript_capture_mode`
+  - `transcript_state_root`
+  - `transcript_retention_limits`
+  - `without_transcript_capture`
+  - `with_local_bounded_transcript`
+  - `with_required_local_bounded_transcript`
+  - `with_transcript_retention_limits`
+- Added `AgentRunTranscriptCapture`.
+- Added `AgentRunTranscriptCaptureError`.
+- Added runtime `TerminalLaunchSpec` transcript writer configuration.
+- Added runtime-owned `BoundedTranscriptWriter` support for AgentRun terminal output reads.
+
+Implemented launch/capture behavior:
+
+- `LocalBounded` is the default AgentRun request capture mode.
+- `LocalBounded` without a state root or with failed path preflight disables capture and still allows launch.
+- `RequiredLocalBounded` rejects validation when state root is missing.
+- `RequiredLocalBounded` rejects validation when retention policy is unbounded.
+- `RequiredLocalBounded` rejects before runtime launch when path preflight fails.
+- Transcript path preflight happens before process start in `ProjectSession::launch_agent_run_with_runtime`.
+- Only resolver-produced `TranscriptStoragePath` values reach `TerminalLaunchSpec` writer configuration.
+- Runtime creates the transcript writer before spawning the process.
+- Runtime appends all PTY bytes read by `read_available_bounded_for` into the bounded transcript writer before applying the caller-visible UI buffer cap.
+- Successful transcript-enabled AgentRun launch attaches transcript metadata to the AgentRun and TerminalSession.
+- Per-run opt-out launches without transcript metadata or bytes.
+
+Review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-080-rfc011-pr011c-agentrun-transcript-launch-integration-implementation-response.md` requested changes because transcript capture wrote only the UI-buffered output subset and silently omitted PTY bytes dropped by `max_buffered_bytes`.
+- Changed `read_available_bounded_for` to append each raw PTY read chunk to the transcript writer before applying the caller-visible output buffer cap.
+- Kept caller-visible `TerminalOutputSummary` bounded by `max_buffered_bytes`.
+- Added a transcript-enabled AgentRun regression where `TerminalOutputSummary` reports dropped bytes while the transcript file still contains bytes beyond the returned UI buffer.
+
+Security/privacy notes:
+
+- Transcript capture remains limited to Tekstide-created AgentRuns; plain terminal launch specs still default to no transcript writer.
+- Transcript errors and summaries remain bounded and content-free.
+- Runtime transcript writer state does not become process truth; TerminalSession/runtime lifecycle remains authoritative.
+- PR-011-C does not implement purge operations, tombstone updates, aggregate cleanup, GUI transcript/review surfaces, generated-change review, search indexing, secure deletion, or redaction.
+- PR-011-C captures output only when callers read terminal output through the existing bounded runtime read API. It does not add a hidden background capture loop.
+
+Observed gates on 2026-07-21 before review request 080:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core agent -- --quiet` passed; 55 tests passed, 0 failed.
+- `cargo test -p tekstide-core transcript -- --quiet` passed; 28 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 280 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `git diff --check` passed.
+
+Observed gates on 2026-07-21 after review request 080 fixes:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core agent -- --quiet` passed; 56 tests passed, 0 failed.
+- `cargo test -p tekstide-core transcript -- --quiet` passed; 29 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 281 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `git diff --check` passed.
+
+Acceptance:
+
+- `.git-exclude/reviewed/tekstide-review-request-081-rfc011-pr011c-agentrun-transcript-launch-integration-implementation-rereview-response.md` accepted PR-011-C on 2026-07-21.
+- Carry forward to PR-011-D: preserve tombstone references by default.
+- Carry forward to PR-011-D: keep purge/local-data summaries content-free.
+- Carry forward to PR-011-D or closeout: reconcile stored transcript metadata with writer byte count, truncation state, last-write timestamp, and finalization behavior.
+
 ## Known Limitations
 
-- PR-011-B does not integrate transcript capture with AgentRun launch.
-- PR-011-B does not implement purge operations or tombstone updates.
-- PR-011-B does not implement aggregate cleanup for project/app budgets.
-- PR-011-B does not read terminal streams directly.
-- PR-011-B does not claim durable audit, GUI review surfaces, generated-change review, search indexing, secure deletion, or redaction.
+- PR-011-C does not implement purge operations or tombstone updates.
+- PR-011-C does not implement aggregate cleanup for project/app budgets.
+- PR-011-C does not add a hidden background terminal-output capture loop.
+- PR-011-C does not claim durable audit, GUI review surfaces, generated-change review, search indexing, secure deletion, or redaction.
