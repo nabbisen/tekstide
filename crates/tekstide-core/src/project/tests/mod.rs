@@ -1,5 +1,6 @@
 use super::{ProjectId, ProjectSession};
 
+mod change_detection;
 mod collections;
 mod metadata;
 mod references;

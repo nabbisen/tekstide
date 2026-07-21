@@ -158,8 +158,20 @@ pub enum ChangeDetectionStatus {
     Complete,
     Unavailable,
     Unsupported,
-    Partial { limit: usize },
-    Failed,
+    Partial {
+        limit: usize,
+    },
+    Failed {
+        reason: ChangeDetectionFailureReason,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChangeDetectionFailureReason {
+    CrossProjectBaseline,
+    MetadataReadFailed,
+    PathOutsideRoot,
+    RootUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

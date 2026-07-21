@@ -87,11 +87,66 @@ Observed gates on 2026-07-21 after review request 085 follow-up:
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
 - `git diff --check` passed.
 
+### PR-012-C - Baseline and Path Detector Harness
+
+Implementation:
+
+- Added `crates/tekstide-core/src/project/change_detection.rs`.
+- Added `crates/tekstide-core/src/project/tests/change_detection.rs`.
+- Updated `crates/tekstide-core/src/project.rs` exports.
+- Updated `crates/tekstide-core/src/domain/changeset.rs` so `ChangeDetectionStatus::Failed` carries a bounded `ChangeDetectionFailureReason`.
+- Updated `crates/tekstide-core/src/domain.rs` exports.
+
+Implemented detector behavior:
+
+- Added `GeneratedChangeDetector` and `GeneratedChangeDetectionPolicy`.
+- Added metadata-only `ReviewBaseline` capture using filesystem snapshots.
+- Added metadata-only changed-path comparison for created, modified, and deleted path evidence; renamed paths surface as a delete/create pair.
+- Added project-relative changed-path validation for relative and absolute inputs.
+- Added explicit changed-path kind metadata for files, directories, symlinks, deleted paths, and other filesystem entries.
+- Added bounded entry/path limits with `ChangeDetectionStatus::Partial`.
+- Added content-free failed states through `ChangeDetectionFailureReason`.
+- Added explicit `GitStatus` detector unavailable/unsupported results for this slice; no Git subprocess or Git library behavior is claimed.
+
+Security/privacy notes:
+
+- Filesystem snapshots use `symlink_metadata`, file kind, file length, and modified timestamp metadata only.
+- The detector does not read file contents, compute diffs, invoke Git, execute workspace automation, scan transcript bytes, persist durable audit records, apply patches, rollback changes, search-index contents, secure-delete files, or claim redaction.
+- Absolute changed-path inputs must canonicalize under the ProjectSession root before becoming project-relative paths.
+- Relative changed-path inputs reject `..` traversal before resolution.
+- Escaping symlink paths are rejected by explicit validation, and recursive filesystem scanning records symlink entries without following their targets.
+- Directory entries are tracked without using directory mtime as change evidence, avoiding noisy parent-directory changes from child edits.
+
+Observed gates on 2026-07-21 before review request 086:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core project::tests::change_detection -- --quiet` passed; 7 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 302 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `git diff --check` passed.
+
+Review follow-up:
+
+- `.git-exclude/reviewed/tekstide-review-request-086-rfc012-pr012c-baseline-path-detector-harness-response.md` accepted PR-012-C with required follow-up on 2026-07-21.
+- Updated changed-path validation to anchor below `canonical_root_path()` so symlinked ancestors above the project root do not reject ordinary in-root relative paths.
+- Added a Unix regression test where `root_path` uses a symlinked ancestor and `canonical_root_path` differs.
+- Updated degraded scan handling so `DetectedChanges.changed_paths` is empty for `Failed` and `Partial` statuses.
+- Added regression coverage for changed-path limit partial scans and current-scan failure.
+- Removed unused `ChangeDetectionFailureReason::TooManyEntries`.
+
+Observed gates on 2026-07-21 after review request 086 follow-up:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core project::tests::change_detection -- --quiet` passed; 10 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 305 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
 ## Known Limitations
 
-- PR-012-B is model-only.
-- No baseline capture or changed-path detector is implemented yet.
-- ChangeSet constructors do not validate project-relative root containment for `changed_files`; PR-012-C must enforce that in the detector.
-- No Git subprocess or safe-library detector behavior is implemented yet.
+- Filesystem snapshot detection is implemented as metadata-only evidence.
+- Git detection is explicitly unavailable/unsupported in PR-012-C; no Git subprocess or safe-library detector behavior is implemented yet.
+- ChangeSet constructors do not validate project-relative root containment for `changed_files`; PR-012-C enforces containment in the detector harness, and PR-012-D must use the harness before creating detected ChangeSets.
 - No AgentRun lifecycle integration is implemented yet.
 - No rendered diff/review UI, durable audit persistence, hunk-level patch application, rollback, search indexing, secure deletion, or redaction is claimed.

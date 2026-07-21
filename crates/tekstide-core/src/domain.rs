@@ -12,8 +12,8 @@ pub use agent::{AgentCompatibilityLevel, AgentRun, AgentRunStatus, AgentRunTrans
 pub use approval::{ApprovalDecision, ApprovalDecisionError, ApprovalRequest, RiskLevel};
 pub use audit::{AuditEvent, AuditEventClass, AuditEventError};
 pub use changeset::{
-    ChangeAssociationConfidence, ChangeDetectionSource, ChangeDetectionStatus, ChangeSet,
-    ChangeSetSummary, ReviewState, ReviewStateTransitionError,
+    ChangeAssociationConfidence, ChangeDetectionFailureReason, ChangeDetectionSource,
+    ChangeDetectionStatus, ChangeSet, ChangeSetSummary, ReviewState, ReviewStateTransitionError,
 };
 pub use ids::{AgentRunId, ApprovalId, AuditEventId, ChangeSetId, TerminalId, TranscriptId};
 pub use ownership::OwnershipError;

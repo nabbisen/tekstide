@@ -1,3 +1,4 @@
+mod change_detection;
 mod content;
 mod identity;
 mod metadata;
@@ -6,6 +7,11 @@ pub mod root;
 mod runtime;
 mod session;
 
+pub use change_detection::{
+    ChangePathKind, ChangedPathValidationError, ChangedPathValidationErrorReason,
+    DetectedChangedPath, DetectedChanges, GeneratedChangeDetectionPolicy, GeneratedChangeDetector,
+    ReviewBaseline, ReviewBaselineEntry,
+};
 pub use content::{
     ProjectActiveFileLaunchAssessment, ProjectActiveFileLaunchBlockReason,
     ProjectActiveFileLaunchDecision, ProjectContentError, ProjectContentStatus,
