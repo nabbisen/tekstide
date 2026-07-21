@@ -16,7 +16,9 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 ## Proposed
 
-No proposed RFCs.
+| RFC | Title | Status |
+| --- | --- | --- |
+| 011 | [Transcript Retention and Local Data Policy](./proposed/011-transcript-retention-and-local-data-policy.md) | Proposed |
 
 ## Handoffs
 
@@ -32,6 +34,7 @@ No proposed RFCs.
 | 008 | [TerminalSession and Process Lifecycle](./handoffs/008-terminalsession-process-lifecycle/README.md) |
 | 009 | [Terminal Security Boundary](./handoffs/009-terminal-security-boundary/README.md) |
 | 010 | [AgentRun Launch Model and AI CLI Profiles](./handoffs/010-agentrun-launch-model-and-ai-cli-profiles/README.md) |
+| 011 | [Transcript Retention and Local Data Policy](./handoffs/011-transcript-retention-and-local-data-policy/README.md) |
 
 ## Implemented
 
