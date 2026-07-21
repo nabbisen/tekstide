@@ -1,6 +1,6 @@
 # RFC-010: AgentRun Launch Model and AI CLI Profiles
 
-Status: Proposed
+Status: Implemented with documented limitations
 Target milestone: M5
 Date: 2026-07-17
 

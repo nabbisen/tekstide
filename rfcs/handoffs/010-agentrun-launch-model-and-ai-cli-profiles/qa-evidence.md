@@ -1,8 +1,8 @@
 # RFC-010: AgentRun Launch Model and AI CLI Profiles — QA Evidence
 
-Status: Proposed
+Status: Accepted with documented limitations
 Date opened: 2026-07-17
-Date accepted: Pending
+Date accepted: 2026-07-21
 
 ## Scope
 
@@ -102,7 +102,7 @@ Review follow-up:
 
 ### PR-010-C — AgentRun Launch Spec and Terminal Attachment
 
-Status: ready for focused implementation re-review.
+Status: accepted with notes.
 
 Implementation:
 
@@ -323,11 +323,67 @@ Observed gates on 2026-07-21 after review request 073 follow-up:
 - `git diff --check` passed.
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
 
+### PR-010-F — Closeout Evidence
+
+Status: accepted with documented limitations.
+
+Closeout summary:
+
+- RFC-010 design was reviewed through requests 064 and 065.
+- PR-010-B implemented AI CLI profile model and launch validation.
+- PR-010-C implemented AgentRun launch spec and TerminalSession attachment.
+- PR-010-D implemented runtime-backed AgentRun launch lifecycle.
+- PR-010-E implemented active-file safety before runtime launch.
+- PR-010-F updated the acceptance checklist and closeout evidence only.
+- PR-010-F closeout evidence was accepted on 2026-07-21 in `.git-exclude/reviewed/tekstide-review-request-075-rfc010-pr010f-closeout-evidence-rereview-response.md`.
+
+Accepted implementation review responses:
+
+- `.git-exclude/reviewed/tekstide-review-request-067-rfc010-pr010b-path-lookup-rereview-response.md`
+- `.git-exclude/reviewed/tekstide-review-request-069-rfc010-pr010c-environment-policy-rereview-response.md`
+- `.git-exclude/reviewed/tekstide-review-request-072-rfc010-pr010d-launch-plan-authority-rereview-response.md`
+- `.git-exclude/reviewed/tekstide-review-request-073-rfc010-pr010e-active-file-safety-response.md`
+
+Evidence coverage:
+
+- Profile/source/trust validation: PR-010-B evidence and agent tests.
+- Restricted Mode executable provenance, symlink/wrapper, and project-local `PATH` blocking: PR-010-B follow-up evidence.
+- Implicit CLI workspace-discovery blocking: PR-010-B evidence.
+- Environment policy preservation and metadata-only summaries: PR-010-B, PR-010-C, and PR-010-D evidence.
+- AgentRun/TerminalSession attachment and project ownership: PR-010-C evidence.
+- Runtime-backed launch lifecycle and terminal outcome mapping: PR-010-D evidence.
+- Plain/Supervised/Managed label boundary: PR-010-D review follow-ups and acceptance evidence.
+- Active-file safety and safe-save preservation: PR-010-E evidence.
+- Transcript non-persistence and durable audit deferral: per-slice security/privacy notes and Known Limitations.
+
+Evidence boundaries:
+
+- No concrete built-in AI CLI profile ships in M5, so no per-profile CLI auto-discovery/security review is claimed.
+- The active-document refresh model exists while AgentRuns are active, but closeout evidence does not claim a while-running refresh test.
+- Terminal security evidence is limited to untrusted output classification, trusted UI spoofing boundaries, blocked app effects, and project-scoped paste routing. It does not claim direct file/project-state mutation tests from terminal output.
+- Final acceptance is recorded in `acceptance-qa-checklist.md`.
+- RFC lifecycle movement from `rfcs/proposed/` to `rfcs/done/`, `rfcs/README.md` update, and inbound-reference sweep were completed after closeout acceptance.
+
+Migration note:
+
+- No migration is required. RFC-010 implementation changes are core/domain/runtime in-memory model behavior for M5 and do not introduce durable storage schema.
+
+Observed gates on 2026-07-21:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core agent -- --quiet` passed; 50 tests passed, 0 failed.
+- `cargo test -p tekstide-core runtime::terminal -- --quiet` passed; 46 tests passed, 0 failed.
+- `cargo test -p tekstide-core -- --quiet` passed; 257 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `git diff --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
 ## Known Limitations
 
 - PR-010-E does not implement a reviewed "proceed anyway" decision path for dirty/external/conflict active files.
 - PR-010-E does not add a project-summary external-change signal; external-changed active files are visible through the content workspace status, not Project Board summary fields.
 - PR-010-E has an inherent refresh-to-spawn TOCTOU window because RFC-010 does not add a watcher; safe-save conflict blocking remains the backstop.
+- `AiCliProfile::new` currently defaults workspace-discovery policy to `NoKnownWorkspaceDiscovery`; this is fail-open for future real profiles unless profile authors override it. No concrete built-in profile ships in M5. Carry this into M5 follow-up work: first real profiles should make this field explicit or fail-closed.
 - PR-010-D does not apply `TerminalEnvironmentPolicy::ExplicitAllowlist` or named policies at runtime; those policies are rejected before process start.
 - PR-010-D does not add post-spawn cleanup machinery for unexpected attachment-invariant failures after `LinuxTerminalRuntime` returns a fresh terminal.
 - No transcript retention, durable audit storage, GUI launch/review surfaces, general command approval, provider-specific cloud integration, full watcher behavior, or multi-document conflict UI is claimed by RFC-010 implementation evidence.
