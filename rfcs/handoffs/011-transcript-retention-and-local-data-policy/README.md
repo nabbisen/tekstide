@@ -1,8 +1,8 @@
 # RFC-011: Transcript Retention and Local Data Policy - Developer Handoff Pack
 
-Source RFC: [RFC-011](../../proposed/011-transcript-retention-and-local-data-policy.md)
+Source RFC: [RFC-011](../../done/011-transcript-retention-and-local-data-policy.md)
 Target milestone: **M6**
-Source RFC status: **Proposed**
+Source RFC status: **Implemented with documented limitations**
 
 ## Files
 
@@ -11,7 +11,7 @@ Source RFC status: **Proposed**
 - `acceptance-qa-checklist.md` - acceptance traceability, QA checklist, and evidence requirements.
 - `qa-evidence.md` - placeholder for observed implementation gates, security notes, and known limitations.
 
-This handoff inherits the source RFC lifecycle state. RFC-011 is proposed and must be reviewed before implementation starts.
+This handoff inherits the source RFC lifecycle state. RFC-011 implementation is accepted with documented limitations.
 
 ## Source Summary
 

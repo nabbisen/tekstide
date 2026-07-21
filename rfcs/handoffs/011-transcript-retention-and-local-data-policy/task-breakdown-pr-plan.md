@@ -1,15 +1,15 @@
 ---
 title: "RFC-011: Transcript Retention and Local Data Policy - Task Breakdown / PR Plan"
 rfc: "RFC-011"
-rfc_file: "../../proposed/011-transcript-retention-and-local-data-policy.md"
-status: "Proposed"
+rfc_file: "../../done/011-transcript-retention-and-local-data-policy.md"
+status: "Implemented with documented limitations"
 target_milestone: "M6"
 created: "2026-07-21"
 ---
 
 # RFC-011: Transcript Retention and Local Data Policy - Task Breakdown / PR Plan
 
-Implementation must wait for RFC-011 design review acceptance.
+Implementation has completed through PR-011-D and is ready for closeout review.
 
 ## PR-011-A - Transcript Policy and Path Model
 

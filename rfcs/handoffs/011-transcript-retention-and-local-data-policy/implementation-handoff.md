@@ -1,8 +1,8 @@
 ---
 title: "RFC-011: Transcript Retention and Local Data Policy - Implementation Handoff"
 rfc: "RFC-011"
-rfc_file: "../../proposed/011-transcript-retention-and-local-data-policy.md"
-status: "Proposed"
+rfc_file: "../../done/011-transcript-retention-and-local-data-policy.md"
+status: "Implemented with documented limitations"
 target_milestone: "M6"
 created: "2026-07-21"
 ---
@@ -11,7 +11,7 @@ created: "2026-07-21"
 
 ## Scope
 
-Implement bounded local transcript retention for Tekstide-created AgentRuns only after RFC-011 design review accepts or amends the policy.
+Implement bounded local transcript retention for Tekstide-created AgentRuns according to the accepted RFC-011 policy and reviewed implementation slices.
 
 The implementation must preserve RFC-010 launch validation and lifecycle truth. Transcript capture is storage behavior, not process supervision.
 
@@ -88,7 +88,7 @@ Purge must never delete project files. References may be cleared only if the imp
 
 Every implementation review request for RFC-011 must reference:
 
-- `rfcs/proposed/011-transcript-retention-and-local-data-policy.md`
+- `rfcs/done/011-transcript-retention-and-local-data-policy.md`
 - this handoff pack;
 - relevant prior RFCs: RFC-009 and RFC-010 at minimum.
 

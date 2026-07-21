@@ -1,6 +1,6 @@
 # RFC-011: Transcript Retention and Local Data Policy
 
-Status: Proposed
+Status: Implemented with documented limitations
 Target milestone: M6
 Date: 2026-07-21
 

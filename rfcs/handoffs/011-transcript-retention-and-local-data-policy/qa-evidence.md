@@ -1,8 +1,8 @@
 # RFC-011: Transcript Retention and Local Data Policy - QA Evidence
 
-Status: Proposed
+Status: Implemented with documented limitations
 Date opened: 2026-07-21
-Date accepted: Pending
+Date accepted: 2026-07-21
 
 ## Scope
 
@@ -292,9 +292,42 @@ Observed gates on 2026-07-21 before review request 082:
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
 - `git diff --check` passed.
 
+Acceptance:
+
+- `.git-exclude/reviewed/tekstide-review-request-082-rfc011-pr011d-purge-local-data-summaries-implementation-response.md` accepted PR-011-D on 2026-07-21.
+- Carry forward to PR-011-E closeout: do not claim automatic project/app aggregate cleanup.
+- Carry forward to PR-011-E closeout: do not claim secure deletion, durable audit, GUI review, search indexing, or redaction.
+- Carry forward to future restore/persistence work: revalidate restored transcript storage references against the Tekstide state-root policy before making them purgeable.
+
+### PR-011-E - Closeout Evidence
+
+Implementation:
+
+- Moved RFC-011 from `rfcs/proposed/011-transcript-retention-and-local-data-policy.md` to `rfcs/done/011-transcript-retention-and-local-data-policy.md`.
+- Updated `rfcs/README.md` so RFC-011 is implemented with documented limitations.
+- Updated handoff metadata and links to point at the done RFC.
+- Updated `acceptance-qa-checklist.md` with observed acceptance status, evidence coverage, and limitations.
+- Updated this QA evidence file with PR-011-D acceptance and closeout notes.
+
+Closeout status:
+
+- RFC-011 implementation is accepted with documented limitations.
+- No migration is required for the current implementation because no serialized transcript metadata schema or durable transcript store format has been introduced.
+- The RFC remains scoped to local bounded transcript capture for Tekstide-created AgentRuns only.
+- Plain terminal transcript capture remains disabled by default.
+- Durable audit, GUI review surfaces, generated-change review, search indexing, secure deletion, redaction, automatic aggregate cleanup, hidden background capture, and background metadata finalization remain non-claims.
+
+Observed gates on 2026-07-21 before review request 083:
+
+- `cargo fmt --all --check` passed.
+- `cargo test -p tekstide-core -- --quiet` passed; 288 tests passed, 0 failed; doc tests had 0 tests.
+- `cargo check --workspace` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `git diff --check` passed.
+
 ## Known Limitations
 
-- RFC-011 still needs PR-011-E closeout evidence and checklist updates after PR-011-D implementation review is accepted.
 - Automatic aggregate cleanup for project/app transcript budgets is not implemented; explicit purge and metadata-only accounting are implemented.
 - Transcript metadata reconciliation is explicit and caller-driven; there is no hidden background finalizer or output capture loop.
 - RFC-011 does not claim durable audit, GUI review surfaces, generated-change review, search indexing, secure deletion, or redaction.
+- Future persisted/restore paths must revalidate transcript storage references against the Tekstide state-root policy before making restored records purgeable.
