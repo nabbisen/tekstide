@@ -27,16 +27,16 @@ Status: partially implemented by RFC-010; GUI launch/review surfaces and command
 
 ### Transcript And Review Workflow
 
-Status: transcript retention implemented by RFC-011; generated-change review foundations are proposed in RFC-012.
+Status: transcript retention is implemented by RFC-011; generated-change review foundations are implemented by RFC-012 with documented limitations.
 
 - Bounded transcript/output capture, retention metadata, opt-out, explicit purge scopes, and metadata-only local-data summaries are implemented by RFC-011 with documented limitations.
-- Link generated diffs/artifacts to AgentRuns when detectable.
-- Add headless generated-change review models and harnesses through RFC-012.
+- Link generated diffs/artifacts to AgentRuns when detectable; RFC-012 implements conservative metadata-only association foundations.
+- Add Git-backed detection only after its safety evidence is reviewed.
 - Add rendered review surfaces for transcript and generated changes in the GUI milestone.
 
 ### Durable Audit Storage
 
-Status: deferred after `0.1.0`.
+Status: proposed in RFC-013 for M7.
 
 - Persist security-relevant audit events.
 - Record trust decisions, approvals, process launches, blocked root/symlink access, and destructive confirmations.
