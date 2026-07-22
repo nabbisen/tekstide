@@ -1,8 +1,8 @@
 # RFC-012: Generated Change Review Foundations - QA Evidence
 
-Status: Proposed
+Status: Implemented with documented limitations on main at 34a1c55
 Date opened: 2026-07-21
-Date accepted: Pending
+Date accepted: 2026-07-21
 
 ## Scope
 
@@ -216,10 +216,31 @@ Observed gates on 2026-07-21 after review request 089 follow-up:
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
 - `git diff --check` passed.
 
+Re-review:
+
+- `.git-exclude/reviewed/tekstide-review-request-090-rfc012-pr012d-agentrun-review-integration-rereview-response.md` accepted PR-012-D on 2026-07-21.
+
+### PR-012-E - Closeout Evidence
+
+Implementation:
+
+- Moved RFC-012 lifecycle state from `rfcs/proposed/` to `rfcs/done/`.
+- Updated `rfcs/README.md`.
+- Updated the RFC-012 handoff README, implementation handoff, task plan, acceptance checklist, and QA evidence status.
+
+Closeout notes:
+
+- No migration is required for RFC-012 at this stage. The implemented model changes are in-memory/domain API additions with no durable storage schema.
+- RFC-012 is accepted with documented limitations.
+- Future Git detection still owes RFC-012 Git detector safety evidence before it can replace unavailable/unsupported status.
+- Durable audit remains deferred to the next audit RFC.
+
 ## Known Limitations
 
 - Filesystem snapshot detection is implemented as metadata-only evidence.
 - Git detection is explicitly unavailable/unsupported in PR-012-C; no Git subprocess or safe-library detector behavior is implemented yet.
 - ChangeSet constructors do not validate project-relative root containment for `changed_files`; PR-012-D revalidates detector-created ChangeSets through the detector harness before adding them to ProjectSession.
 - PR-012-D does not store baseline registries or prove wall-clock launch/scan ordering beyond the caller-provided AgentRun-linked baseline.
+- Per-file review decisions are deferred; `PartiallyAccepted` is ChangeSet-level state vocabulary and does not persist per-file or hunk decisions.
+- Artifact references are opaque strings, and bounded summaries expose only their count; durable reference semantics remain future work.
 - No rendered diff/review UI, durable audit persistence, hunk-level patch application, rollback, search indexing, secure deletion, or redaction is claimed.

@@ -1,18 +1,19 @@
 ---
 title: "RFC-012: Generated Change Review Foundations - Acceptance / QA Checklist"
 rfc: "RFC-012"
-rfc_file: "../../proposed/012-generated-change-review-foundations.md"
-status: "Proposed"
+rfc_file: "../../done/012-generated-change-review-foundations.md"
+status: "Implemented with documented limitations on main at 34a1c55"
 target_milestone: "M6"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented with documented limitations on main at 34a1c55"
 created: "2026-07-21"
+updated: "2026-07-21"
 ---
 
 # RFC-012: Generated Change Review Foundations - Acceptance / QA Checklist
 
 ## Acceptance Status
 
-This checklist is proposed. It becomes the implementation acceptance checklist only after RFC-012 design review accepts or amends the scope.
+RFC-012 implementation has been reviewed through PR-012-D and accepted with documented limitations.
 
 ## Model Checklist
 
@@ -50,7 +51,7 @@ This checklist is proposed. It becomes the implementation acceptance checklist o
 ## Evidence Required
 
 - [x] Design review response and any amendment.
-- [ ] Implementation review responses for each PR-012 slice.
+- [x] Implementation review responses for each PR-012 slice.
 - [x] Test command output.
 - [x] Model transition evidence.
 - [x] Path containment evidence.
@@ -58,18 +59,28 @@ This checklist is proposed. It becomes the implementation acceptance checklist o
 - [x] AgentRun association evidence.
 - [x] Project summary/count evidence.
 - [x] Privacy summary evidence.
-- [ ] Migration note or "no migration" statement.
-- [ ] Known limitations.
+- [x] Migration note or "no migration" statement.
+- [x] Known limitations.
+
+## Documented Limitations
+
+- Filesystem snapshot detection is implemented as metadata-only evidence.
+- Git detection is explicitly unavailable/unsupported; no Git subprocess or safe-library detector behavior is implemented yet.
+- ChangeSet constructors remain low-level model helpers and do not validate project-relative root containment for `changed_files`; ProjectSession detector integration revalidates detector-created ChangeSets before collection attachment.
+- PR-012 does not store baseline registries or prove wall-clock launch/scan ordering beyond caller-provided AgentRun-linked baselines.
+- Per-file review decisions are deferred; `PartiallyAccepted` is ChangeSet-level state vocabulary and does not persist per-file or hunk decisions.
+- Artifact references are opaque strings, and bounded summaries expose only their count; durable reference semantics remain future work.
+- RFC-012 does not claim rendered diff/review UI, durable audit persistence, hunk-level patch application, rollback, search indexing, secure deletion, or redaction.
 
 ## Final Acceptance Decision
 
 - [ ] Accepted as complete.
-- [ ] Accepted with documented limitations.
+- [x] Accepted with documented limitations.
 - [ ] Blocked pending fixes.
 - [ ] Requires RFC amendment.
 
 Reviewer notes:
 
 ```text
-Pending design review.
+Accepted with documented limitations after PR-012-A through PR-012-D implementation review.
 ```

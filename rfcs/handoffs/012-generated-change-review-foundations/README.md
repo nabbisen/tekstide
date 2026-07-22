@@ -1,8 +1,8 @@
 # RFC-012: Generated Change Review Foundations - Developer Handoff Pack
 
-Source RFC: [RFC-012](../../proposed/012-generated-change-review-foundations.md)
+Source RFC: [RFC-012](../../done/012-generated-change-review-foundations.md)
 Target milestone: **M6**
-Source RFC status: **Proposed**
+Source RFC status: **Implemented with documented limitations on main at 34a1c55**
 
 ## Files
 
@@ -11,7 +11,7 @@ Source RFC status: **Proposed**
 - `acceptance-qa-checklist.md` - acceptance traceability, QA checklist, and evidence requirements.
 - `qa-evidence.md` - placeholder for observed implementation gates, security notes, and known limitations.
 
-This handoff inherits the source RFC lifecycle state. RFC-012 is proposed and must be reviewed before implementation starts.
+This handoff inherits the source RFC lifecycle state. RFC-012 implementation is accepted with documented limitations.
 
 ## Source Summary
 

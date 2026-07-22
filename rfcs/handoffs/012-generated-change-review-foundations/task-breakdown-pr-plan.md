@@ -1,8 +1,8 @@
 ---
 title: "RFC-012: Generated Change Review Foundations - Task Breakdown / PR Plan"
 rfc: "RFC-012"
-rfc_file: "../../proposed/012-generated-change-review-foundations.md"
-status: "Proposed"
+rfc_file: "../../done/012-generated-change-review-foundations.md"
+status: "Implemented with documented limitations on main at 34a1c55"
 target_milestone: "M6"
 created: "2026-07-21"
 ---

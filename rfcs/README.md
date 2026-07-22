@@ -16,9 +16,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 ## Proposed
 
-| RFC | Title | Status |
-| --- | --- | --- |
-| 012 | [Generated Change Review Foundations](./proposed/012-generated-change-review-foundations.md) | Proposed |
+No proposed RFCs currently.
 
 ## Handoffs
 
@@ -53,6 +51,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 009 | [Terminal Security Boundary](./done/009-terminal-security-boundary.md) | Implemented with documented limitations |
 | 010 | [AgentRun Launch Model and AI CLI Profiles](./done/010-agentrun-launch-model-and-ai-cli-profiles.md) | Implemented with documented limitations |
 | 011 | [Transcript Retention and Local Data Policy](./done/011-transcript-retention-and-local-data-policy.md) | Implemented with documented limitations |
+| 012 | [Generated Change Review Foundations](./done/012-generated-change-review-foundations.md) | Implemented with documented limitations on main at 34a1c55 |
 
 ## Archive
 

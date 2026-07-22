@@ -1,6 +1,6 @@
 # RFC-012: Generated Change Review Foundations
 
-Status: Proposed
+Status: Implemented with documented limitations on main at 34a1c55
 Target milestone: M6
 Date: 2026-07-21
 
@@ -275,8 +275,8 @@ Recommended slices:
 - **Git dependency drift.** Git is common but not universal. Keep detector availability explicit.
 - **Scope creep into UI/audit.** Keep rendered review surfaces for M8 and durable audit for RFC-013.
 
-## Open Questions
+## Resolved Decisions
 
-- Should the first detector use only filesystem metadata, only Git status metadata, or both?
-- Should a ChangeSet support file-level review states in RFC-012, or defer per-file state until rendered review surfaces?
-- What is the smallest useful artifact reference model before durable audit and GUI review exist?
+- RFC-012 ships metadata-only filesystem snapshot detection. Git detection remains explicitly unavailable/unsupported pending the RFC-012 Git safety evidence.
+- Per-file review decisions are deferred. `PartiallyAccepted` is ChangeSet-level state vocabulary and does not persist per-file or hunk decisions.
+- Artifact references are currently opaque strings, while bounded summaries expose only their count. Durable reference semantics remain future work.

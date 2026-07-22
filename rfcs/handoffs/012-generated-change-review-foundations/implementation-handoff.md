@@ -1,8 +1,8 @@
 ---
 title: "RFC-012: Generated Change Review Foundations - Implementation Handoff"
 rfc: "RFC-012"
-rfc_file: "../../proposed/012-generated-change-review-foundations.md"
-status: "Proposed"
+rfc_file: "../../done/012-generated-change-review-foundations.md"
+status: "Implemented with documented limitations on main at 34a1c55"
 target_milestone: "M6"
 created: "2026-07-21"
 ---
@@ -78,7 +78,7 @@ If association is ambiguous, create an unlinked or weakly linked ChangeSet. Do n
 
 Every implementation review request for RFC-012 must reference:
 
-- `rfcs/proposed/012-generated-change-review-foundations.md`
+- `rfcs/done/012-generated-change-review-foundations.md`
 - this handoff pack;
 - relevant prior RFCs: RFC-006, RFC-010, and RFC-011 at minimum.
 
