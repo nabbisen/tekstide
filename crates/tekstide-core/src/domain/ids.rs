@@ -18,6 +18,9 @@ pub struct ChangeSetId(String);
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct AuditEventId(String);
 
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct AuditOperationId(String);
+
 macro_rules! impl_id {
     ($type_name:ident, $prefix:literal) => {
         impl $type_name {
@@ -32,6 +35,13 @@ macro_rules! impl_id {
 
             pub fn as_str(&self) -> &str {
                 &self.0
+            }
+
+            pub fn from_persisted(value: impl Into<String>) -> Option<Self> {
+                let value = value.into();
+                let suffix = value.strip_prefix(concat!($prefix, "-"))?;
+                uuid::Uuid::parse_str(suffix).ok()?;
+                Some(Self(value))
             }
         }
 
@@ -49,3 +59,4 @@ impl_id!(ApprovalId, "approval");
 impl_id!(TranscriptId, "transcript");
 impl_id!(ChangeSetId, "changeset");
 impl_id!(AuditEventId, "audit");
+impl_id!(AuditOperationId, "audit-operation");

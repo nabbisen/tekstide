@@ -15,7 +15,9 @@ pub use changeset::{
     ChangeAssociationConfidence, ChangeDetectionFailureReason, ChangeDetectionSource,
     ChangeDetectionStatus, ChangeSet, ChangeSetSummary, ReviewState, ReviewStateTransitionError,
 };
-pub use ids::{AgentRunId, ApprovalId, AuditEventId, ChangeSetId, TerminalId, TranscriptId};
+pub use ids::{
+    AgentRunId, ApprovalId, AuditEventId, AuditOperationId, ChangeSetId, TerminalId, TranscriptId,
+};
 pub use ownership::OwnershipError;
 pub use terminal::{
     TerminalKind, TerminalSession, TerminalStatus, TerminalTransitionError, VisibleSlot,

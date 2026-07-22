@@ -36,42 +36,42 @@ Design accepted for implementation by review response 095. Implementation and cl
 
 ## Record and Path Checklist
 
-- [ ] Audit path is under canonical Tekstide state root.
-- [ ] Audit path is outside supplied project roots.
-- [ ] Later-added/restored project roots containing audit state are rejected explicitly.
-- [ ] Existing symlinks cannot redirect storage outside the state root.
-- [ ] No project-controlled id becomes a filesystem path component.
-- [ ] Durable DTO is versioned independently from Rust layout.
-- [ ] Stable enum values use string codes.
-- [ ] Action kind, risk, actor, source, and adapter/profile fields are allowlisted and class-constrained.
-- [ ] Every retained v1 event family has explicit required/forbidden fields and phase/outcome rules.
-- [ ] Operation ids are bounded application-generated ids, never caller display text.
-- [ ] Unknown actor/source codes and invalid actor/source pairs are rejected.
-- [ ] Free-form `AuditEvent.summary` is not persisted.
-- [ ] Exact/edited commands, cwd/project/file paths, output, content, prompts, environment data, display summaries, and arbitrary metadata are not persisted.
-- [ ] Persisted strings are bounded and reject controls/NUL.
+- [x] Audit path is under canonical Tekstide state root.
+- [x] Audit path is outside supplied project roots.
+- [x] Later-added/restored project roots containing audit state are rejected explicitly.
+- [x] Existing symlinks cannot redirect storage outside the state root.
+- [x] No project-controlled id becomes a filesystem path component.
+- [x] Durable DTO is versioned independently from Rust layout.
+- [x] Stable enum values use string codes.
+- [x] Action kind, risk, actor, source, and adapter/profile fields are allowlisted and class-constrained.
+- [x] Every retained v1 event family has explicit required/forbidden fields and phase/outcome rules.
+- [x] Operation ids are bounded application-generated ids, never caller display text.
+- [x] Unknown actor/source codes and invalid actor/source pairs are rejected.
+- [x] Free-form `AuditEvent.summary` is not persisted.
+- [x] Exact/edited commands, cwd/project/file paths, output, content, prompts, environment data, display summaries, and arbitrary metadata are not persisted.
+- [x] Persisted strings are bounded and reject controls/NUL.
 - [ ] Cross-project linked ids are rejected.
 
 ## Store Checklist
 
-- [ ] Fresh store creation sets application/schema identity.
+- [x] Fresh store creation sets application/schema identity.
 - [ ] Existing store identity/version is probed read-only before write-capable configuration or migration.
-- [ ] Append is transactional.
-- [ ] Exact retry by event id is idempotent.
-- [ ] Conflicting reuse of event id is rejected without overwrite.
-- [ ] Correlated outcomes require the sole earlier same-project authorization in the same family/action kind.
-- [ ] A different authorization event reusing an operation id is rejected.
-- [ ] Cross-project, wrong-family, outcome-to-outcome, and later-record correlation is rejected.
-- [ ] Interleaved operations do not depend on sequence adjacency.
-- [ ] Authorization without outcome survives reopen without synthesized success.
-- [ ] Contradictory outcomes and managed-process termination before start are rejected.
-- [ ] Managed-process started then terminated is accepted once per phase.
-- [ ] Query limits are required and capped.
-- [ ] Sequence cursor ordering is stable.
-- [ ] Busy/read-only/full-disk/I/O states are bounded and content-free.
-- [ ] Journal, synchronous, foreign-key, and busy-timeout settings are recorded.
-- [ ] One-writer/cross-process limitations are documented.
-- [ ] Bundled SQLite version, features, license, and build/binary impact are recorded.
+- [x] Append is transactional.
+- [x] Exact retry by event id is idempotent.
+- [x] Conflicting reuse of event id is rejected without overwrite.
+- [x] Correlated outcomes require the sole earlier same-project authorization in the same family/action kind.
+- [x] A different authorization event reusing an operation id is rejected.
+- [x] Cross-project, wrong-family, outcome-to-outcome, and later-record correlation is rejected.
+- [x] Interleaved operations do not depend on sequence adjacency.
+- [x] Authorization without outcome survives reopen without synthesized success.
+- [x] Contradictory outcomes and managed-process termination before start are rejected.
+- [x] Managed-process started then terminated is accepted once per phase.
+- [x] Query limits are required and capped.
+- [x] Sequence cursor ordering is stable.
+- [x] Busy/read-only/full-disk/I/O states are bounded and content-free.
+- [x] Journal, synchronous, foreign-key, and busy-timeout settings are recorded.
+- [x] One-writer/cross-process limitations are documented.
+- [x] Bundled SQLite version, features, license, and build/binary impact are recorded.
 
 ## Migration and Recovery Checklist
 
