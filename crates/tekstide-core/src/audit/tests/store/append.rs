@@ -73,12 +73,8 @@ fn invalid_record_is_rejected_before_sensitive_values_reach_sqlite_files() {
 
     for artifact in [
         dirs.storage_path.database_file().to_path_buf(),
-        dirs.storage_path
-            .database_file()
-            .with_extension("sqlite3-wal"),
-        dirs.storage_path
-            .database_file()
-            .with_extension("sqlite3-shm"),
+        dirs.storage_path.wal_file(),
+        dirs.storage_path.shared_memory_file(),
     ] {
         if let Ok(bytes) = fs::read(artifact) {
             assert!(

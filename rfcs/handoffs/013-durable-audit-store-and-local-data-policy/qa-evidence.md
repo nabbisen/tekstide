@@ -106,7 +106,50 @@ Observed after the response 096 follow-up on 2026-07-22:
 
 ## PR-013-D - Schema Identity and Migration Harness
 
-Pending implementation.
+Implementation awaiting review:
+
+- Added `crates/tekstide-core/src/audit/migration.rs` as the schema lifecycle boundary, reducing migration/identity responsibility in `store.rs`.
+- Added the independent tracked SQL fixture `crates/tekstide-core/src/audit/tests/fixtures/audit-v1.sql`. It records the complete v1 schema, application id, user version, constraints, and indexes without deriving them from the production schema constant.
+- Existing databases are opened read-only first and checked for application id, supported user version, required table presence, and one primary-key-limited row read. No row-count-dependent integrity scan runs during ordinary startup.
+- After the read-write connection opens, identity/version are re-read and must match the read-only probe before migration or write-capable connection configuration.
+- Foreign application ids, future versions, and versions older than the current supported floor are rejected before write-capable open. Tests snapshot the database, journal, WAL, and shared-memory artifacts and prove foreign/future rejection does not change them.
+- Fresh database creation remains transactional and creates current application/schema identity only after path validation.
+- The migration runner requires exact sequential `N -> N+1` steps and runs the complete chain in one immediate transaction. Missing/nonsequential steps fail without writes, and a later failing step rolls back earlier steps and the schema version.
+- V1 is Tekstide's first durable-audit schema, so there is no supported historical production migration. Synthetic v1-to-v3 steps exercise the harness; the tracked v1 fixture is the immutable input baseline for the next real schema version.
+- Fixed SQLite companion paths for rollback journal, WAL, and shared memory are now exposed by `AuditStoragePath`; pre-existing companions must be regular files and cannot be symlinks. Recovery behavior remains PR-013-E scope.
+
+Observed gates on 2026-07-22:
+
+- `cargo test -p tekstide-core audit::` passed; 44 tests passed, 0 failed.
+- `cargo fmt --all --check` passed.
+- `cargo check --workspace --all-targets` passed.
+- `cargo test --workspace` passed; `tekstide-core` ran 346 tests with 0 failures, other workspace test targets and doc tests ran 0 tests with 0 failures.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed.
+- `git diff --check` passed.
+
+Explicit limits:
+
+- No production migration is registered because no schema predates v1.
+- Ordinary startup does not run `quick_check` or `integrity_check`; comprehensive diagnostics belong to PR-013-E.
+- This slice does not classify malformed/truncated databases beyond existing typed SQLite errors, quarantine artifacts, write recovery manifests, recreate stores, or append recovery events.
+- The canonical v1 fixture proves identity and compatibility/openability, not byte-for-byte schema equivalence with fresh schema creation.
+
+Review response 097 accepted PR-013-D with one required migration-harness follow-up:
+
+- Replaced free-form `execute_batch` migration steps with explicit single-statement lists.
+- Added a conservative migration statement allowlist for `CREATE`, `ALTER`, `DROP`, `INSERT`, `UPDATE`, and `DELETE`; transaction control, journal-affecting PRAGMAs, `VACUUM`, comments before statements, and other unreviewed statement classes fail as `InvalidMigration`.
+- Individual statements use `Transaction::execute`, which rejects appended second statements. A regression with `CREATE TABLE ...; COMMIT;` proves that embedded transaction control cannot leak schema changes or advance `user_version` after a later failure.
+- Documented that existing-store migration must run before connection configuration because SQLite table rebuilds require foreign-key enforcement off and identity validation must precede WAL/journal changes.
+- Documented that the second bounded schema read deliberately re-verifies the write-capable connection after identity checking and any migration.
+
+Observed after the response 097 follow-up on 2026-07-22:
+
+- `cargo test -p tekstide-core audit::tests::migration -- --nocapture` passed; 8 tests passed, 0 failed.
+- `cargo fmt --all --check` passed.
+- `cargo check --workspace --all-targets` passed.
+- `cargo test --workspace` passed; `tekstide-core` ran 348 tests with 0 failures, other workspace test targets and doc tests ran 0 tests with 0 failures.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed.
+- `git diff --check` passed.
 
 ## PR-013-E - Corruption and Recovery Harness
 

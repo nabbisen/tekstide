@@ -42,6 +42,18 @@ impl AuditStoragePath {
         &self.recovery_dir
     }
 
+    pub fn journal_file(&self) -> PathBuf {
+        sqlite_companion_path(&self.database_file, "-journal")
+    }
+
+    pub fn wal_file(&self) -> PathBuf {
+        sqlite_companion_path(&self.database_file, "-wal")
+    }
+
+    pub fn shared_memory_file(&self) -> PathBuf {
+        sqlite_companion_path(&self.database_file, "-shm")
+    }
+
     pub fn ensure_project_root_compatible(
         &self,
         project_root: &Path,
@@ -178,5 +190,30 @@ fn validate_existing_audit_paths(
         }
     }
 
+    for companion in [
+        sqlite_companion_path(database_file, "-journal"),
+        sqlite_companion_path(database_file, "-wal"),
+        sqlite_companion_path(database_file, "-shm"),
+    ] {
+        if let Ok(metadata) = fs::symlink_metadata(companion) {
+            if metadata.file_type().is_symlink() {
+                return Err(AuditPathError::new(
+                    AuditPathErrorReason::AuditPathIsSymlink,
+                ));
+            }
+            if !metadata.is_file() {
+                return Err(AuditPathError::new(
+                    AuditPathErrorReason::AuditPathTypeInvalid,
+                ));
+            }
+        }
+    }
+
     Ok(())
+}
+
+fn sqlite_companion_path(database_file: &Path, suffix: &str) -> PathBuf {
+    let mut path = database_file.as_os_str().to_os_string();
+    path.push(suffix);
+    PathBuf::from(path)
 }

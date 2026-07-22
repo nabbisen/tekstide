@@ -1,6 +1,5 @@
 use std::fmt;
 use std::fs;
-use std::path::Path;
 use std::time::Duration;
 
 use rusqlite::{
@@ -8,13 +7,13 @@ use rusqlite::{
     params, types::Type,
 };
 
+use super::migration::{create_current_schema, prepare_existing_store, probe_existing_store};
 use super::path::{AuditPathError, AuditStoragePath};
 use super::record::{
     AuditActionKind, AuditActionSource, AuditActorKind, AuditEventFamily, AuditOutcome,
     AuditReasonCode, AuditRecordValidationError, AuditReference, AuditRiskLevel, AuditSubjectKind,
     DurableAuditRecordV1,
 };
-use super::schema::{AUDIT_APPLICATION_ID, AUDIT_SCHEMA_VERSION, CREATE_SCHEMA_V1};
 use crate::domain::{
     AgentRunId, ApprovalId, AuditEventId, AuditOperationId, DomainTimestamp, TerminalId,
 };
@@ -34,9 +33,9 @@ impl AuditStore {
             .validate_before_open()
             .map_err(AuditStoreError::path)?;
         let existed = storage_path.database_file().exists();
-        if existed {
-            probe_existing_store(storage_path.database_file())?;
-        }
+        let probed_version = existed
+            .then(|| probe_existing_store(storage_path.database_file()))
+            .transpose()?;
 
         fs::create_dir_all(storage_path.audit_dir())
             .map_err(|_| AuditStoreError::new(AuditStoreErrorReason::Io))?;
@@ -51,11 +50,17 @@ impl AuditStore {
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .map_err(AuditStoreError::sqlite)?;
-        configure_connection(&connection)?;
-        if existed {
-            verify_open_store(&connection)?;
+        connection
+            .busy_timeout(BUSY_TIMEOUT)
+            .map_err(AuditStoreError::sqlite)?;
+        if let Some(probed_version) = probed_version {
+            // Keep migrations before configuration: SQLite table rebuilds require foreign-key
+            // enforcement off, and WAL/journal settings must not precede identity validation.
+            prepare_existing_store(&mut connection, probed_version)?;
+            configure_connection(&connection)?;
         } else {
-            create_schema(&mut connection)?;
+            configure_connection(&connection)?;
+            create_current_schema(&mut connection)?;
         }
 
         Ok(Self {
@@ -214,6 +219,7 @@ pub enum AuditStoreErrorReason {
     UnsupportedSchema,
     InvalidRecord,
     InvalidQuery,
+    InvalidMigration,
     DuplicateEventConflict,
     MissingAuthorization,
     OperationConflict,
@@ -226,7 +232,7 @@ pub struct AuditStoreError {
 }
 
 impl AuditStoreError {
-    fn new(reason: AuditStoreErrorReason) -> Self {
+    pub(super) fn new(reason: AuditStoreErrorReason) -> Self {
         Self { reason }
     }
 
@@ -238,7 +244,7 @@ impl AuditStoreError {
         Self::new(AuditStoreErrorReason::InvalidRecord)
     }
 
-    fn sqlite(error: rusqlite::Error) -> Self {
+    pub(super) fn sqlite(error: rusqlite::Error) -> Self {
         if let rusqlite::Error::FromSqlConversionFailure(_, _, source) = &error
             && source.downcast_ref::<AuditDecodeFailure>().is_some()
         {
@@ -259,18 +265,6 @@ impl AuditStoreError {
     }
 }
 
-fn probe_existing_store(database_file: &Path) -> Result<(), AuditStoreError> {
-    let connection = Connection::open_with_flags(
-        database_file,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(AuditStoreError::sqlite)?;
-    connection
-        .busy_timeout(BUSY_TIMEOUT)
-        .map_err(AuditStoreError::sqlite)?;
-    verify_open_store(&connection)
-}
-
 fn configure_connection(connection: &Connection) -> Result<(), AuditStoreError> {
     connection
         .busy_timeout(BUSY_TIMEOUT)
@@ -285,48 +279,6 @@ fn configure_connection(connection: &Connection) -> Result<(), AuditStoreError> 
         .pragma_update(None, "synchronous", "FULL")
         .map_err(AuditStoreError::sqlite)?;
     Ok(())
-}
-
-fn create_schema(connection: &mut Connection) -> Result<(), AuditStoreError> {
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(AuditStoreError::sqlite)?;
-    transaction
-        .execute_batch(CREATE_SCHEMA_V1)
-        .map_err(AuditStoreError::sqlite)?;
-    transaction
-        .pragma_update(None, "application_id", AUDIT_APPLICATION_ID)
-        .map_err(AuditStoreError::sqlite)?;
-    transaction
-        .pragma_update(None, "user_version", AUDIT_SCHEMA_VERSION)
-        .map_err(AuditStoreError::sqlite)?;
-    transaction.commit().map_err(AuditStoreError::sqlite)
-}
-
-fn verify_open_store(connection: &Connection) -> Result<(), AuditStoreError> {
-    let application_id: i64 = connection
-        .query_row("PRAGMA application_id", [], |row| row.get(0))
-        .map_err(AuditStoreError::sqlite)?;
-    if application_id != AUDIT_APPLICATION_ID {
-        return Err(AuditStoreError::new(
-            AuditStoreErrorReason::UnsupportedApplication,
-        ));
-    }
-    let schema_version: i64 = connection
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .map_err(AuditStoreError::sqlite)?;
-    if schema_version != AUDIT_SCHEMA_VERSION {
-        return Err(AuditStoreError::new(
-            AuditStoreErrorReason::UnsupportedSchema,
-        ));
-    }
-    connection
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'audit_events'",
-            [],
-            |_| Ok(()),
-        )
-        .map_err(AuditStoreError::sqlite)
 }
 
 fn validate_operation_phase(

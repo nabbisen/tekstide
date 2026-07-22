@@ -55,7 +55,7 @@ Design accepted for implementation by review response 095. Implementation and cl
 ## Store Checklist
 
 - [x] Fresh store creation sets application/schema identity.
-- [ ] Existing store identity/version is probed read-only before write-capable configuration or migration.
+- [x] Existing store identity/version is probed read-only before write-capable configuration or migration.
 - [x] Append is transactional.
 - [x] Exact retry by event id is idempotent.
 - [x] Conflicting reuse of event id is rejected without overwrite.
@@ -75,16 +75,16 @@ Design accepted for implementation by review response 095. Implementation and cl
 
 ## Migration and Recovery Checklist
 
-- [ ] Canonical v1 fixture exists.
-- [ ] Current schema reopen is tested.
-- [ ] Supported prior-version migrations are fixture-tested.
-- [ ] Failed migration rolls back.
-- [ ] Future schema is rejected in v1 without writes.
-- [ ] Foreign application identity is not overwritten.
-- [ ] Missing store initializes safely.
+- [x] Canonical v1 fixture exists.
+- [x] Current schema reopen is tested.
+- [x] Supported prior-version migrations are fixture-tested. V1 is the first schema, so no prior production version exists; the sequential harness is tested with synthetic steps.
+- [x] Failed migration rolls back.
+- [x] Future schema is rejected in v1 without writes.
+- [x] Foreign application identity is not overwritten.
+- [x] Missing store initializes safely.
 - [ ] Corrupt store open does not rename/delete/recreate automatically.
-- [ ] Startup health probing is bounded independently of retained row count.
-- [ ] Comprehensive integrity checks require explicit diagnostics/recovery.
+- [x] Startup health probing is bounded independently of retained row count.
+- [x] Comprehensive integrity checks require explicit diagnostics/recovery.
 - [ ] Explicit recovery quarantines database and known companion artifacts.
 - [ ] Recovery manifest records moved/absent/failure state for each expected artifact.
 - [ ] Incomplete quarantine prevents fresh-store creation.

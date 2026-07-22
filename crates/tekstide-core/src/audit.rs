@@ -1,3 +1,4 @@
+mod migration;
 mod path;
 mod record;
 mod schema;

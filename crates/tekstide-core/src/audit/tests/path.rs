@@ -21,6 +21,9 @@ fn audit_path_resolves_under_state_root_and_outside_projects() {
             .ends_with(Path::new("audit/audit.sqlite3"))
     );
     assert!(path.recovery_dir().ends_with(Path::new("audit/recovery")));
+    assert!(path.journal_file().ends_with("audit.sqlite3-journal"));
+    assert!(path.wal_file().ends_with("audit.sqlite3-wal"));
+    assert!(path.shared_memory_file().ends_with("audit.sqlite3-shm"));
     assert!(!path.database_file().starts_with(&temp.project_root));
 }
 
@@ -102,6 +105,25 @@ fn existing_symlinked_audit_directory_is_rejected() {
     let target = temp.base.join("audit-target");
     fs::create_dir_all(&target).unwrap();
     symlink(&target, temp.state_root.join("audit")).unwrap();
+
+    let error = AuditPathResolver
+        .resolve(AuditPathRequest::new(&temp.state_root, Vec::new()))
+        .unwrap_err();
+
+    assert_eq!(error.reason, AuditPathErrorReason::AuditPathIsSymlink);
+}
+
+#[cfg(unix)]
+#[test]
+fn existing_symlinked_sqlite_companion_is_rejected() {
+    use std::os::unix::fs::symlink;
+
+    let temp = TestDirs::new("companion-symlink");
+    let audit_dir = temp.state_root.join("audit");
+    let target = temp.base.join("outside-wal");
+    fs::create_dir_all(&audit_dir).unwrap();
+    fs::write(&target, b"not a real wal").unwrap();
+    symlink(&target, audit_dir.join("audit.sqlite3-wal")).unwrap();
 
     let error = AuditPathResolver
         .resolve(AuditPathRequest::new(&temp.state_root, Vec::new()))
