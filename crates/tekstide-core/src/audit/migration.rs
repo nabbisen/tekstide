@@ -162,13 +162,16 @@ fn validate_identity(identity: SchemaIdentity) -> Result<(), AuditStoreError> {
 }
 
 fn verify_bounded_schema_read(connection: &Connection) -> Result<(), AuditStoreError> {
-    connection
+    let table_exists = connection
         .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'audit_events'",
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'audit_events')",
             [],
-            |_| Ok(()),
+            |row| row.get::<_, bool>(0),
         )
-        .map_err(AuditStoreError::sqlite)?;
+        .map_err(schema_read_error)?;
+    if !table_exists {
+        return Err(AuditStoreError::new(AuditStoreErrorReason::Corrupt));
+    }
     connection
         .query_row(
             "SELECT sequence FROM audit_events ORDER BY sequence DESC LIMIT 1",
@@ -176,6 +179,15 @@ fn verify_bounded_schema_read(connection: &Connection) -> Result<(), AuditStoreE
             |row| row.get::<_, i64>(0),
         )
         .optional()
-        .map_err(AuditStoreError::sqlite)?;
+        .map_err(schema_read_error)?;
     Ok(())
+}
+
+fn schema_read_error(error: rusqlite::Error) -> AuditStoreError {
+    let error = AuditStoreError::sqlite(error);
+    if error.reason == AuditStoreErrorReason::Io {
+        AuditStoreError::new(AuditStoreErrorReason::Corrupt)
+    } else {
+        error
+    }
 }

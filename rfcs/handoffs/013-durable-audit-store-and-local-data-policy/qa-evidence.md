@@ -153,7 +153,67 @@ Observed after the response 097 follow-up on 2026-07-22:
 
 ## PR-013-E - Corruption and Recovery Harness
 
-Pending implementation.
+Implementation awaiting review:
+
+- Added an explicit diagnostics boundary that first reuses the bounded read-only startup probe, then runs `PRAGMA integrity_check` and validates every durable row only when diagnostics are requested.
+- Diagnostics classify missing, healthy, corrupt, semantically invalid-record, foreign-application, future/unsupported-schema, and unavailable stores without carrying paths or persisted content in the report.
+- Malformed databases, truncated databases, and current-identity databases missing the required table are classified as corrupt. Ordinary `AuditStore::open` attempts fail without renaming, deleting, or recreating the database evidence.
+- Persisted rows that fail the durable record decoder are classified as `InvalidRecords`, not SQLite corruption. Query pages continue to fail closed in full, and explicit recovery accepts this state without parsing or salvaging row content.
+- Added explicit quarantine/recreate recovery. The caller contract requires application-owned SQLite handles to be closed before recovery begins.
+- Recovery addresses exactly `audit.sqlite3`, `audit.sqlite3-journal`, `audit.sqlite3-wal`, and `audit.sqlite3-shm`; no directory glob is used.
+- Every attempt creates one unique recovery bundle and a content-free manifest with a moved, absent, or failed result for each expected artifact.
+- Recovery attempts all four known artifacts. Any failed move writes an incomplete manifest and prevents fresh-store creation.
+- A complete quarantine creates the current schema and attempts to append one structured `audit_store_recovery` event referencing only the recovery-bundle identifier. Event persistence failure is represented by the ephemeral receipt rather than undoing successful quarantine/recreation.
+- Recovery refuses missing, healthy, foreign-application, and unsupported future-schema stores without moving evidence.
+- Recovery-directory and SQLite-artifact path checks reject symlink or unexpected file-type boundaries before recovery.
+
+Observed gates on 2026-07-22:
+
+- `cargo test -p tekstide-core audit::` passed; 53 tests passed, 0 failed.
+- `cargo fmt --all -- --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo test --workspace --all-targets --all-features` passed; `tekstide-core` ran 355 tests with 0 failures and the other workspace targets ran 0 tests with 0 failures.
+
+Explicit limits:
+
+- Recovery is an explicit caller-driven operation; it does not discover or close live SQLite handles itself.
+- Recovery performs quarantine and fresh initialization only. It does not salvage records from corrupt evidence.
+- Recovery bundles remain local data until a later explicit policy handles them; PR-013-F owns purge and local-data accounting behavior.
+- No runtime security-event producer is wired to the durable store in this slice.
+
+Review response 098 required a restart-safe incomplete-recovery guard and clean final-tree evidence:
+
+- Recovery now creates and synchronizes one content-free `active-recovery.json` marker before the first artifact move. Ordinary `AuditStore::open` returns `RecoveryIncomplete` while that marker exists, including when the canonical database has already moved and would otherwise look like first run.
+- `AuditRecovery::resume` reads the bounded marker, validates the exact recovery bundle, reconstructs moved/absent/remaining artifact state from exact paths, retries quarantine and manifest writing, and finishes fresh initialization explicitly.
+- A complete manifest is synchronized before fresh initialization. The active marker is removed only after initialization and the best-effort recovery event step finish.
+- Partial-move, manifest-write-failure, interrupted-move, and failed-fresh-initialization tests all prove ordinary open remains blocked and explicit resume can complete without silently treating the state as first run.
+- The review-created `tmp_probe.rs` print-only probe was removed. Its unsafe scenario is retained as asserted recovery tests.
+
+Observed after the response 098 follow-up on 2026-07-22:
+
+- `cargo test -p tekstide-core audit::` passed; 56 tests passed, 0 failed.
+- `cargo fmt --all -- --check` passed.
+- `cargo test --workspace --all-targets --all-features` passed; `tekstide-core` ran 358 tests with 0 failures and the other workspace targets ran 0 tests with 0 failures.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+
+Review response 099 required fresh-store initialization to remain API-resumable when SQLite leaves regular partial-attempt artifacts:
+
+- Fresh initialization now uses the exact recovery-owned `.audit.sqlite3.recovery-new` database path instead of creating the canonical database directly.
+- After schema creation and best-effort recovery-event append, the temporary store switches from WAL to DELETE journal mode, closes, and must pass explicit healthy diagnostics with no journal/WAL/shared-memory companions.
+- Only that complete single database file is atomically renamed to `audit.sqlite3`; the audit directory is synchronized before recovery finalization removes the active marker.
+- A failed fresh attempt can leave only the exact temporary database/journal/WAL/shared-memory paths. Explicit resume, authorized by the active marker and complete manifest, removes those recovery-owned regular files and retries initialization without operator filesystem cleanup.
+- If interruption occurs after atomic installation but before marker removal, resume recognizes the healthy canonical store, validates the complete manifest, avoids duplicating a matching recovery event, and finalizes the marker.
+- If marker removal itself fails after installation, ordinary open remains blocked and a later resume idempotently finalizes the already healthy store.
+- The initialization-failure regression injects regular temporary database, journal, WAL, and shared-memory files, proves ordinary open remains blocked with no canonical database, and proves `AuditRecovery::resume` cleans the temporary set and reaches a healthy store through the public API alone.
+- A separate compatibility regression injects regular partial canonical database/journal/WAL/shared-memory artifacts after the complete manifest, proves ordinary open remains blocked, and proves public resume resolves the previously reported unsupported-application dead end without manual cleanup.
+- Canonical-artifact cleanup exists only for recovery states produced by the earlier direct-canonical initialization implementation. It requires the active marker and complete matching manifest that prove original evidence is already quarantined; it is not a general store-reset capability.
+
+Observed after the response 099 follow-up on 2026-07-23:
+
+- `cargo test -p tekstide-core audit::` passed; 57 tests passed, 0 failed.
+- `cargo fmt --all -- --check` passed.
+- `cargo test --workspace --all-targets --all-features` passed; `tekstide-core` ran 359 tests with 0 failures and the other workspace targets ran 0 tests with 0 failures.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
 
 ## PR-013-F - Purge and Local-Data Summary
 

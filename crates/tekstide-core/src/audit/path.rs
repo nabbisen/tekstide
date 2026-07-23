@@ -42,6 +42,19 @@ impl AuditStoragePath {
         &self.recovery_dir
     }
 
+    pub(crate) fn recovery_marker_file(&self) -> PathBuf {
+        self.recovery_dir.join("active-recovery.json")
+    }
+
+    pub(crate) fn recovery_initialization_path(&self) -> Self {
+        Self {
+            state_root: self.state_root.clone(),
+            audit_dir: self.audit_dir.clone(),
+            database_file: self.audit_dir.join(".audit.sqlite3.recovery-new"),
+            recovery_dir: self.recovery_dir.clone(),
+        }
+    }
+
     pub fn journal_file(&self) -> PathBuf {
         sqlite_companion_path(&self.database_file, "-journal")
     }
@@ -80,6 +93,37 @@ impl AuditStoragePath {
             ));
         }
         validate_existing_audit_paths(&state_root, &self.audit_dir, &self.database_file)
+    }
+
+    pub(crate) fn validate_for_recovery(&self) -> Result<(), AuditPathError> {
+        self.validate_before_open()?;
+        if let Ok(metadata) = fs::symlink_metadata(&self.recovery_dir) {
+            if metadata.file_type().is_symlink() {
+                return Err(AuditPathError::new(
+                    AuditPathErrorReason::AuditPathIsSymlink,
+                ));
+            }
+            if !metadata.is_dir() {
+                return Err(AuditPathError::new(
+                    AuditPathErrorReason::AuditPathTypeInvalid,
+                ));
+            }
+            let canonical = fs::canonicalize(&self.recovery_dir).map_err(|_| {
+                AuditPathError::new(AuditPathErrorReason::AuditPathEscapesStateRoot)
+            })?;
+            if !canonical.starts_with(&self.audit_dir) {
+                return Err(AuditPathError::new(
+                    AuditPathErrorReason::AuditPathEscapesStateRoot,
+                ));
+            }
+        }
+        validate_optional_regular_file(&self.recovery_marker_file())?;
+        Ok(())
+    }
+
+    pub(crate) fn recovery_is_active(&self) -> Result<bool, AuditPathError> {
+        self.validate_for_recovery()?;
+        Ok(self.recovery_marker_file().exists())
     }
 }
 
@@ -209,6 +253,22 @@ fn validate_existing_audit_paths(
         }
     }
 
+    Ok(())
+}
+
+fn validate_optional_regular_file(path: &Path) -> Result<(), AuditPathError> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() {
+            return Err(AuditPathError::new(
+                AuditPathErrorReason::AuditPathIsSymlink,
+            ));
+        }
+        if !metadata.is_file() {
+            return Err(AuditPathError::new(
+                AuditPathErrorReason::AuditPathTypeInvalid,
+            ));
+        }
+    }
     Ok(())
 }
 

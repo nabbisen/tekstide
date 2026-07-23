@@ -29,9 +29,37 @@ pub struct AuditStore {
 
 impl AuditStore {
     pub fn open(storage_path: AuditStoragePath) -> Result<Self, AuditStoreError> {
+        Self::open_internal(storage_path, false)
+    }
+
+    pub(super) fn open_after_complete_recovery(
+        storage_path: AuditStoragePath,
+    ) -> Result<Self, AuditStoreError> {
+        Self::open_internal(storage_path, true)
+    }
+
+    pub(super) fn prepare_for_atomic_install(&self) -> Result<(), AuditStoreError> {
+        self.connection
+            .pragma_update(None, "journal_mode", "DELETE")
+            .map_err(AuditStoreError::sqlite)
+    }
+
+    fn open_internal(
+        storage_path: AuditStoragePath,
+        allow_active_recovery: bool,
+    ) -> Result<Self, AuditStoreError> {
         storage_path
             .validate_before_open()
             .map_err(AuditStoreError::path)?;
+        if !allow_active_recovery
+            && storage_path
+                .recovery_is_active()
+                .map_err(AuditStoreError::path)?
+        {
+            return Err(AuditStoreError::new(
+                AuditStoreErrorReason::RecoveryIncomplete,
+            ));
+        }
         let existed = storage_path.database_file().exists();
         let probed_version = existed
             .then(|| probe_existing_store(storage_path.database_file()))
@@ -220,6 +248,7 @@ pub enum AuditStoreErrorReason {
     InvalidRecord,
     InvalidQuery,
     InvalidMigration,
+    RecoveryIncomplete,
     DuplicateEventConflict,
     MissingAuthorization,
     OperationConflict,
@@ -439,7 +468,7 @@ fn load_by_event_id(
         .map_err(AuditStoreError::sqlite)
 }
 
-fn decode_row(row: &Row<'_>) -> rusqlite::Result<SequencedAuditRecord> {
+pub(super) fn decode_row(row: &Row<'_>) -> rusqlite::Result<SequencedAuditRecord> {
     decode_row_inner(row).map_err(|_| {
         rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(AuditDecodeFailure))
     })

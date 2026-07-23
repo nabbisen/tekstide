@@ -82,13 +82,13 @@ Design accepted for implementation by review response 095. Implementation and cl
 - [x] Future schema is rejected in v1 without writes.
 - [x] Foreign application identity is not overwritten.
 - [x] Missing store initializes safely.
-- [ ] Corrupt store open does not rename/delete/recreate automatically.
+- [x] Corrupt store open does not rename/delete/recreate automatically.
 - [x] Startup health probing is bounded independently of retained row count.
 - [x] Comprehensive integrity checks require explicit diagnostics/recovery.
-- [ ] Explicit recovery quarantines database and known companion artifacts.
-- [ ] Recovery manifest records moved/absent/failure state for each expected artifact.
-- [ ] Incomplete quarantine prevents fresh-store creation.
-- [ ] Fresh store after recovery records a content-free recovery event where possible.
+- [x] Explicit recovery quarantines database and known companion artifacts.
+- [x] Recovery manifest records moved/absent/failure state for each expected artifact.
+- [x] Incomplete quarantine prevents fresh-store creation.
+- [x] Fresh store after recovery records a content-free recovery event where possible.
 
 ## Purge and Retention Checklist
 
