@@ -216,7 +216,7 @@ impl ProjectSession {
         &self.audit_events
     }
 
-    pub fn grant_trust(&mut self, summary: impl Into<String>) -> &AuditEvent {
+    pub(crate) fn grant_trust(&mut self, summary: impl Into<String>) -> &AuditEvent {
         self.trust_state = WorkspaceTrust::Trusted;
         self.audit_events
             .push(AuditEvent::trust_granted(self.id.clone(), summary));
@@ -226,7 +226,7 @@ impl ProjectSession {
             .expect("trust audit event should be present after push")
     }
 
-    pub fn revoke_trust(&mut self, summary: impl Into<String>) -> &AuditEvent {
+    pub(crate) fn revoke_trust(&mut self, summary: impl Into<String>) -> &AuditEvent {
         self.trust_state = WorkspaceTrust::Revoked;
         self.audit_events
             .push(AuditEvent::trust_revoked(self.id.clone(), summary));
@@ -357,14 +357,31 @@ impl ProjectSession {
         Ok(agent_run_id)
     }
 
-    pub fn launch_agent_run_with_runtime(
+    #[cfg(test)]
+    pub(crate) fn launch_agent_run_with_runtime(
         &mut self,
         mut plan: AgentRunLaunchPlan,
         runtime: &mut LinuxTerminalRuntime,
     ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
-        self.validate_agent_launch_plan_before_runtime(&plan)?;
+        self.prepare_agent_run_launch(&mut plan)?;
+        self.launch_prepared_agent_run_with_runtime(plan, runtime)
+    }
+
+    pub(crate) fn prepare_agent_run_launch(
+        &mut self,
+        plan: &mut AgentRunLaunchPlan,
+    ) -> Result<(), ProjectAgentRuntimeLaunchError> {
+        self.validate_agent_launch_plan_before_runtime(plan)?;
         self.ensure_agent_launch_active_file_safety()?;
         plan.prepare_transcript_capture()?;
+        Ok(())
+    }
+
+    pub(crate) fn launch_prepared_agent_run_with_runtime(
+        &mut self,
+        mut plan: AgentRunLaunchPlan,
+        runtime: &mut LinuxTerminalRuntime,
+    ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
         let transcript_storage_path = plan.transcript_storage_path().cloned();
 
         plan.transition_agent_run_to(AgentRunStatus::Preparing)?;
@@ -385,7 +402,7 @@ impl ProjectSession {
         Ok((agent_run_id, events))
     }
 
-    pub fn apply_agent_terminal_outcome(
+    pub(crate) fn apply_agent_terminal_outcome(
         &mut self,
         agent_run_id: &AgentRunId,
         terminal_id: &TerminalId,

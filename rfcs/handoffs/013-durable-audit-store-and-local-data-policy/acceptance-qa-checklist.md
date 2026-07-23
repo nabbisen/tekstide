@@ -106,22 +106,22 @@ Design accepted for implementation by review response 095. Implementation and cl
 
 ## Integration Checklist
 
-- [ ] Authority-increasing/destructive actions persist authorization before mutation.
-- [ ] Authorization records do not claim applied/started/completed outcomes.
-- [ ] Outcome records carry the matching authorization operation id.
-- [ ] Authority-increasing/destructive persistence failure blocks the action.
-- [ ] Authority-reducing/protective actions apply before observational persistence.
-- [ ] Protective persistence failure preserves the safer state.
-- [ ] Observational persistence failure preserves runtime/security truth.
-- [ ] Managed/supervised launch authorization is persisted before process creation and followed by started/failed truth.
+- [x] Authority-increasing actions integrated in PR-013-G persist authorization before mutation; destructive producers remain unsupported.
+- [x] Authorization records do not claim applied/started/completed outcomes.
+- [x] Outcome records carry the matching authorization operation id.
+- [x] Authority-increasing persistence failure blocks the integrated action; destructive producers remain unsupported.
+- [x] Authority-reducing/protective actions apply before observational persistence.
+- [x] Protective persistence failure preserves the safer state.
+- [x] Observational persistence failure preserves runtime/security truth.
+- [x] Managed/supervised launch authorization is persisted before process creation and followed by started/failed truth.
 - [ ] Safe-close applied outcome means action issued, not process exited.
-- [ ] Plain/manual terminal behavior is never relabeled as durably authorized.
-- [ ] Initial root/symlink integration is limited to typed post-ProjectSession open/save blocks without raw paths.
-- [ ] Audit degradation is visible in bounded in-memory health state.
-- [ ] Audit failure does not recursively audit itself.
-- [ ] Terminal output cannot create trusted durable records.
-- [ ] Runtime remains TerminalSession/AgentRun process truth.
-- [ ] Integrated and unsupported event producers are listed separately.
+- [x] Plain/manual terminal behavior is never relabeled as durably authorized.
+- [x] Initial root/symlink integration is limited to typed post-ProjectSession open/save blocks without raw paths.
+- [x] Audit degradation is visible in bounded in-memory health state.
+- [x] Audit failure does not recursively audit itself.
+- [x] Terminal output cannot create trusted durable records.
+- [x] Runtime remains TerminalSession/AgentRun process truth.
+- [x] Integrated and unsupported event producers are listed separately.
 
 ## Evidence Required
 
@@ -141,8 +141,8 @@ Design accepted for implementation by review response 095. Implementation and cl
 - [ ] Recovery artifact evidence.
 - [ ] Recovery manifest/partial-quarantine evidence.
 - [ ] Purge isolation evidence.
-- [ ] Security-direction and authorization/outcome integration evidence.
-- [ ] Command/cwd/environment/display-summary/path privacy sentinel evidence.
+- [x] Security-direction and authorization/outcome integration evidence.
+- [x] Command/cwd/environment/display-summary/path privacy sentinel evidence.
 - [ ] Known limitations and release-claim assessment.
 
 ## Final Acceptance Decision

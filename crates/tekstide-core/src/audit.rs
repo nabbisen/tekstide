@@ -1,4 +1,5 @@
 mod diagnostics;
+mod integration;
 mod migration;
 mod path;
 mod purge;
@@ -8,6 +9,10 @@ mod schema;
 mod store;
 
 pub use diagnostics::{AuditDiagnosticStatus, AuditDiagnostics, AuditDiagnosticsReport};
+pub use integration::{
+    AuditActionResult, AuditCoordinator, AuditHealth, AuditHealthStatus, AuditIntegrationError,
+    AuditObservationStatus, AuditedAgentLaunch,
+};
 pub use path::{
     AuditPathError, AuditPathErrorReason, AuditPathRequest, AuditPathResolver, AuditStoragePath,
 };

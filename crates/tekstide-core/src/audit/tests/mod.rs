@@ -1,4 +1,5 @@
 mod diagnostics;
+mod integration;
 mod migration;
 mod path;
 mod purge;

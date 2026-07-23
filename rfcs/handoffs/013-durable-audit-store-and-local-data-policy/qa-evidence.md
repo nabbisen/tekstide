@@ -252,7 +252,59 @@ Explicit limits:
 
 ## PR-013-G - Security-Event Integration
 
-Pending implementation.
+Implementation awaiting review:
+
+- Added `audit/integration.rs` as the application coordinator boundary. It owns persistence ordering and bounded `AuditHealth`; domain collection setters and terminal output do not receive an `AuditStore`.
+- Trust grants preflight a structured `authorized` record and commit it before changing `WorkspaceTrust`. The separate `applied` record reuses the operation id. Required-write failure leaves the project Restricted; an applied-observation failure leaves the already-applied Trusted state intact and marks audit health degraded.
+- Trust revocation changes the project to Revoked before its observational append. Persistence failure cannot reverse the safer state and increments one bounded health failure without recursively creating another audit record.
+- Managed/supervised AgentRun launch is split into side-effect-free/runtime-safe preflight and execution. The coordinator commits launch authorization after preflight and before process creation, then appends `started` with the actual project-owned AgentRun and TerminalSession ids or `failed` after launch failure.
+- A returned `AuditedAgentLaunch` retains the application-generated operation id for later process outcome correlation. Observed exit/signal/kill outcomes update TerminalSession/AgentRun truth first and append `terminated` afterward; observational failure leaves the runtime state authoritative and marks health degraded. Orphaned/observer-failed states remain domain truth without being mislabeled as durable termination.
+- AgentRun and terminal ownership are rechecked against the target ProjectSession before linked lifecycle outcomes are persisted. A cross-project handle is rejected before domain mutation or append.
+- Plain launch plans are rejected by the managed/supervised coordinator before append or process creation. They are not relabeled as durably authorized.
+- ProjectSession text open/save integration appends only a project id plus `root_escape` or `symlink_escape` after a typed `ProjectFileAccessPolicy::resolve_existing` block. Paths, filenames, and content are absent from the record type and privacy sentinels prove they do not appear in queried rows.
+- Successful open/save operations produce no audit record. Other access, format, size, external-change, and write failures are not misclassified as root/symlink security events.
+- Durable records are built directly from typed ProjectSession, launch-plan, runtime, and file-access context. No conversion reads or persists `AuditEvent.summary`, prompt summaries, terminal titles/output, executable/cwd paths, environment policy, transcript bytes, or generated-change content.
+
+Runtime-integrated producers in this slice:
+
+- trust grant authorization and applied outcome;
+- trust revocation observation;
+- managed/supervised AgentRun authorization, started/failed launch result, and observed exit/signal/kill termination;
+- post-ProjectSession text open/save root or symlink access blocks.
+
+Explicitly unsupported by this integration slice:
+
+- project-added durability;
+- Plain/manual terminal lifecycle observations;
+- command approval request/decision outcomes;
+- paste and restricted-feature blocks;
+- safe-close/destructive decisions;
+- sensitive configuration changes;
+- transcript-purge records.
+
+The audit-store recovery producer remains owned by PR-013-E. Project/global audit purge remains intentionally ephemeral under PR-013-F.
+
+Observed gates on 2026-07-23:
+
+- `cargo test -p tekstide-core audit::tests::integration -- --nocapture` passed; 10 tests passed, 0 failed.
+- `cargo test -p tekstide-core audit::` passed; 73 tests passed, 0 failed.
+- `cargo test --workspace --all-targets --all-features` passed; `tekstide-core` ran 375 tests with 0 failures and the other workspace targets ran 0 tests with 0 failures.
+- `cargo fmt --all -- --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `git diff --check` passed.
+
+Explicit limits:
+
+- The integration coordinator is a core application service, not a rendered audit viewer or local-data UI.
+- Command approval and safe-close matrix behavior remain unchecked because those producers are not wired; their record vocabulary alone is not implementation evidence.
+- `AuditHealth` is bounded in-memory status and does not claim durable self-diagnostics, automatic recovery, or that a later successful append repairs an earlier audit gap.
+
+Review response 102 accepted PR-013-G with one required visibility follow-up:
+
+- `ProjectSession::apply_agent_terminal_outcome` is now crate-scoped, matching the trust and launch mutation boundaries. External callers handling managed/supervised lifecycle outcomes must use `AuditCoordinator::apply_managed_agent_terminal_outcome`; the direct domain mutation can no longer bypass its durable termination observation.
+- The unexpected post-spawn invariant-failure case remains a known limitation: a live attached process can coexist with an incomplete authorization operation if an internal launched-id or ownership invariant fails after spawn.
+- Managed/supervised profile identifiers must satisfy `AuditReference` syntax before launch. Profile-definition-time validation and a more specific error remain future usability work.
+- Phase conflicts and store availability failures both conservatively degrade the in-memory health summary; health remains degraded for the process lifetime and does not claim current-store recovery state.
 
 ## PR-013-H - Closeout Evidence
 
