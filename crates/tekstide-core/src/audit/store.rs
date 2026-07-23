@@ -23,8 +23,8 @@ pub const MAX_AUDIT_QUERY_LIMIT: u32 = 200;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub struct AuditStore {
-    connection: Connection,
-    storage_path: AuditStoragePath,
+    pub(super) connection: Connection,
+    pub(super) storage_path: AuditStoragePath,
 }
 
 impl AuditStore {

@@ -217,7 +217,38 @@ Observed after the response 099 follow-up on 2026-07-23:
 
 ## PR-013-F - Purge and Local-Data Summary
 
-Pending implementation.
+Implemented and accepted by review response 101:
+
+- Added `audit/purge.rs` as the explicit audit-retention boundary. The only purge scopes are one project and all audit records; no event-id, subject, or timestamp-range purge API exists.
+- `AuditStore::purge_project_records` and `purge_all_records` execute one SQL `DELETE` in an immediate transaction. A receipt is returned only after commit, and repeating either operation succeeds with a zero deleted-record count.
+- Project purge filters only by the validated project identifier. Tests prove target-project rows are removed while another project's rows and global rows remain.
+- Global purge deletes every audit row while retaining the current schema. Tests prove no durable purge row is appended and a repeated global purge remains empty.
+- Receipts are ephemeral value objects containing only scope kind, bounded deleted-record count, and journal-cleanup status. A successful return means the deletion transaction committed; project receipts contain no project, subject, event, or operation identifier.
+- After commit, purge attempts `PRAGMA wal_checkpoint(TRUNCATE)`. Successful cleanup reports `Completed`; a pinned WAL reader reports `Deferred` without misrepresenting the already committed purge. Retrying after the reader closes completes cleanup.
+- Purge never traverses or removes filesystem paths. Sentinel fixtures prove project files, transcript bytes, recent-project state, configuration, and recovery evidence remain byte-identical after global purge.
+- `AuditStore::local_data_summary` reports retained row count and separate physical byte counts for the database, rollback journal, WAL, shared memory, and recovery files, plus total bytes and recovery-artifact count.
+- Recovery accounting is a bounded, non-symlink-following scan capped at 4,096 entries and one directory level below `audit/recovery/`, matching the recovery bundle layout. Entry-limit and unavailable states are explicit rather than presented as complete totals.
+- Recovery artifacts are counted as sensitive audit local data but are not deleted by project or global audit-record purge.
+
+Observed gates on 2026-07-23:
+
+- `cargo test -p tekstide-core audit::tests::purge -- --nocapture` passed; 6 tests passed, 0 failed.
+- `cargo test -p tekstide-core audit::` passed; 63 tests passed, 0 failed.
+- `cargo fmt --all -- --check` passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo test --workspace --all-targets --all-features` passed; `tekstide-core` ran 365 tests with 0 failures and the other workspace targets ran 0 tests with 0 failures.
+
+After response 101, the always-true `AuditPurgeReceipt::completed` field was removed. A returned `Ok` receipt itself means the deletion transaction committed; error paths return no receipt. The formatting, strict Clippy, full workspace test, and diff-hygiene gates above were rerun after this clarification.
+
+Explicit limits:
+
+- Purge is logical SQLite row deletion. It does not enable secure deletion, overwrite free pages, run `VACUUM`, or claim forensic erasure.
+- Checkpoint/truncation can reduce live WAL retention but does not guarantee deletion from storage media or remove bytes already present in the main database's free pages.
+- The database file is retained with its schema and may not shrink after purge.
+- Local-data sizes are point-in-time logical file lengths, not allocated-block or storage-media measurements.
+- Recovery evidence remains retained until a separately reviewed explicit recovery-artifact policy exists; ordinary audit-record purge never removes it.
+- PR-013-H release-facing wording must not imply secure erasure: purged record bytes can remain in database free pages.
+- PR-013-H release-facing wording must not imply tamper evidence or a durable record of purge operations; purge receipts are ephemeral by design.
 
 ## PR-013-G - Security-Event Integration
 

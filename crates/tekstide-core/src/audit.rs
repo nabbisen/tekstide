@@ -1,6 +1,7 @@
 mod diagnostics;
 mod migration;
 mod path;
+mod purge;
 mod record;
 mod recovery;
 mod schema;
@@ -9,6 +10,10 @@ mod store;
 pub use diagnostics::{AuditDiagnosticStatus, AuditDiagnostics, AuditDiagnosticsReport};
 pub use path::{
     AuditPathError, AuditPathErrorReason, AuditPathRequest, AuditPathResolver, AuditStoragePath,
+};
+pub use purge::{
+    AuditJournalCleanupStatus, AuditLocalDataScanStatus, AuditLocalDataSummary, AuditPurgeReceipt,
+    AuditPurgeScope, MAX_AUDIT_RECOVERY_SUMMARY_ENTRIES,
 };
 pub use record::{
     AUDIT_RECORD_SCHEMA_VERSION, AuditActionKind, AuditActionSource, AuditActorKind,

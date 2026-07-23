@@ -92,17 +92,17 @@ Design accepted for implementation by review response 095. Implementation and cl
 
 ## Purge and Retention Checklist
 
-- [ ] Normal startup/cleanup does not delete audit records.
-- [ ] Project purge affects only that project's records.
-- [ ] Global purge removes all audit rows.
-- [ ] Event-id/date-range purge remains deferred.
-- [ ] Purge is explicit, transactional, and idempotent.
-- [ ] Purge receipts do not defeat the requested scope.
-- [ ] Project/global audit-data purge receipts are ephemeral only; no durable purge event is appended.
-- [ ] Purge does not delete project files, transcripts, recent-project state, configuration, or recovery artifacts.
-- [ ] Database and companion artifacts are included in local-data size accounting.
-- [ ] Journal cleanup behavior is tested.
-- [ ] No secure-deletion claim is made.
+- [x] Normal startup/cleanup does not delete audit records.
+- [x] Project purge affects only that project's records.
+- [x] Global purge removes all audit rows.
+- [x] Event-id/date-range purge remains deferred.
+- [x] Purge is explicit, transactional, and idempotent.
+- [x] Purge receipts do not defeat the requested scope.
+- [x] Project/global audit-data purge receipts are ephemeral only; no durable purge event is appended.
+- [x] Purge does not delete project files, transcripts, recent-project state, configuration, or recovery artifacts.
+- [x] Database and companion artifacts are included in local-data size accounting.
+- [x] Journal cleanup behavior is tested.
+- [x] No secure-deletion claim is made.
 
 ## Integration Checklist
 
