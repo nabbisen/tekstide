@@ -18,7 +18,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| - | No proposed RFCs | - |
+| 014 | [Desktop GUI Substrate and Terminal Rendering Strategy](./proposed/014-desktop-gui-substrate-and-terminal-rendering.md) | Proposed |
 
 ## Handoffs
 
@@ -37,6 +37,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 011 | [Transcript Retention and Local Data Policy](./handoffs/011-transcript-retention-and-local-data-policy/README.md) |
 | 012 | [Generated Change Review Foundations](./handoffs/012-generated-change-review-foundations/README.md) |
 | 013 | [Durable Audit Store and Local Data Policy](./handoffs/013-durable-audit-store-and-local-data-policy/README.md) |
+| 014 | [Desktop GUI Substrate and Terminal Rendering Strategy](./handoffs/014-desktop-gui-substrate-and-terminal-rendering/README.md) |
 
 ## Implemented
 
