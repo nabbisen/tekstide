@@ -1,8 +1,8 @@
 # RFC-013: Durable Audit Store and Local Data Policy - Developer Handoff Pack
 
-Source RFC: [RFC-013](../../proposed/013-durable-audit-store-and-local-data-policy.md)
+Source RFC: [RFC-013](../../done/013-durable-audit-store-and-local-data-policy.md)
 Target milestone: **M7**
-Source RFC status: **Proposed**
+Source RFC status: **Implemented with documented limitations**
 
 ## Files
 
@@ -11,7 +11,7 @@ Source RFC status: **Proposed**
 - `acceptance-qa-checklist.md` - acceptance traceability and required evidence.
 - `qa-evidence.md` - placeholder for observed implementation gates, security notes, and known limitations.
 
-This handoff inherits the source RFC lifecycle state. Design review response 095 accepted RFC-013 for implementation; PR-013-B may begin.
+This handoff inherits the source RFC lifecycle state. Response 103 accepted PR-013-H as complete with documented limitations. Its original finding requiring a published `crates/tekstide/NOTICE` file was withdrawn after maintainer challenge — the root `NOTICE` alone covers repository and binary/release-tarball distribution, and the `tekstide` source package does not redistribute third-party code — so no crate-level notice was added. RFC-013 is implemented with documented limitations.
 
 ## Source Summary
 

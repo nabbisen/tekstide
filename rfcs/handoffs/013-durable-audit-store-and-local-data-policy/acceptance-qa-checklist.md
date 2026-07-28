@@ -1,19 +1,19 @@
 ---
 title: "RFC-013: Durable Audit Store and Local Data Policy - Acceptance / QA Checklist"
 rfc: "RFC-013"
-rfc_file: "../../proposed/013-durable-audit-store-and-local-data-policy.md"
-status: "Proposed"
+rfc_file: "../../done/013-durable-audit-store-and-local-data-policy.md"
+status: "Implemented with documented limitations"
 target_milestone: "M7"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented with documented limitations"
 created: "2026-07-22"
-updated: "2026-07-22"
+updated: "2026-07-23"
 ---
 
 # RFC-013: Durable Audit Store and Local Data Policy - Acceptance / QA Checklist
 
 ## Acceptance Status
 
-Design accepted for implementation by review response 095. Implementation and closeout acceptance remain pending.
+Design was accepted by response 095. PR-013-B through PR-013-G implementation was accepted by responses 096, 097, 100, 101, and 102. Response 103 accepted PR-013-H as complete with documented limitations; its earlier requirement for a `crates/tekstide/NOTICE` file was withdrawn as a maintainer-challenged error and no such file was created.
 
 ## Design Checklist
 
@@ -50,7 +50,7 @@ Design accepted for implementation by review response 095. Implementation and cl
 - [x] Free-form `AuditEvent.summary` is not persisted.
 - [x] Exact/edited commands, cwd/project/file paths, output, content, prompts, environment data, display summaries, and arbitrary metadata are not persisted.
 - [x] Persisted strings are bounded and reject controls/NUL.
-- [ ] Cross-project linked ids are rejected.
+- [x] Cross-project linked ids are rejected by store correlation and rechecked against ProjectSession ownership at runtime integration boundaries.
 
 ## Store Checklist
 
@@ -125,35 +125,34 @@ Design accepted for implementation by review response 095. Implementation and cl
 
 ## Evidence Required
 
-- [ ] Design review response and amendments/rereviews.
-- [ ] Implementation review response for every PR-013 slice.
-- [ ] Workspace dependency/linkage evidence.
-- [ ] Test command output.
-- [ ] Schema and migration fixture evidence.
-- [ ] Read-only identity/version probe evidence.
-- [ ] Append/idempotency/conflict evidence.
-- [ ] Correlation/interleaving/incomplete-authorization evidence.
-- [ ] Operation cardinality and lifecycle phase-order evidence.
-- [ ] Actor/source valid/invalid vocabulary evidence.
-- [ ] Path containment evidence.
-- [ ] Bounded query evidence.
-- [ ] Corrupt/missing/future-store evidence.
-- [ ] Recovery artifact evidence.
-- [ ] Recovery manifest/partial-quarantine evidence.
-- [ ] Purge isolation evidence.
+- [x] Design review response and amendments/rereviews.
+- [x] Implementation review responses for PR-013-B through PR-013-G.
+- [x] PR-013-H closeout review response.
+- [x] Workspace dependency/linkage evidence.
+- [x] Test command output.
+- [x] Schema and migration fixture evidence.
+- [x] Read-only identity/version probe evidence.
+- [x] Append/idempotency/conflict evidence.
+- [x] Correlation/interleaving/incomplete-authorization evidence.
+- [x] Operation cardinality and lifecycle phase-order evidence.
+- [x] Actor/source valid/invalid vocabulary evidence.
+- [x] Path containment evidence.
+- [x] Bounded query evidence.
+- [x] Corrupt/missing/future-store evidence.
+- [x] Recovery artifact evidence.
+- [x] Recovery manifest/partial-quarantine evidence.
+- [x] Purge isolation evidence.
 - [x] Security-direction and authorization/outcome integration evidence.
 - [x] Command/cwd/environment/display-summary/path privacy sentinel evidence.
-- [ ] Known limitations and release-claim assessment.
+- [x] Known limitations and release-claim assessment.
 
 ## Final Acceptance Decision
 
 - [ ] Accepted as complete.
-- [ ] Accepted with documented limitations.
+- [x] Accepted with documented limitations.
 - [ ] Blocked pending fixes.
 - [ ] Requires RFC amendment.
 
 Reviewer notes:
 
-```text
-Pending implementation and evidence.
-```
+Response 103 accepted RFC-013 as complete with documented limitations. Its original finding requiring a `crates/tekstide/NOTICE` file was withdrawn after maintainer challenge: the `tekstide` source package redistributes no third-party code, so the obligation is satisfied by the root `NOTICE` alone (covering repository checkouts and release tarballs) plus the rusqlite/libsqlite3-sys packages' own licenses for crates.io source consumers. RFC-013 has moved to `rfcs/done/`.

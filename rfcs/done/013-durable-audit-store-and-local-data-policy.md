@@ -1,6 +1,6 @@
 # RFC-013: Durable Audit Store and Local Audit Data Policy
 
-Status: Proposed
+Status: Implemented with documented limitations
 Target milestone: M7
 Date: 2026-07-22
 

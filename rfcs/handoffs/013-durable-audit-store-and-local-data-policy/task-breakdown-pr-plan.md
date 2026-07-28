@@ -1,8 +1,8 @@
 ---
 title: "RFC-013: Durable Audit Store and Local Data Policy - Task Breakdown / PR Plan"
 rfc: "RFC-013"
-rfc_file: "../../proposed/013-durable-audit-store-and-local-data-policy.md"
-status: "Proposed"
+rfc_file: "../../done/013-durable-audit-store-and-local-data-policy.md"
+status: "Implemented with documented limitations"
 target_milestone: "M7"
 created: "2026-07-22"
 ---

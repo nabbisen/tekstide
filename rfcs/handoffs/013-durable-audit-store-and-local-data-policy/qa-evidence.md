@@ -1,6 +1,6 @@
 # RFC-013: Durable Audit Store and Local Data Policy - QA Evidence
 
-Status: Proposed; no implementation evidence recorded
+Status: Implemented with documented limitations
 Target milestone: M7
 Date opened: 2026-07-22
 
@@ -302,15 +302,63 @@ Explicit limits:
 Review response 102 accepted PR-013-G with one required visibility follow-up:
 
 - `ProjectSession::apply_agent_terminal_outcome` is now crate-scoped, matching the trust and launch mutation boundaries. External callers handling managed/supervised lifecycle outcomes must use `AuditCoordinator::apply_managed_agent_terminal_outcome`; the direct domain mutation can no longer bypass its durable termination observation.
+- Narrowing `apply_agent_terminal_outcome` to `pub(crate)` also removed the only public path for applying a Plain AgentRun terminal outcome. This is intentional and consistent with Plain lifecycle being an unimplemented durable producer. A future Plain path must be added deliberately — as a Plain-scoped wrapper that rejects managed/supervised runs — rather than by re-widening the crate-scoped method.
 - The unexpected post-spawn invariant-failure case remains a known limitation: a live attached process can coexist with an incomplete authorization operation if an internal launched-id or ownership invariant fails after spawn.
 - Managed/supervised profile identifiers must satisfy `AuditReference` syntax before launch. Profile-definition-time validation and a more specific error remain future usability work.
 - Phase conflicts and store availability failures both conservatively degrade the in-memory health summary; health remains degraded for the process lifetime and does not claim current-store recovery state.
 
 ## PR-013-H - Closeout Evidence
 
-Pending implementation.
+Closeout awaiting review:
+
+- Added root and `tekstide-core` package `NOTICE` files with the resolved `rusqlite 0.39.0` and `libsqlite3-sys 0.37.0` MIT notice plus the bundled SQLite 3.51.3 public-domain notice. The crate-local copy is included in the package that enables bundled SQLite; the root copy covers repository and binary distributions. This satisfies response 096's first bundled-native-code notice requirement without changing dependency features.
+- Responses 092 through 095 accepted the design and amendments. Responses 096, 097, 100, 101, and 102 accepted PR-013-B/C, D, E, F, and G respectively after their required follow-ups.
+- The current reviewed implementation evidence covers record/path validation, SQLite schema/append/query, migration fixtures, diagnostics and restart-safe recovery, purge/local-data accounting, and the integrated trust/managed-launch/root-block producers.
+- `AuditRecovery` remains explicit and caller-driven. Application-owned SQLite handles must be closed before recovery; the type system does not discover or close them.
+- The generated `NOTICE` does not change Tekstide's Apache-2.0 project license or claim copyright over public-domain SQLite.
+
+Claimable RFC-013 properties:
+
+- local structured audit records persist in a versioned SQLite store under the validated application state root;
+- transactional append, exact retry, bounded query, operation correlation, phase cardinality, and explicit migration/recovery behavior have reviewed tests;
+- managed/supervised launch authorization is audit-required before process creation, while trust revocation, root/symlink blocks, and observed runtime outcomes preserve safer/runtime truth on observational failure;
+- project/global audit-row purge is explicit and idempotent, with bounded local-data accounting and no durable purge receipt;
+- persisted record fields exclude commands, paths, output, prompts, environment data, transcript bytes, file/diff content, and free-form display summaries.
+
+Release-facing non-claims and limitations:
+
+- no rendered audit viewer or local-data settings UI;
+- no encryption, tamper evidence, signed log, cloud sync, export, cross-process writer guarantee, automatic retention, or complete crash/power-loss guarantee;
+- purge is logical row deletion, not secure erasure: deleted bytes can remain in SQLite free pages or storage media, and the database file can retain its prior size;
+- purge operations intentionally leave no durable audit record, so local audit history is erasable without tamper-evident proof;
+- recovery quarantines evidence and creates a fresh store but does not salvage records or automatically close live handles;
+- audit health is bounded, in-memory, sticky after degradation, and does not prove current store availability or repair earlier gaps;
+- unexpected post-spawn invariant failure can leave a live attached process with an incomplete authorization operation;
+- managed/supervised profile ids must already satisfy the durable reference alphabet; profile-definition-time validation and a specific user-facing error are not implemented;
+- project-added, Plain/manual terminal lifecycle, command approval, paste, restricted-feature, safe-close/destructive, sensitive-configuration, and transcript-purge producers are unimplemented, even though the v1 record vocabulary represents them;
+- safe-close applied semantics remain design vocabulary only and are not an integrated runtime claim;
+- current native build evidence is limited to `x86_64-unknown-linux-gnu`; Windows and macOS support are not established by RFC-013.
+
+Observed closeout gates on 2026-07-23:
+
+- `cargo package -p tekstide-core --list --allow-dirty` passed and listed the crate-local `NOTICE` in the package archive.
+- `cargo tree -p tekstide-core -e features -i rusqlite` showed `rusqlite 0.39.0` with `bundled` and its implied `modern_sqlite` feature, rooted only through `tekstide-core`.
+- `cargo test --workspace --all-targets --all-features` passed; `tekstide-core` ran 375 tests with 0 failures and the other workspace targets ran 0 tests with 0 failures.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passed.
+- `cargo fmt --all -- --check` passed.
+- `git diff --check` passed.
+
+Response 103 accepted closeout as complete with documented limitations. That response originally required adding `crates/tekstide/NOTICE`; a maintainer challenge showed the finding was wrong, and it was withdrawn. Third-party notices for bundled SQLite reach binary recipients through the release tarball's root `NOTICE`. crates.io source consumers receive rusqlite and libsqlite3-sys licenses from those crates' own packages; Tekstide's published packages declare dependencies rather than redistributing that code. No `crates/tekstide/NOTICE` was created. RFC-013 is implemented with documented limitations and has moved to `rfcs/done/`.
+
+Response 103 separately left `crates/tekstide-core/NOTICE` as a discretionary "keep or delete, not load-bearing either way" call, distinct from the withdrawn `crates/tekstide` finding. Maintainer decision on 2026-07-28: consolidate to a single root `NOTICE` as the source of truth. `crates/tekstide-core/NOTICE` is removed. The same reasoning that applies to `tekstide` applies here — the `tekstide-core` package does not redistribute rusqlite, libsqlite3-sys, or SQLite source itself, so its crates.io source consumers receive those licenses from the dependency packages, and the repo-root `NOTICE` carried in the release tarball covers binary distribution.
+
+Observed after the 2026-07-28 consolidation:
+
+- `cargo package -p tekstide-core --list --allow-dirty` no longer lists a `NOTICE` file.
+- `cargo fmt --all -- --check` passed.
+- `git diff --check` passed.
 
 ## Known Limitations
 
-- Final limitations will be recorded from accepted implementation evidence.
-- Until then, no durable-audit implementation claim is made.
+- The PR-013-H release-facing non-claims above are the accepted RFC-013 limitation set.
+- Unsupported producers must be implemented and reviewed before their represented schema vocabulary becomes a runtime durability claim.

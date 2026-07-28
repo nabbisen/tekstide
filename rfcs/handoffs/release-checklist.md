@@ -36,6 +36,7 @@ The workspace dry-run is the release-candidate gate for same-workspace dependenc
 - [ ] Build or test from generated package artifacts rather than only the working tree.
 - [ ] Confirm package output does not include `.git/`, `.git-exclude/`, local agent config, `target/`, or temporary state.
 - [ ] Confirm crates.io package pages and README badges describe the intended release scope and do not overclaim the full AI CLI workbench.
+- [ ] Any distributed prebuilt binary must ship with `NOTICE` alongside it. Releases assembled as project-structure tarballs satisfy this automatically because `NOTICE` sits at the archive root; a bare binary uploaded on its own does not.
 
 ## Review
 

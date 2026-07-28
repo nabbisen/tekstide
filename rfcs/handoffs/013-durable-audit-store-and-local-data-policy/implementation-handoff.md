@@ -1,8 +1,8 @@
 ---
 title: "RFC-013: Durable Audit Store and Local Data Policy - Implementation Handoff"
 rfc: "RFC-013"
-rfc_file: "../../proposed/013-durable-audit-store-and-local-data-policy.md"
-status: "Proposed"
+rfc_file: "../../done/013-durable-audit-store-and-local-data-policy.md"
+status: "Implemented with documented limitations"
 target_milestone: "M7"
 created: "2026-07-22"
 ---
@@ -195,7 +195,7 @@ Audit path safety must also be checked when a project is added or restored after
 
 Every implementation review request for RFC-013 must reference:
 
-- `rfcs/proposed/013-durable-audit-store-and-local-data-policy.md` until lifecycle closeout moves it;
+- `rfcs/done/013-durable-audit-store-and-local-data-policy.md` after lifecycle closeout;
 - this handoff pack;
 - RFC-002 and RFC-004;
 - the specific upstream integration RFCs touched by the slice, such as RFC-008, RFC-009, RFC-010, RFC-011, or RFC-012;
