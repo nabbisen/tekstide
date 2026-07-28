@@ -8,9 +8,17 @@
 //! full spike specification.
 
 mod filter;
+mod font_metrics;
 mod shell;
 mod terminal_pane;
 
 fn main() -> iced::Result {
+    shell::mark_process_start();
+
+    if std::env::args().nth(1).as_deref() == Some("--font-metrics") {
+        font_metrics::run();
+        return Ok(());
+    }
+
     shell::run()
 }

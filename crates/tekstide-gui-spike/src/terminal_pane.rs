@@ -176,6 +176,43 @@ impl TerminalPane {
         let _ = self.runtime.write_input(&self.handle, command.as_bytes());
     }
 
+    /// PR-014-E (C3): starts a background output-flood loop in the shell
+    /// (`&` so the shell prompt returns and stays interactive), following
+    /// the RFC-007 `tekstide-pty-spike` flood-harness precedent. Measured
+    /// keystrokes are then written to the same interactive shell via
+    /// [`Self::send_input`] while the flood runs concurrently.
+    pub fn send_flood_script_once(&mut self) {
+        if self.demo_sent {
+            return;
+        }
+        self.demo_sent = true;
+
+        let script = "i=0; while true; do printf 'tekstide-flood-%08d-filler-filler-filler-filler-filler\\n' \"$i\"; i=$((i+1)); done &\n";
+        let _ = self.runtime.write_input(&self.handle, script.as_bytes());
+    }
+
+    /// PR-014-E (C10): prints a non-Latin-script sample (CJK + RTL) into
+    /// the shell so the terminal surface can be screenshotted alongside
+    /// the editor surface showing the same sample.
+    pub fn send_i18n_demo_once(&mut self, sample: &str) {
+        if self.demo_sent {
+            return;
+        }
+        self.demo_sent = true;
+
+        for line in sample.lines() {
+            let command = format!("printf '%s\\n' '{line}'\n");
+            let _ = self.runtime.write_input(&self.handle, command.as_bytes());
+        }
+    }
+
+    /// PR-014-E: writes raw bytes to the pane's pty, used by the
+    /// measurement harness to send a single measured character into the
+    /// interactive shell (e.g. for C3, terminal input latency under flood).
+    pub fn send_input(&mut self, bytes: &[u8]) {
+        let _ = self.runtime.write_input(&self.handle, bytes);
+    }
+
     /// Reads whatever PTY output is currently available (bounded, short
     /// poll -- this is called from a GUI tick subscription, so it must not
     /// block the render loop) and advances the filtered emulator.

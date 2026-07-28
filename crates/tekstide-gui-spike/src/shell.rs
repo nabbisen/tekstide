@@ -7,7 +7,10 @@
 //! This module renders no real project data. It is measurement/rendering
 //! scaffolding only.
 
-use std::time::Duration;
+use std::collections::VecDeque;
+use std::io::Write;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use iced::widget::text::Span;
 use iced::widget::{center, column, container, opaque, rich_text, row, stack, text};
@@ -16,6 +19,123 @@ use iced::{Background, Border, Color, Element, Length, Subscription, Task, Theme
 use crate::terminal_pane::TerminalPane;
 
 const SIDEBAR_WIDTH_FRACTION: f32 = 0.20;
+
+/// PR-014-E: a large real source file, used verbatim as the "editor
+/// surface with a large document loaded" that C2 (typing latency) asks
+/// for. Not a fabricated lorem-ipsum blob -- a real ~1,500-line file from
+/// this workspace, so the layout cost the measurement exercises is the
+/// same shape a user's editor would actually see.
+const TYPING_MEASUREMENT_DOCUMENT: &str =
+    include_str!("../../tekstide-core/src/project/session.rs");
+
+/// First line of `main()`, captured once, before anything else runs.
+/// This is the only honest definition of "process start" available from
+/// inside the process itself -- it excludes exec()/dynamic-linker/runtime
+/// init time, which is disclosed in qa-evidence.md rather than implied away.
+static PROCESS_START: OnceLock<Instant> = OnceLock::new();
+
+pub fn mark_process_start() {
+    PROCESS_START.get_or_init(Instant::now);
+}
+
+fn process_start() -> Instant {
+    *PROCESS_START.get_or_init(Instant::now)
+}
+
+/// PR-014-E measurement criteria. `None` (the default, no env var set)
+/// preserves the exact PR-014-B/C/D interactive behaviour already
+/// reviewed -- this instrumentation is additive and off by default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, std::hash::Hash)]
+enum MeasureCriterion {
+    /// C2: typing latency, large document loaded, keystrokes appended.
+    Typing,
+    /// C3: terminal input latency under a background output flood.
+    TerminalFlood,
+    /// C4: Content <-> Terminal toggle latency.
+    ModeSwitch,
+    /// C5: process start to first frame painted.
+    Startup,
+}
+
+/// Receipt-confirming latency sampler: every measured input pushes an
+/// `Instant` here, and every `Message::Frame` (from `iced::window::frames()`,
+/// which fires once per real `RedrawRequested`) drains it, writing one log
+/// line per drained sample. The external harness compares lines-written to
+/// keys-sent and aborts on mismatch rather than computing a percentile over
+/// a partial sample -- see qa-evidence.md PR-014-E for why (response 107 Q3).
+struct Measurement {
+    criterion: MeasureCriterion,
+    log: std::fs::File,
+    pending: VecDeque<Instant>,
+    received: u32,
+    target: u32,
+    startup_recorded: bool,
+}
+
+impl Measurement {
+    fn from_env() -> Option<Self> {
+        let criterion = match std::env::var("TEKSTIDE_MEASURE_CRITERION").ok()?.as_str() {
+            "typing" => MeasureCriterion::Typing,
+            "terminal-flood" => MeasureCriterion::TerminalFlood,
+            "mode-switch" => MeasureCriterion::ModeSwitch,
+            "startup" => MeasureCriterion::Startup,
+            _ => return None,
+        };
+        let log_path = std::env::var("TEKSTIDE_MEASURE_LOG").ok()?;
+        let target: u32 = std::env::var("TEKSTIDE_MEASURE_TARGET")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(1100);
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_path)
+            .ok()?;
+
+        Some(Self {
+            criterion,
+            log,
+            pending: VecDeque::new(),
+            received: 0,
+            target,
+            startup_recorded: false,
+        })
+    }
+
+    fn on_input(&mut self) {
+        self.pending.push_back(Instant::now());
+        self.received += 1;
+    }
+
+    fn on_frame(&mut self, at: Instant) {
+        if self.criterion == MeasureCriterion::Startup {
+            if !self.startup_recorded {
+                self.startup_recorded = true;
+                let elapsed = at.saturating_duration_since(process_start());
+                let _ = writeln!(self.log, "{}", elapsed.as_micros());
+            }
+            return;
+        }
+
+        while let Some(input_at) = self.pending.pop_front() {
+            let elapsed = at.saturating_duration_since(input_at);
+            let _ = writeln!(self.log, "{}", elapsed.as_micros());
+        }
+    }
+
+    fn is_done(&self) -> bool {
+        match self.criterion {
+            MeasureCriterion::Startup => self.startup_recorded,
+            _ => self.received >= self.target && self.pending.is_empty(),
+        }
+    }
+}
+
+fn tail_lines(doc: &str, count: usize) -> String {
+    let lines: Vec<&str> = doc.lines().collect();
+    let start = lines.len().saturating_sub(count);
+    lines[start..].join("\n")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusZone {
@@ -89,6 +209,13 @@ pub struct State {
     dialog_shown: bool,
     dialog_focus: DialogButton,
     dialog_decision: Option<DialogButton>,
+    measure: Option<Measurement>,
+    typing_doc: String,
+    /// PR-014-E (C10): when set (via `TEKSTIDE_I18N_DEMO`), the editor
+    /// surface shows a CJK + RTL sample instead of the static PR-014-B
+    /// placeholder, and the terminal pane is pre-launched with the same
+    /// sample printed into it, for one-frame-per-surface screenshots.
+    i18n_demo: bool,
 }
 
 impl Default for State {
@@ -101,8 +228,74 @@ impl Default for State {
             dialog_shown: false,
             dialog_focus: DialogButton::Deny,
             dialog_decision: None,
+            measure: None,
+            typing_doc: String::new(),
+            i18n_demo: false,
         }
     }
+}
+
+/// PR-014-E (C10): CJK (Simplified Chinese, Japanese) and one RTL script
+/// (Arabic), each on its own line, mixed with ASCII so a reader can see
+/// alignment/shaping behaviour against plain text in the same block.
+const I18N_SAMPLE: &str = "\
+中文: 你好，世界。这是一个非 Latin 脚本的例子。
+日本語: こんにちは、世界。これは非ラテン文字の例です。
+العربية: مرحبا بالعالم. هذا مثال على نص من اليمين إلى اليسار.
+plain ascii control line for comparison";
+
+/// Boot function for PR-014-E measurement runs. With no
+/// `TEKSTIDE_MEASURE_CRITERION` env var set this is behaviourally
+/// identical to `State::default()` -- the exact shell already reviewed in
+/// PR-014-B/C/D. Each criterion pre-launches whatever it needs (a pane, a
+/// preloaded document) so the measured loop never has to pay one-time
+/// launch cost.
+fn boot() -> State {
+    let mut state = State {
+        measure: Measurement::from_env(),
+        ..State::default()
+    };
+
+    match state
+        .measure
+        .as_ref()
+        .map(|measurement| measurement.criterion)
+    {
+        Some(MeasureCriterion::Typing) => {
+            state.typing_doc = TYPING_MEASUREMENT_DOCUMENT.to_string();
+        }
+        Some(MeasureCriterion::TerminalFlood) => {
+            state.terminal_mode = true;
+            match TerminalPane::launch() {
+                Ok(mut pane) => {
+                    pane.send_flood_script_once();
+                    state.pane = Some(pane);
+                }
+                Err(error) => state.pane_launch_error = Some(error.message),
+            }
+        }
+        Some(MeasureCriterion::ModeSwitch) => match TerminalPane::launch() {
+            Ok(pane) => state.pane = Some(pane),
+            Err(error) => state.pane_launch_error = Some(error.message),
+        },
+        Some(MeasureCriterion::Startup) | None => {}
+    }
+
+    state.i18n_demo = std::env::var("TEKSTIDE_I18N_DEMO").is_ok();
+    if state.i18n_demo {
+        state.typing_doc = I18N_SAMPLE.to_string();
+        if state.pane.is_none() {
+            match TerminalPane::launch() {
+                Ok(mut pane) => {
+                    pane.send_i18n_demo_once(I18N_SAMPLE);
+                    state.pane = Some(pane);
+                }
+                Err(error) => state.pane_launch_error = Some(error.message),
+            }
+        }
+    }
+
+    state
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +305,13 @@ pub enum Message {
     ToggleTerminalMode,
     Tick,
     DialogActivate,
+    /// PR-014-E: a measured input for whichever criterion is active
+    /// (typed character for Typing/TerminalFlood).
+    MeasuredKey,
+    /// PR-014-E: fires once per real `RedrawRequested`, timestamped by
+    /// iced itself. This is the "frame submitted for presentation" side
+    /// of the app-internal latency definition.
+    Frame(Instant),
 }
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -125,6 +325,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::FocusNext => state.focus = state.focus.next(),
         Message::FocusPrevious => state.focus = state.focus.previous(),
         Message::ToggleTerminalMode => {
+            if let Some(measurement) = state.measure.as_mut()
+                && measurement.criterion == MeasureCriterion::ModeSwitch
+            {
+                measurement.on_input();
+            }
             state.terminal_mode = !state.terminal_mode;
             if state.terminal_mode && state.pane.is_none() && state.pane_launch_error.is_none() {
                 match TerminalPane::launch() {
@@ -148,6 +353,33 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.dialog_shown = false;
         }
         Message::DialogActivate => {}
+        Message::MeasuredKey => {
+            let criterion = state
+                .measure
+                .as_ref()
+                .map(|measurement| measurement.criterion);
+            if let Some(measurement) = state.measure.as_mut() {
+                measurement.on_input();
+            }
+            match criterion {
+                Some(MeasureCriterion::Typing) => state.typing_doc.push('x'),
+                Some(MeasureCriterion::TerminalFlood) => {
+                    if let Some(pane) = state.pane.as_mut() {
+                        pane.send_input(b"x");
+                    }
+                }
+                _ => {}
+            }
+        }
+        Message::Frame(at) => {
+            if let Some(measurement) = state.measure.as_mut() {
+                measurement.on_frame(at);
+                if measurement.is_done() {
+                    let _ = std::io::stdout().flush();
+                    std::process::exit(0);
+                }
+            }
+        }
     }
     Task::none()
 }
@@ -329,14 +561,39 @@ fn view(state: &State) -> Element<'_, Message> {
     .spacing(4)
     .into();
 
-    let main_content: Element<'_, Message> = column![
-        text("1 | pub mod array;").size(13),
-        text("2 | pub mod error;").size(13),
-        text("3 |").size(13),
-        text("4 | // static Content Mode shell (PR-014-B)").size(13),
-    ]
-    .spacing(4)
-    .into();
+    let is_typing_measurement = matches!(
+        state
+            .measure
+            .as_ref()
+            .map(|measurement| measurement.criterion),
+        Some(MeasureCriterion::Typing)
+    ) || state.i18n_demo;
+
+    let main_content: Element<'_, Message> = if is_typing_measurement {
+        let visible = tail_lines(&state.typing_doc, 50);
+        column(
+            visible
+                .lines()
+                .map(|line| {
+                    text(line.to_string())
+                        .size(13)
+                        .font(iced::Font::MONOSPACE)
+                        .into()
+                })
+                .collect::<Vec<Element<'_, Message>>>(),
+        )
+        .spacing(2)
+        .into()
+    } else {
+        column![
+            text("1 | pub mod array;").size(13),
+            text("2 | pub mod error;").size(13),
+            text("3 |").size(13),
+            text("4 | // static Content Mode shell (PR-014-B)").size(13),
+        ]
+        .spacing(4)
+        .into()
+    };
 
     let sidebar_width = Length::FillPortion((SIDEBAR_WIDTH_FRACTION * 100.0) as u16);
     let main_width = Length::FillPortion(((1.0 - SIDEBAR_WIDTH_FRACTION) * 100.0) as u16);
@@ -370,39 +627,70 @@ fn view(state: &State) -> Element<'_, Message> {
 }
 
 fn subscription(state: &State) -> Subscription<Message> {
-    let keys = keyboard::listen().filter_map(|event| match event {
-        keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(keyboard::key::Named::Tab),
-            modifiers,
-            ..
-        } if modifiers.shift() => Some(Message::FocusPrevious),
-        keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(keyboard::key::Named::Tab),
-            ..
-        } => Some(Message::FocusNext),
-        keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(keyboard::key::Named::F2),
-            ..
-        } => Some(Message::ToggleTerminalMode),
-        keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(keyboard::key::Named::Enter),
-            ..
-        } => Some(Message::DialogActivate),
-        _ => None,
-    });
+    let measure_criterion = state
+        .measure
+        .as_ref()
+        .map(|measurement| measurement.criterion);
 
-    if state.terminal_mode {
+    let keys = keyboard::listen()
+        .with(measure_criterion)
+        .filter_map(|(criterion, event)| match event {
+            keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Tab),
+                modifiers,
+                ..
+            } if modifiers.shift() => Some(Message::FocusPrevious),
+            keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Tab),
+                ..
+            } => Some(Message::FocusNext),
+            keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::F2),
+                ..
+            } => Some(Message::ToggleTerminalMode),
+            keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Enter),
+                ..
+            } => Some(Message::DialogActivate),
+            keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(ref c),
+                ..
+            } if c.as_str() == "j" => match criterion {
+                Some(MeasureCriterion::Typing) | Some(MeasureCriterion::TerminalFlood) => {
+                    Some(Message::MeasuredKey)
+                }
+                Some(MeasureCriterion::ModeSwitch) => Some(Message::ToggleTerminalMode),
+                _ => None,
+            },
+            _ => None,
+        });
+
+    // `window::frames()` forces continuous compositor-driven redraw for as
+    // long as it is subscribed (confirmed empirically: 0 CPU ticks/3s idle
+    // without it vs ~8 ticks/3s with it -- see qa-evidence.md PR-014-E).
+    // It is therefore only ever included during a measurement run, so it
+    // never contaminates the PR-014-B/C/D interactive behaviour already
+    // reviewed, or the C6 idle-RSS baseline (which runs with no
+    // `TEKSTIDE_MEASURE_CRITERION` set at all).
+    let frames: Subscription<Message> = if state.measure.is_some() {
+        iced::window::frames().map(Message::Frame)
+    } else {
+        Subscription::none()
+    };
+
+    if state.terminal_mode || state.pane.is_some() {
         Subscription::batch([
             keys,
+            frames,
             iced::time::every(Duration::from_millis(50)).map(|_| Message::Tick),
         ])
     } else {
-        keys
+        Subscription::batch([keys, frames])
     }
 }
 
 pub fn run() -> iced::Result {
-    iced::application(State::default, update, view)
+    iced::application(boot, update, view)
         .title("tekstide-gui-spike (RFC-014)")
         .subscription(subscription)
         .run()

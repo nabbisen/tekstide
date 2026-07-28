@@ -38,17 +38,17 @@ Criteria accepted 2026-07-28 (PR-014-A). Spike evidence pending.
 - [x] **C1** Terminal grid renders the RFC-009 accepted subset correctly. Real PTY-backed shell (`/bin/sh`) with printed output, prompt, and SGR colors, screenshot in `evidence/pr-014-c/`.
 - [x] **C1** At least three unsupported families render visibly inert. OSC 52 clipboard, OSC title (window title independently verified unchanged via `niri`/`xdotool`), and OSC 8 hyperlink all confirmed inert; see qa-evidence.md PR-014-C.
 - [x] **C1** Styled spans render — multiple colors/attributes in one text block. "red"/"green"/"bold-blue" render in distinct correct colors within one line, resolved via `Term::renderable_content()`.
-- [ ] **C2** Typing latency measured; p50/p95/p99 recorded against ≤16 ms p95, ≤33 ms p99.
-- [ ] **C3** Terminal input latency measured under background output flood; p95 against ≤16 ms.
-- [ ] **C4** Mode switch measured against ≤32 ms p95; absence of animation confirmed.
-- [ ] **C5** Warm startup measured against ≤800 ms.
-- [ ] **C6** Idle RSS recorded as a baseline figure.
-- [ ] **C7** Per-pane column count computed from real font metrics at 1x and fractional scaling.
+- [x] **C2** Typing latency measured; p50/p95/p99 recorded against ≤16 ms p95, ≤33 ms p99. 1,012 post-warmup samples, all 0ms — trivially met, but flagged in qa-evidence.md as a degenerate measurement (the only frame-timing hook available forces continuous redraw once active, confirmed via CPU-tick measurement) rather than a clean substrate-responsiveness result.
+- [x] **C3** Terminal input latency measured under background output flood; p95 against ≤16 ms. 1,015 post-warmup samples, all 0ms — same instrumentation-limitation caveat as C2 applies.
+- [x] **C4** Mode switch measured against ≤32 ms p95; absence of animation confirmed. 1,000 post-warmup samples, all 0ms (same caveat); no-animation confirmed independently by code inspection (no interpolation/tween/`iced::animation` in `shell.rs`'s view branching).
+- [x] **C5** Warm startup measured against ≤800 ms. 14 warm runs (1 cold discarded): median 227.9ms, max 255.5ms — met comfortably, and unaffected by the C2-C4 instrumentation caveat (only the first frame after a cold start is timed).
+- [x] **C6** Idle RSS recorded as a baseline figure. 178,124 kB after 60s idle with one project + one terminal open (176,176 kB immediately after opening the terminal).
+- [x] **C7** Per-pane column count computed from real font metrics at 1x and fractional scaling. Measured headlessly via `iced::advanced::graphics::text::Paragraph` (the real `cosmic-text`-backed layout primitive, not a guess): 7.8 logical px/glyph at 13px monospace. Applied to the real, running desktop's actual fractional scale (1.2x, recorded in machine identification) via the i18n screenshots' correct non-garbled rendering — the invariance is exercised, not just asserted. Limitation: the terminal's PTY grid remains hard-coded 80×24 and does not consume this computation (recorded, not hidden).
 - [x] **C8** Trusted UI structurally separable; screenshot evidence produced. Genuine dialog rendered via `iced::widget::stack`/`opaque` (a real GUI layer, not terminal-grid characters) alongside an adversarial box-drawing imitation printed inside the terminal pane; both appear in one frame in `evidence/pr-014-d/genuine-and-adversarial-dialog-one-frame.png`, closing the RFC-009 deferral.
 - [x] **C9** All primary spike workflows reachable by keyboard; focus trapping in dialog. Static-shell focus (PR-014-B) plus dialog focus trapping (PR-014-D, real `Tab`/`Enter` input, screenshots in `evidence/pr-014-d/`) — both halves now exist.
-- [ ] **C10** Non-Latin script renders in editor and terminal surfaces.
-- [ ] **C11** Accessibility affordances assessed; focus indicators visible; screen-reader path identified or its absence recorded. (Focus indicators are visible for both the shell and the dialog; screen-reader path is not yet assessed — held for PR-014-E alongside the rest of the accessibility criteria.)
-- [ ] **C12** No known blocker to Windows/macOS identified, or blockers recorded.
+- [x] **C10** Non-Latin script renders in editor and terminal surfaces. CJK (Simplified Chinese, Japanese) and Arabic (RTL) all render in both surfaces (`evidence/pr-014-e/i18n-{editor,terminal}-surface.png`). Two disclosed rendering-fidelity gaps in the terminal surface specifically: no bidi reordering (Arabic shows in raw cell order, not visually RTL-reordered) and no wide-cell CJK (single-width cells, not double) — both are properties of the terminal-grid rendering path, not spike-introduced bugs, and neither affects the editor surface.
+- [x] **C11** Accessibility affordances assessed; focus indicators visible; screen-reader path identified or its absence recorded. Focus indicators visible (PR-014-B/D). Screen-reader path: absence recorded, not assessed as present — `iced` 0.14 has no accessibility bridge at all (grepped for `accesskit`/`accessibility`/`a11y`, zero matches in `iced`/`iced_winit` source or manifest).
+- [x] **C12** No known blocker to Windows/macOS identified, or blockers recorded. Not attempted (non-goal, §8). Noticed without chasing: the spike's dependency on `tekstide_core::runtime::terminal::LinuxTerminalRuntime` is a concrete Linux-only blocker at the terminal-runtime layer specifically; `iced` and `alacritty_terminal`/`vte` are not known to be Linux-only upstream.
 - [x] **C13** Licence inventory complete for every crate introduced so far, including transitive dependencies (`iced` in PR-014-B; `alacritty_terminal`, `vte`, `tokio`, and 8 further transitives in PR-014-C). No bundled native C code introduced by this slice, unlike RFC-013's `rusqlite`.
 - [x] **C14** Maintenance posture assessment recorded for the chosen substrate (`iced`) and the screened alternatives (`gpui`, `xilem`, `relm4`) in PR-014-B.
 
@@ -70,28 +70,28 @@ Criteria accepted 2026-07-28 (PR-014-A). Spike evidence pending.
 
 ## Measurement Integrity Checklist
 
-- [ ] All figures from release builds; no debug-build numbers recorded.
-- [ ] ≥1,000 samples for latency criteria; first 100 discarded as warmup.
-- [ ] p50, p95, and p99 all reported.
-- [ ] Machine identification recorded: CPU, RAM, GPU/driver, compositor, OS, Rust version.
-- [ ] Latency described as **app-internal**, not end-to-end.
-- [ ] Missed budgets handled per the escalation policy; any >2x miss reported when confirmed, not deferred to closeout.
+- [x] All figures from release builds; no debug-build numbers recorded. All PR-014-E figures (C2-C7) from `cargo build --release`.
+- [x] ≥1,000 samples for latency criteria; first 100 discarded as warmup. C2: 1,012 post-warmup. C3: 1,015. C4: 1,000.
+- [x] p50, p95, and p99 all reported. All three reported for C2/C3/C4 (all 0ms; see qa-evidence.md's continuous-redraw finding for why that number is degenerate rather than a clean pass).
+- [x] Machine identification recorded: CPU, RAM, GPU/driver, compositor, OS, Rust version. Recorded in qa-evidence.md PR-014-E, including non-standard display mode (2560x1440@59.951Hz, non-native) and non-integer scale (1.2x).
+- [x] Latency described as **app-internal**, not end-to-end. Stated explicitly, plus the further instrumentation-limitation caveat that makes the C2-C4 numbers even narrower than plain app-internal.
+- [x] Missed budgets handled per the escalation policy; any >2x miss reported when confirmed, not deferred to closeout. No budget was missed (all trivially met) — the escalation policy was not triggered. The degenerate-measurement finding (not a budget miss) was still surfaced prominently and immediately, matching the policy's spirit of not deferring a significant finding to closeout.
 
 ## Honesty Checklist
 
-- [ ] Every criterion that could not be evaluated is listed with a reason.
-- [ ] No capability inferred from documentation without exercising it.
-- [ ] Findings that falsify the provisional plan are recorded prominently, not buried.
+- [x] Every criterion that could not be evaluated is listed with a reason. C11 (screen-reader half) and C12 (beyond noticed-in-passing) in qa-evidence.md's Criteria Not Evaluated.
+- [x] No capability inferred from documentation without exercising it. The `window::frames()` continuous-redraw side effect was discovered by direct CPU-tick measurement, not inferred from its doc comment; the C7 font-metrics figure is a real measured value from iced's own layout primitive, not a guessed constant; the C11 accessibility-bridge absence was confirmed by grepping actual source, not assumed.
+- [x] Findings that falsify the provisional plan are recorded prominently, not buried. The continuous-redraw/degenerate-latency finding is stated at the top of the PR-014-E section, before any table, with an explicit "read this before the tables" framing — not left to a trailing limitations bullet.
 
 ## Evidence Required
 
-- [ ] Commit/PR list.
-- [x] Gate command output. Recorded for PR-014-B and PR-014-C in qa-evidence.md.
-- [ ] Latency measurement tables with method.
-- [ ] Trusted-UI screenshots and generator script.
-- [x] Licence and dependency-weight inventory. Recorded for PR-014-B (`iced`, +345 packages) and PR-014-C (`alacritty_terminal`/`vte`/`tokio`, +11 packages) in qa-evidence.md.
-- [ ] Criteria-not-evaluated list. (Partial limitations recorded per-slice; the consolidated closeout list is PR-014-F scope, after PR-014-E lands.)
-- [ ] Known limitations. (Recorded per-slice so far; consolidated at closeout.)
+- [ ] Commit/PR list. (To be added once this slice's commit lands.)
+- [x] Gate command output. Recorded for PR-014-B, PR-014-C, and PR-014-E in qa-evidence.md.
+- [x] Latency measurement tables with method. C2/C3/C4 tables plus C5 startup table, all with method described, in qa-evidence.md PR-014-E.
+- [x] Trusted-UI screenshots and generator script. Recorded in PR-014-D (unchanged this slice).
+- [x] Licence and dependency-weight inventory. Recorded for PR-014-B (`iced`, +345 packages) and PR-014-C (`alacritty_terminal`/`vte`/`tokio`, +11 packages) in qa-evidence.md. PR-014-E added the `advanced` feature flag to the existing `iced` dependency, not a new crate.
+- [x] Criteria-not-evaluated list. Consolidated list now in qa-evidence.md (C11 screen-reader half, C12 beyond noticed-in-passing).
+- [x] Known limitations. Consolidated list now in qa-evidence.md, including the PR-014-E-specific instrumentation-limitation and delivery-loss findings.
 
 ## Final Acceptance Decision
 

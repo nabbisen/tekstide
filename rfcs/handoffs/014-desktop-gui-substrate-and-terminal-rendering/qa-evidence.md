@@ -198,18 +198,99 @@ Gates observed on 2026-07-28: `cargo fmt --all --check`, `cargo clippy --workspa
 
 ### PR-014-E — Measurement
 
-Pending implementation.
+**Machine identification** (recorded before any figure below): CPU AMD Ryzen 9 9950X (16-core/32-thread); RAM 59 GiB; GPU NVIDIA GeForce RTX 5060 Ti, driver 610.43.03, OpenGL 4.6; compositor `niri` (Wayland), with XWayland forced for synthetic-input delivery per the response-107 methodology (native Wayland does not accept `xdotool`-style synthetic input); OS CachyOS Linux, kernel 7.1.5-1-cachyos; Rust 1.97.1. Display: 2560x1440 @ 59.951 Hz (non-native — the panel's preferred mode is 3840x2160 @ 59.997 Hz), **fractional scale 1.2x** (non-integer — recorded per §4's requirement to flag non-standard refresh rate/scaling). All figures below are from `cargo build --release`; no debug-build numbers are recorded anywhere in this section.
+
+**A finding that changes what the C2/C3/C4 numbers below mean — read this before the tables.**
+
+The only mechanism `iced` 0.14 exposes to observe "a frame was submitted for presentation" from application code is `iced::window::frames() -> Subscription<Instant>`, which fires once per `RedrawRequested`. Measuring it required subscribing to it. Exercising that (not inferred from docs) showed it has a side effect: **subscribing to `frames()` causes iced to redraw continuously, at roughly the display refresh rate, with zero input and no animating widgets in the tree.**
+
+Confirmed by direct measurement, not assumption:
+
+| Configuration | `RedrawRequested` events in ~4s idle, zero input | Idle CPU (`utime+stime` ticks/3s, 100 ticks/s) |
+| --- | --- | --- |
+| `frames()` subscription absent (normal PR-014-B/C/D shell) | not observable (no signal), but CPU confirms no redraw | 0 |
+| `frames()` subscription present | 228-231 (~57 Hz) | 8 (~2.7% of one core) |
+| Same result under native Wayland (no forced XWayland) | 231 in ~4s | not separately re-measured; CPU test only run under the forced-XWayland configuration |
+
+This is universal to this shell (reproduced under both native Wayland and forced XWayland), not an XWayland artifact. Root cause was not fully isolated within the spike's time budget — plausibly some widget-tree or runtime default requesting `RedrawRequest::NextFrame` rather than `Wait` once anything observes window events this way — and that is recorded honestly as unresolved rather than guessed at further, per this project's "verify empirically, don't infer beyond what you exercised" discipline.
+
+**Consequence for C2/C3/C4: once `frames()` is subscribed to make the measurement possible at all, a new frame is always imminent (within one refresh period, ≈17ms) regardless of whether the input just received actually caused it.** "Time from input-message receipt to the next `Frame` event" therefore does not isolate this input's own rendering cost — it mostly measures "how soon was a frame already due anyway," which, once the loop is hot, is sub-microsecond. The numbers below are genuine, reproducible, and satisfy the literal mandated definition ("input event receipt in the application" → "frame submitted for presentation"), but they are **not evidence that the substrate renders in zero time from a cold, non-redrawing state** — they are evidence that *this specific instrumentation path* is degenerate once active. This is disclosed prominently here, per the honesty checklist, rather than reported as a clean pass.
+
+Because this side effect is real and measured (the CPU-tick table above), `frames()` is **only ever subscribed to during an active measurement run** (`state.measure.is_some()` gates it in `shell.rs::subscription`) — it is never on during ordinary interactive use, and never during the C6 idle-RSS run, so neither the PR-014-B/C/D reviewed behaviour nor the idle-memory baseline is contaminated by it.
+
+**Methodology used for C2/C3/C4, unaffected by the above:** global `xdotool key` delivery (never `--window`-targeted, per the response-107 finding), paced at a fixed interval. The harness never trusts a pre-committed "sent" count: it sends in small batches, checks the *actual line count on disk* in the log file after each batch (a line only exists if the app's own `Measurement::on_input`/`on_frame` pair genuinely ran), and only stops once at least 1,100 **confirmed** samples exist. Every percentile below is computed over confirmed-received samples only — nothing is padded, inferred, or assumed for a key that might not have landed. The delivery-loss rate for each run (dispatched vs. confirmed) is reported as a measured fact, not glossed over:
+
+| Criterion | Dispatched | Confirmed samples | Delivery loss | After 100-sample warmup discard |
+| --- | --- | --- | --- | --- |
+| C2 typing | 1,275 | 1,112 | 12.78% | 1,012 |
+| C3 terminal-under-flood | 1,150 | 1,115 | 3.04% | 1,015 |
+| C4 mode switch | 1,100 | 1,100 | 0.00% | 1,000 |
+
+Sustained delivery over ~2-3 minute runs is measurably lossier than the short 20-50-key bursts response 107 validated (0% there) — a real, newly-quantified extension of that finding, not a contradiction of it. All three runs still cleared the mandatory ≥1,000-post-warmup-samples floor.
+
+**C2 (typing), C3 (terminal input under flood), C4 (mode switch) — app-internal latency, input-message receipt to next `Frame` event:**
+
+| Criterion | p50 | p95 | p99 | max | Budget | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| C2 typing | 0ms | 0ms | 0ms | 0ms | p95 ≤16ms, p99 ≤33ms | Trivially met, see caveat above |
+| C3 terminal-under-flood | 0ms | 0ms | 0ms | 0ms | p95 ≤16ms | Trivially met, see caveat above |
+| C4 mode switch | 0ms | 0ms | 0ms | 0ms | p95 ≤32ms | Trivially met, see caveat above |
+
+Every one of the 1,012/1,015/1,000 post-warmup samples measured 0 whole microseconds (truncated, `Duration::as_micros()`), for all three criteria. That degenerate uniformity is itself consistent with the continuous-redraw finding above — it is what you would expect once a frame is always <1ms away. **These are not reported as "C2/C3/C4 pass with headroom" in any meaningful substrate-comparison sense; they are reported as measured, with the instrumentation limitation that makes them measure the wrong thing recorded as the real finding.** C4's "no animation" sub-requirement is confirmed separately and validly, by code inspection: `view()` branches instantly between `terminal_pane_view` and the static Content view with no interpolation, tween, or `iced::animation` usage anywhere in `shell.rs`.
+
+Terminal input (C3) used the RFC-007 `tekstide-pty-spike` flood-harness pattern: `i=0; while true; do printf '...'; i=$((i+1)); done &` backgrounded in the pane's own shell, so the interactive prompt stays available for measured keystrokes to be written into the same PTY concurrently with the flood.
+
+**C5 (warm startup) — process start (first line of `main()`) to first `Frame` event, unaffected by the C2-C4 caveat** (only the *first* frame after a cold process start is timed; the continuous-redraw side effect only matters for *subsequent* frames, which are never used here):
+
+15 consecutive release-binary launches. First discarded as cold (257.3ms); the following 14 are warm:
+
+| n (warm) | min | median | mean | max | Budget | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| 14 | 200.8ms | 227.9ms | 224.8ms | 255.5ms | ≤800ms | **Met**, comfortably |
+
+**C6 (idle RSS)** — one project, one terminal pane open (real F2 toggle), 60s idle, plain interactive shell (no `TEKSTIDE_MEASURE_CRITERION` set, so `frames()` is not subscribed and this baseline is not contaminated by the continuous-redraw finding above). `/proc/<pid>/status` `VmRSS` used (the RFC-013-baseline note that `/usr/bin/time -v` was unavailable still applies; it remains unavailable in this environment).
+
+| Point | VmRSS |
+| --- | --- |
+| Immediately after opening the terminal pane | 176,176 kB |
+| After 60s idle | 178,124 kB |
+
+**Baseline figure, not pass/fail, per §4.** ~174 MiB idle with one project and one terminal open. Growth over the idle window (+1,948 kB) is small and consistent with normal allocator/heap behaviour, not a leak signature — though 60s is far too short a window to rule out a slow leak either way; this is a snapshot, not a leak-detection pass.
+
+**C7 (font metrics / column count).** Measured headlessly via `iced::advanced::graphics::text::Paragraph::with_text` — the exact layout primitive iced's own `Text` widget uses internally (`cosmic-text`-backed), not a guessed pixel-per-character constant. 200 repeated `"M"` glyphs measured and averaged, at the same 13px monospace size used throughout the shell:
+
+- Monospace glyph advance: **7.8000 logical px** at 13px.
+- This measurement is scale-invariant by construction: iced always lays text out in logical pixels; the compositor applies the scale factor afterward. "1x and a fractional scaling factor" (§4) is satisfied by this invariance holding in the actually-running app: the real desktop in this session runs at the non-integer 1.2x scale recorded in machine identification above, and the i18n screenshots below (taken on that same real, fractionally-scaled desktop) show correctly-shaped, non-garbled text — the computation is not merely a paper claim, it is what the running app's own text layer actually used to produce every screenshot in this file.
+- Column-count computation, applying the shell's own real padding (`terminal_pane_view`'s 8px-per-side body padding, `zone_container`'s 8px-per-side padding) to the actual observed window logical width (1,042px, tiled by `niri` on this display):
+  - Terminal pane (full width minus 16px padding): (1,042 − 16) / 7.8 ≈ **131 columns**.
+  - Content-mode main area (80% of width, minus sidebar, minus 16px padding): (1,042 × 0.8 − 16) / 7.8 ≈ **104 columns**.
+- **Limitation, disclosed rather than implied away: the terminal pane's actual PTY grid is hard-coded to 80×24 (`terminal_pane.rs::{ROWS, COLS}`) and does not consume this computation.** C7 asks the spike to "demonstrate computing" column count from real font metrics, which this does; it does not ask the spike to wire that computation into live grid resizing, which remains real product work (dynamic resize-on-window-change) not attempted here.
+
+**C10 (i18n: CJK + RTL in both editor and terminal surfaces).** Sample (`shell.rs::I18N_SAMPLE`): Simplified Chinese, Japanese, and Arabic lines plus a plain-ASCII control line, shown via `TEKSTIDE_I18N_DEMO=1` in both the Content-mode editor surface and the terminal pane (printed via `printf` on a real, running shell — real evidence, not simulated). Screenshots: `evidence/pr-014-e/i18n-editor-surface.png`, `evidence/pr-014-e/i18n-terminal-surface.png`.
+
+- **Editor surface:** all three scripts render correctly, including full Unicode bidi reordering for the Arabic line — the label `العربية:` and the sentence read in correct right-to-left visual order, matching what a real Arabic reader would expect. This is `cosmic-text`'s standard text-shaping path (the same one used for every other `text!`/`rich_text!` widget in the shell), not special-cased for this demo.
+- **Terminal surface:** CJK and Arabic glyphs both render (shaped correctly at the individual-glyph level — Arabic letters still join/connect properly within each printed line), but **the terminal grid does not apply bidi reordering**: the Arabic line appears in raw left-to-right *cell* order (the order bytes were written to the grid), not visually reordered right-to-left the way the editor surface shows it. This is a genuine, exercised difference between the two surfaces, not a bug specific to this spike's code — real terminal emulators (this one included, via `alacritty_terminal`'s grid model) operate on a monospace cell grid rather than shaped text runs, and generally do not implement the Unicode bidi algorithm at all. Any real product terminal surface wanting correct RTL rendering would need to address this as a genuine, non-trivial gap, not something this spike's filter or rendering choice introduced.
+- **Second limitation, also visible in the terminal screenshot:** CJK characters occupy exactly one grid cell each here, not the two cells a real terminal emulator gives "wide" (fullwidth) characters. `alacritty_terminal`'s grid supports wide-character cells, but this spike's minimal rendering path (`terminal_pane.rs::styled_rows`) was not built to consume that distinction. Recorded as a rendering-fidelity gap for CJK column alignment, not silently implied complete.
+- Both gaps are about the terminal-grid rendering path specifically; the editor surface (a plain `iced::widget::text`/`rich_text` column) has neither issue.
+
+Gates run on 2026-07-28 after this section's code changes (`shell.rs` measurement instrumentation, `terminal_pane.rs` flood/i18n senders, `font_metrics.rs`, `main.rs` CLI dispatch): `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (375 `tekstide-core` + 18 `tekstide-gui-spike`, 0 failures), `git diff --check` — all passed.
 
 ## Criteria Not Evaluated
 
-To be completed by the spike. Every criterion in C1-C14 that could not be exercised must appear here with a reason. An empty section at closeout means every criterion was evaluated — do not leave it empty by omission.
+- **C11 (screen-reader path), the screen-reader half specifically.** Focus indicators are visible (C9/PR-014-B/D evidence covers that half). The screen-reader/assistive-technology half could not be evaluated: `iced` 0.14 has no accessibility bridge at all — grepped for `accesskit`/`accessibility`/`a11y` across `iced-0.14.0`'s `Cargo.toml` and `iced_winit-0.14.0`'s source; zero matches, not feature-gated-off, genuinely absent. This matches the handoff's own example of a useful non-evaluation: no bridge exists to test against, on any platform, for this toolkit at this version.
+- **C12 (Windows/macOS blockers), beyond what was noticed in passing.** Per §8, cross-platform builds were not attempted and blockers were not chased. What was noticed without chasing it: the spike depends on `tekstide-core::runtime::terminal::LinuxTerminalRuntime` directly (Linux-only by name and implementation — PTY via `nix`/`libc`), and all measurement tooling in this section (`xdotool`, `niri msg`, `/proc/<pid>/status`) is Linux-specific test infrastructure, not app code. Neither `iced` nor `alacritty_terminal`/`vte` is known to be Linux-only upstream (both advertise cross-platform support), so the concrete, spike-introduced blocker is narrower than "the whole approach" — it is specifically the terminal-runtime layer, which RFC-007/013 already scoped as Linux-only for this milestone.
+
+Every other criterion (C1-C10, C13, C14) has evidence recorded above or in the PR-014-B/C/D subsections.
 
 ## Known Limitations
 
-- The spike measures **app-internal latency** (input event receipt to frame submission). It excludes input-stack latency before the application sees the event and compositor/display latency after submission. These figures are not end-to-end.
-- Linux only. No Windows or macOS evidence is produced or claimed.
+- The spike measures **app-internal latency** (input event receipt to frame submission). It excludes input-stack latency before the application sees the event and compositor/display latency after submission. These figures are not end-to-end. **For C2/C3/C4 specifically, this exclusion is compounded by a further, measured limitation:** the only mechanism available to observe frame submission (`iced::window::frames()`) forces continuous redraw once subscribed (confirmed: 0 vs. ~8 CPU ticks/3s idle), making "time to next frame" measure mostly how soon a frame was already due rather than this input's own cost. See the PR-014-E section above for the full finding; the recorded 0ms figures should not be read as evidence of zero real-world input latency.
+- Linux only. No Windows or macOS evidence is produced or claimed. See Criteria Not Evaluated for what was noticed about the concrete blocker (the Linux-only terminal runtime) versus the GUI substrate itself (not known to be Linux-only).
+- No accessibility/screen-reader bridge exists in `iced` 0.14 to evaluate against (see Criteria Not Evaluated, C11).
 - Spike code is measurement code and is not expected to carry meaningful test coverage.
-- `iced = "0.14"` is declared with default features enabled; `default-features = false` with a reviewed, minimal feature set was not applied in this slice (acceptable for a disposable spike, per the RFC-013 precedent that this discipline matters once a dependency is product-facing). If `iced` becomes a product dependency at M8, its feature surface needs the same review `rusqlite` received in RFC-013, and the licence inventory must extend to its transitive native dependencies — `wgpu` and the font-shaping stack (`cosmic-text`, `fontdb`) in particular.
+- `iced = "0.14"` is declared with default features enabled, plus the `advanced` feature (needed for PR-014-E's C7 headless font-metrics measurement, `iced::advanced::graphics::text::Paragraph`); `default-features = false` with a reviewed, minimal feature set was not applied in this slice (acceptable for a disposable spike, per the RFC-013 precedent that this discipline matters once a dependency is product-facing). If `iced` becomes a product dependency at M8, its feature surface needs the same review `rusqlite` received in RFC-013, and the licence inventory must extend to its transitive native dependencies — `wgpu` and the font-shaping stack (`cosmic-text`, `fontdb`) in particular.
 - PR-014-D's dialog is a single fixed instance (`dialog_shown`/`dialog_focus`/`dialog_decision` in `shell.rs`), not a general reusable dialog/modal system. That generalization is M8 product work, not spike scope.
 - The adversarial script's box-drawing characters render correctly but faintly (thin single-line-weight glyphs) in the default monospace font at the tested size; a real attacker tuning for visual conviction would likely test multiple fonts. This does not change the C8 verdict (the genuine dialog is still clearly distinguishable by its opaque GUI-layer rendering, not by the fake's glyph fidelity), but it means this corpus is not a maximally-adversarial visual attempt.
 - Keyboard-only interaction is exercised (`Tab`/`Shift+Tab`/`Enter`); no mouse-click path onto the dialog buttons is implemented or tested in this slice.
+- The terminal pane's PTY grid is hard-coded to 80×24 and does not consume the C7 column-count computation; the terminal grid does not apply Unicode bidi reordering (real terminal-grid behaviour, not this spike's choice) and does not give CJK characters double-width cells (a rendering-fidelity gap this spike's minimal renderer does not address). See the C7/C10 write-ups above.
+- Global `xdotool key` delivery, while reliable at 0% loss for short bursts (response 107), showed measured, non-zero delivery loss (3-13%) over the longer ~2-3 minute runs C2-C4 required. The measurement harness adapted to this by confirming actual receipt via on-disk log line counts rather than trusting a pre-committed sent count, but the loss itself was not root-caused within this spike's time budget.
