@@ -73,4 +73,4 @@ Status: active after `0.1.0`.
 
 ## Milestone Roadmap
 
-See [`../ROADMAP.md`](../ROADMAP.md) for the milestone schedule.
+See [`../ROADMAP.md`](../ROADMAP.md) for the milestone schedule, and [`delivery-plan.md`](./delivery-plan.md) for the ordered RFC queue, requirements gap analysis, and developer pick-up workflow.
