@@ -332,6 +332,93 @@ fn v4_unterminated_osc_continues_correctly_into_next_chunk() {
     );
 }
 
+// --- V5-V7: response 106 review probes, added to the corpus per the
+// developer handoff rather than left as a documented gap. ---
+
+#[test]
+fn v5_parameter_overflow_does_not_desync_the_parser() {
+    // 500 semicolon-separated CSI params must not cause the parser to
+    // truncate and reinterpret trailing bytes as a fresh sequence.
+    let mut sequence = b"\x1b[".to_vec();
+    for _ in 0..500 {
+        sequence.extend_from_slice(b"0;");
+    }
+    sequence.push(b'm');
+    sequence.extend_from_slice(b"AFTER");
+
+    let (term, blocked) = feed_chunks(&[&sequence]);
+    assert_eq!(
+        blocked,
+        Vec::new(),
+        "parameter overflow alone must not be classified as blocked"
+    );
+    assert!(
+        line_text(&term, 0).contains("AFTER"),
+        "trailing text after an overflowed CSI must render as ordinary text, not be swallowed \
+         or misparsed: {:?}",
+        line_text(&term, 0)
+    );
+}
+
+/// The sharper case, and the one worth keeping as a regression: an
+/// overflowed CSI does not desync the parser state enough to let a
+/// following blocked sequence slip through unclassified.
+#[test]
+fn v5_parameter_overflow_followed_by_osc_52_still_blocks_clipboard() {
+    let mut sequence = b"\x1b[".to_vec();
+    for _ in 0..500 {
+        sequence.extend_from_slice(b"0;");
+    }
+    sequence.push(b'm');
+    sequence.extend_from_slice(b"\x1b]52;c;U0VDUkVU\x07");
+
+    let (term, blocked) = feed_chunks(&[&sequence]);
+    assert!(
+        blocked_families(&blocked).contains(&BlockedFamily::Clipboard),
+        "OSC 52 immediately after a parameter overflow must still be blocked; blocked = {blocked:?}"
+    );
+    assert!(!line_text(&term, 0).contains("U0VDUkVU"));
+}
+
+#[test]
+fn v6_colon_subparameters_forward_as_terminal_attribute_not_blocked() {
+    // CSI 38:2:255:0:0 m (colon-form truecolor SGR) must classify the same
+    // as the semicolon form -- forwarded as styling only. `Attr` is purely
+    // presentational (Reset/Bold/Dim/Italic/underline variants/Blink*/
+    // Reverse/Hidden/Strike/Cancel*), so nothing non-visual is reachable
+    // through the forwarded path either way.
+    let (_, blocked) = feed_chunks(&[b"\x1b[38:2:255:0:0m"]);
+    assert_eq!(
+        blocked,
+        Vec::new(),
+        "colon-form SGR must forward via terminal_attribute like the semicolon form"
+    );
+}
+
+#[test]
+fn v7_utf8_split_reassembles_correctly_at_every_boundary() {
+    // A CJK string split at every byte boundary must reassemble correctly:
+    // `Processor`'s persistent parser state handles multi-byte UTF-8
+    // reassembly, the same mechanism P4 relies on for control sequences.
+    let phrase = "こんにちは世界"; // 7 characters, 3 bytes each = 21 bytes
+    let bytes = phrase.as_bytes();
+
+    for split in 1..bytes.len() {
+        let (left, right) = bytes.split_at(split);
+        let (term, blocked) = feed_chunks(&[left, right]);
+        assert_eq!(
+            blocked,
+            Vec::new(),
+            "split at {split} should not be classified as blocked"
+        );
+        assert!(
+            line_text(&term, 0).contains(phrase),
+            "split at {split} did not reassemble correctly: {:?}",
+            line_text(&term, 0)
+        );
+    }
+}
+
 // --- V8 (documented, not executed as a test): direct API access. ---
 //
 // `Term::grid_mut()` is public and would let calling code bypass this

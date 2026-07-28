@@ -55,7 +55,7 @@ Criteria accepted 2026-07-28 (PR-014-A). Spike evidence pending.
 ## Terminal Strategy Checklist
 
 - [x] Option A tested: RFC-009 policy interposed in front of the emulator.
-- [x] Interposition proven **non-bypassable** for the corpus tested (14 tests, including exhaustive chunk-boundary splitting for the mandatory minimum families), with two documented limitations (see qa-evidence.md: `linefeed()` also admits VT/FF, and ~100 of ~119 `Handler` methods are blocked by omission rather than individually classified).
+- [x] Interposition proven **non-bypassable** for the corpus tested (14 tests, including exhaustive chunk-boundary splitting for the mandatory minimum families), with two documented limitations (see qa-evidence.md: `linefeed()` also admits VT/FF, and 63 of 71 `Handler` methods are blocked by omission rather than individually classified).
 - [x] Demonstration that a blocked family cannot reach emulator state. Proven three ways: unit-test grid-content assertions, the filter's own `blocked` log, and an independent real-window check (window title never changed per both `niri msg windows` and `xdotool getwindowname` after sending an OSC-0 title-set sequence).
 - [ ] If Option A falsified, Option B evaluated as fallback with reasons recorded. **N/A — Option A was not falsified**, so this item has no applicable evidence to check; left unchecked rather than checked-as-satisfied to avoid implying Option B work happened.
 - [x] Option C not adopted without maintainer sign-off and a threat-model amendment. (Trivially true: Option C was never adopted or considered further once Option A held.)

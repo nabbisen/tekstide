@@ -237,7 +237,7 @@ impl<'a, H: Handler> Handler for SecurityFilter<'a, H> {
         self.block(BlockedFamily::Scp);
     }
 
-    // --- Everything else in the ~119-method Handler trait is blocked by
+    // --- Everything else in the 71-method Handler trait is blocked by
     // omission: this impl does not override it, so the trait's own default
     // no-op body runs and `inner` is never called. That satisfies P1/P2 for
     // those methods without individually classifying each one. Notable
