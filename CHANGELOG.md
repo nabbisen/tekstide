@@ -2,7 +2,7 @@
 
 ## 0.3.0 - AgentRun, Transcript, Review, and Durable Audit
 
-Status: prepared; pending maintainer publish and tag.
+Status: released on 2026-07-28.
 
 Tekstide `0.3.0` consolidates three milestones — M5 AgentRun launch, M6 transcript
 and review foundations, and M7 durable audit — covering RFC-010 through RFC-013.
@@ -112,7 +112,14 @@ Build-cost baseline (first captured; RFC-013 retained none, so there is no prior
 - Clean `cargo build --release --locked` on `x86_64-unknown-linux-gnu`, Rust 1.97.1: 27.3s wall-clock.
 - `target/release/tekstide` binary size: 790,560 bytes unstripped, 605,368 bytes stripped.
 
-Not yet done: real `cargo publish` to crates.io, git tag, and release-candidate review acceptance. This entry's `Status:` line must be updated to `released on YYYY-MM-DD` only after those complete.
+Release-candidate review (request 104) found that both published READMEs undercounted wired audit producers (three instead of four — audit-store recovery was omitted) and that the ROADMAP M7 table row still listed producers the reconciled scope section had already moved to M8. Both were corrected in commit `1f5100b` before publishing; the gates above were re-run against the corrected tree and the release tarball and crate packages were rebuilt from that commit. The threat model's matching corrections live in `.git-exclude/specs/`, which is gitignored and carries no commit.
+
+Post-publish verification on 2026-07-28:
+
+- `cargo publish -p tekstide-core --locked` — published `tekstide-core 0.3.0` to crates.io.
+- `cargo publish -p tekstide --locked` — published `tekstide 0.3.0` to crates.io, correctly resolved against the just-published `tekstide-core 0.3.0`.
+- Tag `0.3.0` (signed) created at commit `1f5100b`, matching the `0.1.0`/`0.2.0` tagging convention.
+- `crates.io` API confirms both `tekstide-core 0.3.0` and `tekstide 0.3.0` exist and are not yanked.
 
 ## 0.2.0 - Terminal Runtime Foundation
 
