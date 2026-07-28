@@ -1,0 +1,45 @@
+# RFC-023: Configuration System - Developer Handoff Pack
+
+Source RFC: [RFC-023](../../proposed/023-configuration-system.md)
+Target milestone: **M12** (all slices headless — start immediately)
+Source RFC status: **Proposed**
+
+**Start here.** This file is the entry point. Everything is linked below in reading order.
+
+## Read in this order
+
+| # | Document | Purpose |
+| --- | --- | --- |
+| 1 | [RFC-023](../../proposed/023-configuration-system.md) | Format, precedence, atomic validation, security-sensitive settings, audit vocabulary. |
+| 2 | This file | Orientation and what is binding. |
+| 3 | [`implementation-handoff.md`](./implementation-handoff.md) | Module layout, validation pipeline, the profile-bypass trap, audit mapping. |
+| 4 | [`task-breakdown-pr-plan.md`](./task-breakdown-pr-plan.md) | Slice boundaries and review gates. |
+| 5 | [`acceptance-qa-checklist.md`](./acceptance-qa-checklist.md) | Required evidence. |
+| 6 | [`qa-evidence.md`](./qa-evidence.md) | Where you record gates, findings, and limitations. |
+
+Read before starting, because this RFC conforms to them rather than amending them:
+
+- [RFC-004](../../done/004-security-baseline-and-restricted-mode.md) — Restricted Mode feature vocabulary you will extend.
+- [RFC-010](../../done/010-agentrun-launch-model-and-ai-cli-profiles.md) — executable provenance rules that configuration must not weaken.
+- [RFC-013](../../done/013-durable-audit-store-and-local-data-policy.md) — the frozen `sensitive_config_changed` family.
+
+## Where to start work
+
+**Begin at PR-023-B.** PR-023-A is design acceptance. All slices are headless — no GUI dependency, so this runs in parallel with RFC-014 and RFC-021.
+
+## Five things that are binding
+
+1. **Configuration is a security surface, not a convenience feature.** It can name the executable Tekstide launches. Treat it with the discipline RFC-010 applies to profiles.
+2. **Validation is atomic.** Parse → validate whole document → construct → swap. A partially applied configuration is a defect, not a degraded mode.
+3. **Configuration cannot bypass RFC-010.** A config-defined AI CLI profile passes through identical provenance validation. This is the single most likely place to introduce a real vulnerability — see `implementation-handoff.md` §4.
+4. **Security-sensitive settings never hot-reload.** They require explicit confirmation and produce an audit event.
+5. **Missing config is not an error.** Compiled defaults are total; Tekstide starts normally without a file, and an invalid file must not become a denial of service.
+
+## One vocabulary trap
+
+RFC-013 froze two audit action kinds whose names are ambiguous:
+
+- `config_policy_increase` — **increases the permitted capability surface** (weakens security). Requires authorization.
+- `config_policy_reduce` — **reduces the permitted capability surface** (tightens security). Applied directly.
+
+The names read the other way round to most people. RFC-023 pins the semantics; the authorization asymmetry in the frozen schema is what settles it. Do not guess from the names.

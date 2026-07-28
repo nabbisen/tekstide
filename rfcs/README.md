@@ -18,7 +18,9 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 014 | [Desktop GUI Substrate and Terminal Rendering Strategy](./proposed/014-desktop-gui-substrate-and-terminal-rendering.md) | Proposed |
+| 014 | [Desktop GUI Substrate and Terminal Rendering Strategy](./proposed/014-desktop-gui-substrate-and-terminal-rendering.md) | Proposed — criteria accepted, spike in progress |
+| 021 | [Command Approval Model and Adapter Capability](./proposed/021-command-approval-model-and-adapter-capability.md) | Proposed |
+| 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ## Handoffs
 
@@ -38,6 +40,8 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 012 | [Generated Change Review Foundations](./handoffs/012-generated-change-review-foundations/README.md) |
 | 013 | [Durable Audit Store and Local Data Policy](./handoffs/013-durable-audit-store-and-local-data-policy/README.md) |
 | 014 | [Desktop GUI Substrate and Terminal Rendering Strategy](./handoffs/014-desktop-gui-substrate-and-terminal-rendering/README.md) |
+| 021 | [Command Approval Model and Adapter Capability](./handoffs/021-command-approval-model-and-adapter-capability/README.md) |
+| 023 | [Configuration System](./handoffs/023-configuration-system/README.md) |
 
 ## Implemented
 
