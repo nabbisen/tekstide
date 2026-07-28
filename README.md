@@ -38,10 +38,10 @@ app/UI terminal and launch commands, rendered paste/approval/trust dialogs, comm
 approval, Git-based change detection, file watcher, overwrite-confirmation UI, and
 cross-platform evidence beyond Linux are deferred.
 
-Durable audit currently records trust decisions, managed AgentRun lifecycle, and
-blocked root/symlink access. Command approval, paste, restricted-feature, safe-close,
-configuration-change, transcript-purge, project-added, and plain-terminal producers
-are defined in the audit schema but not yet wired.
+Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked
+root/symlink access, and audit-store recovery outcomes. Command approval, paste,
+restricted-feature, safe-close, configuration-change, transcript-purge, project-added,
+and plain-terminal producers are defined in the audit schema but not yet wired.
 
 ## Quick Start
 

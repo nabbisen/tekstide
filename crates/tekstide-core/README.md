@@ -13,7 +13,7 @@ This crate is part of the Tekstide `0.3.0` headless core through RFC-013. It pro
 - metadata-only generated-change detection and review-state tracking;
 - durable local SQLite audit storage with schema identity, migration harness, corruption diagnostics, restart-safe recovery, and explicit purge.
 
-It is not the desktop GUI, rendered terminal surface, app/UI terminal launcher, or command-approval system. Those areas remain deferred. Durable audit currently records trust decisions, managed AgentRun lifecycle, and blocked root/symlink access only; command approval, paste, restricted-feature, safe-close, configuration-change, transcript-purge, project-added, and plain-terminal producers are defined in the audit schema but not yet wired.
+It is not the desktop GUI, rendered terminal surface, app/UI terminal launcher, or command-approval system. Those areas remain deferred. Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked root/symlink access, and audit-store recovery outcomes; command approval, paste, restricted-feature, safe-close, configuration-change, transcript-purge, project-added, and plain-terminal producers are defined in the audit schema but not yet wired.
 
 Repository documentation:
 
