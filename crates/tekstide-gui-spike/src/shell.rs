@@ -10,7 +10,7 @@
 use std::time::Duration;
 
 use iced::widget::text::Span;
-use iced::widget::{column, container, rich_text, row, text};
+use iced::widget::{center, column, container, opaque, rich_text, row, stack, text};
 use iced::{Background, Border, Color, Element, Length, Subscription, Task, Theme, keyboard};
 
 use crate::terminal_pane::TerminalPane;
@@ -50,11 +50,45 @@ impl FocusZone {
     }
 }
 
+/// PR-014-D: the two focusable elements of the genuine trusted dialog.
+/// Kept entirely separate from `FocusZone` -- while the dialog is shown,
+/// Tab/Shift+Tab must cycle *only* between these two, never the shell
+/// zones behind it and never anything the terminal pane could influence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogButton {
+    Approve,
+    Deny,
+}
+
+impl DialogButton {
+    const ORDER: [DialogButton; 2] = [DialogButton::Approve, DialogButton::Deny];
+
+    fn next(self) -> Self {
+        let index = Self::ORDER.iter().position(|b| *b == self).unwrap_or(0);
+        Self::ORDER[(index + 1) % Self::ORDER.len()]
+    }
+
+    fn previous(self) -> Self {
+        let index = Self::ORDER.iter().position(|b| *b == self).unwrap_or(0);
+        Self::ORDER[(index + Self::ORDER.len() - 1) % Self::ORDER.len()]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            DialogButton::Approve => "Approve",
+            DialogButton::Deny => "Deny",
+        }
+    }
+}
+
 pub struct State {
     focus: FocusZone,
     terminal_mode: bool,
     pane: Option<TerminalPane>,
     pane_launch_error: Option<String>,
+    dialog_shown: bool,
+    dialog_focus: DialogButton,
+    dialog_decision: Option<DialogButton>,
 }
 
 impl Default for State {
@@ -64,6 +98,9 @@ impl Default for State {
             terminal_mode: false,
             pane: None,
             pane_launch_error: None,
+            dialog_shown: false,
+            dialog_focus: DialogButton::Deny,
+            dialog_decision: None,
         }
     }
 }
@@ -74,10 +111,17 @@ pub enum Message {
     FocusPrevious,
     ToggleTerminalMode,
     Tick,
+    DialogActivate,
 }
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
+        Message::FocusNext if state.terminal_mode && state.dialog_shown => {
+            state.dialog_focus = state.dialog_focus.next();
+        }
+        Message::FocusPrevious if state.terminal_mode && state.dialog_shown => {
+            state.dialog_focus = state.dialog_focus.previous();
+        }
         Message::FocusNext => state.focus = state.focus.next(),
         Message::FocusPrevious => state.focus = state.focus.previous(),
         Message::ToggleTerminalMode => {
@@ -86,7 +130,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 match TerminalPane::launch() {
                     Ok(mut pane) => {
                         pane.send_demo_script_once();
+                        pane.send_adversarial_dialog_script();
                         state.pane = Some(pane);
+                        state.dialog_shown = true;
                     }
                     Err(error) => state.pane_launch_error = Some(error.message),
                 }
@@ -97,6 +143,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 pane.poll();
             }
         }
+        Message::DialogActivate if state.dialog_shown => {
+            state.dialog_decision = Some(state.dialog_focus);
+            state.dialog_shown = false;
+        }
+        Message::DialogActivate => {}
     }
     Task::none()
 }
@@ -179,9 +230,16 @@ fn terminal_pane_view(state: &State) -> Element<'_, Message> {
         .map(|pane| pane.blocked_log.len())
         .unwrap_or(0);
 
+    let decision_label = match state.dialog_decision {
+        Some(DialogButton::Approve) => "Approve",
+        Some(DialogButton::Deny) => "Deny",
+        None => "none yet",
+    };
+
     let status_bar = container(
         text(format!(
             "RFC-009 filter blocked {blocked_count} calls this session | \
+             last real-dialog decision: {decision_label} | \
              demo script sends OSC 52/title/hyperlink -- none should visibly take effect"
         ))
         .size(13),
@@ -189,7 +247,7 @@ fn terminal_pane_view(state: &State) -> Element<'_, Message> {
     .width(Length::Fill)
     .padding(6);
 
-    column![
+    let base: Element<'_, Message> = column![
         top_bar,
         container(body)
             .width(Length::Fill)
@@ -199,6 +257,56 @@ fn terminal_pane_view(state: &State) -> Element<'_, Message> {
     ]
     .width(Length::Fill)
     .height(Length::Fill)
+    .into();
+
+    if state.dialog_shown {
+        stack![base, opaque(center(trusted_dialog_view(state)))].into()
+    } else {
+        base
+    }
+}
+
+/// PR-014-D: the genuine Tekstide modal dialog, rendered via `iced::widget::stack`
+/// -- a real GUI layer entirely outside the terminal surface, not characters
+/// drawn into the terminal grid the way the adversarial imitation is. This is
+/// the C8 evidence RFC-009 deferred: "screenshot-backed spoofing evidence."
+fn trusted_dialog_view(state: &State) -> Element<'_, Message> {
+    let button = |target: DialogButton| {
+        let is_focused = state.dialog_focus == target;
+        let marker = if is_focused { "> " } else { "  " };
+        container(text(format!("{marker}[ {} ]", target.label())).size(14))
+            .padding(6)
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(Background::Color(if is_focused {
+                    Color::from_rgb(0.20, 0.35, 0.60)
+                } else {
+                    Color::from_rgb(0.15, 0.15, 0.15)
+                })),
+                border: focus_border(is_focused),
+                ..container::Style::default()
+            })
+    };
+
+    container(
+        column![
+            text("Command Approval Required").size(16),
+            text("Project: rfc-014-spike").size(13),
+            text("Command: rm -rf /").size(13),
+            row![button(DialogButton::Approve), button(DialogButton::Deny)].spacing(16),
+            text("Tab/Shift+Tab moves focus between Approve/Deny; Enter activates.").size(11),
+        ]
+        .spacing(10),
+    )
+    .padding(20)
+    .style(|_theme: &Theme| container::Style {
+        background: Some(Background::Color(Color::from_rgb(0.05, 0.05, 0.08))),
+        border: Border {
+            color: Color::from_rgb(0.9, 0.7, 0.1),
+            width: 3.0,
+            radius: 4.0.into(),
+        },
+        ..container::Style::default()
+    })
     .into()
 }
 
@@ -276,6 +384,10 @@ fn subscription(state: &State) -> Subscription<Message> {
             key: keyboard::Key::Named(keyboard::key::Named::F2),
             ..
         } => Some(Message::ToggleTerminalMode),
+        keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Enter),
+            ..
+        } => Some(Message::DialogActivate),
         _ => None,
     });
 

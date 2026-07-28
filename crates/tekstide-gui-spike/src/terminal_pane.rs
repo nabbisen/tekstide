@@ -63,6 +63,7 @@ pub struct TerminalPane {
     term: Term<NullListener>,
     pub blocked_log: Vec<BlockedCall>,
     demo_sent: bool,
+    scratch_root: PathBuf,
 }
 
 #[derive(Debug)]
@@ -106,7 +107,7 @@ impl TerminalPane {
         let mut spec = TerminalLaunchSpec::plain_shell(
             project_id,
             "RFC-014 spike terminal",
-            canonical_root,
+            canonical_root.clone(),
             PathBuf::from("/bin/sh"),
         );
         spec.dimensions = TerminalDimensions {
@@ -128,6 +129,7 @@ impl TerminalPane {
             term: Term::new(Config::default(), &PaneSize, NullListener),
             blocked_log: Vec::new(),
             demo_sent: false,
+            scratch_root: canonical_root,
         })
     }
 
@@ -152,6 +154,26 @@ impl TerminalPane {
             "printf 'after-inert-sequences\\n'\n",
         );
         let _ = self.runtime.write_input(&self.handle, script.as_bytes());
+    }
+
+    /// Runs the PR-014-D adversarial dialog generator (the committed
+    /// `adversarial-dialog.sh` script, included verbatim via `include_str!`
+    /// so the file that is reviewed and the bytes that actually run can
+    /// never drift apart). Written to a file in the spike's own temp
+    /// scratch directory and invoked as a single `sh` command, rather than
+    /// piped line-by-line into the interactive shell's stdin: an
+    /// interactive shell echoes every line of input before executing it,
+    /// which would otherwise clutter the rendered pane with every comment
+    /// line in the script instead of just its output. `clear` runs first
+    /// so the screenshot shows only the adversarial content.
+    pub fn send_adversarial_dialog_script(&mut self) {
+        const SCRIPT: &str = include_str!("../adversarial-dialog.sh");
+        let script_path = self.scratch_root.join("adversarial-dialog.sh");
+        if std::fs::write(&script_path, SCRIPT).is_err() {
+            return;
+        }
+        let command = format!("clear; sh {}\n", script_path.display());
+        let _ = self.runtime.write_input(&self.handle, command.as_bytes());
     }
 
     /// Reads whatever PTY output is currently available (bounded, short

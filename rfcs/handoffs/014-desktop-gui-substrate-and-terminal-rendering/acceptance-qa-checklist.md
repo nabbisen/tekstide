@@ -44,10 +44,10 @@ Criteria accepted 2026-07-28 (PR-014-A). Spike evidence pending.
 - [ ] **C5** Warm startup measured against ≤800 ms.
 - [ ] **C6** Idle RSS recorded as a baseline figure.
 - [ ] **C7** Per-pane column count computed from real font metrics at 1x and fractional scaling.
-- [ ] **C8** Trusted UI structurally separable; screenshot evidence produced.
-- [ ] **C9** All primary spike workflows reachable by keyboard; focus trapping in dialog. (Partial evidence exists for the static shell from PR-014-B; dialog focus trapping is PR-014-D scope, so this stays unchecked until that half exists too.)
+- [x] **C8** Trusted UI structurally separable; screenshot evidence produced. Genuine dialog rendered via `iced::widget::stack`/`opaque` (a real GUI layer, not terminal-grid characters) alongside an adversarial box-drawing imitation printed inside the terminal pane; both appear in one frame in `evidence/pr-014-d/genuine-and-adversarial-dialog-one-frame.png`, closing the RFC-009 deferral.
+- [x] **C9** All primary spike workflows reachable by keyboard; focus trapping in dialog. Static-shell focus (PR-014-B) plus dialog focus trapping (PR-014-D, real `Tab`/`Enter` input, screenshots in `evidence/pr-014-d/`) — both halves now exist.
 - [ ] **C10** Non-Latin script renders in editor and terminal surfaces.
-- [ ] **C11** Accessibility affordances assessed; focus indicators visible; screen-reader path identified or its absence recorded.
+- [ ] **C11** Accessibility affordances assessed; focus indicators visible; screen-reader path identified or its absence recorded. (Focus indicators are visible for both the shell and the dialog; screen-reader path is not yet assessed — held for PR-014-E alongside the rest of the accessibility criteria.)
 - [ ] **C12** No known blocker to Windows/macOS identified, or blockers recorded.
 - [x] **C13** Licence inventory complete for every crate introduced so far, including transitive dependencies (`iced` in PR-014-B; `alacritty_terminal`, `vte`, `tokio`, and 8 further transitives in PR-014-C). No bundled native C code introduced by this slice, unlike RFC-013's `rusqlite`.
 - [x] **C14** Maintenance posture assessment recorded for the chosen substrate (`iced`) and the screened alternatives (`gpui`, `xilem`, `relm4`) in PR-014-B.
@@ -55,18 +55,18 @@ Criteria accepted 2026-07-28 (PR-014-A). Spike evidence pending.
 ## Terminal Strategy Checklist
 
 - [x] Option A tested: RFC-009 policy interposed in front of the emulator.
-- [x] Interposition proven **non-bypassable** for the corpus tested (14 tests, including exhaustive chunk-boundary splitting for the mandatory minimum families), with two documented limitations (see qa-evidence.md: `linefeed()` also admits VT/FF, and 63 of 71 `Handler` methods are blocked by omission rather than individually classified).
+- [x] Interposition proven **non-bypassable** for the corpus tested (18 tests, including exhaustive chunk-boundary splitting for the mandatory minimum families plus response-106-supplied V5/V6/V7 probes), with two documented limitations (see qa-evidence.md: `linefeed()` also admits VT/FF — constraint-forced; `clear_screen` forwards mode-blind including scrollback erasure — a choice, raised as an RFC-017 question; and 63 of 71 `Handler` methods are blocked by omission rather than individually classified).
 - [x] Demonstration that a blocked family cannot reach emulator state. Proven three ways: unit-test grid-content assertions, the filter's own `blocked` log, and an independent real-window check (window title never changed per both `niri msg windows` and `xdotool getwindowname` after sending an OSC-0 title-set sequence).
 - [ ] If Option A falsified, Option B evaluated as fallback with reasons recorded. **N/A — Option A was not falsified**, so this item has no applicable evidence to check; left unchecked rather than checked-as-satisfied to avoid implying Option B work happened.
 - [x] Option C not adopted without maintainer sign-off and a threat-model amendment. (Trivially true: Option C was never adopted or considered further once Option A held.)
 
 ## Trusted-UI Evidence Checklist
 
-- [ ] Genuine dialog rendered outside the terminal surface.
-- [ ] Adversarial imitation generator committed and reproducible.
-- [ ] Screenshot shows both in one frame.
-- [ ] A reviewer can distinguish real from imitation using the screenshot alone.
-- [ ] Terminal output cannot move keyboard focus out of the real dialog.
+- [x] Genuine dialog rendered outside the terminal surface. `iced::widget::stack`/`opaque` overlay, not terminal-grid content.
+- [x] Adversarial imitation generator committed and reproducible. `crates/tekstide-gui-spike/adversarial-dialog.sh`, included via `include_str!` so the committed file and the bytes that run cannot drift; includes an 8-bit C1 case per response 106 Q3.
+- [x] Screenshot shows both in one frame. `evidence/pr-014-d/genuine-and-adversarial-dialog-one-frame.png`.
+- [x] A reviewer can distinguish real from imitation using the screenshot alone. Genuine dialog: opaque GUI layer, sharp border, highlighted focused button. Imitation: dimmer terminal text scrolling with ordinary shell output.
+- [x] Terminal output cannot move keyboard focus out of the real dialog. Structural, not just observed: `DialogButton` focus is a separate state field the terminal pane has no message path to reach; demonstrated with real `Tab` input in `evidence/pr-014-d/focus-trap-tab-cycles-approve-deny.png`.
 
 ## Measurement Integrity Checklist
 
