@@ -30,7 +30,7 @@ Criteria accepted 2026-07-28 (PR-014-A). Spike evidence pending.
 - [x] Bounded survey performed; shortlist recorded (`egui`, `slint`, `gpui`, `xilem`, `relm4`).
 - [x] Second candidate selected using the text-grid/terminal-precedent rule (`egui`, via the `egui_term` widget on `alacritty_terminal`).
 - [x] Licence screen (C13) applied before implementation; `slint` screened out (GPLv3/proprietary-EULA, incompatible with Apache-2.0 distribution).
-- [x] Maintenance posture (C14) recorded for candidates considered: `gpui` screened out despite the strongest terminal precedent (Zed's own terminal panel) because Zed Industries paused community-facing development; `xilem` deprioritized as explicitly alpha; `relm4`/GTK deprioritized on native-dependency weight without full evaluation.
+- [x] Maintenance posture (C14) recorded for candidates considered: `gpui` screened out despite the strongest terminal precedent (Zed's own terminal panel) on a ~9-month crates.io publish gap (last release 2025-10-22) versus `egui`'s ~1 month; `xilem` deprioritized as explicitly alpha; `relm4`/GTK deprioritized on native-dependency weight without full evaluation. `iced`'s own dependency weight (`Cargo.lock` 50 → 395 packages, +345) is recorded in `qa-evidence.md` as a PR-014-F input, applied asymmetrically relative to `relm4` since `iced` was assigned by the handoff rule rather than screened.
 - [x] Selection rationale recorded in `qa-evidence.md` PR-014-B.
 
 ## Criteria Checklist (C1-C14)
