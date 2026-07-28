@@ -7,7 +7,9 @@
 //! `rfcs/handoffs/014-desktop-gui-substrate-and-terminal-rendering/` for the
 //! full spike specification.
 
+mod filter;
 mod shell;
+mod terminal_pane;
 
 fn main() -> iced::Result {
     shell::run()

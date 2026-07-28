@@ -45,7 +45,7 @@ Licence versions verified directly against the crates.io API (not secondary sour
 
 **Dependency weight (C14, recorded for PR-014-F).** `Cargo.lock` went from 50 to 395 packages after adding `iced` — +345 transitive dependencies, a ~7.9x increase in the resolved graph. Notable transitive natives: `wgpu`, `wgpu-core`, `glow`, `glutin_wgl_sys`, `cosmic-text`, `fontdb`. This was applied asymmetrically in the survey above — `relm4`/GTK was deprioritized partly on dependency weight, but `iced`'s own weight was never measured, because `iced` was assigned by the handoff rule rather than selected by the C14 screen. Recording it now rather than leaving it implicit: ~345 crates is unremarkable for a GPU-accelerated Rust GUI toolkit (a windowing/rendering backend for `egui` would pull a comparable order), so this is not disqualifying, but RFC-013's T-033 exists because one native dependency (`rusqlite` + bundled SQLite) was judged worth a threat-model entry — a graph this size, including a GPU abstraction layer and a font-shaping stack, is a materially larger surface that PR-014-F should weigh explicitly rather than inherit by default.
 
-**Workspace-dependency deviation.** Every other dependency in this repo is declared in root `[workspace.dependencies]` (`libc`, `serde`, `serde_json`, `uuid`, `rusqlite`), and `tekstide-pty-spike` follows that pattern (`libc = { workspace = true }`). `iced = "0.14"` is instead declared directly in `crates/tekstide-gui-spike/Cargo.toml`, not the workspace table. This is deliberate, not an oversight: a dependency absent from `[workspace.dependencies]` cannot be picked up by another crate via `iced.workspace = true`, which makes the quarantine boundary structurally stronger rather than weaker — no product crate can "accidentally" gain access to `iced` through the workspace table the way it could if it were declared there.
+**Workspace-dependency convention.** `iced` was initially declared directly in `crates/tekstide-gui-spike/Cargo.toml` rather than `[workspace.dependencies]`, on the reasoning that keeping it out of the shared table made the quarantine boundary marginally stronger (no other crate could pick it up via `iced.workspace = true` without also adding its own version line). The maintainer overrode this during review: every other dependency in this repo, including `tekstide-pty-spike`'s `libc`, is declared in `[workspace.dependencies]`, and quarantine is actually enforced by which crates list a dependency in their own `[dependencies]` section, not by where the version string lives. `iced`, `alacritty_terminal`, and `vte` are now declared in `[workspace.dependencies]` and referenced via `.workspace = true`, matching the established convention. The quarantine claim (no product crate depends on the spike) is unaffected — verified by the same `grep` check after this change.
 
 **Static Content Mode shell.** `crates/tekstide-gui-spike/src/shell.rs` renders a top bar, sidebar (20% width via `Length::FillPortion`), main area (remaining width), and status bar, matching `tekstide-uiux-wireframes-v0.md` §7.2 and external design §4.4 proportions.
 
@@ -66,7 +66,69 @@ Gates observed on 2026-07-28: `cargo fmt --all --check`, `cargo clippy --workspa
 
 ### PR-014-C — Terminal surface and Option A/B resolution
 
-Pending implementation.
+**Verdict: Option A is implementable and not falsified.** The RFC-009 accepted-sequence policy is interposed as a filter in front of `alacritty_terminal`'s emulator, and the filter is not bypassable by anything reachable from the PTY byte stream.
+
+**Interposition point.** Not the byte/`Perform` boundary the handoff's provisional framing assumed, but one layer further in: `alacritty_terminal` 0.26 depends directly on `vte` 0.15's bundled `ansi` module, and `vte::ansi::Processor` — the *same* code alacritty itself is built on — owns the entire VT/ANSI grammar and dispatches already-classified semantic operations to a `vte::ansi::Handler` implementation (`Term` implements it). `crates/tekstide-gui-spike/src/filter.rs`'s `SecurityFilter<H: Handler>` wraps the real handler, forwarding only the RFC-009 accepted set (`input`, `carriage_return`, `linefeed`, `put_tab`, `backspace`, `terminal_attribute`, `move_up/down/forward/backward`, `clear_line`, `clear_screen`) and letting every other one of the ~119 `Handler` methods fall through to the trait's own no-op default, so `Term` is never called for anything not on that list. Each accepted-set mapping was read directly from the vendored `vte-0.15.0/src/ansi.rs` `execute`/`csi_dispatch` match arms, not assumed.
+
+This choice gives two of the four filter properties **by construction, not by testing**:
+
+- **P3 (classification parity)** holds because the filter and the real emulator share the identical classifier — there is no second grammar implementation to drift out of sync with the first, unlike a from-scratch byte-level filter would require.
+- **P4 (stream-position independence)** holds because `Processor` is long-lived across `advance()` calls and holds the VT parser state internally, so a sequence split across two PTY reads is reassembled by the same code the real terminal uses before this filter ever sees it.
+
+**P1/P2 assessment (read from source, not assumed).** `Term::grid_mut()` is public API for direct grid manipulation (used by alacritty's own search/selection features) and is **not** reachable from the PTY byte path — `vte::ansi::Processor` never calls it. P1 therefore depends on calling-code discipline: `terminal_pane.rs` is the only place PTY bytes are handled in this spike, and the only thing it ever does with them is `Processor::advance(&mut SecurityFilter::new(&mut self.term), bytes)`. No other code path holds a `&mut Term` derived from PTY input.
+
+#### Adversarial corpus: findings, not just pass/fail
+
+14 tests in `crates/tekstide-gui-spike/src/filter/tests.rs`, all passing, several of which falsified my own initial assumptions rather than confirming them — recorded because a spike's job is to falsify, not to demonstrate:
+
+- **SCP is CSI-dispatched, not DCS.** The handoff's own framing ("SCP, the one DCS-family sequence Processor recognizes") does not match vte 0.15: SCP is `ESC [ <n> SP k`, a CSI sequence. Verified by reading `csi_dispatch`'s `('k', [b' '])` match arm directly. The corpus now has a corrected `v1_scp_is_csi_not_dcs_blocked_at_every_split` test and a separate genuine-DCS test.
+- **No DCS content of any kind reaches a `Handler` method, recognized or not.** `vte::ansi::Processor`'s own `Perform::hook`/`put`/`unhook` implementations are unconditional no-ops (read directly, not inferred) — DCS is fully swallowed one layer below this filter's interposition point. `v1_generic_dcs_content_never_reaches_handler_at_every_split` proves a 26-byte DCS payload leaves `blocked` empty (nothing to classify — Processor never asked) and never reaches the grid, at every one of 25 split points.
+- **8-bit C1 introducers are not recognized at all by this parser** — confirmed by reading `vte`'s own module doc ("Only supports 7-bit codes") and its `advance_ground`/`anywhere` state-transition code directly. A lone C1 byte (e.g. `0x9D`) is invalid UTF-8, handled via `Perform::execute(byte)`, which `ansi::Processor`'s own `execute()` match has no arm for — so it is silently dropped *before* reaching this filter's `Handler` layer at all.
+- **Second-order finding from the above, discovered empirically by running the test rather than assumed from the first:** consuming the ambiguous introducer byte does not suppress the payload that would have followed it in a well-formed sequence. The *semantic operation* never fires (no `clipboard_store`/`set_title` call — `blocked` is empty because there was nothing to block), but the trailing payload text (e.g. the base64 clipboard content, or the title string) **renders as plain printable characters**, because the parser resumes in `Ground` state once the ambiguous byte is consumed. For OSC 52 specifically: no clipboard exfiltration, but the payload text becomes visible on screen — a real, lesser leak than the 7-bit form, recorded rather than silently asserted as fully inert. `v2_8bit_c1_osc_introducer_blocks_the_operation_but_payload_text_still_renders` and its DCS counterpart assert this exact, verified behavior.
+- **`put_tab` is unambiguous.** Traced the C0 HT execute path (`C0::HT => self.handler.put_tab(1)`) against the CSI-originated tab-stop methods (`move_forward_tabs`/`move_backward_tabs`, separate methods) before assuming `put_tab` was safe to allow — confirmed they are genuinely distinct at the `Handler` layer, so allowing raw-tab does not also admit CSI tab-stop movement (which stays blocked by omission).
+- **`linefeed()` is a real, if minor, RFC-009 policy widening.** `execute()`'s `C0::LF | C0::VT | C0::FF => self.handler.linefeed()` means allowing `linefeed()` (required for LF) also admits VT (0x0B) and FF (0x0C), which `tekstide_core::TerminalSecurityParser`'s byte-level classifier treats as unsupported C0 control (blocked). This is the one case found where Handler-level interposition is *coarser* than RFC-009's original byte-level policy rather than matching or narrowing it. Recorded as a limitation for PR-014-F, not silently absorbed.
+
+Both directions are proven, not just the blocking direction: `accepted_printable_text_reaches_the_grid`, `accepted_sgr_cursor_and_clear_do_not_block`, and `accepted_c0_controls_do_not_block` confirm the filter is a boundary, not a brick wall.
+
+#### Real rendering evidence (PTY-backed, not simulated)
+
+`terminal_pane.rs` launches `/bin/sh` via the existing `LinuxTerminalRuntime` (in a temp directory — this spike never touches a real Tekstide state root or project), and renders the filtered `Term` grid using `iced::widget::rich_text`/`Span`, with per-cell colors resolved via `Term::renderable_content()` — the same API a real terminal renderer (or `iced_term`/`egui_term`) would use, not a bespoke shortcut. A demo script (`send_demo_script_once`) exercises styled SGR output plus three inert families (OSC 52 clipboard, OSC title, OSC 8 hyperlink) so there is something concrete to screenshot.
+
+Screenshot: `evidence/pr-014-c/terminal-pane-demo-script.png`, captured from a real running instance via `niri msg action screenshot-window`, forced to the X11/XWayland `winit` backend (see the PR-014-B Wayland/XWayland finding) so `xdotool` could deliver the `F2` mode-toggle key.
+
+Observed in that screenshot and independently cross-checked (not screenshot-only):
+
+- **Styled spans, C1 evidence:** "red", "green", and "bold-blue" render in distinct, correct colors within one line — genuine multi-color text in a single text block, using real `Attr`/SGR data resolved through `Term`'s color table, not hardcoded per-word colors.
+- **Window title never changed**, despite the OSC-0 title-set sequence being sent through the PTY. Verified two ways beyond the screenshot: `niri msg windows` and `xdotool getwindowname` both still report `"tekstide-gui-spike (RFC-014)"` — the value set once via `.title()` at startup — after the demo script ran. This is real evidence the title-mutation block held at the actual OS window level, not just in an internal log.
+- **OSC 8 hyperlink had no visible effect:** "link-text" renders as plain text, no hyperlink styling applied (`set_hyperlink` was intercepted, so the grid cursor template's hyperlink field was never set for those cells).
+- **Status bar reports "RFC-009 filter blocked 15 calls this session"** — a live, non-hardcoded count from the running filter, not a fabricated number.
+
+#### Licence inventory (C13)
+
+All newly introduced dependencies for this slice, checked directly against the crates.io API:
+
+| Crate | Licence |
+| --- | --- |
+| `alacritty_terminal` 0.26.0 | Apache-2.0 |
+| `vte` 0.15.0 | Apache-2.0 OR MIT |
+| `rustix-openpty` 0.2.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| `tokio` (added as an `iced` feature, for the tick subscription) | MIT |
+| `aho-corasick`, `base64`, `home`, `miow` (Windows-only), `regex-automata`, `regex-syntax`, `signal-hook` (transitive) | MIT OR Apache-2.0 (or Unlicense OR MIT for `aho-corasick`) |
+
+`Cargo.lock` grew from 395 to 406 packages (+11) for this slice — far smaller than `iced`'s own +345 in PR-014-B, since alacritty/vte/tokio reuse much of what was already resolved. None of these compile bundled native C code (unlike RFC-013's `rusqlite`); `rustix-openpty` wraps PTY syscalls through the existing `rustix`/`libc` ecosystem pattern already used elsewhere in this workspace, not a new C dependency. No `NOTICE` entry is triggered by this slice.
+
+#### Gates observed on 2026-07-28
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (375 `tekstide-core` + 14 `tekstide-gui-spike` filter-corpus tests, 0 failures), `git diff --check` all passed.
+
+#### Known limitations
+
+- Only 8 of the ~119 `Handler` trait methods are individually classified into a `BlockedFamily` (the corpus's minimum required coverage: title, clipboard, hyperlink, private mode, keyboard protocol, terminal query/reply, SCP). The other ~100+ blocked methods are blocked by omission (never forwarded, so P1/P2 hold for them) but are not individually named in `blocked_log` — a reviewer probing for an unclassified-but-still-blocked method would find it silent rather than logged.
+- V5 (parameter overflow) and V6 (colon sub-parameters) and V7 (UTF-8 split) from `pr-014-c-filter-interposition.md` §4 are not covered by this corpus. V1 (mandatory, exhaustive split testing), V2 (8-bit C1), V3 (terminator divergence), and V4 (unterminated-at-stream-end) are covered; V8 (direct API access) is assessed and documented (`grid_mut`) rather than executed as a test.
+- The `linefeed()` widening (VT/FF admitted alongside LF) is a real, if minor, RFC-009 policy widening relative to `tekstide_core::TerminalSecurityParser`'s byte-level classification — see above. Not fixed in this spike; recorded as a PR-014-F input.
+- Color resolution in `terminal_pane.rs::resolve_color` covers the standard 16 ANSI colors and direct RGB (`Color::Spec`) only; indexed colors 16-255 fall back to a default foreground rather than resolving the full 256-color palette. Documented as a spike simplification, not silently implied complete.
+- The demo script is fixed, non-interactive content sent once after launch — this is demonstration input to produce screenshot evidence, not a general user-input path or product behavior.
+- No automated regression test asserts the window title stays unchanged (that check was done manually via `niri msg`/`xdotool` for this evidence pass, not wired into the corpus as a repeatable test).
 
 ### PR-014-D — Trusted-UI evidence
 

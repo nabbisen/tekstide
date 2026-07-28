@@ -13,5 +13,7 @@ name = "tekstide-gui-spike"
 path = "src/main.rs"
 
 [dependencies]
-tekstide-core = { workspace = true }
-iced          = "0.14"
+tekstide-core      = { workspace = true }
+iced               = { workspace = true }
+alacritty_terminal = { workspace = true }
+vte                = { workspace = true }
