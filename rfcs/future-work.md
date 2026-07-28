@@ -36,10 +36,12 @@ Status: transcript retention is implemented by RFC-011; generated-change review 
 
 ### Durable Audit Storage
 
-Status: proposed in RFC-013 for M7.
+Status: implemented by RFC-013 with documented limitations; three of twelve v1 event families have a wired producer.
 
-- Persist security-relevant audit events.
-- Record trust decisions, approvals, process launches, blocked root/symlink access, and destructive confirmations.
+- Durable local SQLite store, schema identity, migration harness, corruption diagnostics, restart-safe recovery, and explicit project/global purge are implemented by RFC-013 with documented limitations.
+- Wired producers: trust decisions, managed AgentRun lifecycle, and blocked root/symlink access.
+- Remaining work — producers represented in the v1 schema but not yet wired: command approval, terminal paste blocks, restricted-feature blocks, safe-close/destructive decisions, sensitive configuration changes, transcript purge, project added, and plain-terminal lifecycle observation.
+- Command approval, safe-close, and configuration-change producers require rendered surfaces and move to the GUI milestone (M8). Paste blocks and project-added producers are feasible headlessly and remain available for wiring before then.
 - Keep audit records local and avoid storing unnecessary file contents or private output.
 
 ### Desktop GUI Runtime
