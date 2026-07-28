@@ -11,7 +11,7 @@ This roadmap tracks the next implementation themes after `0.1.0`. It is intentio
 | M4 | `0.2.0` (released 2026-07-17) | Runtime Feasibility + Terminal / PTY Foundation | GUI/TUI substrate decision, PTY render/input spike, then project-scoped local terminal lifecycle foundation. |
 | M5 | `0.3.0` (consolidated with M6-M7) | AgentRun Launch + Active File Safety | Executable AI CLI profiles, AgentRun launch, and active-document external-change detection while agents run. |
 | M6 | `0.3.0` (consolidated with M5, M7) | Transcript And Review Foundations | Bounded transcript capture, retention controls, and generated-change review models/harnesses. |
-| M7 | `0.3.0` (consolidated with M5-M6) | Durable Audit | Local durable audit storage for trust, launch, approval, blocked access, and destructive decisions. |
+| M7 | `0.3.0` (consolidated with M5-M6) | Durable Audit | Local durable audit storage for trust decisions, managed process launches, blocked root/symlink access, and recovery outcomes. |
 | M8 | `0.4.x` | Desktop GUI Runtime + Terminal Surface | First real desktop shell, terminal/agent-immersion surface, and security/review UI surfaces. |
 | M9 | `0.5.x` | File Workflow Follow-Up | Watcher, overwrite confirmation, multi-document model, and richer editor internals where needed. |
 | M10 | `0.6.x`-`0.9.x` | Integration Hardening | Cross-feature UX, release automation, portability checks, and beta stabilization. |
