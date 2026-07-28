@@ -8,16 +8,16 @@ This roadmap tracks the next implementation themes after `0.1.0`. It is intentio
 
 | Milestone | Working Target | Theme | Primary Outcome |
 | --- | --- | --- | --- |
-| M4 | `0.2.x` | Runtime Feasibility + Terminal / PTY Foundation | GUI/TUI substrate decision, PTY render/input spike, then project-scoped local terminal lifecycle foundation. |
-| M5 | `0.3.x` | AgentRun Launch + Active File Safety | Executable AI CLI profiles, AgentRun launch, and active-document external-change detection while agents run. |
-| M6 | `0.4.x` | Transcript And Review Foundations | Bounded transcript capture, retention controls, and generated-change review models/harnesses. |
-| M7 | `0.5.x` | Durable Audit | Local durable audit storage for trust, launch, approval, blocked access, and destructive decisions. |
-| M8 | `0.6.x` | Desktop GUI Runtime + Terminal Surface | First real desktop shell, terminal/agent-immersion surface, and security/review UI surfaces. |
-| M9 | `0.7.x` | File Workflow Follow-Up | Watcher, overwrite confirmation, multi-document model, and richer editor internals where needed. |
-| M10 | `0.8.x`-`0.9.x` | Integration Hardening | Cross-feature UX, release automation, portability checks, and beta stabilization. |
+| M4 | `0.2.0` (released 2026-07-17) | Runtime Feasibility + Terminal / PTY Foundation | GUI/TUI substrate decision, PTY render/input spike, then project-scoped local terminal lifecycle foundation. |
+| M5 | `0.3.0` (consolidated with M6-M7) | AgentRun Launch + Active File Safety | Executable AI CLI profiles, AgentRun launch, and active-document external-change detection while agents run. |
+| M6 | `0.3.0` (consolidated with M5, M7) | Transcript And Review Foundations | Bounded transcript capture, retention controls, and generated-change review models/harnesses. |
+| M7 | `0.3.0` (consolidated with M5-M6) | Durable Audit | Local durable audit storage for trust, launch, approval, blocked access, and destructive decisions. |
+| M8 | `0.4.x` | Desktop GUI Runtime + Terminal Surface | First real desktop shell, terminal/agent-immersion surface, and security/review UI surfaces. |
+| M9 | `0.5.x` | File Workflow Follow-Up | Watcher, overwrite confirmation, multi-document model, and richer editor internals where needed. |
+| M10 | `0.6.x`-`0.9.x` | Integration Hardening | Cross-feature UX, release automation, portability checks, and beta stabilization. |
 | M11 | `1.0.0` candidate | Public Product Release | Coherent GUI AI CLI workbench with runtime, review, audit, and safety claims aligned. |
 
-Versions are planning targets, not promises. A milestone can split into multiple patch/minor releases if review shows the scope is too large.
+Versions are planning targets, not promises. A milestone can split into multiple patch/minor releases if review shows the scope is too large. Milestone-to-version mapping follows actual releases: a milestone may share a release with others (as M5-M7 did in `0.3.0`), and version targets for unreleased milestones may shift accordingly.
 
 Dependency notes:
 
@@ -108,10 +108,14 @@ Purpose:
 Scope:
 
 - Durable audit store.
-- Persist trust decisions, process launches, approvals, paste blocks, safe-close decisions, blocked root/symlink access, and destructive confirmations.
+- Persist trust decisions, managed process launches, and blocked root/symlink access.
+- Command approval, safe-close, and destructive-confirmation producers move to M8, because those events originate in dialogs that do not yet exist.
+- Terminal paste blocks and project-added producers remain available for wiring once an app/UI event path exists; deferred at 0.3.0 alongside the rest to keep that release reconciliation-only.
 - Keep audit records local.
 - Avoid storing unnecessary file contents, transcript bytes, or private output in audit summaries.
 - Add migration/versioning policy for audit data.
+
+Delivered at 0.3.0: three of the seven originally scoped producer families (trust decisions, managed process launches, blocked root/symlink access). The v1 schema is exhaustive across twelve event families; the remaining nine (the four above plus plain-terminal observation, sensitive configuration changes, and transcript purge) exist in schema only. See the security threat model's T-035 for the associated risk of assuming schema exhaustiveness implies producer coverage.
 
 Review gates:
 
@@ -134,6 +138,7 @@ Scope:
 - Build terminal/agent-immersion surface with the safe ANSI/VT subset and escape-sanitization policy.
 - Build real file tree and editor surface backed by RFC-006 core models.
 - Build rendered approval, paste-protection, transcript/review, and audit/security-event surfaces.
+- Wire the audit producers that require rendered surfaces: command approval, safe-close/destructive decisions, and sensitive configuration changes.
 - Add keyboard/mouse/focus/dialog behavior.
 - Preserve mode policy and no-overclaim safety labels.
 

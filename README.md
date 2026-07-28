@@ -13,22 +13,35 @@ Tekst IDE (`tekstide`) is a local-first, multi-project workbench for supervising
 
 ## Current Status
 
-The current implementation is a terminal/runtime/security foundation through RFC-009. It includes:
+The current implementation is a headless core through RFC-013: terminal runtime,
+AgentRun launch, transcript retention, generated-change review, and durable audit
+storage. It includes:
 
-- Project Board and ProjectSession state;
-- root-bound file access policy;
-- bounded explorer read model;
-- UTF-8 text document buffer;
-- safe save and external-change detection;
-- shell-visible Content Mode evidence;
-- Linux PTY feasibility evidence;
-- project-owned Linux TerminalSession lifecycle foundation;
-- bounded terminal IO, resize, process-group termination, and running-terminal close assessment;
-- conservative terminal output security policy;
-- paste classification before PTY write;
-- model-level trusted UI / terminal spoofing boundary.
+- Project Board and ProjectSession state, root-bound file access, bounded explorer,
+  UTF-8 text buffers, and safe save with external-change detection;
+- project-owned Linux PTY terminal lifecycle with bounded IO, resize, and
+  process-group termination;
+- conservative terminal output security policy, paste classification, and
+  model-level trusted UI boundaries;
+- AI CLI profiles as reviewed launch contracts, with Restricted Mode blocking
+  workspace-local executables, wrappers, project-local `PATH`, and implicit CLI
+  workspace-config discovery;
+- AgentRun launch through project-owned terminals, with honest Plain/Supervised/
+  Managed labels and active-file safety before process start;
+- bounded local transcript capture with retention limits, per-run opt-out, and purge;
+- metadata-only generated-change detection and review-state tracking;
+- durable local SQLite audit storage with schema identity, migration harness,
+  corruption diagnostics, restart-safe recovery, and explicit purge.
 
-It is not yet the full AI CLI workbench. The desktop GUI, app/UI terminal commands, rendered paste dialogs, rendered trusted dialogs, AgentRun launch, AI CLI workflow, transcript/review flow, file watcher, overwrite-confirmation UI, durable audit storage, command approval, and cross-platform terminal evidence are deferred.
+It is not yet the full AI CLI workbench. The desktop GUI, rendered terminal surface,
+app/UI terminal and launch commands, rendered paste/approval/trust dialogs, command
+approval, Git-based change detection, file watcher, overwrite-confirmation UI, and
+cross-platform evidence beyond Linux are deferred.
+
+Durable audit currently records trust decisions, managed AgentRun lifecycle, and
+blocked root/symlink access. Command approval, paste, restricted-feature, safe-close,
+configuration-change, transcript-purge, project-added, and plain-terminal producers
+are defined in the audit schema but not yet wired.
 
 ## Quick Start
 

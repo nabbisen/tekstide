@@ -1,5 +1,99 @@
 # Changelog
 
+## 0.3.0 - AgentRun, Transcript, Review, and Durable Audit
+
+Status: prepared; pending maintainer publish and tag.
+
+Tekstide `0.3.0` consolidates three milestones — M5 AgentRun launch, M6 transcript
+and review foundations, and M7 durable audit — covering RFC-010 through RFC-013.
+These milestones were developed sequentially but never separately released, so they
+ship together here. It remains a headless core, not the full AI CLI workbench.
+
+### Implemented
+
+- RFC-010 AgentRun launch model and AI CLI profiles:
+  - AI CLI profiles as reviewed launch contracts covering executable provenance,
+    argv shape, compatibility level, cwd, environment, prompt, and transcript policy;
+  - Restricted Mode rejection of workspace-local executables, wrappers, shims,
+    symlink targets resolving into the project root, and project-local `PATH` entries;
+  - implicit CLI workspace-config/tool/prompt/plugin discovery blocked or rejected
+    before process start;
+  - launch validation for project, root, cwd, profile source, environment, and
+    compatibility before any process is created;
+  - AgentRun launch through project-owned TerminalSessions, with lifecycle derived
+    from runtime observation;
+  - honest Plain/Supervised/Managed labels; Managed requires adapter capability evidence;
+  - active-document dirty, external-change, conflict, and save-error states block
+    launch before process start, and safe-save conflict blocking is preserved while
+    AgentRuns are active.
+- RFC-011 transcript retention and local data policy:
+  - capture modes Disabled, LocalBounded, and RequiredLocalBounded;
+  - default retention of 32 MiB per transcript, 256 MiB per project, 1 GiB app-wide,
+    and 30 days, with aggregate accounting;
+  - transcript paths resolved under Tekstide state, outside project roots, with
+    symlinked state-root rejection;
+  - bounded append-only writer with truncation state;
+  - per-run opt-out before process start;
+  - purge by transcript, AgentRun, and ProjectSession scope with content-free tombstones.
+- RFC-012 generated change review foundations:
+  - ChangeSet review model with detection source/status, association confidence,
+    bounded content-free summaries, and validated review-state transitions;
+  - filesystem baseline capture and metadata-only changed-path detection;
+  - project-relative path validation rejecting absolute escapes, `..` traversal, and
+    escaping symlinks; symlink entries recorded without following targets;
+  - conservative AgentRun association — strong linkage requires a same-run baseline,
+    a closed target run, and no overlapping run; ambiguous cases stay unlinked.
+- RFC-013 durable audit store and local data policy:
+  - versioned durable record with stable string codes and an exhaustive
+    family/field validation matrix;
+  - local SQLite store with CHECK constraints mirroring that matrix independently of
+    Rust validation, transactional append, exact-retry idempotency, operation
+    correlation, and phase cardinality;
+  - bounded descending cursor queries;
+  - schema identity, read-only probe before write-capable open, and a sequential
+    migration harness with a statement allowlist;
+  - explicit comprehensive diagnostics separate from the bounded startup probe;
+  - corruption classification, exact-artifact quarantine with content-free manifests,
+    atomic fresh-store installation, and restart-safe resume;
+  - project and global purge with ephemeral receipts and local-data accounting;
+  - security-event integration for trust grant/revoke, managed AgentRun lifecycle,
+    and blocked root/symlink access.
+
+Only three of the twelve audit-schema event families have a wired runtime producer
+(trust decisions, managed AgentRun lifecycle, blocked root/symlink access). See
+Deferred below and the security threat model's T-035 for why this distinction matters.
+
+### Dependencies
+
+- Added `rusqlite 0.39.0` with `default-features = false` and only `bundled` enabled,
+  resolving `libsqlite3-sys 0.37.0` and bundled SQLite `3.51.3`. This is the first
+  third-party native dependency; it compiles the SQLite C amalgamation during build.
+  Third-party notices are recorded in `NOTICE`.
+
+### Deferred
+
+- Desktop GUI runtime, rendered terminal surface, and rendered paste/approval/trust
+  dialogs.
+- App/UI commands for launching, selecting, and closing terminals and AgentRuns.
+- Command approval.
+- Audit producers for command approval, terminal paste, restricted-feature blocks,
+  safe-close and destructive decisions, sensitive configuration changes, transcript
+  purge, project added, and plain-terminal lifecycle. These families exist in the
+  audit schema but have no runtime producer. Wiring `paste_blocked` headlessly was
+  considered for this release (RFC-009 already classifies paste without a GUI) and
+  deferred to keep 0.3.0 reconciliation-only; it remains available for a future
+  release alongside `project_added`, `plain_terminal_observation`, and
+  `transcript_purge`.
+- Git-based change detection; the RFC-012 detector reports Git as unavailable.
+- File watcher, overwrite-confirmation UI, and multi-document conflict workflow.
+- Cross-platform terminal, storage, and native build evidence beyond
+  `x86_64-unknown-linux-gnu`.
+- Encryption at rest, tamper-evident audit, secure deletion, and automatic retention.
+
+### Release Gate Status
+
+Pending — see release-candidate evidence for observed gate output before tagging.
+
 ## 0.2.0 - Terminal Runtime Foundation
 
 Status: released on 2026-07-17.
