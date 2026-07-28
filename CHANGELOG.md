@@ -92,7 +92,27 @@ Deferred below and the security threat model's T-035 for why this distinction ma
 
 ### Release Gate Status
 
-Pending — see release-candidate evidence for observed gate output before tagging.
+Completed on a clean, committed tree:
+
+- `git status --short` clean; `git diff --check`;
+- `cargo fmt --all --check`;
+- `cargo test --workspace --all-targets --all-features` — 375 `tekstide-core` tests, 0 elsewhere, 0 failures;
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`;
+- `cargo build --release --locked`;
+- `cargo package -p tekstide-core --locked` (113 files, 872.3 KiB / 143.7 KiB compressed);
+- `cargo publish --dry-run -p tekstide-core --locked`;
+- `cargo package -p tekstide --locked` (6 files, 12.8 KiB / 4.7 KiB compressed);
+- `cargo publish --dry-run -p tekstide --locked`;
+- `cargo publish --workspace --dry-run --locked` (authoritative same-workspace pairing check; verifies `tekstide` against the local `tekstide-core 0.3.0`, not a stale registry version);
+- package smoke test: `cargo build`/`cargo test` from the unpacked `tekstide-core-0.3.0` package artifact (not the working tree) — 375 tests passed;
+- release tarball built via `git archive` at `tekstide-v0.3.0.tar`: no intermediate parent directory, `NOTICE` and `LICENSE` both at archive root, no `.git`/`.git-exclude`/`target`/local-agent-config paths present (249 entries).
+
+Build-cost baseline (first captured; RFC-013 retained none, so there is no prior figure to compare against):
+
+- Clean `cargo build --release --locked` on `x86_64-unknown-linux-gnu`, Rust 1.97.1: 27.3s wall-clock.
+- `target/release/tekstide` binary size: 790,560 bytes unstripped, 605,368 bytes stripped.
+
+Not yet done: real `cargo publish` to crates.io, git tag, and release-candidate review acceptance. This entry's `Status:` line must be updated to `released on YYYY-MM-DD` only after those complete.
 
 ## 0.2.0 - Terminal Runtime Foundation
 
