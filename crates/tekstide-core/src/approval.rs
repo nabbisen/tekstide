@@ -8,19 +8,23 @@
 //!
 //! PR-021-B: protocol message types and bounded validation.
 //! PR-021-C: structural risk classifier.
-//! PR-021-D (this slice): the sideband channel.
-//! No coordinator yet -- that is `approval::coordinator`, added in the
-//! next slice.
+//! PR-021-D: the sideband channel.
+//! PR-021-E1 (this slice): the trusted-context coordinator -- verified
+//! cwd, proposal-id uniqueness, single-use decisions. Audit wiring and the
+//! decision round-trip over the channel are PR-021-E2, not yet built.
 
 mod channel;
+mod coordinator;
 mod protocol;
 mod risk;
 
 pub use channel::{
-    AcceptedProposal, ApprovalChannelDirectory, ApprovalChannelEndpoint, ApprovalChannelError,
-    ApprovalChannelErrorReason, ApprovalChannelPathError, ApprovalChannelPathErrorReason,
-    ApprovalChannelPathRequest, ApprovalChannelPathResolver,
+    APPROVAL_TOKEN_ENV_VAR, AcceptedProposal, ApprovalChannelDirectory, ApprovalChannelEndpoint,
+    ApprovalChannelError, ApprovalChannelErrorReason, ApprovalChannelPathError,
+    ApprovalChannelPathErrorReason, ApprovalChannelPathRequest, ApprovalChannelPathResolver,
+    inject_token_into_environment,
 };
+pub use coordinator::{ApprovalCoordinator, DecideOutcome, ReceiveOutcome};
 pub use protocol::{
     CommandDecision, CommandProposal, DecisionOutcome, DecisionValidationError,
     DecisionValidationErrorReason, MAX_ARGV_ENTRIES, MAX_ARGV_ENTRY_LEN, MAX_ARGV_TOTAL_LEN,

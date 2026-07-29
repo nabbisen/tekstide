@@ -643,6 +643,107 @@ fn ancestor_symlink_swap_of_the_state_root_itself_is_rejected() {
     let _ = std::fs::remove_file(&state_root);
 }
 
+/// Response 113 Q2 (promoted to required E1 scope): a same-user peer that
+/// connects and stalls must not delay acceptance of a second, unrelated,
+/// well-behaved connection. Reproduces the exact denial the reviewer
+/// described: a slow peer connects first and holds its connection open
+/// (sending nothing) for far longer than the well-behaved peer's proposal
+/// should take to be served -- if `serve_concurrently` still authenticated
+/// one connection at a time, the well-behaved peer's result would not
+/// arrive until the slow peer's read timeout released the single slot.
+#[test]
+fn serve_concurrently_accepts_a_second_connection_while_the_first_stalls() {
+    let state_root = temp_state_root("concurrent");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    let (mut endpoint, token) =
+        ApprovalChannelEndpoint::bind(&directory, &agent_run_id).expect("bind must succeed");
+    endpoint.set_read_timeout_for_test(Duration::from_secs(2));
+    let socket_path = directory.socket_path(&agent_run_id);
+    let endpoint = std::sync::Arc::new(endpoint);
+    let receiver = std::sync::Arc::clone(&endpoint).serve_concurrently();
+
+    let slow_socket_path = socket_path.clone();
+    let slow_peer = std::thread::spawn(move || {
+        let stream = UnixStream::connect(&slow_socket_path).expect("slow peer connect");
+        // Holds the connection open, sending nothing, for longer than the
+        // well-behaved peer below should take to be served -- but well
+        // under the 2s read timeout, so this thread's own result arrives
+        // (a ReadTimedOut error, ignored by this test) without slowing
+        // the test down unnecessarily.
+        std::thread::sleep(Duration::from_millis(600));
+        drop(stream);
+    });
+    // Give the slow peer a head start so it is definitely connected and
+    // occupying its own authentication thread before the well-behaved
+    // peer connects.
+    std::thread::sleep(Duration::from_millis(100));
+
+    let well_behaved_socket_path = socket_path;
+    let well_behaved_peer = std::thread::spawn(move || {
+        let mut stream =
+            UnixStream::connect(&well_behaved_socket_path).expect("well-behaved peer connect");
+        stream
+            .write_all(&valid_proposal_frame(&token, "proposal-1"))
+            .expect("well-behaved peer send proposal");
+    });
+
+    let started = std::time::Instant::now();
+    let result = receiver.recv_timeout(Duration::from_millis(400)).expect(
+        "must receive the well-behaved peer's result promptly -- if this times out, \
+             the well-behaved connection was stuck behind the stalling one",
+    );
+    let elapsed = started.elapsed();
+
+    well_behaved_peer
+        .join()
+        .expect("well-behaved peer thread must not panic");
+    slow_peer.join().expect("slow peer thread must not panic");
+
+    let accepted = result.expect("the well-behaved peer's proposal must be accepted");
+    assert_eq!(accepted.proposal.proposal_id().as_str(), "proposal-1");
+    assert!(
+        elapsed < Duration::from_millis(400),
+        "the well-behaved connection must be served quickly, not wait behind the \
+         stalling one -- took {elapsed:?}"
+    );
+}
+
+/// Response 113 Q3 item 1: the capability token must reach a spawned
+/// adapter process only through `APPROVAL_TOKEN_ENV_VAR`. Verified against
+/// a real, separately spawned child process reading back its own
+/// environment -- not merely asserting the `Command` builder was called.
+#[test]
+fn inject_token_into_environment_sets_the_sanctioned_variable_on_a_real_child_process() {
+    let token_value = "a-real-looking-capability-token-0123456789";
+    let proposal = crate::approval::CommandProposal::decode(
+        crate::approval::PROTOCOL_VERSION,
+        token_value.to_string(),
+        "proposal-1".to_string(),
+        vec!["true".to_string()],
+        PathBuf::from("/tmp"),
+        None,
+        None,
+    )
+    .expect("test proposal must decode");
+
+    let mut command = Command::new("sh");
+    command.arg("-c").arg(format!(
+        "printf '%s' \"${}\"",
+        crate::approval::APPROVAL_TOKEN_ENV_VAR
+    ));
+    crate::approval::inject_token_into_environment(&mut command, proposal.run_token());
+
+    let output = command.output().expect("spawn a real child process");
+    assert!(output.status.success(), "child process must exit cleanly");
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("child stdout must be valid UTF-8"),
+        token_value,
+        "the child process must see the token through APPROVAL_TOKEN_ENV_VAR"
+    );
+}
+
 fn which_python3() -> Result<String, ()> {
     let output = Command::new("which")
         .arg("python3")

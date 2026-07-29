@@ -61,6 +61,8 @@ use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -324,6 +326,43 @@ fn generate_capability_token() -> String {
     )
 }
 
+/// The one and only environment variable through which a
+/// `RunCapabilityToken` may reach an adapter process (response 113 Q3 item
+/// 1: promoted from launch-path wiring to a security decision this module
+/// must own -- "the token must reach the adapter only by this route" is
+/// itself part of what makes the token a capability rather than a
+/// guessable value, not a coordination detail for whichever code happens
+/// to spawn the process).
+pub const APPROVAL_TOKEN_ENV_VAR: &str = "TEKSTIDE_APPROVAL_TOKEN";
+
+/// Sets `APPROVAL_TOKEN_ENV_VAR` on `command` to `token`'s value -- the
+/// single sanctioned way a `RunCapabilityToken` may be delivered to a
+/// spawned adapter process. This exists so there is exactly one, tested
+/// choke point for that delivery, rather than each future call site
+/// improvising its own `.env(...)` call: nothing here (or, so far as a
+/// search of this crate when this was written could confirm, anywhere
+/// else in it) writes the token to a file, a log, or any other channel.
+///
+/// **Known limitation, disclosed rather than worked around:** as of this
+/// slice, no code path in `runtime::terminal` spawns a distinct "adapter"
+/// process to call this against. `runtime::terminal::launch::spawn_shell`
+/// always launches a plain interactive shell with a fixed, hard-coded
+/// environment (`env_clear()` plus five literal `.env()` calls), and
+/// `TerminalEnvironmentPolicy::ExplicitAllowlist` is not yet applied by
+/// the Linux runtime (`launch.rs`'s own `unsupported_environment_policy_
+/// summary` rejects that policy outright, before a process is ever
+/// spawned). This function therefore has no production caller yet. It is
+/// built and tested now, ahead of that caller existing, so the one
+/// correct way to deliver this specific secret is already established
+/// and verified rather than improvised later under the same kind of time
+/// pressure that left the caller itself unbuilt.
+pub fn inject_token_into_environment(
+    command: &mut std::process::Command,
+    token: &RunCapabilityToken,
+) {
+    command.env(APPROVAL_TOKEN_ENV_VAR, token.as_str());
+}
+
 // --- The endpoint --------------------------------------------------
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -514,12 +553,74 @@ impl ApprovalChannelEndpoint {
     /// dropped immediately -- no diagnostic is returned to the peer, and
     /// nothing here constructs anything a dialog could render, per the
     /// fail-closed-without-a-dialog requirement.
+    ///
+    /// This accepts and authenticates strictly one connection at a time --
+    /// see `serve_concurrently` for why that is no longer this endpoint's
+    /// only mode of operation, and when to use which.
     pub fn accept_proposal(&self) -> Result<AcceptedProposal, ApprovalChannelError> {
-        let (mut stream, _addr) = self.listener.accept().map_err(ApprovalChannelError::io)?;
+        let (stream, _addr) = self.listener.accept().map_err(ApprovalChannelError::io)?;
+        self.authenticate_and_read(stream)
+    }
 
+    /// Response 113 Q2 (promoted from an open PR-021-E question to
+    /// required E1 scope, per the reviewer's framing: the timeout bounds
+    /// how long one connection can occupy the slot, but does not fix the
+    /// underlying denial of a single-slot design). `accept_proposal`
+    /// authenticates one connection fully -- including the up-to-
+    /// `read_timeout` wait for its first frame -- before `listener.accept`
+    /// is ever called again. A same-user peer that connects and stalls
+    /// therefore occupies the one in-flight slot repeatedly, delaying the
+    /// real adapter's connection behind it in the kernel's listen backlog
+    /// for a further `read_timeout` on every repeat.
+    ///
+    /// This spawns a dedicated thread per accepted connection so the
+    /// accept loop calls `listener.accept()` again immediately rather than
+    /// waiting for the previous connection to finish authenticating.
+    /// `read_timeout` still bounds how long any *one* connection can
+    /// occupy its own thread; it no longer bounds how quickly the *next*
+    /// connection is accepted. Results are delivered through the returned
+    /// channel in whatever order authentication actually finishes in, not
+    /// necessarily accept order.
+    ///
+    /// Takes `self` by `Arc` rather than `&self` because both the accept
+    /// loop thread and each per-connection authentication thread need
+    /// independent ownership that outlives this call, and the number of
+    /// concurrent connections is unbounded at compile time.
+    pub fn serve_concurrently(
+        self: Arc<Self>,
+    ) -> mpsc::Receiver<Result<AcceptedProposal, ApprovalChannelError>> {
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            loop {
+                let stream = match self.listener.accept() {
+                    Ok((stream, _addr)) => stream,
+                    // The listener itself is gone (e.g. every `Arc` clone
+                    // reachable from a caller has already been dropped) --
+                    // nothing further can be accepted, so this loop ends.
+                    Err(_) => break,
+                };
+                let endpoint = Arc::clone(&self);
+                let sender = sender.clone();
+                thread::spawn(move || {
+                    let result = endpoint.authenticate_and_read(stream);
+                    // The receiver may have been dropped (the caller
+                    // stopped listening for results) -- a send failure
+                    // here is not this thread's problem to handle further.
+                    let _ = sender.send(result);
+                });
+            }
+        });
+        receiver
+    }
+
+    fn authenticate_and_read(
+        &self,
+        mut stream: UnixStream,
+    ) -> Result<AcceptedProposal, ApprovalChannelError> {
         // Response 112 Defect 3: without this, a same-user peer that
         // connects and then sends nothing (or a partial frame) blocks
-        // this call -- and every connection after it -- forever.
+        // this call -- and, before `serve_concurrently`, every connection
+        // after it -- forever.
         stream
             .set_read_timeout(Some(self.read_timeout))
             .map_err(ApprovalChannelError::io)?;
