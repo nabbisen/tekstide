@@ -1,6 +1,6 @@
 # RFC-014: Desktop GUI Substrate and Terminal Rendering Strategy
 
-Status: Proposed
+Status: Proposed — spike complete; substrate decision approved by the human owner 2026-07-29 (see §PR-014-F)
 Target milestone: M8
 Date: 2026-07-28
 
@@ -193,3 +193,111 @@ PR-014-B through PR-014-E are developer implementation and measurement work. PR-
 2. Should the second retained-mode candidate be named now, or selected by the spike author after a bounded survey?
 3. If a performance budget is missed by a small margin, is the preference to amend the NFR or to change substrate?
 4. Should syntax highlighting be pulled into the spike's evaluation, or remain deferred as RFC-006 left it?
+
+---
+
+# Decision Record (PR-014-F)
+
+Date: 2026-07-29
+Author: high-capability model (architect)
+Status: **Approved by the human owner, 2026-07-29**
+Evidence base: PR-014-B through PR-014-E, reviewed and accepted in responses 105, 106, 107, and 108.
+
+**Approved by the human owner on 2026-07-29.** Substrate selection is a multi-year maintenance commitment reserved to the human owner; this section records the recommendation, the evidence behind it, and the owner's decision.
+
+**Owner's basis for the decision.** The owner's own evaluation considered a wider candidate set than the spike's shortlist — including `dioxus` and `tauri`, neither of which the spike assessed — and independently reached the same conclusion. `dioxus` and `tauri` are webview-adjacent, which this RFC had already excluded on `NFR-RES-002` grounds ("baseline memory substantially lower than Electron-based IDEs"); the owner's consideration reached that outcome separately rather than inheriting it. The decision therefore rests on both the spike evidence below and a broader independent comparison.
+
+## D1. Recommended decision
+
+**Substrate: `iced` 0.14.**
+**Terminal rendering: Option A** — `alacritty_terminal` as the emulator, with the RFC-009 accepted-sequence policy interposed as a `vte::ansi::Handler` wrapper in front of it.
+
+## D2. Evidence against the criteria
+
+| # | Criterion | Result |
+| --- | --- | --- |
+| C1 | Terminal grid renders the RFC-009 accepted subset; unsupported families inert; styled spans | **Verified.** Real PTY-backed shell; OSC 52 / title / OSC 8 confirmed inert, window title independently checked unchanged; multi-colour spans in one line via `Term::renderable_content()` |
+| C2 | Typing latency p95 ≤ 16 ms | **Not verified** — see R1 |
+| C3 | Terminal input latency under flood p95 ≤ 16 ms | **Not verified** — see R1 |
+| C4 | Mode switch p95 ≤ 32 ms; no animation | **Not verified** — see R1. No-animation confirmed separately by code inspection |
+| C5 | Warm start ≤ 800 ms | **Met.** Median 227.9 ms, max 255.5 ms over 14 warm runs. Uncontaminated |
+| C6 | Idle RSS baseline | **Recorded.** 178,124 kB after 60 s idle, one project + one terminal. Uncontaminated |
+| C7 | Font metrics for per-pane column count | **Verified.** 7.8 logical px/glyph at 13 px monospace via iced's own `Paragraph` primitive, exercised at the real 1.2× fractional scale |
+| C8 | Trusted UI structurally separable; screenshot evidence | **Verified.** Genuine dialog via `stack`/`opaque` alongside an adversarial imitation in one frame. **Closes the RFC-009 `screenshot-backed spoofing evidence` deferral** |
+| C9 | Keyboard reachability; focus trapping | **Verified** for the spike surfaces. Caveat R6 applies |
+| C10 | Non-Latin script rendering | **Verified with disclosed gaps.** Editor reorders bidi correctly; terminal grid does not, and lacks wide-cell CJK — see R7 |
+| C11 | Accessibility affordances | **Partially met.** Focus indicators verified and non-colour-reliant. **Screen-reader path absent — see R2** |
+| C12 | Cross-platform path | **Not attempted** (non-goal). Blocker identified is `LinuxTerminalRuntime`, not the GUI substrate |
+| C13 | Licence inventory | **Verified.** `iced` MIT; `alacritty_terminal` Apache-2.0; `vte` Apache-2.0 OR MIT; transitives inventoried. No bundled native C introduced |
+| C14 | Maintenance posture | **Recorded.** See R3 for dependency weight |
+
+Ten of fourteen criteria verified or met. Three unverified (C2-C4, one root cause). One partially met (C11). One deliberately not attempted (C12).
+
+## D3. Rejected alternatives
+
+| Alternative | Reason |
+| --- | --- |
+| **Pure TUI** | Rejected on accepted-requirements grounds, not preference. RFC-009:212 requires approval/trust/paste/destructive dialogs rendered *outside terminal output*; that property cannot hold when every surface is characters in one grid. i18n and accessibility point the same way |
+| **`slint`** | C13 licence. `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0` — GPL is virally incompatible with Apache-2.0 redistribution, and `LicenseRef-` denotes bespoke non-OSI terms |
+| **`gpui`** | C14 maintenance. Last crates.io release 0.2.2 on 2025-10-22, ~9 months stale; 172 K downloads vs `egui`'s 20.4 M. Rejected *despite having the strongest terminal precedent* (Zed ships a production terminal on it) — precedent shows a framework can do the job today, maintenance posture shows whether it still will in three years |
+| **`xilem`** | Explicitly alpha; no stable release |
+| **`relm4`/GTK** | Native GTK4 C dependency, in tension with the pure-Rust framing that already excludes webview shells |
+| **`egui`** | Not rejected on merit — evaluated as the comparison candidate under a deliberately narrow C1/C7 probe. **See R2: it is materially better than `iced` on accessibility, and that was never compared** |
+| **Terminal Option B** (own grid on the RFC-009 parser) | Not needed. Option A proved implementable and non-falsified |
+| **Terminal Option C** (unfiltered emulator + amend RFC-009) | Not adopted. Would have reopened an accepted, evidence-backed security boundary |
+
+## D4. Why Option A rather than a byte-level filter
+
+The handoff specified byte-level interposition with a stateful filter mirroring `TerminalSecurityParser`. The spike falsified that as the right approach: `alacritty_terminal` delegates classification to the same `vte` grammar it is built on, so wrapping `vte::ansi::Handler` yields two properties **by construction** rather than by testing —
+
+- **P3 (classification parity):** filter and emulator share one classifier; there is no second implementation to drift.
+- **P4 (stream-position independence):** `Processor` holds parse state across `advance()` calls, so sequences split across PTY reads are reassembled by the same code the real terminal uses.
+
+Verified in vendored `vte-0.15.0`: all 71 `Handler` methods have default bodies and every default is an empty no-op, so "blocked by omission" is fail-closed by the trait's own design. A future `vte` adding a method gets the no-op automatically — a new capability cannot appear by silent forwarding.
+
+The handoff's original instruction would have created the very dual-parser drift risk it was written to prevent.
+
+## D5. Residual risks
+
+Numbered for carry-forward. **R1 and R2 require owner acknowledgement.**
+
+**R1 — Latency budgets unverified (C2/C3/C4).** *Owner acknowledgement required.*
+`iced` 0.14's only application-level frame-observation hook, `window::frames()`, forces continuous compositor-driven redraw once subscribed (~57 Hz, ~2.7 % of one core, with nothing animating). Input-to-frame therefore measures frame availability, not rendering cost. All samples read 0 µs — a degenerate result, not a pass.
+*Impact:* the substrate's responsiveness against `NFR-PERF-002/003/004` is unknown. It may be excellent; it is unproven.
+*Mitigation:* verify in M8 with instrumentation built into the real shell, where a non-contaminating path is available. **Do not amend the NFRs** — nothing was measured, so there is nothing to calibrate against.
+
+**R2 — No accessibility bridge exists in `iced` 0.14.** *Owner decision required.*
+Verified: zero matches for `accesskit`/`a11y`/`accessibility` in vendored `iced`/`iced_winit`, and `accesskit` is absent from the resolved graph. **`egui` 0.35 depends on `accesskit` 0.24.1 as a required, non-optional dependency.**
+*Impact:* `NFR-UX-001` (keyboard accessibility) is satisfiable and satisfied. UI/UX §18's *"screen-reader labels should be provided for Project Board rows, approval actions, and process state"* is **not achievable** on this substrate unless `iced` adds a bridge upstream. Accessibility cannot be retrofitted onto a toolkit with no bridge.
+*Honest attribution:* the spike did not surface this comparison because **my own handoff scoped the second candidate to a narrow C1/C7 probe**, excluding accessibility. That scoping error is mine, not the implementer's.
+***Accepted by the human owner, 2026-07-29.*** Accepted on the grounds that i18n is a **mandatory** project requirement with verified evidence on this substrate (C10: the editor surface performs full Unicode bidi reordering with correct shaping, via `cosmic-text`/`swash`/`unicode-bidi`), whereas screen-reader labelling is a **"should"** in UI/UX §18 with no end-to-end verification on any candidate. `NFR-UX-001` keyboard accessibility is satisfied and unaffected.
+
+*Obligations arising from this acceptance:*
+1. **Public claims must state the limitation** — README, documentation, and release notes must say Tekstide is keyboard-accessible and has **no screen-reader support**, with the same discipline applied to audit-producer coverage.
+2. **Watch `iced` upstream for an `accesskit` bridge.** If one lands, adoption becomes ordinary implementation work rather than a substrate question.
+3. **Keep the core/runtime boundary clean.** It has held from RFC-008 through RFC-013 and is what would make a future substrate change survivable.
+
+*Reviewer note on provenance:* the spike did not compare accessibility because **the architect's handoff scoped the second candidate to a narrow C1/C7 probe**. That scoping error is recorded here so the decision's evidentiary limits are visible, not hidden.
+
+**R3 — Dependency weight.** `Cargo.lock` 50 → 406 packages (+356 across PR-014-B/C), including `wgpu`, `glow`, `cosmic-text`, `fontdb`. Unremarkable for a GPU-accelerated Rust GUI, but materially larger than the single native dependency that justified threat-model entry T-033. PR-014-F records it; a supply-chain assessment belongs in M8.
+
+**R4 — `linefeed()` admits VT and FF.** Constraint-forced: `vte` collapses `C0::LF | C0::VT | C0::FF` into one `linefeed()` call, so the filter cannot separate them at this boundary. `tekstide-core`'s byte-level classifier blocks VT/FF. RFC-017 must decide explicitly whether admitting them is acceptable or whether a byte-level pre-filter is needed for those two codes.
+
+**R5 — `clear_screen` forwarded mode-blind.** `CSI 3 J` (`ClearMode::Saved`) erases scrollback. Faithful to RFC-009:131 as written, and `tekstide-core`'s parser is equally mode-blind — so this is pre-existing policy breadth, not a filter divergence. Unlike R4 this is a *choice*: the mode is available as a parameter. RFC-017 should decide whether terminal output may wipe user scrollback.
+
+**R6 — The focus-trap property does not transfer.** It currently holds because the spike's terminal is output-only and emits no messages. The real terminal must accept keyboard input; RFC-017 must re-establish the property under that condition, with a different argument and probably a real test. **This evidence must not be cited as covering the input-accepting case.**
+
+**R7 — Terminal i18n fidelity is lower than the editor's.** Editor reorders bidi correctly; the terminal grid does not (correct — real terminals generally do not) and lacks wide-cell CJK (a genuine gap; `alacritty_terminal` supports it, the spike's minimal renderer does not consume it). RFC-016 and RFC-017 both need this asymmetry as input.
+
+**R8 — `default-features` unconstrained**, now plus the `advanced` feature. RFC-013 established `default-features = false` discipline for `rusqlite`. If `iced` becomes a product dependency, its feature surface and transitive native licences need the same review.
+
+**R9 — Measurement harness carries survivorship bias.** Percentiles computed over confirmed-received samples only; if delivery loss correlates with the app being busy, dropped samples may be the slow ones. Irrelevant to a degenerate result, material for M8 reuse.
+
+## D6. Spike disposition
+
+`crates/tekstide-gui-spike` remains `publish = false` with no product dependency. **Retain, do not delete, until RFC-015 lands** — the filter corpus (18 tests) and the C7 font-metrics harness are directly reusable as reference implementations, and deleting them before the real shell exists would discard working evidence. Remove or archive at RFC-015 closeout.
+
+## D7. What M8 inherits
+
+- **Proven:** terminal rendering strategy, the RFC-009 interposition point, trusted-UI separability, font metrics for the split policy, startup and idle-memory baselines.
+- **Unproven and owed:** latency verification (R1), accessibility posture (R2), and every property in R4-R7 that RFC-017 must re-establish under real product conditions.

@@ -85,9 +85,9 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 
 | RFC | Title | Milestone | Depends on | Headless | Status |
 | --- | --- | --- | --- | --- | --- |
-| 014 | Desktop GUI Substrate and Terminal Rendering Strategy | M8 | — | no | **In progress** (PR-014-B accepted) |
-| 015 | Application Shell and Rendered Surface Model | M8 | 014 | no | Blocked on 014 |
-| 016 | Internationalization and Localization | M8 | 014 | partly | Blocked on 014 |
+| 014 | Desktop GUI Substrate and Terminal Rendering Strategy | M8 | — | no | **Decision approved 2026-07-29 — `iced` + Option A** |
+| 015 | Application Shell and Rendered Surface Model | M8 | 014 | no | **Unblocked — next to author** |
+| 016 | Internationalization and Localization | M8 | 014 | partly | **Unblocked** |
 | 017 | Terminal Renderer and Immersion Mode | M9 | 014, 015 | no | Blocked |
 | 018 | Rendered Paste Protection and Trusted UI | M9 | 017 | no | Blocked |
 | 019 | Editor and Explorer Surfaces | M10 | 015 | no | Blocked |
