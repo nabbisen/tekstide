@@ -2,7 +2,7 @@
 title: "RFC-021: Command Approval Model and Adapter Capability - Acceptance / QA Checklist"
 rfc: "RFC-021"
 rfc_file: "../../proposed/021-command-approval-model-and-adapter-capability.md"
-status: "Proposed — implementation in progress (PR-021-B landed)"
+status: "Proposed — implementation in progress (PR-021-B, PR-021-C landed)"
 target_milestone: "M11"
 source_rfc_status: "Proposed"
 created: "2026-07-28"
@@ -40,15 +40,15 @@ updated: "2026-07-29"
 
 ## Risk Classifier Checklist
 
-- [ ] Path outside canonical project root escalates to at least `High`.
-- [ ] Privilege elevation escalates.
-- [ ] Git remote-mutating operations escalate.
-- [ ] Secret-like path patterns escalate.
-- [ ] Writes to the Tekstide state root escalate.
-- [ ] Recursive deletion / disk operations / history rewriting classify `Destructive`.
-- [ ] **Unclassifiable input classifies `High`, never `Low`.**
-- [ ] Fixture corpus covers both directions — escalating and ordinary.
-- [ ] No shell-grammar interpretation.
+- [x] Path outside canonical project root escalates to at least `High`. Checked lexically (no filesystem access); covers absolute paths, simple `..`, and deeply-nested `..`.
+- [x] Privilege elevation escalates. `sudo`/`doas`/`pkexec`, by basename (catches absolute-path invocation) and scanned across all argv entries (catches `env sudo ...` wrapper indirection).
+- [x] Git remote-mutating operations escalate. `push`, `remote`, `tag -d`/`--delete`, any `--force`/`-f`/`--force-with-lease`.
+- [x] Secret-like path patterns escalate. See qa-evidence.md: the pattern list is newly authored for this slice, not reused from an existing implementation — flagged as a possible RFC-004 gap.
+- [x] Writes to the Tekstide state root escalate. Any reference (not distinguished from reads, since that distinction is not structurally decidable).
+- [x] Recursive deletion / disk operations / history rewriting classify `Destructive`.
+- [x] **Unclassifiable input classifies `High`, never `Low`.** `Low`/`Medium` are only reachable via explicit allowlists; the fallthrough is `High` by construction. Test written first, per instruction.
+- [x] Fixture corpus covers both directions — escalating and ordinary. 34-case table plus 3 targeted tests.
+- [x] No shell-grammar interpretation. Structural only; documented in the module doc. (A shell interpreter invoked with `-c` escalates as opaque-to-inspection, which is a consequence of not interpreting shell grammar, not an exception to it.)
 
 ## Decision Checklist
 

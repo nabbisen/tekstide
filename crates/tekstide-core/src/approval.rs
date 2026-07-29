@@ -6,12 +6,13 @@
 //! `audit::record` and `runtime::terminal::security`: untrusted input in,
 //! fail-closed decisions out.
 //!
-//! PR-021-B (this slice): protocol message types and bounded validation
-//! only. No channel, no classifier, no coordinator yet -- those are
-//! `approval::channel`, `approval::risk`, and `approval::coordinator`,
-//! added in later slices.
+//! PR-021-B: protocol message types and bounded validation.
+//! PR-021-C (this slice): structural risk classifier.
+//! No channel, no coordinator yet -- those are `approval::channel` and
+//! `approval::coordinator`, added in later slices.
 
 mod protocol;
+mod risk;
 
 pub use protocol::{
     CommandDecision, CommandProposal, DecisionOutcome, DecisionValidationError,
@@ -20,6 +21,7 @@ pub use protocol::{
     PROTOCOL_VERSION, ProposalId, ProposalValidationError, RunCapabilityToken,
     UntrustedEffectsHint,
 };
+pub use risk::classify;
 
 #[cfg(test)]
 mod tests;

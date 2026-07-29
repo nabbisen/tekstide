@@ -1,6 +1,6 @@
 # RFC-021: Command Approval Model and Adapter Capability - QA Evidence
 
-Status: Proposed — implementation in progress (PR-021-B landed 2026-07-29)
+Status: Proposed — implementation in progress (PR-021-B, PR-021-C landed 2026-07-29)
 Date opened: 2026-07-28
 Date accepted: Pending
 
@@ -52,7 +52,26 @@ Noted for PR-021-E, not acted on now: response 109 flagged that RFC-016's escape
 
 ### PR-021-C — Risk classifier
 
-Pending implementation.
+**Module:** `crates/tekstide-core/src/approval/risk.rs` (+ `approval/tests/risk.rs`), one public function: `classify(argv: &[String], cwd: &Path, project_root: &Path, state_root: &Path) -> domain::RiskLevel`. Reuses the existing `domain::RiskLevel` type (`Low`/`Medium`/`High`/`Destructive`) rather than defining a new one, per the handoff.
+
+**Design: `Low`/`Medium` are only reachable through an explicit allowlist; everything else is `High` by construction.** The RFC's mandatory property — "unclassifiable input classifies `High`, never `Low`" — shaped the whole function shape, not just one branch: `classify` checks Destructive triggers, then High triggers, then a small `Low` allowlist, then a small `Medium` allowlist, and falls through to `High` if none matched. There is no code path that reaches `Low` or `Medium` without a positive match; an unrecognized program cannot silently default to safe. The corresponding test (`unrecognized_program_classifies_high_never_low`) is written first in the test file, per the handoff's instruction to write that test before anything else.
+
+**Path escaping is checked lexically, not via `fs::canonicalize`.** A proposed command may reference a path that does not exist yet (a new output file, a not-yet-created directory), so requiring the filesystem to agree before classifying anything would be wrong for a proposal that hasn't executed. Every argv entry is resolved against `cwd` (if relative) and normalized by manually walking `.`/`..` path components — no filesystem access, no symlink resolution — then checked for containment under `project_root` (escalate if outside) and separately under `state_root` (escalate if inside). Checking *every* argv entry (not just ones that "look like" flag values) is deliberately conservative and does not produce false positives: an ordinary non-path token like `status` or `-la`, joined with `cwd`, trivially resolves to somewhere inside `cwd` and therefore inside the root.
+
+**Escalation rules implemented, matching `implementation-handoff.md` §4:** path outside project root; privilege elevation (`sudo`/`doas`/`pkexec`, checked by basename so `/usr/bin/sudo` is caught, and scanned across all argv entries so `env sudo ls` is caught too); Git remote-mutating operations (`push`, `remote`, `tag -d`/`--delete`, any `--force`/`-f`/`--force-with-lease`); secret-like path patterns; writes targeting the Tekstide state root. Destructive: `rm`/`rmdir` with a recursive flag, known disk-level programs (`dd`, `mkfs*`, `fdisk`, `parted`, `wipefs`, `shred`), and Git history rewriting (`rebase`, `filter-branch`, `filter-repo`, `reset --hard`).
+
+**One addition beyond the handoff's explicit list, added because the handoff's own logic implies it:** a shell interpreter (`sh`/`bash`/`zsh`/`dash`/`ksh`/`fish`) invoked with `-c` escalates to `High` unconditionally. The RFC says this module does not interpret shell grammar — but a `-c` argument to a shell interpreter *is* an opaque shell string from this classifier's point of view, and treating it as an ordinary argument would let a proposal hide an arbitrary command behind one level of indirection. Flagging this as an addition, not something the handoff asked for verbatim, in case it should be scoped differently.
+
+**Two gaps recorded prominently in the module doc, not left for the reviewer to find first:**
+
+1. **Wrapper indirection is only partially handled.** `env sudo rm -rf /` is caught (the elevation check scans every argv entry's basename). `sh -c '...'` is caught (the addition above). An arbitrary wrapper — `env`, `nice`, `timeout`, `xargs` — running `git push` is **not** unwrapped to recognize the `git` invocation underneath, so `env git push` would currently classify as unrecognized-`High` rather than the more specific "Git remote-mutating" reason, which happens to land on the same level here but would not in general (e.g. `env git status` would also be unrecognized-`High` instead of the correct `Low`). Full wrapper-unwrapping is a materially larger problem than this slice's scope and is left as a known limitation.
+2. **The handoff's premise about "secret-like patterns already defined for environment redaction" does not hold.** Searched the codebase (`grep` for `secret`, `redact`, common credential-variable names) and found no existing pattern set — RFC-004 states the *policy* ("Tekstide may redact known secret-like environment variable values...") but no concrete pattern list exists in code today. `SECRET_LIKE_PATH_PATTERNS` in `risk.rs` (`.ssh`, `.gnupg`, `.netrc`, `.pgp`, `id_rsa`/`id_ed25519`/`id_ecdsa`, `.pem`, `.git-credentials`, `credentials`, `.aws`, `.docker/config.json`) is therefore newly written for this slice, not reused. Flagged in the review request as a possible RFC-004 implementation gap, since another RFC may independently need this same pattern set and would benefit from one shared, reviewed list rather than two independently-invented ones.
+
+**Fixture corpus:** `approval::tests::risk::corpus()`, 34 `(name, argv, expected_level)` cases, covering both directions per the checklist requirement — ordinary/ambiguous forms that should *not* escalate (`git status`, `ls`, `cat README.md` → `Low`; `git add`/`commit`, `cargo build`, `npm install`, `cp`, `mkdir` → `Medium`) alongside every escalation rule (root escape by absolute path, by simple `..`, and by deeply-nested `..`; elevation directly, via absolute path, and via `env` wrapper; shell `-c`; each Git remote-mutating form; secret-like paths both absolute and relative; a state-root write; an unrecognized program; each Destructive trigger). Plus three targeted tests beyond the table: subdirectory-relative resolution (both the non-escaping and escaping cases, confirming resolution is relative to the proposal's own `cwd`, not always the root), Destructive-outranks-High when a single proposal triggers both, and empty-argv defensive behavior (unreachable from a validated `CommandProposal` but must not panic).
+
+**Checklist items this slice satisfies:** every Risk Classifier Checklist item — path-outside-root, privilege elevation, Git remote-mutating, secret-like patterns (with the reuse caveat above), state-root writes, Destructive classification, unclassifiable-is-High, corpus covering both directions, no shell-grammar interpretation.
+
+Gates run on 2026-07-29: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (416 `tekstide-core` — up from 410, 6 new — + 18 `tekstide-gui-spike`, 0 failures), `git diff --check` — all passed.
 
 ### PR-021-D — Sideband channel
 
