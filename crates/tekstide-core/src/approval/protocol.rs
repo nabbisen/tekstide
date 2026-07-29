@@ -1,0 +1,321 @@
+//! `CommandProposal` / `CommandDecision`: the two sideband messages RFC-021
+//! defines. Both are constructed only through a fallible, validating
+//! constructor -- there is no way to hold an instance of either type that
+//! has not already passed every bound and shape check below. This is
+//! deliberately stricter than `audit::record::DurableAuditRecordV1`, whose
+//! `validate()` runs separately from construction: that type is built from
+//! already-trusted, internally-generated data, while these two cross an
+//! untrusted boundary from an adapter process, so parsing and validating
+//! happen as one inseparable step.
+//!
+//! What this module does *not* do: decide whether a token is the *correct*
+//! token for a run, decide whether a proposal id has been seen before, or
+//! decide whether a path stays inside a project root. Those all require
+//! context (the real per-run token, prior proposal ids, the project root)
+//! that a pure protocol decoder does not have. They belong to
+//! `approval::channel` and `approval::coordinator`.
+
+use std::path::{Path, PathBuf};
+
+/// The only protocol version this build understands. Per RFC-021: unknown
+/// version fails closed -- there is no negotiation, no "best effort" parse
+/// of a newer or older shape.
+pub const PROTOCOL_VERSION: u32 = 1;
+
+pub const MAX_PROPOSAL_ID_LEN: usize = 128;
+pub const MAX_TOKEN_LEN: usize = 256;
+pub const MAX_ARGV_ENTRIES: usize = 64;
+pub const MAX_ARGV_ENTRY_LEN: usize = 4096;
+pub const MAX_CWD_LEN: usize = 4096;
+pub const MAX_INTENT_LEN: usize = 512;
+pub const MAX_EFFECTS_HINT_LEN: usize = 512;
+
+/// An adapter-generated, opaque proposal identifier. Bounded and
+/// charset-restricted so it can be logged, compared, and used as a
+/// correlation key without ever being interpreted as anything else.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct ProposalId(String);
+
+impl ProposalId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A per-run capability credential, opaque to everything except the
+/// channel that issued it. This type only validates *shape* (bounded,
+/// printable). Whether a given token is the correct one for a given run is
+/// a `approval::channel` concern -- this layer cannot know that.
+#[derive(Clone, Eq, PartialEq)]
+pub struct RunCapabilityToken(String);
+
+impl RunCapabilityToken {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+// Deliberately no `Debug` derive carrying the token value: it is a secret
+// credential, and printing it anywhere it might reach a log is exactly the
+// leakage RFC-021 §"Token leakage" warns against.
+impl std::fmt::Debug for RunCapabilityToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RunCapabilityToken(<redacted>)")
+    }
+}
+
+/// Adapter-declared effects text, e.g. "reads only". Wrapped so the type
+/// system itself makes the RFC's rule visible at every use site: this is a
+/// display hint, never a basis for lowering risk or skipping approval.
+/// There is intentionally no accessor that returns anything richer than
+/// the raw string -- nothing here should ever be parsed as structured
+/// data or treated as a classification input.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UntrustedEffectsHint(String);
+
+impl UntrustedEffectsHint {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Adapter -> Tekstide. Every field already passed validation by the time
+/// an instance exists; see [`CommandProposal::decode`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommandProposal {
+    pub run_token: RunCapabilityToken,
+    pub proposal_id: ProposalId,
+    argv: Vec<String>,
+    cwd: PathBuf,
+    pub declared_intent: Option<String>,
+    pub declared_effects: Option<UntrustedEffectsHint>,
+}
+
+impl CommandProposal {
+    pub fn argv(&self) -> &[String] {
+        &self.argv
+    }
+
+    pub fn cwd(&self) -> &Path {
+        &self.cwd
+    }
+
+    /// Validates and constructs a `CommandProposal` from raw, untrusted
+    /// wire fields. This is the only way to obtain one.
+    ///
+    /// `protocol_version` and `run_token` are checked first and
+    /// independently of everything else, since an unknown version or an
+    /// absent/malformed token means the rest of the message cannot be
+    /// trusted to mean what its shape suggests -- reject before looking at
+    /// anything else.
+    #[allow(clippy::too_many_arguments)]
+    pub fn decode(
+        protocol_version: u32,
+        run_token: String,
+        proposal_id: String,
+        argv: Vec<String>,
+        cwd: PathBuf,
+        declared_intent: Option<String>,
+        declared_effects: Option<String>,
+    ) -> Result<Self, ProposalValidationError> {
+        if protocol_version != PROTOCOL_VERSION {
+            return Err(ProposalValidationError::UnsupportedProtocolVersion);
+        }
+        let run_token = validate_token(run_token)?;
+        let proposal_id = validate_proposal_id(proposal_id)?;
+        let argv = validate_argv(argv)?;
+        let cwd = validate_cwd(cwd)?;
+        let declared_intent = validate_display_text(declared_intent, MAX_INTENT_LEN)
+            .map_err(|_| ProposalValidationError::IntentInvalid)?;
+        let declared_effects = validate_display_text(declared_effects, MAX_EFFECTS_HINT_LEN)
+            .map_err(|_| ProposalValidationError::EffectsHintInvalid)?
+            .map(UntrustedEffectsHint);
+
+        Ok(Self {
+            run_token,
+            proposal_id,
+            argv,
+            cwd,
+            declared_intent,
+            declared_effects,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProposalValidationError {
+    UnsupportedProtocolVersion,
+    TokenInvalid,
+    ProposalIdInvalid,
+    ArgvEmpty,
+    ArgvTooManyEntries,
+    ArgvEntryInvalid,
+    CwdInvalid,
+    IntentInvalid,
+    EffectsHintInvalid,
+}
+
+/// Kept as a distinct type from [`ProposalValidationError`] even though the
+/// variant sets overlap: a decision message and a proposal message fail
+/// for different reasons (a decision has no argv-empty case, but has an
+/// edit-presence rule a proposal does not), and collapsing them would
+/// force irrelevant variants onto call sites that can never produce them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DecisionValidationErrorReason {
+    UnsupportedProtocolVersion,
+    ProposalIdInvalid,
+    EditedArgvMissingForEditedAndApproved,
+    EditedArgvPresentForOtherDecision,
+    EditedArgvInvalid,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DecisionValidationError {
+    pub reason: DecisionValidationErrorReason,
+}
+
+/// Tekstide -> adapter. Deliberately has no `Pending` variant: a decision
+/// message is only ever sent once a decision has actually been made, so
+/// "pending" is not a representable wire state -- unlike
+/// `domain::ApprovalDecision`, which models the request's lifecycle and
+/// does need a pending state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DecisionOutcome {
+    ApprovedOnce,
+    Rejected,
+    EditedAndApproved,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommandDecision {
+    pub proposal_id: ProposalId,
+    pub outcome: DecisionOutcome,
+    edited_argv: Option<Vec<String>>,
+}
+
+impl CommandDecision {
+    pub fn edited_argv(&self) -> Option<&[String]> {
+        self.edited_argv.as_deref()
+    }
+
+    /// Validates and constructs a `CommandDecision`. `edited_argv` must be
+    /// `Some` if and only if `outcome` is `EditedAndApproved` -- the RFC's
+    /// "edited argv, present only for `EditedAndApproved`" rule is enforced
+    /// here as a shape check, not left to whoever reads the field later.
+    pub fn decode(
+        protocol_version: u32,
+        proposal_id: String,
+        outcome: DecisionOutcome,
+        edited_argv: Option<Vec<String>>,
+    ) -> Result<Self, DecisionValidationError> {
+        if protocol_version != PROTOCOL_VERSION {
+            return Err(DecisionValidationError {
+                reason: DecisionValidationErrorReason::UnsupportedProtocolVersion,
+            });
+        }
+        let proposal_id =
+            validate_proposal_id(proposal_id).map_err(|_| DecisionValidationError {
+                reason: DecisionValidationErrorReason::ProposalIdInvalid,
+            })?;
+
+        let edited_argv = match (outcome, edited_argv) {
+            (DecisionOutcome::EditedAndApproved, Some(argv)) => {
+                Some(validate_argv(argv).map_err(|_| DecisionValidationError {
+                    reason: DecisionValidationErrorReason::EditedArgvInvalid,
+                })?)
+            }
+            (DecisionOutcome::EditedAndApproved, None) => {
+                return Err(DecisionValidationError {
+                    reason: DecisionValidationErrorReason::EditedArgvMissingForEditedAndApproved,
+                });
+            }
+            (_, None) => None,
+            (_, Some(_)) => {
+                return Err(DecisionValidationError {
+                    reason: DecisionValidationErrorReason::EditedArgvPresentForOtherDecision,
+                });
+            }
+        };
+
+        Ok(Self {
+            proposal_id,
+            outcome,
+            edited_argv,
+        })
+    }
+}
+
+fn validate_token(raw: String) -> Result<RunCapabilityToken, ProposalValidationError> {
+    if raw.is_empty()
+        || raw.len() > MAX_TOKEN_LEN
+        || !raw.bytes().all(|byte| byte.is_ascii_graphic())
+    {
+        return Err(ProposalValidationError::TokenInvalid);
+    }
+    Ok(RunCapabilityToken(raw))
+}
+
+fn validate_proposal_id(raw: String) -> Result<ProposalId, ProposalValidationError> {
+    if raw.is_empty()
+        || raw.len() > MAX_PROPOSAL_ID_LEN
+        || !raw.bytes().all(|byte| byte.is_ascii_graphic())
+    {
+        return Err(ProposalValidationError::ProposalIdInvalid);
+    }
+    Ok(ProposalId(raw))
+}
+
+/// argv is validated as a vector of independent strings, never as a shell
+/// string to be split. A NUL byte is rejected outright: it cannot appear
+/// in a real argv entry passed to `exec`, so its presence indicates a
+/// malformed or adversarial proposal, not a legitimate argument. Beyond
+/// that, argument content is intentionally permissive -- real command
+/// arguments legitimately contain spaces, quotes, and arbitrary UTF-8, and
+/// this layer does not interpret shell grammar (an explicit RFC-021
+/// non-goal).
+fn validate_argv(argv: Vec<String>) -> Result<Vec<String>, ProposalValidationError> {
+    if argv.is_empty() {
+        return Err(ProposalValidationError::ArgvEmpty);
+    }
+    if argv.len() > MAX_ARGV_ENTRIES {
+        return Err(ProposalValidationError::ArgvTooManyEntries);
+    }
+    for entry in &argv {
+        if entry.is_empty() || entry.len() > MAX_ARGV_ENTRY_LEN || entry.contains('\0') {
+            return Err(ProposalValidationError::ArgvEntryInvalid);
+        }
+    }
+    Ok(argv)
+}
+
+/// Only shape (absolute, bounded, no embedded NUL) is checked here.
+/// Whether the path stays inside the canonical project root is a risk-
+/// classification and coordinator concern, not a decoding concern: this
+/// layer has no project context to check it against.
+fn validate_cwd(cwd: PathBuf) -> Result<PathBuf, ProposalValidationError> {
+    let as_str = cwd.to_str().ok_or(ProposalValidationError::CwdInvalid)?;
+    if as_str.is_empty() || as_str.len() > MAX_CWD_LEN || as_str.contains('\0') {
+        return Err(ProposalValidationError::CwdInvalid);
+    }
+    if !cwd.is_absolute() {
+        return Err(ProposalValidationError::CwdInvalid);
+    }
+    Ok(cwd)
+}
+
+/// Shared bound/shape check for the two free-text display fields (declared
+/// intent, declared effects). Both are display-only text, never a
+/// classification input, so the only requirements are a length bound and
+/// no control characters -- control characters in text a GUI dialog will
+/// render verbatim (RFC-022) are a display-spoofing vector in their own
+/// right (e.g. embedding line breaks to pad or hide content), independent
+/// of the terminal-escape concern RFC-009 already covers for the PTY path.
+fn validate_display_text(value: Option<String>, max_len: usize) -> Result<Option<String>, ()> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_empty() || value.len() > max_len || value.chars().any(|c| c.is_control()) {
+        return Err(());
+    }
+    Ok(Some(value))
+}

@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod app;
+pub mod approval;
 pub mod audit;
 pub mod close;
 pub mod command;

@@ -2,11 +2,11 @@
 title: "RFC-021: Command Approval Model and Adapter Capability - Acceptance / QA Checklist"
 rfc: "RFC-021"
 rfc_file: "../../proposed/021-command-approval-model-and-adapter-capability.md"
-status: "Proposed — implementation pending"
+status: "Proposed — implementation in progress (PR-021-B landed)"
 target_milestone: "M11"
 source_rfc_status: "Proposed"
 created: "2026-07-28"
-updated: "2026-07-28"
+updated: "2026-07-29"
 ---
 
 # RFC-021 Acceptance / QA Checklist
@@ -30,13 +30,13 @@ updated: "2026-07-28"
 
 ## Protocol Checklist
 
-- [ ] `CommandProposal` supplies argv as a vector; shell strings rejected.
-- [ ] Unknown protocol version rejected without negotiation.
-- [ ] Malformed messages rejected; no partial parse.
-- [ ] Oversized fields rejected.
-- [ ] Duplicate proposal id rejected.
-- [ ] Adapter-declared effects never lower risk or skip approval.
-- [ ] All diagnostics bounded and content-free.
+- [x] `CommandProposal` supplies argv as a vector; shell strings rejected. True by construction: `decode` takes `Vec<String>`, never a string; see qa-evidence.md PR-021-B for the scope note on what this does and does not guarantee about the eventual wire-decode layer.
+- [x] Unknown protocol version rejected without negotiation.
+- [x] Malformed messages rejected; no partial parse. `decode` is all-or-nothing; there is no partially-constructed `CommandProposal`/`CommandDecision`.
+- [x] Oversized fields rejected. Token, proposal id, argv entries, cwd, intent, effects hint all bounded and tested at and past the bound.
+- [ ] Duplicate proposal id rejected. Requires tracking proposal ids across a run's lifetime — PR-021-E (coordinator) scope, not reachable from protocol types alone.
+- [ ] Adapter-declared effects never lower risk or skip approval. Type-level half done (`UntrustedEffectsHint`, no structured accessor); the behavioral guarantee needs PR-021-C's risk classifier to exist and be shown not to consume it.
+- [x] All diagnostics bounded and content-free. Error enums carry no content (e.g. `TokenInvalid`, not the token itself).
 
 ## Risk Classifier Checklist
 
