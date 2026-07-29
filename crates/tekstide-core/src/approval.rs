@@ -7,13 +7,20 @@
 //! fail-closed decisions out.
 //!
 //! PR-021-B: protocol message types and bounded validation.
-//! PR-021-C (this slice): structural risk classifier.
-//! No channel, no coordinator yet -- those are `approval::channel` and
-//! `approval::coordinator`, added in later slices.
+//! PR-021-C: structural risk classifier.
+//! PR-021-D (this slice): the sideband channel.
+//! No coordinator yet -- that is `approval::coordinator`, added in the
+//! next slice.
 
+mod channel;
 mod protocol;
 mod risk;
 
+pub use channel::{
+    AcceptedProposal, ApprovalChannelDirectory, ApprovalChannelEndpoint, ApprovalChannelError,
+    ApprovalChannelErrorReason, ApprovalChannelPathError, ApprovalChannelPathErrorReason,
+    ApprovalChannelPathRequest, ApprovalChannelPathResolver,
+};
 pub use protocol::{
     CommandDecision, CommandProposal, DecisionOutcome, DecisionValidationError,
     DecisionValidationErrorReason, MAX_ARGV_ENTRIES, MAX_ARGV_ENTRY_LEN, MAX_ARGV_TOTAL_LEN,
