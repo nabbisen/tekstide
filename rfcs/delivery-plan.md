@@ -87,7 +87,7 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | --- | --- | --- | --- | --- | --- |
 | 014 | Desktop GUI Substrate and Terminal Rendering Strategy | M8 | — | no | **Decision approved 2026-07-29 — `iced` + Option A** |
 | 015 | Application Shell and Rendered Surface Model | M8 | 014 | no | **Authored — ready for implementation** |
-| 016 | Internationalization and Localization | M8 | 014 | partly | **Unblocked** |
+| 016 | Internationalization and Localization | M8 | 014 | partly | **Authored — ready for implementation** |
 | 017 | Terminal Renderer and Immersion Mode | M9 | 014, 015 | no | Blocked |
 | 018 | Rendered Paste Protection and Trusted UI | M9 | 017 | no | Blocked |
 | 019 | Editor and Explorer Surfaces | M10 | 015 | no | Blocked |
