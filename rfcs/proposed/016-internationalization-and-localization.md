@@ -191,7 +191,9 @@ The text-safety escaping function is the one piece that may deserve a home in `t
 5. **PR-016-E** — enforcement tests: no-hardcoded-strings scan, catalog completeness.
 6. **PR-016-F** — closeout evidence.
 
-PR-016-C may proceed independently of PR-016-B if scheduling favours it; the escaping function has no catalog dependency.
+**Implementation order: PR-016-C first**, ahead of PR-016-B. Approved by the human owner on 2026-07-29.
+
+The escaping function has no catalog dependency, and the vulnerability it closes is live: RFC-021's approval model is under implementation and RFC-022 will render a dialog showing adapter-supplied command text. Text safety must exist before any surface displays that string. The remaining slices are ordinary localization plumbing and follow after.
 
 ## Test and Evidence Requirements
 

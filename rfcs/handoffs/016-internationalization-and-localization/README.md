@@ -24,7 +24,13 @@ Read before starting:
 
 ## Where to start work
 
-**Begin at PR-016-B**, or PR-016-C if RFC-015's seam is not yet available. PR-016-A is design acceptance.
+**Begin at PR-016-C — the text-safety slice — not at PR-016-B.**
+
+This ordering is deliberate and was approved by the human owner on 2026-07-29. PR-016-C has no catalog dependency, and the vulnerability it closes is live *now*: RFC-021's approval model is under implementation, and RFC-022 will render its dialog. The bidi fix must exist before any surface displays an adapter-supplied command string.
+
+Do not reorder this back to numeric sequence for tidiness. B, D, and E are ordinary localization plumbing and can follow.
+
+PR-016-A is design acceptance.
 
 ## Four things that are binding
 

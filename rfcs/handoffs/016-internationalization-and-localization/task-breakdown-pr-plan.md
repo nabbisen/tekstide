@@ -9,7 +9,7 @@ updated: "2026-07-29"
 
 # RFC-016 Task Breakdown and PR Plan
 
-Six slices. PR-016-C is the security-critical one and can proceed independently of the catalog work.
+Six slices. **PR-016-C is implemented first**, ahead of PR-016-B — see Sequencing.
 
 ## PR-016-A — Design and handoff acceptance
 
@@ -27,7 +27,7 @@ Review gate:
 
 ## PR-016-C — Text safety: escape and isolate
 
-**The security-critical slice.** May run before or in parallel with PR-016-B; it has no catalog dependency.
+**The security-critical slice, and the first to implement.** It has no catalog dependency, so it does not wait on PR-016-B.
 
 Scope: `quote_untrusted`; application across all trusted surfaces; deliberate editor and terminal exceptions.
 
@@ -60,6 +60,10 @@ Scope: checklist, QA evidence, known limitations (confusables, RTL layout mirror
 
 ## Sequencing
 
-C is independent. B → D is strict. E needs B. F needs all.
+**C first.** Then B → D, with E after B, and F last.
+
+The reason C leads: the bidi vulnerability it closes is live on `main` today, RFC-021's approval model is under implementation, and RFC-022 will render a dialog showing adapter-supplied command text. Landing text safety before any such surface exists is materially cheaper and safer than retrofitting it afterwards. C has no catalog dependency, so nothing is gained by making it wait.
+
+Approved by the human owner, 2026-07-29.
 
 **If PR-016-C finds that escaping cannot be reliably applied at a shared render path**, stop and escalate before surfaces multiply — retrofitting text safety across six surfaces is far more expensive than fixing the render path now.
