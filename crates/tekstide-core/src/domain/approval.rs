@@ -57,7 +57,11 @@ impl ApprovalRequest {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Variants are declared in ascending severity order deliberately: derived
+/// `Ord` makes "at least `High`"-style comparisons (`level >= RiskLevel::High`)
+/// a type-checked fact rather than a hand-rolled match every caller has to
+/// get right independently (per RFC-021 PR-021-C response 110 recommended-8).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum RiskLevel {
     Low,
     Medium,

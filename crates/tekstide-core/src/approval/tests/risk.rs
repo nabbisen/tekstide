@@ -1,4 +1,4 @@
-use crate::approval::classify;
+use crate::approval::{RiskAssessment, RiskReason, classify};
 use crate::domain::RiskLevel;
 use std::path::Path;
 
@@ -9,17 +9,22 @@ fn argv(entries: &[&str]) -> Vec<String> {
     entries.iter().map(|s| s.to_string()).collect()
 }
 
-fn classify_at(entries: &[&str], cwd: &str) -> RiskLevel {
+fn classify_at(
+    entries: &[&str],
+    cwd: &str,
+    project_root: &str,
+    state_root: &str,
+) -> RiskAssessment {
     classify(
         &argv(entries),
         Path::new(cwd),
-        Path::new(PROJECT_ROOT),
-        Path::new(STATE_ROOT),
+        Path::new(project_root),
+        Path::new(state_root),
     )
 }
 
-fn classify_in_root(entries: &[&str]) -> RiskLevel {
-    classify_at(entries, PROJECT_ROOT)
+fn classify_in_root(entries: &[&str]) -> RiskAssessment {
+    classify_at(entries, PROJECT_ROOT, PROJECT_ROOT, STATE_ROOT)
 }
 
 /// The one property to get right before anything else, per
@@ -28,168 +33,367 @@ fn classify_in_root(entries: &[&str]) -> RiskLevel {
 /// silent default of `Low` an unhandled fallthrough would otherwise give.
 #[test]
 fn unrecognized_program_classifies_high_never_low() {
-    assert_eq!(
-        classify_in_root(&["some-totally-unknown-vendor-cli", "--do-a-thing"]),
-        RiskLevel::High
-    );
+    let assessment = classify_in_root(&["some-totally-unknown-vendor-cli", "--do-a-thing"]);
+    assert_eq!(assessment.level, RiskLevel::High);
+    assert_eq!(assessment.reasons, vec![RiskReason::Unrecognized]);
 }
 
-/// Fixture corpus: `(name, argv, expected)`. Extend this table rather than
-/// writing one-off tests for new argv forms -- that is the shape the
-/// review process expects (per response 107/109 precedent on other
-/// corpora in this project, and `implementation-handoff.md` §4's explicit
-/// request for a table in this shape).
-fn corpus() -> Vec<(&'static str, Vec<&'static str>, RiskLevel)> {
+/// Fixture corpus: `(name, argv, expected_level, reason_that_must_be_present)`.
+/// `reason` is `None` only where the level itself is already discriminating
+/// without it (response 110 Mandatory 1: for every `High` case that could
+/// also be reached by the "unrecognized" fallthrough, `reason` must be
+/// `Some` and must not be `Unrecognized`, or the case proves nothing --
+/// response 110 demonstrated this empirically by deleting five escalation
+/// rules and finding every old assertion still passed).
+fn corpus() -> Vec<(
+    &'static str,
+    Vec<&'static str>,
+    RiskLevel,
+    Option<RiskReason>,
+)> {
     vec![
         // --- Low: recognized read-only operations ---
-        ("git status", vec!["git", "status"], RiskLevel::Low),
-        ("git log", vec!["git", "log", "--oneline"], RiskLevel::Low),
-        ("git diff", vec!["git", "diff"], RiskLevel::Low),
-        ("ls", vec!["ls", "-la"], RiskLevel::Low),
-        ("cat a file", vec!["cat", "README.md"], RiskLevel::Low),
-        ("pwd", vec!["pwd"], RiskLevel::Low),
+        ("git status", vec!["git", "status"], RiskLevel::Low, None),
+        (
+            "git log",
+            vec!["git", "log", "--oneline"],
+            RiskLevel::Low,
+            None,
+        ),
+        ("git diff", vec!["git", "diff"], RiskLevel::Low, None),
+        ("ls", vec!["ls", "-la"], RiskLevel::Low, None),
+        ("cat a file", vec!["cat", "README.md"], RiskLevel::Low, None),
+        ("pwd", vec!["pwd"], RiskLevel::Low, None),
+        (
+            "argv[0] as resolved absolute path",
+            vec!["/usr/bin/git", "status"],
+            RiskLevel::Low,
+            None,
+        ),
+        (
+            "argv[0] as resolved absolute path, ls",
+            vec!["/bin/ls", "-la"],
+            RiskLevel::Low,
+            None,
+        ),
+        (
+            "git remote read-only form",
+            vec!["git", "remote", "-v"],
+            RiskLevel::Low,
+            None,
+        ),
+        (
+            "ordinary commit message mentioning a secret-shaped word",
+            vec!["git", "commit", "-m", "rotate credentials"],
+            RiskLevel::Medium,
+            None,
+        ),
+        (
+            "in-root file literally named credentials.md",
+            vec!["cat", "credentials.md"],
+            RiskLevel::Low,
+            None,
+        ),
         // --- Medium: recognized, ordinary, mutating-but-mundane ---
         (
             "git add",
             vec!["git", "add", "src/main.rs"],
             RiskLevel::Medium,
+            None,
         ),
         (
             "git commit",
             vec!["git", "commit", "-m", "message"],
             RiskLevel::Medium,
+            None,
         ),
-        ("cargo build", vec!["cargo", "build"], RiskLevel::Medium),
-        ("npm install", vec!["npm", "install"], RiskLevel::Medium),
+        (
+            "cargo build",
+            vec!["cargo", "build"],
+            RiskLevel::Medium,
+            None,
+        ),
+        (
+            "npm install",
+            vec!["npm", "install"],
+            RiskLevel::Medium,
+            None,
+        ),
         (
             "cp within root",
             vec!["cp", "a.txt", "b.txt"],
             RiskLevel::Medium,
+            None,
         ),
-        ("mkdir", vec!["mkdir", "newdir"], RiskLevel::Medium),
+        ("mkdir", vec!["mkdir", "newdir"], RiskLevel::Medium, None),
+        (
+            "git checkout a branch",
+            vec!["git", "checkout", "feature-branch"],
+            RiskLevel::Medium,
+            None,
+        ),
+        (
+            "git stash push",
+            vec!["git", "stash", "push"],
+            RiskLevel::Medium,
+            None,
+        ),
         // --- High: escalation rules from implementation-handoff.md §4 ---
         (
             "absolute path outside root",
             vec!["cat", "/etc/passwd"],
             RiskLevel::High,
+            Some(RiskReason::PathOutsideProjectRoot),
         ),
         (
             "relative path escaping root via ..",
             vec!["cat", "../../etc/passwd"],
             RiskLevel::High,
+            Some(RiskReason::PathOutsideProjectRoot),
         ),
         (
             "deeply nested .. still escapes",
             vec!["cat", "a/b/../../../../etc/passwd"],
             RiskLevel::High,
+            Some(RiskReason::PathOutsideProjectRoot),
         ),
-        ("sudo", vec!["sudo", "ls"], RiskLevel::High),
-        ("doas", vec!["doas", "ls"], RiskLevel::High),
-        ("pkexec", vec!["pkexec", "ls"], RiskLevel::High),
+        (
+            "sudo",
+            vec!["sudo", "ls"],
+            RiskLevel::High,
+            Some(RiskReason::PrivilegeElevation),
+        ),
+        (
+            "doas",
+            vec!["doas", "ls"],
+            RiskLevel::High,
+            Some(RiskReason::PrivilegeElevation),
+        ),
+        (
+            "pkexec",
+            vec!["pkexec", "ls"],
+            RiskLevel::High,
+            Some(RiskReason::PrivilegeElevation),
+        ),
+        (
+            "su -c",
+            vec!["su", "-c", "x"],
+            RiskLevel::High,
+            Some(RiskReason::PrivilegeElevation),
+        ),
+        (
+            "run0",
+            vec!["run0", "ls"],
+            RiskLevel::High,
+            Some(RiskReason::PrivilegeElevation),
+        ),
         (
             "elevation via absolute path",
             vec!["/usr/bin/sudo", "ls"],
             RiskLevel::High,
+            Some(RiskReason::PrivilegeElevation),
         ),
         (
-            "elevation via wrapper indirection",
+            "elevation via env wrapper",
             vec!["env", "sudo", "ls"],
             RiskLevel::High,
+            Some(RiskReason::PrivilegeElevation),
         ),
         (
-            "shell -c is opaque to structural inspection",
+            "shell -c is opaque regardless of flag spelling",
             vec!["bash", "-c", "echo hi"],
             RiskLevel::High,
+            Some(RiskReason::OpaqueShellInvocation),
         ),
-        ("git push", vec!["git", "push"], RiskLevel::High),
+        (
+            "shell with unusual combined flags still opaque",
+            vec!["bash", "-lc", "x"],
+            RiskLevel::High,
+            Some(RiskReason::OpaqueShellInvocation),
+        ),
+        (
+            "opaque wrapper without a recognized real command",
+            vec!["env", "git", "status"],
+            RiskLevel::High,
+            Some(RiskReason::OpaqueWrapper),
+        ),
+        (
+            "git push",
+            vec!["git", "push"],
+            RiskLevel::High,
+            Some(RiskReason::GitRemoteMutating),
+        ),
         (
             "git push force",
             vec!["git", "push", "--force"],
             RiskLevel::High,
+            Some(RiskReason::GitRemoteMutating),
         ),
         (
             "git remote add",
             vec!["git", "remote", "add", "origin", "url"],
             RiskLevel::High,
+            Some(RiskReason::GitRemoteMutating),
         ),
         (
             "git tag delete",
             vec!["git", "tag", "-d", "v1.0"],
             RiskLevel::High,
+            Some(RiskReason::GitRemoteMutating),
+        ),
+        (
+            "git branch delete is not blanket-allowlisted",
+            vec!["git", "branch", "-D", "feature"],
+            RiskLevel::High,
+            Some(RiskReason::Unrecognized),
+        ),
+        (
+            "git branch long-form delete/force flags",
+            vec!["git", "branch", "--delete", "--force", "feature"],
+            RiskLevel::High,
+            Some(RiskReason::Unrecognized),
         ),
         (
             "ssh key path",
             vec!["cat", "/home/user/.ssh/id_rsa"],
             RiskLevel::High,
+            Some(RiskReason::SecretLikePath),
         ),
         (
             "aws credentials path",
             vec!["cat", "/home/user/.aws/credentials"],
             RiskLevel::High,
+            Some(RiskReason::SecretLikePath),
         ),
         (
             "relative ssh key path",
             vec!["cat", ".ssh/id_rsa"],
             RiskLevel::High,
+            Some(RiskReason::SecretLikePath),
         ),
         (
-            "write targeting tekstide state root",
-            vec!["cat", "/home/user/.local/share/tekstide/audit.sqlite"],
+            "attached long-option path escape",
+            vec!["cp", "--target-directory=/etc", "a.txt"],
             RiskLevel::High,
+            Some(RiskReason::PathOutsideProjectRoot),
+        ),
+        (
+            "attached long-option path escape, cargo",
+            vec!["cargo", "build", "--target-dir=/etc"],
+            RiskLevel::High,
+            Some(RiskReason::PathOutsideProjectRoot),
+        ),
+        (
+            "attached long-option secret path",
+            vec!["cat", "--file=/home/user/.ssh/id_rsa"],
+            RiskLevel::High,
+            Some(RiskReason::SecretLikePath),
         ),
         (
             "unrecognized program",
             vec!["some-vendor-tool", "--flag"],
             RiskLevel::High,
+            Some(RiskReason::Unrecognized),
+        ),
+        (
+            "exact-match disk-level program, not prefix",
+            vec!["shredder", "--help"],
+            RiskLevel::High,
+            Some(RiskReason::Unrecognized),
+        ),
+        (
+            "exact-match disk-level program, not prefix, dd-like name",
+            vec!["ddgr", "rust"],
+            RiskLevel::High,
+            Some(RiskReason::Unrecognized),
+        ),
+        (
+            "chmod -R is recursive but not deletion -- unrecognized, not destructive",
+            vec!["chmod", "-R", "777", "."],
+            RiskLevel::High,
+            Some(RiskReason::Unrecognized),
         ),
         // --- Destructive ---
         (
             "rm -rf",
             vec!["rm", "-rf", "build/"],
             RiskLevel::Destructive,
+            Some(RiskReason::RecursiveDeletion),
         ),
         (
             "rm -r long form",
             vec!["rm", "--recursive", "build/"],
             RiskLevel::Destructive,
+            Some(RiskReason::RecursiveDeletion),
+        ),
+        (
+            "rm -fR alternate flag order",
+            vec!["rm", "-fR", "build/"],
+            RiskLevel::Destructive,
+            Some(RiskReason::RecursiveDeletion),
         ),
         (
             "dd",
             vec!["dd", "if=/dev/zero", "of=/dev/sda"],
             RiskLevel::Destructive,
+            Some(RiskReason::DiskLevelOperation),
         ),
         (
             "mkfs",
             vec!["mkfs.ext4", "/dev/sda1"],
             RiskLevel::Destructive,
+            Some(RiskReason::DiskLevelOperation),
         ),
         (
             "git rebase",
             vec!["git", "rebase", "-i", "HEAD~3"],
             RiskLevel::Destructive,
+            Some(RiskReason::HistoryRewrite),
         ),
         (
             "git filter-branch",
             vec!["git", "filter-branch", "--force"],
             RiskLevel::Destructive,
+            Some(RiskReason::HistoryRewrite),
         ),
         (
             "git reset --hard",
             vec!["git", "reset", "--hard", "HEAD~1"],
             RiskLevel::Destructive,
+            Some(RiskReason::HistoryRewrite),
+        ),
+        (
+            "git checkout -- discards working tree changes",
+            vec!["git", "checkout", "--", "."],
+            RiskLevel::Destructive,
+            Some(RiskReason::WorkingTreeDiscard),
+        ),
+        (
+            "git checkout . discards working tree changes",
+            vec!["git", "checkout", "."],
+            RiskLevel::Destructive,
+            Some(RiskReason::WorkingTreeDiscard),
         ),
     ]
 }
 
 #[test]
 fn fixture_corpus_classifies_as_expected() {
-    for (name, entries, expected) in corpus() {
+    for (name, entries, expected_level, expected_reason) in corpus() {
         let refs: Vec<&str> = entries.to_vec();
-        let actual = classify_in_root(&refs);
+        let assessment = classify_in_root(&refs);
         assert_eq!(
-            actual, expected,
-            "case {name:?}: argv={entries:?} expected {expected:?} got {actual:?}"
+            assessment.level, expected_level,
+            "case {name:?}: argv={entries:?} expected level {expected_level:?} got {:?} (reasons: {:?})",
+            assessment.level, assessment.reasons
         );
+        if let Some(reason) = expected_reason {
+            assert!(
+                assessment.reasons.contains(&reason),
+                "case {name:?}: argv={entries:?} expected reason {reason:?} to be present, got {:?}",
+                assessment.reasons
+            );
+        }
     }
 }
 
@@ -197,10 +401,13 @@ fn fixture_corpus_classifies_as_expected() {
 fn relative_path_within_root_from_a_subdirectory_is_not_escalated() {
     // cwd is a subdirectory of the project root; a plain relative
     // argument should resolve inside the root and not escalate.
-    assert_eq!(
-        classify_at(&["cat", "lib.rs"], "/home/user/project/src"),
-        RiskLevel::Low
+    let assessment = classify_at(
+        &["cat", "lib.rs"],
+        "/home/user/project/src",
+        PROJECT_ROOT,
+        STATE_ROOT,
     );
+    assert_eq!(assessment.level, RiskLevel::Low);
 }
 
 #[test]
@@ -208,9 +415,17 @@ fn relative_path_escaping_root_from_a_subdirectory_is_escalated() {
     // From a subdirectory, ".." only needs to climb past the
     // subdirectory and the root itself to escape -- confirms resolution
     // is relative to the proposal's own cwd, not always the root.
-    assert_eq!(
-        classify_at(&["cat", "../../../etc/passwd"], "/home/user/project/src"),
-        RiskLevel::High
+    let assessment = classify_at(
+        &["cat", "../../../etc/passwd"],
+        "/home/user/project/src",
+        PROJECT_ROOT,
+        STATE_ROOT,
+    );
+    assert_eq!(assessment.level, RiskLevel::High);
+    assert!(
+        assessment
+            .reasons
+            .contains(&RiskReason::PathOutsideProjectRoot)
     );
 }
 
@@ -220,10 +435,8 @@ fn destructive_outranks_high_when_both_would_otherwise_apply() {
     // `rm -rf` is a Destructive trigger. Destructive must win: it is
     // checked first and returns immediately, since it is the more severe
     // classification.
-    assert_eq!(
-        classify_in_root(&["rm", "-rf", "/etc"]),
-        RiskLevel::Destructive
-    );
+    let assessment = classify_in_root(&["rm", "-rf", "/etc"]);
+    assert_eq!(assessment.level, RiskLevel::Destructive);
 }
 
 #[test]
@@ -231,5 +444,49 @@ fn empty_argv_does_not_panic_and_classifies_high() {
     // CommandProposal::decode already rejects empty argv, so this input
     // is unreachable from a validated proposal -- but this function must
     // still behave defensively rather than panic if ever called directly.
-    assert_eq!(classify_in_root(&[]), RiskLevel::High);
+    let assessment = classify_in_root(&[]);
+    assert_eq!(assessment.level, RiskLevel::High);
+}
+
+#[test]
+fn state_root_write_discriminates_only_when_state_root_is_inside_project_root() {
+    // response 110: "the state-root rule is only non-redundant when the
+    // state root sits inside a project root -- which is exactly the case
+    // no fixture covers." Construct exactly that arrangement.
+    let nested_state_root = "/home/user/project/.tekstide-state";
+    let assessment = classify_at(
+        &["cat", ".tekstide-state/audit.sqlite"],
+        PROJECT_ROOT,
+        PROJECT_ROOT,
+        nested_state_root,
+    );
+    assert_eq!(assessment.level, RiskLevel::High);
+    assert!(assessment.reasons.contains(&RiskReason::TekstideStateRoot));
+    // And it must NOT also claim PathOutsideProjectRoot, since the path is
+    // inside the project root -- this is what makes the case discriminate
+    // the state-root rule specifically rather than the root-escape rule.
+    assert!(
+        !assessment
+            .reasons
+            .contains(&RiskReason::PathOutsideProjectRoot)
+    );
+}
+
+#[test]
+fn ablation_privilege_elevation_rule_is_load_bearing() {
+    // Regression guard against response 110 Mandatory 1's failure mode:
+    // this test would still pass on `level` alone even with the rule
+    // deleted, since High is also the fallthrough. Asserting the reason
+    // is what makes it discriminating.
+    let assessment = classify_in_root(&["sudo", "ls"]);
+    assert_eq!(assessment.reasons, vec![RiskReason::PrivilegeElevation]);
+}
+
+#[test]
+fn argv_zero_as_absolute_path_does_not_escalate_via_containment() {
+    // Response 110 Recommended 2: adapters routinely emit a resolved
+    // absolute path to the program itself. If argv[0] were checked for
+    // containment, this would incorrectly classify High.
+    let assessment = classify_in_root(&["/usr/bin/git", "status"]);
+    assert_eq!(assessment.level, RiskLevel::Low);
 }

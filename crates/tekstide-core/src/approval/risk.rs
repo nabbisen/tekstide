@@ -14,75 +14,214 @@
 //! whole design here: `Low` and `Medium` are only reachable through a
 //! small, explicit allowlist of recognized, argument-checked forms.
 //! Anything not recognized -- a program this module has never heard of,
-//! doing something it cannot positively vouch for -- falls through to
-//! `High` by construction, not by an added "else" branch that could be
-//! forgotten.
+//! or a recognized program used in a shape nobody vouched for (response
+//! 110 Mandatory 3: an allowlist entry must be a form you can vouch for
+//! *entirely*, including its flags) -- falls through to `High` by
+//! construction.
 //!
-//! **A gap recorded here rather than silently left for the reviewer to
-//! find:** wrapper indirection. `env sudo rm -rf /` is caught (the
-//! elevation check scans every argv entry's basename, not just argv[0]),
-//! and `sh -c '...'` is caught (a shell interpreter with `-c` is High on
-//! its own, since its real command is opaque to structural inspection).
-//! But an arbitrary wrapper -- `env`, `nice`, `timeout`, `xargs` -- running
-//! `git push` is not unwrapped to recognize the `git` invocation
-//! underneath. Full wrapper-unwrapping is a much larger problem than this
-//! slice's scope; this is disclosed as a known limitation, not fixed here.
+//! **`RiskAssessment` carries *why*, not just the level** (response 110
+//! Recommended 1). Two independent reasons: a fixture assertion of the
+//! form `classify(...).level == High` cannot fail when `High` is also the
+//! fallthrough for anything unrecognized -- response 110 proved this by
+//! deleting five escalation rules and watching every existing test still
+//! pass. Asserting a specific `RiskReason` is present makes a corpus entry
+//! discriminating by construction. Separately, PR-021-E's dialog has to
+//! tell a user *why* a command is `High` -- "High" alone is not an
+//! actionable prompt. `RiskReason` stays content-free (no captured paths,
+//! no captured argv), so it remains safe to log under RFC-013's privacy
+//! rule.
 //!
-//! **Another gap, about the handoff's own premise:** `implementation-
-//! handoff.md` §4 says to escalate on "paths matching the secret-like
-//! patterns already defined for environment redaction." Searched the
-//! codebase (`grep` for `secret`, `redact`, common credential-variable
-//! names) and found no such pattern set already implemented -- RFC-004
-//! states the *policy* ("Tekstide may redact known secret-like environment
-//! variable values...") but no concrete pattern list exists in code. The
-//! list below (`SECRET_LIKE_PATH_PATTERNS`) is therefore newly written for
-//! this slice, not reused, and is flagged in the review request as a
-//! possible RFC-004 implementation gap rather than an RFC-021-local
-//! question.
+//! **Path containment is checked lexically, not via `fs::canonicalize`**
+//! (response 110 Recommended 3 confirms this design was correct, not just
+//! adequate): a proposed command may reference a path that does not exist
+//! yet, so requiring the filesystem to agree before classifying anything
+//! would be wrong. This means an in-root symlink that points outside the
+//! root is **not** detected here -- that enforcement lives in RFC-011/
+//! RFC-012's detectors, at the point of actual file access, which is where
+//! it belongs. Recorded as a known limitation, not silently implied away
+//! by the word "canonical" (which the checklist used incorrectly before
+//! response 110 -- corrected to "lexical").
+//!
+//! **`argv[0]` is excluded from containment checks only** (response 110
+//! Recommended 2): adapters routinely emit a resolved absolute path to the
+//! program itself (`/usr/bin/git status`), and checking that against the
+//! project root would make nearly every proposal `High` regardless of
+//! what it actually does -- an inert classifier. `argv[0]` still
+//! participates in the elevation and secret-pattern scans, since a
+//! program *named* `sudo` or living somewhere secret-pattern-shaped is
+//! still meaningful regardless of whether it is "inside the project."
+//!
+//! **Attached option values are resolved too** (response 110 Mandatory 2):
+//! `--target-directory=/etc` and `cp -t /etc` must classify the same way,
+//! since they specify the same effect through different syntax. Every
+//! argv entry contributes both itself and (if it contains `=`) the
+//! substring after the first `=` as path candidates. Attached *short*
+//! options (`-o/etc/x`) remain uncovered -- disclosed, not chased.
+//!
+//! **Secret-like patterns match path components, not raw substrings**
+//! (response 110 Recommended 2): matching `"credentials"` as a substring
+//! of the whole resolved string escalated `git commit -m "rotate
+//! credentials"`, an ordinary sentence that happens to resolve (jointly
+//! with `cwd`) to a path-shaped string containing that word. Matching
+//! against individual path *components* instead means a free-text
+//! argument that is not actually a path essentially never accidentally
+//! matches a directory-name-shaped pattern like `.ssh` or `.aws`.
+//!
+//! **Wrapper indirection is only partially handled**, and this is
+//! unchanged from the previous version of this module, confirmed still
+//! true by response 110's own probing: `env sudo rm -rf /` is caught (the
+//! elevation scan checks every argv entry's basename), a shell
+//! interpreter as `argv[0]` is caught unconditionally (see
+//! `SHELL_INTERPRETERS` below), and a small explicit opaque-wrapper list
+//! (`env`, `nice`, `timeout`, `xargs`, `stdbuf`, `nohup`) is caught by
+//! name. But none of these *unwrap* to recognize the real command
+//! underneath -- `env git status` lands on `High`/`OpaqueWrapper` rather
+//! than the correct `Low`. Response 110 confirmed this is over-
+//! classification, not under-classification, and endorsed deferring a fix
+//! rather than building unreviewed unwrapping under time pressure.
+//!
+//! **The handoff's premise that a secret-like-path pattern set "already"
+//! exists for environment redaction does not hold** (response 110 Q3):
+//! searched the codebase and found only the RFC-004 *policy* statement, no
+//! concrete pattern list. `SECRET_LIKE_EXACT_COMPONENTS`/
+//! `SECRET_LIKE_COMPONENT_SUFFIXES` below are therefore newly authored for
+//! this slice and are narrow, not authoritative -- the reviewer is
+//! recording the RFC-004 environment-variable-name gap separately; this
+//! list matches *filesystem path components*, a different and
+//! non-redundant thing.
 
 use std::path::{Component, Path, PathBuf};
 
 use crate::domain::RiskLevel;
 
-/// Programs whose presence anywhere in argv means "the real command is
-/// opaque to structural inspection" or "this is asking for elevated
-/// privilege" -- checked by basename so `/usr/bin/sudo` is caught the same
-/// as `sudo`.
-const ELEVATION_PROGRAMS: &[&str] = &["sudo", "doas", "pkexec"];
-const SHELL_INTERPRETERS: &[&str] = &["sh", "bash", "zsh", "dash", "ksh", "fish"];
-const DISK_LEVEL_PROGRAMS: &[&str] =
-    &["dd", "mkfs", "fdisk", "sfdisk", "parted", "wipefs", "shred"];
+/// A structural reason a proposal was classified the way it was.
+/// Deliberately content-free: no captured path, no captured argv entry --
+/// see the module doc's `RiskAssessment` paragraph for why.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RiskReason {
+    PathOutsideProjectRoot,
+    PrivilegeElevation,
+    OpaqueShellInvocation,
+    OpaqueWrapper,
+    GitRemoteMutating,
+    SecretLikePath,
+    TekstideStateRoot,
+    RecursiveDeletion,
+    DiskLevelOperation,
+    HistoryRewrite,
+    /// `git checkout -- <path>` / `git checkout .`: discards uncommitted
+    /// working-tree changes, unrecoverably (nothing was ever committed,
+    /// so there is no reflog rescue) -- the same category of data loss as
+    /// `git reset --hard`, which is `Destructive`. Kept distinct from
+    /// `HistoryRewrite` because no history is being rewritten; nothing
+    /// was ever committed in the first place.
+    WorkingTreeDiscard,
+    Unrecognized,
+}
 
-/// Substrings checked against every resolved path argument. Deliberately
-/// narrow and documented (see module doc) rather than presented as a
-/// complete or authoritative list.
-const SECRET_LIKE_PATH_PATTERNS: &[&str] = &[
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RiskAssessment {
+    pub level: RiskLevel,
+    pub reasons: Vec<RiskReason>,
+}
+
+impl RiskAssessment {
+    fn destructive(reasons: Vec<RiskReason>) -> Self {
+        Self {
+            level: RiskLevel::Destructive,
+            reasons,
+        }
+    }
+
+    fn high(reasons: Vec<RiskReason>) -> Self {
+        Self {
+            level: RiskLevel::High,
+            reasons,
+        }
+    }
+
+    fn low() -> Self {
+        Self {
+            level: RiskLevel::Low,
+            reasons: Vec::new(),
+        }
+    }
+
+    fn medium() -> Self {
+        Self {
+            level: RiskLevel::Medium,
+            reasons: Vec::new(),
+        }
+    }
+}
+
+/// Programs whose presence anywhere in argv means "asking for elevated
+/// privilege" -- checked by basename so `/usr/bin/sudo` is caught the same
+/// as `sudo`, and scanned across every argv entry so `env sudo ls` is
+/// caught too.
+const ELEVATION_PROGRAMS: &[&str] = &["sudo", "doas", "pkexec", "su", "run0"];
+
+/// `argv[0]` being one of these is `High` unconditionally, regardless of
+/// flags (response 110 Q1: simpler and more defensible than enumerating
+/// flag spellings like `-c` vs `-lc` -- the honest reason is that a shell
+/// invocation is opaque to structural inspection full stop, not that a
+/// specific flag "hides" something the classifier would otherwise see).
+const SHELL_INTERPRETERS: &[&str] = &["sh", "bash", "zsh", "dash", "ksh", "fish"];
+
+/// `argv[0]` being one of these means the real command is whatever
+/// follows, which this module does not unwrap (see module doc). Recorded
+/// on purpose via `RiskReason::OpaqueWrapper` rather than left to fall
+/// through to the generic `Unrecognized` reason by accident.
+const OPAQUE_WRAPPER_PROGRAMS: &[&str] = &["env", "nice", "timeout", "xargs", "stdbuf", "nohup"];
+
+const DISK_LEVEL_EXACT_PROGRAMS: &[&str] = &["dd", "fdisk", "sfdisk", "parted", "wipefs", "shred"];
+
+/// Path components matched exactly (not a substring search over the whole
+/// path -- see module doc). Narrow and not claimed authoritative.
+const SECRET_LIKE_EXACT_COMPONENTS: &[&str] = &[
     ".ssh",
     ".gnupg",
     ".netrc",
-    ".pgp",
+    ".aws",
+    ".docker",
+    ".git-credentials",
     "id_rsa",
     "id_ed25519",
     "id_ecdsa",
-    ".pem",
-    ".git-credentials",
-    "credentials",
-    ".aws",
-    ".docker/config.json",
 ];
+/// Path components matched by suffix (extension-like patterns that are
+/// never a whole component on their own).
+const SECRET_LIKE_COMPONENT_SUFFIXES: &[&str] = &[".pem", ".pgp"];
 
-const LOW_RISK_GIT_SUBCOMMANDS: &[&str] = &["status", "log", "diff", "show", "branch"];
+const LOW_RISK_GIT_SUBCOMMANDS: &[&str] = &["status", "log", "diff", "show"];
 const LOW_RISK_PROGRAMS: &[&str] = &[
     "ls", "pwd", "echo", "cat", "head", "tail", "wc", "printf", "whoami", "date",
 ];
 
-const MEDIUM_RISK_GIT_SUBCOMMANDS: &[&str] = &[
-    "add", "commit", "checkout", "merge", "pull", "fetch", "clone", "stash",
-];
+/// `checkout` and `stash` are deliberately absent: their subcommand forms
+/// are handled specially below rather than being blanket-allowlisted (see
+/// `is_working_tree_discard` and `is_stash_purge`), per response 110's
+/// point that `git branch`-style blanket allowlisting of a program whose
+/// flags were never enumerated is the same mistake `git branch` made.
+const MEDIUM_RISK_GIT_SUBCOMMANDS: &[&str] = &["add", "commit", "merge", "pull", "fetch", "clone"];
 const MEDIUM_RISK_PROGRAMS: &[&str] = &["cp", "mv", "mkdir", "touch", "cargo", "npm", "make"];
 
 const HISTORY_REWRITE_GIT_SUBCOMMANDS: &[&str] = &["rebase", "filter-branch", "filter-repo"];
-const REMOTE_MUTATING_GIT_SUBCOMMANDS: &[&str] = &["push", "remote"];
+/// `push` has no read-only form. `remote` does (`git remote` /
+/// `git remote -v` lists configured remotes); it only mutates when a
+/// specific action verb follows, checked separately in
+/// `is_remote_mutating`.
+const ALWAYS_MUTATING_GIT_SUBCOMMANDS: &[&str] = &["push"];
+const REMOTE_MUTATING_ACTIONS: &[&str] = &[
+    "add",
+    "remove",
+    "rm",
+    "rename",
+    "set-url",
+    "set-branches",
+    "set-head",
+    "prune",
+];
 
 /// Classifies a proposed command. `cwd` and `project_root` are used to
 /// resolve relative path arguments and to detect indirection that escapes
@@ -93,56 +232,97 @@ const REMOTE_MUTATING_GIT_SUBCOMMANDS: &[&str] = &["push", "remote"];
 /// fixture-testable function with no filesystem access and no dependency
 /// on `ProjectSession` -- the coordinator (PR-021-E) supplies the real
 /// canonical values.
-pub fn classify(argv: &[String], cwd: &Path, project_root: &Path, state_root: &Path) -> RiskLevel {
+pub fn classify(
+    argv: &[String],
+    cwd: &Path,
+    project_root: &Path,
+    state_root: &Path,
+) -> RiskAssessment {
     let Some(program) = argv.first() else {
         // CommandProposal::decode already rejects empty argv, so this is
         // unreachable from a validated proposal -- but this function must
         // not panic on it, and per the same philosophy as "unclassifiable
         // is High," an argv this module cannot even look at is High.
-        return RiskLevel::High;
+        return RiskAssessment::high(vec![RiskReason::Unrecognized]);
     };
     let basename = basename_str(program);
 
-    if is_destructive(argv, &basename) {
-        return RiskLevel::Destructive;
+    let destructive_reasons = destructive_reasons(argv, &basename);
+    if !destructive_reasons.is_empty() {
+        return RiskAssessment::destructive(destructive_reasons);
     }
-    if is_high_risk(argv, cwd, project_root, state_root, &basename) {
-        return RiskLevel::High;
+
+    let high_reasons = high_risk_reasons(argv, cwd, project_root, state_root, &basename);
+    if !high_reasons.is_empty() {
+        return RiskAssessment::high(high_reasons);
     }
+
     if is_known_low_risk(argv, &basename) {
-        return RiskLevel::Low;
+        return RiskAssessment::low();
     }
     if is_known_medium_risk(argv, &basename) {
-        return RiskLevel::Medium;
+        return RiskAssessment::medium();
     }
 
     // Not recognized as anything in particular: unclassifiable is High,
     // never Low. This is the fallthrough case, not a rule -- there is no
     // path through this function that reaches `Low` or `Medium` without
     // first matching one of the explicit allowlists above.
-    RiskLevel::High
+    RiskAssessment::high(vec![RiskReason::Unrecognized])
 }
 
-fn is_destructive(argv: &[String], basename: &str) -> bool {
+fn destructive_reasons(argv: &[String], basename: &str) -> Vec<RiskReason> {
+    let mut reasons = Vec::new();
+
     if (basename == "rm" || basename == "rmdir") && has_recursive_flag(argv) {
-        return true;
+        reasons.push(RiskReason::RecursiveDeletion);
     }
-    if DISK_LEVEL_PROGRAMS
-        .iter()
-        .any(|program| basename == *program || basename.starts_with(program))
-    {
-        return true;
+    if is_disk_level_program(basename) {
+        reasons.push(RiskReason::DiskLevelOperation);
     }
     if basename == "git" {
         let subcommand = argv.get(1).map(String::as_str);
         if subcommand.is_some_and(|sub| HISTORY_REWRITE_GIT_SUBCOMMANDS.contains(&sub)) {
-            return true;
+            reasons.push(RiskReason::HistoryRewrite);
         }
         if subcommand == Some("reset") && argv.iter().any(|arg| arg == "--hard") {
-            return true;
+            reasons.push(RiskReason::HistoryRewrite);
+        }
+        if is_working_tree_discard(subcommand, argv) {
+            reasons.push(RiskReason::WorkingTreeDiscard);
         }
     }
-    false
+    reasons
+}
+
+fn is_disk_level_program(basename: &str) -> bool {
+    DISK_LEVEL_EXACT_PROGRAMS.contains(&basename)
+        || basename == "mkfs"
+        || basename.starts_with("mkfs.")
+}
+
+/// `git remote` / `git remote -v` lists configured remotes read-only;
+/// `git remote add/remove/rm/rename/set-url/set-branches/set-head/prune`
+/// mutates. The action verb is `argv[2]` when present.
+fn is_remote_mutating(subcommand: Option<&str>, argv: &[String]) -> bool {
+    if subcommand != Some("remote") {
+        return false;
+    }
+    argv.get(2)
+        .is_some_and(|action| REMOTE_MUTATING_ACTIONS.contains(&action.as_str()))
+}
+
+/// `git checkout -- <path>` (the unambiguous "what follows is pathspecs,
+/// not a ref" syntax) or `git checkout .` (bare dot cannot be a ref name):
+/// both discard uncommitted working-tree changes to the named paths,
+/// unrecoverably. A bare `git checkout <ref>` (branch switch) is not this
+/// -- and whether an arbitrary bare argument is a ref or a path is not
+/// structurally decidable, so only the unambiguous forms are caught here.
+fn is_working_tree_discard(subcommand: Option<&str>, argv: &[String]) -> bool {
+    if subcommand != Some("checkout") {
+        return false;
+    }
+    argv.iter().skip(2).any(|arg| arg == "--" || arg == ".")
 }
 
 fn has_recursive_flag(argv: &[String]) -> bool {
@@ -152,72 +332,156 @@ fn has_recursive_flag(argv: &[String]) -> bool {
     })
 }
 
-fn is_high_risk(
+fn high_risk_reasons(
     argv: &[String],
     cwd: &Path,
     project_root: &Path,
     state_root: &Path,
     basename: &str,
-) -> bool {
-    if ELEVATION_PROGRAMS
+) -> Vec<RiskReason> {
+    let mut reasons = Vec::new();
+
+    if argv
         .iter()
-        .any(|elevated| argv.iter().any(|arg| basename_str(arg) == *elevated))
+        .any(|arg| ELEVATION_PROGRAMS.contains(&basename_str(arg).as_str()))
     {
-        return true;
+        reasons.push(RiskReason::PrivilegeElevation);
     }
-    if SHELL_INTERPRETERS.contains(&basename) && argv.iter().any(|arg| arg == "-c") {
-        return true;
+    if SHELL_INTERPRETERS.contains(&basename) {
+        reasons.push(RiskReason::OpaqueShellInvocation);
+    }
+    if OPAQUE_WRAPPER_PROGRAMS.contains(&basename) {
+        reasons.push(RiskReason::OpaqueWrapper);
     }
     if basename == "git" {
         let subcommand = argv.get(1).map(String::as_str);
-        if subcommand.is_some_and(|sub| REMOTE_MUTATING_GIT_SUBCOMMANDS.contains(&sub)) {
-            return true;
+        if subcommand.is_some_and(|sub| ALWAYS_MUTATING_GIT_SUBCOMMANDS.contains(&sub))
+            || is_remote_mutating(subcommand, argv)
+        {
+            reasons.push(RiskReason::GitRemoteMutating);
         }
         if subcommand == Some("tag") && argv.iter().any(|arg| arg == "-d" || arg == "--delete") {
-            return true;
+            reasons.push(RiskReason::GitRemoteMutating);
         }
-        if argv
-            .iter()
-            .any(|arg| arg == "--force" || arg == "-f" || arg == "--force-with-lease")
+        // Scoped to `push` specifically -- a force flag on `push` is the
+        // classic remote-history-clobbering case the RFC names. A force
+        // flag on some other, unrecognized subcommand (e.g. `git branch
+        // --force`) still ends up High via the generic fallthrough; it
+        // just should not be mislabelled as "remote-mutating" when it is
+        // not.
+        if subcommand == Some("push")
+            && argv
+                .iter()
+                .any(|arg| arg == "--force" || arg == "-f" || arg == "--force-with-lease")
         {
-            return true;
+            reasons.push(RiskReason::GitRemoteMutating);
         }
     }
-    for entry in argv {
-        let resolved = resolve_path_arg(entry, cwd);
-        if !is_inside(&resolved, project_root) {
-            return true;
-        }
-        if is_inside(&resolved, state_root) {
-            return true;
-        }
-        let resolved_str = resolved.to_string_lossy();
-        if SECRET_LIKE_PATH_PATTERNS
-            .iter()
-            .any(|pattern| resolved_str.contains(pattern) || entry.contains(pattern))
-        {
-            return true;
+
+    // argv[0] is excluded from containment (see module doc) but still
+    // participates in the secret-pattern scan, hence `enumerate()` rather
+    // than `skip(1)` outright.
+    for (index, entry) in argv.iter().enumerate() {
+        for candidate in path_candidates(entry) {
+            let resolved = resolve_path_arg(candidate, cwd);
+            if index != 0 {
+                if !is_inside(&resolved, project_root) {
+                    reasons.push(RiskReason::PathOutsideProjectRoot);
+                }
+                if is_inside(&resolved, state_root) {
+                    reasons.push(RiskReason::TekstideStateRoot);
+                }
+            }
+            if matches_secret_like_pattern(&resolved) {
+                reasons.push(RiskReason::SecretLikePath);
+            }
         }
     }
-    false
+
+    reasons.sort_by_key(reason_sort_key);
+    reasons.dedup();
+    reasons
+}
+
+/// Stable, content-free ordering so `reasons` is deterministic for tests
+/// and for a future dialog rendering them -- not a severity ordering (all
+/// reasons returned together are already at the same `RiskLevel`).
+fn reason_sort_key(reason: &RiskReason) -> u8 {
+    match reason {
+        RiskReason::PathOutsideProjectRoot => 0,
+        RiskReason::PrivilegeElevation => 1,
+        RiskReason::OpaqueShellInvocation => 2,
+        RiskReason::OpaqueWrapper => 3,
+        RiskReason::GitRemoteMutating => 4,
+        RiskReason::SecretLikePath => 5,
+        RiskReason::TekstideStateRoot => 6,
+        RiskReason::RecursiveDeletion => 7,
+        RiskReason::DiskLevelOperation => 8,
+        RiskReason::HistoryRewrite => 9,
+        RiskReason::WorkingTreeDiscard => 10,
+        RiskReason::Unrecognized => 11,
+    }
+}
+
+/// An argv entry contributes itself as a path candidate, plus (if it
+/// contains `=`) the substring after the first `=` -- covers the common
+/// GNU long-option attached form (`--target-directory=/etc`). Attached
+/// short options (`-o/etc/x`) are not covered; disclosed as a known
+/// limitation rather than chased.
+fn path_candidates(entry: &str) -> Vec<&str> {
+    match entry.split_once('=') {
+        Some((_, value)) => vec![entry, value],
+        None => vec![entry],
+    }
 }
 
 fn is_known_low_risk(argv: &[String], basename: &str) -> bool {
     if basename == "git" {
-        return argv
-            .get(1)
-            .is_some_and(|sub| LOW_RISK_GIT_SUBCOMMANDS.contains(&sub.as_str()));
+        let subcommand = argv.get(1).map(String::as_str);
+        if subcommand.is_some_and(|sub| LOW_RISK_GIT_SUBCOMMANDS.contains(&sub)) {
+            return true;
+        }
+        // Read-only `git remote` / `git remote -v` (no mutating action
+        // verb, already ruled out by `is_remote_mutating` before this
+        // function runs) lists configured remotes -- no different in kind
+        // from `git status`.
+        return subcommand == Some("remote") && !is_remote_mutating(subcommand, argv);
     }
     LOW_RISK_PROGRAMS.contains(&basename)
 }
 
 fn is_known_medium_risk(argv: &[String], basename: &str) -> bool {
     if basename == "git" {
-        return argv
-            .get(1)
-            .is_some_and(|sub| MEDIUM_RISK_GIT_SUBCOMMANDS.contains(&sub.as_str()));
+        let subcommand = argv.get(1).map(String::as_str);
+        if subcommand.is_some_and(|sub| MEDIUM_RISK_GIT_SUBCOMMANDS.contains(&sub)) {
+            return true;
+        }
+        // `checkout` without the unambiguous discard markers is an
+        // ordinary branch switch; `stash` other than a purge is ordinary
+        // stash bookkeeping. Both were ruled out as Destructive/High
+        // already by the time this function runs.
+        if subcommand == Some("checkout") && !is_working_tree_discard(subcommand, argv) {
+            return true;
+        }
+        if subcommand == Some("stash") && !is_stash_purge(argv) {
+            return true;
+        }
+        return false;
     }
     MEDIUM_RISK_PROGRAMS.contains(&basename)
+}
+
+/// `git stash clear`/`git stash drop`: deliberately purges saved work.
+/// Not currently escalated beyond this function returning `false` for
+/// "ordinary medium-risk stash use" (which falls through to the generic
+/// `High`/`Unrecognized` default) -- recorded as a deliberate choice, not
+/// an oversight: see qa-evidence.md for the severity reasoning versus
+/// `WorkingTreeDiscard`.
+fn is_stash_purge(argv: &[String]) -> bool {
+    matches!(
+        argv.get(2).map(String::as_str),
+        Some("clear") | Some("drop")
+    )
 }
 
 fn basename_str(entry: &str) -> String {
@@ -259,4 +523,17 @@ fn lexically_normalize(path: &Path) -> PathBuf {
 
 fn is_inside(path: &Path, root: &Path) -> bool {
     path == root || path.strip_prefix(root).is_ok()
+}
+
+fn matches_secret_like_pattern(path: &Path) -> bool {
+    path.components().any(|component| {
+        let Component::Normal(part) = component else {
+            return false;
+        };
+        let part = part.to_string_lossy();
+        SECRET_LIKE_EXACT_COMPONENTS.contains(&part.as_ref())
+            || SECRET_LIKE_COMPONENT_SUFFIXES
+                .iter()
+                .any(|suffix| part.ends_with(suffix))
+    })
 }

@@ -21,7 +21,7 @@ pub use protocol::{
     PROTOCOL_VERSION, ProposalId, ProposalValidationError, RunCapabilityToken,
     UntrustedEffectsHint,
 };
-pub use risk::classify;
+pub use risk::{RiskAssessment, RiskReason, classify};
 
 #[cfg(test)]
 mod tests;
