@@ -94,6 +94,18 @@ fn corpus() -> Vec<(
             RiskLevel::Low,
             None,
         ),
+        (
+            "= split does not apply to free text (response 111 non-blocking-2)",
+            vec!["git", "commit", "-m", "note a=/etc/passwd"],
+            RiskLevel::Medium,
+            None,
+        ),
+        (
+            "= split does not apply to a non-option argument",
+            vec!["echo", "FOO=/etc/passwd"],
+            RiskLevel::Low,
+            None,
+        ),
         // --- Medium: recognized, ordinary, mutating-but-mundane ---
         (
             "git add",
@@ -224,14 +236,20 @@ fn corpus() -> Vec<(
             Some(RiskReason::GitRemoteMutating),
         ),
         (
-            "git push force",
-            vec!["git", "push", "--force"],
+            "git remote add",
+            vec!["git", "remote", "add", "origin", "url"],
             RiskLevel::High,
             Some(RiskReason::GitRemoteMutating),
         ),
         (
-            "git remote add",
-            vec!["git", "remote", "add", "origin", "url"],
+            "git remote flag before the action verb (response 111 Required 1)",
+            vec!["git", "remote", "-v", "remove", "origin"],
+            RiskLevel::High,
+            Some(RiskReason::GitRemoteMutating),
+        ),
+        (
+            "git remote long-flag before the action verb",
+            vec!["git", "remote", "--verbose", "set-url", "origin", "u"],
             RiskLevel::High,
             Some(RiskReason::GitRemoteMutating),
         ),
@@ -374,6 +392,42 @@ fn corpus() -> Vec<(
             RiskLevel::Destructive,
             Some(RiskReason::WorkingTreeDiscard),
         ),
+        (
+            "git checkout -f discards local modifications (response 111 non-blocking-1)",
+            vec!["git", "checkout", "-f", "feature"],
+            RiskLevel::Destructive,
+            Some(RiskReason::WorkingTreeDiscard),
+        ),
+        (
+            "git checkout --force, long form",
+            vec!["git", "checkout", "--force", "feature"],
+            RiskLevel::Destructive,
+            Some(RiskReason::WorkingTreeDiscard),
+        ),
+        (
+            "git push --force rewrites remote history (response 111 Required 2)",
+            vec!["git", "push", "--force"],
+            RiskLevel::Destructive,
+            Some(RiskReason::RemoteHistoryRewrite),
+        ),
+        (
+            "git push --force-with-lease, same severity (not distinguished, see Known Limitations)",
+            vec!["git", "push", "--force-with-lease"],
+            RiskLevel::Destructive,
+            Some(RiskReason::RemoteHistoryRewrite),
+        ),
+        (
+            "git stash clear purges saved work (response 111 Required 3)",
+            vec!["git", "stash", "clear"],
+            RiskLevel::High,
+            Some(RiskReason::WorkingTreeDiscard),
+        ),
+        (
+            "git stash drop, same reason",
+            vec!["git", "stash", "drop"],
+            RiskLevel::High,
+            Some(RiskReason::WorkingTreeDiscard),
+        ),
     ]
 }
 
@@ -480,6 +534,41 @@ fn ablation_privilege_elevation_rule_is_load_bearing() {
     // is what makes it discriminating.
     let assessment = classify_in_root(&["sudo", "ls"]);
     assert_eq!(assessment.reasons, vec![RiskReason::PrivilegeElevation]);
+}
+
+#[test]
+fn remote_mutating_scan_is_not_defeated_by_a_flag_before_the_verb() {
+    // Response 111 Required 1: a fixed-index read of argv[2] missed the
+    // action verb whenever a flag preceded it. This is the adversarial
+    // input, distinct from an ablation test -- ablation proves the rule
+    // is reachable, this proves it is not evadable by a shape the rule
+    // author didn't happen to write a fixture for.
+    let assessment = classify_in_root(&["git", "remote", "-v", "remove", "origin"]);
+    assert_eq!(assessment.level, RiskLevel::High);
+    assert!(assessment.reasons.contains(&RiskReason::GitRemoteMutating));
+}
+
+#[test]
+fn ablation_force_push_rule_is_load_bearing_and_at_destructive_severity() {
+    // Response 111 Required 2: this rule was previously dead (ablating it
+    // changed no test outcome, since `push` was already High via
+    // ALWAYS_MUTATING_GIT_SUBCOMMANDS). Asserting Destructive specifically
+    // -- not just that some reason is present -- is what makes force-push
+    // distinguishable from an ordinary push.
+    let assessment = classify_in_root(&["git", "push", "--force"]);
+    assert_eq!(assessment.level, RiskLevel::Destructive);
+    assert_eq!(assessment.reasons, vec![RiskReason::RemoteHistoryRewrite]);
+}
+
+#[test]
+fn ablation_stash_purge_reason_is_load_bearing() {
+    // Response 111 Required 3: the level was already right (stash purge
+    // fell through to High), but the reason was Unrecognized -- a
+    // deliberate decision indistinguishable from an oversight. Asserting
+    // the specific reason means deleting `is_stash_purge`'s call site
+    // would now be caught.
+    let assessment = classify_in_root(&["git", "stash", "clear"]);
+    assert_eq!(assessment.reasons, vec![RiskReason::WorkingTreeDiscard]);
 }
 
 #[test]

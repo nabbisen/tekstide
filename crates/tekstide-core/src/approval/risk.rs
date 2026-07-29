@@ -109,13 +109,25 @@ pub enum RiskReason {
     RecursiveDeletion,
     DiskLevelOperation,
     HistoryRewrite,
-    /// `git checkout -- <path>` / `git checkout .`: discards uncommitted
-    /// working-tree changes, unrecoverably (nothing was ever committed,
-    /// so there is no reflog rescue) -- the same category of data loss as
-    /// `git reset --hard`, which is `Destructive`. Kept distinct from
-    /// `HistoryRewrite` because no history is being rewritten; nothing
-    /// was ever committed in the first place.
+    /// `git checkout -- <path>` / `git checkout .` / `git checkout -f`
+    /// (or `--force`): discards uncommitted working-tree changes,
+    /// unrecoverably (nothing was ever committed, so there is no reflog
+    /// rescue) -- the same category of data loss as `git reset --hard`,
+    /// which is `Destructive`. Also used for `git stash clear`/`drop`
+    /// (response 111 Required 3): a purge of saved work is the same shape
+    /// of loss, one step removed. Kept distinct from `HistoryRewrite`
+    /// because no history is being rewritten; nothing was ever committed
+    /// in the first place.
     WorkingTreeDiscard,
+    /// `git push --force`/`--force-with-lease`: rewrites history on a
+    /// **remote other people pull from**, where there is no reflog to
+    /// rescue and the loss is not the operator's alone -- response 111
+    /// Required 2 judged this strictly worse than local history rewriting
+    /// (`HistoryRewrite`, `Destructive` via `git rebase`/`reset --hard`),
+    /// so it gets its own reason at the same `Destructive` level rather
+    /// than being folded into either `HistoryRewrite` or the `High`-level
+    /// `GitRemoteMutating`.
+    RemoteHistoryRewrite,
     Unrecognized,
 }
 
@@ -291,8 +303,21 @@ fn destructive_reasons(argv: &[String], basename: &str) -> Vec<RiskReason> {
         if is_working_tree_discard(subcommand, argv) {
             reasons.push(RiskReason::WorkingTreeDiscard);
         }
+        if subcommand == Some("push") && has_force_flag(argv) {
+            reasons.push(RiskReason::RemoteHistoryRewrite);
+        }
     }
     reasons
+}
+
+/// `--force`/`-f`/`--force-with-lease`. Not distinguishing
+/// `--force-with-lease` (genuinely safer than `--force`, since it refuses
+/// to overwrite a remote ref that has moved since the last fetch) is a
+/// deliberate simplification, recorded in Known Limitations rather than
+/// silently implied to be a finer-grained check than it is.
+fn has_force_flag(argv: &[String]) -> bool {
+    argv.iter()
+        .any(|arg| arg == "--force" || arg == "-f" || arg == "--force-with-lease")
 }
 
 fn is_disk_level_program(basename: &str) -> bool {
@@ -303,26 +328,40 @@ fn is_disk_level_program(basename: &str) -> bool {
 
 /// `git remote` / `git remote -v` lists configured remotes read-only;
 /// `git remote add/remove/rm/rename/set-url/set-branches/set-head/prune`
-/// mutates. The action verb is `argv[2]` when present.
+/// mutates. The action verb is scanned across `argv[2..]` rather than read
+/// at a fixed index (response 111 Required 1: git's synopsis is `git
+/// remote [-v | --verbose] <subcommand>`, so a flag before the verb shifts
+/// its position and a fixed-index read misses it -- `git remote -v remove
+/// origin` classified `Low` under the fixed-index version. The general
+/// lesson response 111 drew: moving a program into an allowlist transfers
+/// responsibility for *every* argument shape onto the carve-out; a
+/// positional check is exactly the kind of shape that transfer can miss).
 fn is_remote_mutating(subcommand: Option<&str>, argv: &[String]) -> bool {
     if subcommand != Some("remote") {
         return false;
     }
-    argv.get(2)
-        .is_some_and(|action| REMOTE_MUTATING_ACTIONS.contains(&action.as_str()))
+    argv.iter()
+        .skip(2)
+        .any(|action| REMOTE_MUTATING_ACTIONS.contains(&action.as_str()))
 }
 
-/// `git checkout -- <path>` (the unambiguous "what follows is pathspecs,
-/// not a ref" syntax) or `git checkout .` (bare dot cannot be a ref name):
-/// both discard uncommitted working-tree changes to the named paths,
-/// unrecoverably. A bare `git checkout <ref>` (branch switch) is not this
-/// -- and whether an arbitrary bare argument is a ref or a path is not
-/// structurally decidable, so only the unambiguous forms are caught here.
+/// `git checkout -- <path>` / `git checkout .` (the unambiguous "what
+/// follows is a pathspec, not a ref" syntax; bare `.` cannot be a ref
+/// name) or `git checkout -f`/`--force` (explicitly discards local
+/// modifications when switching, response 111 non-blocking-1: the third
+/// instance of the same shape as `git branch -D` and `git push --force`
+/// -- a decidable flag on an otherwise-blanket-allowlisted form): all
+/// discard uncommitted working-tree changes, unrecoverably. A bare `git
+/// checkout <ref>` (branch switch) is not this -- and whether an
+/// arbitrary bare argument is a ref or a path is not structurally
+/// decidable, so only these unambiguous forms are caught.
 fn is_working_tree_discard(subcommand: Option<&str>, argv: &[String]) -> bool {
     if subcommand != Some("checkout") {
         return false;
     }
-    argv.iter().skip(2).any(|arg| arg == "--" || arg == ".")
+    argv.iter()
+        .skip(2)
+        .any(|arg| arg == "--" || arg == "." || arg == "-f" || arg == "--force")
 }
 
 fn has_recursive_flag(argv: &[String]) -> bool {
@@ -363,24 +402,25 @@ fn high_risk_reasons(
         if subcommand == Some("tag") && argv.iter().any(|arg| arg == "-d" || arg == "--delete") {
             reasons.push(RiskReason::GitRemoteMutating);
         }
-        // Scoped to `push` specifically -- a force flag on `push` is the
-        // classic remote-history-clobbering case the RFC names. A force
-        // flag on some other, unrecognized subcommand (e.g. `git branch
-        // --force`) still ends up High via the generic fallthrough; it
-        // just should not be mislabelled as "remote-mutating" when it is
-        // not.
-        if subcommand == Some("push")
-            && argv
-                .iter()
-                .any(|arg| arg == "--force" || arg == "-f" || arg == "--force-with-lease")
-        {
-            reasons.push(RiskReason::GitRemoteMutating);
+        // `push` with a force flag is handled in `destructive_reasons`
+        // (`RiskReason::RemoteHistoryRewrite`, response 111 Required 2) --
+        // not repeated here. `destructive_reasons` runs first and returns
+        // immediately when non-empty, so a duplicate `High`-level rule
+        // here would be unreachable dead code for the force case.
+        if subcommand == Some("stash") && is_stash_purge(argv) {
+            // response 111 Required 3: a deliberate severity choice
+            // (`Medium`/`High` both defensible, per qa-evidence.md) needs
+            // a named reason and a fixture, not just "falls through to
+            // Unrecognized by not being in the Medium allowlist."
+            reasons.push(RiskReason::WorkingTreeDiscard);
         }
     }
 
-    // argv[0] is excluded from containment (see module doc) but still
-    // participates in the secret-pattern scan, hence `enumerate()` rather
-    // than `skip(1)` outright.
+    // argv[0] participates in the elevation and secret-pattern scans
+    // above and below, but is excluded from the two containment checks
+    // just below (project-root, state-root) -- see the module doc's
+    // `argv[0]` paragraph for why the asymmetry is principled rather than
+    // a compromise.
     for (index, entry) in argv.iter().enumerate() {
         for candidate in path_candidates(entry) {
             let resolved = resolve_path_arg(candidate, cwd);
@@ -419,20 +459,27 @@ fn reason_sort_key(reason: &RiskReason) -> u8 {
         RiskReason::DiskLevelOperation => 8,
         RiskReason::HistoryRewrite => 9,
         RiskReason::WorkingTreeDiscard => 10,
-        RiskReason::Unrecognized => 11,
+        RiskReason::RemoteHistoryRewrite => 11,
+        RiskReason::Unrecognized => 12,
     }
 }
 
 /// An argv entry contributes itself as a path candidate, plus (if it
-/// contains `=`) the substring after the first `=` -- covers the common
-/// GNU long-option attached form (`--target-directory=/etc`). Attached
-/// short options (`-o/etc/x`) are not covered; disclosed as a known
-/// limitation rather than chased.
+/// starts with `-` and contains `=`) the substring after the first `=` --
+/// covers the common GNU long-option attached form
+/// (`--target-directory=/etc`) without also splitting ordinary free text
+/// that happens to contain `=` (response 111 non-blocking-2: `git commit
+/// -m "note a=/etc/passwd"` and `echo FOO=/etc/passwd` are not option
+/// syntax and must not be treated as one). Attached short options
+/// (`-o/etc/x`) are not covered; disclosed as a known limitation rather
+/// than chased.
 fn path_candidates(entry: &str) -> Vec<&str> {
-    match entry.split_once('=') {
-        Some((_, value)) => vec![entry, value],
-        None => vec![entry],
+    if entry.starts_with('-')
+        && let Some((_, value)) = entry.split_once('=')
+    {
+        return vec![entry, value];
     }
+    vec![entry]
 }
 
 fn is_known_low_risk(argv: &[String], basename: &str) -> bool {
@@ -472,11 +519,13 @@ fn is_known_medium_risk(argv: &[String], basename: &str) -> bool {
 }
 
 /// `git stash clear`/`git stash drop`: deliberately purges saved work.
-/// Not currently escalated beyond this function returning `false` for
-/// "ordinary medium-risk stash use" (which falls through to the generic
-/// `High`/`Unrecognized` default) -- recorded as a deliberate choice, not
-/// an oversight: see qa-evidence.md for the severity reasoning versus
-/// `WorkingTreeDiscard`.
+/// Excluded from the ordinary-stash-use `Medium` allowlist by
+/// `is_known_medium_risk`, and given its own `High`/`WorkingTreeDiscard`
+/// reason in `high_risk_reasons` (response 111 Required 3: the level was
+/// already right, but it was landing on `Unrecognized` by accident -- a
+/// deliberate decision needs a named reason and a fixture, or it is
+/// indistinguishable from an oversight). See qa-evidence.md for the
+/// severity reasoning versus the `Destructive` working-tree-discard cases.
 fn is_stash_purge(argv: &[String]) -> bool {
     matches!(
         argv.get(2).map(String::as_str),
