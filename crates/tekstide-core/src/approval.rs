@@ -15,9 +15,10 @@ mod protocol;
 
 pub use protocol::{
     CommandDecision, CommandProposal, DecisionOutcome, DecisionValidationError,
-    DecisionValidationErrorReason, MAX_ARGV_ENTRIES, MAX_ARGV_ENTRY_LEN, MAX_CWD_LEN,
-    MAX_EFFECTS_HINT_LEN, MAX_INTENT_LEN, MAX_PROPOSAL_ID_LEN, MAX_TOKEN_LEN, PROTOCOL_VERSION,
-    ProposalId, ProposalValidationError, RunCapabilityToken, UntrustedEffectsHint,
+    DecisionValidationErrorReason, MAX_ARGV_ENTRIES, MAX_ARGV_ENTRY_LEN, MAX_ARGV_TOTAL_LEN,
+    MAX_CWD_LEN, MAX_EFFECTS_HINT_LEN, MAX_INTENT_LEN, MAX_PROPOSAL_ID_LEN, MAX_TOKEN_LEN,
+    PROTOCOL_VERSION, ProposalId, ProposalValidationError, RunCapabilityToken,
+    UntrustedEffectsHint,
 };
 
 #[cfg(test)]

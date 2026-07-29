@@ -24,8 +24,24 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 pub const MAX_PROPOSAL_ID_LEN: usize = 128;
 pub const MAX_TOKEN_LEN: usize = 256;
-pub const MAX_ARGV_ENTRIES: usize = 64;
-pub const MAX_ARGV_ENTRY_LEN: usize = 4096;
+/// Raised from an initial 64 per response 109 Q3: realistic commands
+/// exceed that trivially (`git add` over a large changeset, glob
+/// expansion, build invocations with many flags), and the cost of a
+/// count this low was not buying safety proportionate to what it
+/// rejected -- `ARG_MAX` on Linux is ~2 MB, far above what this and
+/// `MAX_ARGV_TOTAL_LEN` together allow.
+pub const MAX_ARGV_ENTRIES: usize = 512;
+/// Raised from an initial 4096 alongside the entry-count increase: a
+/// single legitimate argument can exceed 4 KiB (e.g. `git commit -m
+/// "<long message>"`). `MAX_ARGV_TOTAL_LEN` is the real resource bound;
+/// this exists to reject a single grotesquely oversized entry rather
+/// than to be the primary size control.
+pub const MAX_ARGV_ENTRY_LEN: usize = 65536;
+/// Total-argv-size bound (sum of entry lengths), per response 109 Q3:
+/// count and per-entry bounds are proxies for the actual resource
+/// question, which this answers directly. 1 MiB is comfortably above
+/// any realistic proposal and comfortably below any resource concern.
+pub const MAX_ARGV_TOTAL_LEN: usize = 1_048_576;
 pub const MAX_CWD_LEN: usize = 4096;
 pub const MAX_INTENT_LEN: usize = 512;
 pub const MAX_EFFECTS_HINT_LEN: usize = 512;
@@ -79,25 +95,48 @@ impl UntrustedEffectsHint {
     }
 }
 
-/// Adapter -> Tekstide. Every field already passed validation by the time
-/// an instance exists; see [`CommandProposal::decode`].
+/// Adapter -> Tekstide. Every field is private with a read-only accessor:
+/// there is no way to hold an instance of this type that has not already
+/// passed every bound and shape check below, and no way -- via a `&mut
+/// CommandProposal` obtained after decoding -- to push a field back out of
+/// bounds or swap a token between two decoded proposals. (An earlier
+/// version left these fields `pub`; response 109 correctly identified
+/// that as violating the module's own stated invariant, since `pub` fields
+/// are mutable through any `&mut` reference without going through
+/// `decode` at all.) See [`CommandProposal::decode`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommandProposal {
-    pub run_token: RunCapabilityToken,
-    pub proposal_id: ProposalId,
+    run_token: RunCapabilityToken,
+    proposal_id: ProposalId,
     argv: Vec<String>,
     cwd: PathBuf,
-    pub declared_intent: Option<String>,
-    pub declared_effects: Option<UntrustedEffectsHint>,
+    declared_intent: Option<String>,
+    declared_effects: Option<UntrustedEffectsHint>,
 }
 
 impl CommandProposal {
+    pub fn run_token(&self) -> &RunCapabilityToken {
+        &self.run_token
+    }
+
+    pub fn proposal_id(&self) -> &ProposalId {
+        &self.proposal_id
+    }
+
     pub fn argv(&self) -> &[String] {
         &self.argv
     }
 
     pub fn cwd(&self) -> &Path {
         &self.cwd
+    }
+
+    pub fn declared_intent(&self) -> Option<&str> {
+        self.declared_intent.as_deref()
+    }
+
+    pub fn declared_effects(&self) -> Option<&UntrustedEffectsHint> {
+        self.declared_effects.as_ref()
     }
 
     /// Validates and constructs a `CommandProposal` from raw, untrusted
@@ -150,6 +189,7 @@ pub enum ProposalValidationError {
     ArgvEmpty,
     ArgvTooManyEntries,
     ArgvEntryInvalid,
+    ArgvTotalTooLarge,
     CwdInvalid,
     IntentInvalid,
     EffectsHintInvalid,
@@ -186,14 +226,24 @@ pub enum DecisionOutcome {
     EditedAndApproved,
 }
 
+/// Fields are private for the same reason as [`CommandProposal`]'s: no
+/// path to a valid-but-mutated-past-validation instance.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommandDecision {
-    pub proposal_id: ProposalId,
-    pub outcome: DecisionOutcome,
+    proposal_id: ProposalId,
+    outcome: DecisionOutcome,
     edited_argv: Option<Vec<String>>,
 }
 
 impl CommandDecision {
+    pub fn proposal_id(&self) -> &ProposalId {
+        &self.proposal_id
+    }
+
+    pub fn outcome(&self) -> DecisionOutcome {
+        self.outcome
+    }
+
     pub fn edited_argv(&self) -> Option<&[String]> {
         self.edited_argv.as_deref()
     }
@@ -273,6 +323,16 @@ fn validate_proposal_id(raw: String) -> Result<ProposalId, ProposalValidationErr
 /// arguments legitimately contain spaces, quotes, and arbitrary UTF-8, and
 /// this layer does not interpret shell grammar (an explicit RFC-021
 /// non-goal).
+///
+/// **Empty entries are allowed** (response 109 Q2): `printf '%s' ""`,
+/// `grep "" file`, and scripts passing an empty string as an unset
+/// placeholder are all ordinary, legitimate argv. The security property
+/// that matters is that argv is a vector at all -- no shell tokenization,
+/// no quoting ambiguity between what is displayed and what executes.
+/// Entry non-emptiness contributes nothing to that, and a rejected
+/// proposal is not a soft failure: the adapter's command simply does not
+/// run, which pushes users toward routing around approval entirely if it
+/// happens often enough for no good reason.
 fn validate_argv(argv: Vec<String>) -> Result<Vec<String>, ProposalValidationError> {
     if argv.is_empty() {
         return Err(ProposalValidationError::ArgvEmpty);
@@ -280,10 +340,15 @@ fn validate_argv(argv: Vec<String>) -> Result<Vec<String>, ProposalValidationErr
     if argv.len() > MAX_ARGV_ENTRIES {
         return Err(ProposalValidationError::ArgvTooManyEntries);
     }
+    let mut total_len: usize = 0;
     for entry in &argv {
-        if entry.is_empty() || entry.len() > MAX_ARGV_ENTRY_LEN || entry.contains('\0') {
+        if entry.len() > MAX_ARGV_ENTRY_LEN || entry.contains('\0') {
             return Err(ProposalValidationError::ArgvEntryInvalid);
         }
+        total_len += entry.len();
+    }
+    if total_len > MAX_ARGV_TOTAL_LEN {
+        return Err(ProposalValidationError::ArgvTotalTooLarge);
     }
     Ok(argv)
 }

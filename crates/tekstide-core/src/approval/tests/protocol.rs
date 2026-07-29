@@ -1,7 +1,7 @@
 use crate::approval::{
     CommandDecision, CommandProposal, DecisionOutcome, DecisionValidationErrorReason,
-    MAX_ARGV_ENTRIES, MAX_ARGV_ENTRY_LEN, MAX_CWD_LEN, MAX_EFFECTS_HINT_LEN, MAX_INTENT_LEN,
-    MAX_PROPOSAL_ID_LEN, MAX_TOKEN_LEN, PROTOCOL_VERSION, ProposalValidationError,
+    MAX_ARGV_ENTRIES, MAX_ARGV_ENTRY_LEN, MAX_ARGV_TOTAL_LEN, MAX_CWD_LEN, MAX_EFFECTS_HINT_LEN,
+    MAX_INTENT_LEN, MAX_PROPOSAL_ID_LEN, MAX_TOKEN_LEN, PROTOCOL_VERSION, ProposalValidationError,
 };
 use std::path::PathBuf;
 
@@ -38,12 +38,12 @@ fn valid_proposal_decodes_and_preserves_fields() {
     let proposal = decode_proposal(TOKEN, PROPOSAL_ID, valid_argv(), valid_cwd())
         .expect("valid proposal must decode");
 
-    assert_eq!(proposal.run_token.as_str(), TOKEN);
-    assert_eq!(proposal.proposal_id.as_str(), PROPOSAL_ID);
+    assert_eq!(proposal.run_token().as_str(), TOKEN);
+    assert_eq!(proposal.proposal_id().as_str(), PROPOSAL_ID);
     assert_eq!(proposal.argv(), valid_argv().as_slice());
     assert_eq!(proposal.cwd(), valid_cwd());
-    assert_eq!(proposal.declared_intent, None);
-    assert_eq!(proposal.declared_effects, None);
+    assert_eq!(proposal.declared_intent(), None);
+    assert_eq!(proposal.declared_effects(), None);
 }
 
 #[test]
@@ -59,12 +59,9 @@ fn valid_proposal_with_intent_and_effects_decodes() {
     )
     .expect("valid proposal with display fields must decode");
 
+    assert_eq!(proposal.declared_intent(), Some("run the test suite"));
     assert_eq!(
-        proposal.declared_intent.as_deref(),
-        Some("run the test suite")
-    );
-    assert_eq!(
-        proposal.declared_effects.as_ref().map(|e| e.as_str()),
+        proposal.declared_effects().map(|e| e.as_str()),
         Some("reads only")
     );
 }
@@ -126,7 +123,7 @@ fn token_with_control_character_is_rejected() {
 fn token_debug_output_never_contains_the_raw_value() {
     let proposal = decode_proposal(TOKEN, PROPOSAL_ID, valid_argv(), valid_cwd())
         .expect("valid proposal must decode");
-    let rendered = format!("{:?}", proposal.run_token);
+    let rendered = format!("{:?}", proposal.run_token());
     assert!(
         !rendered.contains(TOKEN),
         "Debug output must never leak the capability token: {rendered}"
@@ -171,6 +168,32 @@ fn oversized_argv_entry_is_rejected() {
     let argv = vec!["x".repeat(MAX_ARGV_ENTRY_LEN + 1)];
     let result = decode_proposal(TOKEN, PROPOSAL_ID, argv, valid_cwd());
     assert_eq!(result, Err(ProposalValidationError::ArgvEntryInvalid));
+}
+
+#[test]
+fn empty_argv_entry_is_accepted() {
+    // Response 109 Q2: real commands legitimately pass an empty string
+    // (`printf '%s' ""`, `grep "" file`), and rejecting it buys no
+    // security -- the property that matters is that argv is a vector,
+    // not whether any one entry happens to be empty.
+    let argv = vec!["printf".to_string(), "%s".to_string(), String::new()];
+    let result = decode_proposal(TOKEN, PROPOSAL_ID, argv, valid_cwd());
+    assert!(result.is_ok(), "an empty argv entry must be accepted");
+}
+
+#[test]
+fn argv_total_size_over_the_bound_is_rejected_even_with_entries_under_the_per_entry_bound() {
+    let entry_len = MAX_ARGV_ENTRY_LEN / 2;
+    let entries_needed = MAX_ARGV_TOTAL_LEN / entry_len + 2;
+    let argv = vec!["x".repeat(entry_len); entries_needed.min(MAX_ARGV_ENTRIES)];
+    // Guard the test's own premise: enough entries to exceed the total
+    // bound while each individual entry stays under MAX_ARGV_ENTRY_LEN,
+    // and without themselves exceeding MAX_ARGV_ENTRIES.
+    assert!(argv.len() <= MAX_ARGV_ENTRIES);
+    assert!(argv.iter().map(String::len).sum::<usize>() > MAX_ARGV_TOTAL_LEN);
+
+    let result = decode_proposal(TOKEN, PROPOSAL_ID, argv, valid_cwd());
+    assert_eq!(result, Err(ProposalValidationError::ArgvTotalTooLarge));
 }
 
 #[test]
@@ -282,7 +305,7 @@ fn approved_once_decision_decodes_without_edited_argv() {
         None,
     )
     .expect("valid ApprovedOnce decision must decode");
-    assert_eq!(decision.outcome, DecisionOutcome::ApprovedOnce);
+    assert_eq!(decision.outcome(), DecisionOutcome::ApprovedOnce);
     assert_eq!(decision.edited_argv(), None);
 }
 
@@ -295,7 +318,7 @@ fn rejected_decision_decodes_without_edited_argv() {
         None,
     )
     .expect("valid Rejected decision must decode");
-    assert_eq!(decision.outcome, DecisionOutcome::Rejected);
+    assert_eq!(decision.outcome(), DecisionOutcome::Rejected);
     assert_eq!(decision.edited_argv(), None);
 }
 
