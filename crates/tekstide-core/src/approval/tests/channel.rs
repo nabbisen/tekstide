@@ -561,6 +561,88 @@ fn stale_socket_clearing_refuses_a_non_socket_file() {
     );
 }
 
+/// Response 113 Required 1: binding through the short `/proc/self/fd`-
+/// relative path no longer fails on a deep real state root the way the
+/// pre-response-113 code did -- the reviewer's probe showed `bind()`
+/// succeeding at a 266-byte state-root length while the *real* socket path
+/// (327 bytes) exceeded `sun_path`, leaving a healthy-looking endpoint no
+/// adapter could ever `connect()` to. `bind()` now checks the real path's
+/// length explicitly and must refuse before doing anything else.
+#[test]
+fn bind_rejects_a_state_root_deep_enough_to_exceed_sun_path() {
+    let mut state_root = std::env::temp_dir();
+    // A single path component this long, repeated, reliably pushes the
+    // *real* socket path (`<state_root>/approval/<agent_run_id>.sock`)
+    // past a `sockaddr_un`'s capacity (~108 bytes on Linux) while staying
+    // well under any single filesystem's per-component name limit
+    // (typically 255 bytes).
+    for _ in 0..6 {
+        state_root.push("a".repeat(40));
+    }
+    std::fs::create_dir_all(&state_root).expect("create the deep temp state root");
+    let state_root = state_root
+        .canonicalize()
+        .expect("canonicalize deep state root");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    assert!(
+        directory.socket_path(&agent_run_id).as_os_str().len() > 107,
+        "test precondition: the real socket path must actually exceed sun_path's capacity"
+    );
+
+    let result = ApprovalChannelEndpoint::bind(&directory, &agent_run_id);
+    assert_eq!(
+        result.err().map(|error| error.reason),
+        Some(ApprovalChannelErrorReason::SocketPathTooLong),
+        "bind() must refuse a real socket path too long for sockaddr_un, \
+         rather than binding through the short /proc/self/fd path and \
+         leaving connect() to fail later"
+    );
+}
+
+/// Response 113 Required 2: `O_NOFOLLOW` on the `approval` subdirectory
+/// alone (the pre-response-113 fix) only protects that final path
+/// component -- swapping an *ancestor* (`state_root` itself) still placed
+/// the socket outside the state root, one directory higher than the race
+/// response 112 closed. `resolve()` now pins `state_root` as an fd once,
+/// and `bind()` never re-resolves its pathname again, so this swap must
+/// now be rejected too.
+#[test]
+fn ancestor_symlink_swap_of_the_state_root_itself_is_rejected() {
+    let state_root = temp_state_root("ancestor-swap");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    // `resolve()` has already pinned `state_root` as an fd by this point.
+    // Now perform the swap that fd-pinning is supposed to defeat: replace
+    // the state root *itself* with a symlink to somewhere else entirely,
+    // simulating a same-user process racing a later `bind()` call.
+    let attacker_target = temp_state_root("ancestor-swap-target");
+    std::fs::remove_dir(&state_root).expect("remove the real state root");
+    std::os::unix::fs::symlink(&attacker_target, &state_root)
+        .expect("swap the state root itself for a symlink");
+
+    let result = ApprovalChannelEndpoint::bind(&directory, &agent_run_id);
+    assert!(
+        result.is_err(),
+        "bind() must refuse when the state root itself (not just the approval \
+         subdirectory) has been swapped for a symlink since resolve() ran"
+    );
+
+    let leaked_socket = attacker_target
+        .join("approval")
+        .join(format!("{agent_run_id}.sock"));
+    assert!(
+        !leaked_socket.exists(),
+        "no socket may be created inside the symlink target reached via the swapped ancestor"
+    );
+
+    // Clean up the symlink so it doesn't get treated as a real directory
+    // by anything that later enumerates the parent temp directory.
+    let _ = std::fs::remove_file(&state_root);
+}
+
 fn which_python3() -> Result<String, ()> {
     let output = Command::new("which")
         .arg("python3")

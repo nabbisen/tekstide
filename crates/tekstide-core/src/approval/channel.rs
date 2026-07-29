@@ -60,6 +60,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -91,7 +92,19 @@ const MAX_MESSAGE_FRAME_BYTES: u32 = 8 * 1024 * 1024;
 /// unbounded. This timeout only bounds how long the adapter has to
 /// finish *transmitting* its proposal, which a real adapter does need
 /// generously more than instantly, but never anywhere near indefinitely.
-const PROPOSAL_READ_TIMEOUT: Duration = Duration::from_secs(30);
+///
+/// Response 113 Q2: shortened from an initial 30 seconds to 5. The exact
+/// value matters less than the shape of the fix -- a single-threaded
+/// accept loop handling one connection at a time means an attacker who
+/// loops connect-and-stall still occupies the one slot repeatedly, just
+/// in shorter increments; concurrent connection handling (response 113
+/// required E1 item) is the actual fix for that class of denial, not this
+/// constant. 5 seconds is generous for a local adapter writing one
+/// already-composed frame, which needs milliseconds even on a loaded
+/// machine. Deliberately not configurable: a user-tunable timeout on a
+/// security control invites setting it to something unhelpful, and there
+/// is no legitimate reason for a local adapter to need longer.
+const PROPOSAL_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 // --- Path resolution, modelled on `audit::path` ---------------------
 
@@ -110,10 +123,18 @@ impl ApprovalChannelPathRequest {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// `state_root_fd` pins the state root directory as an open fd, captured
+/// once in `ApprovalChannelPathResolver::resolve()` (response 113 Required
+/// 2). `Arc` rather than a bare `OwnedFd` because `OwnedFd` is not `Clone`
+/// and this directory value may be reused across multiple `bind()` calls
+/// for different `AgentRun`s. `Eq`/`PartialEq` are deliberately not
+/// derived (an fd is not a meaningful value to compare) -- nothing outside
+/// this module ever compared two directories anyway.
+#[derive(Clone, Debug)]
 pub struct ApprovalChannelDirectory {
     state_root: PathBuf,
     channel_dir: PathBuf,
+    state_root_fd: Arc<OwnedFd>,
 }
 
 impl ApprovalChannelDirectory {
@@ -125,19 +146,21 @@ impl ApprovalChannelDirectory {
         &self.channel_dir
     }
 
-    /// One socket per `AgentRun`, named by its id. Unix `sun_path` is
-    /// bounded (108 bytes on Linux) -- an unusually long state-root path
-    /// can make this exceed that limit, which surfaces as a bind-time
-    /// `io::Error` (`ApprovalChannelError::Io`) rather than being
-    /// pre-validated here. Recorded as a known limitation rather than
-    /// worked around with a hashed/shortened name, since doing that well
-    /// would need a hashing dependency this crate does not otherwise need.
+    /// One socket per `AgentRun`, named by its id.
+    ///
+    /// Unix `sun_path` is bounded (~108 bytes on Linux); an unusually long
+    /// state-root path can make this exceed that limit. `bind()` binds
+    /// through a short `/proc/self/fd`-relative path rather than this real
+    /// path (see `magic_fd_path`), so the limit no longer surfaces there --
+    /// response 113 Required 1 found that this let a too-long path bind
+    /// successfully and then fail silently at *connect* time instead, on
+    /// the adapter's side, with an endpoint that looks healthy but can
+    /// never be reached. `bind()` now checks this exact path's length
+    /// explicitly and returns `ApprovalChannelErrorReason::SocketPathTooLong`
+    /// before doing anything else, specifically so that failure mode is
+    /// closed rather than moved.
     pub fn socket_path(&self, agent_run_id: &AgentRunId) -> PathBuf {
         self.channel_dir.join(format!("{agent_run_id}.sock"))
-    }
-
-    fn ensure_created(&self) -> io::Result<()> {
-        fs::create_dir_all(&self.channel_dir)
     }
 }
 
@@ -189,9 +212,29 @@ impl ApprovalChannelPathResolver {
         }
         reject_symlink(&channel_dir)?;
 
+        // Response 113 Required 2: pin the state root itself as an open fd,
+        // right after resolving its pathname, rather than only pinning the
+        // `approval` subdirectory at `bind()` time as the previous
+        // revision did. `O_NOFOLLOW` on a single path component protects
+        // only that component -- an ancestor swap (replacing `state_root`
+        // itself with a symlink sometime between this call and a later
+        // `bind()`) was still possible, one directory higher than the race
+        // response 112 closed. An fd pins an inode: `bind()` resolves the
+        // `approval` subdirectory via `openat` relative to `state_root_fd`
+        // (see `bind()`), so no pathname swap at any level after this
+        // point can redirect it, no matter how long a caller waits between
+        // `resolve()` and `bind()`.
+        fs::create_dir_all(&state_root).map_err(|_error| {
+            ApprovalChannelPathError::new(ApprovalChannelPathErrorReason::InvalidStateRoot)
+        })?;
+        let state_root_fd = open_dir_no_follow(&state_root).map_err(|_error| {
+            ApprovalChannelPathError::new(ApprovalChannelPathErrorReason::InvalidStateRoot)
+        })?;
+
         let resolved = ApprovalChannelDirectory {
             state_root,
             channel_dir,
+            state_root_fd: Arc::new(state_root_fd),
         };
         for project_root in request.project_roots {
             resolved.ensure_project_root_compatible(&project_root)?;
@@ -293,6 +336,23 @@ pub enum ApprovalChannelErrorReason {
     PeerCredentialMismatch,
     ConnectionClosed,
     ReadTimedOut,
+    /// Response 113 Required 1: the real `socket_path` (not the short
+    /// `/proc/self/fd`-relative path `bind()` actually binds through)
+    /// exceeds what a `sockaddr_un` can hold. Distinguished from a bare
+    /// `Io` specifically so this fails loudly and identifiably at
+    /// `bind()`, rather than binding successfully and leaving every
+    /// adapter connect attempt to fail later with an unrelated-looking
+    /// error against an endpoint that otherwise looks healthy.
+    SocketPathTooLong,
+    /// Response 113 Q1 item 1: the `/proc/self/fd/<fd>/<name>` magic path
+    /// this module binds through could not be used -- almost always
+    /// because `/proc` is not mounted (some minimal containers and
+    /// hardened configurations omit it; Tekstide is Linux-only and
+    /// desktop-targeted, so this is expected to be rare). Distinguished
+    /// from a bare `Io` so this specific, environmental precondition is
+    /// identifiable rather than indistinguishable from any other bind
+    /// failure.
+    ProcMagicPathUnavailable,
 }
 
 #[derive(Debug)]
@@ -366,27 +426,52 @@ impl ApprovalChannelEndpoint {
         directory: &ApprovalChannelDirectory,
         agent_run_id: &AgentRunId,
     ) -> Result<(Self, String), ApprovalChannelError> {
-        directory
-            .ensure_created()
-            .map_err(ApprovalChannelError::io)?;
+        let socket_path = directory.socket_path(agent_run_id);
 
-        // Opened with `O_NOFOLLOW` immediately before use (response 112
-        // Defect 1): `resolve()` already rejected a symlinked channel
-        // directory once, but that check happens earlier and the result
-        // can decay -- a same-user process could swap the directory for a
-        // symlink in the window between `resolve()` and here. Opening
-        // again, right before use, re-checks at the only moment that
-        // actually matters. Everything below operates through this fd
-        // (via the `/proc/self/fd` magic path) rather than by
-        // re-resolving `channel_dir`'s pathname a second time, so nothing
-        // after this point can be redirected by a later swap either.
+        // Response 113 Required 1: checked against the *real* path, up
+        // front, before anything else. Binding below goes through a short
+        // `/proc/self/fd`-relative path (see `magic_fd_path`'s doc
+        // comment for why that shortness is incidental, not a feature),
+        // which no longer fails here on a long real path the way the
+        // previous revision did -- it would instead bind successfully and
+        // leave a real adapter's later `connect()` (which must use the
+        // real path) to fail against a healthy-looking, unreachable
+        // endpoint. That is a harder failure to diagnose than the one it
+        // replaced, so it is closed explicitly here instead.
+        if socket_path.as_os_str().len() > max_socket_path_len() {
+            return Err(ApprovalChannelError::new(
+                ApprovalChannelErrorReason::SocketPathTooLong,
+            ));
+        }
+
+        // Response 113 Required 2: `mkdirat`/`openat` relative to the
+        // state-root fd pinned once in `resolve()`, instead of
+        // re-resolving `channel_dir`'s pathname here the way the previous
+        // revision's `open_dir_no_follow(directory.channel_dir())` did.
+        // That call re-resolved `state_root`'s pathname on every `bind()`,
+        // so a same-user swap of `state_root` itself (not just the
+        // `approval` subdirectory) between `resolve()` and `bind()` still
+        // worked -- `state_root_fd` was opened once and never re-resolves
+        // its own pathname again, closing that too.
+        let state_root_fd = directory.state_root_fd.as_raw_fd();
+        mkdirat_if_missing(state_root_fd, "approval", 0o700).map_err(ApprovalChannelError::io)?;
         let dir_fd =
-            open_dir_no_follow(directory.channel_dir()).map_err(ApprovalChannelError::io)?;
+            openat_dir_no_follow(state_root_fd, "approval").map_err(ApprovalChannelError::io)?;
         fchmod(dir_fd.as_raw_fd(), 0o700).map_err(ApprovalChannelError::io)?;
+
+        // Response 113 Q1 item 1: this fd-relative approach depends on
+        // `/proc/self/fd` being mounted and functional. Checked here,
+        // against the fd this call just opened itself, so a failure is
+        // unambiguously about `/proc` rather than about the eventual bind
+        // target -- and surfaces as a distinguished reason instead of a
+        // bare `Io` that would otherwise look identical to an unrelated
+        // bind failure.
+        verify_proc_fd_magic_path_available(&dir_fd).map_err(|_error| {
+            ApprovalChannelError::new(ApprovalChannelErrorReason::ProcMagicPathUnavailable)
+        })?;
 
         let filename = format!("{agent_run_id}.sock");
         let bind_path = magic_fd_path(&dir_fd, &filename);
-        let socket_path = directory.socket_path(agent_run_id);
 
         clear_stale_socket(&bind_path, &socket_path)?;
 
@@ -475,7 +560,7 @@ impl ApprovalChannelEndpoint {
 
 #[cfg(test)]
 impl ApprovalChannelEndpoint {
-    /// So a timeout test does not have to wait the real 30-second
+    /// So a timeout test does not have to wait the real
     /// `PROPOSAL_READ_TIMEOUT`.
     pub(crate) fn set_read_timeout_for_test(&mut self, timeout: Duration) {
         self.read_timeout = timeout;
@@ -550,6 +635,14 @@ fn clear_stale_socket(bind_path: &Path, removal_path: &Path) -> Result<(), Appro
 /// (response 112 Defect 1) -- unlike a plain `fs::symlink_metadata` check
 /// followed by a later path-based operation, there is no gap here between
 /// "checked" and "used": they are the same fd.
+///
+/// Used directly only in `resolve()`, to pin `state_root` itself. Opening
+/// the `approval` subdirectory later goes through `openat_dir_no_follow`
+/// relative to that pinned fd instead (response 113 Required 2) -- calling
+/// this function on `channel_dir`'s full pathname, as the previous
+/// revision of `bind()` did, re-resolved `state_root`'s pathname every
+/// time and left an ancestor-swap race open one directory higher than the
+/// `approval` component this originally closed.
 fn open_dir_no_follow(path: &Path) -> io::Result<OwnedFd> {
     let c_path = CString::new(path.as_os_str().as_bytes()).map_err(|_error| {
         io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte")
@@ -571,16 +664,100 @@ fn open_dir_no_follow(path: &Path) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
+/// Creates `name` as a subdirectory of the directory `dir_fd` refers to,
+/// tolerating `AlreadyExists` (this runs on every `bind()` call, not just
+/// the first). Relative to an already-open fd rather than a pathname, so
+/// this cannot be redirected by any pathname swap of an ancestor directory
+/// (response 113 Required 2) -- unlike the plain-path `fs::create_dir_all`
+/// the previous revision used here.
+fn mkdirat_if_missing(dir_fd: RawFd, name: &str, mode: u32) -> io::Result<()> {
+    let c_name = CString::new(name).map_err(|_error| {
+        io::Error::new(io::ErrorKind::InvalidInput, "name contains a NUL byte")
+    })?;
+    // SAFETY: `c_name` is a valid, NUL-terminated C string for the
+    // lifetime of this call; `dir_fd` is a valid, currently-open directory
+    // fd owned by the caller for at least that long.
+    let result = unsafe { libc::mkdirat(dir_fd, c_name.as_ptr(), mode as libc::mode_t) };
+    if result != 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::AlreadyExists {
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+/// `open_dir_no_follow`, but relative to an already-open directory fd
+/// (`libc::openat`) rather than resolving a pathname from the process's
+/// current working directory. This is the `approval`-subdirectory
+/// counterpart to pinning `state_root` in `resolve()`: because `dir_fd`
+/// was opened once, at `resolve()` time, and never re-resolves its own
+/// pathname again, no pathname swap of `state_root` (or anything above
+/// it) after that point can redirect where this ends up opening
+/// (response 113 Required 2).
+fn openat_dir_no_follow(dir_fd: RawFd, name: &str) -> io::Result<OwnedFd> {
+    let c_name = CString::new(name).map_err(|_error| {
+        io::Error::new(io::ErrorKind::InvalidInput, "name contains a NUL byte")
+    })?;
+    // SAFETY: `c_name` is a valid, NUL-terminated C string for the
+    // lifetime of this call; `dir_fd` is a valid, currently-open directory
+    // fd owned by the caller for at least that long. `openat` either
+    // returns a valid owned fd or a negative value with `errno` set; both
+    // are handled below.
+    let fd = unsafe {
+        libc::openat(
+            dir_fd,
+            c_name.as_ptr(),
+            libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_RDONLY,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `fd` was just returned by a successful `openat` call above
+    // and is not owned anywhere else.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
 /// A path that resolves through the kernel's fd table (Linux's `/proc/
 /// self/fd` magic symlinks) rather than by re-resolving `dir_fd`'s
 /// directory pathname from scratch. Binding or chmod-ing through this
 /// path cannot be redirected by anything that happens to the directory's
 /// *pathname* after `dir_fd` was opened, since the fd already refers
-/// directly to the verified directory's inode -- this is what actually
-/// closes the race window `open_dir_no_follow`'s doc comment describes,
-/// rather than merely narrowing it.
+/// directly to the verified directory's inode.
+///
+/// Response 113 Q1 item 3: this path being short is incidental to closing
+/// the TOCTOU race, not a feature -- it is what let a `socket_path` longer
+/// than `sun_path`'s capacity bind successfully here and fail only later,
+/// at `connect()`, on the adapter's side (Required 1). The explicit length
+/// check in `bind()` against the *real* `socket_path` is what enforces
+/// the limit now; nobody should remove that check on the theory that
+/// binding through this short path has lifted it.
 fn magic_fd_path(dir_fd: &OwnedFd, filename: &str) -> PathBuf {
     PathBuf::from(format!("/proc/self/fd/{}/{filename}", dir_fd.as_raw_fd()))
+}
+
+/// The longest path `bind`/`connect` can accept in a `sockaddr_un`, not
+/// counting the mandatory trailing NUL terminator the kernel requires
+/// (response 113 Required 1).
+fn max_socket_path_len() -> usize {
+    let sun_path_len =
+        std::mem::size_of::<libc::sockaddr_un>() - std::mem::size_of::<libc::sa_family_t>();
+    sun_path_len - 1
+}
+
+/// Confirms `/proc/self/fd/<fd>` resolves, for the fd this module just
+/// opened itself, before relying on the same mechanism to construct a
+/// bind path (response 113 Q1 item 1). `/proc` not being mounted is the
+/// expected cause of failure here -- rare on Tekstide's Linux desktop
+/// target, but not impossible in minimal containers or hardened
+/// configurations -- and checking against a fd we know is valid isolates
+/// that specific precondition from any other reason a later operation on
+/// the constructed path might fail.
+fn verify_proc_fd_magic_path_available(dir_fd: &OwnedFd) -> io::Result<()> {
+    let self_path = PathBuf::from(format!("/proc/self/fd/{}", dir_fd.as_raw_fd()));
+    fs::metadata(&self_path)?;
+    Ok(())
 }
 
 fn fchmod(fd: RawFd, mode: u32) -> io::Result<()> {

@@ -2,11 +2,11 @@
 title: "RFC-021: Command Approval Model and Adapter Capability - Acceptance / QA Checklist"
 rfc: "RFC-021"
 rfc_file: "../../proposed/021-command-approval-model-and-adapter-capability.md"
-status: "Proposed — implementation in progress (PR-021-B, PR-021-C, PR-021-D landed)"
+status: "Proposed — implementation in progress (PR-021-B, PR-021-C, PR-021-D landed; PR-021-D accepted with required follow-up, applied)"
 target_milestone: "M11"
 source_rfc_status: "Proposed"
 created: "2026-07-28"
-updated: "2026-07-29"
+updated: "2026-07-30"
 ---
 
 # RFC-021 Acceptance / QA Checklist
@@ -16,7 +16,7 @@ updated: "2026-07-29"
 ## Channel Checklist
 
 - [x] Approval channel is a Unix domain socket, never the PTY stream. `std::os::unix::net::UnixListener`/`UnixStream` only; no code path in `approval::channel` touches terminal I/O.
-- [x] Endpoint lives under the state root, outside every project root. `ApprovalChannelPathResolver` mirrors `AuditPathResolver`'s *resolver* shape; `ProjectContainsChannelState` tested directly. Response 112 Defect 1 found the resolver alone was insufficient — a same-user symlink swap between `resolve()` and `bind()` could place the socket outside the state root — and required an `O_NOFOLLOW`-opened directory fd (closing the race, not narrowing it) plus a dedicated test (`symlink_swap_between_resolve_and_bind_is_rejected`) before re-checking this box.
+- [x] Endpoint lives under the state root, outside every project root. `ApprovalChannelPathResolver` mirrors `AuditPathResolver`'s *resolver* shape; `ProjectContainsChannelState` tested directly. Response 112 Defect 1 found the resolver alone was insufficient — a same-user symlink swap between `resolve()` and `bind()` could place the socket outside the state root — and an `O_NOFOLLOW`-opened `approval`-directory fd was added, tested via `symlink_swap_between_resolve_and_bind_is_rejected`. Response 113 Required 2 then found *that* fix protected only the final path component: swapping `state_root` itself (one directory higher) still worked, contradicting the "closed the race" claim made at the time. Fixed by pinning `state_root` itself as an `O_NOFOLLOW`-opened fd in `resolve()` (stored as `state_root_fd`) and deriving the `approval` subdirectory from it via `openat`/`mkdirat`, so no pathname swap at any level after `resolve()` can redirect where the channel opens. `ancestor_symlink_swap_of_the_state_root_itself_is_rejected` reproduces the reviewer's exact probe; both this test and the earlier one are ablation-verified load-bearing (fix reverted, test confirmed to fail, fix restored).
 - [x] Path validation rejects symlink redirection, matching RFC-011/RFC-013 discipline. Tested with a real symlinked `approval` directory.
 - [x] One endpoint per AgentRun; destroyed on termination. Socket path is per-`AgentRunId`; `Drop` removes the file, tested directly. Stale-socket recovery tested with a genuinely dead raw listener.
 - [x] Socket permissions restricted to the owning user. Explicitly `chmod`'d to `0600` after `bind()` (independent of umask); tested by reading back the mode bits.
