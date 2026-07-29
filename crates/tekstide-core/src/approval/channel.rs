@@ -52,12 +52,15 @@
 //! has access to the actual `AgentRun`/`ProjectSession` state this module
 //! deliberately does not depend on.
 
+use std::ffi::CString;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::PermissionsExt;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -69,10 +72,26 @@ use super::protocol::{
 
 /// Hard cap on a single wire message, checked against the length prefix
 /// *before* reading that many bytes -- an oversized declared length is
-/// rejected without ever allocating a buffer for it. Deliberately larger
-/// than `MAX_ARGV_TOTAL_LEN` (1 MiB) to leave headroom for JSON framing
-/// overhead and the other fields, but still bounded.
-const MAX_MESSAGE_FRAME_BYTES: u32 = 2 * 1024 * 1024;
+/// rejected without ever allocating a buffer for it. Set well above
+/// `MAX_ARGV_TOTAL_LEN` (1 MiB): JSON string escaping can expand a byte up
+/// to sixfold (`\u00XX`), so a legitimate proposal near the argv ceiling
+/// with heavily-escaped content needs headroom beyond the raw argv bound
+/// plus structural overhead, not just a small margin over it (response
+/// 112 non-blocking-4).
+const MAX_MESSAGE_FRAME_BYTES: u32 = 8 * 1024 * 1024;
+
+/// How long `accept_proposal` waits for the initial proposal frame after a
+/// connection is accepted, before giving up (response 112 Defect 3). A
+/// same-user peer that connects and then sends nothing -- or a partial
+/// frame -- would otherwise block this call forever, queuing every
+/// subsequent connection (including the real adapter's) behind it. This
+/// is deliberately unrelated to and much shorter than the RFC's "no
+/// approval timeout" policy, which governs how long a *human* may take to
+/// decide once a proposal has already been received -- that remains
+/// unbounded. This timeout only bounds how long the adapter has to
+/// finish *transmitting* its proposal, which a real adapter does need
+/// generously more than instantly, but never anywhere near indefinitely.
+const PROPOSAL_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 // --- Path resolution, modelled on `audit::path` ---------------------
 
@@ -118,8 +137,7 @@ impl ApprovalChannelDirectory {
     }
 
     fn ensure_created(&self) -> io::Result<()> {
-        fs::create_dir_all(&self.channel_dir)?;
-        fs::set_permissions(&self.channel_dir, fs::Permissions::from_mode(0o700))
+        fs::create_dir_all(&self.channel_dir)
     }
 }
 
@@ -274,6 +292,7 @@ pub enum ApprovalChannelErrorReason {
     TokenMismatch,
     PeerCredentialMismatch,
     ConnectionClosed,
+    ReadTimedOut,
 }
 
 #[derive(Debug)]
@@ -334,6 +353,7 @@ pub struct ApprovalChannelEndpoint {
     socket_path: PathBuf,
     expected_token: RunCapabilityToken,
     owner_uid: u32,
+    read_timeout: Duration,
 }
 
 impl ApprovalChannelEndpoint {
@@ -349,17 +369,45 @@ impl ApprovalChannelEndpoint {
         directory
             .ensure_created()
             .map_err(ApprovalChannelError::io)?;
+
+        // Opened with `O_NOFOLLOW` immediately before use (response 112
+        // Defect 1): `resolve()` already rejected a symlinked channel
+        // directory once, but that check happens earlier and the result
+        // can decay -- a same-user process could swap the directory for a
+        // symlink in the window between `resolve()` and here. Opening
+        // again, right before use, re-checks at the only moment that
+        // actually matters. Everything below operates through this fd
+        // (via the `/proc/self/fd` magic path) rather than by
+        // re-resolving `channel_dir`'s pathname a second time, so nothing
+        // after this point can be redirected by a later swap either.
+        let dir_fd =
+            open_dir_no_follow(directory.channel_dir()).map_err(ApprovalChannelError::io)?;
+        fchmod(dir_fd.as_raw_fd(), 0o700).map_err(ApprovalChannelError::io)?;
+
+        let filename = format!("{agent_run_id}.sock");
+        let bind_path = magic_fd_path(&dir_fd, &filename);
         let socket_path = directory.socket_path(agent_run_id);
 
-        clear_stale_socket(&socket_path)?;
+        clear_stale_socket(&bind_path, &socket_path)?;
 
-        let listener = UnixListener::bind(&socket_path).map_err(ApprovalChannelError::io)?;
-        fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))
+        let listener = UnixListener::bind(&bind_path).map_err(ApprovalChannelError::io)?;
+        // Empirically, `fchmod` on the *listening socket's own fd* does
+        // not reliably update the bound special file's mode bits (tried
+        // first; the socket file kept its umask-derived default despite
+        // `fchmod` reporting success) -- unlike a plain directory fd,
+        // where `fchmod` unambiguously works, a socket fd's relationship
+        // to the special file's inode metadata is evidently not the same
+        // thing. Falling back to a path-based `set_permissions`, but
+        // still through `bind_path` (the `/proc/self/fd`-relative path)
+        // rather than the plain path, so this still resolves through the
+        // already-verified directory fd instead of re-resolving a
+        // separate pathname.
+        fs::set_permissions(&bind_path, fs::Permissions::from_mode(0o600))
             .map_err(ApprovalChannelError::io)?;
 
         let raw_token = generate_capability_token();
-        let expected_token = protocol_decode_token(&raw_token)
-            .expect("generated token must satisfy the protocol's own bounds");
+        let expected_token = super::protocol::validate_token(raw_token.clone())
+            .expect("a freshly generated token must satisfy the protocol's own bounds");
 
         let owner_uid = current_euid();
 
@@ -369,6 +417,7 @@ impl ApprovalChannelEndpoint {
                 socket_path,
                 expected_token,
                 owner_uid,
+                read_timeout: PROPOSAL_READ_TIMEOUT,
             },
             raw_token,
         ))
@@ -382,6 +431,13 @@ impl ApprovalChannelEndpoint {
     /// fail-closed-without-a-dialog requirement.
     pub fn accept_proposal(&self) -> Result<AcceptedProposal, ApprovalChannelError> {
         let (mut stream, _addr) = self.listener.accept().map_err(ApprovalChannelError::io)?;
+
+        // Response 112 Defect 3: without this, a same-user peer that
+        // connects and then sends nothing (or a partial frame) blocks
+        // this call -- and every connection after it -- forever.
+        stream
+            .set_read_timeout(Some(self.read_timeout))
+            .map_err(ApprovalChannelError::io)?;
 
         let peer_uid = peer_uid(&stream).map_err(ApprovalChannelError::io)?;
         if peer_uid != self.owner_uid {
@@ -398,17 +454,47 @@ impl ApprovalChannelEndpoint {
             ApprovalChannelError::new(ApprovalChannelErrorReason::MalformedFrame)
         })?;
 
-        let proposal = wire.into_proposal().map_err(|_error| {
-            ApprovalChannelError::new(ApprovalChannelErrorReason::InvalidProposal)
-        })?;
-
-        if proposal.run_token() != &self.expected_token {
+        // Response 112 Recommended 7: checked immediately after parsing,
+        // before the full `CommandProposal::decode` -- an unauthenticated
+        // peer's bytes reach strictly less code this way, and a mismatch
+        // is unambiguously reported as `TokenMismatch` rather than
+        // whatever `decode` happened to reject first.
+        if !self.expected_token.matches_raw(&wire.run_token) {
             return Err(ApprovalChannelError::new(
                 ApprovalChannelErrorReason::TokenMismatch,
             ));
         }
 
+        let proposal = wire.into_proposal().map_err(|_error| {
+            ApprovalChannelError::new(ApprovalChannelErrorReason::InvalidProposal)
+        })?;
+
         Ok(AcceptedProposal { proposal, stream })
+    }
+}
+
+#[cfg(test)]
+impl ApprovalChannelEndpoint {
+    /// So a timeout test does not have to wait the real 30-second
+    /// `PROPOSAL_READ_TIMEOUT`.
+    pub(crate) fn set_read_timeout_for_test(&mut self, timeout: Duration) {
+        self.read_timeout = timeout;
+    }
+
+    /// Response 112 Q1: there is no second real user account (or root)
+    /// available to exercise the peer-credential-*mismatch* branch
+    /// end-to-end -- that would require an actually different kernel-
+    /// reported UID, which nothing in this process can produce. This
+    /// converts an entirely untested branch into one where the
+    /// *comparison* (`peer_uid != self.owner_uid`) is exercised for real,
+    /// by varying the other operand instead: the peer's real UID (read via
+    /// a real `getsockopt(SO_PEERCRED)` call, unchanged and unfaked) is
+    /// compared against a deliberately wrong expected value. This does
+    /// not prove `getsockopt` reads the kernel's value correctly -- only
+    /// a second real account could -- but it is a meaningfully smaller
+    /// residual claim than "the comparison is untested."
+    pub(crate) fn set_owner_uid_for_test(&mut self, uid: u32) {
+        self.owner_uid = uid;
     }
 }
 
@@ -423,25 +509,88 @@ impl Drop for ApprovalChannelEndpoint {
 /// If a socket file already exists at this path, determine whether it is
 /// a live listener (a genuine conflict -- refuse to touch it) or a stale
 /// leftover from an ungraceful prior termination (safe to remove and
-/// rebind). Attempting a connect is the standard way to tell the two
-/// apart: a live listener accepts or at least does not refuse, a dead one
-/// refuses the connection.
-fn clear_stale_socket(socket_path: &Path) -> Result<(), ApprovalChannelError> {
-    if fs::symlink_metadata(socket_path).is_err() {
-        return Ok(());
+/// rebind). `bind_path` (the `/proc/self/fd`-relative path) is used for
+/// both the type check and the connect attempt, so both go through the
+/// already-verified directory fd rather than re-resolving a plain
+/// pathname; `removal_path` is the plain path used only for the final
+/// `remove_file`, which is a no-op-if-wrong operation (removing a stale
+/// socket by name either succeeds or the subsequent `bind` fails loudly,
+/// it cannot silently redirect anything).
+fn clear_stale_socket(bind_path: &Path, removal_path: &Path) -> Result<(), ApprovalChannelError> {
+    let metadata = match fs::symlink_metadata(bind_path) {
+        Ok(metadata) => metadata,
+        Err(_) => return Ok(()),
+    };
+    if !metadata.file_type().is_socket() {
+        // Response 112 Q3: connecting to a *regular file* also yields
+        // `ECONNREFUSED`, which the previous version of this function
+        // could not distinguish from a genuinely stale socket -- any
+        // non-socket file at this path was silently deleted. Refuse
+        // outright rather than attempt to connect to something that was
+        // never a socket in the first place.
+        return Err(ApprovalChannelError::new(ApprovalChannelErrorReason::Io));
     }
-    match UnixStream::connect(socket_path) {
+    match UnixStream::connect(bind_path) {
         Ok(_) => Err(ApprovalChannelError::new(ApprovalChannelErrorReason::Io)),
         Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
-            fs::remove_file(socket_path).map_err(ApprovalChannelError::io)
+            fs::remove_file(removal_path).map_err(ApprovalChannelError::io)
         }
         Err(_) => {
-            // Any other error (permission denied, not a socket, etc.) is
-            // treated the same as "do not touch it" -- only a confirmed
-            // stale listener is cleared.
+            // Any other error (permission denied, etc.) is treated the
+            // same as "do not touch it" -- only a confirmed stale
+            // listener is cleared.
             Err(ApprovalChannelError::new(ApprovalChannelErrorReason::Io))
         }
     }
+}
+
+/// Opens `path` with `O_NOFOLLOW`: fails if the final path component is a
+/// symlink *at the moment of this call*, which is what makes it safe to
+/// use as the basis for every subsequent operation on this directory
+/// (response 112 Defect 1) -- unlike a plain `fs::symlink_metadata` check
+/// followed by a later path-based operation, there is no gap here between
+/// "checked" and "used": they are the same fd.
+fn open_dir_no_follow(path: &Path) -> io::Result<OwnedFd> {
+    let c_path = CString::new(path.as_os_str().as_bytes()).map_err(|_error| {
+        io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte")
+    })?;
+    // SAFETY: `c_path` is a valid, NUL-terminated C string for the
+    // lifetime of this call. `open` either returns a valid owned fd or a
+    // negative value with `errno` set; both are handled below.
+    let fd = unsafe {
+        libc::open(
+            c_path.as_ptr(),
+            libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_RDONLY,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `fd` was just returned by a successful `open` call above
+    // and is not owned anywhere else.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// A path that resolves through the kernel's fd table (Linux's `/proc/
+/// self/fd` magic symlinks) rather than by re-resolving `dir_fd`'s
+/// directory pathname from scratch. Binding or chmod-ing through this
+/// path cannot be redirected by anything that happens to the directory's
+/// *pathname* after `dir_fd` was opened, since the fd already refers
+/// directly to the verified directory's inode -- this is what actually
+/// closes the race window `open_dir_no_follow`'s doc comment describes,
+/// rather than merely narrowing it.
+fn magic_fd_path(dir_fd: &OwnedFd, filename: &str) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}/{filename}", dir_fd.as_raw_fd()))
+}
+
+fn fchmod(fd: RawFd, mode: u32) -> io::Result<()> {
+    // SAFETY: `fd` is a valid, currently-open file descriptor for the
+    // duration of this call (the caller retains ownership across it).
+    let result = unsafe { libc::fchmod(fd, mode as libc::mode_t) };
+    if result != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 fn current_euid() -> u32 {
@@ -478,25 +627,6 @@ fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     }
 }
 
-fn protocol_decode_token(raw: &str) -> Result<RunCapabilityToken, ProposalValidationError> {
-    // Round-trips through the real proposal decoder's token validation
-    // rather than constructing a `RunCapabilityToken` any other way, so
-    // the token this endpoint expects is guaranteed to satisfy exactly
-    // the same bounds an incoming proposal's token will be checked
-    // against -- there is no second, potentially-divergent validation
-    // path for the expected side.
-    CommandProposal::decode(
-        super::protocol::PROTOCOL_VERSION,
-        raw.to_string(),
-        "token-self-check".to_string(),
-        vec!["placeholder".to_string()],
-        std::env::temp_dir(),
-        None,
-        None,
-    )
-    .map(|proposal| proposal.run_token().clone())
-}
-
 // --- Wire framing --------------------------------------------------
 
 fn write_frame(stream: &mut UnixStream, bytes: &[u8]) -> Result<(), ApprovalChannelError> {
@@ -515,14 +645,7 @@ fn write_frame(stream: &mut UnixStream, bytes: &[u8]) -> Result<(), ApprovalChan
 
 fn read_frame(stream: &mut UnixStream) -> Result<Vec<u8>, ApprovalChannelError> {
     let mut len_bytes = [0_u8; 4];
-    stream
-        .read_exact(&mut len_bytes)
-        .map_err(|error| match error.kind() {
-            io::ErrorKind::UnexpectedEof => {
-                ApprovalChannelError::new(ApprovalChannelErrorReason::ConnectionClosed)
-            }
-            _ => ApprovalChannelError::io(error),
-        })?;
+    stream.read_exact(&mut len_bytes).map_err(map_read_error)?;
     let len = u32::from_be_bytes(len_bytes);
     if len > MAX_MESSAGE_FRAME_BYTES {
         return Err(ApprovalChannelError::new(
@@ -530,13 +653,33 @@ fn read_frame(stream: &mut UnixStream) -> Result<Vec<u8>, ApprovalChannelError> 
         ));
     }
     let mut buffer = vec![0_u8; len as usize];
-    stream
-        .read_exact(&mut buffer)
-        .map_err(ApprovalChannelError::io)?;
+    stream.read_exact(&mut buffer).map_err(map_read_error)?;
     Ok(buffer)
 }
 
+/// A read timeout (response 112 Defect 3) can surface as either
+/// `WouldBlock` or `TimedOut` depending on platform, so both are treated
+/// as the same distinguished, expected outcome rather than a generic I/O
+/// error.
+fn map_read_error(error: io::Error) -> ApprovalChannelError {
+    match error.kind() {
+        io::ErrorKind::UnexpectedEof => {
+            ApprovalChannelError::new(ApprovalChannelErrorReason::ConnectionClosed)
+        }
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => {
+            ApprovalChannelError::new(ApprovalChannelErrorReason::ReadTimedOut)
+        }
+        _ => ApprovalChannelError::io(error),
+    }
+}
+
+/// `deny_unknown_fields` (response 112 non-blocking-3): an unrecognized
+/// field in an otherwise-valid message sat oddly next to "unknown
+/// protocol version rejected without negotiation" -- both are the same
+/// kind of "the message shape is not one we agreed to," and both should
+/// fail closed the same way.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WireCommandProposal {
     protocol_version: u32,
     run_token: String,

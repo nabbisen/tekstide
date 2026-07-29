@@ -16,7 +16,7 @@ updated: "2026-07-29"
 ## Channel Checklist
 
 - [x] Approval channel is a Unix domain socket, never the PTY stream. `std::os::unix::net::UnixListener`/`UnixStream` only; no code path in `approval::channel` touches terminal I/O.
-- [x] Endpoint lives under the state root, outside every project root. `ApprovalChannelPathResolver` mirrors `AuditPathResolver`'s discipline exactly; `ProjectContainsChannelState` tested directly.
+- [x] Endpoint lives under the state root, outside every project root. `ApprovalChannelPathResolver` mirrors `AuditPathResolver`'s *resolver* shape; `ProjectContainsChannelState` tested directly. Response 112 Defect 1 found the resolver alone was insufficient — a same-user symlink swap between `resolve()` and `bind()` could place the socket outside the state root — and required an `O_NOFOLLOW`-opened directory fd (closing the race, not narrowing it) plus a dedicated test (`symlink_swap_between_resolve_and_bind_is_rejected`) before re-checking this box.
 - [x] Path validation rejects symlink redirection, matching RFC-011/RFC-013 discipline. Tested with a real symlinked `approval` directory.
 - [x] One endpoint per AgentRun; destroyed on termination. Socket path is per-`AgentRunId`; `Drop` removes the file, tested directly. Stale-socket recovery tested with a genuinely dead raw listener.
 - [x] Socket permissions restricted to the owning user. Explicitly `chmod`'d to `0600` after `bind()` (independent of umask); tested by reading back the mode bits.
@@ -27,7 +27,7 @@ updated: "2026-07-29"
 - [x] **A non-adapter process cannot submit a proposal.** Tested twice: same-process thread with a wrong token, and a genuinely separate `python3` process with a wrong token (`cross_process_impersonation_with_wrong_token_is_rejected`) — both rejected with `TokenMismatch`, no dialog constructed.
 - [x] **A non-adapter process cannot submit a decision.** Structural, not a separate test: decisions only ever flow over a connection that already passed proposal authentication (`AcceptedProposal::send_decision`); there is no separate, unauthenticated pathway a rogue process could use to inject a decision independent of first passing the proposal handshake.
 - [x] A token from another AgentRun is rejected. Each `bind()` call generates an independent token; the round-trip and wrong-token tests together demonstrate a token only validates against the specific endpoint that issued it.
-- [ ] Peer credentials (`SO_PEERCRED`) reject a different Unix user. Implemented (`peer_uid` compared against the endpoint's own euid) but **not tested** — would need a second real user account or root, neither available in this environment. Recorded as an untested path, not assumed covered.
+- [x] Peer credentials (`SO_PEERCRED`) reject a different Unix user. Implemented (`peer_uid` compared against the endpoint's own euid); the *comparison* is now tested (`peer_credential_mismatch_is_rejected`, using a test-only `owner_uid` override per response 112 Q1). What remains genuinely unverified, stated precisely rather than left vague: whether `getsockopt(SO_PEERCRED)` itself reads the kernel's value correctly for an actually different real user — nothing short of a second real account or root can verify that specific claim.
 
 ## Protocol Checklist
 

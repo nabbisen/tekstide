@@ -62,12 +62,21 @@ impl ProposalId {
 /// channel that issued it. This type only validates *shape* (bounded,
 /// printable). Whether a given token is the correct one for a given run is
 /// a `approval::channel` concern -- this layer cannot know that.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct RunCapabilityToken(String);
 
 impl RunCapabilityToken {
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Constant-time comparison against a raw, not-yet-validated wire
+    /// string, for `approval::channel` to check an incoming token before
+    /// it has gone through full proposal decoding (response 112
+    /// Recommended 7). Uses the same `constant_time_eq` the `PartialEq`
+    /// impl uses, so this and `==` never disagree.
+    pub(crate) fn matches_raw(&self, raw: &str) -> bool {
+        constant_time_eq(self.0.as_bytes(), raw.as_bytes())
     }
 }
 
@@ -78,6 +87,33 @@ impl std::fmt::Debug for RunCapabilityToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("RunCapabilityToken(<redacted>)")
     }
+}
+
+impl Eq for RunCapabilityToken {}
+
+/// Constant-time comparison (response 112 Recommended 8): this is a
+/// capability comparison in a security boundary, not an ordinary value
+/// equality check. A derived `PartialEq` on the underlying `String` would
+/// short-circuit at the first differing byte -- realistically
+/// unexploitable once `accept()` and JSON parsing sit between an attacker
+/// and this comparison, but "we measured the noise floor and judged it
+/// unexploitable" is a weaker claim than "it does not vary," and the fix
+/// is three lines.
+impl PartialEq for RunCapabilityToken {
+    fn eq(&self, other: &Self) -> bool {
+        constant_time_eq(self.0.as_bytes(), other.0.as_bytes())
+    }
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0_u8;
+    for (byte_a, byte_b) in a.iter().zip(b.iter()) {
+        diff |= byte_a ^ byte_b;
+    }
+    diff == 0
 }
 
 /// Adapter-declared effects text, e.g. "reads only". Wrapped so the type
@@ -295,7 +331,15 @@ impl CommandDecision {
     }
 }
 
-fn validate_token(raw: String) -> Result<RunCapabilityToken, ProposalValidationError> {
+/// `pub(crate)` (response 112 Defect 2): `approval::channel` needs to
+/// validate a freshly-generated token against the exact same rules an
+/// incoming proposal's token is checked against, without constructing an
+/// entire `CommandProposal` (with a placeholder `cwd`/argv) just to reach
+/// this check indirectly -- that indirection was itself the bug (a token
+/// self-check that could panic on a hostile `$TMPDIR`, despite having
+/// nothing to do with paths or argv at all). One shared implementation,
+/// callable directly by both.
+pub(crate) fn validate_token(raw: String) -> Result<RunCapabilityToken, ProposalValidationError> {
     if raw.is_empty()
         || raw.len() > MAX_TOKEN_LEN
         || !raw.bytes().all(|byte| byte.is_ascii_graphic())

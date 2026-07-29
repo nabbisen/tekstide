@@ -3,6 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use crate::approval::{
     ApprovalChannelDirectory, ApprovalChannelEndpoint, ApprovalChannelErrorReason,
@@ -399,6 +400,164 @@ s.close()
         result.unwrap_err().reason,
         ApprovalChannelErrorReason::TokenMismatch,
         "a real separate OS process presenting the wrong token must be rejected"
+    );
+}
+
+/// Response 112 Defect 1: `resolve()` rejected a symlinked channel
+/// directory once, but that check can decay -- a same-user process could
+/// swap the directory for a symlink in the window between `resolve()` and
+/// `bind()`. Reproduces the reviewer's own probe: resolve normally, then
+/// perform the swap, then bind, and confirm the swap is caught rather
+/// than the endpoint ending up bound inside the attacker's target
+/// directory.
+#[test]
+fn symlink_swap_between_resolve_and_bind_is_rejected() {
+    let state_root = temp_state_root("swap");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    // `resolve()` has already run (inside `resolve_directory`) and
+    // approved of `channel_dir` as a real directory -- but that directory
+    // does not exist on disk yet at this point (creation happens inside
+    // `bind()`). Create it first, as an earlier `bind()` call would have,
+    // then perform the swap `resolve()` cannot see: replace it with a
+    // symlink to somewhere else entirely, simulating a same-user process
+    // racing a *second* `bind()` call.
+    std::fs::create_dir_all(directory.channel_dir()).expect("create the real approval dir first");
+    let attacker_target = temp_state_root("swap-target");
+    std::fs::remove_dir(directory.channel_dir()).expect("remove the real approval dir");
+    std::os::unix::fs::symlink(&attacker_target, directory.channel_dir())
+        .expect("swap in a symlink");
+
+    let result = ApprovalChannelEndpoint::bind(&directory, &agent_run_id);
+    assert!(
+        result.is_err(),
+        "bind() must refuse a channel directory that resolves to a symlink at bind time, \
+         even though resolve() checked and approved it earlier"
+    );
+
+    // Confirm the attacker's directory was not touched (no socket placed
+    // there, no permissions changed) and nothing was bound outside the
+    // real state root.
+    let leaked_socket = attacker_target.join(format!("{agent_run_id}.sock"));
+    assert!(
+        !leaked_socket.exists(),
+        "no socket may be created inside the symlink target"
+    );
+}
+
+/// Response 112 Defect 3: a same-user peer that connects and then sends
+/// nothing must not block `accept_proposal` (and every connection after
+/// it) forever. Uses `set_read_timeout_for_test` so this test takes a
+/// bounded fraction of a second rather than the real 30-second
+/// `PROPOSAL_READ_TIMEOUT`.
+#[test]
+fn silent_peer_triggers_a_read_timeout_rather_than_blocking_forever() {
+    let state_root = temp_state_root("silent-peer");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    let (mut endpoint, _token) =
+        ApprovalChannelEndpoint::bind(&directory, &agent_run_id).expect("bind must succeed");
+    endpoint.set_read_timeout_for_test(Duration::from_millis(200));
+    let socket_path = directory.socket_path(&agent_run_id);
+
+    let silent_peer = std::thread::spawn(move || {
+        let stream = UnixStream::connect(&socket_path).expect("silent peer connect");
+        // Deliberately send nothing and hold the connection open long
+        // enough that, without a timeout, `accept_proposal` would still
+        // be blocked when this thread finishes.
+        std::thread::sleep(Duration::from_millis(500));
+        drop(stream);
+    });
+
+    let started = std::time::Instant::now();
+    let result = endpoint.accept_proposal();
+    let elapsed = started.elapsed();
+
+    silent_peer
+        .join()
+        .expect("silent peer thread must not panic");
+
+    assert_eq!(
+        result.unwrap_err().reason,
+        ApprovalChannelErrorReason::ReadTimedOut
+    );
+    assert!(
+        elapsed < Duration::from_millis(400),
+        "accept_proposal must return once its own read timeout elapses, \
+         not wait for the peer -- took {elapsed:?}"
+    );
+}
+
+/// Response 112 Q1: exercises the `peer_uid != self.owner_uid` comparison
+/// by varying `owner_uid` (via a test-only setter) rather than the peer's
+/// real UID, since no second real user account is available in this
+/// environment. See `set_owner_uid_for_test`'s doc comment for exactly
+/// what this does and does not prove.
+#[test]
+fn peer_credential_mismatch_is_rejected() {
+    let state_root = temp_state_root("peer-cred");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    let (mut endpoint, token) =
+        ApprovalChannelEndpoint::bind(&directory, &agent_run_id).expect("bind must succeed");
+    let real_uid = unsafe { libc::geteuid() };
+    endpoint.set_owner_uid_for_test(real_uid + 1);
+    let socket_path = directory.socket_path(&agent_run_id);
+
+    let peer = std::thread::spawn(move || {
+        let mut stream = UnixStream::connect(&socket_path).expect("peer connect");
+        // A perfectly valid proposal with the correct token -- the point
+        // is that peer-credential rejection happens before the token is
+        // even inspected. The write itself may race against the main
+        // thread's rejection (which drops the connection as soon as the
+        // peer-credential check fails, possibly before this write
+        // completes) -- a `BrokenPipe` here is an expected side effect of
+        // fast, correct rejection, not a test failure, so errors are
+        // deliberately ignored rather than `.expect()`-ed.
+        let _ = stream.write_all(&valid_proposal_frame(&token, "proposal-1"));
+    });
+
+    let result = endpoint.accept_proposal();
+    peer.join().expect("peer thread must not panic");
+
+    assert_eq!(
+        result.unwrap_err().reason,
+        ApprovalChannelErrorReason::PeerCredentialMismatch
+    );
+}
+
+/// Response 112 Q3: a regular file (never a socket) sitting at the target
+/// path must be refused outright, not silently deleted on the assumption
+/// that `ECONNREFUSED`-from-connecting-to-it means "stale socket, safe to
+/// clear" -- a plain file yields the same `ECONNREFUSED`-shaped failure
+/// from a connect attempt, which the pre-fix code could not tell apart
+/// from a genuinely stale socket.
+#[test]
+fn stale_socket_clearing_refuses_a_non_socket_file() {
+    let state_root = temp_state_root("non-socket");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+    let socket_path = directory.socket_path(&agent_run_id);
+
+    std::fs::create_dir_all(directory.channel_dir()).expect("create channel dir for the test");
+    std::fs::write(&socket_path, b"not a socket").expect("create a plain regular file");
+
+    let result = ApprovalChannelEndpoint::bind(&directory, &agent_run_id);
+    assert!(
+        result.is_err(),
+        "bind() must refuse when a non-socket file occupies the target path"
+    );
+    assert!(
+        socket_path.exists(),
+        "the regular file must not have been deleted"
+    );
+    assert_eq!(
+        std::fs::read(&socket_path).expect("read back the file"),
+        b"not a socket",
+        "the regular file's contents must be untouched"
     );
 }
 
