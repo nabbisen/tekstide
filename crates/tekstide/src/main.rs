@@ -6,8 +6,14 @@
 // precedent: proven by this module's own tests, not by a fabricated call
 // site (`quote_untrusted` had the identical "no re-review, do not stub
 // anything" ruling in response 118 Q1).
-#[allow(dead_code)]
-mod i18n;
+//
+// `pub`, not a blanket `#[allow(dead_code)]` (response 122 Required 3):
+// a module-level allow suppresses the lint for everything added here
+// from now on, including code that becomes genuinely dead later --
+// exactly where a headless module most needs the compiler's help.
+// Making the module `pub` lets the lint keep working for the right
+// reason instead.
+pub mod i18n;
 
 use tekstide_core::shell::ApplicationShell;
 

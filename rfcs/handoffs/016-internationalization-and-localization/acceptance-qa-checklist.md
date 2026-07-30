@@ -32,7 +32,7 @@ updated: "2026-07-30"
 
 ## Catalog and Locale Checklist
 
-- [x] Catalog format chosen; **dependency cost measured and recorded** as a lockfile delta. Fluent (`fluent-bundle` 0.16.0): +12 packages, measured via `git diff Cargo.lock`. `sys-locale` (OS locale detection): +0, already resolved transitively via `tekstide-gui-spike`.
+- [x] Catalog format chosen; **dependency cost measured and recorded**, scoped to the shipped `tekstide` binary. **Corrected per response 122** — the original `git diff Cargo.lock` measurement scored the whole workspace lock (including `tekstide-gui-spike`'s `iced` tree), not what `tekstide` actually ships. Re-measured with `cargo tree -p tekstide --edges normal`, before/after: whole binary tree **39 packages** (23 baseline + **16 net new**: Fluent/`unic-langid` +15, `sys-locale` +1 — not the originally-reported +0).
 - [x] Decision reasoning recorded, not just the outcome. Compared against RFC-014 R3's iced precedent (+345 packages) in `qa-evidence.md`; +12 for native plurals/gendered forms/interpolation/asymmetric translation judged proportionate.
 - [x] Source-locale catalog compiled into the binary. `crates/tekstide/locales/en.ftl` via `include_str!` in `i18n/catalog.rs`; `source_locale_bundle()` takes no disk path at all.
 - [ ] **Lookup replaces RFC-015's placeholder without changing the call shape.** Not met as literally stated — **RFC-015 has not been implemented**, so no placeholder exists to replace and no call shape exists to preserve. This slice establishes the call shape (`i18n::Catalog::resolve`/`Catalog::get`) instead, documented as a disclosed sequencing gap in `qa-evidence.md`, not a silent substitution. Left unchecked pending the reviewer's view on whether establishing the shape now satisfies the intent.
@@ -76,7 +76,7 @@ updated: "2026-07-30"
 - [x] Commit/PR list; gate output. See qa-evidence.md PR-016-C section (this slice only; B/D/E/F pending).
 - [x] Bidi corpus results including the Trojan Source case. `crates/tekstide-core/src/text_safety/tests.rs`.
 - [ ] Byte-fidelity test results for audit and transcript paths. Audit path only; no transcript integration point exists yet.
-- [x] Dependency-cost measurement. Fluent: +12 packages; `sys-locale`: +0 (already resolved elsewhere in the workspace). See `qa-evidence.md` PR-016-B section.
+- [x] Dependency-cost measurement. Corrected per response 122: `cargo tree -p tekstide --edges normal`, scoped to the shipped binary, not the workspace lock. 39 packages total; +16 net new (Fluent/`unic-langid` +15, `sys-locale` +1). See `qa-evidence.md` PR-016-B section.
 - [ ] Screenshot of a non-Latin locale rendering the shell. Requires RFC-015's shell to exist first.
 - [x] Known limitations; answers to the RFC's open questions. Open Question 1 (escaping function's home) answered by the README's 2026-07-30 addendum: `tekstide-core`, shared — see qa-evidence.md.
 

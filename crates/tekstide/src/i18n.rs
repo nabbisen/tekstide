@@ -38,7 +38,15 @@ use unic_langid::LanguageIdentifier;
 /// in `main.rs`, and RFC-023's configuration setting does not exist) --
 /// the fields exist so [`Catalog::resolve`]'s signature does not need to
 /// change when those callers arrive.
+///
+/// `#[non_exhaustive]` (response 122 Q2 recommended): a future
+/// precedence level -- an environment variable, a per-project override
+/// -- can then be added without breaking struct-literal construction
+/// anywhere this type is built, the same reason `cli_flag`/`configured`
+/// exist ahead of their real callers, generalized instead of predicting
+/// each slot in advance.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct LocalePreference {
     pub cli_flag: Option<String>,
     pub configured: Option<String>,
