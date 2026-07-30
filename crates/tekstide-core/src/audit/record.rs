@@ -33,6 +33,15 @@ pub enum AuditOutcome {
     Blocked,
     Cancelled,
     Completed,
+    /// RFC-021 PR-021-E2 response 116 Required 2: an informational
+    /// observation, not a gate. Deliberately distinct from `Blocked` --
+    /// `Blocked` in every other family here means the described action did
+    /// not proceed (paste blocked, root access blocked); an `Anomaly`
+    /// record (currently only `command_cwd_mismatch`) is recorded
+    /// alongside an action that proceeded normally, using trusted data the
+    /// anomaly itself has no bearing on. Reusing `Blocked` would overstate
+    /// what happened.
+    Anomaly,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,6 +53,14 @@ pub enum AuditActionKind {
     CommandApprove,
     CommandEditAndApprove,
     CommandReject,
+    /// RFC-021 PR-021-E2 response 116 Required 2: a proposal's claimed
+    /// `cwd` disagreed with the caller-supplied, already-verified
+    /// `verified_cwd`. Never used for classification or containment (see
+    /// `approval::coordinator`'s module doc) -- this is the one honest use
+    /// `CommandProposal::cwd()` has: evidence that an adapter's claim was
+    /// wrong, recorded best-effort as an `Anomaly`, alongside the
+    /// classification that correctly used `verified_cwd` alone.
+    CommandCwdMismatch,
     ManagedAgentLaunch,
     PlainTerminalLifecycle,
     TerminalPaste,
@@ -312,6 +329,12 @@ impl DurableAuditRecordV1 {
                     && self.outcome == AuditOutcome::Applied
                     && self.actor_kind == AuditActorKind::User
                     && self.action_source == AuditActionSource::TrustedUi
+            }
+            AuditActionKind::CommandCwdMismatch => {
+                self.operation_id.is_none()
+                    && self.outcome == AuditOutcome::Anomaly
+                    && self.actor_kind == AuditActorKind::AppPolicy
+                    && self.action_source == AuditActionSource::Adapter
             }
             _ => false,
         }
@@ -608,6 +631,7 @@ impl_code!(AuditOutcome {
     Blocked => "blocked",
     Cancelled => "cancelled",
     Completed => "completed",
+    Anomaly => "anomaly",
 });
 
 impl_code!(AuditActionKind {
@@ -618,6 +642,7 @@ impl_code!(AuditActionKind {
     CommandApprove => "command_approve",
     CommandEditAndApprove => "command_edit_and_approve",
     CommandReject => "command_reject",
+    CommandCwdMismatch => "command_cwd_mismatch",
     ManagedAgentLaunch => "managed_agent_launch",
     PlainTerminalLifecycle => "plain_terminal_lifecycle",
     TerminalPaste => "terminal_paste",

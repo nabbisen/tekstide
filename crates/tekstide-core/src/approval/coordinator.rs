@@ -43,16 +43,22 @@
 //!    (whether from a genuine retry or a replayed decision message)
 //!    returns the existing terminal state unchanged rather than
 //!    re-running anything or overwriting the first decision.
+//! 4. **A proposal's claimed `cwd` is compared against `verified_cwd`,
+//!    and a mismatch is recorded as a best-effort audit anomaly -- never
+//!    trusted, never used for classification (point 1 above still holds
+//!    absolutely), but not silently discarded either.** Response 116
+//!    Required 2: `CommandProposal::cwd()` has exactly one honest use in
+//!    this module -- evidence that an adapter's claim disagreed with
+//!    reality, which is what a `command_cwd_mismatch` audit anomaly
+//!    means. The comparison happens in `receive_proposal`, strictly after
+//!    classification and storage have already used `verified_cwd` alone.
 //!
-//! **Explicitly out of scope for this slice (deferred to PR-021-E2):**
-//! writing any of this to durable audit via `AuditCoordinator`, sending
-//! `CommandDecision` back over the wire, re-classifying edited argv for
-//! `EditedAndApproved` (`implementation-handoff.md` §7), and auditing a
-//! `cwd` mismatch between what a proposal claims and `verified_cwd` as an
-//! anomaly signal (response 114 Recommended 3 -- not comparing at all
-//! here is deliberate; see the module-doc point above). This module only
-//! produces in-memory `domain::ApprovalRequest` values; E2 wires those to
-//! the audit family and the channel.
+//! Durable audit (via `AuditCoordinator`), the `CommandDecision` round
+//! trip back over the wire, and edit-and-approve reclassification
+//! (`implementation-handoff.md` §7 -- the audit record must describe what
+//! was approved, not what was proposed) are all implemented as of
+//! PR-021-E2. This module has no further deferred work; PR-021-F
+//! (closeout) writes no product code.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -95,6 +101,14 @@ pub enum ReceiveOutcome {
         /// health without this module returning an error for a condition
         /// it does not treat as fatal.
         command_request_audit: crate::audit::AuditObservationStatus,
+        /// Whether a `command_cwd_mismatch` anomaly was recorded, i.e.
+        /// whether `accepted.proposal.cwd()` disagreed with
+        /// `verified_cwd` at all (response 116 Required 2). `None` when
+        /// the claim and the verified value agreed -- there is nothing to
+        /// report, not a report this module withheld. `Some` carries
+        /// whether the best-effort write itself succeeded, exactly like
+        /// `command_request_audit`.
+        cwd_mismatch_audit: Option<crate::audit::AuditObservationStatus>,
     },
     /// This proposal id was already seen for this run. **No
     /// `ApprovalRequest` is returned, regardless of whether the repeat's
@@ -125,6 +139,21 @@ impl ReceiveOutcome {
                 command_request_audit,
                 ..
             } => Some(*command_request_audit),
+            ReceiveOutcome::DuplicateRejected { .. } => None,
+        }
+    }
+
+    /// `Some` only when a mismatch was actually detected and an anomaly
+    /// record attempted; `None` for `DuplicateRejected` *and* for a
+    /// `Created` outcome where the claim and `verified_cwd` agreed --
+    /// these are not distinguished here because a caller checking audit
+    /// health only cares whether a write was attempted and failed, not
+    /// why none was attempted.
+    pub fn cwd_mismatch_audit(&self) -> Option<crate::audit::AuditObservationStatus> {
+        match self {
+            ReceiveOutcome::Created {
+                cwd_mismatch_audit, ..
+            } => *cwd_mismatch_audit,
             ReceiveOutcome::DuplicateRejected { .. } => None,
         }
     }
@@ -169,6 +198,12 @@ pub enum DecideOutcome {
     /// once audit is healthy again -- and nothing is sent over the
     /// channel. `Rejected` decisions never reach this path (rejection has
     /// no authorization phase to fail; see `SimpleDecision`'s doc).
+    ///
+    /// This variant carries no request (see [`Self::request`]): the
+    /// request was never mutated, but it still exists and is still
+    /// `Pending` -- call [`ApprovalCoordinator::find`] to observe it, not
+    /// `.request()` here, which would otherwise read as "the request is
+    /// gone" rather than "retry once audit is healthy."
     AuditBlocked(AuditIntegrationError),
 }
 
@@ -318,12 +353,30 @@ impl ApprovalCoordinator {
             request.id.clone(),
             request.risk_level,
         );
+        // Response 116 Required 2: compare the adapter's claimed cwd
+        // against verified_cwd, strictly *after* classification and
+        // storage above have already used verified_cwd alone -- this
+        // comparison exists purely to produce an anomaly signal, never to
+        // influence anything that already happened. Best-effort, matching
+        // command_request's treatment: a mismatch is information, not a
+        // reason to fail an otherwise-safe receipt.
+        let cwd_mismatch_audit = if accepted.proposal.cwd() != verified_cwd_path {
+            Some(audit.record_cwd_mismatch_anomaly(
+                request.project_id.clone(),
+                request.agent_run_id.clone(),
+                request.id.clone(),
+                request.risk_level,
+            ))
+        } else {
+            None
+        };
         let returned = request.clone();
         self.requests
             .insert(key, PendingRequest { request, accepted });
         ReceiveOutcome::Created {
             request: Box::new(returned),
             command_request_audit,
+            cwd_mismatch_audit,
         }
     }
 
@@ -450,24 +503,40 @@ impl ApprovalCoordinator {
             return DecideOutcome::AlreadyDecided(pending.request.clone());
         }
 
-        let operation_id = match audit.authorize_command_decision(
-            pending.request.project_id.clone(),
-            pending.request.agent_run_id.clone(),
-            pending.request.id.clone(),
-            pending.request.risk_level,
-            CommandDecisionActionKind::EditAndApprove,
-        ) {
-            Ok(operation_id) => operation_id,
-            Err(error) => return DecideOutcome::AuditBlocked(error),
-        };
-
+        // Response 116 Required 1: reclassify *before* authorizing, into
+        // locals -- classification is pure computation with no side
+        // effects or external visibility, so computing it here does not
+        // weaken "authorization precedes execution" (that ordering
+        // constrains application, not arithmetic). The authorizing record
+        // must describe the command that was actually approved, not the
+        // one that was proposed; the previous ordering authorized against
+        // `pending.request.risk_level` (still the proposed level) and
+        // only reclassified afterward, so the audit record an incident
+        // review reads first answered the wrong question for exactly the
+        // case edit-and-approve exists to cover. Nothing is written onto
+        // `pending.request` until authorization succeeds, so an
+        // `AuditBlocked` result still leaves the stored request describing
+        // the original proposal, unchanged.
         let assessment = risk::classify(
             &edited_argv,
             verified_cwd.as_path(),
             project_root,
             state_root,
         );
-        pending.request.display_command = display_argv(&edited_argv);
+        let display_command = display_argv(&edited_argv);
+
+        let operation_id = match audit.authorize_command_decision(
+            pending.request.project_id.clone(),
+            pending.request.agent_run_id.clone(),
+            pending.request.id.clone(),
+            assessment.level,
+            CommandDecisionActionKind::EditAndApprove,
+        ) {
+            Ok(operation_id) => operation_id,
+            Err(error) => return DecideOutcome::AuditBlocked(error),
+        };
+
+        pending.request.display_command = display_command;
         pending.request.risk_level = assessment.level;
         pending.request.risk_reasons = assessment.reasons;
         pending

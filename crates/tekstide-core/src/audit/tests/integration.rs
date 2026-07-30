@@ -1,11 +1,16 @@
 use std::fs;
 use std::os::unix::fs::symlink;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::agent::{
     AgentRunLaunchPlan, AgentRunLaunchRequest, AgentRunLaunchValidator, AiCliExecutable,
     AiCliExecutableProvenance, AiCliProfile, AiCliProfileSource, AiCliWorkspaceDiscoveryPolicy,
+    VerifiedCwd,
+};
+use crate::approval::{
+    AcceptedProposal, ApprovalCoordinator, CommandProposal, DecideOutcome, PROTOCOL_VERSION,
+    ReceiveOutcome,
 };
 use crate::audit::integration::AuditRecordWriter;
 use crate::audit::{
@@ -14,7 +19,8 @@ use crate::audit::{
     AuditStoreErrorReason, CommandDecisionActionKind, DurableAuditRecordV1,
 };
 use crate::domain::{
-    AgentCompatibilityLevel, AgentRunStatus, ApprovalId, RiskLevel, TerminalStatus,
+    AgentCompatibilityLevel, AgentRunId, AgentRunStatus, ApprovalDecision, ApprovalId, RiskLevel,
+    TerminalStatus,
 };
 use crate::project::{ProjectContentError, ProjectId, ProjectSession, WorkspaceTrust};
 use crate::runtime::terminal::{
@@ -469,6 +475,97 @@ fn command_approve_persists_authorized_then_applied_with_matching_operation_id()
             && record.record.terminal_id.is_none()
             && record.record.subject_kind.is_none()
     }));
+}
+
+/// RFC-021 PR-021-E2 response 116 Required 1: on `DecideOutcome::
+/// AuditBlocked` for an edit-and-approve, the stored request must remain
+/// exactly as it was before the edit -- `display_command`, `risk_level`,
+/// and `risk_reasons` all still describing the *original* proposal, never
+/// the edited argv that was never actually authorized. This is the one
+/// property `approval::tests::coordinator` cannot reach on its own: that
+/// module has no path to a fake failing `AuditRecordWriter` (the trait is
+/// `pub(crate)` but lives in the private `audit::integration` module,
+/// which is never re-exported, so it cannot be named -- or implemented for
+/// a caller's own type -- from outside `audit` and its descendants). This
+/// module IS a descendant of `audit`, so it can use `RecordingWriter` and
+/// `AuditCoordinator::with_writer` exactly as every other required-vs-
+/// best-effort proof in this file does, while calling into
+/// `approval::ApprovalCoordinator` (a fully public, crate-external type)
+/// to exercise the property that actually lives there.
+#[test]
+fn edit_and_approve_audit_block_leaves_the_stored_request_describing_the_original_proposal() {
+    const PROJECT_ROOT: &str = "/home/user/project";
+    const STATE_ROOT: &str = "/home/user/.local/share/tekstide";
+
+    let mut health = AuditHealth::default();
+    // Attempt 1 is `record_command_request` during `receive_proposal`
+    // (must succeed, or there is no request to edit); attempt 2 is
+    // `authorize_command_decision` during `decide_with_edited_argv` (must
+    // fail, to exercise `AuditBlocked`).
+    let mut writer = RecordingWriter::fail_on(2);
+
+    let command_proposal = CommandProposal::decode(
+        PROTOCOL_VERSION,
+        "t".repeat(64),
+        "proposal-1".to_string(),
+        vec!["git".to_string(), "status".to_string()],
+        PathBuf::from(PROJECT_ROOT),
+        None,
+        None,
+    )
+    .expect("test proposal must decode");
+    let (accepted, _peer) = AcceptedProposal::for_test(command_proposal.clone());
+
+    let mut coordinator = ApprovalCoordinator::new();
+    let agent_run_id = AgentRunId::for_test(1);
+    let ReceiveOutcome::Created {
+        request: original, ..
+    } = coordinator.receive_proposal(
+        ProjectId::for_test(1),
+        agent_run_id.clone(),
+        &VerifiedCwd::for_test(PROJECT_ROOT),
+        Path::new(PROJECT_ROOT),
+        Path::new(STATE_ROOT),
+        accepted,
+        &mut AuditCoordinator::with_writer(&mut writer, &mut health),
+    )
+    else {
+        panic!("must create a request");
+    };
+    assert_eq!(original.risk_level, RiskLevel::Low);
+
+    let outcome = coordinator.decide_with_edited_argv(
+        &agent_run_id,
+        command_proposal.proposal_id(),
+        vec!["rm".to_string(), "-rf".to_string(), "/etc".to_string()],
+        &VerifiedCwd::for_test(PROJECT_ROOT),
+        Path::new(PROJECT_ROOT),
+        Path::new(STATE_ROOT),
+        &mut AuditCoordinator::with_writer(&mut writer, &mut health),
+    );
+
+    let DecideOutcome::AuditBlocked(error) = outcome else {
+        panic!("must be blocked -- got {outcome:?}");
+    };
+    assert_eq!(
+        error,
+        AuditIntegrationError::RequiredAuditUnavailable(AuditStoreErrorReason::StorageFull)
+    );
+    // Nothing durable was written for the blocked authorization attempt --
+    // only the one successful `command_request` write from receipt.
+    assert_eq!(writer.records.len(), 1);
+
+    let still_pending = coordinator
+        .find(&agent_run_id, command_proposal.proposal_id())
+        .expect("the request must still exist -- AuditBlocked does not remove it");
+    assert_eq!(
+        still_pending.decision,
+        ApprovalDecision::Pending,
+        "a blocked authorization must not apply the decision"
+    );
+    assert_eq!(still_pending.display_command, original.display_command);
+    assert_eq!(still_pending.risk_level, original.risk_level);
+    assert_eq!(still_pending.risk_reasons, original.risk_reasons);
 }
 
 fn project_for(dirs: &TestAuditDirs, sequence: u64) -> ProjectSession {

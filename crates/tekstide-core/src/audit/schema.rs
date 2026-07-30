@@ -16,7 +16,7 @@ CREATE TABLE audit_events (
     )),
     outcome TEXT NOT NULL CHECK (outcome IN (
         'requested', 'authorized', 'applied', 'failed', 'started',
-        'terminated', 'blocked', 'cancelled', 'completed'
+        'terminated', 'blocked', 'cancelled', 'completed', 'anomaly'
     )),
     operation_id TEXT,
     terminal_id TEXT,
@@ -29,6 +29,7 @@ CREATE TABLE audit_events (
     action_kind TEXT NOT NULL CHECK (action_kind IN (
         'project_add', 'trust_grant', 'trust_revoke', 'command_request',
         'command_approve', 'command_edit_and_approve', 'command_reject',
+        'command_cwd_mismatch',
         'managed_agent_launch', 'plain_terminal_lifecycle', 'terminal_paste',
         'restricted_feature', 'root_access', 'safe_close_terminate',
         'safe_close_abandon', 'destructive_action', 'config_policy_increase',
@@ -100,7 +101,10 @@ CREATE TABLE audit_events (
                     AND actor_kind = 'user' AND action_source = 'trusted_ui')
                 OR (action_kind = 'command_reject' AND operation_id IS NULL
                     AND outcome = 'applied' AND actor_kind = 'user'
-                    AND action_source = 'trusted_ui')))
+                    AND action_source = 'trusted_ui')
+                OR (action_kind = 'command_cwd_mismatch' AND operation_id IS NULL
+                    AND outcome = 'anomaly' AND actor_kind = 'app_policy'
+                    AND action_source = 'adapter')))
         OR (family = 'managed_process_lifecycle'
             AND project_id IS NOT NULL AND agent_run_id IS NOT NULL
             AND approval_id IS NULL AND operation_id IS NOT NULL

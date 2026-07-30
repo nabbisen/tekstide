@@ -984,22 +984,116 @@ fn sentinel_command_text_never_reaches_the_durable_audit_store() {
     assert!(!raw_text.contains(SENTINEL_CWD));
 }
 
-/// Response 114 Recommended 3 / response 115: the fixture proving that a
-/// proposal's claimed `cwd` differing from `verified_cwd` is not (yet)
-/// compared or audited anywhere -- this is a Known Limitation, not a
-/// silent gap, and this test documents the current, deliberate behavior
-/// precisely so a future change to it is a visible diff, not a surprise.
+/// Response 116 Required 2: a proposal's claimed `cwd` differing from
+/// `verified_cwd` is now compared and recorded as a best-effort
+/// `command_cwd_mismatch` audit anomaly -- converted from response 114/115's
+/// known-limitation fixture (which documented the absence of this check)
+/// to assert its presence, per response 116's explicit instruction.
 #[test]
-fn a_cwd_mismatch_is_not_yet_compared_or_audited_known_limitation() {
+fn a_cwd_mismatch_is_compared_and_recorded_as_a_best_effort_audit_anomaly() {
     let mut coordinator = ApprovalCoordinator::new();
-    let agent_run_id = AgentRunId::for_test(1);
+    // A real UUID-shaped id -- this test queries a real store afterward.
+    let agent_run_id = AgentRunId::new_uuid();
     // The proposal claims cwd = "/", but the caller supplies the real,
     // separately-sourced PROJECT_ROOT as verified_cwd -- a genuine
     // mismatch between the two.
     let command_proposal = proposal("proposal-1", &["git", "status"], "/");
     let mut test_audit = TestAudit::new("cwd-mismatch");
 
-    let (ReceiveOutcome::Created { request, .. }, _peer) = receive(
+    let (
+        ReceiveOutcome::Created {
+            request,
+            cwd_mismatch_audit,
+            ..
+        },
+        _peer,
+    ) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &command_proposal,
+        &mut test_audit.coordinator(),
+    )
+    else {
+        panic!("must create a request");
+    };
+    // The request is still classified and stored using verified_cwd
+    // (correct, per this module's core guarantee -- never the claim,
+    // point 1 of the module doc) -- the mismatch is a *separate*,
+    // observability-only signal alongside that.
+    assert_eq!(request.cwd, Path::new(PROJECT_ROOT));
+    assert_ne!(
+        command_proposal.cwd(),
+        request.cwd,
+        "test precondition: the proposal's claim and the verified cwd must actually differ"
+    );
+    assert_eq!(
+        cwd_mismatch_audit,
+        Some(crate::audit::AuditObservationStatus::Persisted)
+    );
+
+    let records = test_audit
+        .store
+        .query(&crate::audit::AuditQuery::latest(10))
+        .expect("query the real audit store")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .collect::<Vec<_>>();
+    let anomaly = records
+        .iter()
+        .find(|record| record.action_kind == crate::audit::AuditActionKind::CommandCwdMismatch)
+        .expect("a command_cwd_mismatch anomaly record must exist");
+    assert_eq!(anomaly.outcome, crate::audit::AuditOutcome::Anomaly);
+    assert_eq!(
+        anomaly.family,
+        crate::audit::AuditEventFamily::CommandApproval
+    );
+    assert_eq!(anomaly.operation_id, None);
+    assert_eq!(anomaly.approval_id, Some(request.id.clone()));
+}
+
+/// A proposal whose claimed `cwd` genuinely matches `verified_cwd` must
+/// **not** produce an anomaly record -- otherwise every ordinary proposal
+/// would be flagged, and the signal would be useless.
+#[test]
+fn a_matching_cwd_produces_no_mismatch_anomaly() {
+    let mut coordinator = ApprovalCoordinator::new();
+    let agent_run_id = AgentRunId::for_test(1);
+    let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let mut test_audit = TestAudit::new("cwd-match");
+
+    let (
+        ReceiveOutcome::Created {
+            cwd_mismatch_audit, ..
+        },
+        _peer,
+    ) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &command_proposal,
+        &mut test_audit.coordinator(),
+    )
+    else {
+        panic!("must create a request");
+    };
+    assert_eq!(cwd_mismatch_audit, None);
+}
+
+/// Response 116 Required 1's core defect, reproduced and closed: the
+/// `Authorized` record for an edit-and-approve must carry the *edited*
+/// command's risk level, not the risk level of what was originally
+/// proposed -- reclassification now happens before authorization, not
+/// after.
+#[test]
+fn edit_and_approve_authorized_record_carries_the_edited_risk_level_not_the_proposed_one() {
+    let mut coordinator = ApprovalCoordinator::new();
+    let agent_run_id = AgentRunId::new_uuid();
+    let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let mut test_audit = TestAudit::new("edit-and-approve-audit-level");
+
+    let (ReceiveOutcome::Created { .. }, _peer) = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
@@ -1008,13 +1102,48 @@ fn a_cwd_mismatch_is_not_yet_compared_or_audited_known_limitation() {
     ) else {
         panic!("must create a request");
     };
-    // The request is classified and stored using verified_cwd (correct,
-    // per this module's core guarantee) -- the mismatch itself is simply
-    // not detected, recorded, or surfaced anywhere yet.
-    assert_eq!(request.cwd, Path::new(PROJECT_ROOT));
-    assert_ne!(
-        command_proposal.cwd(),
-        request.cwd,
-        "test precondition: the proposal's claim and the verified cwd must actually differ"
+
+    let outcome = coordinator.decide_with_edited_argv(
+        &agent_run_id,
+        command_proposal.proposal_id(),
+        vec!["rm".to_string(), "-rf".to_string(), "/etc".to_string()],
+        &VerifiedCwd::for_test(PROJECT_ROOT),
+        Path::new(PROJECT_ROOT),
+        Path::new(STATE_ROOT),
+        &mut test_audit.coordinator(),
+    );
+    assert!(matches!(outcome, DecideOutcome::Decided { .. }));
+
+    let records = test_audit
+        .store
+        .query(&crate::audit::AuditQuery::latest(10))
+        .expect("query the real audit store")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .collect::<Vec<_>>();
+    let authorized = records
+        .iter()
+        .find(|record| {
+            record.action_kind == crate::audit::AuditActionKind::CommandEditAndApprove
+                && record.outcome == crate::audit::AuditOutcome::Authorized
+        })
+        .expect("an Authorized command_edit_and_approve record must exist");
+    assert_eq!(
+        authorized.risk_level,
+        Some(crate::audit::AuditRiskLevel::Destructive),
+        "the Authorized record must describe the EDITED command (rm -rf /etc), not the \
+         originally-proposed Low-risk `git status`"
     );
 }
+
+// Companion property to the fixture above: on `AuditBlocked`, the stored
+// request must remain describing the *original* proposal, never a
+// half-applied edit. That specific scenario (a real `AuditCoordinator`
+// failing authorization mid-edit-and-approve) cannot be constructed from
+// this module alone -- `approval::tests` has no path to a fake failing
+// `AuditRecordWriter` (that trait, and every type implementing it, live in
+// `audit::integration`/`audit::tests::integration`, neither of which is
+// reachable here; see this module's doc). It is proven instead in
+// `audit/tests/integration.rs`'s
+// `edit_and_approve_audit_block_leaves_the_stored_request_describing_the_original_proposal`.

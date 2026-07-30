@@ -427,6 +427,33 @@ impl<'a> AuditCoordinator<'a> {
         self.append_observation(&record)
     }
 
+    /// RFC-021 PR-021-E2 response 116 Required 2: a proposal's claimed
+    /// `cwd` disagreed with `verified_cwd`. Best-effort, matching
+    /// `record_command_request`'s treatment -- classification and storage
+    /// have already used `verified_cwd` alone by the time this is called,
+    /// so a write failure here degrades `AuditHealth` but blocks nothing;
+    /// the anomaly is purely an observability signal, never a gate.
+    pub fn record_cwd_mismatch_anomaly(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+    ) -> AuditObservationStatus {
+        let record = command_approval_record(
+            project_id,
+            agent_run_id,
+            approval_id,
+            risk_level,
+            AuditActionKind::CommandCwdMismatch,
+            AuditOutcome::Anomaly,
+            None,
+            AuditActorKind::AppPolicy,
+            AuditActionSource::Adapter,
+        );
+        self.append_observation(&record)
+    }
+
     /// `command_reject`: a single best-effort write, no `operation_id` --
     /// per the schema, rejection has no authorize-then-apply phase at all,
     /// since rejecting is always the safe direction and gates no
@@ -453,6 +480,20 @@ impl<'a> AuditCoordinator<'a> {
         self.append_observation(&record)
     }
 
+    /// Response 116 Q3's confirmation, recorded here rather than only in
+    /// `qa-evidence.md` since this is exactly the property a future change
+    /// to `AuditStore::append` must preserve: **this can never write a
+    /// record and still return `Err`.** `AuditStore::append`
+    /// (`audit/store.rs`) does all validation and insertion inside a
+    /// single `rusqlite` transaction and only reports success after
+    /// `transaction.commit()` itself succeeds; every error path (failed
+    /// validation, a duplicate/conflict check, a failed `insert`, or a
+    /// failed `commit`) returns before or without a successful commit, and
+    /// an uncommitted `rusqlite::Transaction` rolls back on drop. So a
+    /// caller retrying after `RequiredAuditUnavailable` (e.g. a retried
+    /// `decide` after `AuditBlocked`) can never produce an orphaned
+    /// `Authorized` record with no matching `Applied` -- the failed
+    /// attempt left nothing behind to orphan.
     fn append_required(
         &mut self,
         record: &DurableAuditRecordV1,
