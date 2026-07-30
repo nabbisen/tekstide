@@ -63,7 +63,7 @@ Scope:
 - Desktop GUI substrate and terminal-rendering strategy decision (RFC-014, in progress).
 - Application window, Content Mode / Terminal Mode layout, mode switching without animation.
 - Keyboard focus model and routing; all shell navigation reachable without a mouse.
-- Theme and typography primitives; configurable font family and size plumbed through.
+- Theme and typography primitives, with the font family/size seam plumbed through. **User-configurable** typography needs RFC-023 (M12) and is not an M8 deliverable — corrected 2026-07-30; the original wording overstated what M8 can deliver.
 - **i18n scaffolding** — string catalog, locale loading, and the discipline that no user-facing string is hardcoded.
 - Project Board surface rendering existing `tekstide-core` state.
 - Accessibility baseline: visible focus indicators, no colour-only status, screen-reader labelling path identified.
@@ -74,7 +74,9 @@ Review gates:
 - RFC for application shell and rendered surface model.
 - RFC for i18n and localization.
 - Accessibility and layout review for the shell.
-- NFR evidence for mode switch (`NFR-PERF-002`) and warm startup (`NFR-PERF-001`).
+- NFR evidence for warm startup (`NFR-PERF-001`) and input latency (RFC-014 R1) in `0.4.0`. **Mode switch (`NFR-PERF-002`) moves to `0.4.1`** with the mode-switching slice — corrected 2026-07-30: in M8 a mode switch toggles the Project Board against an empty content area, since Terminal Mode has no terminal until M9, so measuring it here measures scaffolding.
+
+`0.4.0` ships the shell, input routing, text safety, and the Project Board. `0.4.1` ships mode switching and the Content-mode scaffolding for M9/M10 surfaces. See `rfcs/delivery-plan.md` §Release Cycle Tracking for the reasoning.
 
 Explicitly not in M8: terminal rendering, editor, dialogs.
 

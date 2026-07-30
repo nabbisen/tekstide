@@ -59,6 +59,9 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | **Cross-platform** — Linux only | `NFR-PORT-001`..`003` | M14 |
 | **Documentation** — `docs/` absent | Project rules | M14 |
 | **CI** | — | M14 |
+| **Environment secret redaction** — RFC-004 states the policy; no pattern set exists in code | RFC-004 | M12 (with configuration) |
+
+**Note on the redaction gap.** Found during PR-021-C review (response 110): RFC-004 says Tekstide "may redact known secret-like environment variable values," and the RFC-021 handoff told the developer to reuse "the secret-like patterns already used for environment redaction." No such pattern set is implemented. RFC-021's classifier carries its own `SECRET_LIKE_PATH_PATTERNS`, deliberately **not** shared: that list matches filesystem path components (`.ssh`, `.aws`), while redaction needs environment *variable names* (`AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`). These are different pattern kinds and must not be consolidated into one list where half the entries are inert in each use. Whichever RFC implements environment redaction authors its own.
 
 ### Audit producer coverage
 
@@ -92,7 +95,7 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | 018 | Rendered Paste Protection and Trusted UI | M9 | 017 | no | Blocked |
 | 019 | Editor and Explorer Surfaces | M10 | 015 | no | Blocked |
 | 020 | Diff Review and AgentRun Report Surfaces | M10 | 015 | no | Blocked |
-| 021 | Command Approval Model and Adapter Capability | M11 | — | **yes** | **Authored — ready for implementation** |
+| 021 | Command Approval Model and Adapter Capability | M11 | — | **yes** | **B-E implemented and reviewed; two required fixes open (response 116); F closeout pending — architect's slice** |
 | 022 | Security Dialogs and Audit Producer Completion | M11 | 015, 021 | no | Blocked |
 | 023 | Configuration System | M12 | — | **yes** | **Authored — ready for implementation** |
 | 024 | Git Integration | M12 | — | **yes** | Queued (parallel-ready) |
@@ -122,6 +125,42 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 
 ## Scheduling Recommendation
 
+### Current, as of 2026-07-30
+
+**Do not cut a release now.** There is no user-visible change to describe, and RFC-021's honesty constraint makes even naming it awkward — the model, protocol, channel, classifier, and coordinator are complete and tested, and none of it is reachable. A `0.3.1` would spend its release notes saying so.
+
+**Next, in this order:**
+
+1. **RFC-016 PR-016-C** (text safety) — owner-approved to lead RFC-016, and it now also retires the duplicate-escaping debt described under Release Cycle Tracking. Adopt `approval::coordinator::display_argv`'s escaping as the canonical shared primitive; make `approval` call it.
+2. **RFC-015** (application shell) — the M8 spine. Everything in M8-M10 waits on it.
+3. **RFC-016 PR-016-B, D, E** — catalog plumbing, after the shell exists to hold it.
+
+**`0.4.0` remains M8**, unchanged. The version/milestone mapping in ROADMAP stays; the correction is to work the milestone that bears the version, not to renumber.
+
+### `0.4.0` / `0.4.1` split — decided 2026-07-30
+
+Owner delegated the call, allowing either and accepting `0.4.1` if it is better and safer. **Decision: the Project Board stays in `0.4.0`; the mode-switching scaffolding moves to `0.4.1`.**
+
+The framing in the original question was wrong, and checking the current binary is what showed it. `crates/tekstide/src/main.rs` is 40 lines that print `shell.render_text()` and exit — `0.3.0` is a non-interactive CLI, and Project Board *state* (`ApplicationShell`, `recent_project_state`) already exists in `tekstide-core`. So PR-015-D is a **rendering** slice over state that is already built and reviewed, not a new-feature slice.
+
+That inverts the safety argument:
+
+- **Deferring the board makes `0.4.0` a GUI window with chrome and nothing in it.** A user could launch it and do less than `0.3.0`'s CLI already does. A release that regresses observable function is the composition failure recorded above, one layer up — and it would be the second consecutive cycle with nothing a user can reach.
+- **Deferring the board buys no safety**, because the security-critical slice is PR-015-C (input routing and the three message classes), and it is *upstream* of PR-015-D. The board renders through the routing model, so it cannot ship ahead of that gate. Cutting D would ship a window, not a smaller risk.
+
+**`0.4.0` contents:** PR-016-C (text safety, canonical shared primitive) → PR-015-B (window, layers, chrome, theme and i18n seams) → PR-015-C (input routing, focus, modal exclusivity — probed empirically) → PR-015-D (Project Board over existing state) → PR-015-F (R1 latency, warm startup) → PR-015-G (closeout).
+
+**`0.4.1` contents:** PR-015-E (mode switching, Content-mode sidebar and main-area scaffolding) and the `NFR-PERF-002` mode-switch evidence that depends on it.
+
+### Two M8 scope errors found while deciding this
+
+Both are mine, from the M8-M14 restructure on 2026-07-28.
+
+1. **"Theme and typography primitives; configurable font family and size plumbed through"** — user-configurable typography needs RFC-023 (configuration system, M12). M8 can build the primitives and the plumbing seam; it cannot deliver user configuration. ROADMAP wording corrected.
+2. **`NFR-PERF-002` (mode switch) as an M8 review gate** — mode switching in M8 switches between the Project Board and an empty content area, because Terminal Mode has no terminal until M9. Measuring it in M8 measures scaffolding. The gate moves to `0.4.1` with PR-015-E, and the substantive mode-switch measurement belongs in M9 when there are two real modes.
+
+### Original (2026-07-28), retained for the reasoning
+
 **Start RFC-021 and RFC-023 now, in parallel with the RFC-014 spike.** Both are headless, neither depends on the substrate, and both remove risk from later milestones:
 
 - **RFC-021 (command approval)** is the product's central safety promise and the largest honesty gap in the current release. Building and proving the model now means M11 only has to render a dialog over an already-reviewed policy, instead of designing the policy under UI pressure.
@@ -130,6 +169,50 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 Sequencing these behind the GUI would leave the two most product-defining gaps until last, when schedule pressure is highest. That is the wrong order for work whose correctness matters most.
 
 **RFC-024 (Git) and RFC-027 (crash recovery)** are also parallel-ready and can absorb capacity whenever GUI work blocks.
+
+## Release Cycle Tracking
+
+Added 2026-07-30 after the owner asked whether release cycles were being watched. They were not — the review queue was being run slice by slice with no cadence measurement. This section is the correction, and it is reviewed every cycle.
+
+### Observed cadence
+
+| Release | Date | Interval |
+| --- | --- | --- |
+| `0.1.0` | 2026-07-06 | — |
+| `0.2.0` | 2026-07-17 | 11 days |
+| `0.3.0` | 2026-07-28 | 11 days |
+| *(unreleased)* | — | 2 days elapsed |
+
+**Cadence is not the problem.** Two releases at an 11-day interval, and the current cycle is 2 days old. Nothing is late.
+
+### Composition is the problem
+
+33 commits since `0.3.0`. Releasable user-visible surface in them: **zero.**
+
+- ~20 commits are RFC-021 (M11), which closes headless — no adapter-spawn pathway, so neither `ApprovalCoordinator` nor `inject_token_into_environment` has a production caller.
+- ~8 are RFC-014's GUI spike, in a crate marked `publish = false`.
+- ~5 are RFC and roadmap documents.
+
+A release cut today would be indistinguishable from `0.3.0` for a user. ROADMAP §"Why M8 Was Split" names this exact failure mode — *"accumulating unreleased work, which is the failure mode that produced three unreleased milestones before `0.3.0`"* — and M8, the milestone that bears `0.4.x`, has had **zero implementation commits** since the substrate decision was accepted. At two days this is a trajectory, not yet a failure. It is the trajectory that section was written to prevent.
+
+### Sequencing cost incurred: duplicate text-safety escaping
+
+RFC-016 Open Question 1 reserves for PR-016-C: *"Should the escaping function live in `tekstide-core` (shared with RFC-021's approval model) or remain shell-local?"* RFC-016 §Risks states: *"escaping belongs to the shared untrusted-text render path, not to each surface."*
+
+Response 115 Required A directed a full `Cc`+`Cf` category escaping implementation into `approval::coordinator::display_argv`, pre-empting that reserved decision and creating the second implementation RFC-016 warns against. **This is the reviewer's error, not the implementers'** — requiring escaping in E1 was correct because `display_command` was being constructed there unsafely, but it should have been required as a call into a shared primitive, with PR-016-C sequenced first. PR-016-C had already been owner-approved to lead RFC-016 on 2026-07-29 at 17:06; RFC-021 implementation began at 17:09 instead.
+
+**Consequence:** PR-016-C must adopt `display_argv`'s escaping as the canonical implementation and `approval::coordinator` must call it, rather than PR-016-C building a parallel one. Recorded as required scope for PR-016-C, not as a later cleanup.
+
+### Metrics to carry each cycle
+
+1. **Releasable-surface ratio** — commits producing user-visible change ÷ total. Currently 0/33.
+2. **Milestone/version alignment** — is the milestone bearing the next minor version the one being worked? Currently no: M11 was worked, M8 bears `0.4.x`.
+3. **Review rounds per slice** — RFC-021: 5 implementation slices, 8 review requests, **1.6 rounds/slice**. Each extra round found a real defect (including the duplicate-proposal-id approval-laundering bug), so this is not waste — but estimates for remaining RFCs should assume 1.6×, and none did.
+4. **Next-release contents** — named before the cycle starts, not discovered at the end.
+
+### Standing rule
+
+**A cycle may not consist entirely of headless work.** Headless parallel tracks exist to de-risk later milestones (ROADMAP §Parallel Tracks), not to become the only track. When a cycle's work is entirely unreachable by a user, either the release-bearing milestone gets capacity in the same cycle or the cadence commitment is explicitly suspended with the owner's agreement.
 
 ## Standing Constraints
 
