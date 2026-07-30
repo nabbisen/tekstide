@@ -2,9 +2,31 @@
 
 Source RFC: [RFC-021](../../done/021-command-approval-model-and-adapter-capability.md)
 Target milestone: **M11** (headless slices start immediately — see below)
-Source RFC status: **Proposed**
+Source RFC status: **Implemented headless with documented limitations** — closed 2026-07-30 by PR-021-F
 
 **Start here.** This file is the entry point. Everything is linked below in reading order.
+
+## Active work: one item outstanding (2026-07-30)
+
+RFC-021 is **closed** (PR-021-F, accepted with one required follow-up). Everything below is historical except this:
+
+**Add a regression test for "no timeout approves."**
+
+RFC-021's fail-closed matrix says: *no response → pending indefinitely; **no timeout approves***. The property holds today, verified structurally at closeout — `approval/coordinator.rs` contains no `Duration`, `Instant`, `elapsed`, `SystemTime`, or `now()`, records `created_at` only via `ApprovalRequest::pending`, and reads no timestamp anywhere; the module's single timeout (`channel.rs`'s `PROPOSAL_READ_TIMEOUT`) only drops a connection and cannot produce a decision.
+
+It is held by the **absence of code**, which does not survive a future edit visibly. Someone will one day add a timeout for a good-sounding reason — a stuck-proposal cleanup, a UI hint — and nothing will object. This is the same class as a fixture corpus that cannot fail (review response 110).
+
+What the test must assert:
+
+1. A proposal received and left undecided is still `Pending` after elapsed time, with `find()` returning it unchanged.
+2. No decision was sent over the connection — read from the peer half of the `UnixStream::pair()` with a bounded read timeout and assert nothing arrives.
+3. `decide` on it afterwards still succeeds normally, i.e. the request was not silently abandoned either.
+
+Do not sleep for a meaningful duration — the point is not to wait out a real timeout but to prove no time-based path exists. A short elapsed interval plus the structural assertion is enough.
+
+Then check the corresponding line in [`acceptance-qa-checklist.md`](./acceptance-qa-checklist.md) (Fail-Closed Checklist, "No response → pending indefinitely") and record it in [`qa-evidence.md`](./qa-evidence.md) under the PR-021-F section's "Required follow-up", replacing that heading with the evidence.
+
+**This is the last thing owed on RFC-021.** After it lands the RFC needs nothing further until the adapter-spawn slice makes any of it reachable.
 
 ## Read in this order
 
