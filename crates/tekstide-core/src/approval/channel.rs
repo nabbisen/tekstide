@@ -460,6 +460,22 @@ impl AcceptedProposal {
         })?;
         write_frame(&mut self.stream, &bytes)
     }
+
+    /// Test-only constructor for `approval::coordinator`'s tests, which
+    /// need a real, working `AcceptedProposal` (this type has no public
+    /// constructor otherwise -- the only way to obtain one in production
+    /// is a full authenticate-over-a-real-socket cycle via
+    /// `accept_proposal`/`serve_concurrently`) without paying for a full
+    /// bind/listen/connect/authenticate cycle in every coordinator unit
+    /// test. `UnixStream::pair()` gives a genuinely connected, real pair
+    /// of local sockets -- not a mock -- so `send_decision` on the
+    /// returned value still does real I/O; the peer half is handed back
+    /// too so a test can read what was actually sent.
+    #[cfg(test)]
+    pub(crate) fn for_test(proposal: CommandProposal) -> (Self, UnixStream) {
+        let (stream, peer) = UnixStream::pair().expect("create a real connected socket pair");
+        (Self { proposal, stream }, peer)
+    }
 }
 
 pub struct ApprovalChannelEndpoint {

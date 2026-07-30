@@ -1,8 +1,11 @@
+use std::io::Read;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 
 use crate::agent::VerifiedCwd;
 use crate::approval::{
-    ApprovalCoordinator, CommandProposal, DecideOutcome, ReceiveOutcome, classify,
+    AcceptedProposal, ApprovalCoordinator, CommandProposal, DecideOutcome, ReceiveOutcome,
+    SimpleDecision, classify,
 };
 use crate::domain::{AgentRunId, ApprovalDecision, RiskLevel};
 use crate::project::ProjectId;
@@ -23,20 +26,46 @@ fn proposal(proposal_id: &str, argv: &[&str], cwd: &str) -> CommandProposal {
     .expect("test proposal must decode")
 }
 
+/// Builds a real, connected `AcceptedProposal` (via `UnixStream::pair()`,
+/// not a mock) and calls `receive_proposal` with it -- response 114
+/// Required 1's fix means `receive_proposal` now takes ownership of the
+/// connection a proposal arrived on, so it can send a decision back over
+/// it later. Returns the peer half of the pair so a test can read back
+/// whatever `decide`/`decide_with_edited_argv` actually sends.
 fn receive(
     coordinator: &mut ApprovalCoordinator,
     agent_run_id: &AgentRunId,
     verified_cwd: &str,
     command_proposal: &CommandProposal,
-) -> ReceiveOutcome {
-    coordinator.receive_proposal(
+) -> (ReceiveOutcome, UnixStream) {
+    let (accepted, peer) = AcceptedProposal::for_test(command_proposal.clone());
+    let outcome = coordinator.receive_proposal(
         ProjectId::for_test(1),
         agent_run_id.clone(),
         &VerifiedCwd::for_test(verified_cwd),
         Path::new(PROJECT_ROOT),
         Path::new(STATE_ROOT),
-        command_proposal,
-    )
+        accepted,
+    );
+    (outcome, peer)
+}
+
+/// Reads one length-prefixed JSON frame from `peer` and returns it parsed
+/// -- the same wire shape `approval::channel` writes decisions in. A
+/// bounded read timeout is set first so a genuine regression (nothing
+/// ever sent) fails this test promptly rather than hanging the whole
+/// suite -- discovered the hard way while ablating `decide`'s send call
+/// during response-115-era testing, which hung indefinitely without one.
+fn read_decision_frame(peer: &mut UnixStream) -> serde_json::Value {
+    peer.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .expect("set a bounded read timeout");
+    let mut len_bytes = [0_u8; 4];
+    peer.read_exact(&mut len_bytes)
+        .expect("read decision length prefix");
+    let len = u32::from_be_bytes(len_bytes) as usize;
+    let mut buffer = vec![0_u8; len];
+    peer.read_exact(&mut buffer).expect("read decision body");
+    serde_json::from_slice(&buffer).expect("decision must be valid JSON")
 }
 
 /// Response 114 Required 1 -- the exact laundering sequence the reviewer
@@ -51,21 +80,21 @@ fn a_repeated_proposal_id_is_rejected_outright_even_after_approval_and_never_aut
     let agent_run_id = AgentRunId::for_test(1);
 
     let first = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
-    let ReceiveOutcome::Created { request, .. } =
+    let (ReceiveOutcome::Created { request }, _peer) =
         receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &first)
     else {
         panic!("first receipt of a proposal id must create a request");
     };
     let proposal_id = first.proposal_id().clone();
-    let decided = coordinator.decide(&agent_run_id, &proposal_id, ApprovalDecision::ApprovedOnce);
-    assert!(matches!(decided, DecideOutcome::Decided(_)));
+    let decided = coordinator.decide(&agent_run_id, &proposal_id, SimpleDecision::ApprovedOnce);
+    assert!(matches!(decided, DecideOutcome::Decided { .. }));
     assert_eq!(request.risk_level, RiskLevel::Low);
 
     // Same proposal id, resubmitted with a far riskier argv -- the attack
     // this fixture reproduces: laundering the earlier approval onto a
     // command that was never classified or decided on its own merits.
     let laundering_attempt = proposal("proposal-1", &["rm", "-rf", "/etc"], PROJECT_ROOT);
-    let outcome = receive(
+    let (outcome, _peer) = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
@@ -103,10 +132,10 @@ fn the_same_proposal_id_in_a_different_agent_run_is_not_a_duplicate() {
     let run_b = AgentRunId::for_test(11);
     let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
 
-    let outcome_a = receive(&mut coordinator, &run_a, PROJECT_ROOT, &command_proposal);
+    let (outcome_a, _peer_a) = receive(&mut coordinator, &run_a, PROJECT_ROOT, &command_proposal);
     assert!(matches!(outcome_a, ReceiveOutcome::Created { .. }));
 
-    let outcome_b = receive(&mut coordinator, &run_b, PROJECT_ROOT, &command_proposal);
+    let (outcome_b, _peer_b) = receive(&mut coordinator, &run_b, PROJECT_ROOT, &command_proposal);
     assert!(
         matches!(outcome_b, ReceiveOutcome::Created { .. }),
         "the same proposal id in a different AgentRun must be treated as new"
@@ -121,21 +150,21 @@ fn decision_is_single_use_and_replay_is_inert() {
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
     let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
-    let ReceiveOutcome::Created {
-        request: created, ..
-    } = receive(
+    let (ReceiveOutcome::Created { request: created }, _peer) = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
         &command_proposal,
-    )
-    else {
+    ) else {
         panic!("must create a request");
     };
     let proposal_id = command_proposal.proposal_id().clone();
 
-    let first = coordinator.decide(&agent_run_id, &proposal_id, ApprovalDecision::ApprovedOnce);
-    let DecideOutcome::Decided(decided) = first else {
+    let first = coordinator.decide(&agent_run_id, &proposal_id, SimpleDecision::ApprovedOnce);
+    let DecideOutcome::Decided {
+        request: decided, ..
+    } = first
+    else {
         panic!("first decide call must succeed");
     };
     assert_eq!(decided.decision, ApprovalDecision::ApprovedOnce);
@@ -144,7 +173,7 @@ fn decision_is_single_use_and_replay_is_inert() {
     // Replay with a DIFFERENT decision -- if this were not inert, the
     // approved command would flip to rejected (or vice versa), which
     // would be a correctness disaster for a security control.
-    let replay = coordinator.decide(&agent_run_id, &proposal_id, ApprovalDecision::Rejected);
+    let replay = coordinator.decide(&agent_run_id, &proposal_id, SimpleDecision::Rejected);
     let DecideOutcome::AlreadyDecided(unchanged) = replay else {
         panic!("a replayed decide call must be reported as already-decided, not applied");
     };
@@ -171,7 +200,7 @@ fn deciding_an_unknown_proposal_returns_not_found() {
         .proposal_id()
         .clone();
 
-    let outcome = coordinator.decide(&agent_run_id, &proposal_id, ApprovalDecision::ApprovedOnce);
+    let outcome = coordinator.decide(&agent_run_id, &proposal_id, SimpleDecision::ApprovedOnce);
     assert!(matches!(outcome, DecideOutcome::NotFound));
 }
 
@@ -215,7 +244,7 @@ fn a_claimed_cwd_of_root_cannot_make_an_external_path_look_project_internal() {
     // never from `proposal.cwd()`.
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
-    let ReceiveOutcome::Created { request, .. } = receive(
+    let (ReceiveOutcome::Created { request }, _peer) = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
@@ -243,7 +272,7 @@ fn a_claimed_cwd_of_root_does_not_cause_a_genuinely_internal_path_to_escalate() 
 
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
-    let ReceiveOutcome::Created { request, .. } = receive(
+    let (ReceiveOutcome::Created { request }, _peer) = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
@@ -290,17 +319,21 @@ fn the_coordinator_never_lets_the_declared_effects_hint_affect_classification() 
 
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
-    let ReceiveOutcome::Created {
-        request: request_with_hint,
-        ..
-    } = receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &with_hint)
+    let (
+        ReceiveOutcome::Created {
+            request: request_with_hint,
+        },
+        _peer1,
+    ) = receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &with_hint)
     else {
         panic!("must create a request");
     };
-    let ReceiveOutcome::Created {
-        request: request_without_hint,
-        ..
-    } = receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &without_hint)
+    let (
+        ReceiveOutcome::Created {
+            request: request_without_hint,
+        },
+        _peer2,
+    ) = receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &without_hint)
     else {
         panic!("must create a request");
     };
@@ -326,7 +359,7 @@ fn display_command_quotes_an_entry_that_would_otherwise_read_as_a_second_shell_c
         PROJECT_ROOT,
     );
     let mut coordinator = ApprovalCoordinator::new();
-    let ReceiveOutcome::Created { request, .. } = receive(
+    let (ReceiveOutcome::Created { request }, _peer) = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
@@ -341,7 +374,7 @@ fn display_command_quotes_an_entry_that_would_otherwise_read_as_a_second_shell_c
 fn display_command_quotes_an_entry_containing_a_space_so_it_does_not_read_as_two_arguments() {
     let command_proposal = proposal("proposal-1", &["rm", "-rf", "my documents"], PROJECT_ROOT);
     let mut coordinator = ApprovalCoordinator::new();
-    let ReceiveOutcome::Created { request, .. } = receive(
+    let (ReceiveOutcome::Created { request }, _peer) = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
@@ -356,7 +389,7 @@ fn display_command_quotes_an_entry_containing_a_space_so_it_does_not_read_as_two
 fn display_command_escapes_an_embedded_newline_to_a_visible_marker() {
     let command_proposal = proposal("proposal-1", &["echo", "safe\nrm -rf /etc"], PROJECT_ROOT);
     let mut coordinator = ApprovalCoordinator::new();
-    let ReceiveOutcome::Created { request, .. } = receive(
+    let (ReceiveOutcome::Created { request }, _peer) = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
@@ -375,7 +408,7 @@ fn display_command_escapes_an_embedded_newline_to_a_visible_marker() {
 fn display_command_escapes_a_bidi_override_per_rfc_016_rather_than_letting_it_reverse_text() {
     let command_proposal = proposal("proposal-1", &["rm", "\u{202e}gpj.exe"], PROJECT_ROOT);
     let mut coordinator = ApprovalCoordinator::new();
-    let ReceiveOutcome::Created { request, .. } = receive(
+    let (ReceiveOutcome::Created { request }, _peer) = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
@@ -395,7 +428,7 @@ fn display_command_escapes_a_bidi_override_per_rfc_016_rather_than_letting_it_re
 fn display_command_renders_an_empty_argument_visibly_rather_than_letting_it_vanish() {
     let command_proposal = proposal("proposal-1", &["printf", "%s", ""], PROJECT_ROOT);
     let mut coordinator = ApprovalCoordinator::new();
-    let ReceiveOutcome::Created { request, .. } = receive(
+    let (ReceiveOutcome::Created { request }, _peer) = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
@@ -434,7 +467,7 @@ fn display_command_escapes_every_bidi_and_format_probe_from_response_115() {
         let command_proposal =
             proposal(&format!("proposal-{index}"), &["cat", &entry], PROJECT_ROOT);
         let mut coordinator = ApprovalCoordinator::new();
-        let ReceiveOutcome::Created { request, .. } = receive(
+        let (ReceiveOutcome::Created { request }, _peer) = receive(
             &mut coordinator,
             &AgentRunId::for_test(index as u64),
             PROJECT_ROOT,
@@ -460,7 +493,7 @@ fn display_command_escapes_every_bidi_and_format_probe_from_response_115() {
 fn approval_request_carries_the_classifiers_reasons() {
     let command_proposal = proposal("proposal-1", &["sudo", "ls"], PROJECT_ROOT);
     let mut coordinator = ApprovalCoordinator::new();
-    let ReceiveOutcome::Created { request } = receive(
+    let (ReceiveOutcome::Created { request }, _peer) = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
@@ -471,5 +504,132 @@ fn approval_request_carries_the_classifiers_reasons() {
     assert_eq!(
         request.risk_reasons,
         vec![crate::approval::RiskReason::PrivilegeElevation]
+    );
+}
+
+// --- PR-021-E2: the CommandDecision round trip ---------------------------
+
+/// The core new property for this slice: a decision must actually be sent
+/// back over the connection the proposal arrived on, in the frame shape
+/// `approval::channel` writes -- read via a real, connected peer socket,
+/// not asserted only against the in-memory `ApprovalRequest`.
+#[test]
+fn decide_sends_a_real_command_decision_back_over_the_proposals_own_connection() {
+    let mut coordinator = ApprovalCoordinator::new();
+    let agent_run_id = AgentRunId::for_test(1);
+    let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let (ReceiveOutcome::Created { .. }, mut peer) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &command_proposal,
+    ) else {
+        panic!("must create a request");
+    };
+
+    let outcome = coordinator.decide(
+        &agent_run_id,
+        command_proposal.proposal_id(),
+        SimpleDecision::ApprovedOnce,
+    );
+    let DecideOutcome::Decided { sent, .. } = outcome else {
+        panic!("must decide");
+    };
+    sent.expect("sending the decision over a live connection must succeed");
+
+    let frame = read_decision_frame(&mut peer);
+    assert_eq!(frame["outcome"], "approved_once");
+    assert_eq!(frame["proposal_id"], "proposal-1");
+}
+
+/// A replayed `decide` call must not send anything a second time -- a
+/// replay is fully inert, not merely non-overwriting. Verified by reading
+/// exactly one frame off the real connection and then confirming a second
+/// read blocks (times out) rather than returning a second frame.
+#[test]
+fn a_replayed_decision_does_not_send_a_second_frame() {
+    let mut coordinator = ApprovalCoordinator::new();
+    let agent_run_id = AgentRunId::for_test(1);
+    let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let (ReceiveOutcome::Created { .. }, mut peer) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &command_proposal,
+    ) else {
+        panic!("must create a request");
+    };
+
+    let proposal_id = command_proposal.proposal_id().clone();
+    let first = coordinator.decide(&agent_run_id, &proposal_id, SimpleDecision::ApprovedOnce);
+    assert!(matches!(first, DecideOutcome::Decided { .. }));
+    let _ = read_decision_frame(&mut peer);
+
+    let replay = coordinator.decide(&agent_run_id, &proposal_id, SimpleDecision::Rejected);
+    assert!(matches!(replay, DecideOutcome::AlreadyDecided(_)));
+
+    peer.set_read_timeout(Some(std::time::Duration::from_millis(100)))
+        .expect("set a short read timeout for the check");
+    let mut buffer = [0_u8; 1];
+    let result = peer.read(&mut buffer);
+    assert!(
+        result.is_err(),
+        "a replayed decision must not send a second frame -- the connection must have \
+         nothing further to read"
+    );
+}
+
+/// `implementation-handoff.md` §7: edit-and-approve must re-run the risk
+/// classifier on the *edited* argv, and the audit-facing fields
+/// (`display_command`, `risk_level`, `risk_reasons`) must describe what
+/// was actually approved, not what was originally proposed. Also confirms
+/// the wire decision sent back carries the edited argv, per
+/// `CommandDecision`'s own shape requirement for `EditedAndApproved`.
+#[test]
+fn decide_with_edited_argv_reclassifies_and_sends_the_edited_argv() {
+    let mut coordinator = ApprovalCoordinator::new();
+    let agent_run_id = AgentRunId::for_test(1);
+    // Proposed as an ordinary, Low-risk command...
+    let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let (ReceiveOutcome::Created { request: original }, mut peer) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &command_proposal,
+    ) else {
+        panic!("must create a request");
+    };
+    assert_eq!(original.risk_level, RiskLevel::Low);
+
+    // ...but the user edits it, before approving, into something far
+    // riskier. The stored request must reflect the EDIT, not the original
+    // proposal.
+    let edited_argv = vec!["rm".to_string(), "-rf".to_string(), "/etc".to_string()];
+    let outcome = coordinator.decide_with_edited_argv(
+        &agent_run_id,
+        command_proposal.proposal_id(),
+        edited_argv.clone(),
+        &VerifiedCwd::for_test(PROJECT_ROOT),
+        Path::new(PROJECT_ROOT),
+        Path::new(STATE_ROOT),
+    );
+    let DecideOutcome::Decided { request, sent } = outcome else {
+        panic!("must decide");
+    };
+    sent.expect("sending the decision must succeed");
+    assert_eq!(request.decision, ApprovalDecision::EditedAndApproved);
+    assert_eq!(
+        request.risk_level,
+        RiskLevel::Destructive,
+        "the stored request must be reclassified against the EDITED argv, not the \
+         original Low-risk proposal"
+    );
+    assert_eq!(request.display_command, "rm -rf /etc");
+
+    let frame = read_decision_frame(&mut peer);
+    assert_eq!(frame["outcome"], "edited_and_approved");
+    assert_eq!(
+        frame["edited_argv"],
+        serde_json::json!(["rm", "-rf", "/etc"])
     );
 }

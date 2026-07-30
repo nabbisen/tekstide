@@ -61,7 +61,8 @@ use crate::agent::VerifiedCwd;
 use crate::domain::{AgentRunId, ApprovalDecision, ApprovalRequest};
 use crate::project::ProjectId;
 
-use super::protocol::{CommandProposal, ProposalId};
+use super::channel::{AcceptedProposal, ApprovalChannelError};
+use super::protocol::{CommandDecision, DecisionOutcome, PROTOCOL_VERSION, ProposalId};
 use super::risk;
 
 /// The `requested_action_kind` recorded on every `ApprovalRequest` this
@@ -92,6 +93,9 @@ pub enum ReceiveOutcome {
     /// repeated proposal id is either an adapter bug or a replay, and
     /// neither should be serviceable by handing back a value a caller
     /// could read as authorization for whatever argv arrived this time.
+    /// The duplicate's connection is dropped along with it (its
+    /// `AcceptedProposal` is not retained), so no decision can ever be
+    /// sent back over it either.
     DuplicateRejected { proposal_id: ProposalId },
 }
 
@@ -111,14 +115,28 @@ impl ReceiveOutcome {
     }
 }
 
-/// Result of [`ApprovalCoordinator::decide`].
-#[derive(Clone, Debug)]
+/// Result of [`ApprovalCoordinator::decide`] and
+/// [`ApprovalCoordinator::decide_with_edited_argv`].
+#[derive(Debug)]
 pub enum DecideOutcome {
-    /// The first decision for this proposal id. `request` now reflects it.
-    Decided(ApprovalRequest),
+    /// The first decision for this proposal id. `request` now reflects
+    /// it, and the coordinator has attempted to send the corresponding
+    /// `CommandDecision` back over the connection the proposal arrived
+    /// on. `sent` is `Err` if that send failed (e.g. the adapter already
+    /// disconnected) -- the decision was still made and is still final
+    /// (`request.decision` is authoritative regardless), but the adapter
+    /// may never learn about it. Not treated as a reason to undo the
+    /// decision: PR-021-E2 has no execution wiring yet for this to race
+    /// against, and a decision the user actually made must not be
+    /// silently reverted because a notification failed.
+    Decided {
+        request: ApprovalRequest,
+        sent: Result<(), ApprovalChannelError>,
+    },
     /// This proposal id was already decided; the decision requested this
     /// time (whatever it was) had no effect -- the existing terminal state
-    /// is returned unchanged.
+    /// is returned unchanged, and nothing is sent again (a replay must be
+    /// fully inert, not just non-overwriting).
     AlreadyDecided(ApprovalRequest),
     /// No request exists for this `(AgentRunId, ProposalId)` pair -- a
     /// decision cannot be made for a proposal that was never received.
@@ -128,25 +146,69 @@ pub enum DecideOutcome {
 impl DecideOutcome {
     pub fn request(&self) -> Option<&ApprovalRequest> {
         match self {
-            DecideOutcome::Decided(request) | DecideOutcome::AlreadyDecided(request) => {
-                Some(request)
-            }
+            DecideOutcome::Decided { request, .. } => Some(request),
+            DecideOutcome::AlreadyDecided(request) => Some(request),
             DecideOutcome::NotFound => None,
         }
     }
 }
 
-/// Per-run, in-memory bookkeeping for proposal-id uniqueness and single-use
-/// decisions. Nothing here is durable -- see the module doc for why audit
-/// wiring is explicitly out of scope for this slice, and
-/// `qa-evidence.md`'s Known Limitations for why that non-durability is
-/// safe rather than merely unaddressed (response 114 Q2: a restart loses
-/// this map, but `bind()` also generates a fresh token per endpoint, so a
-/// pre-restart token cannot authenticate afterward either -- the failure
-/// mode is "forgotten and nothing executes," not "replayed").
+/// The decisions [`ApprovalCoordinator::decide`] accepts directly.
+/// `EditedAndApproved` is deliberately not a variant here: it always
+/// requires edited argv, both to re-classify against and to include on
+/// the wire (`CommandDecision::decode` itself rejects `EditedAndApproved`
+/// with no edited argv), and `decide` has no parameter for that.
+/// [`ApprovalCoordinator::decide_with_edited_argv`] is the only way to
+/// reach it -- reaching it that way makes the required argv structurally
+/// unavoidable rather than a runtime check this type could otherwise skip.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SimpleDecision {
+    ApprovedOnce,
+    Rejected,
+}
+
+impl From<SimpleDecision> for ApprovalDecision {
+    fn from(simple: SimpleDecision) -> Self {
+        match simple {
+            SimpleDecision::ApprovedOnce => ApprovalDecision::ApprovedOnce,
+            SimpleDecision::Rejected => ApprovalDecision::Rejected,
+        }
+    }
+}
+
+impl From<SimpleDecision> for DecisionOutcome {
+    fn from(simple: SimpleDecision) -> Self {
+        match simple {
+            SimpleDecision::ApprovedOnce => DecisionOutcome::ApprovedOnce,
+            SimpleDecision::Rejected => DecisionOutcome::Rejected,
+        }
+    }
+}
+
+/// A request still awaiting (or already past) a decision, alongside the
+/// still-open connection its proposal arrived on. Response 114 Required 1
+/// keeps `ApprovalRequest` itself Clone-friendly and freely returnable;
+/// `AcceptedProposal` (holding a live `UnixStream`) is not clonable and is
+/// not returned to callers at all -- it is used exactly once, internally,
+/// when `decide`/`decide_with_edited_argv` sends the resulting
+/// `CommandDecision` back.
+struct PendingRequest {
+    request: ApprovalRequest,
+    accepted: AcceptedProposal,
+}
+
+/// Per-run, in-memory bookkeeping for proposal-id uniqueness, single-use
+/// decisions, and the connection each proposal arrived on. Nothing here is
+/// durable -- see the module doc for why audit wiring is explicitly out of
+/// scope for this slice, and `qa-evidence.md`'s Known Limitations for why
+/// that non-durability is safe rather than merely unaddressed (response
+/// 114 Q2: a restart loses the map, but `bind()` also generates a fresh
+/// token per endpoint, so a pre-restart token cannot authenticate
+/// afterward either -- the failure mode is "forgotten and nothing
+/// executes," not "replayed").
 #[derive(Default)]
 pub struct ApprovalCoordinator {
-    requests: HashMap<(AgentRunId, ProposalId), ApprovalRequest>,
+    requests: HashMap<(AgentRunId, ProposalId), PendingRequest>,
 }
 
 impl ApprovalCoordinator {
@@ -154,12 +216,18 @@ impl ApprovalCoordinator {
         Self::default()
     }
 
-    /// Classifies and registers a freshly-authenticated `CommandProposal`.
+    /// Classifies and registers a freshly-authenticated proposal, taking
+    /// ownership of the `AcceptedProposal` (and the live connection it
+    /// holds) so that a later `decide`/`decide_with_edited_argv` call can
+    /// send the resulting `CommandDecision` back over the same
+    /// connection -- the protocol has no separate mechanism to address a
+    /// decision to a specific adapter connection, so the connection the
+    /// proposal arrived on is the only route back to it.
     ///
     /// `verified_cwd` and `project_root` must come from the caller's own,
     /// already-authenticated `AgentRun`/`ProjectSession` state -- **never**
-    /// from `proposal.cwd()`. There is no parameter here that accepts
-    /// `proposal.cwd()`'s value at all: this module never reads it.
+    /// from `accepted.proposal.cwd()`. There is no parameter here that
+    /// accepts `proposal.cwd()`'s value at all: this module never reads it.
     ///
     /// `verified_cwd` takes `&VerifiedCwd`, not `&Path` (response 114 Q3 /
     /// response 115: a plain `&Path` parameter did not stop a caller from
@@ -178,18 +246,29 @@ impl ApprovalCoordinator {
         verified_cwd: &VerifiedCwd,
         project_root: &Path,
         state_root: &Path,
-        proposal: &CommandProposal,
+        accepted: AcceptedProposal,
     ) -> ReceiveOutcome {
-        let key = (agent_run_id.clone(), proposal.proposal_id().clone());
+        let key = (
+            agent_run_id.clone(),
+            accepted.proposal.proposal_id().clone(),
+        );
         if self.requests.contains_key(&key) {
+            // The duplicate's own connection (`accepted`) is dropped here,
+            // without ever being stored -- it is never retained, so
+            // nothing can later send a decision back over it either.
             return ReceiveOutcome::DuplicateRejected {
-                proposal_id: proposal.proposal_id().clone(),
+                proposal_id: accepted.proposal.proposal_id().clone(),
             };
         }
 
-        let verified_cwd = verified_cwd.as_path();
-        let assessment = risk::classify(proposal.argv(), verified_cwd, project_root, state_root);
-        let display_command = display_argv(proposal.argv());
+        let verified_cwd_path = verified_cwd.as_path();
+        let assessment = risk::classify(
+            accepted.proposal.argv(),
+            verified_cwd_path,
+            project_root,
+            state_root,
+        );
+        let display_command = display_argv(accepted.proposal.argv());
         let request = ApprovalRequest::pending(
             project_id,
             Some(agent_run_id),
@@ -197,39 +276,105 @@ impl ApprovalCoordinator {
             display_command,
             assessment.level,
             assessment.reasons,
-            verified_cwd,
+            verified_cwd_path,
         );
-        self.requests.insert(key, request.clone());
+        let returned = request.clone();
+        self.requests
+            .insert(key, PendingRequest { request, accepted });
         ReceiveOutcome::Created {
-            request: Box::new(request),
+            request: Box::new(returned),
         }
     }
 
-    /// Applies a decision to a previously-received request. See
-    /// [`DecideOutcome`] for what happens on a replay.
+    /// Applies `ApprovedOnce` or `Rejected` to a previously-received
+    /// request and sends the corresponding `CommandDecision` back over
+    /// the connection its proposal arrived on. See [`DecideOutcome`] for
+    /// what happens on a replay, and [`Self::decide_with_edited_argv`]
+    /// for `EditedAndApproved`.
     pub fn decide(
         &mut self,
         agent_run_id: &AgentRunId,
         proposal_id: &ProposalId,
-        decision: ApprovalDecision,
+        decision: SimpleDecision,
     ) -> DecideOutcome {
         let key = (agent_run_id.clone(), proposal_id.clone());
-        let Some(request) = self.requests.get_mut(&key) else {
+        let Some(pending) = self.requests.get_mut(&key) else {
             return DecideOutcome::NotFound;
         };
-        if request.decision != ApprovalDecision::Pending {
+        if pending.request.decision != ApprovalDecision::Pending {
             // Single-use, inert replay: the decision requested this call
             // (whatever it is) is discarded, and the existing terminal
             // state is returned unchanged -- not an error the caller must
             // specially handle, since a replay is an expected event on
             // this path (a resent decision message, a retried UI action),
-            // not an exceptional one.
-            return DecideOutcome::AlreadyDecided(request.clone());
+            // not an exceptional one. Nothing is sent again either: a
+            // replay must be fully inert, not merely non-overwriting.
+            return DecideOutcome::AlreadyDecided(pending.request.clone());
         }
-        request
-            .decide(decision)
+        pending
+            .request
+            .decide(decision.into())
             .expect("guarded immediately above: request.decision was just checked to be Pending");
-        DecideOutcome::Decided(request.clone())
+
+        let wire_decision = build_wire_decision(proposal_id, decision.into(), None);
+        let sent = pending.accepted.send_decision(&wire_decision);
+        DecideOutcome::Decided {
+            request: pending.request.clone(),
+            sent,
+        }
+    }
+
+    /// `EditedAndApproved`: re-runs the risk classifier on `edited_argv`
+    /// and updates the stored request's `display_command`/`risk_level`/
+    /// `risk_reasons` to reflect the *edited* argv before recording the
+    /// decision -- `implementation-handoff.md` §7's rule that "the audit
+    /// record must describe what was approved, not what was proposed."
+    /// `verified_cwd`/`project_root`/`state_root` are required again for
+    /// the same reason `receive_proposal` needs them: re-classification
+    /// must use the same trusted context, never anything derived from the
+    /// proposal's own claims.
+    #[allow(clippy::too_many_arguments)]
+    pub fn decide_with_edited_argv(
+        &mut self,
+        agent_run_id: &AgentRunId,
+        proposal_id: &ProposalId,
+        edited_argv: Vec<String>,
+        verified_cwd: &VerifiedCwd,
+        project_root: &Path,
+        state_root: &Path,
+    ) -> DecideOutcome {
+        let key = (agent_run_id.clone(), proposal_id.clone());
+        let Some(pending) = self.requests.get_mut(&key) else {
+            return DecideOutcome::NotFound;
+        };
+        if pending.request.decision != ApprovalDecision::Pending {
+            return DecideOutcome::AlreadyDecided(pending.request.clone());
+        }
+
+        let assessment = risk::classify(
+            &edited_argv,
+            verified_cwd.as_path(),
+            project_root,
+            state_root,
+        );
+        pending.request.display_command = display_argv(&edited_argv);
+        pending.request.risk_level = assessment.level;
+        pending.request.risk_reasons = assessment.reasons;
+        pending
+            .request
+            .decide(ApprovalDecision::EditedAndApproved)
+            .expect("guarded immediately above: request.decision was just checked to be Pending");
+
+        let wire_decision = build_wire_decision(
+            proposal_id,
+            DecisionOutcome::EditedAndApproved,
+            Some(edited_argv),
+        );
+        let sent = pending.accepted.send_decision(&wire_decision);
+        DecideOutcome::Decided {
+            request: pending.request.clone(),
+            sent,
+        }
     }
 
     /// Looks up a request without mutating anything, for callers that need
@@ -241,7 +386,29 @@ impl ApprovalCoordinator {
     ) -> Option<&ApprovalRequest> {
         self.requests
             .get(&(agent_run_id.clone(), proposal_id.clone()))
+            .map(|pending| &pending.request)
     }
+}
+
+/// Builds the wire `CommandDecision` for an already-validated proposal id
+/// and an outcome this coordinator itself determined -- both are trusted,
+/// internally-generated values by this point (the proposal id was already
+/// validated when the original proposal was decoded; `outcome`/
+/// `edited_argv` come from this module's own logic, not from re-parsing
+/// anything adapter-supplied), so a decode failure here would indicate a
+/// bug in this function, not adversarial input.
+fn build_wire_decision(
+    proposal_id: &ProposalId,
+    outcome: DecisionOutcome,
+    edited_argv: Option<Vec<String>>,
+) -> CommandDecision {
+    CommandDecision::decode(
+        PROTOCOL_VERSION,
+        proposal_id.as_str().to_string(),
+        outcome,
+        edited_argv,
+    )
+    .expect("a decision built from an already-validated proposal id must satisfy decode's bounds")
 }
 
 // --- Display-only argv rendering (response 114 Required 2) -------------
