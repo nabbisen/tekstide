@@ -2,7 +2,7 @@
 title: "RFC-016: Internationalization and Localization - Acceptance / QA Checklist"
 rfc: "RFC-016"
 rfc_file: "../../proposed/016-internationalization-and-localization.md"
-status: "Proposed — implementation in progress (PR-016-C, PR-016-B complete and accepted; PR-016-D: response 125 required re-review after fixes, fixes applied 2026-07-31, pending re-review; PR-016-E waits for RFC-015)"
+status: "Proposed — implementation in progress (PR-016-C, PR-016-B, PR-016-D complete and accepted [response 126]; PR-016-E waits for RFC-015)"
 target_milestone: "M8"
 source_rfc_status: "Proposed"
 created: "2026-07-29"

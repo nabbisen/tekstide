@@ -1,6 +1,6 @@
 # RFC-016: Internationalization and Localization - QA Evidence
 
-Status: Proposed — implementation in progress (PR-016-C complete and accepted; PR-016-B complete and accepted [response 122, fixes confirmed by response 123]; PR-016-D: response 125 required re-review after fixes, fixes applied 2026-07-31, pending re-review; PR-016-E waits for RFC-015 per the scan-scope obligation in response 122; PR-016-F last)
+Status: Proposed — implementation in progress (PR-016-C complete and accepted; PR-016-B complete and accepted [response 122, fixes confirmed by response 123]; PR-016-D complete and accepted [response 126]; PR-016-E waits for RFC-015 per the scan-scope obligation in response 122, now also carries response 126's interpolation-guard scope note; PR-016-F last)
 Date opened: 2026-07-29
 Date accepted: Pending
 
@@ -157,9 +157,15 @@ Gates run 2026-07-31 (response 125 fixes): `cargo fmt --all --check`, `cargo cli
 
 Gates run 2026-07-30 (original `a311cba` submission): `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (490 `tekstide-core` + 15 `tekstide` — up from 9, 6 net new — + 18 `tekstide-gui-spike`, 0 failures), `git diff --check` — all passed.
 
+**Response 126 — approved, PR-016-D closed.** Both required fixes verified independently by the reviewer (the `E0308` typecheck failure and the ablated `[one]`-deletion failure, both reproduced from their own probes rather than taken from this evidence file's account). Two non-blocking notes, both applied:
+- **`trusted_symbol(&'static str)` is a strong barrier, not an impossible one** — `String::leak` can turn runtime data into `&'static str`. Added to the module doc rather than left as an implied absolute; the bar this module holds to is "bypassing it requires deliberate effort," which leaking memory to defeat it clears.
+- **Sealing (`CatalogNumber`) has limited force in a binary crate** — no downstream implementors exist to exclude today. Kept anyway: it prevents an in-crate accident and travels correctly if `i18n` ever becomes a library.
+
+**Recommended, not required — folded into PR-016-E's scope note below**, since it costs nothing extra there: PR-016-E's enforcement machinery should also check that `i18n` exposes no `fluent_bundle` type and offers no raw-`&str` interpolation constructor, so a future `pub use` reintroducing the response-125 gap is caught mechanically rather than only by the next security re-review.
+
 ### PR-016-E — Enforcement
 
-Pending implementation.
+Pending implementation. **Scope note added by response 126 (non-blocking recommendation from the PR-016-D re-review):** in addition to the no-hardcoded-strings scan and catalog-completeness test this slice already owns, add a mechanical check that `i18n` exposes no `fluent_bundle` type (`FluentArgs`/`FluentValue`) and that `CatalogArgs` offers no constructor accepting a raw `&str` for untrusted text — so a future `pub use` or a new constructor silently reopening response 125's interpolation gap is caught by the enforcement harness, not only by the next security re-review.
 
 ### PR-016-F — Closeout evidence
 

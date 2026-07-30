@@ -57,7 +57,14 @@
 //!   compile-time literal (`CountDisplay`'s state names and similar)
 //!   cannot be a project name, branch name, or anything else read at
 //!   runtime -- the `'static` bound excludes attacker-influenceable data
-//!   by construction, not by caller discipline.
+//!   by construction, not by caller discipline. **This is a strong
+//!   barrier, not an impossible one** (response 126): `String::leak`
+//!   turns runtime data into `&'static str`, so a caller determined to
+//!   launder untrusted text through the trusted path can. The bar this
+//!   module holds to is "bypassing it requires deliberate effort," which
+//!   leaking memory to defeat the boundary clears comfortably -- this is
+//!   not a claim that `trusted_symbol` is unbypassable under any caller
+//!   behavior whatsoever.
 //!
 //! Fluent itself treats every argument value as an opaque literal
 //! regardless of which constructor produced it: it is never re-parsed as
