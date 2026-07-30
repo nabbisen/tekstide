@@ -303,3 +303,63 @@ Draft constraint for whoever completes it: the claim must distinguish *"Tekstide
 - **Still open after PR-021-E2, unchanged from PR-021-E1: no adapter-spawn pathway exists in `runtime::terminal`**, so `inject_token_into_environment` has no production caller, and neither does `ApprovalCoordinator` itself — this slice remains fully headless. Per response 114 Q1: RFC-021 will close with no production caller, and PR-021-F's honesty-checklist wording must say so plainly.
 - **Unix socket path length (`sun_path`, ~108 bytes on Linux) is now pre-validated at `bind()` (PR-021-D, response 113 Required 1).** `bind()` checks the real `socket_path` (not the short `/proc/self/fd`-relative path it actually binds through) against `sun_path`'s capacity before doing anything else, and returns a distinguished `ApprovalChannelErrorReason::SocketPathTooLong` rather than a bare `io::Error`. This closes a regression response 112's `/proc/self/fd` fix introduced: binding through the short fd-relative path no longer failed at `bind()` on a deep real state root, so the failure moved silently to the adapter's later `connect()` call instead, against an endpoint that otherwise looked healthy. Not worked around with a shortened/hashed filename, since doing that well would need a hashing dependency this crate does not otherwise need for anything else — the length is validated, not avoided.
 - **This module's fd-relative binding mechanism depends on `/proc/self/fd` being mounted and functional (PR-021-D, response 113 Q1/Required 4).** True for every desktop Linux target Tekstide runs on; not universal (some minimal containers and hardened configurations omit it). `bind()` checks this explicitly against the fd it just opened itself and returns a distinguished `ApprovalChannelErrorReason::ProcMagicPathUnavailable` rather than a bare `io::Error` if the check fails.
+
+---
+
+# PR-021-F: Closeout
+
+Author: high-capability model (architect). Per governance, closeout is the architect's slice, not the implementers'.
+Date: 2026-07-30
+Implementation slices reviewed: PR-021-B (`0655eb5`, `8ce974e`), PR-021-C (`80f902a`, `0071362`, `78d0c03`), PR-021-D (`e370000`, `7d96ca3`, `d053c02`), PR-021-E1 (`5e040f1`, `8da5523`, `8a18a7e`), PR-021-E2 (`7053c10`, `bdb7680`, `7331ab7`, `3ac794b`).
+Reviews: responses 109-117 in `.git-exclude/reviewed/`.
+
+## What Tekstide may claim about command approval
+
+This is the statement PR-021-F exists to produce. It is binding on the README, release notes, and any future marketing or documentation text. **Each paragraph is here because a shorter version of it would be false.**
+
+**Implemented.** Tekstide has a command-approval model: a versioned sideband protocol over a per-AgentRun Unix domain socket under the state root; two-layer peer authentication (kernel-verified `SO_PEERCRED` plus a per-`bind()` capability token compared in constant time); a structural risk classifier over argv and cwd; a coordinator that assigns single-use decisions to unique proposal ids, re-classifies edited argv before authorising it, and writes the `command_approval` audit family through `AuditCoordinator` with authorisation preceding application.
+
+**Not reachable.** No user can encounter any of it. There is no adapter-spawn pathway — `runtime::terminal::spawn_shell` launches a plain interactive shell with a fixed environment, and `TerminalEnvironmentPolicy::ExplicitAllowlist` is rejected as unsupported before a process starts — so `inject_token_into_environment` has no production caller and neither does `ApprovalCoordinator`. There is no dialog, because there is no GUI. **Every property above is implemented and tested; none of it is wired to anything a user can reach.**
+
+**Cooperative, not enforced.** Approval works only if the adapter asks. Tekstide does not intercept process execution, does not use `ptrace`, `seccomp`, `LD_PRELOAD`, or any OS-level mechanism — verified absent by grep across the workspace — and has no execution path of its own to withhold. An adapter that ignores a `Rejected` decision, or that never submits a proposal in the first place, runs its command unimpeded. **Nothing in this RFC prevents that, and no wording may imply otherwise.**
+
+**Therefore, the sentence that must not be written** is any variant of "Tekstide approves commands", "Tekstide controls what the AI can run", or "commands require approval". The accurate forms are: *"Tekstide implements a command-approval protocol that a cooperating AI CLI adapter can use"*, and, until the adapter-spawn pathway and dialog exist, *"command approval is not yet available to users."*
+
+**On the audit trail specifically.** The `command_approval` family is wired and its records are correct — verified by reviewer probe against a real store, including that no argv, cwd, intent, effects hint, proposal id, or display text reaches the durable database. But with no production caller, it produces nothing. "Audit records command approvals" is false today; "the audit schema and producers for command approval exist and are tested" is true.
+
+## Decisions on the RFC's open questions
+
+**1. Ship a reference wrapper adapter, or define the contract and wait for CLI support?**
+
+**Define the contract; do not ship a wrapper in v1.** A Tekstide-authored wrapper would be the only thing exercising the protocol, which makes it simultaneously the reference implementation and the sole test subject — and it would invite the claim that approval "works", when what worked was Tekstide talking to itself. It also creates a supply-chain surface (a process Tekstide spawns to wrap another process) for a feature whose honest description is "cooperative." Revisit if a real AI CLI implements the contract; the decision to reverse is cheap, the decision to un-ship a wrapper is not.
+
+**2. Restrict `EditedAndApproved` for `Destructive` proposals, where editing may mask intent?**
+
+**No restriction. Editing is re-classified, which is the stronger control.** `decide_with_edited_argv` re-runs the classifier on the edited argv and — as of response 116 Required 1 — authorises against the *edited* risk level, so an edit that turns something benign into something destructive is recorded as destructive. Blocking edit-and-approve at `Destructive` would push users toward approving the original unedited command, which is worse. The residual risk is that a user edits a `Destructive` command into a different `Destructive` command; the audit record describes what was approved, which is the property that matters.
+
+**3. Should proposals persist across a Tekstide restart, or always be abandoned?**
+
+**Always abandoned, and this is safe rather than merely unaddressed.** `ApprovalCoordinator`'s bookkeeping is in-memory, so a restart forgets every pending proposal and nothing executes — the failure direction is closed. Crucially, `bind()` generates a fresh token per endpoint, so an adapter holding a pre-restart token cannot authenticate afterwards either; there is no window in which a stale decision could be replayed. Persisting proposals would create exactly that window in exchange for convenience on a path that has no users. Recorded as a deliberate non-goal, not a gap.
+
+## Verified by reviewer probe at closeout
+
+Beyond the per-slice reviews, three closeout-specific checks:
+
+- **No OS-level interception anywhere in the workspace.** `grep` for `ptrace`, `seccomp`, `LD_PRELOAD`, `bpf` across `crates/`: no matches.
+- **No pattern-based or always-allow rules.** `grep` for `always_allow`, `AlwaysAllow`, `allowlist_pattern`, `remember_choice`, `ApproveAlways` across `approval/`: no matches.
+- **No timeout can approve.** `coordinator.rs` contains no `Duration`, `Instant`, `elapsed`, `SystemTime`, or `now()`. It records `created_at` only via `ApprovalRequest::pending`, and reads no timestamp anywhere. The single timeout in the whole module is `channel.rs`'s `PROPOSAL_READ_TIMEOUT`, whose only effect is to drop a connection — it cannot produce a decision. **See required follow-up below: this is currently guaranteed by absence, and absence does not survive a future edit silently.**
+
+## Required follow-up before RFC-021 is complete
+
+**One item.** Add a regression test asserting that a received proposal remains `Pending` with no decision after elapsed time, and that no code path in `approval` reads a timestamp to decide. The property is real — I verified it structurally above — but "no timeout approves" is the RFC's headline fail-closed guarantee, and it is presently held by the absence of code rather than by a test that fails if someone later adds a timeout for a good-sounding reason. This is the same class as a fixture corpus that cannot fail (response 110).
+
+Small, and it is the last thing owed on this RFC.
+
+## Obligations carried forward
+
+These are not RFC-021 defects; they are work this RFC's design requires of others.
+
+1. **Adapter-spawn pathway — its own slice, needs an owner decision.** Enabling `TerminalEnvironmentPolicy::ExplicitAllowlist` changes the terminal security boundary (RFC-009/RFC-010 territory), not the approval channel. Until it lands, nothing in RFC-021 is reachable.
+2. **RFC-022 inherits the dialog**, and with it: rendering `display_command` through `text_safety` (already the shared primitive — `approval::coordinator` calls it, so the dialog inherits escaping rather than reimplementing it), surfacing `risk_reasons` so a user learns *why* a command is `High`, and the fail-closed obligations still unchecked here (adapter disconnect and AgentRun termination while pending → abandoned).
+3. **`Plain`/`Supervised`/`Managed` per-mode gating is unbuilt.** The checklist lines for it stay unchecked deliberately: they are vacuously true today because no run mode reaches approval at all, and a vacuous pass is not evidence of a gate. Whoever wires the adapter-spawn pathway owes the real gate.
+4. **Residual limitations**, each recorded in its own place above: lexical (not canonical) path containment in the classifier; wrapper indirection not unwrapped; attached short options (`-o/path`) uncovered; `SO_PEERCRED` correctness for a genuinely different real user unverified without a second account; `/proc/self/fd` dependency for fd-relative binding; in-memory coordinator bookkeeping.

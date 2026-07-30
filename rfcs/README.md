@@ -21,7 +21,6 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 014 | [Desktop GUI Substrate and Terminal Rendering Strategy](./proposed/014-desktop-gui-substrate-and-terminal-rendering.md) | Proposed — spike complete; substrate decision approved 2026-07-29 |
 | 015 | [Application Shell and Rendered Surface Model](./proposed/015-application-shell-and-rendered-surface-model.md) | Proposed |
 | 016 | [Internationalization and Localization](./proposed/016-internationalization-and-localization.md) | Proposed |
-| 021 | [Command Approval Model and Adapter Capability](./proposed/021-command-approval-model-and-adapter-capability.md) | Proposed |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ## Handoffs
@@ -65,6 +64,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 011 | [Transcript Retention and Local Data Policy](./done/011-transcript-retention-and-local-data-policy.md) | Implemented with documented limitations |
 | 012 | [Generated Change Review Foundations](./done/012-generated-change-review-foundations.md) | Implemented with documented limitations on main at 34a1c55 |
 | 013 | [Durable Audit Store and Local Data Policy](./done/013-durable-audit-store-and-local-data-policy.md) | Implemented with documented limitations · **Amendment 1 authorised 2026-07-30, in implementation** (additive v1 → v2 schema migration for RFC-021's `command_cwd_mismatch`) |
+| 021 | [Command Approval Model and Adapter Capability](./done/021-command-approval-model-and-adapter-capability.md) | Implemented **headless** with documented limitations — not reachable by any user; cooperative, not enforced. One required regression test outstanding |
 
 ## Archive
 

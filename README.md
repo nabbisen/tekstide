@@ -13,9 +13,10 @@ Tekst IDE (`tekstide`) is a local-first, multi-project workbench for supervising
 
 ## Current Status
 
-The current implementation is a headless core through RFC-013: terminal runtime,
-AgentRun launch, transcript retention, generated-change review, and durable audit
-storage. It includes:
+The current implementation is a headless core through RFC-013, plus the headless
+command-approval model of RFC-021 and the shared text-safety primitive of RFC-016
+PR-016-C: terminal runtime, AgentRun launch, transcript retention, generated-change
+review, and durable audit storage. It includes:
 
 - Project Board and ProjectSession state, root-bound file access, bounded explorer,
   UTF-8 text buffers, and safe save with external-change detection;
@@ -34,14 +35,33 @@ storage. It includes:
   corruption diagnostics, restart-safe recovery, and explicit purge.
 
 It is not yet the full AI CLI workbench. The desktop GUI, rendered terminal surface,
-app/UI terminal and launch commands, rendered paste/approval/trust dialogs, command
-approval, Git-based change detection, file watcher, overwrite-confirmation UI, and
-cross-platform evidence beyond Linux are deferred.
+app/UI terminal and launch commands, rendered paste/approval/trust dialogs, an
+adapter-spawn pathway that would make command approval reachable, Git-based change
+detection, file watcher, overwrite-confirmation UI, and cross-platform evidence beyond
+Linux are deferred.
 
 Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked
-root/symlink access, and audit-store recovery outcomes. Command approval, paste,
-restricted-feature, safe-close, configuration-change, transcript-purge, project-added,
-and plain-terminal producers are defined in the audit schema but not yet wired.
+root/symlink access, and audit-store recovery outcomes. Paste, restricted-feature,
+safe-close, configuration-change, transcript-purge, project-added, and plain-terminal
+producers are defined in the audit schema but not yet wired. The command-approval
+producers are wired and tested but produce nothing, because nothing calls them — see
+below.
+
+### Command approval
+
+Tekstide implements a command-approval protocol that a cooperating AI CLI adapter can
+use: a versioned sideband channel over a per-run Unix domain socket, two-layer peer
+authentication, a structural risk classifier, and single-use decisions recorded in the
+durable audit trail.
+
+**It is not yet available to users.** No code path spawns an adapter that could speak
+the protocol, and there is no dialog to decide in, so nothing reaches it.
+
+**It is cooperative, not enforced.** Approval works only if the adapter asks. Tekstide
+does not intercept process execution and has no execution path of its own to withhold,
+so an adapter that ignores a rejection — or never submits a proposal — runs its command
+regardless. Tekstide does not approve commands, and does not control what an AI CLI can
+run.
 
 ## Quick Start
 

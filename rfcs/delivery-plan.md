@@ -39,13 +39,13 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | Terminal security | `REQ-SEC-030`..`033` | Boundary complete; rendering deferred |
 | Filesystem safety | `REQ-SEC-040`..`043` | Complete |
 | Session recovery | `REQ-RECOVER-001`, `003`, `004` | Recent projects and run records restore |
+| Command approval | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **Model complete and audited; headless and unreachable** — no adapter-spawn pathway, no dialog. Cooperative, not enforced. RFC-021 closed 2026-07-30 |
 
 ### Not implemented
 
 | Area | Requirements | Milestone |
 | --- | --- | --- |
 | **Desktop GUI** — every rendered surface | External design §3, UI/UX baseline | M8-M11 |
-| **Command approval** — only domain vocabulary exists | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | M11 |
 | **Configuration system** — no module at all | `REQ-CONFIG-001`..`007` | M12 |
 | **i18n** — no module; mandated by project rules | Project rules, UI/UX §18 | M8 |
 | **Git integration** — no module; RFC-012 detector reports Git unavailable | `REQ-GIT-001`..`007` | M12 |
@@ -54,7 +54,7 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | **Multi-document** — one active document only | External design §3.4 | M13 |
 | **Syntax highlighting** | `REQ-EDIT-003` | M10 (optional) |
 | **Crash / unsaved buffer recovery** | `REQ-RECOVER-005` | M13 |
-| **Audit producers** — 8 of 12 families unwired | `REQ-SEC-014` | M9, M11, M12 |
+| **Audit producers** — 7 of 12 families unwired | `REQ-SEC-014` | M9, M11, M12 |
 | **LSP** | `REQ-LSP-001`..`005` | Deferred beyond 1.0 by design |
 | **Cross-platform** — Linux only | `NFR-PORT-001`..`003` | M14 |
 | **Documentation** — `docs/` absent | Project rules | M14 |
@@ -65,7 +65,7 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 
 ### Audit producer coverage
 
-Four of twelve v1 families have runtime producers. The remaining eight are the clearest measure of how much product surface is still missing:
+Five of twelve v1 families have runtime producers. The remaining seven are the clearest measure of how much product surface is still missing. `command_approval` is wired but **produces nothing**, because nothing calls the coordinator — counted as wired, listed with that caveat:
 
 | Family | Producer | Milestone |
 | --- | --- | --- |
@@ -75,7 +75,7 @@ Four of twelve v1 families have runtime producers. The remaining eight are the c
 | `audit_store_recovery` | wired | — |
 | `paste_blocked` | none | M9 |
 | `plain_terminal_observation` | none | M9 |
-| `command_approval` | none | M11 |
+| `command_approval` | wired, no caller | M11 (reachable only once the adapter-spawn slice lands) |
 | `safe_close_decision` | none | M11 |
 | `restricted_mode_blocked` | none | M11 |
 | `project_added` | none | M11 |
@@ -95,7 +95,7 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | 018 | Rendered Paste Protection and Trusted UI | M9 | 017 | no | Blocked |
 | 019 | Editor and Explorer Surfaces | M10 | 015 | no | Blocked |
 | 020 | Diff Review and AgentRun Report Surfaces | M10 | 015 | no | Blocked |
-| 021 | Command Approval Model and Adapter Capability | M11 | — | **yes** | **B-E implemented and reviewed; two required fixes open (response 116); F closeout pending — architect's slice** |
+| 021 | Command Approval Model and Adapter Capability | M11 | — | **yes** | **Implemented headless; F closeout accepted with one required follow-up 2026-07-30. Moved to `done/`. Not reachable by any user until the adapter-spawn slice lands** |
 | 022 | Security Dialogs and Audit Producer Completion | M11 | 015, 021 | no | Blocked |
 | 023 | Configuration System | M12 | — | **yes** | **Authored — ready for implementation** |
 | 024 | Git Integration | M12 | — | **yes** | Queued (parallel-ready) |

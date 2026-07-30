@@ -1,9 +1,9 @@
 ---
 title: "RFC-021: Command Approval Model and Adapter Capability - Implementation Handoff"
 rfc: "RFC-021"
-rfc_file: "../../proposed/021-command-approval-model-and-adapter-capability.md"
+rfc_file: "../../done/021-command-approval-model-and-adapter-capability.md"
 target_milestone: "M11"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented headless with documented limitations"
 created: "2026-07-28"
 updated: "2026-07-28"
 ---

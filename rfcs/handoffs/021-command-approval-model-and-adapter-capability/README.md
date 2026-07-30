@@ -1,6 +1,6 @@
 # RFC-021: Command Approval Model and Adapter Capability - Developer Handoff Pack
 
-Source RFC: [RFC-021](../../proposed/021-command-approval-model-and-adapter-capability.md)
+Source RFC: [RFC-021](../../done/021-command-approval-model-and-adapter-capability.md)
 Target milestone: **M11** (headless slices start immediately — see below)
 Source RFC status: **Proposed**
 
@@ -10,7 +10,7 @@ Source RFC status: **Proposed**
 
 | # | Document | Purpose |
 | --- | --- | --- |
-| 1 | [RFC-021](../../proposed/021-command-approval-model-and-adapter-capability.md) | The model, the enforcement boundary, and the adapter contract. **Read the "Enforcement Boundary" section first — it constrains everything else.** |
+| 1 | [RFC-021](../../done/021-command-approval-model-and-adapter-capability.md) | The model, the enforcement boundary, and the adapter contract. **Read the "Enforcement Boundary" section first — it constrains everything else.** |
 | 2 | This file | Orientation and what is binding. |
 | 3 | [`implementation-handoff.md`](./implementation-handoff.md) | Protocol shape, risk classifier rules, fail-closed matrix, audit correlation. |
 | 4 | [`task-breakdown-pr-plan.md`](./task-breakdown-pr-plan.md) | Slice boundaries and review gates. |

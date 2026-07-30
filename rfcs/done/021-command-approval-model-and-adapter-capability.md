@@ -1,7 +1,7 @@
 # RFC-021: Command Approval Model and Adapter Capability
 
-Status: Proposed
-Target milestone: M11 (headless model may be implemented earlier — see Scheduling)
+Status: Implemented headless with documented limitations — **not reachable by any user** (no adapter-spawn pathway, no dialog). Closed 2026-07-30 by PR-021-F; one required regression test outstanding ("no timeout approves"). See `../handoffs/021-command-approval-model-and-adapter-capability/qa-evidence.md` §PR-021-F for exactly what may be claimed.
+Target milestone: M11 (headless model implemented ahead of it — see Scheduling)
 Date: 2026-07-28
 
 Related baseline documents:

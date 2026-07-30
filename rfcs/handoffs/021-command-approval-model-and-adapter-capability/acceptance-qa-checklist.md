@@ -1,10 +1,10 @@
 ---
 title: "RFC-021: Command Approval Model and Adapter Capability - Acceptance / QA Checklist"
 rfc: "RFC-021"
-rfc_file: "../../proposed/021-command-approval-model-and-adapter-capability.md"
-status: "Proposed — implementation in progress (PR-021-B, PR-021-C, PR-021-D landed; PR-021-D accepted with required follow-up, applied; PR-021-E1 accepted with required follow-up, all fixes applied; PR-021-E2 accepted with required follow-up (response 116), all fixes applied — PR-021-E complete; PR-021-F closeout next)"
+rfc_file: "../../done/021-command-approval-model-and-adapter-capability.md"
+status: "Implemented headless — PR-021-B through E complete; PR-021-F closeout accepted with one required follow-up 2026-07-30. Not reachable by any user; cooperative, not enforced."
 target_milestone: "M11"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented headless with documented limitations"
 created: "2026-07-28"
 updated: "2026-07-30"
 ---
@@ -98,23 +98,79 @@ updated: "2026-07-30"
 
 ## Evidence Required
 
-- [ ] Commit/PR list.
-- [ ] Gate command output.
-- [ ] Risk classifier fixture corpus.
-- [ ] Impersonation test results.
-- [ ] Audit conformance and sentinel-privacy test results.
-- [ ] Known limitations.
-- [ ] Answers to the RFC's open questions.
+- [x] Commit/PR list. `qa-evidence.md` §PR-021-F header: fourteen commits across B, C, D, E1, E2, with reviews 109-117.
+- [x] Gate command output. Recorded per slice; final state 489 `tekstide-core` + 18 `tekstide-gui-spike`, 0 failures, all four gates clean.
+- [x] Risk classifier fixture corpus. 44 cases plus targeted tests, reason-discriminated; ablation shows 19 of 19 rules load-bearing (responses 110-111).
+- [x] Impersonation test results. Cross-process wrong-token rejection (real second OS process, same UID); peer-credential comparison exercised via test-only `owner_uid` override; 0 bytes returned to an unauthenticated peer. Residual: `SO_PEERCRED` correctness for a genuinely different real user needs a second account.
+- [x] Audit conformance and sentinel-privacy test results. Verified by reviewer probe against a real store: `Authorized` and `Applied` share one operation id, authorisation precedes application, and **all seven adapter-controlled markers are absent from the raw sqlite bytes** — argv, cwd, intent, effects hint, proposal id, display text, verified cwd (response 116).
+- [x] Known limitations. `qa-evidence.md` §PR-021-F "Obligations carried forward", item 4.
+- [x] Answers to the RFC's open questions. `qa-evidence.md` §PR-021-F "Decisions on the RFC's open questions" — all three decided.
 
 ## Final Acceptance Decision
 
 - [ ] Accepted.
-- [ ] Accepted with required follow-up.
+- [x] **Accepted with required follow-up.**
 - [ ] Requires re-review after changes.
 - [ ] Blocked — channel cannot be made impersonation-resistant.
 
 Reviewer notes:
 
 ```text
-Pending implementation.
+PR-021-F closeout, high-capability model (architect), 2026-07-30.
+
+ACCEPTED WITH ONE REQUIRED FOLLOW-UP: a regression test for "no timeout
+approves". The property holds -- coordinator.rs has no time source and reads
+no timestamp, and the module's only timeout drops a connection rather than
+producing a decision -- but it is guaranteed by the absence of code, which
+does not survive a future edit visibly. Absence is not a test. Same class as
+a fixture corpus that cannot fail (response 110).
+
+THE HARD GATE PASSED. The task breakdown said to stop and escalate if
+PR-021-D could not establish impersonation resistance. It did: SO_PEERCRED is
+kernel-supplied and unforgeable by the peer, the token is per-bind and
+compared in constant time, and the cross-process test uses a genuinely
+separate OS process rather than a thread. No escalation was needed.
+
+UNCHECKED BOXES ARE THE POINT, NOT AN OMISSION. 28 of 68 lines stay unchecked
+and each names why. Three classes:
+  - Cooperative-protocol lines (every proposal requires a decision, no
+    threshold executes silently, rejected proposals never execute). These are
+    properties of the ADAPTER'S behaviour. Tekstide cannot enforce them and
+    has no execution path to withhold. Checking them on the strength of
+    "Tekstide has no execution path" would be the exact overclaim this
+    checklist exists to catch: the absence of a feature is not the presence
+    of a control.
+  - Vacuously-true lines (Plain/Supervised/Managed expose no approval path).
+    True today only because NO run mode reaches approval at all. A vacuous
+    pass is not evidence of a gate. Whoever builds the adapter-spawn pathway
+    owes the real gate.
+  - Line 74 (schema unamended). Genuinely violated. The command_approval
+    family was additively amended under RFC-013 Amendment 1 with owner
+    authorisation 2026-07-30. The requirement stays unmet rather than
+    rewritten -- a requirement is not satisfied by editing the requirement.
+
+WHAT MAY BE CLAIMED is in qa-evidence.md §PR-021-F, and it is binding on the
+README, release notes, and any future documentation. Summary: the model is
+implemented and tested; it is not reachable by any user; it is cooperative,
+not enforced. The sentence that must not be written is any variant of
+"Tekstide approves commands" or "commands require approval".
+
+ON THE WORK ITSELF. Seven slices, nine review rounds, and the defect class
+shifted exactly once -- after PR-021-C, from mistakes inside components to
+mistakes at the joins between them. Every finding since was a seam: what
+receive_proposal's return value permitted a caller to do (approval laundering
+via a duplicate proposal id -- the most serious finding in the RFC), what
+resolve() still guaranteed by the time bind() ran, what a fix stopped doing
+that something depended on, and what a record written before a
+reclassification described. Four of those were fixes whose blast radius
+exceeded their target, which is now recorded as a standing review question:
+a change to a security module is not finished when the target defect is gone,
+but when you have asked what else depended on the old behaviour.
+
+Three of the required findings in this sequence originated in my own
+instructions being narrower than the property they protected -- the frozen
+audit matrix I did not check before requiring an anomaly record, "sequence
+values" when I meant the AUTOINCREMENT counter, and a Cf-only escape set when
+I had stated the principle as "invisible characters". Recorded here because
+the review trail should show where the reviewer was the cause.
 ```
