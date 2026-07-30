@@ -2,11 +2,11 @@
 title: "RFC-016: Internationalization and Localization - Acceptance / QA Checklist"
 rfc: "RFC-016"
 rfc_file: "../../proposed/016-internationalization-and-localization.md"
-status: "Proposed — implementation in progress (PR-016-C landed 2026-07-30, not yet reviewed)"
+status: "Proposed — implementation in progress (PR-016-C complete and accepted; PR-016-B landed 2026-07-30, not yet reviewed)"
 target_milestone: "M8"
 source_rfc_status: "Proposed"
 created: "2026-07-29"
-updated: "2026-07-29"
+updated: "2026-07-30"
 ---
 
 # RFC-016 Acceptance / QA Checklist
@@ -32,14 +32,14 @@ updated: "2026-07-29"
 
 ## Catalog and Locale Checklist
 
-- [ ] Catalog format chosen; **dependency cost measured and recorded** as a lockfile delta.
-- [ ] Decision reasoning recorded, not just the outcome.
-- [ ] Source-locale catalog compiled into the binary.
-- [ ] Lookup replaces RFC-015's placeholder without changing the call shape.
-- [ ] Locale precedence: CLI flag → configuration → OS locale → source locale.
-- [ ] Fallback chain: locale → language → source → key.
-- [ ] Missing key renders the key. **Never blank, never panic.**
-- [ ] Missing-key events logged at debug level, not as audit events.
+- [x] Catalog format chosen; **dependency cost measured and recorded** as a lockfile delta. Fluent (`fluent-bundle` 0.16.0): +12 packages, measured via `git diff Cargo.lock`. `sys-locale` (OS locale detection): +0, already resolved transitively via `tekstide-gui-spike`.
+- [x] Decision reasoning recorded, not just the outcome. Compared against RFC-014 R3's iced precedent (+345 packages) in `qa-evidence.md`; +12 for native plurals/gendered forms/interpolation/asymmetric translation judged proportionate.
+- [x] Source-locale catalog compiled into the binary. `crates/tekstide/locales/en.ftl` via `include_str!` in `i18n/catalog.rs`; `source_locale_bundle()` takes no disk path at all.
+- [ ] **Lookup replaces RFC-015's placeholder without changing the call shape.** Not met as literally stated — **RFC-015 has not been implemented**, so no placeholder exists to replace and no call shape exists to preserve. This slice establishes the call shape (`i18n::Catalog::resolve`/`Catalog::get`) instead, documented as a disclosed sequencing gap in `qa-evidence.md`, not a silent substitution. Left unchecked pending the reviewer's view on whether establishing the shape now satisfies the intent.
+- [x] Locale precedence: CLI flag → configuration → OS locale → source locale. `Catalog::resolve`; `cli_flag_takes_precedence_over_configured_locale` (both supplied, confirms CLI wins), ablation-verified.
+- [x] Fallback chain: locale → language → source → key. `Catalog::get`; `a_region_specific_locale_falls_back_to_its_language_subtag_catalog`, `a_key_missing_from_a_loaded_locale_falls_back_to_the_source_value`, `a_missing_key_renders_as_the_key_itself_never_blank` — all three links ablation-verified independently.
+- [x] Missing key renders the key. **Never blank, never panic.** `a_missing_key_renders_as_the_key_itself_never_blank`; `no_locales_directory_falls_back_to_source_without_panicking` covers the no-locales-directory-at-all case too.
+- [x] Missing-key events logged at debug level, not as audit events. `log_missing_key`, gated on `cfg!(debug_assertions)`; plain `eprintln!`, no audit-store call anywhere near it.
 
 ## Pluralization and Interpolation Checklist
 
@@ -76,7 +76,7 @@ updated: "2026-07-29"
 - [x] Commit/PR list; gate output. See qa-evidence.md PR-016-C section (this slice only; B/D/E/F pending).
 - [x] Bidi corpus results including the Trojan Source case. `crates/tekstide-core/src/text_safety/tests.rs`.
 - [ ] Byte-fidelity test results for audit and transcript paths. Audit path only; no transcript integration point exists yet.
-- [ ] Dependency-cost measurement. PR-016-B scope, not yet started.
+- [x] Dependency-cost measurement. Fluent: +12 packages; `sys-locale`: +0 (already resolved elsewhere in the workspace). See `qa-evidence.md` PR-016-B section.
 - [ ] Screenshot of a non-Latin locale rendering the shell. Requires RFC-015's shell to exist first.
 - [x] Known limitations; answers to the RFC's open questions. Open Question 1 (escaping function's home) answered by the README's 2026-07-30 addendum: `tekstide-core`, shared — see qa-evidence.md.
 

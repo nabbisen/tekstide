@@ -1,3 +1,14 @@
+// RFC-016 PR-016-B: no caller yet. RFC-015 (the shell that would render
+// localized chrome through `i18n::Catalog`) has not been implemented --
+// `main.rs` below predates it and only dumps `ApplicationShell`'s plain-
+// text debug rendering, which is not RFC-015's rendered surface and is
+// not in scope for localization. Matching PR-016-C's `text_safety`
+// precedent: proven by this module's own tests, not by a fabricated call
+// site (`quote_untrusted` had the identical "no re-review, do not stub
+// anything" ruling in response 118 Q1).
+#[allow(dead_code)]
+mod i18n;
+
 use tekstide_core::shell::ApplicationShell;
 
 fn main() -> std::process::ExitCode {

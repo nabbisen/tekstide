@@ -16,3 +16,6 @@ path = "src/main.rs"
 
 [dependencies]
 tekstide-core               = { workspace = true }
+fluent-bundle               = { workspace = true }
+unic-langid                 = { workspace = true }
+sys-locale                  = { workspace = true }
