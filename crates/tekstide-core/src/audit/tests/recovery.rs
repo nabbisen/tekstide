@@ -260,8 +260,10 @@ fn recovery_refuses_healthy_foreign_future_and_missing_stores() {
             AuditDiagnosticStatus::UnsupportedApplication,
         ),
         (
+            // RFC-013 Amendment 1 bumped AUDIT_SCHEMA_VERSION to 2, so
+            // `2` is no longer future -- `3` is genuinely out of range.
             "recovery-refuse-future",
-            "PRAGMA user_version = 2",
+            "PRAGMA user_version = 3",
             AuditDiagnosticStatus::UnsupportedSchema,
         ),
     ] {

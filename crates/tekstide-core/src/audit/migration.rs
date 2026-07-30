@@ -3,12 +3,77 @@ use std::time::Duration;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 
-use super::schema::{AUDIT_APPLICATION_ID, AUDIT_SCHEMA_VERSION, CREATE_SCHEMA_V1};
+use super::schema::{
+    AUDIT_APPLICATION_ID, AUDIT_SCHEMA_VERSION, CREATE_SCHEMA_V2, audit_events_v2_table_ddl,
+};
 use super::store::{AuditStoreError, AuditStoreErrorReason};
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(2);
-const OLDEST_SUPPORTED_SCHEMA_VERSION: i64 = AUDIT_SCHEMA_VERSION;
-const MIGRATIONS: &[MigrationStep] = &[];
+/// **Deliberately a literal, not derived from [`AUDIT_SCHEMA_VERSION`].**
+/// RFC-013 Amendment 1's trap: `OLDEST_SUPPORTED_SCHEMA_VERSION =
+/// AUDIT_SCHEMA_VERSION` looks like it just tracks "the only version we
+/// support" today, but it silently drags the floor up with every future
+/// bump -- the exact version that put every existing v1 database out of
+/// range the moment `AUDIT_SCHEMA_VERSION` became `2`, verified by probe
+/// in the amendment handoff (`user_version=0/2: open -> Err
+/// (UnsupportedSchema)`, before this fix). Pinning it to `1` means the
+/// oldest schema the `1 -> 2` migration below can actually migrate from
+/// stays in range regardless of how high `AUDIT_SCHEMA_VERSION` climbs
+/// later.
+const OLDEST_SUPPORTED_SCHEMA_VERSION: i64 = 1;
+
+/// RFC-013 Amendment 1's `1 -> 2` step: adds `command_cwd_mismatch`/
+/// `anomaly` to the `command_approval` family. SQLite cannot `ALTER` a
+/// `CHECK` constraint, so this is the table-rebuild pattern: create a v2
+/// table under a temporary name, copy every row (explicitly listing
+/// columns and, critically, `sequence` itself -- RFC-013's whole
+/// append-only ordering claim rests on `sequence` surviving unchanged,
+/// and an `AUTOINCREMENT` column left to default would silently
+/// reassign it), drop the old table, rename the new one into place, and
+/// recreate every index (`DROP TABLE` removes a table's indexes
+/// automatically, so they do not need dropping explicitly).
+///
+/// The rebuild table's DDL is built from the exact same
+/// [`audit_events_v2_table_ddl`] macro expansion [`CREATE_SCHEMA_V2`]
+/// uses for a fresh install (only the table name differs), and SQLite's
+/// `ALTER TABLE ... RENAME TO` rewrites the stored table name on rename
+/// -- so a migrated database's `sqlite_master` entry for `audit_events`
+/// ends up textually identical to a fresh v2 install's. The convergence
+/// test in `audit::tests::migration` asserts this rather than assuming
+/// it.
+pub(crate) const MIGRATIONS: &[MigrationStep] = &[MigrationStep {
+    from_version: 1,
+    to_version: 2,
+    statements: &[
+        audit_events_v2_table_ddl!("audit_events_v2_rebuild"),
+        "INSERT INTO audit_events_v2_rebuild (\
+            sequence, event_id, schema_version, project_id, family, outcome, \
+            operation_id, terminal_id, agent_run_id, approval_id, subject_kind, \
+            subject_ref, action_kind, risk_level, actor_kind, action_source, \
+            adapter_profile_ref, reason_code, created_at\
+        ) SELECT \
+            sequence, event_id, schema_version, project_id, family, outcome, \
+            operation_id, terminal_id, agent_run_id, approval_id, subject_kind, \
+            subject_ref, action_kind, risk_level, actor_kind, action_source, \
+            adapter_profile_ref, reason_code, created_at \
+        FROM audit_events",
+        "DROP TABLE audit_events",
+        "ALTER TABLE audit_events_v2_rebuild RENAME TO audit_events",
+        // Each index statement's text is byte-identical to the
+        // corresponding one in `CREATE_SCHEMA_V2` (real embedded
+        // newline + 4-space indent, not a backslash line-continuation
+        // collapsed to a single space) -- SQLite stores an index's
+        // `CREATE INDEX` text in `sqlite_master.sql` verbatim as given,
+        // unlike a table's, which gets rewritten on rename. A fresh
+        // install and this migration must produce identical index text
+        // too, or the convergence test's whole point is defeated by the
+        // one part of it that ISN'T covered by the table-DDL macro.
+        "CREATE INDEX audit_events_project_sequence\n    ON audit_events(project_id, sequence DESC)",
+        "CREATE INDEX audit_events_operation_sequence\n    ON audit_events(operation_id, sequence ASC)",
+        "CREATE UNIQUE INDEX audit_events_one_authorization_per_operation\n    ON audit_events(operation_id) WHERE outcome = 'authorized'",
+        "CREATE INDEX audit_events_family_outcome_sequence\n    ON audit_events(family, outcome, sequence DESC)",
+    ],
+}];
 
 pub(super) fn probe_existing_store(database_file: &Path) -> Result<i64, AuditStoreError> {
     let connection = Connection::open_with_flags(
@@ -52,7 +117,7 @@ pub(super) fn create_current_schema(connection: &mut Connection) -> Result<(), A
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(AuditStoreError::sqlite)?;
     transaction
-        .execute_batch(CREATE_SCHEMA_V1)
+        .execute_batch(CREATE_SCHEMA_V2)
         .map_err(AuditStoreError::sqlite)?;
     transaction
         .pragma_update(None, "application_id", AUDIT_APPLICATION_ID)

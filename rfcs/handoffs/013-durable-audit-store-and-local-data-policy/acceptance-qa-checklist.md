@@ -2,11 +2,11 @@
 title: "RFC-013: Durable Audit Store and Local Data Policy - Acceptance / QA Checklist"
 rfc: "RFC-013"
 rfc_file: "../../done/013-durable-audit-store-and-local-data-policy.md"
-status: "Implemented with documented limitations"
+status: "Implemented with documented limitations; Amendment 1 landed, awaiting full review"
 target_milestone: "M7"
 source_rfc_status: "Implemented with documented limitations"
 created: "2026-07-22"
-updated: "2026-07-23"
+updated: "2026-07-30"
 ---
 
 # RFC-013: Durable Audit Store and Local Data Policy - Acceptance / QA Checklist
@@ -14,6 +14,8 @@ updated: "2026-07-23"
 ## Acceptance Status
 
 Design was accepted by response 095. PR-013-B through PR-013-G implementation was accepted by responses 096, 097, 100, 101, and 102. Response 103 accepted PR-013-H as complete with documented limitations; its earlier requirement for a `crates/tekstide/NOTICE` file was withdrawn as a maintainer-challenged error and no such file was created.
+
+**Amendment 1 (schema v2 migration), authorised by the human owner 2026-07-30, landed the same day — awaiting full review** (not diff confirmation, per the amendment's own instruction: a schema migration against released data is the highest-risk change class in this codebase). See the Amendment 1 checklist below.
 
 ## Design Checklist
 
@@ -146,6 +148,28 @@ Design was accepted by response 095. PR-013-B through PR-013-G implementation wa
 - [x] Command/cwd/environment/display-summary/path privacy sentinel evidence.
 - [x] Known limitations and release-claim assessment.
 
+## Amendment 1 — Schema v2 Migration Checklist (2026-07-30)
+
+**A checked box means evidence exists, not that the result was favourable.**
+
+- [x] `CREATE_SCHEMA_V1` reverted to byte-for-byte match with the immutable `audit-v1.sql` fixture, and a permanent test (`create_schema_v1_constant_matches_the_immutable_fixture_exactly`) enforces this going forward.
+- [x] `CREATE_SCHEMA_V2` added as its own named constant (not `CREATE_SCHEMA_V1` edited forward), sharing its table-body literal text with the `1 -> 2` migration's rebuild statement via one macro, so the two cannot independently drift.
+- [x] `AUDIT_SCHEMA_VERSION` bumped to `2`.
+- [x] `OLDEST_SUPPORTED_SCHEMA_VERSION` pinned to the literal `1`, not derived from `AUDIT_SCHEMA_VERSION` — the trap the amendment identified in advance, confirmed by probe before the fix.
+- [x] `1 -> 2` migration step added, using the table-rebuild pattern (SQLite cannot `ALTER` a `CHECK` constraint).
+- [x] `sequence` values survive the rebuild unchanged — explicit column lists on both sides of `INSERT ... SELECT`, proved against real pre-existing rows inserted via raw SQL, not through any Rust API.
+- [x] Every index survives the rebuild — proved by the convergence test, not asserted.
+- [x] **Convergence test**: a fresh v2 install and a migrated-from-v1 database produce byte-identical `sqlite_master` entries for `audit_events` (table + every index, including SQLite's own autoindexes).
+- [x] `audit-v1.sql` fixture left unedited.
+- [x] `audit-v2.sql` fixture added, generated from `CREATE_SCHEMA_V2` (not hand-transcribed), and itself verified to match the constant and to open as a valid current-version store.
+- [x] `canonical_v1_fixture_opens_and_remains_current` converted into a genuine migration assertion (`v1_fixture_with_existing_rows_migrates_to_v2_preserving_sequence_and_accepts_the_new_anomaly`) rather than left proving only that a fixture opens.
+- [x] **Round-trip, end-to-end defect closure**: a `command_cwd_mismatch` anomaly write, which silently degraded on a pre-amendment database (response 117's probe), now persists on a migrated database.
+- [x] Interrupted-migration property re-proved against the **real** `1 -> 2` step (not only against the harness's pre-existing synthetic failure-injection tests): failure reported; `user_version` unchanged; no partial rebuild table; original table and rows intact with original `sequence`; database still genuinely v1 afterwards (a v2-only value is still rejected); no partial commit.
+- [x] **Ablation**: the transaction-wrapped guarantee was temporarily removed from the real harness and the interrupted-migration test (plus a pre-existing test) were confirmed to fail before the guarantee was restored.
+- [x] Concurrency: the real `1 -> 2` step holds one `IMMEDIATE` transaction for its entire duration, demonstrated directly (a second connection's write blocks/fails while the migration transaction is held).
+- [x] RFC-021 `acceptance-qa-checklist.md` line 74 restored to its original requirement text and marked **not met**, with this amendment recorded as the disclosure beneath it rather than the requirement rewritten to match the implementation.
+- [x] Gates: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (484 `tekstide-core`, 0 failures), `git diff --check`.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted as complete.
@@ -156,3 +180,5 @@ Design was accepted by response 095. PR-013-B through PR-013-G implementation wa
 Reviewer notes:
 
 Response 103 accepted RFC-013 as complete with documented limitations. Its original finding requiring a `crates/tekstide/NOTICE` file was withdrawn after maintainer challenge: the `tekstide` source package redistributes no third-party code, so the obligation is satisfied by the root `NOTICE` alone (covering repository checkouts and release tarballs) plus the rusqlite/libsqlite3-sys packages' own licenses for crates.io source consumers. RFC-013 has moved to `rfcs/done/`.
+
+**Amendment 1 (2026-07-30) is a separate, additive reopening of this closed RFC and has not yet been reviewed.** The Final Acceptance Decision above describes the base RFC-013 scope only; Amendment 1's own acceptance is pending the full review its own checklist section requires.
