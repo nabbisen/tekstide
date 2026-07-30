@@ -2,7 +2,7 @@
 title: "RFC-016: Internationalization and Localization - Acceptance / QA Checklist"
 rfc: "RFC-016"
 rfc_file: "../../proposed/016-internationalization-and-localization.md"
-status: "Proposed — implementation in progress (PR-016-C complete and accepted; PR-016-B landed 2026-07-30, not yet reviewed)"
+status: "Proposed — implementation in progress (PR-016-C, PR-016-B complete and accepted; PR-016-D landed 2026-07-30, not yet reviewed; PR-016-E waits for RFC-015)"
 target_milestone: "M8"
 source_rfc_status: "Proposed"
 created: "2026-07-29"
@@ -43,10 +43,10 @@ updated: "2026-07-30"
 
 ## Pluralization and Interpolation Checklist
 
-- [ ] Plural categories correct for a language whose rules differ from English.
-- [ ] Interpolation works.
-- [ ] Interpolation cannot inject markup or escape PR-016-C quoting.
-- [ ] Second locale added purely to prove the machinery.
+- [x] Plural categories correct for a language whose rules differ from English. Polish (`one`/`few`/`many`/`other` vs. English's `one`/`other`); `plural_categories_differ_correctly_for_polish`, ablation-verified (collapsing `few`/`many` to identical text made the test fail).
+- [x] Interpolation works. `Catalog::get_with_args`; numeric and symbolic-string arguments both proven, through the real shipped `en.ftl`/`pl.ftl`.
+- [x] Interpolation cannot inject markup or escape PR-016-C quoting. `interpolated_values_cannot_inject_fluent_syntax` (FTL-lookalike text renders as a literal, never re-parsed); `interpolation_does_not_substitute_for_text_safety_escaping` (a bidi override survives raw, proving interpolation is not a substitute for `text_safety::escape_untrusted_chars` and must not be treated as one). Both documented directly in `i18n.rs`'s module doc, not only here.
+- [x] Second locale added purely to prove the machinery. Polish (`pl`), loaded from the real shipped `crates/tekstide/locales/pl.ftl`, not a test-only fixture. Translation quality unreviewed, per RFC-016 §Non-Goals.
 
 ## Never-Localized Checklist
 

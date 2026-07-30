@@ -26,11 +26,37 @@
 //! Never blank, never panics -- a missing key renders as the key,
 //! which is ugly and immediately obvious, the correct failure mode for
 //! a translation gap.
+//!
+//! **Interpolation ([`Catalog::get_with_args`]) is for trusted data, not
+//! untrusted text -- it is not a substitute for
+//! `tekstide_core::text_safety`.** Fluent treats every argument value as
+//! an opaque literal: it is never re-parsed as FTL syntax (no markup
+//! injection is possible through an argument, proven in
+//! `tests::interpolated_values_cannot_inject_fluent_syntax`) but it is
+//! also never escaped for bidi/format-character safety (proven in
+//! `tests::interpolation_does_not_substitute_for_text_safety_escaping`).
+//! A caller interpolating anything that did not originate as trusted
+//! application data (a count, an enum-derived symbolic state) -- for
+//! example a branch name or any other adapter- or filesystem-controlled
+//! string -- must run it through `text_safety::quote_untrusted` first
+//! and interpolate the already-escaped result, exactly as it would for
+//! any other untrusted span embedded in trusted chrome.
+//!
+//! **The interpolation argument type doubles as the answer to "how does
+//! a caller express a non-numeric count?"** `$count`-shaped selectors in
+//! this module's catalogs match either CLDR plural categories (for a
+//! `FluentValue::Number`) or literal string variants (for a
+//! `FluentValue::String`) in the *same* message, against the *same*
+//! variable -- so a caller with a `tekstide_core::project_board::
+//! CountDisplay`-shaped value (`KnownCount(u32)` plus three non-numeric
+//! states) has exactly one lookup to make, not two. See
+//! `locales/en.ftl`'s `blocked-automation-count` key for the pattern.
 
 mod catalog;
 
 use std::path::Path;
 
+pub use fluent_bundle::{FluentArgs, FluentValue};
 use unic_langid::LanguageIdentifier;
 
 /// Locale preference inputs above OS-locale detection, in precedence
@@ -128,11 +154,22 @@ impl Catalog {
     /// never as an audit event, since a missing translation is not a
     /// security decision.
     pub fn get(&self, key: &str) -> String {
-        if let Some(value) = Self::lookup_in(&self.resolved, key) {
+        self.get_with_args_impl(key, None)
+    }
+
+    /// [`Self::get`], with Fluent interpolation arguments. Same fallback
+    /// chain; `args` is passed through to every stage it reaches. See
+    /// the module doc for what this is (and is not) safe to interpolate.
+    pub fn get_with_args(&self, key: &str, args: &FluentArgs) -> String {
+        self.get_with_args_impl(key, Some(args))
+    }
+
+    fn get_with_args_impl(&self, key: &str, args: Option<&FluentArgs>) -> String {
+        if let Some(value) = Self::lookup_in(&self.resolved, key, args) {
             return value;
         }
         if let Some(source) = &self.source_fallback
-            && let Some(value) = Self::lookup_in(source, key)
+            && let Some(value) = Self::lookup_in(source, key, args)
         {
             log_missing_key(key, &self.resolved_locale);
             return value;
@@ -141,11 +178,11 @@ impl Catalog {
         key.to_string()
     }
 
-    fn lookup_in(bundle: &catalog::Bundle, key: &str) -> Option<String> {
+    fn lookup_in(bundle: &catalog::Bundle, key: &str, args: Option<&FluentArgs>) -> Option<String> {
         let message = bundle.get_message(key)?;
         let pattern = message.value()?;
         let mut errors = vec![];
-        let value = bundle.format_pattern(pattern, None, &mut errors);
+        let value = bundle.format_pattern(pattern, args, &mut errors);
         if errors.is_empty() {
             Some(value.into_owned())
         } else {

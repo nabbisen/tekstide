@@ -13,3 +13,22 @@
 
 app-title = Tekstide
 project-board-title = Project Board
+
+# RFC-016 PR-016-D: proves both pluralization and interpolation through
+# one realistic key, modeled on `shell::render_text`'s real "blocked
+# automation: N" field (response 123/124's own example of why PR-016-D
+# unblocks RFC-015 PR-015-D). The selector doubles as the response's
+# design constraint made concrete: `$count` may be a genuine number
+# (plural-category selection applies) or one of `CountDisplay`'s three
+# non-numeric states, expressed as literal string variants alongside the
+# plural ones -- the same interpolation argument, the same key, no
+# second API. `CountDisplay::label()` itself is not called from here;
+# this key only proves the catalog CAN express all four shapes, per
+# response 123/124's explicit "record it, do not solve it in PR-016-D."
+blocked-automation-count = { $count ->
+    [not_implemented] blocked automation: not implemented
+    [unavailable] blocked automation: not available
+    [unknown] blocked automation: unknown
+    [one] blocked automation: {$count}
+   *[other] blocked automation: {$count}
+}
