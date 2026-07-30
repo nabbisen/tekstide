@@ -176,6 +176,83 @@ fn v1_fixture_with_existing_rows_migrates_to_v2_preserving_sequence_and_accepts_
     assert_eq!(pragma(&connection, "user_version"), 2);
 }
 
+/// Response 119 Required: a store that was **purged** (all rows deleted,
+/// as `purge.rs`'s `DELETE FROM audit_events` does) before being upgraded
+/// must not reuse a retired `sequence` number after migrating. `sequence`
+/// is `INTEGER PRIMARY KEY AUTOINCREMENT` specifically so a deleted row's
+/// number is never reused -- `DROP TABLE audit_events` during the
+/// rebuild deletes that bookkeeping (SQLite's own `sqlite_sequence`
+/// table) along with the table itself, and the rebuild's own row in
+/// `sqlite_sequence` reflects only what was actually copied into it, so
+/// without carrying the high-water mark across separately, a purged-
+/// then-migrated store's next append would silently restart from a low
+/// number. None of the other fixture tests can observe this: they all
+/// migrate stores whose rows are still present, where the mark and
+/// `MAX(sequence)` happen to agree.
+#[test]
+fn a_purged_then_migrated_store_does_not_reuse_a_retired_sequence_number() {
+    let dirs = TestAuditDirs::new("migration-purged-then-migrated");
+    fs::create_dir_all(dirs.storage_path.audit_dir()).unwrap();
+    let connection = Connection::open(dirs.storage_path.database_file()).unwrap();
+    connection.execute_batch(V1_FIXTURE).unwrap();
+    for n in 1..=5u8 {
+        connection
+            .execute(
+                "INSERT INTO audit_events \
+                    (event_id, schema_version, project_id, family, outcome, \
+                     action_kind, actor_kind, action_source, created_at) \
+                 VALUES \
+                    (?1, 1, ?2, 'project_added', 'applied', 'project_add', 'user', \
+                     'trusted_ui', '2026-01-01T00:00:00Z')",
+                rusqlite::params![fixture_event_id(n), fixture_project_id(n)],
+            )
+            .unwrap();
+    }
+    let pre_purge_high_water_mark: i64 = connection
+        .query_row(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'audit_events'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        pre_purge_high_water_mark, 5,
+        "test precondition: five rows inserted, high-water mark at 5"
+    );
+    // The purge itself: every row deleted, exactly as `purge.rs` does.
+    connection.execute("DELETE FROM audit_events", []).unwrap();
+    let remaining_rows: i64 = connection
+        .query_row("SELECT COUNT(*) FROM audit_events", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(remaining_rows, 0, "test precondition: store is purged");
+    drop(connection);
+
+    // Opening via the real `AuditStore::open` runs the real `1 -> 2`
+    // migration on this purged-but-not-empty-history store.
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::CommandApproval,
+        AuditOutcome::Anomaly,
+        AuditActionKind::CommandCwdMismatch,
+        AuditActorKind::AppPolicy,
+        AuditActionSource::Adapter,
+    );
+    record.project_id = Some(ProjectId::for_test(1));
+    record.approval_id = Some(ApprovalId::new_uuid());
+    record.risk_level = Some(AuditRiskLevel::Low);
+    store.append(&record).unwrap();
+
+    let records = store.query(&AuditQuery::latest(10)).unwrap().records;
+    assert_eq!(records.len(), 1, "only the newly-appended record exists");
+    assert!(
+        records[0].sequence > pre_purge_high_water_mark,
+        "the newly-appended record's sequence ({}) must exceed the pre-migration \
+         high-water mark ({pre_purge_high_water_mark}), not reuse a retired number",
+        records[0].sequence
+    );
+}
+
 /// A v2 fixture (no migration needed) must also open and stay current --
 /// the companion to the v1 fixture test, proving `audit-v2.sql` itself is
 /// a valid, openable v2 database, not just text that happens to match

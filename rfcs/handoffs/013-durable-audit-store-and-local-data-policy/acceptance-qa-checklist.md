@@ -168,7 +168,9 @@ Design was accepted by response 095. PR-013-B through PR-013-G implementation wa
 - [x] **Ablation**: the transaction-wrapped guarantee was temporarily removed from the real harness and the interrupted-migration test (plus a pre-existing test) were confirmed to fail before the guarantee was restored.
 - [x] Concurrency: the real `1 -> 2` step holds one `IMMEDIATE` transaction for its entire duration, demonstrated directly (a second connection's write blocks/fails while the migration transaction is held).
 - [x] RFC-021 `acceptance-qa-checklist.md` line 74 restored to its original requirement text and marked **not met**, with this amendment recorded as the disclosure beneath it rather than the requirement rewritten to match the implementation.
-- [x] Gates: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (484 `tekstide-core`, 0 failures), `git diff --check`.
+- [x] **The `sqlite_sequence` `AUTOINCREMENT` high-water mark survives the rebuild, separately from row values** (response 119 Required — the reviewer's own probe found this: a purged-then-migrated store reused a retired `sequence` number, since `DROP TABLE audit_events` deletes the mark along with the table). Fixed with a capture-before/restore-after pair of statements using `MAX` so the mark can only move forward. New test: `a_purged_then_migrated_store_does_not_reuse_a_retired_sequence_number`, ablation-verified.
+- [x] Statement whitelist's permissiveness for `CREATE TABLE ... AS SELECT` (needed by the high-water-mark carry) documented directly on `validate_migration_statement`.
+- [x] Gates: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (485 `tekstide-core`, 0 failures), `git diff --check`.
 
 ## Final Acceptance Decision
 

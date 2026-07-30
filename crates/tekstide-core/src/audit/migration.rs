@@ -41,10 +41,35 @@ const OLDEST_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 /// ends up textually identical to a fresh v2 install's. The convergence
 /// test in `audit::tests::migration` asserts this rather than assuming
 /// it.
+///
+/// **The `AUTOINCREMENT` high-water mark is carried across the rebuild
+/// separately from the rows themselves** (response 119 Required): `DROP
+/// TABLE audit_events` deletes `audit_events`'s row in SQLite's own
+/// `sqlite_sequence` table, and the rebuild table's row in
+/// `sqlite_sequence` reflects only what was actually inserted into it --
+/// if the source table had been purged of some rows before the upgrade
+/// (`purge.rs`'s `DELETE FROM audit_events`), the counter would silently
+/// reset below its true history, letting a later append reuse a
+/// `sequence` value that used to identify a different, now-deleted
+/// event. The values themselves surviving unchanged (the property named
+/// explicitly in the amendment handoff) is not the same property as the
+/// *counter* surviving unchanged -- this migration now preserves both.
+/// The carry is captured into a throwaway table before anything else
+/// runs and restored (via `MAX`, so it can only move forward, never
+/// backward) after the rename and indexes are in place.
 pub(crate) const MIGRATIONS: &[MigrationStep] = &[MigrationStep {
     from_version: 1,
     to_version: 2,
     statements: &[
+        // Captured first, before the source table (and its
+        // `sqlite_sequence` row) is touched at all. If `audit_events`
+        // was never written to, it has no `sqlite_sequence` row yet
+        // (SQLite creates that row lazily on first insert, not at
+        // `CREATE TABLE` time) -- this then produces an empty carry
+        // table, which the restore step below treats as "no floor to
+        // enforce" via `COALESCE(MAX(seq), 0)`.
+        "CREATE TABLE audit_events_seq_carry AS \
+         SELECT seq FROM sqlite_sequence WHERE name = 'audit_events'",
         audit_events_v2_table_ddl!("audit_events_v2_rebuild"),
         "INSERT INTO audit_events_v2_rebuild (\
             sequence, event_id, schema_version, project_id, family, outcome, \
@@ -72,6 +97,16 @@ pub(crate) const MIGRATIONS: &[MigrationStep] = &[MigrationStep {
         "CREATE INDEX audit_events_operation_sequence\n    ON audit_events(operation_id, sequence ASC)",
         "CREATE UNIQUE INDEX audit_events_one_authorization_per_operation\n    ON audit_events(operation_id) WHERE outcome = 'authorized'",
         "CREATE INDEX audit_events_family_outcome_sequence\n    ON audit_events(family, outcome, sequence DESC)",
+        // Restore the high-water mark -- `MAX` so this can only move the
+        // mark forward (matching whatever the rebuild's own inserts
+        // already advanced it to), never backward. Only reachable if the
+        // rebuild table actually has a `sqlite_sequence` row itself
+        // (true whenever it received at least one row; see the carry
+        // step's own comment for the symmetric zero-row case).
+        "UPDATE sqlite_sequence SET seq = MAX(seq, \
+            (SELECT COALESCE(MAX(seq), 0) FROM audit_events_seq_carry)) \
+         WHERE name = 'audit_events'",
+        "DROP TABLE audit_events_seq_carry",
     ],
 }];
 
@@ -174,6 +209,14 @@ pub(crate) fn migrate_sequentially(
     transaction.commit().map_err(AuditStoreError::sqlite)
 }
 
+/// Keyword-based, not statement-shape-based: this permits `CREATE TABLE
+/// ... AS SELECT` (it only inspects the first word, `CREATE`) as well as
+/// plain `CREATE TABLE (...)`. RFC-013 Amendment 1's `1 -> 2` step
+/// depends on this specifically -- the `sqlite_sequence` high-water-mark
+/// carry uses `CREATE TABLE audit_events_seq_carry AS SELECT ...` -- so a
+/// future tightening of this whitelist to distinguish the two `CREATE
+/// TABLE` shapes would silently break that migration step. Noted here so
+/// nobody narrows this without checking `MIGRATIONS` first.
 fn validate_migration_statement(statement: &str) -> Result<(), AuditStoreError> {
     let keyword = statement
         .trim_start()
