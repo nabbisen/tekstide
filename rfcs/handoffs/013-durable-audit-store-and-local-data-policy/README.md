@@ -4,6 +4,18 @@ Source RFC: [RFC-013](../../done/013-durable-audit-store-and-local-data-policy.m
 Target milestone: **M7**
 Source RFC status: **Implemented with documented limitations**
 
+## Active work: Amendment 1 — schema v2 migration (2026-07-30)
+
+**Start here if you are picking up this pack now.** RFC-013 is otherwise closed; this is reopened work.
+
+- **[`amendment-1-schema-v2-migration.md`](./amendment-1-schema-v2-migration.md)** — the slice to implement.
+
+Authorised by the human owner on 2026-07-30 as an additive amendment ([RFC-013 §Amendment 1](../../done/013-durable-audit-store-and-local-data-policy.md)), adding one `action_kind` (`command_cwd_mismatch`) and one `outcome` (`anomaly`) for RFC-021, delivered as a v1 → v2 migration.
+
+It exists because commit `3ac794b` widened `CREATE_SCHEMA_V1`'s `CHECK` constraints in place without bumping the schema version or adding a migration step, so the new record silently cannot be written on any existing installation. Verified by probe in review response 117. No data loss; no user-visible effect yet; permanent per install until this lands.
+
+This will be the **first migration step the harness has ever actually run** — `MIGRATIONS` has been empty since RFC-013 closed. It gets a full review, not diff confirmation, and it blocks RFC-021's PR-021-F closeout.
+
 ## Files
 
 - `implementation-handoff.md` - developer-facing durable-audit guidance.

@@ -477,3 +477,56 @@ References used for the backend decision:
 - Use one `managed_process_lifecycle` family with exactly one authorization, one `started`/`failed` initial result, and an optional later `terminated` observation only after start.
 - Use only the exhaustive v1 actor/source codes and allowed pairs defined by the per-class contract.
 - Keep the v1 event-family matrix exhaustive. Audit-data purge is ephemeral-only, and generated-change metadata purge remains deferred.
+
+---
+
+## Amendment 1: Additive v1 → v2 Schema Amendment for `command_cwd_mismatch`
+
+Status: **Authorised by the human owner, 2026-07-30**
+Amendment type: **Additive** — no existing family, action kind, outcome, or allowed pair changes meaning.
+Requested by: RFC-021 PR-021-E2 (review response 116 Required 2, verified in response 117).
+
+### What is authorised
+
+Two additions to the v1 event matrix, and the schema version bump and migration needed to deliver them to existing installations:
+
+| Addition | Value | Family |
+| --- | --- | --- |
+| `AuditActionKind` | `command_cwd_mismatch` | `command_approval` |
+| `AuditOutcome` | `anomaly` | (new outcome, used only by the above in this amendment) |
+
+Allowed pair, matching the per-class contract's exhaustive style:
+
+```
+action_kind = 'command_cwd_mismatch'
+  AND operation_id IS NULL
+  AND outcome = 'anomaly'
+  AND actor_kind = 'app_policy'
+  AND action_source = 'adapter'
+```
+
+`AUDIT_SCHEMA_VERSION` becomes `2`. `OLDEST_SUPPORTED_SCHEMA_VERSION` stays at `1`.
+
+### Why an amendment was needed
+
+RFC-021's approval coordinator compares a `CommandProposal`'s **claimed** `cwd` against the caller-supplied, already-verified `VerifiedCwd`. The claim is never trusted and never used for classification or containment — the comparison exists solely to record that an adapter's claim disagreed with reality, which is the one honest use that field has. The frozen v1 matrix had no action kind or outcome expressing an informational observation alongside an action that proceeded normally.
+
+Reusing `blocked` was considered and rejected: in every other family `blocked` means the described action did **not** proceed, and this record accompanies one that did. Reusing it would overstate what happened, in the durable record, in the direction of alarm.
+
+### Why this does not require a new RFC
+
+This document's own Schema Versioning and Migration rules state that **destructive** migration requires a new reviewed RFC amendment. This migration is additive: it widens two `CHECK` constraint value sets and adds one allowed-pair clause. No row is rewritten, no column is dropped, no existing validation changes. An amendment section here, with owner authorisation recorded, is the proportionate instrument.
+
+### Constraints this amendment inherits, unchanged
+
+Every migration rule in Schema Versioning and Migration continues to apply, and three deserve restating because they are the ones this change can plausibly violate:
+
+1. **A failed migration leaves the prior database usable or returns a recoverable failure without claiming success.** RFC-013 PR-013-D review found a real violation of this rule — a failing step left `user_version` advanced and a partially-created table behind. `MIGRATIONS` has been empty since RFC-013 closed, so this will be the **first migration step the harness has ever actually run**. The property must be re-proved against the real 1 → 2 step, not inherited from the harness's failure-injection tests.
+2. **Immutable input/expected fixtures for every supported prior version.** `audit/tests/fixtures/audit-v1.sql` already exists and, as of 2026-07-30, still contains the genuine pre-amendment DDL. It must not be edited to match v2 — it is now the only accurate record of what v1 was, and its value is precisely that it disagrees with the current constant.
+3. **Migrations are forward-only and sequential**, and each runs in a transaction.
+
+### Defect this amendment exists to correct
+
+Commit `3ac794b` added both values to `CREATE_SCHEMA_V1` in place without bumping the schema version or adding a migration step. Verified by probe in review response 117: an existing v1 database opens successfully, no migration runs, and every `command_cwd_mismatch` write is rejected by the old `CHECK` constraint — `AuditObservationStatus::Degraded`, zero rows persisted, audit health degraded, while pre-existing action kinds continue to persist normally. No data is lost and nothing user-visible depends on it yet, but the failure is silent and permanent per installation.
+
+A secondary consequence, recorded because the existing test suite cannot see it: `CREATE_SCHEMA_V1` and `audit-v1.sql` now describe different schemas, and `canonical_v1_fixture_opens_and_remains_current` still passes, because schema identity compares only `application_id` and `user_version` and never the DDL. That test must become a v1 → v2 migration assertion.
