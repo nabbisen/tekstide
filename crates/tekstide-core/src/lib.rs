@@ -13,4 +13,5 @@ pub mod route;
 pub mod runtime;
 pub mod security;
 pub mod shell;
+pub mod text_safety;
 pub mod transcript;

@@ -601,71 +601,17 @@ fn build_wire_decision(
 }
 
 // --- Display-only argv rendering (response 114 Required 2) -------------
-
-/// Every Unicode **Format (`Cf`)** category codepoint -- response 115
-/// Required A: escaping only the two bidi-override ranges (RFC-016
-/// §Security point 1) implements point 1 but not point 3, which requires
-/// "other invisible or format characters" to be made visible "on the same
-/// principle" -- zero-width joiners/non-joiners, zero-width space, soft
-/// hyphen, and other bidi *marks* (not just overrides) all sit outside
-/// those two ranges. The reviewer's probe showed three genuine bidi
-/// controls (LRM `U+200E`, RLM `U+200F`, ALM `U+061C`) and several
-/// zero-width/invisible characters (ZWSP, ZWNJ, ZWJ, soft hyphen, BOM)
-/// passing through unescaped under the narrower rule -- `U+200B` in a
-/// filename argument (`impor<ZWSP>tant.txt` rendering as `important.txt`)
-/// is Required 2's display-ambiguity defect surviving in a form the
-/// original fix did not cover, since it is neither whitespace nor a `Cc`
-/// control by Rust's own classification.
-///
-/// Hand-rolled rather than a dependency, per the reviewer: `Cf` is a
-/// small, stable set of ranges.
-fn is_format_char(c: char) -> bool {
-    matches!(
-        c as u32,
-        0x00AD
-            | 0x0600..=0x0605
-            | 0x061C
-            | 0x06DD
-            | 0x070F
-            | 0x0890..=0x0891
-            | 0x08E2
-            | 0x180E
-            | 0x200B..=0x200F
-            | 0x202A..=0x202E
-            | 0x2060..=0x2064
-            | 0x2066..=0x206F
-            | 0xFEFF
-            | 0xFFF9..=0xFFFB
-            | 0x110BD
-            | 0x110CD
-            | 0x13430..=0x13438
-            | 0x1BCA0..=0x1BCA3
-            | 0x1D173..=0x1D17A
-            | 0xE0001
-            | 0xE0020..=0xE007F
-    )
-}
-
-/// Any character this module escapes to a visible `<U+XXXX>` marker
-/// rather than passing through raw: every Unicode **Control (`Cc`)**
-/// character (`char::is_control`) plus every **Format (`Cf`)** character
-/// (`is_format_char`, above) -- the general-category rule the reviewer
-/// prescribed in place of an enumerated list, so it covers whatever
-/// invisible-character shape nobody has thought of yet, not just the ones
-/// already found.
-///
-/// **Deliberately not extended to homoglyphs/confusables** (response 115
-/// Q1): Cyrillic `о` versus Latin `o` is a different problem class
-/// (script-mixing detection, a skeleton algorithm), which RFC-016 does
-/// not require, and a policy loose enough to catch it would over-escape
-/// legitimate Cyrillic, Greek, and CJK text -- breaking the i18n
-/// requirement RFC-016 exists to satisfy. Invisible characters are
-/// unambiguously wrong in a security display; visible non-Latin
-/// characters are the point of having i18n. This is the line, and it
-/// stops here.
-fn is_escaped_control(c: char) -> bool {
-    c.is_control() || is_format_char(c)
-}
+//
+// The character-escaping half (bidi/format-control -> visible `<U+XXXX>`
+// marker) is NOT implemented here. RFC-016 PR-016-C consolidated it into
+// `crate::text_safety`, since this module's private copy (added under
+// RFC-021 review pressure in PR-021-E1/response 115, before RFC-016
+// existed to own it) was exactly the duplication RFC-016 §Risks warns
+// against: "escaping belongs to the shared untrusted-text render path,
+// not to each surface." Only the argv-specific half stays here: per-entry
+// POSIX-style quoting, which is shaped around "argv is a vector of
+// entries," not around "text contains untrusted characters," and has no
+// equivalent in `text_safety`'s single-string API.
 
 /// Shell metacharacters that make an argument's boundary ambiguous when
 /// simply concatenated with neighbours -- not an attempt at a complete or
@@ -680,23 +626,21 @@ const SHELL_METACHARACTERS: &[char] = &[
 fn needs_quoting(entry: &str) -> bool {
     entry.is_empty()
         || entry.chars().any(|c| {
-            c.is_whitespace() || is_escaped_control(c) || SHELL_METACHARACTERS.contains(&c)
+            c.is_whitespace()
+                || crate::text_safety::is_untrusted_display_control(c)
+                || SHELL_METACHARACTERS.contains(&c)
         })
 }
 
 /// Renders one argv entry for display: control characters (including
-/// RFC-016's bidi range) become visible `<U+XXXX>` markers, and the whole
-/// entry is single-quoted if it is empty or contains anything that would
-/// otherwise make its boundary ambiguous next to its neighbours.
+/// RFC-016's bidi range) become visible `<U+XXXX>` markers via
+/// `crate::text_safety::escape_untrusted_chars` (the shared, canonical
+/// implementation as of RFC-016 PR-016-C -- see the section doc above),
+/// and the whole entry is single-quoted if it is empty or contains
+/// anything that would otherwise make its boundary ambiguous next to its
+/// neighbours.
 fn display_entry(entry: &str) -> String {
-    let mut escaped = String::with_capacity(entry.len());
-    for c in entry.chars() {
-        if is_escaped_control(c) {
-            escaped.push_str(&format!("<U+{:04X}>", c as u32));
-        } else {
-            escaped.push(c);
-        }
-    }
+    let escaped = crate::text_safety::escape_untrusted_chars(entry);
     if !needs_quoting(entry) {
         return escaped;
     }

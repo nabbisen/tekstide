@@ -2,7 +2,7 @@
 title: "RFC-016: Internationalization and Localization - Acceptance / QA Checklist"
 rfc: "RFC-016"
 rfc_file: "../../proposed/016-internationalization-and-localization.md"
-status: "Proposed — implementation pending"
+status: "Proposed — implementation in progress (PR-016-C landed 2026-07-30, not yet reviewed)"
 target_milestone: "M8"
 source_rfc_status: "Proposed"
 created: "2026-07-29"
@@ -15,19 +15,19 @@ updated: "2026-07-29"
 
 ## Text Safety Checklist (PR-016-C) — security-critical
 
-- [ ] U+202A..U+202E escaped to a visible representation, not obeyed.
-- [ ] U+2066..U+2069 escaped.
-- [ ] Zero-width joiner/non-joiner, zero-width space, soft hyphen escaped.
-- [ ] **Trojan Source pattern defeated** — displayed order matches logical argv.
-- [ ] Untrusted span isolated; unterminated override cannot affect adjacent trusted labels.
-- [ ] **Escaping is render-time only; stored values keep byte fidelity** — verified against audit and transcript paths.
-- [ ] Applied to: approval, trust, paste, destructive, safe-close dialogs.
-- [ ] Applied to: Project Board rows (branch and project names).
-- [ ] Applied to: notifications, audit viewer, transcript viewer.
-- [ ] **Editor surface exception implemented deliberately** and documented.
-- [ ] **Terminal surface exception implemented deliberately** — no escaping, no reordering.
-- [ ] Escaping lives on the shared render path; bypass requires deliberate effort.
-- [ ] Legitimate RTL chrome renders naturally, unescaped.
+- [x] U+202A..U+202E escaped to a visible representation, not obeyed. `text_safety::escape_untrusted_chars`; `every_bidi_and_format_probe_escapes_to_its_visible_marker` covers U+202E explicitly, the full range is covered by the `is_format_char` range check itself.
+- [x] U+2066..U+2069 escaped. `the_full_isolate_initiator_and_terminator_range_is_escaped` covers all four explicitly, including U+2069 (PDI) — the same codepoint used to close `quote_untrusted`'s own isolate wrap.
+- [x] Zero-width joiner/non-joiner, zero-width space, soft hyphen escaped. Covered in the ten-codepoint probe (U+200B/200C/200D/00AD).
+- [x] **Trojan Source pattern defeated** — displayed order matches logical text. `the_trojan_source_pattern_is_defeated`.
+- [x] Untrusted span isolated; unterminated override cannot affect adjacent trusted labels. `an_unterminated_override_cannot_affect_adjacent_trusted_text` — checks structural properties (no live control survives escaping; isolate marks present), not a full Unicode Bidi Algorithm resolution, which this crate does not implement.
+- [ ] **Escaping is render-time only; stored values keep byte fidelity** — verified against audit and transcript paths. Verified against the audit path only (`approval::coordinator`'s pre-existing sentinel test, unchanged). **Not verified against a transcript path** — no RFC-011 transcript code calls into `text_safety`, so there is no integration point yet. Left unchecked rather than checked on the audit half alone.
+- [ ] Applied to: approval, trust, paste, destructive, safe-close dialogs. Only the approval surface's argv rendering exists (`approval::coordinator`, pre-existing, now sharing this module's escaping); no trust/paste/destructive/safe-close dialog exists anywhere in the tree — RFC-015's shell is unimplemented.
+- [ ] Applied to: Project Board rows (branch and project names). No Project Board rendering surface exists yet.
+- [ ] Applied to: notifications, audit viewer, transcript viewer. None of these surfaces exist yet.
+- [ ] **Editor surface exception implemented deliberately** and documented. No editor surface exists yet to except.
+- [ ] **Terminal surface exception implemented deliberately** — no escaping, no reordering. The terminal genuinely does not reorder or escape (confirmed by RFC-014 C10 and the gui-spike filter tests), but this is pre-existing absence, not something this slice implemented as a deliberate opt-out of a shared path — left unchecked to avoid claiming an implementation that isn't there.
+- [x] Escaping lives on the shared render path; bypass requires deliberate effort — **for the one real call site that exists.** `approval::coordinator` can no longer diverge without deliberately reimplementing the `Cf` table itself; ablation-verified (breaking the shared function breaks both the shared tests and `approval`'s pre-existing tests identically). The wider claim (bypass-resistant across a whole shell crate) awaits real UI surfaces to make it meaningful.
+- [x] Legitimate RTL chrome renders naturally, unescaped. `legitimate_rtl_letters_are_not_escaped`, at the primitive level (no chrome exists yet to render it in).
 
 ## Catalog and Locale Checklist
 
@@ -72,12 +72,12 @@ updated: "2026-07-29"
 
 ## Evidence Required
 
-- [ ] Commit/PR list; gate output.
-- [ ] Bidi corpus results including the Trojan Source case.
-- [ ] Byte-fidelity test results for audit and transcript paths.
-- [ ] Dependency-cost measurement.
-- [ ] Screenshot of a non-Latin locale rendering the shell.
-- [ ] Known limitations; answers to the RFC's open questions.
+- [x] Commit/PR list; gate output. See qa-evidence.md PR-016-C section (this slice only; B/D/E/F pending).
+- [x] Bidi corpus results including the Trojan Source case. `crates/tekstide-core/src/text_safety/tests.rs`.
+- [ ] Byte-fidelity test results for audit and transcript paths. Audit path only; no transcript integration point exists yet.
+- [ ] Dependency-cost measurement. PR-016-B scope, not yet started.
+- [ ] Screenshot of a non-Latin locale rendering the shell. Requires RFC-015's shell to exist first.
+- [x] Known limitations; answers to the RFC's open questions. Open Question 1 (escaping function's home) answered by the README's 2026-07-30 addendum: `tekstide-core`, shared — see qa-evidence.md.
 
 ## Final Acceptance Decision
 
