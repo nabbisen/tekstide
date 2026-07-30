@@ -234,24 +234,69 @@ impl ApprovalCoordinator {
 
 // --- Display-only argv rendering (response 114 Required 2) -------------
 
-/// RFC-016's bidi control ranges (`U+202A..=U+202E`, `U+2066..=U+2069`),
-/// escaped to a visible representation per RFC-016's "Policy: escape and
-/// isolate" -- approval surfaces are listed there as mandatory. This is
-/// the point where that text is first *constructed*, not merely rendered
-/// (response 114 corrected my own prior guidance that RFC-016 only
-/// mattered starting at PR-021-E2/the dialog).
-fn is_bidi_control(c: char) -> bool {
-    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+/// Every Unicode **Format (`Cf`)** category codepoint -- response 115
+/// Required A: escaping only the two bidi-override ranges (RFC-016
+/// §Security point 1) implements point 1 but not point 3, which requires
+/// "other invisible or format characters" to be made visible "on the same
+/// principle" -- zero-width joiners/non-joiners, zero-width space, soft
+/// hyphen, and other bidi *marks* (not just overrides) all sit outside
+/// those two ranges. The reviewer's probe showed three genuine bidi
+/// controls (LRM `U+200E`, RLM `U+200F`, ALM `U+061C`) and several
+/// zero-width/invisible characters (ZWSP, ZWNJ, ZWJ, soft hyphen, BOM)
+/// passing through unescaped under the narrower rule -- `U+200B` in a
+/// filename argument (`impor<ZWSP>tant.txt` rendering as `important.txt`)
+/// is Required 2's display-ambiguity defect surviving in a form the
+/// original fix did not cover, since it is neither whitespace nor a `Cc`
+/// control by Rust's own classification.
+///
+/// Hand-rolled rather than a dependency, per the reviewer: `Cf` is a
+/// small, stable set of ranges.
+fn is_format_char(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x00AD
+            | 0x0600..=0x0605
+            | 0x061C
+            | 0x06DD
+            | 0x070F
+            | 0x0890..=0x0891
+            | 0x08E2
+            | 0x180E
+            | 0x200B..=0x200F
+            | 0x202A..=0x202E
+            | 0x2060..=0x2064
+            | 0x2066..=0x206F
+            | 0xFEFF
+            | 0xFFF9..=0xFFFB
+            | 0x110BD
+            | 0x110CD
+            | 0x13430..=0x13438
+            | 0x1BCA0..=0x1BCA3
+            | 0x1D173..=0x1D17A
+            | 0xE0001
+            | 0xE0020..=0xE007F
+    )
 }
 
 /// Any character this module escapes to a visible `<U+XXXX>` marker
-/// rather than passing through raw: RFC-016's bidi range, plus every
-/// other C0/C1 control character (a literal newline is exactly as capable
-/// of hiding text below a fold as a bidi override is of reversing it, so
-/// this is a strict superset of what RFC-016 itself mandates, not a
-/// narrower reading of it).
+/// rather than passing through raw: every Unicode **Control (`Cc`)**
+/// character (`char::is_control`) plus every **Format (`Cf`)** character
+/// (`is_format_char`, above) -- the general-category rule the reviewer
+/// prescribed in place of an enumerated list, so it covers whatever
+/// invisible-character shape nobody has thought of yet, not just the ones
+/// already found.
+///
+/// **Deliberately not extended to homoglyphs/confusables** (response 115
+/// Q1): Cyrillic `о` versus Latin `o` is a different problem class
+/// (script-mixing detection, a skeleton algorithm), which RFC-016 does
+/// not require, and a policy loose enough to catch it would over-escape
+/// legitimate Cyrillic, Greek, and CJK text -- breaking the i18n
+/// requirement RFC-016 exists to satisfy. Invisible characters are
+/// unambiguously wrong in a security display; visible non-Latin
+/// characters are the point of having i18n. This is the line, and it
+/// stops here.
 fn is_escaped_control(c: char) -> bool {
-    is_bidi_control(c) || c.is_control()
+    c.is_control() || is_format_char(c)
 }
 
 /// Shell metacharacters that make an argument's boundary ambiguous when

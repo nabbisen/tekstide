@@ -2,7 +2,7 @@
 title: "RFC-021: Command Approval Model and Adapter Capability - Acceptance / QA Checklist"
 rfc: "RFC-021"
 rfc_file: "../../proposed/021-command-approval-model-and-adapter-capability.md"
-status: "Proposed — implementation in progress (PR-021-B, PR-021-C, PR-021-D landed; PR-021-D accepted with required follow-up, applied; PR-021-E1 landed, response-114 required fixes applied, awaiting re-review)"
+status: "Proposed — implementation in progress (PR-021-B, PR-021-C, PR-021-D landed; PR-021-D accepted with required follow-up, applied; PR-021-E1 landed, accepted with required follow-up, all fixes applied — proceeding to PR-021-E2)"
 target_milestone: "M11"
 source_rfc_status: "Proposed"
 created: "2026-07-28"

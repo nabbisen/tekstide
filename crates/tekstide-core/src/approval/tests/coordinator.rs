@@ -405,6 +405,50 @@ fn display_command_renders_an_empty_argument_visibly_rather_than_letting_it_vani
     assert_eq!(request.display_command, "printf %s ''");
 }
 
+/// Response 115 Required A: the reviewer's ten probe cases showing the
+/// bidi-range-only escape (response 114's fix) missed three genuine bidi
+/// controls and six other invisible/format characters RFC-016 §Security
+/// point 3 also requires be made visible. Each must render as a visible
+/// `<U+XXXX>` marker, not pass through raw -- the `important.txt` case
+/// (index 5, ZWSP) is the reviewer's exact concrete example of the
+/// display-ambiguity defect surviving in a form the original fix did not
+/// cover: `impor<ZWSP>tant.txt` renders as `important.txt` with no visual
+/// cue that a command targets a different file than the one displayed.
+#[test]
+fn display_command_escapes_every_bidi_and_format_probe_from_response_115() {
+    let probes: &[(char, &str)] = &[
+        ('\u{202E}', "202E"), // RLO -- already covered by response 114
+        ('\u{2066}', "2066"), // LRI -- already covered by response 114
+        ('\u{200E}', "200E"), // LRM -- a bidi mark, missed by the bidi-range-only rule
+        ('\u{200F}', "200F"), // RLM -- a bidi mark, missed
+        ('\u{061C}', "061C"), // ALM -- a bidi mark, missed
+        ('\u{200B}', "200B"), // ZWSP -- the "important.txt" case
+        ('\u{200C}', "200C"), // ZWNJ
+        ('\u{200D}', "200D"), // ZWJ
+        ('\u{00AD}', "00AD"), // soft hyphen
+        ('\u{FEFF}', "FEFF"), // ZWNBSP / BOM
+    ];
+    for (index, (codepoint, hex)) in probes.iter().enumerate() {
+        let entry = format!("impor{codepoint}tant.txt");
+        let command_proposal =
+            proposal(&format!("proposal-{index}"), &["cat", &entry], PROJECT_ROOT);
+        let mut coordinator = ApprovalCoordinator::new();
+        let ReceiveOutcome::Created { request, .. } = receive(
+            &mut coordinator,
+            &AgentRunId::for_test(index as u64),
+            PROJECT_ROOT,
+            &command_proposal,
+        ) else {
+            panic!("must create a request");
+        };
+        assert!(
+            request.display_command.contains(&format!("<U+{hex}>")),
+            "U+{hex} must be escaped to a visible marker, got {:?}",
+            request.display_command
+        );
+    }
+}
+
 /// The classifier's `RiskReason`s must actually reach the caller through
 /// `ReceiveOutcome`, not be discarded after `ApprovalRequest` is built
 /// (response 114 Recommended 2).

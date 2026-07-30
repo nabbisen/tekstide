@@ -633,9 +633,18 @@ impl ApprovalChannelEndpoint {
                     break;
                 }
                 let Some(endpoint) = weak.upgrade() else {
-                    // Every strong owner is gone: the caller dropped its
-                    // `Arc` without calling `shutdown()` first. Nothing
-                    // further can or should be accepted.
+                    // Response 115: corrected from an earlier, overstated
+                    // comment. This is reachable only in the brief window
+                    // between one connection finishing and the next
+                    // `accept()` call starting -- while a call is blocked
+                    // inside `accept()` below, this check has already
+                    // passed and is not reached again until that call
+                    // returns, so a caller dropping every strong owner
+                    // *during* a blocked `accept()` is NOT caught here.
+                    // `ServeShutdown`'s `Drop` (which wakes a blocked
+                    // `accept()` via a self-connect before the strong
+                    // count can matter) is what actually guarantees
+                    // eventual cleanup in that case, not this branch.
                     break;
                 };
                 let stream = match endpoint.listener.accept() {
@@ -675,7 +684,7 @@ impl ApprovalChannelEndpoint {
             ServeShutdown {
                 shutting_down,
                 socket_path,
-                join_handle,
+                join_handle: Some(join_handle),
             },
         )
     }
@@ -727,28 +736,52 @@ impl ApprovalChannelEndpoint {
 }
 
 /// Returned by [`ApprovalChannelEndpoint::serve_concurrently`] (response
-/// 114 Required 3). The accept loop cannot be stopped by dropping `Arc`
-/// clones alone -- it may be blocked indefinitely inside `accept()`, which
-/// nothing but an actual event on that listener can unblock. Calling
-/// `shutdown()` is what makes the endpoint droppable: after it returns,
-/// the loop thread has fully exited, so the only thing that can still be
-/// keeping the endpoint alive is whatever `Arc` clone the original caller
-/// retained -- dropping that is what finally runs `Drop` and removes the
-/// socket file.
+/// 114 Required 3, corrected by response 115 Required B). The accept loop
+/// cannot be stopped by dropping `Arc` clones alone -- it may be blocked
+/// indefinitely inside `accept()`, which nothing but an actual event on
+/// that listener can unblock, and while a connection is being handled the
+/// loop holds its own temporary strong `Arc` across that blocking call, so
+/// a caller dropping every *other* strong reference at that exact moment
+/// does not bring the count to zero either.
+///
+/// **This type's `Drop` impl is what actually guarantees cleanup**
+/// (response 115 Required B: an earlier version relied on the caller
+/// remembering to call `shutdown()`, and simply dropping this value did
+/// nothing -- the reviewer's probe showed a caller that dropped
+/// everything, including this handle, while the loop was already blocked
+/// in `accept()`, left the socket file behind and the loop blocked
+/// forever, because nothing had signalled it). Whether cleanup happens via
+/// an explicit `shutdown()` call or simply by this value going out of
+/// scope, the same signal-wake-join sequence runs exactly once.
 pub struct ServeShutdown {
     shutting_down: Arc<AtomicBool>,
     socket_path: PathBuf,
-    join_handle: thread::JoinHandle<()>,
+    join_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl ServeShutdown {
     /// Signals the accept loop to stop, wakes a blocked `accept()` via a
     /// throw-away self-connect to the endpoint's own real socket path, and
-    /// blocks until the loop's thread has fully exited.
-    pub fn shutdown(self) {
+    /// blocks until the loop's thread has fully exited. Equivalent to
+    /// simply dropping this value; kept as an explicit method for callers
+    /// that want to wait for shutdown to complete at a specific point
+    /// rather than whenever this value happens to go out of scope.
+    pub fn shutdown(mut self) {
+        self.shutdown_and_join();
+    }
+
+    fn shutdown_and_join(&mut self) {
         self.shutting_down.store(true, Ordering::SeqCst);
         let _ = UnixStream::connect(&self.socket_path);
-        let _ = self.join_handle.join();
+        if let Some(join_handle) = self.join_handle.take() {
+            let _ = join_handle.join();
+        }
+    }
+}
+
+impl Drop for ServeShutdown {
+    fn drop(&mut self) {
+        self.shutdown_and_join();
     }
 }
 

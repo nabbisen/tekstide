@@ -749,6 +749,50 @@ fn serve_concurrently_endpoint_is_dropped_and_socket_removed_after_shutdown() {
     );
 }
 
+/// Response 115 Required B: the previous fix relied on the caller
+/// explicitly calling `shutdown()` -- dropping the returned `ServeShutdown`
+/// without calling it did nothing, since it had no `Drop` impl. The
+/// reviewer's probe showed this leaves the socket file behind and the
+/// accept loop blocked forever *specifically* when the loop is already
+/// blocked inside `accept()` at the moment everything is dropped (dropping
+/// immediately after `serve_concurrently` returns happened to look fine,
+/// which is a race, not a guarantee). The delay below is what makes this
+/// test prove something: without it, this could pass on the same race the
+/// reviewer warned about rather than actually exercising cleanup-via-Drop
+/// while a connection-less `accept()` call is genuinely in progress.
+#[test]
+fn dropping_serve_shutdown_while_the_loop_is_blocked_in_accept_still_cleans_up() {
+    let state_root = temp_state_root("drop-blocked");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    let (endpoint, _token) =
+        ApprovalChannelEndpoint::bind(&directory, &agent_run_id).expect("bind must succeed");
+    let socket_path = directory.socket_path(&agent_run_id);
+    let endpoint = std::sync::Arc::new(endpoint);
+    let (_receiver, shutdown) = std::sync::Arc::clone(&endpoint).serve_concurrently();
+
+    // Give the accept loop time to actually reach and block inside
+    // `accept()` (no connections are made in this test) before anything
+    // is dropped.
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Dropped, not explicitly shut down -- this must still clean up via
+    // `ServeShutdown`'s `Drop` impl.
+    drop(shutdown);
+    drop(endpoint);
+
+    assert!(
+        !socket_path.exists(),
+        "the socket file must be removed even when ServeShutdown is only dropped, \
+         not explicitly shut down, while the accept loop is blocked in accept()"
+    );
+    assert!(
+        UnixStream::connect(&socket_path).is_err(),
+        "the socket path must no longer be connectable"
+    );
+}
+
 /// Response 114 Required 4: an unbounded thread-per-connection design
 /// lets a same-user process exhaust threads by opening connections and
 /// sending nothing. Confirms connections beyond `MAX_CONCURRENT_CONNECTIONS`
