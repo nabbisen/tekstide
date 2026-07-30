@@ -66,7 +66,15 @@ impl ProposalId {
 pub struct RunCapabilityToken(String);
 
 impl RunCapabilityToken {
-    pub fn as_str(&self) -> &str {
+    /// `pub(crate)`, not `pub` (response 114 Recommended 1): a `pub`
+    /// accessor gives any downstream crate (`tekstide-gui`, `tekstide`) a
+    /// way to extract the raw secret and log it, which would make "token
+    /// never persisted to disk unencrypted" and "token never appears in a
+    /// durable audit record" unenforceable by the type system rather than
+    /// merely unviolated today. `inject_token_into_environment` -- the one
+    /// sanctioned choke point for handing this value to a child process --
+    /// lives inside this crate, so `pub(crate)` is sufficient for it.
+    pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
 

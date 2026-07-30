@@ -61,6 +61,7 @@ use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -107,6 +108,20 @@ const MAX_MESSAGE_FRAME_BYTES: u32 = 8 * 1024 * 1024;
 /// security control invites setting it to something unhelpful, and there
 /// is no legitimate reason for a local adapter to need longer.
 const PROPOSAL_READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Hard cap on connections being authenticated at once by
+/// `serve_concurrently` (response 114 Required 4). Fixing the
+/// one-at-a-time serialization denial (response 113 Q2) by spawning a
+/// thread per connection introduced a different denial: nothing capped
+/// how many threads a same-user process could make this endpoint spawn by
+/// opening connections and sending nothing, each holding a thread for the
+/// full `PROPOSAL_READ_TIMEOUT`. A connection beyond this cap is refused
+/// silently -- dropped without being read from or written to -- consistent
+/// with the fail-closed-without-a-dialog requirement; nothing here should
+/// ever cause a diagnostic to reach an unauthenticated peer. Generous for
+/// a local, single-user desktop tool: legitimate concurrent proposals
+/// across a handful of `AgentRun`s come nowhere near this.
+const MAX_CONCURRENT_CONNECTIONS: usize = 32;
 
 // --- Path resolution, modelled on `audit::path` ---------------------
 
@@ -573,7 +588,8 @@ impl ApprovalChannelEndpoint {
     /// real adapter's connection behind it in the kernel's listen backlog
     /// for a further `read_timeout` on every repeat.
     ///
-    /// This spawns a dedicated thread per accepted connection so the
+    /// This spawns a dedicated thread per accepted connection (bounded by
+    /// `MAX_CONCURRENT_CONNECTIONS`, response 114 Required 4) so the
     /// accept loop calls `listener.accept()` again immediately rather than
     /// waiting for the previous connection to finish authenticating.
     /// `read_timeout` still bounds how long any *one* connection can
@@ -582,27 +598,70 @@ impl ApprovalChannelEndpoint {
     /// channel in whatever order authentication actually finishes in, not
     /// necessarily accept order.
     ///
-    /// Takes `self` by `Arc` rather than `&self` because both the accept
-    /// loop thread and each per-connection authentication thread need
-    /// independent ownership that outlives this call, and the number of
-    /// concurrent connections is unbounded at compile time.
+    /// The accept loop holds only a `Weak` reference to `self` (response
+    /// 114 Required 3): an earlier version captured a strong `Arc` in the
+    /// loop's own closure, which meant the loop itself was always one more
+    /// live owner than whatever the caller held -- the endpoint's strong
+    /// count could never reach zero from outside, `Drop` could never run,
+    /// and the socket file was never removed no matter what the caller
+    /// did with its own `Arc`. A `Weak` alone is not enough on its own,
+    /// since the loop cannot check anything while blocked inside
+    /// `accept()` -- the returned [`ServeShutdown`] is what actually
+    /// unblocks it, via a throw-away self-connect, so the loop can notice
+    /// the shutdown flag and exit.
     pub fn serve_concurrently(
         self: Arc<Self>,
-    ) -> mpsc::Receiver<Result<AcceptedProposal, ApprovalChannelError>> {
+    ) -> (
+        mpsc::Receiver<Result<AcceptedProposal, ApprovalChannelError>>,
+        ServeShutdown,
+    ) {
         let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
+        let shutting_down = Arc::new(AtomicBool::new(false));
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let socket_path = self.socket_path.clone();
+        let weak = Arc::downgrade(&self);
+        // Deliberately dropped rather than moved into the loop below: the
+        // loop must never itself be a strong owner (see the doc comment
+        // above). Only a caller-retained clone of the original `Arc` this
+        // function was given keeps the endpoint alive from here on.
+        drop(self);
+
+        let loop_shutting_down = Arc::clone(&shutting_down);
+        let join_handle = thread::spawn(move || {
             loop {
-                let stream = match self.listener.accept() {
+                if loop_shutting_down.load(Ordering::SeqCst) {
+                    break;
+                }
+                let Some(endpoint) = weak.upgrade() else {
+                    // Every strong owner is gone: the caller dropped its
+                    // `Arc` without calling `shutdown()` first. Nothing
+                    // further can or should be accepted.
+                    break;
+                };
+                let stream = match endpoint.listener.accept() {
                     Ok((stream, _addr)) => stream,
-                    // The listener itself is gone (e.g. every `Arc` clone
-                    // reachable from a caller has already been dropped) --
-                    // nothing further can be accepted, so this loop ends.
                     Err(_) => break,
                 };
-                let endpoint = Arc::clone(&self);
+                if loop_shutting_down.load(Ordering::SeqCst) {
+                    // Either the throw-away self-connect `shutdown()` used
+                    // to unblock `accept()`, or a genuine connection that
+                    // arrived exactly as shutdown began -- either way,
+                    // stop without processing it further.
+                    drop(stream);
+                    break;
+                }
+                if in_flight.fetch_add(1, Ordering::SeqCst) >= MAX_CONCURRENT_CONNECTIONS {
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
+                    // Silent refusal (response 114 Required 4): nothing is
+                    // read from or written to a connection beyond the cap.
+                    drop(stream);
+                    continue;
+                }
                 let sender = sender.clone();
+                let in_flight = Arc::clone(&in_flight);
                 thread::spawn(move || {
                     let result = endpoint.authenticate_and_read(stream);
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
                     // The receiver may have been dropped (the caller
                     // stopped listening for results) -- a send failure
                     // here is not this thread's problem to handle further.
@@ -610,7 +669,15 @@ impl ApprovalChannelEndpoint {
                 });
             }
         });
-        receiver
+
+        (
+            receiver,
+            ServeShutdown {
+                shutting_down,
+                socket_path,
+                join_handle,
+            },
+        )
     }
 
     fn authenticate_and_read(
@@ -656,6 +723,32 @@ impl ApprovalChannelEndpoint {
         })?;
 
         Ok(AcceptedProposal { proposal, stream })
+    }
+}
+
+/// Returned by [`ApprovalChannelEndpoint::serve_concurrently`] (response
+/// 114 Required 3). The accept loop cannot be stopped by dropping `Arc`
+/// clones alone -- it may be blocked indefinitely inside `accept()`, which
+/// nothing but an actual event on that listener can unblock. Calling
+/// `shutdown()` is what makes the endpoint droppable: after it returns,
+/// the loop thread has fully exited, so the only thing that can still be
+/// keeping the endpoint alive is whatever `Arc` clone the original caller
+/// retained -- dropping that is what finally runs `Drop` and removes the
+/// socket file.
+pub struct ServeShutdown {
+    shutting_down: Arc<AtomicBool>,
+    socket_path: PathBuf,
+    join_handle: thread::JoinHandle<()>,
+}
+
+impl ServeShutdown {
+    /// Signals the accept loop to stop, wakes a blocked `accept()` via a
+    /// throw-away self-connect to the endpoint's own real socket path, and
+    /// blocks until the loop's thread has fully exited.
+    pub fn shutdown(self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
+        let _ = UnixStream::connect(&self.socket_path);
+        let _ = self.join_handle.join();
     }
 }
 

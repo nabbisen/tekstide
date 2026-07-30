@@ -22,7 +22,7 @@ pub use channel::{
     APPROVAL_TOKEN_ENV_VAR, AcceptedProposal, ApprovalChannelDirectory, ApprovalChannelEndpoint,
     ApprovalChannelError, ApprovalChannelErrorReason, ApprovalChannelPathError,
     ApprovalChannelPathErrorReason, ApprovalChannelPathRequest, ApprovalChannelPathResolver,
-    inject_token_into_environment,
+    ServeShutdown, inject_token_into_environment,
 };
 pub use coordinator::{ApprovalCoordinator, DecideOutcome, ReceiveOutcome};
 pub use protocol::{

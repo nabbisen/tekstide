@@ -38,40 +38,59 @@ fn receive(
     )
 }
 
-/// Response 113 item 8 (written first, per the reviewer's instruction --
-/// the same discipline as PR-021-C's "unclassifiable is `High`" test):
-/// a second proposal carrying an id already seen for this run must not
-/// create a second request or reclassify -- the *original* request, from
-/// the *original* argv, is what comes back.
+/// Response 114 Required 1 -- the exact laundering sequence the reviewer
+/// probed: an adapter submits `git status` under id `1`, the user
+/// approves it, and the adapter resubmits a wildly different, far riskier
+/// argv under the SAME id. The second receive must reject outright: no
+/// `ApprovalRequest` is returned at all, so there is nothing a caller
+/// could misread as an `ApprovedOnce` authorization for the new argv.
 #[test]
-fn duplicate_proposal_id_returns_the_original_request_without_reclassifying() {
+fn a_repeated_proposal_id_is_rejected_outright_even_after_approval_and_never_authorizes_new_argv() {
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
 
     let first = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
-    let outcome = receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &first);
-    let ReceiveOutcome::Created(original) = outcome else {
+    let ReceiveOutcome::Created { request, .. } =
+        receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &first)
+    else {
         panic!("first receipt of a proposal id must create a request");
     };
-    assert_eq!(original.risk_level, RiskLevel::Low);
+    let proposal_id = first.proposal_id().clone();
+    let decided = coordinator.decide(&agent_run_id, &proposal_id, ApprovalDecision::ApprovedOnce);
+    assert!(matches!(decided, DecideOutcome::Decided(_)));
+    assert_eq!(request.risk_level, RiskLevel::Low);
 
-    // Same proposal id, but a wildly different -- and far riskier -- argv.
-    // If this were reclassified, it would come back `Destructive`.
-    let replay = proposal("proposal-1", &["rm", "-rf", "/"], PROJECT_ROOT);
-    let outcome = receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &replay);
-    let ReceiveOutcome::Duplicate(returned) = outcome else {
-        panic!("a repeated proposal id must be reported as a duplicate, not created again");
-    };
-    assert_eq!(
-        returned.risk_level,
-        RiskLevel::Low,
-        "a duplicate proposal id must return the ORIGINAL request's classification, \
-         not reclassify against whatever argv arrived the second time"
+    // Same proposal id, resubmitted with a far riskier argv -- the attack
+    // this fixture reproduces: laundering the earlier approval onto a
+    // command that was never classified or decided on its own merits.
+    let laundering_attempt = proposal("proposal-1", &["rm", "-rf", "/etc"], PROJECT_ROOT);
+    let outcome = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &laundering_attempt,
     );
-    assert_eq!(
-        returned.id, original.id,
-        "must be the same request, not a new one"
+    assert!(
+        outcome.is_duplicate_rejected(),
+        "a repeated proposal id must be rejected outright"
     );
+    assert!(
+        outcome.request().is_none(),
+        "a rejected duplicate must carry NO ApprovalRequest -- there must be nothing \
+         a caller could misread as authorization for the new argv, approved or not"
+    );
+
+    // The ORIGINAL request, looked up directly, must still reflect only
+    // what it was actually decided on -- the second receive must not have
+    // mutated it either.
+    let original_still_intact = coordinator
+        .find(&agent_run_id, &proposal_id)
+        .expect("the original request must still exist, unmutated");
+    assert_eq!(
+        original_still_intact.decision,
+        ApprovalDecision::ApprovedOnce
+    );
+    assert_eq!(original_still_intact.risk_level, RiskLevel::Low);
 }
 
 /// A proposal id is scoped to its `AgentRun` -- the same id arriving for a
@@ -84,29 +103,32 @@ fn the_same_proposal_id_in_a_different_agent_run_is_not_a_duplicate() {
     let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
 
     let outcome_a = receive(&mut coordinator, &run_a, PROJECT_ROOT, &command_proposal);
-    assert!(matches!(outcome_a, ReceiveOutcome::Created(_)));
+    assert!(matches!(outcome_a, ReceiveOutcome::Created { .. }));
 
     let outcome_b = receive(&mut coordinator, &run_b, PROJECT_ROOT, &command_proposal);
     assert!(
-        matches!(outcome_b, ReceiveOutcome::Created(_)),
+        matches!(outcome_b, ReceiveOutcome::Created { .. }),
         "the same proposal id in a different AgentRun must be treated as new"
     );
 }
 
-/// Response 113 item 8: a decision, once made, is final. A repeated
-/// `decide` call for the same proposal id -- whether a genuine retry or a
-/// replayed decision message -- must not overwrite the first decision.
+/// A decision, once made, is final. A repeated `decide` call for the same
+/// proposal id -- whether a genuine retry or a replayed decision message
+/// -- must not overwrite the first decision.
 #[test]
 fn decision_is_single_use_and_replay_is_inert() {
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
     let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
-    let ReceiveOutcome::Created(created) = receive(
+    let ReceiveOutcome::Created {
+        request: created, ..
+    } = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
         &command_proposal,
-    ) else {
+    )
+    else {
         panic!("must create a request");
     };
     let proposal_id = command_proposal.proposal_id().clone();
@@ -192,7 +214,7 @@ fn a_claimed_cwd_of_root_cannot_make_an_external_path_look_project_internal() {
     // never from `proposal.cwd()`.
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
-    let ReceiveOutcome::Created(request) = receive(
+    let ReceiveOutcome::Created { request, .. } = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
@@ -220,7 +242,7 @@ fn a_claimed_cwd_of_root_does_not_cause_a_genuinely_internal_path_to_escalate() 
 
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
-    let ReceiveOutcome::Created(request) = receive(
+    let ReceiveOutcome::Created { request, .. } = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
@@ -267,13 +289,17 @@ fn the_coordinator_never_lets_the_declared_effects_hint_affect_classification() 
 
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
-    let ReceiveOutcome::Created(request_with_hint) =
-        receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &with_hint)
+    let ReceiveOutcome::Created {
+        request: request_with_hint,
+        ..
+    } = receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &with_hint)
     else {
         panic!("must create a request");
     };
-    let ReceiveOutcome::Created(request_without_hint) =
-        receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &without_hint)
+    let ReceiveOutcome::Created {
+        request: request_without_hint,
+        ..
+    } = receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &without_hint)
     else {
         panic!("must create a request");
     };
@@ -283,4 +309,119 @@ fn the_coordinator_never_lets_the_declared_effects_hint_affect_classification() 
         request_without_hint.risk_level
     );
     assert_eq!(request_with_hint.risk_level, RiskLevel::Destructive);
+}
+
+// --- Response 114 Required 2: display_command must not be argv.join(" ") ---
+
+/// The reviewer's five probe cases, each a different way `argv.join(" ")`
+/// misrepresented the vector it was built from. Asserted through
+/// `ApprovalRequest.display_command`, since `display_argv` itself is a
+/// private implementation detail of this module.
+#[test]
+fn display_command_quotes_an_entry_that_would_otherwise_read_as_a_second_shell_command() {
+    let command_proposal = proposal(
+        "proposal-1",
+        &["git", "commit", "-m", "fix; rm -rf /etc"],
+        PROJECT_ROOT,
+    );
+    let mut coordinator = ApprovalCoordinator::new();
+    let ReceiveOutcome::Created { request, .. } = receive(
+        &mut coordinator,
+        &AgentRunId::for_test(1),
+        PROJECT_ROOT,
+        &command_proposal,
+    ) else {
+        panic!("must create a request");
+    };
+    assert_eq!(request.display_command, "git commit -m 'fix; rm -rf /etc'");
+}
+
+#[test]
+fn display_command_quotes_an_entry_containing_a_space_so_it_does_not_read_as_two_arguments() {
+    let command_proposal = proposal("proposal-1", &["rm", "-rf", "my documents"], PROJECT_ROOT);
+    let mut coordinator = ApprovalCoordinator::new();
+    let ReceiveOutcome::Created { request, .. } = receive(
+        &mut coordinator,
+        &AgentRunId::for_test(1),
+        PROJECT_ROOT,
+        &command_proposal,
+    ) else {
+        panic!("must create a request");
+    };
+    assert_eq!(request.display_command, "rm -rf 'my documents'");
+}
+
+#[test]
+fn display_command_escapes_an_embedded_newline_to_a_visible_marker() {
+    let command_proposal = proposal("proposal-1", &["echo", "safe\nrm -rf /etc"], PROJECT_ROOT);
+    let mut coordinator = ApprovalCoordinator::new();
+    let ReceiveOutcome::Created { request, .. } = receive(
+        &mut coordinator,
+        &AgentRunId::for_test(1),
+        PROJECT_ROOT,
+        &command_proposal,
+    ) else {
+        panic!("must create a request");
+    };
+    assert_eq!(
+        request.display_command, "echo 'safe<U+000A>rm -rf /etc'",
+        "the embedded newline must render as a visible marker, not an actual line break \
+         that could hide the rest of the argument below a fold"
+    );
+}
+
+#[test]
+fn display_command_escapes_a_bidi_override_per_rfc_016_rather_than_letting_it_reverse_text() {
+    let command_proposal = proposal("proposal-1", &["rm", "\u{202e}gpj.exe"], PROJECT_ROOT);
+    let mut coordinator = ApprovalCoordinator::new();
+    let ReceiveOutcome::Created { request, .. } = receive(
+        &mut coordinator,
+        &AgentRunId::for_test(1),
+        PROJECT_ROOT,
+        &command_proposal,
+    ) else {
+        panic!("must create a request");
+    };
+    assert_eq!(
+        request.display_command, "rm '<U+202E>gpj.exe'",
+        "a RIGHT-TO-LEFT OVERRIDE must render as a visible <U+202E> marker per RFC-016's \
+         escape-and-isolate policy, never passed through where a renderer could obey it \
+         as a directionality instruction (the Trojan Source pattern)"
+    );
+}
+
+#[test]
+fn display_command_renders_an_empty_argument_visibly_rather_than_letting_it_vanish() {
+    let command_proposal = proposal("proposal-1", &["printf", "%s", ""], PROJECT_ROOT);
+    let mut coordinator = ApprovalCoordinator::new();
+    let ReceiveOutcome::Created { request, .. } = receive(
+        &mut coordinator,
+        &AgentRunId::for_test(1),
+        PROJECT_ROOT,
+        &command_proposal,
+    ) else {
+        panic!("must create a request");
+    };
+    assert_eq!(request.display_command, "printf %s ''");
+}
+
+/// The classifier's `RiskReason`s must actually reach the caller through
+/// `ReceiveOutcome`, not be discarded after `ApprovalRequest` is built
+/// (response 114 Recommended 2).
+#[test]
+fn receive_outcome_carries_the_classifiers_reasons() {
+    let command_proposal = proposal("proposal-1", &["sudo", "ls"], PROJECT_ROOT);
+    let mut coordinator = ApprovalCoordinator::new();
+    let ReceiveOutcome::Created { reasons, .. } = receive(
+        &mut coordinator,
+        &AgentRunId::for_test(1),
+        PROJECT_ROOT,
+        &command_proposal,
+    ) else {
+        panic!("must create a request");
+    };
+    assert_eq!(
+        reasons,
+        vec![crate::approval::RiskReason::PrivilegeElevation]
+    );
 }

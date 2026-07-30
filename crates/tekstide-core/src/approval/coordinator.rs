@@ -3,7 +3,7 @@
 //! This is where a `CommandProposal`'s untrusted claims meet the actual,
 //! already-authenticated `AgentRun`/`ProjectSession` state that
 //! `approval::channel` and `approval::risk` deliberately do not depend on.
-//! Two properties this module exists specifically to enforce:
+//! Properties this module exists specifically to enforce:
 //!
 //! 1. **`CommandProposal::cwd()` is never trusted for classification.**
 //!    Response 111 (PR-021-C re-review) and response 113 (PR-021-D
@@ -23,20 +23,30 @@
 //!    caller-supplied parameter sourced from real, already-verified
 //!    context. **There is no code path in this module that reads
 //!    `CommandProposal::cwd()` at all.**
-//! 2. **A proposal id is single-use within an `AgentRun`.** A second
-//!    proposal carrying an id already seen for this run returns the
-//!    existing request inertly -- no reclassification, no new
-//!    `ApprovalRequest`. A decision, once made, is likewise final: a
-//!    repeated `decide` call (whether from a genuine retry or a replayed
-//!    decision message) returns the existing terminal state unchanged
-//!    rather than re-running anything or overwriting the first decision.
+//! 2. **A repeated proposal id is rejected outright, not resolved
+//!    inertly.** Response 114 Required 1: an earlier version of this
+//!    module returned the *original*, possibly-already-decided request on
+//!    a repeat -- which meant a caller holding the repeat's *new* argv
+//!    could read an `ApprovedOnce` decision that was never granted for
+//!    that argv at all, laundering approval for one command onto another.
+//!    A repeat now gets `ReceiveOutcome::DuplicateRejected`, which carries
+//!    no `ApprovalRequest` whatsoever -- there is no value to
+//!    (mis)interpret as authorization, regardless of whether the repeat's
+//!    argv happens to match the original.
+//! 3. **A decision, once made, is final.** A repeated `decide` call
+//!    (whether from a genuine retry or a replayed decision message)
+//!    returns the existing terminal state unchanged rather than
+//!    re-running anything or overwriting the first decision.
 //!
 //! **Explicitly out of scope for this slice (deferred to PR-021-E2):**
 //! writing any of this to durable audit via `AuditCoordinator`, sending
-//! `CommandDecision` back over the wire, and re-classifying edited argv
-//! for `EditedAndApproved` (`implementation-handoff.md` §7). This module
-//! only produces in-memory `domain::ApprovalRequest` values; E2 wires
-//! those to the audit family and the channel.
+//! `CommandDecision` back over the wire, re-classifying edited argv for
+//! `EditedAndApproved` (`implementation-handoff.md` §7), and auditing a
+//! `cwd` mismatch between what a proposal claims and `verified_cwd` as an
+//! anomaly signal (response 114 Recommended 3 -- not comparing at all
+//! here is deliberate; see the module-doc point above). This module only
+//! produces in-memory `domain::ApprovalRequest` values; E2 wires those to
+//! the audit family and the channel.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -45,7 +55,7 @@ use crate::domain::{AgentRunId, ApprovalDecision, ApprovalRequest};
 use crate::project::ProjectId;
 
 use super::protocol::{CommandProposal, ProposalId};
-use super::risk;
+use super::risk::{self, RiskReason};
 
 /// The `requested_action_kind` recorded on every `ApprovalRequest` this
 /// coordinator creates. RFC-021 defines exactly one proposal kind (a
@@ -57,23 +67,40 @@ const COMMAND_EXECUTION_ACTION_KIND: &str = "command_execution";
 #[derive(Clone, Debug)]
 pub enum ReceiveOutcome {
     /// First time this `(AgentRunId, ProposalId)` pair has been seen: a
-    /// fresh `Pending` request was created and classified.
-    Created(ApprovalRequest),
-    /// This exact proposal id was already seen for this run. The existing
-    /// request (whatever its current state -- still `Pending`, or already
-    /// decided) is returned unchanged; nothing is reclassified or mutated.
-    Duplicate(ApprovalRequest),
+    /// fresh `Pending` request was created and classified. `reasons` is
+    /// the classifier's own reason vector (response 114 Recommended 2) --
+    /// carried here rather than discarded, since a future dialog needs to
+    /// tell a user *why* a command is `High`, not just that it is.
+    Created {
+        // Boxed per clippy::large_enum_variant: `ApprovalRequest` is large
+        // relative to `DuplicateRejected`'s single `ProposalId`, and this
+        // enum is returned by value from `receive_proposal` on every call,
+        // not just the rare duplicate case.
+        request: Box<ApprovalRequest>,
+        reasons: Vec<RiskReason>,
+    },
+    /// This proposal id was already seen for this run. **No
+    /// `ApprovalRequest` is returned, regardless of whether the repeat's
+    /// argv matches the original or not** (response 114 Required 1) -- a
+    /// repeated proposal id is either an adapter bug or a replay, and
+    /// neither should be serviceable by handing back a value a caller
+    /// could read as authorization for whatever argv arrived this time.
+    DuplicateRejected { proposal_id: ProposalId },
 }
 
 impl ReceiveOutcome {
-    pub fn request(&self) -> &ApprovalRequest {
+    /// The created request, if this is a fresh receipt. Deliberately
+    /// `None` for `DuplicateRejected` -- there is no request to return,
+    /// not merely one this accessor withholds.
+    pub fn request(&self) -> Option<&ApprovalRequest> {
         match self {
-            ReceiveOutcome::Created(request) | ReceiveOutcome::Duplicate(request) => request,
+            ReceiveOutcome::Created { request, .. } => Some(request.as_ref()),
+            ReceiveOutcome::DuplicateRejected { .. } => None,
         }
     }
 
-    pub fn is_duplicate(&self) -> bool {
-        matches!(self, ReceiveOutcome::Duplicate(_))
+    pub fn is_duplicate_rejected(&self) -> bool {
+        matches!(self, ReceiveOutcome::DuplicateRejected { .. })
     }
 }
 
@@ -104,7 +131,12 @@ impl DecideOutcome {
 
 /// Per-run, in-memory bookkeeping for proposal-id uniqueness and single-use
 /// decisions. Nothing here is durable -- see the module doc for why audit
-/// wiring is explicitly out of scope for this slice.
+/// wiring is explicitly out of scope for this slice, and
+/// `qa-evidence.md`'s Known Limitations for why that non-durability is
+/// safe rather than merely unaddressed (response 114 Q2: a restart loses
+/// this map, but `bind()` also generates a fresh token per endpoint, so a
+/// pre-restart token cannot authenticate afterward either -- the failure
+/// mode is "forgotten and nothing executes," not "replayed").
 #[derive(Default)]
 pub struct ApprovalCoordinator {
     requests: HashMap<(AgentRunId, ProposalId), ApprovalRequest>,
@@ -120,8 +152,13 @@ impl ApprovalCoordinator {
     /// `verified_cwd` and `project_root` must come from the caller's own,
     /// already-authenticated `AgentRun`/`ProjectSession` state -- **never**
     /// from `proposal.cwd()`. There is no parameter here that accepts
-    /// `proposal.cwd()`'s value at all: the type signature is the
-    /// enforcement mechanism, not a comment asking callers to be careful.
+    /// `proposal.cwd()`'s value at all: the type signature prevents this
+    /// module from *reading* it. It does not prevent a caller from
+    /// *passing* `proposal.cwd()` as `verified_cwd` -- response 114 Q3
+    /// correctly identified that as a residual gap in the claim, to be
+    /// closed by a `VerifiedCwd` newtype (constructed only where launch
+    /// validation happens) before PR-021-E2 builds the real caller. Not
+    /// done in this slice; recorded in `qa-evidence.md`.
     #[allow(clippy::too_many_arguments)]
     pub fn receive_proposal(
         &mut self,
@@ -133,12 +170,14 @@ impl ApprovalCoordinator {
         proposal: &CommandProposal,
     ) -> ReceiveOutcome {
         let key = (agent_run_id.clone(), proposal.proposal_id().clone());
-        if let Some(existing) = self.requests.get(&key) {
-            return ReceiveOutcome::Duplicate(existing.clone());
+        if self.requests.contains_key(&key) {
+            return ReceiveOutcome::DuplicateRejected {
+                proposal_id: proposal.proposal_id().clone(),
+            };
         }
 
         let assessment = risk::classify(proposal.argv(), verified_cwd, project_root, state_root);
-        let display_command = proposal.argv().join(" ");
+        let display_command = display_argv(proposal.argv());
         let request = ApprovalRequest::pending(
             project_id,
             Some(agent_run_id),
@@ -148,7 +187,10 @@ impl ApprovalCoordinator {
             verified_cwd,
         );
         self.requests.insert(key, request.clone());
-        ReceiveOutcome::Created(request)
+        ReceiveOutcome::Created {
+            request: Box::new(request),
+            reasons: assessment.reasons,
+        }
     }
 
     /// Applies a decision to a previously-received request. See
@@ -188,4 +230,78 @@ impl ApprovalCoordinator {
         self.requests
             .get(&(agent_run_id.clone(), proposal_id.clone()))
     }
+}
+
+// --- Display-only argv rendering (response 114 Required 2) -------------
+
+/// RFC-016's bidi control ranges (`U+202A..=U+202E`, `U+2066..=U+2069`),
+/// escaped to a visible representation per RFC-016's "Policy: escape and
+/// isolate" -- approval surfaces are listed there as mandatory. This is
+/// the point where that text is first *constructed*, not merely rendered
+/// (response 114 corrected my own prior guidance that RFC-016 only
+/// mattered starting at PR-021-E2/the dialog).
+fn is_bidi_control(c: char) -> bool {
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Any character this module escapes to a visible `<U+XXXX>` marker
+/// rather than passing through raw: RFC-016's bidi range, plus every
+/// other C0/C1 control character (a literal newline is exactly as capable
+/// of hiding text below a fold as a bidi override is of reversing it, so
+/// this is a strict superset of what RFC-016 itself mandates, not a
+/// narrower reading of it).
+fn is_escaped_control(c: char) -> bool {
+    is_bidi_control(c) || c.is_control()
+}
+
+/// Shell metacharacters that make an argument's boundary ambiguous when
+/// simply concatenated with neighbours -- not an attempt at a complete or
+/// execution-safe shell-quoting implementation (nothing here is ever
+/// re-parsed or executed), just enough to keep a human reading the
+/// rendered string from mistaking one argument for several.
+const SHELL_METACHARACTERS: &[char] = &[
+    ';', '|', '&', '`', '$', '\\', '"', '\'', '<', '>', '(', ')', '*', '?', '[', ']', '{', '}',
+    '~', '#', '!',
+];
+
+fn needs_quoting(entry: &str) -> bool {
+    entry.is_empty()
+        || entry.chars().any(|c| {
+            c.is_whitespace() || is_escaped_control(c) || SHELL_METACHARACTERS.contains(&c)
+        })
+}
+
+/// Renders one argv entry for display: control characters (including
+/// RFC-016's bidi range) become visible `<U+XXXX>` markers, and the whole
+/// entry is single-quoted if it is empty or contains anything that would
+/// otherwise make its boundary ambiguous next to its neighbours.
+fn display_entry(entry: &str) -> String {
+    let mut escaped = String::with_capacity(entry.len());
+    for c in entry.chars() {
+        if is_escaped_control(c) {
+            escaped.push_str(&format!("<U+{:04X}>", c as u32));
+        } else {
+            escaped.push(c);
+        }
+    }
+    if !needs_quoting(entry) {
+        return escaped;
+    }
+    format!("'{}'", escaped.replace('\'', r"'\''"))
+}
+
+/// Renders `argv` for human display only -- never re-parsed, never
+/// executed. Response 114 Required 1: the previous version,
+/// `argv.join(" ")`, put back exactly the ambiguity "argv is a vector,
+/// never a shell string" exists to prevent, at the one layer where a
+/// human makes the approval decision -- an entry containing a semicolon
+/// could read as two shell commands, an entry containing a space could
+/// read as two arguments, an embedded newline could hide text, and an
+/// empty entry vanished with no trace. Quoting and escaping per entry
+/// closes all four.
+fn display_argv(argv: &[String]) -> String {
+    argv.iter()
+        .map(|entry| display_entry(entry))
+        .collect::<Vec<_>>()
+        .join(" ")
 }

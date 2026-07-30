@@ -662,7 +662,7 @@ fn serve_concurrently_accepts_a_second_connection_while_the_first_stalls() {
     endpoint.set_read_timeout_for_test(Duration::from_secs(2));
     let socket_path = directory.socket_path(&agent_run_id);
     let endpoint = std::sync::Arc::new(endpoint);
-    let receiver = std::sync::Arc::clone(&endpoint).serve_concurrently();
+    let (receiver, shutdown) = std::sync::Arc::clone(&endpoint).serve_concurrently();
 
     let slow_socket_path = socket_path.clone();
     let slow_peer = std::thread::spawn(move || {
@@ -708,6 +708,112 @@ fn serve_concurrently_accepts_a_second_connection_while_the_first_stalls() {
         "the well-behaved connection must be served quickly, not wait behind the \
          stalling one -- took {elapsed:?}"
     );
+    shutdown.shutdown();
+}
+
+/// Response 114 Required 3: the accept loop's earlier version captured a
+/// strong `Arc`, so the endpoint's strong count could never reach zero
+/// from outside no matter what the caller did -- `Drop` never ran, and
+/// the socket file was never removed. `shutdown()` must make the endpoint
+/// droppable again: after it returns and the caller's own `Arc` is
+/// dropped, the socket file must actually be gone and the path must no
+/// longer be connectable.
+#[test]
+fn serve_concurrently_endpoint_is_dropped_and_socket_removed_after_shutdown() {
+    let state_root = temp_state_root("shutdown");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    let (endpoint, _token) =
+        ApprovalChannelEndpoint::bind(&directory, &agent_run_id).expect("bind must succeed");
+    let socket_path = directory.socket_path(&agent_run_id);
+    assert!(socket_path.exists(), "precondition: socket file exists");
+
+    let endpoint = std::sync::Arc::new(endpoint);
+    let (_receiver, shutdown) = std::sync::Arc::clone(&endpoint).serve_concurrently();
+
+    shutdown.shutdown();
+    // The caller's own `Arc` is the only strong reference left once
+    // `shutdown()` has returned (it waits for the accept loop's thread,
+    // which held only a `Weak`, to fully exit) -- dropping it here must
+    // be what finally runs `Drop`.
+    drop(endpoint);
+
+    assert!(
+        !socket_path.exists(),
+        "the socket file must be removed once the endpoint is actually dropped after shutdown"
+    );
+    assert!(
+        UnixStream::connect(&socket_path).is_err(),
+        "the socket path must no longer be connectable after shutdown"
+    );
+}
+
+/// Response 114 Required 4: an unbounded thread-per-connection design
+/// lets a same-user process exhaust threads by opening connections and
+/// sending nothing. Confirms connections beyond `MAX_CONCURRENT_CONNECTIONS`
+/// are refused (their stream is closed without a response) rather than
+/// each spawning another authentication thread indefinitely.
+#[test]
+fn serve_concurrently_refuses_connections_beyond_the_concurrency_cap() {
+    let state_root = temp_state_root("cap");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    let (mut endpoint, _token) =
+        ApprovalChannelEndpoint::bind(&directory, &agent_run_id).expect("bind must succeed");
+    // Long enough that none of the held connections below time out during
+    // the test, short enough that the test itself stays fast.
+    endpoint.set_read_timeout_for_test(Duration::from_secs(5));
+    let socket_path = directory.socket_path(&agent_run_id);
+    let endpoint = std::sync::Arc::new(endpoint);
+    let (_receiver, shutdown) = std::sync::Arc::clone(&endpoint).serve_concurrently();
+
+    // Open well beyond the cap (32) worth of connections, all silent, and
+    // hold them open -- if the cap were not enforced, this would spawn
+    // one authentication thread per connection with no limit.
+    let held: Vec<UnixStream> = (0..40)
+        .map(|_| UnixStream::connect(&socket_path).expect("connect within/beyond the cap"))
+        .collect();
+
+    // Give the accept loop time to actually accept and process all of
+    // them (accept a bounded number at a time; each accept is fast since
+    // nothing here sends any data).
+    std::thread::sleep(Duration::from_millis(300));
+
+    // The connections beyond the cap must have been closed by the
+    // endpoint (refused) rather than left open waiting on a spawned
+    // authentication thread -- reading from them must observe EOF
+    // (0 bytes) rather than blocking or returning data.
+    // A short per-stream timeout: an accepted-and-held connection blocks
+    // for the full timeout on every check (nothing arrives, the server
+    // hasn't closed it), so this value directly multiplies by up to 32
+    // held connections -- kept small so the test does not spend most of
+    // its time waiting out timeouts on the connections that were
+    // correctly accepted rather than refused.
+    let mut refused_count = 0;
+    for mut stream in held {
+        stream
+            .set_read_timeout(Some(Duration::from_millis(30)))
+            .expect("set short read timeout for the check");
+        let mut buffer = [0_u8; 1];
+        if let Ok(0) = stream.read(&mut buffer) {
+            refused_count += 1;
+        }
+    }
+    // `MAX_CONCURRENT_CONNECTIONS` (32) is a private implementation
+    // detail, not re-exported -- asserting a generous lower bound rather
+    // than an exact count avoids this test depending on the constant's
+    // precise value, while still conclusively proving *some* connections
+    // were refused rather than every one of the 40 spawning a thread.
+    assert!(
+        refused_count >= 4,
+        "connections beyond the concurrency cap must be refused (closed without a \
+         response) -- only {refused_count} of 40 were, expected several once the cap \
+         is exceeded"
+    );
+
+    shutdown.shutdown();
 }
 
 /// Response 113 Q3 item 1: the capability token must reach a spawned
