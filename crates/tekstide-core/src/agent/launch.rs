@@ -75,6 +75,49 @@ impl AgentRunLaunchRequest {
     }
 }
 
+/// A `cwd` that has already passed `AgentRunLaunchValidator::validate`'s
+/// containment check (canonicalized, confirmed to start with the
+/// project's canonical root). RFC-021 PR-021-E1/response 114 Q3 flagged
+/// that `approval::coordinator::receive_proposal` taking a plain `&Path`
+/// for its verified cwd parameter did not stop a caller from passing an
+/// *unverified* path (e.g. `CommandProposal::cwd()`, the adapter's own
+/// untrusted claim) by mistake -- both are `&Path`, so the compiler
+/// cannot tell them apart. This type has deliberately no public
+/// constructor that accepts an arbitrary path: the only way to obtain one
+/// is already having gone through this validator, the same parse-don't-
+/// validate discipline `approval::protocol::CommandProposal::decode`
+/// already established for untrusted wire data.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedCwd(PathBuf);
+
+impl VerifiedCwd {
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+
+    fn from_validated(path: PathBuf) -> Self {
+        Self(path)
+    }
+
+    /// Test-only escape hatch, matching this crate's established
+    /// `for_test` convention (`AgentRunId::for_test`, `ProjectId::for_test`)
+    /// -- other modules' tests (e.g. `approval::coordinator`'s) need a
+    /// `VerifiedCwd` without constructing an entire `ProjectSession` /
+    /// `AiCliProfile` / `AgentRunLaunchRequest` pipeline just to obtain
+    /// one. `#[cfg(test)]`-gated, so this does not weaken the real
+    /// guarantee in a release build.
+    #[cfg(test)]
+    pub fn for_test(path: impl Into<PathBuf>) -> Self {
+        Self(path.into())
+    }
+}
+
+impl From<VerifiedCwd> for PathBuf {
+    fn from(verified: VerifiedCwd) -> Self {
+        verified.0
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentRunLaunchValidation {
     project_id: ProjectId,
@@ -82,7 +125,7 @@ pub struct AgentRunLaunchValidation {
     project_root: PathBuf,
     executable_path: PathBuf,
     executable_provenance: AiCliExecutableProvenance,
-    cwd: PathBuf,
+    cwd: VerifiedCwd,
     compatibility_level: AgentCompatibilityLevel,
     prompt_summary: String,
     environment_summary: AgentLaunchSummary,
@@ -98,7 +141,7 @@ pub struct AgentRunLaunchSpec {
     project_root: PathBuf,
     executable_path: PathBuf,
     executable_provenance: AiCliExecutableProvenance,
-    cwd: PathBuf,
+    cwd: VerifiedCwd,
     compatibility_level: AgentCompatibilityLevel,
     prompt_summary: String,
     environment_summary: AgentLaunchSummary,
@@ -129,6 +172,10 @@ impl AgentRunLaunchValidation {
     }
 
     pub fn cwd(&self) -> &Path {
+        self.cwd.as_path()
+    }
+
+    pub fn verified_cwd(&self) -> &VerifiedCwd {
         &self.cwd
     }
 
@@ -337,6 +384,10 @@ impl AgentRunLaunchSpec {
     }
 
     pub fn cwd(&self) -> &Path {
+        self.cwd.as_path()
+    }
+
+    pub fn verified_cwd(&self) -> &VerifiedCwd {
         &self.cwd
     }
 
@@ -497,6 +548,11 @@ impl AgentRunLaunchValidator {
                 )),
             });
         }
+        // Wrapped only now, immediately after the containment check
+        // above passes -- `VerifiedCwd` exists specifically so a value of
+        // this type can only mean "canonicalized and confirmed to start
+        // with the project's canonical root," not merely "some path."
+        let cwd = VerifiedCwd::from_validated(cwd);
 
         let (executable_path, executable_provenance) =
             resolve_executable(profile, &root, restricted)?;

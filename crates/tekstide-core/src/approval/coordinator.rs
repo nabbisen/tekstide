@@ -1,4 +1,4 @@
-//! RFC-021 PR-021-E1: the trusted-context coordinator.
+//! RFC-021 PR-021-E1/E2: the trusted-context coordinator.
 //!
 //! This is where a `CommandProposal`'s untrusted claims meet the actual,
 //! already-authenticated `AgentRun`/`ProjectSession` state that
@@ -22,7 +22,13 @@
 //!    that needs a cwd or a project root takes it as a separate,
 //!    caller-supplied parameter sourced from real, already-verified
 //!    context. **There is no code path in this module that reads
-//!    `CommandProposal::cwd()` at all.**
+//!    `CommandProposal::cwd()` at all.** `receive_proposal` takes
+//!    `&agent::VerifiedCwd`, not `&Path`, for its `verified_cwd` parameter
+//!    (response 114 Q3 / response 115): `VerifiedCwd` has no public
+//!    constructor accepting an arbitrary path, so a caller cannot even
+//!    typecheck passing `proposal.cwd()` here by mistake -- the only way
+//!    to obtain one is to have already gone through
+//!    `agent::AgentRunLaunchValidator::validate`.
 //! 2. **A repeated proposal id is rejected outright, not resolved
 //!    inertly.** Response 114 Required 1: an earlier version of this
 //!    module returned the *original*, possibly-already-decided request on
@@ -51,11 +57,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::agent::VerifiedCwd;
 use crate::domain::{AgentRunId, ApprovalDecision, ApprovalRequest};
 use crate::project::ProjectId;
 
 use super::protocol::{CommandProposal, ProposalId};
-use super::risk::{self, RiskReason};
+use super::risk;
 
 /// The `requested_action_kind` recorded on every `ApprovalRequest` this
 /// coordinator creates. RFC-021 defines exactly one proposal kind (a
@@ -67,17 +74,17 @@ const COMMAND_EXECUTION_ACTION_KIND: &str = "command_execution";
 #[derive(Clone, Debug)]
 pub enum ReceiveOutcome {
     /// First time this `(AgentRunId, ProposalId)` pair has been seen: a
-    /// fresh `Pending` request was created and classified. `reasons` is
-    /// the classifier's own reason vector (response 114 Recommended 2) --
-    /// carried here rather than discarded, since a future dialog needs to
-    /// tell a user *why* a command is `High`, not just that it is.
+    /// fresh `Pending` request was created and classified. The
+    /// classifier's reasons live on `request.risk_reasons` itself
+    /// (response 115 Q2 -- relocated from a separate field here, since a
+    /// caller that stores `request` and lets this `ReceiveOutcome` go out
+    /// of scope still needs to answer "why" later).
     Created {
         // Boxed per clippy::large_enum_variant: `ApprovalRequest` is large
         // relative to `DuplicateRejected`'s single `ProposalId`, and this
         // enum is returned by value from `receive_proposal` on every call,
         // not just the rare duplicate case.
         request: Box<ApprovalRequest>,
-        reasons: Vec<RiskReason>,
     },
     /// This proposal id was already seen for this run. **No
     /// `ApprovalRequest` is returned, regardless of whether the repeat's
@@ -152,19 +159,23 @@ impl ApprovalCoordinator {
     /// `verified_cwd` and `project_root` must come from the caller's own,
     /// already-authenticated `AgentRun`/`ProjectSession` state -- **never**
     /// from `proposal.cwd()`. There is no parameter here that accepts
-    /// `proposal.cwd()`'s value at all: the type signature prevents this
-    /// module from *reading* it. It does not prevent a caller from
-    /// *passing* `proposal.cwd()` as `verified_cwd` -- response 114 Q3
-    /// correctly identified that as a residual gap in the claim, to be
-    /// closed by a `VerifiedCwd` newtype (constructed only where launch
-    /// validation happens) before PR-021-E2 builds the real caller. Not
-    /// done in this slice; recorded in `qa-evidence.md`.
+    /// `proposal.cwd()`'s value at all: this module never reads it.
+    ///
+    /// `verified_cwd` takes `&VerifiedCwd`, not `&Path` (response 114 Q3 /
+    /// response 115: a plain `&Path` parameter did not stop a caller from
+    /// *passing* `proposal.cwd()` here by mistake, since both are `&Path`
+    /// and the compiler cannot tell an adapter's untrusted claim apart
+    /// from a validated one). `VerifiedCwd` has no public constructor
+    /// that accepts an arbitrary path -- the only way a caller can obtain
+    /// one is by already having gone through
+    /// `agent::AgentRunLaunchValidator::validate`, so passing
+    /// `proposal.cwd()` here no longer typechecks at all.
     #[allow(clippy::too_many_arguments)]
     pub fn receive_proposal(
         &mut self,
         project_id: ProjectId,
         agent_run_id: AgentRunId,
-        verified_cwd: &Path,
+        verified_cwd: &VerifiedCwd,
         project_root: &Path,
         state_root: &Path,
         proposal: &CommandProposal,
@@ -176,6 +187,7 @@ impl ApprovalCoordinator {
             };
         }
 
+        let verified_cwd = verified_cwd.as_path();
         let assessment = risk::classify(proposal.argv(), verified_cwd, project_root, state_root);
         let display_command = display_argv(proposal.argv());
         let request = ApprovalRequest::pending(
@@ -184,12 +196,12 @@ impl ApprovalCoordinator {
             COMMAND_EXECUTION_ACTION_KIND,
             display_command,
             assessment.level,
+            assessment.reasons,
             verified_cwd,
         );
         self.requests.insert(key, request.clone());
         ReceiveOutcome::Created {
             request: Box::new(request),
-            reasons: assessment.reasons,
         }
     }
 

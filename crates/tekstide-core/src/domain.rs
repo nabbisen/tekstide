@@ -9,7 +9,9 @@ mod time;
 mod transcript;
 
 pub use agent::{AgentCompatibilityLevel, AgentRun, AgentRunStatus, AgentRunTransitionError};
-pub use approval::{ApprovalDecision, ApprovalDecisionError, ApprovalRequest, RiskLevel};
+pub use approval::{
+    ApprovalDecision, ApprovalDecisionError, ApprovalRequest, RiskLevel, RiskReason,
+};
 pub use audit::{AuditEvent, AuditEventClass, AuditEventError};
 pub use changeset::{
     ChangeAssociationConfidence, ChangeDetectionFailureReason, ChangeDetectionSource,

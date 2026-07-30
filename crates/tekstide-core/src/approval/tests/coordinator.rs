@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use crate::agent::VerifiedCwd;
 use crate::approval::{
     ApprovalCoordinator, CommandProposal, DecideOutcome, ReceiveOutcome, classify,
 };
@@ -31,7 +32,7 @@ fn receive(
     coordinator.receive_proposal(
         ProjectId::for_test(1),
         agent_run_id.clone(),
-        Path::new(verified_cwd),
+        &VerifiedCwd::for_test(verified_cwd),
         Path::new(PROJECT_ROOT),
         Path::new(STATE_ROOT),
         command_proposal,
@@ -449,14 +450,17 @@ fn display_command_escapes_every_bidi_and_format_probe_from_response_115() {
     }
 }
 
-/// The classifier's `RiskReason`s must actually reach the caller through
-/// `ReceiveOutcome`, not be discarded after `ApprovalRequest` is built
-/// (response 114 Recommended 2).
+/// The classifier's `RiskReason`s must actually reach the caller, and must
+/// still be readable from a stored `ApprovalRequest` after `ReceiveOutcome`
+/// itself is gone (response 114 Recommended 2, relocated onto
+/// `ApprovalRequest.risk_reasons` per response 115 Q2 -- carrying reasons
+/// only on the transient `ReceiveOutcome` displaced the original
+/// write-only failure by one hop rather than resolving it).
 #[test]
-fn receive_outcome_carries_the_classifiers_reasons() {
+fn approval_request_carries_the_classifiers_reasons() {
     let command_proposal = proposal("proposal-1", &["sudo", "ls"], PROJECT_ROOT);
     let mut coordinator = ApprovalCoordinator::new();
-    let ReceiveOutcome::Created { reasons, .. } = receive(
+    let ReceiveOutcome::Created { request } = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
@@ -465,7 +469,7 @@ fn receive_outcome_carries_the_classifiers_reasons() {
         panic!("must create a request");
     };
     assert_eq!(
-        reasons,
+        request.risk_reasons,
         vec![crate::approval::RiskReason::PrivilegeElevation]
     );
 }

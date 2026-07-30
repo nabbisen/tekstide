@@ -161,6 +161,7 @@ fn approval_decision_is_append_only_after_decided() {
         "command",
         "rm -rf target",
         RiskLevel::High,
+        Vec::new(),
         "/workspace/project",
     );
 
@@ -187,6 +188,7 @@ fn duplicate_agent_run_approval_attachment_is_rejected() {
         "command",
         "cargo test",
         RiskLevel::Medium,
+        Vec::new(),
         "/workspace/project",
     );
 
@@ -212,6 +214,7 @@ fn agent_run_approval_must_match_project_and_run() {
         "command",
         "cargo test",
         RiskLevel::Medium,
+        Vec::new(),
         "/workspace/other",
     );
 
@@ -226,6 +229,7 @@ fn agent_run_approval_must_match_project_and_run() {
         "command",
         "cargo test",
         RiskLevel::Medium,
+        Vec::new(),
         "/workspace/project",
     );
 

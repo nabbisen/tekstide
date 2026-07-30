@@ -89,6 +89,7 @@ fn projectless_audit_event_adopts_approval_project_id() {
         "command",
         "cargo test",
         RiskLevel::Medium,
+        Vec::new(),
         "/workspace/project",
     );
 
@@ -159,6 +160,7 @@ fn approval_audit_constructor_reflects_pending_and_decided_states() {
         "command",
         "cargo test",
         RiskLevel::Medium,
+        Vec::new(),
         "/workspace/project",
     );
 
@@ -188,6 +190,7 @@ fn approval_audit_decision_constructor_maps_approved_decisions() {
         "command",
         "cargo test",
         RiskLevel::Medium,
+        Vec::new(),
         "/workspace/project",
     );
     approved_once
@@ -206,6 +209,7 @@ fn approval_audit_decision_constructor_maps_approved_decisions() {
         "command",
         "cargo test --package tekstide",
         RiskLevel::Medium,
+        Vec::new(),
         "/workspace/project",
     );
     edited.decide(ApprovalDecision::EditedAndApproved).unwrap();

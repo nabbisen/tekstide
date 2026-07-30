@@ -19,6 +19,7 @@ fn approval_requests_reject_missing_agent_run_references() {
         "command",
         "cargo test",
         RiskLevel::Medium,
+        Vec::new(),
         "/workspace/project-1",
     );
 
@@ -160,6 +161,7 @@ fn audit_events_reject_missing_approval_references() {
         "command",
         "cargo test",
         RiskLevel::Medium,
+        Vec::new(),
         "/workspace/project-1",
     );
     let event = AuditEvent::new(

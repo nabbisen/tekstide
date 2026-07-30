@@ -93,43 +93,11 @@
 use std::path::{Component, Path, PathBuf};
 
 use crate::domain::RiskLevel;
-
-/// A structural reason a proposal was classified the way it was.
-/// Deliberately content-free: no captured path, no captured argv entry --
-/// see the module doc's `RiskAssessment` paragraph for why.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RiskReason {
-    PathOutsideProjectRoot,
-    PrivilegeElevation,
-    OpaqueShellInvocation,
-    OpaqueWrapper,
-    GitRemoteMutating,
-    SecretLikePath,
-    TekstideStateRoot,
-    RecursiveDeletion,
-    DiskLevelOperation,
-    HistoryRewrite,
-    /// `git checkout -- <path>` / `git checkout .` / `git checkout -f`
-    /// (or `--force`): discards uncommitted working-tree changes,
-    /// unrecoverably (nothing was ever committed, so there is no reflog
-    /// rescue) -- the same category of data loss as `git reset --hard`,
-    /// which is `Destructive`. Also used for `git stash clear`/`drop`
-    /// (response 111 Required 3): a purge of saved work is the same shape
-    /// of loss, one step removed. Kept distinct from `HistoryRewrite`
-    /// because no history is being rewritten; nothing was ever committed
-    /// in the first place.
-    WorkingTreeDiscard,
-    /// `git push --force`/`--force-with-lease`: rewrites history on a
-    /// **remote other people pull from**, where there is no reflog to
-    /// rescue and the loss is not the operator's alone -- response 111
-    /// Required 2 judged this strictly worse than local history rewriting
-    /// (`HistoryRewrite`, `Destructive` via `git rebase`/`reset --hard`),
-    /// so it gets its own reason at the same `Destructive` level rather
-    /// than being folded into either `HistoryRewrite` or the `High`-level
-    /// `GitRemoteMutating`.
-    RemoteHistoryRewrite,
-    Unrecognized,
-}
+/// Response 115 Q2: `RiskReason` now lives in `domain::approval`, next to
+/// `RiskLevel` and `ApprovalRequest::risk_reasons`, rather than being
+/// defined here -- re-exported so existing call sites (`approval::
+/// RiskReason`, this module's own use below) do not need to change.
+pub use crate::domain::RiskReason;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RiskAssessment {

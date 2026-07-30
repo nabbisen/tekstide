@@ -185,6 +185,7 @@ fn agent_approval_and_change_collections_feed_project_runtime_summary() {
         "command",
         "cargo test",
         RiskLevel::Medium,
+        Vec::new(),
         "/workspace/project-1",
     );
     let change_set = ChangeSet::unreviewed(
@@ -280,6 +281,7 @@ fn project_collections_reject_cross_project_entities() {
         "command",
         "cargo test",
         RiskLevel::Low,
+        Vec::new(),
         "/workspace/other",
     );
     let transcript = Transcript::metadata(

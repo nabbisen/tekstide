@@ -9,9 +9,10 @@
 //! PR-021-B: protocol message types and bounded validation.
 //! PR-021-C: structural risk classifier.
 //! PR-021-D: the sideband channel.
-//! PR-021-E1 (this slice): the trusted-context coordinator -- verified
-//! cwd, proposal-id uniqueness, single-use decisions. Audit wiring and the
-//! decision round-trip over the channel are PR-021-E2, not yet built.
+//! PR-021-E1: the trusted-context coordinator -- verified cwd,
+//! proposal-id uniqueness, single-use decisions.
+//! PR-021-E2 (this slice): the `CommandDecision` round trip, audit-family
+//! wiring, edit-and-approve reclassification.
 
 mod channel;
 mod coordinator;
