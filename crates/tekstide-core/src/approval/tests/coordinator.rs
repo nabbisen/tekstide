@@ -7,6 +7,9 @@ use crate::approval::{
     AcceptedProposal, ApprovalCoordinator, CommandProposal, DecideOutcome, ReceiveOutcome,
     SimpleDecision, classify,
 };
+use crate::audit::{
+    AuditCoordinator, AuditHealth, AuditPathRequest, AuditPathResolver, AuditStore,
+};
 use crate::domain::{AgentRunId, ApprovalDecision, RiskLevel};
 use crate::project::ProjectId;
 
@@ -26,6 +29,40 @@ fn proposal(proposal_id: &str, argv: &[&str], cwd: &str) -> CommandProposal {
     .expect("test proposal must decode")
 }
 
+/// A real, sqlite-backed `AuditStore` (via the same public
+/// `AuditPathResolver`/`AuditStore::open` path production code uses, not a
+/// fake writer -- this module cannot reach `audit`'s private test-only
+/// fake-writer machinery, since it lives in a sibling module tree; that
+/// machinery is what `audit::tests::integration` uses instead to prove the
+/// required-vs-best-effort distinction this module's tests take as given).
+struct TestAudit {
+    store: AuditStore,
+    health: AuditHealth,
+}
+
+impl TestAudit {
+    fn new(name: &str) -> Self {
+        let state_root =
+            std::env::temp_dir().join(format!("approval-audit-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&state_root).expect("create temp audit state root");
+        let state_root = state_root
+            .canonicalize()
+            .expect("canonicalize temp audit state root");
+        let storage_path = AuditPathResolver
+            .resolve(AuditPathRequest::new(state_root, Vec::new()))
+            .expect("resolve audit storage path");
+        let store = AuditStore::open(storage_path).expect("open a real audit store");
+        Self {
+            store,
+            health: AuditHealth::default(),
+        }
+    }
+
+    fn coordinator(&mut self) -> AuditCoordinator<'_> {
+        AuditCoordinator::new(&mut self.store, &mut self.health)
+    }
+}
+
 /// Builds a real, connected `AcceptedProposal` (via `UnixStream::pair()`,
 /// not a mock) and calls `receive_proposal` with it -- response 114
 /// Required 1's fix means `receive_proposal` now takes ownership of the
@@ -37,6 +74,7 @@ fn receive(
     agent_run_id: &AgentRunId,
     verified_cwd: &str,
     command_proposal: &CommandProposal,
+    audit: &mut AuditCoordinator,
 ) -> (ReceiveOutcome, UnixStream) {
     let (accepted, peer) = AcceptedProposal::for_test(command_proposal.clone());
     let outcome = coordinator.receive_proposal(
@@ -46,6 +84,7 @@ fn receive(
         Path::new(PROJECT_ROOT),
         Path::new(STATE_ROOT),
         accepted,
+        audit,
     );
     (outcome, peer)
 }
@@ -78,15 +117,25 @@ fn read_decision_frame(peer: &mut UnixStream) -> serde_json::Value {
 fn a_repeated_proposal_id_is_rejected_outright_even_after_approval_and_never_authorizes_new_argv() {
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
+    let mut test_audit = TestAudit::new("laundering");
 
     let first = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
-    let (ReceiveOutcome::Created { request }, _peer) =
-        receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &first)
-    else {
+    let (ReceiveOutcome::Created { request, .. }, _peer) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &first,
+        &mut test_audit.coordinator(),
+    ) else {
         panic!("first receipt of a proposal id must create a request");
     };
     let proposal_id = first.proposal_id().clone();
-    let decided = coordinator.decide(&agent_run_id, &proposal_id, SimpleDecision::ApprovedOnce);
+    let decided = coordinator.decide(
+        &agent_run_id,
+        &proposal_id,
+        SimpleDecision::ApprovedOnce,
+        &mut test_audit.coordinator(),
+    );
     assert!(matches!(decided, DecideOutcome::Decided { .. }));
     assert_eq!(request.risk_level, RiskLevel::Low);
 
@@ -99,6 +148,7 @@ fn a_repeated_proposal_id_is_rejected_outright_even_after_approval_and_never_aut
         &agent_run_id,
         PROJECT_ROOT,
         &laundering_attempt,
+        &mut test_audit.coordinator(),
     );
     assert!(
         outcome.is_duplicate_rejected(),
@@ -131,11 +181,24 @@ fn the_same_proposal_id_in_a_different_agent_run_is_not_a_duplicate() {
     let run_a = AgentRunId::for_test(10);
     let run_b = AgentRunId::for_test(11);
     let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let mut test_audit = TestAudit::new("cross-run");
 
-    let (outcome_a, _peer_a) = receive(&mut coordinator, &run_a, PROJECT_ROOT, &command_proposal);
+    let (outcome_a, _peer_a) = receive(
+        &mut coordinator,
+        &run_a,
+        PROJECT_ROOT,
+        &command_proposal,
+        &mut test_audit.coordinator(),
+    );
     assert!(matches!(outcome_a, ReceiveOutcome::Created { .. }));
 
-    let (outcome_b, _peer_b) = receive(&mut coordinator, &run_b, PROJECT_ROOT, &command_proposal);
+    let (outcome_b, _peer_b) = receive(
+        &mut coordinator,
+        &run_b,
+        PROJECT_ROOT,
+        &command_proposal,
+        &mut test_audit.coordinator(),
+    );
     assert!(
         matches!(outcome_b, ReceiveOutcome::Created { .. }),
         "the same proposal id in a different AgentRun must be treated as new"
@@ -150,17 +213,30 @@ fn decision_is_single_use_and_replay_is_inert() {
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
     let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
-    let (ReceiveOutcome::Created { request: created }, _peer) = receive(
+    let mut test_audit = TestAudit::new("single-use");
+    let (
+        ReceiveOutcome::Created {
+            request: created, ..
+        },
+        _peer,
+    ) = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
         &command_proposal,
-    ) else {
+        &mut test_audit.coordinator(),
+    )
+    else {
         panic!("must create a request");
     };
     let proposal_id = command_proposal.proposal_id().clone();
 
-    let first = coordinator.decide(&agent_run_id, &proposal_id, SimpleDecision::ApprovedOnce);
+    let first = coordinator.decide(
+        &agent_run_id,
+        &proposal_id,
+        SimpleDecision::ApprovedOnce,
+        &mut test_audit.coordinator(),
+    );
     let DecideOutcome::Decided {
         request: decided, ..
     } = first
@@ -173,7 +249,12 @@ fn decision_is_single_use_and_replay_is_inert() {
     // Replay with a DIFFERENT decision -- if this were not inert, the
     // approved command would flip to rejected (or vice versa), which
     // would be a correctness disaster for a security control.
-    let replay = coordinator.decide(&agent_run_id, &proposal_id, SimpleDecision::Rejected);
+    let replay = coordinator.decide(
+        &agent_run_id,
+        &proposal_id,
+        SimpleDecision::Rejected,
+        &mut test_audit.coordinator(),
+    );
     let DecideOutcome::AlreadyDecided(unchanged) = replay else {
         panic!("a replayed decide call must be reported as already-decided, not applied");
     };
@@ -199,8 +280,14 @@ fn deciding_an_unknown_proposal_returns_not_found() {
     let proposal_id = proposal("never-received", &["git", "status"], PROJECT_ROOT)
         .proposal_id()
         .clone();
+    let mut test_audit = TestAudit::new("not-found");
 
-    let outcome = coordinator.decide(&agent_run_id, &proposal_id, SimpleDecision::ApprovedOnce);
+    let outcome = coordinator.decide(
+        &agent_run_id,
+        &proposal_id,
+        SimpleDecision::ApprovedOnce,
+        &mut test_audit.coordinator(),
+    );
     assert!(matches!(outcome, DecideOutcome::NotFound));
 }
 
@@ -244,11 +331,13 @@ fn a_claimed_cwd_of_root_cannot_make_an_external_path_look_project_internal() {
     // never from `proposal.cwd()`.
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
-    let (ReceiveOutcome::Created { request }, _peer) = receive(
+    let mut test_audit = TestAudit::new("cwd-external");
+    let (ReceiveOutcome::Created { request, .. }, _peer) = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
         &command_proposal,
+        &mut test_audit.coordinator(),
     ) else {
         panic!("must create a request");
     };
@@ -272,11 +361,13 @@ fn a_claimed_cwd_of_root_does_not_cause_a_genuinely_internal_path_to_escalate() 
 
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
-    let (ReceiveOutcome::Created { request }, _peer) = receive(
+    let mut test_audit = TestAudit::new("cwd-internal");
+    let (ReceiveOutcome::Created { request, .. }, _peer) = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
         &command_proposal,
+        &mut test_audit.coordinator(),
     ) else {
         panic!("must create a request");
     };
@@ -319,21 +410,36 @@ fn the_coordinator_never_lets_the_declared_effects_hint_affect_classification() 
 
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
+    let mut test_audit = TestAudit::new("effects-hint");
     let (
         ReceiveOutcome::Created {
             request: request_with_hint,
+            ..
         },
         _peer1,
-    ) = receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &with_hint)
+    ) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &with_hint,
+        &mut test_audit.coordinator(),
+    )
     else {
         panic!("must create a request");
     };
     let (
         ReceiveOutcome::Created {
             request: request_without_hint,
+            ..
         },
         _peer2,
-    ) = receive(&mut coordinator, &agent_run_id, PROJECT_ROOT, &without_hint)
+    ) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &without_hint,
+        &mut test_audit.coordinator(),
+    )
     else {
         panic!("must create a request");
     };
@@ -359,11 +465,13 @@ fn display_command_quotes_an_entry_that_would_otherwise_read_as_a_second_shell_c
         PROJECT_ROOT,
     );
     let mut coordinator = ApprovalCoordinator::new();
-    let (ReceiveOutcome::Created { request }, _peer) = receive(
+    let mut test_audit = TestAudit::new("display-1");
+    let (ReceiveOutcome::Created { request, .. }, _peer) = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
         &command_proposal,
+        &mut test_audit.coordinator(),
     ) else {
         panic!("must create a request");
     };
@@ -374,11 +482,13 @@ fn display_command_quotes_an_entry_that_would_otherwise_read_as_a_second_shell_c
 fn display_command_quotes_an_entry_containing_a_space_so_it_does_not_read_as_two_arguments() {
     let command_proposal = proposal("proposal-1", &["rm", "-rf", "my documents"], PROJECT_ROOT);
     let mut coordinator = ApprovalCoordinator::new();
-    let (ReceiveOutcome::Created { request }, _peer) = receive(
+    let mut test_audit = TestAudit::new("display-2");
+    let (ReceiveOutcome::Created { request, .. }, _peer) = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
         &command_proposal,
+        &mut test_audit.coordinator(),
     ) else {
         panic!("must create a request");
     };
@@ -389,11 +499,13 @@ fn display_command_quotes_an_entry_containing_a_space_so_it_does_not_read_as_two
 fn display_command_escapes_an_embedded_newline_to_a_visible_marker() {
     let command_proposal = proposal("proposal-1", &["echo", "safe\nrm -rf /etc"], PROJECT_ROOT);
     let mut coordinator = ApprovalCoordinator::new();
-    let (ReceiveOutcome::Created { request }, _peer) = receive(
+    let mut test_audit = TestAudit::new("display-3");
+    let (ReceiveOutcome::Created { request, .. }, _peer) = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
         &command_proposal,
+        &mut test_audit.coordinator(),
     ) else {
         panic!("must create a request");
     };
@@ -408,11 +520,13 @@ fn display_command_escapes_an_embedded_newline_to_a_visible_marker() {
 fn display_command_escapes_a_bidi_override_per_rfc_016_rather_than_letting_it_reverse_text() {
     let command_proposal = proposal("proposal-1", &["rm", "\u{202e}gpj.exe"], PROJECT_ROOT);
     let mut coordinator = ApprovalCoordinator::new();
-    let (ReceiveOutcome::Created { request }, _peer) = receive(
+    let mut test_audit = TestAudit::new("display-4");
+    let (ReceiveOutcome::Created { request, .. }, _peer) = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
         &command_proposal,
+        &mut test_audit.coordinator(),
     ) else {
         panic!("must create a request");
     };
@@ -428,11 +542,13 @@ fn display_command_escapes_a_bidi_override_per_rfc_016_rather_than_letting_it_re
 fn display_command_renders_an_empty_argument_visibly_rather_than_letting_it_vanish() {
     let command_proposal = proposal("proposal-1", &["printf", "%s", ""], PROJECT_ROOT);
     let mut coordinator = ApprovalCoordinator::new();
-    let (ReceiveOutcome::Created { request }, _peer) = receive(
+    let mut test_audit = TestAudit::new("display-5");
+    let (ReceiveOutcome::Created { request, .. }, _peer) = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
         &command_proposal,
+        &mut test_audit.coordinator(),
     ) else {
         panic!("must create a request");
     };
@@ -467,11 +583,13 @@ fn display_command_escapes_every_bidi_and_format_probe_from_response_115() {
         let command_proposal =
             proposal(&format!("proposal-{index}"), &["cat", &entry], PROJECT_ROOT);
         let mut coordinator = ApprovalCoordinator::new();
-        let (ReceiveOutcome::Created { request }, _peer) = receive(
+        let mut test_audit = TestAudit::new(&format!("display-probe-{index}"));
+        let (ReceiveOutcome::Created { request, .. }, _peer) = receive(
             &mut coordinator,
             &AgentRunId::for_test(index as u64),
             PROJECT_ROOT,
             &command_proposal,
+            &mut test_audit.coordinator(),
         ) else {
             panic!("must create a request");
         };
@@ -493,11 +611,13 @@ fn display_command_escapes_every_bidi_and_format_probe_from_response_115() {
 fn approval_request_carries_the_classifiers_reasons() {
     let command_proposal = proposal("proposal-1", &["sudo", "ls"], PROJECT_ROOT);
     let mut coordinator = ApprovalCoordinator::new();
-    let (ReceiveOutcome::Created { request }, _peer) = receive(
+    let mut test_audit = TestAudit::new("reasons");
+    let (ReceiveOutcome::Created { request, .. }, _peer) = receive(
         &mut coordinator,
         &AgentRunId::for_test(1),
         PROJECT_ROOT,
         &command_proposal,
+        &mut test_audit.coordinator(),
     ) else {
         panic!("must create a request");
     };
@@ -518,11 +638,13 @@ fn decide_sends_a_real_command_decision_back_over_the_proposals_own_connection()
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
     let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let mut test_audit = TestAudit::new("round-trip");
     let (ReceiveOutcome::Created { .. }, mut peer) = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
         &command_proposal,
+        &mut test_audit.coordinator(),
     ) else {
         panic!("must create a request");
     };
@@ -531,6 +653,7 @@ fn decide_sends_a_real_command_decision_back_over_the_proposals_own_connection()
         &agent_run_id,
         command_proposal.proposal_id(),
         SimpleDecision::ApprovedOnce,
+        &mut test_audit.coordinator(),
     );
     let DecideOutcome::Decided { sent, .. } = outcome else {
         panic!("must decide");
@@ -551,21 +674,33 @@ fn a_replayed_decision_does_not_send_a_second_frame() {
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
     let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let mut test_audit = TestAudit::new("no-replay-send");
     let (ReceiveOutcome::Created { .. }, mut peer) = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
         &command_proposal,
+        &mut test_audit.coordinator(),
     ) else {
         panic!("must create a request");
     };
 
     let proposal_id = command_proposal.proposal_id().clone();
-    let first = coordinator.decide(&agent_run_id, &proposal_id, SimpleDecision::ApprovedOnce);
+    let first = coordinator.decide(
+        &agent_run_id,
+        &proposal_id,
+        SimpleDecision::ApprovedOnce,
+        &mut test_audit.coordinator(),
+    );
     assert!(matches!(first, DecideOutcome::Decided { .. }));
     let _ = read_decision_frame(&mut peer);
 
-    let replay = coordinator.decide(&agent_run_id, &proposal_id, SimpleDecision::Rejected);
+    let replay = coordinator.decide(
+        &agent_run_id,
+        &proposal_id,
+        SimpleDecision::Rejected,
+        &mut test_audit.coordinator(),
+    );
     assert!(matches!(replay, DecideOutcome::AlreadyDecided(_)));
 
     peer.set_read_timeout(Some(std::time::Duration::from_millis(100)))
@@ -589,14 +724,22 @@ fn a_replayed_decision_does_not_send_a_second_frame() {
 fn decide_with_edited_argv_reclassifies_and_sends_the_edited_argv() {
     let mut coordinator = ApprovalCoordinator::new();
     let agent_run_id = AgentRunId::for_test(1);
+    let mut test_audit = TestAudit::new("edit-and-approve");
     // Proposed as an ordinary, Low-risk command...
     let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
-    let (ReceiveOutcome::Created { request: original }, mut peer) = receive(
+    let (
+        ReceiveOutcome::Created {
+            request: original, ..
+        },
+        mut peer,
+    ) = receive(
         &mut coordinator,
         &agent_run_id,
         PROJECT_ROOT,
         &command_proposal,
-    ) else {
+        &mut test_audit.coordinator(),
+    )
+    else {
         panic!("must create a request");
     };
     assert_eq!(original.risk_level, RiskLevel::Low);
@@ -612,6 +755,7 @@ fn decide_with_edited_argv_reclassifies_and_sends_the_edited_argv() {
         &VerifiedCwd::for_test(PROJECT_ROOT),
         Path::new(PROJECT_ROOT),
         Path::new(STATE_ROOT),
+        &mut test_audit.coordinator(),
     );
     let DecideOutcome::Decided { request, sent } = outcome else {
         panic!("must decide");
@@ -631,5 +775,246 @@ fn decide_with_edited_argv_reclassifies_and_sends_the_edited_argv() {
     assert_eq!(
         frame["edited_argv"],
         serde_json::json!(["rm", "-rf", "/etc"])
+    );
+}
+
+// --- PR-021-E2: audit-family wiring ---------------------------------------
+
+/// The `command_request`/`command_approve` audit records must actually
+/// land in a real durable store, in the shape the schema requires --
+/// queried back after the fact, not just asserted from the in-memory
+/// `AuditObservationStatus`.
+#[test]
+fn receive_and_approve_persist_the_expected_audit_records() {
+    let mut coordinator = ApprovalCoordinator::new();
+    // A real UUID-shaped id, not `AgentRunId::for_test` -- this test
+    // queries a real store afterward, and `from_persisted` (the decode
+    // path every query row goes through) requires the genuine
+    // `<prefix>-<uuid>` shape `for_test`'s short, sequence-based ids do
+    // not have.
+    let agent_run_id = AgentRunId::new_uuid();
+    let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let mut test_audit = TestAudit::new("audit-shape");
+
+    let (
+        ReceiveOutcome::Created {
+            command_request_audit,
+            ..
+        },
+        _peer,
+    ) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &command_proposal,
+        &mut test_audit.coordinator(),
+    )
+    else {
+        panic!("must create a request");
+    };
+    assert_eq!(
+        command_request_audit,
+        crate::audit::AuditObservationStatus::Persisted
+    );
+
+    let outcome = coordinator.decide(
+        &agent_run_id,
+        command_proposal.proposal_id(),
+        SimpleDecision::ApprovedOnce,
+        &mut test_audit.coordinator(),
+    );
+    assert!(matches!(outcome, DecideOutcome::Decided { .. }));
+
+    let records = test_audit
+        .store
+        .query(&crate::audit::AuditQuery::latest(10))
+        .expect("query the real audit store")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .collect::<Vec<_>>();
+
+    // Applied, then Authorized, then Requested -- latest-first.
+    assert_eq!(records.len(), 3);
+    assert_eq!(
+        records[0].action_kind,
+        crate::audit::AuditActionKind::CommandApprove
+    );
+    assert_eq!(records[0].outcome, crate::audit::AuditOutcome::Applied);
+    assert_eq!(
+        records[1].action_kind,
+        crate::audit::AuditActionKind::CommandApprove
+    );
+    assert_eq!(records[1].outcome, crate::audit::AuditOutcome::Authorized);
+    assert_eq!(records[0].operation_id, records[1].operation_id);
+    assert_eq!(
+        records[2].action_kind,
+        crate::audit::AuditActionKind::CommandRequest
+    );
+    assert_eq!(records[2].outcome, crate::audit::AuditOutcome::Requested);
+    assert!(records.iter().all(|record| {
+        record.family == crate::audit::AuditEventFamily::CommandApproval
+            && record.approval_id.is_some()
+            && record.risk_level == Some(crate::audit::AuditRiskLevel::Low)
+            && record.terminal_id.is_none()
+            && record.subject_kind.is_none()
+    }));
+}
+
+/// **The sentinel privacy test.** No command text, argv, cwd, or intent
+/// text may appear anywhere in the durable audit store -- including the
+/// quoted, escaped `display_command` this slice constructs specifically
+/// for human display. A proposal built from unmistakable sentinel
+/// strings is received, approved, rejected (a second one), and
+/// edited-and-approved (a third), and the entire raw store file plus
+/// every queried record's `Debug` output is checked for every sentinel.
+#[test]
+fn sentinel_command_text_never_reaches_the_durable_audit_store() {
+    const SENTINEL_ARG: &str = "PRIVATE-COMMAND-SENTINEL-4f8b2c";
+    const SENTINEL_CWD: &str = "/home/user/PRIVATE-CWD-SENTINEL-9a1e7d";
+
+    let mut coordinator = ApprovalCoordinator::new();
+    let mut test_audit = TestAudit::new("sentinel-privacy");
+    // Real UUID-shaped ids, not `AgentRunId::for_test` -- this test reads
+    // the raw store file back, and `for_test`'s short sequence-based ids
+    // cannot round-trip through `from_persisted`'s UUID-suffix check.
+    let run_approved = AgentRunId::new_uuid();
+    let run_rejected = AgentRunId::new_uuid();
+    let run_edited = AgentRunId::new_uuid();
+
+    // Approved.
+    let approved_proposal = proposal(
+        "proposal-approved",
+        &["echo", SENTINEL_ARG, "approved-branch"],
+        SENTINEL_CWD,
+    );
+    let (ReceiveOutcome::Created { .. }, _peer1) = receive(
+        &mut coordinator,
+        &run_approved,
+        SENTINEL_CWD,
+        &approved_proposal,
+        &mut test_audit.coordinator(),
+    ) else {
+        panic!("must create a request");
+    };
+    coordinator.decide(
+        &run_approved,
+        approved_proposal.proposal_id(),
+        SimpleDecision::ApprovedOnce,
+        &mut test_audit.coordinator(),
+    );
+
+    // Rejected.
+    let rejected_proposal = proposal(
+        "proposal-rejected",
+        &["echo", SENTINEL_ARG, "rejected-branch"],
+        SENTINEL_CWD,
+    );
+    let (ReceiveOutcome::Created { .. }, _peer2) = receive(
+        &mut coordinator,
+        &run_rejected,
+        SENTINEL_CWD,
+        &rejected_proposal,
+        &mut test_audit.coordinator(),
+    ) else {
+        panic!("must create a request");
+    };
+    coordinator.decide(
+        &run_rejected,
+        rejected_proposal.proposal_id(),
+        SimpleDecision::Rejected,
+        &mut test_audit.coordinator(),
+    );
+
+    // Edited and approved -- both the original AND the edited argv carry
+    // (different) sentinels, so the sentinel test covers both.
+    let edited_proposal = proposal(
+        "proposal-edited",
+        &["echo", SENTINEL_ARG, "original-branch"],
+        SENTINEL_CWD,
+    );
+    let (ReceiveOutcome::Created { .. }, _peer3) = receive(
+        &mut coordinator,
+        &run_edited,
+        SENTINEL_CWD,
+        &edited_proposal,
+        &mut test_audit.coordinator(),
+    ) else {
+        panic!("must create a request");
+    };
+    coordinator.decide_with_edited_argv(
+        &run_edited,
+        edited_proposal.proposal_id(),
+        vec![
+            "echo".to_string(),
+            format!("{SENTINEL_ARG}-EDITED"),
+            "edited-branch".to_string(),
+        ],
+        &VerifiedCwd::for_test(SENTINEL_CWD),
+        Path::new(SENTINEL_CWD),
+        Path::new(STATE_ROOT),
+        &mut test_audit.coordinator(),
+    );
+
+    let records = test_audit
+        .store
+        .query(&crate::audit::AuditQuery::latest(20))
+        .expect("query the real audit store")
+        .records;
+    assert!(
+        records.len() >= 5,
+        "expected at least command_request + authorize + applied for each of three \
+         proposals (minus reject's single write), got {}",
+        records.len()
+    );
+    let debug_dump = format!("{records:?}");
+    assert!(!debug_dump.contains(SENTINEL_ARG));
+    assert!(!debug_dump.contains(SENTINEL_CWD));
+    assert!(!debug_dump.contains("original-branch"));
+    assert!(!debug_dump.contains("edited-branch"));
+    assert!(!debug_dump.contains("rejected-branch"));
+
+    // Also check the raw on-disk file, not just the typed query result --
+    // the query path re-parses the store's own encoding, so this is an
+    // independent check that nothing leaked into the bytes on disk.
+    let raw_bytes = std::fs::read(test_audit.store.storage_path().database_file())
+        .expect("read the raw audit store file");
+    let raw_text = String::from_utf8_lossy(&raw_bytes);
+    assert!(!raw_text.contains(SENTINEL_ARG));
+    assert!(!raw_text.contains(SENTINEL_CWD));
+}
+
+/// Response 114 Recommended 3 / response 115: the fixture proving that a
+/// proposal's claimed `cwd` differing from `verified_cwd` is not (yet)
+/// compared or audited anywhere -- this is a Known Limitation, not a
+/// silent gap, and this test documents the current, deliberate behavior
+/// precisely so a future change to it is a visible diff, not a surprise.
+#[test]
+fn a_cwd_mismatch_is_not_yet_compared_or_audited_known_limitation() {
+    let mut coordinator = ApprovalCoordinator::new();
+    let agent_run_id = AgentRunId::for_test(1);
+    // The proposal claims cwd = "/", but the caller supplies the real,
+    // separately-sourced PROJECT_ROOT as verified_cwd -- a genuine
+    // mismatch between the two.
+    let command_proposal = proposal("proposal-1", &["git", "status"], "/");
+    let mut test_audit = TestAudit::new("cwd-mismatch");
+
+    let (ReceiveOutcome::Created { request, .. }, _peer) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &command_proposal,
+        &mut test_audit.coordinator(),
+    ) else {
+        panic!("must create a request");
+    };
+    // The request is classified and stored using verified_cwd (correct,
+    // per this module's core guarantee) -- the mismatch itself is simply
+    // not detected, recorded, or surfaced anywhere yet.
+    assert_eq!(request.cwd, Path::new(PROJECT_ROOT));
+    assert_ne!(
+        command_proposal.cwd(),
+        request.cwd,
+        "test precondition: the proposal's claim and the verified cwd must actually differ"
     );
 }

@@ -11,9 +11,11 @@ use crate::audit::integration::AuditRecordWriter;
 use crate::audit::{
     AuditCoordinator, AuditEventFamily, AuditHealth, AuditHealthStatus, AuditIntegrationError,
     AuditObservationStatus, AuditOutcome, AuditQuery, AuditReasonCode, AuditStore, AuditStoreError,
-    AuditStoreErrorReason, DurableAuditRecordV1,
+    AuditStoreErrorReason, CommandDecisionActionKind, DurableAuditRecordV1,
 };
-use crate::domain::{AgentCompatibilityLevel, AgentRunStatus, TerminalStatus};
+use crate::domain::{
+    AgentCompatibilityLevel, AgentRunStatus, ApprovalId, RiskLevel, TerminalStatus,
+};
 use crate::project::{ProjectContentError, ProjectId, ProjectSession, WorkspaceTrust};
 use crate::runtime::terminal::{
     BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalRuntimeHandle, TerminationOutcome,
@@ -365,6 +367,108 @@ fn open_and_save_symlink_blocks_persist_typed_reasons_without_paths() {
     assert!(!debug.contains("secret-sentinel"));
     assert!(!debug.contains("editable.txt"));
     assert!(!debug.contains("secret-content-sentinel"));
+}
+
+// --- RFC-021 PR-021-E2: command_approval family ---------------------------
+
+/// `record_command_request` (`command_request`) is best-effort: nothing is
+/// being authorized yet at this point (no execution to gate), so a write
+/// failure degrades `AuditHealth` but is not surfaced as an error at all.
+#[test]
+fn command_request_is_best_effort_and_degrades_health_without_blocking() {
+    let mut health = AuditHealth::default();
+    let mut writer = RecordingWriter::fail_on(1);
+
+    let result = AuditCoordinator::with_writer(&mut writer, &mut health).record_command_request(
+        ProjectId::for_test(1),
+        None,
+        ApprovalId::new_uuid(),
+        RiskLevel::Low,
+    );
+
+    assert_eq!(result, AuditObservationStatus::Degraded);
+    assert_eq!(health.failure_count(), 1);
+}
+
+/// The RFC's fail-closed matrix, applied to `command_approve`/`command_
+/// edit_and_approve`: the authorization write is **required** -- a
+/// failure here must propagate as `Err`, exactly like `grant_project_
+/// trust`'s authorization. `command_reject` has no authorization phase at
+/// all and must never block, even when every write fails -- rejecting is
+/// always the safe direction, and blocking it on an audit failure would
+/// force an already-safe outcome into limbo.
+#[test]
+fn command_approve_authorization_failure_blocks_and_command_reject_never_blocks() {
+    let mut health = AuditHealth::default();
+    let mut writer = RecordingWriter::fail_on(1);
+
+    let error = AuditCoordinator::with_writer(&mut writer, &mut health)
+        .authorize_command_decision(
+            ProjectId::for_test(1),
+            None,
+            ApprovalId::new_uuid(),
+            RiskLevel::High,
+            CommandDecisionActionKind::Approve,
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        AuditIntegrationError::RequiredAuditUnavailable(AuditStoreErrorReason::StorageFull)
+    );
+    assert_eq!(health.failure_count(), 1);
+
+    let mut reject_writer = RecordingWriter::fail_on(1);
+    let result = AuditCoordinator::with_writer(&mut reject_writer, &mut health)
+        .record_command_reject(
+            ProjectId::for_test(1),
+            None,
+            ApprovalId::new_uuid(),
+            RiskLevel::Low,
+        );
+    assert_eq!(result, AuditObservationStatus::Degraded);
+    assert_eq!(health.failure_count(), 2);
+}
+
+/// `command_approve`'s full authorize-then-apply shape, persisted to a
+/// real store and read back: `Authorized` then `Applied`, sharing one
+/// `operation_id`, both in the `command_approval` family.
+#[test]
+fn command_approve_persists_authorized_then_applied_with_matching_operation_id() {
+    let dirs = TestAuditDirs::new("integration-command-approve");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let approval_id = ApprovalId::new_uuid();
+
+    let operation_id = AuditCoordinator::new(&mut store, &mut health)
+        .authorize_command_decision(
+            ProjectId::for_test(1),
+            None,
+            approval_id.clone(),
+            RiskLevel::Medium,
+            CommandDecisionActionKind::Approve,
+        )
+        .unwrap();
+    AuditCoordinator::new(&mut store, &mut health).record_command_decision_outcome(
+        ProjectId::for_test(1),
+        None,
+        approval_id,
+        RiskLevel::Medium,
+        CommandDecisionActionKind::Approve,
+        operation_id.clone(),
+        true,
+    );
+
+    let records = store.query(&AuditQuery::latest(10)).unwrap().records;
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].record.outcome, AuditOutcome::Applied);
+    assert_eq!(records[1].record.outcome, AuditOutcome::Authorized);
+    assert_eq!(records[0].record.operation_id, Some(operation_id.clone()));
+    assert_eq!(records[1].record.operation_id, Some(operation_id));
+    assert!(records.iter().all(|record| {
+        record.record.family == AuditEventFamily::CommandApproval
+            && record.record.terminal_id.is_none()
+            && record.record.subject_kind.is_none()
+    }));
 }
 
 fn project_for(dirs: &TestAuditDirs, sequence: u64) -> ProjectSession {

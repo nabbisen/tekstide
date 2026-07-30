@@ -3,10 +3,13 @@ use std::path::Path;
 use crate::agent::AgentRunLaunchPlan;
 use crate::content::{SaveDecision, TextDocumentOpenError, TextDocumentSaveError};
 use crate::domain::{
-    AgentCompatibilityLevel, AgentRunId, AuditEventId, AuditOperationId, TerminalId,
+    AgentCompatibilityLevel, AgentRunId, ApprovalId, AuditEventId, AuditOperationId, RiskLevel,
+    TerminalId,
 };
 use crate::project::root::{FileAccessBlockedReason, FileAccessError};
-use crate::project::{ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectSession};
+use crate::project::{
+    ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectId, ProjectSession,
+};
 use crate::runtime::terminal::{LinuxTerminalRuntime, TerminalRuntimeEvent, TerminationOutcome};
 
 use super::{
@@ -334,6 +337,122 @@ impl<'a> AuditCoordinator<'a> {
         }
     }
 
+    /// RFC-021 `command_request`: a proposal arrived. Best-effort --
+    /// nothing is being authorized yet at this point (no execution to
+    /// gate), so a failure here degrades `AuditHealth` but does not block
+    /// receipt of the proposal.
+    pub fn record_command_request(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+    ) -> AuditObservationStatus {
+        let record = command_approval_record(
+            project_id,
+            agent_run_id,
+            approval_id,
+            risk_level,
+            AuditActionKind::CommandRequest,
+            AuditOutcome::Requested,
+            None,
+            AuditActorKind::AppPolicy,
+            AuditActionSource::Adapter,
+        );
+        self.append_observation(&record)
+    }
+
+    /// Authorizes a `command_approve`/`command_edit_and_approve` decision.
+    /// **Required**, per the RFC's fail-closed matrix ("audit append
+    /// failure for the authorization blocks execution", the same
+    /// precedent as `grant_project_trust`'s trust-grant authorization):
+    /// if this returns `Err`, the caller must not apply the decision or
+    /// send it back over the channel.
+    pub fn authorize_command_decision(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+        action_kind: CommandDecisionActionKind,
+    ) -> Result<AuditOperationId, AuditIntegrationError> {
+        let operation_id = AuditOperationId::new_uuid();
+        let record = command_approval_record(
+            project_id,
+            agent_run_id,
+            approval_id,
+            risk_level,
+            action_kind.into(),
+            AuditOutcome::Authorized,
+            Some(operation_id.clone()),
+            AuditActorKind::User,
+            AuditActionSource::TrustedUi,
+        );
+        self.append_required(&record)?;
+        Ok(operation_id)
+    }
+
+    /// Best-effort follow-up after `authorize_command_decision` succeeded:
+    /// records whether the decision was actually delivered back to the
+    /// adapter (`Applied`) or not (`Failed`, e.g. the adapter had already
+    /// disconnected). The decision itself is already authorized and final
+    /// by this point regardless of which outcome this call records.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_command_decision_outcome(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+        action_kind: CommandDecisionActionKind,
+        operation_id: AuditOperationId,
+        delivered: bool,
+    ) -> AuditObservationStatus {
+        let outcome = if delivered {
+            AuditOutcome::Applied
+        } else {
+            AuditOutcome::Failed
+        };
+        let record = command_approval_record(
+            project_id,
+            agent_run_id,
+            approval_id,
+            risk_level,
+            action_kind.into(),
+            outcome,
+            Some(operation_id),
+            AuditActorKind::User,
+            AuditActionSource::TrustedUi,
+        );
+        self.append_observation(&record)
+    }
+
+    /// `command_reject`: a single best-effort write, no `operation_id` --
+    /// per the schema, rejection has no authorize-then-apply phase at all,
+    /// since rejecting is always the safe direction and gates no
+    /// execution. Blocking a rejection on an audit-write failure would be
+    /// perverse: it would force an already-safe outcome into limbo.
+    pub fn record_command_reject(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+    ) -> AuditObservationStatus {
+        let record = command_approval_record(
+            project_id,
+            agent_run_id,
+            approval_id,
+            risk_level,
+            AuditActionKind::CommandReject,
+            AuditOutcome::Applied,
+            None,
+            AuditActorKind::User,
+            AuditActionSource::TrustedUi,
+        );
+        self.append_observation(&record)
+    }
+
     fn append_required(
         &mut self,
         record: &DurableAuditRecordV1,
@@ -394,6 +513,52 @@ fn managed_process_record(
     record.agent_run_id = Some(agent_run_id);
     record.operation_id = Some(operation_id);
     record.adapter_profile_ref = Some(adapter_profile_ref);
+    record
+}
+
+/// The two decisions that need an `operation_id` (RFC-021's
+/// authorize-then-apply phase). `CommandReject` is deliberately not a
+/// variant here -- it never has an `operation_id`, so
+/// `record_command_reject` does not take this type at all.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandDecisionActionKind {
+    Approve,
+    EditAndApprove,
+}
+
+impl From<CommandDecisionActionKind> for AuditActionKind {
+    fn from(kind: CommandDecisionActionKind) -> Self {
+        match kind {
+            CommandDecisionActionKind::Approve => AuditActionKind::CommandApprove,
+            CommandDecisionActionKind::EditAndApprove => AuditActionKind::CommandEditAndApprove,
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn command_approval_record(
+    project_id: ProjectId,
+    agent_run_id: Option<AgentRunId>,
+    approval_id: ApprovalId,
+    risk_level: RiskLevel,
+    action_kind: AuditActionKind,
+    outcome: AuditOutcome,
+    operation_id: Option<AuditOperationId>,
+    actor_kind: AuditActorKind,
+    action_source: AuditActionSource,
+) -> DurableAuditRecordV1 {
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::CommandApproval,
+        outcome,
+        action_kind,
+        actor_kind,
+        action_source,
+    );
+    record.project_id = Some(project_id);
+    record.agent_run_id = agent_run_id;
+    record.approval_id = Some(approval_id);
+    record.risk_level = Some(risk_level.into());
+    record.operation_id = operation_id;
     record
 }
 

@@ -58,6 +58,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::agent::VerifiedCwd;
+use crate::audit::{AuditCoordinator, AuditIntegrationError, CommandDecisionActionKind};
 use crate::domain::{AgentRunId, ApprovalDecision, ApprovalRequest};
 use crate::project::ProjectId;
 
@@ -86,6 +87,14 @@ pub enum ReceiveOutcome {
         // enum is returned by value from `receive_proposal` on every call,
         // not just the rare duplicate case.
         request: Box<ApprovalRequest>,
+        /// Whether the `command_request` audit event was durably
+        /// recorded. Best-effort (response 113's/RFC's design: nothing is
+        /// authorized yet at this point, so a failure here degrades
+        /// `AuditHealth` but never blocks receipt of the proposal) --
+        /// carried here so a caller can still observe degraded audit
+        /// health without this module returning an error for a condition
+        /// it does not treat as fatal.
+        command_request_audit: crate::audit::AuditObservationStatus,
     },
     /// This proposal id was already seen for this run. **No
     /// `ApprovalRequest` is returned, regardless of whether the repeat's
@@ -106,6 +115,16 @@ impl ReceiveOutcome {
     pub fn request(&self) -> Option<&ApprovalRequest> {
         match self {
             ReceiveOutcome::Created { request, .. } => Some(request.as_ref()),
+            ReceiveOutcome::DuplicateRejected { .. } => None,
+        }
+    }
+
+    pub fn command_request_audit(&self) -> Option<crate::audit::AuditObservationStatus> {
+        match self {
+            ReceiveOutcome::Created {
+                command_request_audit,
+                ..
+            } => Some(*command_request_audit),
             ReceiveOutcome::DuplicateRejected { .. } => None,
         }
     }
@@ -141,6 +160,16 @@ pub enum DecideOutcome {
     /// No request exists for this `(AgentRunId, ProposalId)` pair -- a
     /// decision cannot be made for a proposal that was never received.
     NotFound,
+    /// The audit write **authorizing** this decision failed. Per the
+    /// RFC's fail-closed matrix ("audit append failure for the
+    /// authorization blocks execution", the same precedent as
+    /// `AuditCoordinator::grant_project_trust`'s trust-grant
+    /// authorization): the decision is **not** applied. The stored
+    /// request remains `Pending` -- a caller may retry `decide` later,
+    /// once audit is healthy again -- and nothing is sent over the
+    /// channel. `Rejected` decisions never reach this path (rejection has
+    /// no authorization phase to fail; see `SimpleDecision`'s doc).
+    AuditBlocked(AuditIntegrationError),
 }
 
 impl DecideOutcome {
@@ -148,7 +177,7 @@ impl DecideOutcome {
         match self {
             DecideOutcome::Decided { request, .. } => Some(request),
             DecideOutcome::AlreadyDecided(request) => Some(request),
-            DecideOutcome::NotFound => None,
+            DecideOutcome::NotFound | DecideOutcome::AuditBlocked(_) => None,
         }
     }
 }
@@ -238,6 +267,10 @@ impl ApprovalCoordinator {
     /// one is by already having gone through
     /// `agent::AgentRunLaunchValidator::validate`, so passing
     /// `proposal.cwd()` here no longer typechecks at all.
+    ///
+    /// Records the `command_request` audit event via `audit`
+    /// (best-effort -- see [`ReceiveOutcome::Created`]'s doc for why a
+    /// failure here does not block receipt).
     #[allow(clippy::too_many_arguments)]
     pub fn receive_proposal(
         &mut self,
@@ -247,6 +280,7 @@ impl ApprovalCoordinator {
         project_root: &Path,
         state_root: &Path,
         accepted: AcceptedProposal,
+        audit: &mut AuditCoordinator,
     ) -> ReceiveOutcome {
         let key = (
             agent_run_id.clone(),
@@ -278,11 +312,18 @@ impl ApprovalCoordinator {
             assessment.reasons,
             verified_cwd_path,
         );
+        let command_request_audit = audit.record_command_request(
+            request.project_id.clone(),
+            request.agent_run_id.clone(),
+            request.id.clone(),
+            request.risk_level,
+        );
         let returned = request.clone();
         self.requests
             .insert(key, PendingRequest { request, accepted });
         ReceiveOutcome::Created {
             request: Box::new(returned),
+            command_request_audit,
         }
     }
 
@@ -291,11 +332,19 @@ impl ApprovalCoordinator {
     /// the connection its proposal arrived on. See [`DecideOutcome`] for
     /// what happens on a replay, and [`Self::decide_with_edited_argv`]
     /// for `EditedAndApproved`.
+    ///
+    /// `Rejected` has no authorization phase to fail (rejecting is always
+    /// the safe direction) and is recorded best-effort via
+    /// `audit.record_command_reject`. `ApprovedOnce` **requires** a
+    /// durable authorization record first (`audit.authorize_command_
+    /// decision`) -- if that fails, this returns `DecideOutcome::
+    /// AuditBlocked` and the decision is not applied at all.
     pub fn decide(
         &mut self,
         agent_run_id: &AgentRunId,
         proposal_id: &ProposalId,
         decision: SimpleDecision,
+        audit: &mut AuditCoordinator,
     ) -> DecideOutcome {
         let key = (agent_run_id.clone(), proposal_id.clone());
         let Some(pending) = self.requests.get_mut(&key) else {
@@ -307,10 +356,27 @@ impl ApprovalCoordinator {
             // state is returned unchanged -- not an error the caller must
             // specially handle, since a replay is an expected event on
             // this path (a resent decision message, a retried UI action),
-            // not an exceptional one. Nothing is sent again either: a
-            // replay must be fully inert, not merely non-overwriting.
+            // not an exceptional one. Nothing is sent (or audited) again
+            // either: a replay must be fully inert, not merely
+            // non-overwriting.
             return DecideOutcome::AlreadyDecided(pending.request.clone());
         }
+
+        let operation_id = if decision == SimpleDecision::ApprovedOnce {
+            match audit.authorize_command_decision(
+                pending.request.project_id.clone(),
+                pending.request.agent_run_id.clone(),
+                pending.request.id.clone(),
+                pending.request.risk_level,
+                CommandDecisionActionKind::Approve,
+            ) {
+                Ok(operation_id) => Some(operation_id),
+                Err(error) => return DecideOutcome::AuditBlocked(error),
+            }
+        } else {
+            None
+        };
+
         pending
             .request
             .decide(decision.into())
@@ -318,6 +384,33 @@ impl ApprovalCoordinator {
 
         let wire_decision = build_wire_decision(proposal_id, decision.into(), None);
         let sent = pending.accepted.send_decision(&wire_decision);
+
+        match (decision, operation_id) {
+            (SimpleDecision::ApprovedOnce, Some(operation_id)) => {
+                audit.record_command_decision_outcome(
+                    pending.request.project_id.clone(),
+                    pending.request.agent_run_id.clone(),
+                    pending.request.id.clone(),
+                    pending.request.risk_level,
+                    CommandDecisionActionKind::Approve,
+                    operation_id,
+                    sent.is_ok(),
+                );
+            }
+            (SimpleDecision::Rejected, _) => {
+                audit.record_command_reject(
+                    pending.request.project_id.clone(),
+                    pending.request.agent_run_id.clone(),
+                    pending.request.id.clone(),
+                    pending.request.risk_level,
+                );
+            }
+            (SimpleDecision::ApprovedOnce, None) => unreachable!(
+                "authorize_command_decision must have already returned AuditBlocked above \
+                 if it did not produce an operation_id for ApprovedOnce"
+            ),
+        }
+
         DecideOutcome::Decided {
             request: pending.request.clone(),
             sent,
@@ -333,6 +426,11 @@ impl ApprovalCoordinator {
     /// the same reason `receive_proposal` needs them: re-classification
     /// must use the same trusted context, never anything derived from the
     /// proposal's own claims.
+    ///
+    /// Like `ApprovedOnce`, this **requires** a durable authorization
+    /// record first -- if it fails, this returns `DecideOutcome::
+    /// AuditBlocked` and neither the reclassification nor the decision is
+    /// applied.
     #[allow(clippy::too_many_arguments)]
     pub fn decide_with_edited_argv(
         &mut self,
@@ -342,6 +440,7 @@ impl ApprovalCoordinator {
         verified_cwd: &VerifiedCwd,
         project_root: &Path,
         state_root: &Path,
+        audit: &mut AuditCoordinator,
     ) -> DecideOutcome {
         let key = (agent_run_id.clone(), proposal_id.clone());
         let Some(pending) = self.requests.get_mut(&key) else {
@@ -350,6 +449,17 @@ impl ApprovalCoordinator {
         if pending.request.decision != ApprovalDecision::Pending {
             return DecideOutcome::AlreadyDecided(pending.request.clone());
         }
+
+        let operation_id = match audit.authorize_command_decision(
+            pending.request.project_id.clone(),
+            pending.request.agent_run_id.clone(),
+            pending.request.id.clone(),
+            pending.request.risk_level,
+            CommandDecisionActionKind::EditAndApprove,
+        ) {
+            Ok(operation_id) => operation_id,
+            Err(error) => return DecideOutcome::AuditBlocked(error),
+        };
 
         let assessment = risk::classify(
             &edited_argv,
@@ -371,6 +481,16 @@ impl ApprovalCoordinator {
             Some(edited_argv),
         );
         let sent = pending.accepted.send_decision(&wire_decision);
+        audit.record_command_decision_outcome(
+            pending.request.project_id.clone(),
+            pending.request.agent_run_id.clone(),
+            pending.request.id.clone(),
+            pending.request.risk_level,
+            CommandDecisionActionKind::EditAndApprove,
+            operation_id,
+            sent.is_ok(),
+        );
+
         DecideOutcome::Decided {
             request: pending.request.clone(),
             sent,

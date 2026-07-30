@@ -1,5 +1,5 @@
 use crate::domain::{
-    AgentRunId, ApprovalId, AuditEventId, AuditOperationId, DomainTimestamp, TerminalId,
+    AgentRunId, ApprovalId, AuditEventId, AuditOperationId, DomainTimestamp, RiskLevel, TerminalId,
 };
 use crate::project::ProjectId;
 
@@ -64,6 +64,24 @@ pub enum AuditRiskLevel {
     Medium,
     High,
     Destructive,
+}
+
+/// RFC-021 PR-021-E2: `domain::RiskLevel` (the risk classifier's output)
+/// and `AuditRiskLevel` (this schema's persisted column) are kept as
+/// separate types deliberately -- one is `approval::risk`'s in-memory
+/// vocabulary, the other is the frozen, on-disk `command_approval` audit
+/// shape -- but their variants correspond exactly, so the conversion is a
+/// straight match with no room for a silent severity change to slip in
+/// unnoticed the way it would if the two just happened to share a type.
+impl From<RiskLevel> for AuditRiskLevel {
+    fn from(level: RiskLevel) -> Self {
+        match level {
+            RiskLevel::Low => AuditRiskLevel::Low,
+            RiskLevel::Medium => AuditRiskLevel::Medium,
+            RiskLevel::High => AuditRiskLevel::High,
+            RiskLevel::Destructive => AuditRiskLevel::Destructive,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
