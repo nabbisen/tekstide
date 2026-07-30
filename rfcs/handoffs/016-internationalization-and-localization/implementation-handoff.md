@@ -17,11 +17,15 @@ Covers PR-016-B through PR-016-F. Product code — thorough tests expected.
 ```
 crates/tekstide/src/i18n.rs            lookup, locale selection, fallback
 crates/tekstide/src/i18n/catalog.rs    catalog loading; source locale compiled in
-crates/tekstide/src/i18n/text_safety.rs  escape-and-isolate (see §3)
+crates/tekstide-core/src/text_safety.rs  escape-and-isolate (see §3) -- CORRECTED
+                                       2026-07-30: this landed in tekstide-core,
+                                       not the shell crate, because approval::
+                                       coordinator needs it and approval is in
+                                       core. RFC-016 Open Question 1, resolved.
 crates/tekstide/locales/               catalog files
 ```
 
-RFC-015 creates `i18n.rs` with a placeholder lookup and an English default. You replace the placeholder; **do not change the call shape** — RFC-015's shell code already calls it everywhere, and changing the signature would ripple through every surface.
+~~RFC-015 creates `i18n.rs` with a placeholder lookup and an English default. You replace the placeholder; **do not change the call shape**.~~ **Superseded 2026-07-30 (review 122).** RFC-015 had not landed when PR-016-B was implemented, so there was no placeholder and no call shape to preserve. PR-016-B established the shape instead: `i18n::Catalog::resolve` and `Catalog::get`. **The obligation is now inverted — RFC-015 must conform to that shape**, and this is recorded in RFC-015's own handoff so its implementer meets it as a stated constraint rather than discovering it.
 
 ## 2. Catalog decision (PR-016-B)
 

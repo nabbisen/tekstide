@@ -24,6 +24,16 @@ Read before starting — RFC-015 conforms to these rather than amending them:
 - [RFC-014](../../proposed/014-desktop-gui-substrate-and-terminal-rendering.md) — the substrate decision and its residual risks **R1** (latency unverified) and **R6** (focus-trap property does not transfer). RFC-015 discharges both.
 - [RFC-005](../../done/005-application-shell-and-project-board.md) — the `ApplicationShell` and Project Board state you are rendering.
 
+## Two things landed ahead of you (added 2026-07-30)
+
+RFC-016 was implemented before RFC-015, so two seams this RFC was originally expected to *create* already exist. **Conform to them; do not redesign them.**
+
+1. **The i18n call shape is fixed: `i18n::Catalog::resolve` and `Catalog::get`** (`crates/tekstide/src/i18n.rs`, PR-016-B). The original RFC-016 handoff said RFC-015 would create a placeholder that PR-016-B replaced, with an instruction not to change the call shape. That is now inverted — PR-016-B established the shape because RFC-015 had not landed, so **RFC-015 conforms to it.** If it proves awkward for a renderer, raise it before building surfaces rather than working around it locally.
+
+2. **Untrusted text renders through `tekstide_core::text_safety`** (PR-016-C). Every untrusted span a surface displays — command text, project names, branch names, file paths, terminal-derived strings — goes through `quote_untrusted`, never raw. Trusted chrome (localized labels) does not. The escaping is already shared with `approval::coordinator`; **do not add a second escape path in the shell.** RFC-016 §Risks: *"escaping belongs to the shared untrusted-text render path, not to each surface."*
+
+Also relevant to PR-015-D: `tekstide_core::shell::render_text()` is the pre-GUI text harness, and it holds roughly sixteen hardcoded user-facing strings in `tekstide-core` — outside the catalog's reach by design, since the shell crate owns rendering. **PR-015-D is expected to delete it**, and RFC-016 PR-016-E's no-hardcoded-strings scan is waiting on that. If you do not delete it, say so explicitly, because PR-016-E's scan scope depends on the answer.
+
 ## Where to start work
 
 **Begin at PR-015-B.** PR-015-A is design acceptance.
