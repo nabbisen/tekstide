@@ -25,10 +25,17 @@ project-board-title = Project Board
 # second API. `CountDisplay::label()` itself is not called from here;
 # this key only proves the catalog CAN express all four shapes, per
 # response 123/124's explicit "record it, do not solve it in PR-016-D."
+#
+# `[one]` and `*[other]` deliberately use distinct wording (singular
+# "automation" vs. plural "automations"), not the same shape with a
+# number spliced in -- response 125 Required 2: identical branches made
+# `plural_categories_apply_for_english_too_with_its_simpler_one_other_split`
+# pass even with the `[one]` variant deleted entirely, proving nothing
+# about plural selection despite the test's name.
 blocked-automation-count = { $count ->
     [not_implemented] blocked automation: not implemented
     [unavailable] blocked automation: not available
     [unknown] blocked automation: unknown
-    [one] blocked automation: {$count}
-   *[other] blocked automation: {$count}
+    [one] {$count} blocked automation
+   *[other] {$count} blocked automations
 }

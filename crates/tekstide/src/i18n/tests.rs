@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{Catalog, FluentArgs, FluentValue, LocalePreference, catalog};
+use tekstide_core::text_safety;
+
+use super::{Catalog, CatalogArgs, LocalePreference, catalog};
 
 /// The real, shipped `locales/` directory -- used by the PR-016-D tests
 /// that exercise the actual `pl.ftl` this crate ships, rather than a
@@ -192,17 +194,18 @@ fn plural_categories_differ_correctly_for_polish() {
     };
     let cat = Catalog::resolve(preference, Some(&real_locales_dir()));
 
-    let mut args = FluentArgs::new();
-    args.set("count", FluentValue::from(1));
-    let one = cat.get_with_args("blocked-automation-count", &args);
-
-    let mut args = FluentArgs::new();
-    args.set("count", FluentValue::from(3));
-    let few = cat.get_with_args("blocked-automation-count", &args);
-
-    let mut args = FluentArgs::new();
-    args.set("count", FluentValue::from(5));
-    let many = cat.get_with_args("blocked-automation-count", &args);
+    let one = cat.get_with_args(
+        "blocked-automation-count",
+        &CatalogArgs::new().number("count", 1u32),
+    );
+    let few = cat.get_with_args(
+        "blocked-automation-count",
+        &CatalogArgs::new().number("count", 3u32),
+    );
+    let many = cat.get_with_args(
+        "blocked-automation-count",
+        &CatalogArgs::new().number("count", 5u32),
+    );
 
     assert_ne!(
         one, few,
@@ -240,15 +243,17 @@ fn plural_categories_apply_for_english_too_with_its_simpler_one_other_split() {
     let cat = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
     assert_eq!(cat.resolved_locale(), "en");
 
-    let mut args = FluentArgs::new();
-    args.set("count", FluentValue::from(1));
-    let one = cat.get_with_args("blocked-automation-count", &args);
-    assert_eq!(one, "blocked automation: \u{2068}1\u{2069}");
+    let one = cat.get_with_args(
+        "blocked-automation-count",
+        &CatalogArgs::new().number("count", 1u32),
+    );
+    assert_eq!(one, "\u{2068}1\u{2069} blocked automation");
 
-    let mut args = FluentArgs::new();
-    args.set("count", FluentValue::from(9));
-    let other = cat.get_with_args("blocked-automation-count", &args);
-    assert_eq!(other, "blocked automation: \u{2068}9\u{2069}");
+    let other = cat.get_with_args(
+        "blocked-automation-count",
+        &CatalogArgs::new().number("count", 9u32),
+    );
+    assert_eq!(other, "\u{2068}9\u{2069} blocked automations");
 }
 
 /// The design constraint from response 123/124: a `CountDisplay`-shaped
@@ -271,11 +276,12 @@ fn plural_categories_apply_for_english_too_with_its_simpler_one_other_split() {
 fn interpolation_expresses_every_count_display_state_through_one_key() {
     let cat = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
 
-    let mut known = FluentArgs::new();
-    known.set("count", FluentValue::from(9));
     assert_eq!(
-        cat.get_with_args("blocked-automation-count", &known),
-        "blocked automation: \u{2068}9\u{2069}"
+        cat.get_with_args(
+            "blocked-automation-count",
+            &CatalogArgs::new().number("count", 9u32)
+        ),
+        "\u{2068}9\u{2069} blocked automations"
     );
 
     for (state, expected) in [
@@ -283,9 +289,10 @@ fn interpolation_expresses_every_count_display_state_through_one_key() {
         ("unavailable", "blocked automation: not available"),
         ("unknown", "blocked automation: unknown"),
     ] {
-        let mut args = FluentArgs::new();
-        args.set("count", FluentValue::from(state));
-        let rendered = cat.get_with_args("blocked-automation-count", &args);
+        let rendered = cat.get_with_args(
+            "blocked-automation-count",
+            &CatalogArgs::new().trusted_symbol("count", state),
+        );
         assert_eq!(rendered, expected);
         assert!(
             !rendered.contains('0'),
@@ -301,6 +308,12 @@ fn interpolation_expresses_every_count_display_state_through_one_key() {
 /// byte-for-byte as given (aside from Fluent's own isolate-mark
 /// wrapping, proven separately above), never expanded, never used to
 /// alter the structure of the message it was interpolated into.
+///
+/// The FTL-lookalike text is a `&'static str` literal in this test, so
+/// it goes through [`CatalogArgs::trusted_symbol`] -- that constructor
+/// is the right fit here (this test is about Fluent's parser, not about
+/// `text_safety`; see `an_escaped_untrusted_value_survives_correctly`
+/// below for the `untrusted()` path).
 ///
 /// Uses a locale name (`xx`) that is neither the source locale nor any
 /// real shipped catalog -- `Catalog::load` special-cases the source
@@ -325,9 +338,10 @@ fn interpolated_values_cannot_inject_fluent_syntax() {
     );
 
     let malicious = "{ -brand-name } { $secret ->  *[other] leaked }";
-    let mut args = FluentArgs::new();
-    args.set("name", FluentValue::from(malicious));
-    let rendered = cat.get_with_args("greeting", &args);
+    let rendered = cat.get_with_args(
+        "greeting",
+        &CatalogArgs::new().trusted_symbol("name", malicious),
+    );
 
     assert_eq!(
         rendered,
@@ -337,19 +351,31 @@ fn interpolated_values_cannot_inject_fluent_syntax() {
     );
 }
 
-/// The other half of the security boundary: interpolation is NOT a
-/// substitute for `text_safety::quote_untrusted`. A bidi override
-/// character passed as an interpolation argument survives **raw** inside
-/// Fluent's isolate wrapping -- Fluent contains it (point 2 of RFC-016's
-/// policy, for free) but does not escape it to a visible `<U+XXXX>`
-/// marker (point 1, which only `text_safety` does). A caller must still
-/// run untrusted values through `text_safety::escape_untrusted_chars`
-/// before interpolating them; Fluent's isolation is a second layer of
-/// defense here exactly as it is in `text_safety::quote_untrusted`
-/// itself, not a reason to skip the first layer.
+/// Response 125 Required 1: `Catalog::get_with_args` used to accept raw
+/// `fluent_bundle::FluentValue::String` built from any runtime `&str`,
+/// so a caller could interpolate untrusted text -- a project name, a
+/// branch name -- with a live bidi override still in it, unescaped. The
+/// probe that proved this real: `"blocked automation: proj\u{202E}gpj.exe"`
+/// rendered with the override still live, visually reordering to
+/// `projexe.jpg` inside its own isolate.
+///
+/// `CatalogArgs` closes this structurally: there is no constructor that
+/// accepts a raw `&str` at all. [`CatalogArgs::untrusted`] only accepts
+/// `&text_safety::DisplayText`, obtainable only via
+/// `text_safety::quote_untrusted` -- so a caller who runs untrusted text
+/// through `quote_untrusted` first (the only way to reach interpolation
+/// with it) gets the escaped, visible-marker form, never the raw
+/// override, proven here with the reviewer's own probe text.
+///
+/// The compile-time half of this guarantee -- that
+/// `CatalogArgs::untrusted(name, "raw str")` does not typecheck -- is
+/// not expressible as a `compile_fail` doctest, since `tekstide` is a
+/// `[[bin]]`-only crate with no `[lib]` target for a doctest to link
+/// against; recorded instead as a note in `qa-evidence.md`, per response
+/// 125's offered alternative.
 #[test]
-fn interpolation_does_not_substitute_for_text_safety_escaping() {
-    let dir = scratch_locales_dir("no-auto-escape");
+fn an_escaped_untrusted_value_survives_correctly_through_interpolation() {
+    let dir = scratch_locales_dir("escaped-untrusted");
     fs::write(dir.join("xx.ftl"), "greeting = Hello, {$name}!\n").unwrap();
     let preference = LocalePreference {
         cli_flag: Some("xx".to_string()),
@@ -362,16 +388,18 @@ fn interpolation_does_not_substitute_for_text_safety_escaping() {
         "test precondition: the scratch catalog must be the one in use"
     );
 
-    let untrusted = "evil\u{202E}txt.exe";
-    let mut args = FluentArgs::new();
-    args.set("name", FluentValue::from(untrusted));
-    let rendered = cat.get_with_args("greeting", &args);
+    let malicious = "proj\u{202E}gpj.exe";
+    let escaped = text_safety::quote_untrusted(malicious);
+    let rendered = cat.get_with_args("greeting", &CatalogArgs::new().untrusted("name", &escaped));
 
     assert!(
-        rendered.contains('\u{202E}'),
-        "interpolation must not silently escape untrusted text into a visible marker \
-         -- that is text_safety's job, and a caller that skips it must be able to see \
-         the raw override character survived (even if isolated), not have it silently \
-         neutralized here: {rendered:?}"
+        !rendered.contains('\u{202E}'),
+        "a raw, live bidi override must never survive interpolation of an untrusted \
+         value: {rendered:?}"
+    );
+    assert!(
+        rendered.contains("<U+202E>"),
+        "the override must have been escaped to its visible marker by text_safety \
+         before interpolation, not silently dropped: {rendered:?}"
     );
 }

@@ -2,11 +2,11 @@
 title: "RFC-016: Internationalization and Localization - Acceptance / QA Checklist"
 rfc: "RFC-016"
 rfc_file: "../../proposed/016-internationalization-and-localization.md"
-status: "Proposed — implementation in progress (PR-016-C, PR-016-B complete and accepted; PR-016-D landed 2026-07-30, not yet reviewed; PR-016-E waits for RFC-015)"
+status: "Proposed — implementation in progress (PR-016-C, PR-016-B complete and accepted; PR-016-D: response 125 required re-review after fixes, fixes applied 2026-07-31, pending re-review; PR-016-E waits for RFC-015)"
 target_milestone: "M8"
 source_rfc_status: "Proposed"
 created: "2026-07-29"
-updated: "2026-07-30"
+updated: "2026-07-31"
 ---
 
 # RFC-016 Acceptance / QA Checklist
@@ -44,8 +44,10 @@ updated: "2026-07-30"
 ## Pluralization and Interpolation Checklist
 
 - [x] Plural categories correct for a language whose rules differ from English. Polish (`one`/`few`/`many`/`other` vs. English's `one`/`other`); `plural_categories_differ_correctly_for_polish`, ablation-verified (collapsing `few`/`many` to identical text made the test fail).
-- [x] Interpolation works. `Catalog::get_with_args`; numeric and symbolic-string arguments both proven, through the real shipped `en.ftl`/`pl.ftl`.
-- [x] Interpolation cannot inject markup or escape PR-016-C quoting. `interpolated_values_cannot_inject_fluent_syntax` (FTL-lookalike text renders as a literal, never re-parsed); `interpolation_does_not_substitute_for_text_safety_escaping` (a bidi override survives raw, proving interpolation is not a substitute for `text_safety::escape_untrusted_chars` and must not be treated as one). Both documented directly in `i18n.rs`'s module doc, not only here.
+- [x] Interpolation works. `Catalog::get_with_args`; numeric (`CatalogArgs::number`) and symbolic (`CatalogArgs::trusted_symbol`) arguments both proven, through the real shipped `en.ftl`/`pl.ftl`.
+- [x] The English plural test discriminates its own claim. Response 125 Required 2: `en.ftl`'s `[one]`/`*[other]` originally rendered identical text, so the test passed even with `[one]` deleted. Fixed with distinct singular/plural wording; `plural_categories_apply_for_english_too_with_its_simpler_one_other_split` re-ablation-verified (deleting `[one]` again now fails the test).
+- [x] Interpolation cannot inject markup or escape PR-016-C quoting. `interpolated_values_cannot_inject_fluent_syntax` (FTL-lookalike text renders as a literal, never re-parsed).
+- [x] **Untrusted interpolation is forced through `text_safety`, not merely documented as the caller's responsibility.** Response 125 Required 1: the public API originally re-exported `fluent_bundle::{FluentArgs, FluentValue}`, so a caller could interpolate a raw untrusted `&str` (e.g. a project name with a live `U+202E`) with no barrier. Fixed: `i18n::CatalogArgs` is now the only way to build interpolation arguments, and its `untrusted()` constructor accepts only `&text_safety::DisplayText` (obtainable only via `quote_untrusted`) — there is no constructor accepting a raw `&str` for untrusted text. `an_escaped_untrusted_value_survives_correctly_through_interpolation` proves the escaped marker survives and the live override does not, using the reviewer's own probe text; ablation-verified (temporarily reverting `untrusted()` to un-escape before interpolating made the test fail with a live `U+202E` in the output). The compile-time half (raw `&str` does not typecheck) is not a `compile_fail` doctest — `tekstide` has no `[lib]` target for one — confirmed instead by a temporary build probe and recorded in `qa-evidence.md`'s "Response 125 follow-ups" note.
 - [x] Second locale added purely to prove the machinery. Polish (`pl`), loaded from the real shipped `crates/tekstide/locales/pl.ftl`, not a test-only fixture. Translation quality unreviewed, per RFC-016 §Non-Goals.
 
 ## Never-Localized Checklist

@@ -27,27 +27,61 @@
 //! which is ugly and immediately obvious, the correct failure mode for
 //! a translation gap.
 //!
-//! **Interpolation ([`Catalog::get_with_args`]) is for trusted data, not
-//! untrusted text -- it is not a substitute for
-//! `tekstide_core::text_safety`.** Fluent treats every argument value as
-//! an opaque literal: it is never re-parsed as FTL syntax (no markup
-//! injection is possible through an argument, proven in
-//! `tests::interpolated_values_cannot_inject_fluent_syntax`) but it is
-//! also never escaped for bidi/format-character safety (proven in
-//! `tests::interpolation_does_not_substitute_for_text_safety_escaping`).
-//! A caller interpolating anything that did not originate as trusted
-//! application data (a count, an enum-derived symbolic state) -- for
-//! example a branch name or any other adapter- or filesystem-controlled
-//! string -- must run it through `text_safety::quote_untrusted` first
-//! and interpolate the already-escaped result, exactly as it would for
-//! any other untrusted span embedded in trusted chrome.
+//! **Interpolation ([`Catalog::get_with_args`]) is for trusted data;
+//! untrusted text must go through `tekstide_core::text_safety` first --
+//! [`CatalogArgs`] makes that a type-level fact, not a documentation
+//! promise (response 125 Required 1).** An earlier version of this
+//! module publicly re-exported `fluent_bundle::{FluentArgs, FluentValue}`
+//! directly, which meant `FluentValue::from(any_str)` compiled for any
+//! runtime string, untrusted or not -- probed and confirmed real: a
+//! project name containing a live `U+202E` interpolated straight through,
+//! indistinguishable from any other localized text, in the one place
+//! Trojan Source (RFC-016's own motivating threat) is most likely to
+//! reappear, since RFC-015 PR-015-D's first real caller renders project
+//! names. `CatalogArgs` closes this the same way `DisplayText` (no public
+//! constructor but `quote_untrusted`), `VerifiedCwd` (RFC-021), and
+//! `RunCapabilityToken`'s narrowed accessor (RFC-021) all closed the same
+//! shape of gap: `fluent_bundle::{FluentArgs, FluentValue}` are no longer
+//! re-exported at all, so nothing outside this module can construct a
+//! `FluentValue::String` from an arbitrary runtime `&str`. Every argument
+//! must go through one of `CatalogArgs`'s three constructors, each
+//! naming what it allows:
 //!
-//! **The interpolation argument type doubles as the answer to "how does
-//! a caller express a non-numeric count?"** `$count`-shaped selectors in
-//! this module's catalogs match either CLDR plural categories (for a
-//! `FluentValue::Number`) or literal string variants (for a
-//! `FluentValue::String`) in the *same* message, against the *same*
-//! variable -- so a caller with a `tekstide_core::project_board::
+//! - [`CatalogArgs::number`] -- a number. Cannot carry a directionality
+//!   control; CLDR plural-category selection applies.
+//! - [`CatalogArgs::untrusted`] -- takes `&text_safety::DisplayText`, not
+//!   `&str`. The only way to obtain a `DisplayText` is `quote_untrusted`
+//!   (`text_safety`'s own guarantee), so this constructor inherits that
+//!   guarantee rather than re-implementing it.
+//! - [`CatalogArgs::trusted_symbol`] -- takes `&'static str`. A
+//!   compile-time literal (`CountDisplay`'s state names and similar)
+//!   cannot be a project name, branch name, or anything else read at
+//!   runtime -- the `'static` bound excludes attacker-influenceable data
+//!   by construction, not by caller discipline.
+//!
+//! Fluent itself treats every argument value as an opaque literal
+//! regardless of which constructor produced it: it is never re-parsed as
+//! FTL syntax (no markup injection is possible through an argument,
+//! proven in `tests::interpolated_values_cannot_inject_fluent_syntax`).
+//! What Fluent does *not* do on its own is escape bidi/format characters
+//! -- that is what [`CatalogArgs::untrusted`] forces through
+//! `text_safety` for.
+//!
+//! **A genuine, welcome property discovered along the way: Fluent wraps
+//! every interpolated placeable in Unicode bidi isolate marks (First
+//! Strong Isolate / Pop Directional Isolate) by default.** `text_safety::
+//! quote_untrusted` also isolates, so a value that went through
+//! `CatalogArgs::untrusted` ends up isolated twice -- legal (isolates
+//! nest to depth 125) and harmless; this is accepted as a redundant but
+//! inert mark pair, not worked around.
+//!
+//! **The `number`/`untrusted`/`trusted_symbol` split doubles as the
+//! answer to "how does a caller express a non-numeric count?"**
+//! `$count`-shaped selectors in this module's catalogs match either CLDR
+//! plural categories (for a number, via [`CatalogArgs::number`]) or
+//! literal string variants (for a symbol, via
+//! [`CatalogArgs::trusted_symbol`]) in the *same* message, against the
+//! *same* variable -- so a caller with a `tekstide_core::project_board::
 //! CountDisplay`-shaped value (`KnownCount(u32)` plus three non-numeric
 //! states) has exactly one lookup to make, not two. See
 //! `locales/en.ftl`'s `blocked-automation-count` key for the pattern.
@@ -56,8 +90,74 @@ mod catalog;
 
 use std::path::Path;
 
-pub use fluent_bundle::{FluentArgs, FluentValue};
+use fluent_bundle::{FluentArgs, FluentValue};
+use tekstide_core::text_safety::DisplayText;
 use unic_langid::LanguageIdentifier;
+
+/// Numeric primitive types [`CatalogArgs::number`] accepts. Sealed
+/// (private trait, cannot be implemented outside this module) so the
+/// set is exactly "types `fluent_bundle::FluentValue` already treats as
+/// numbers," never extensible to a string-shaped type by an outside
+/// impl.
+mod sealed {
+    pub trait CatalogNumber: Copy {}
+    macro_rules! impl_catalog_number {
+        ($($ty:ty),+ $(,)?) => {
+            $(impl CatalogNumber for $ty {})+
+        };
+    }
+    impl_catalog_number!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize, f32, f64);
+}
+
+/// Interpolation arguments for [`Catalog::get_with_args`] -- see the
+/// module doc for why this exists instead of exposing
+/// `fluent_bundle::FluentArgs` directly.
+#[derive(Default)]
+pub struct CatalogArgs<'a> {
+    inner: FluentArgs<'a>,
+}
+
+impl<'a> CatalogArgs<'a> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A number. See the module doc; cannot carry a directionality
+    /// control by construction (`N` is bounded to numeric primitives).
+    pub fn number<N>(mut self, name: impl Into<std::borrow::Cow<'a, str>>, value: N) -> Self
+    where
+        N: sealed::CatalogNumber,
+        FluentValue<'a>: From<N>,
+    {
+        self.inner.set(name, FluentValue::from(value));
+        self
+    }
+
+    /// Untrusted text, already escaped and isolated via
+    /// `text_safety::quote_untrusted` -- there is no constructor for
+    /// this method that accepts a raw `&str`, so a caller cannot skip
+    /// `text_safety` and still compile.
+    pub fn untrusted(
+        mut self,
+        name: impl Into<std::borrow::Cow<'a, str>>,
+        value: &DisplayText,
+    ) -> Self {
+        self.inner
+            .set(name, FluentValue::from(value.as_str().to_string()));
+        self
+    }
+
+    /// A compile-time literal symbol. See the module doc for why
+    /// `&'static str` is the boundary that matters here.
+    pub fn trusted_symbol(
+        mut self,
+        name: impl Into<std::borrow::Cow<'a, str>>,
+        value: &'static str,
+    ) -> Self {
+        self.inner.set(name, FluentValue::from(value));
+        self
+    }
+}
 
 /// Locale preference inputs above OS-locale detection, in precedence
 /// order. Both fields are `None` today (no CLI flag parsing exists yet
@@ -157,11 +257,12 @@ impl Catalog {
         self.get_with_args_impl(key, None)
     }
 
-    /// [`Self::get`], with Fluent interpolation arguments. Same fallback
-    /// chain; `args` is passed through to every stage it reaches. See
-    /// the module doc for what this is (and is not) safe to interpolate.
-    pub fn get_with_args(&self, key: &str, args: &FluentArgs) -> String {
-        self.get_with_args_impl(key, Some(args))
+    /// [`Self::get`], with interpolation arguments. Same fallback chain;
+    /// `args` is passed through to every stage it reaches. See the
+    /// module doc for why [`CatalogArgs`] -- not raw `FluentArgs` -- is
+    /// the only way to build these.
+    pub fn get_with_args(&self, key: &str, args: &CatalogArgs) -> String {
+        self.get_with_args_impl(key, Some(&args.inner))
     }
 
     fn get_with_args_impl(&self, key: &str, args: Option<&FluentArgs>) -> String {
