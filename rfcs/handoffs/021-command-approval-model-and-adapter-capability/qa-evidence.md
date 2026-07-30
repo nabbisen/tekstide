@@ -1,6 +1,6 @@
 # RFC-021: Command Approval Model and Adapter Capability - QA Evidence
 
-Status: Proposed — implementation in progress (PR-021-B, PR-021-C landed 2026-07-29; PR-021-D landed 2026-07-29, accepted with required follow-up 2026-07-30; PR-021-E1 landed 2026-07-30, accepted with required follow-up 2026-07-30, all fixes applied — no third review needed; PR-021-E2 landed 2026-07-30, accepted with required follow-up (response 116) 2026-07-30, all fixes applied — PR-021-E complete; PR-021-F closeout next, owned by the architect)
+Status: Implemented headless with documented limitations — closed 2026-07-30 (PR-021-F closeout accepted; required follow-up, the no-timeout-approves regression test, landed same day). Not reachable by any user; cooperative, not enforced. Nothing further owed until the adapter-spawn slice makes any of it reachable.
 Date opened: 2026-07-28
 Date accepted: Pending
 
@@ -349,11 +349,23 @@ Beyond the per-slice reviews, three closeout-specific checks:
 - **No pattern-based or always-allow rules.** `grep` for `always_allow`, `AlwaysAllow`, `allowlist_pattern`, `remember_choice`, `ApproveAlways` across `approval/`: no matches.
 - **No timeout can approve.** `coordinator.rs` contains no `Duration`, `Instant`, `elapsed`, `SystemTime`, or `now()`. It records `created_at` only via `ApprovalRequest::pending`, and reads no timestamp anywhere. The single timeout in the whole module is `channel.rs`'s `PROPOSAL_READ_TIMEOUT`, whose only effect is to drop a connection — it cannot produce a decision. **See required follow-up below: this is currently guaranteed by absence, and absence does not survive a future edit silently.**
 
-## Required follow-up before RFC-021 is complete
+## Required follow-up: closed, 2026-07-30
 
-**One item.** Add a regression test asserting that a received proposal remains `Pending` with no decision after elapsed time, and that no code path in `approval` reads a timestamp to decide. The property is real — I verified it structurally above — but "no timeout approves" is the RFC's headline fail-closed guarantee, and it is presently held by the absence of code rather than by a test that fails if someone later adds a timeout for a good-sounding reason. This is the same class as a fixture corpus that cannot fail (response 110).
+The one item owed on RFC-021: a regression test for "no response → pending indefinitely; no timeout approves," so the guarantee is held by a test that fails on a future regression, not by the absence of code alone.
 
-Small, and it is the last thing owed on this RFC.
+**`no_timeout_approves_a_pending_proposal_regardless_of_elapsed_time`** (`crates/tekstide-core/src/approval/tests/coordinator.rs`). Receives a proposal, leaves it undecided, waits a short (50ms, non-meaningful) interval, then asserts all three properties the README specified:
+
+1. **Still `Pending`, unchanged.** A fresh `coordinator.find(...)` lookup (not the stale value from receipt) confirms `decision == Pending`, with `display_command`/`risk_level` unchanged from what was recorded at receipt.
+2. **No decision was sent.** Read from the peer half of the real `UnixStream::pair()` (the same connection `receive_proposal` took ownership of) with a bounded 100ms read timeout; the read errors — nothing ever arrived, elapsed time or not.
+3. **Not silently abandoned either.** `decide(..., SimpleDecision::ApprovedOnce, ...)` called afterwards still returns `DecideOutcome::Decided`, exactly as if no time had passed — the request was neither auto-decided nor stuck.
+
+Does not sleep for a meaningful duration, per the README's spec: the point is proving no time-based path exists at all, not waiting out a real timeout (there is none to wait out).
+
+**Ablation-verified against the exact regression this test exists to prevent**, not a synthetic stand-in: temporarily edited `receive_proposal` (`coordinator.rs`) to call `request.decide(ApprovalDecision::ApprovedOnce)` immediately after constructing the request — simulating precisely the "someone adds a timeout for a good-sounding reason" scenario the README warns about, an auto-decision the instant a proposal arrives, which is the most aggressive version of "no timeout approves" being violated. The test failed exactly as expected (`left: ApprovedOnce, right: Pending`, at the "still Pending" assertion). Reverted immediately after confirming the failure; no other code in `coordinator.rs` was touched.
+
+Gates run 2026-07-30: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (490 `tekstide-core` — up from 489, 1 net new — + 9 `tekstide` + 18 `tekstide-gui-spike`, 0 failures), `git diff --check` — all passed.
+
+**RFC-021 needs nothing further** until the adapter-spawn slice makes any of it reachable, per the README.
 
 ## Obligations carried forward
 

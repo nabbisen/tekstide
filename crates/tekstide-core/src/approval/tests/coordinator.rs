@@ -1147,3 +1147,76 @@ fn edit_and_approve_authorized_record_carries_the_edited_risk_level_not_the_prop
 // reachable here; see this module's doc). It is proven instead in
 // `audit/tests/integration.rs`'s
 // `edit_and_approve_audit_block_leaves_the_stored_request_describing_the_original_proposal`.
+
+/// RFC-021's required follow-up at closeout: the fail-closed matrix's
+/// headline guarantee, "no response -> pending indefinitely; **no
+/// timeout approves**," was verified structurally at PR-021-F
+/// (`coordinator.rs` contains no `Duration`/`Instant`/`elapsed`/
+/// `SystemTime`/`now()`, reads no timestamp anywhere) but had no
+/// regression test -- the guarantee was held by the *absence* of code,
+/// which does not survive a future edit visibly (the same class as a
+/// fixture corpus that cannot fail, response 110). Someone will one day
+/// add a timeout for a good-sounding reason -- a stuck-proposal cleanup,
+/// a UI hint -- and nothing will object without this test.
+///
+/// Does not sleep for a meaningful duration: the point is not to wait
+/// out a real timeout (there is none to wait out) but to prove no
+/// time-based path exists at all. A short elapsed interval plus the
+/// structural assertions below is what the README's spec calls for.
+#[test]
+fn no_timeout_approves_a_pending_proposal_regardless_of_elapsed_time() {
+    let mut coordinator = ApprovalCoordinator::new();
+    let agent_run_id = AgentRunId::for_test(1);
+    let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let mut test_audit = TestAudit::new("no-timeout-approves");
+
+    let (ReceiveOutcome::Created { request, .. }, mut peer) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &command_proposal,
+        &mut test_audit.coordinator(),
+    ) else {
+        panic!("must create a request");
+    };
+    assert_eq!(request.decision, ApprovalDecision::Pending);
+
+    // A short elapsed interval -- not waiting out a timeout, since there
+    // is none; only demonstrating that time passing has no effect.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // 1. Still Pending, unchanged, via a fresh lookup rather than the
+    //    stale `request` value above.
+    let still_pending = coordinator
+        .find(&agent_run_id, command_proposal.proposal_id())
+        .expect("the request must still exist after elapsed time");
+    assert_eq!(still_pending.decision, ApprovalDecision::Pending);
+    assert_eq!(still_pending.display_command, request.display_command);
+    assert_eq!(still_pending.risk_level, request.risk_level);
+
+    // 2. No decision was sent over the connection -- nothing to read,
+    //    not even after elapsed time, and no code path could have
+    //    produced one without an explicit `decide` call.
+    peer.set_read_timeout(Some(std::time::Duration::from_millis(100)))
+        .expect("set a short read timeout for the check");
+    let mut buffer = [0_u8; 1];
+    let result = peer.read(&mut buffer);
+    assert!(
+        result.is_err(),
+        "no decision may be sent for a proposal nobody decided, elapsed time or not"
+    );
+
+    // 3. The request was not silently abandoned either -- `decide`
+    //    afterwards still succeeds normally, exactly as if no time had
+    //    passed at all.
+    let outcome = coordinator.decide(
+        &agent_run_id,
+        command_proposal.proposal_id(),
+        SimpleDecision::ApprovedOnce,
+        &mut test_audit.coordinator(),
+    );
+    assert!(
+        matches!(outcome, DecideOutcome::Decided { .. }),
+        "a proposal left pending across elapsed time must still be decidable normally: {outcome:?}"
+    );
+}

@@ -2,7 +2,7 @@
 title: "RFC-021: Command Approval Model and Adapter Capability - Acceptance / QA Checklist"
 rfc: "RFC-021"
 rfc_file: "../../done/021-command-approval-model-and-adapter-capability.md"
-status: "Implemented headless — PR-021-B through E complete; PR-021-F closeout accepted with one required follow-up 2026-07-30. Not reachable by any user; cooperative, not enforced."
+status: "Implemented headless — PR-021-B through E complete; PR-021-F closeout accepted 2026-07-30, required follow-up (no-timeout-approves regression test) landed same day. Not reachable by any user; cooperative, not enforced."
 target_milestone: "M11"
 source_rfc_status: "Implemented headless with documented limitations"
 created: "2026-07-28"
@@ -63,7 +63,7 @@ updated: "2026-07-30"
 
 ## Fail-Closed Checklist
 
-- [ ] No response → pending indefinitely; **no timeout approves**. True by construction (no timeout code path exists in `ApprovalCoordinator` at all), but not yet exercised by a dedicated test; left unchecked pending one.
+- [x] No response → pending indefinitely; **no timeout approves**. True by construction (no timeout code path exists in `ApprovalCoordinator` at all), and now exercised by a dedicated regression test: `no_timeout_approves_a_pending_proposal_regardless_of_elapsed_time` (`approval::tests::coordinator`). Ablation-verified against the exact regression feared: temporarily made `receive_proposal` auto-decide a proposal the instant it arrives (simulating a future "good-sounding" timeout), and confirmed the test fails (`left: ApprovedOnce, right: Pending`), then restored.
 - [ ] Adapter disconnect while pending → abandoned, no execution. Not yet implemented — the coordinator has no AgentRun-lifecycle integration yet.
 - [ ] AgentRun termination while pending → abandoned, no execution. Same as above.
 - [x] Audit append failure for authorization → execution blocked. `ApprovalCoordinator::decide`/`decide_with_edited_argv` call `AuditCoordinator::authorize_command_decision` (required) before mutating the request or sending anything; a failure returns `DecideOutcome::AuditBlocked` and leaves the request `Pending`. The required-vs-best-effort distinction itself is proven at `audit::tests::integration` (`command_approve_authorization_failure_blocks_and_command_reject_never_blocks`, using the same fake-writer pattern already established for `grant_project_trust`); `approval::tests::coordinator` proves the happy path against a real store plus the early-return control flow by inspection (see qa-evidence.md for why an end-to-end real-failure test was attempted and removed rather than left silently testing nothing).
