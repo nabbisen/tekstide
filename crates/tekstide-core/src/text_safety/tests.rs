@@ -175,3 +175,79 @@ fn an_empty_string_does_not_panic_and_produces_the_bare_isolate_wrapper() {
     assert_eq!(escape_untrusted_chars(""), "");
     assert_eq!(quote_untrusted("").as_str(), "\u{2068}\u{2069}");
 }
+
+/// Response 118 Required 1: the exact five codepoints the reviewer's
+/// probe found unescaped under the earlier `Cc` + `Cf` rule, all outside
+/// `Cf`, now covered by `is_default_ignorable_extra`. `U+3164`/`U+FFA0`/
+/// `U+115F`/`U+1160` are Hangul filler *letters* (`Lo`) that render
+/// blank; `U+2065` is the one unassigned (`Cn`) codepoint RFC-016
+/// §Security names explicitly.
+const DEFAULT_IGNORABLE_EXTRA_PROBE: &[(char, &str)] = &[
+    ('\u{3164}', "<U+3164>"), // HANGUL FILLER
+    ('\u{FFA0}', "<U+FFA0>"), // HALFWIDTH HANGUL FILLER
+    ('\u{115F}', "<U+115F>"), // HANGUL CHOSEONG FILLER
+    ('\u{1160}', "<U+1160>"), // HANGUL JUNGSEONG FILLER
+    ('\u{2065}', "<U+2065>"), // <reserved>, named explicitly by RFC-016
+];
+
+#[test]
+fn every_default_ignorable_extra_probe_escapes_to_its_visible_marker() {
+    for (codepoint, expected_marker) in DEFAULT_IGNORABLE_EXTRA_PROBE {
+        let text = format!("before{codepoint}after");
+        let escaped = escape_untrusted_chars(&text);
+        assert_eq!(
+            escaped,
+            format!("before{expected_marker}after"),
+            "codepoint U+{:04X} must escape to a visible marker",
+            *codepoint as u32
+        );
+        assert!(is_untrusted_display_control(*codepoint));
+    }
+}
+
+/// Response 118 Required 1's reproduction of the exact attack: two
+/// different filenames that render identically to the eye because
+/// `U+3164` (a Hangul *letter*, not a control/format character) was not
+/// escaped under the response-115-era rule -- the same class of finding
+/// as `U+200B` in response 115, one Unicode general category over. With
+/// the fix, the two are no longer visually identical: the filler renders
+/// as a literal, visible marker.
+#[test]
+fn the_hangul_filler_display_spoofing_attack_is_defeated() {
+    let benign = escape_untrusted_chars("important.txt");
+    let spoofed = escape_untrusted_chars("impor\u{3164}tant.txt");
+    assert_ne!(
+        benign, spoofed,
+        "a Hangul filler must not let two different filenames render identically"
+    );
+    assert_eq!(spoofed, "impor<U+3164>tant.txt");
+}
+
+/// Response 118 Required 1: `U+2800` BRAILLE PATTERN BLANK renders blank
+/// to a sighted reader unfamiliar with Braille -- the same visual
+/// symptom as the codepoints above -- but it is category `So` (Symbol,
+/// other), not `Default_Ignorable_Code_Point`, and Braille content is
+/// legitimate text a Braille-literate user is entitled to see rendered
+/// unescaped. This is a deliberate boundary decision, recorded as a
+/// fixture so a future change to it is a visible diff, not a silent one.
+#[test]
+fn braille_pattern_blank_is_not_escaped() {
+    assert!(!is_untrusted_display_control('\u{2800}'));
+    assert_eq!(escape_untrusted_chars("\u{2800}"), "\u{2800}");
+}
+
+/// Response 118's over-escaping control cases, alongside the five
+/// must-escape ones above: an ordinary space and a genuine CJK letter
+/// must never be escaped, confirming the expanded predicate did not
+/// widen into legitimate text while closing the invisible-character gap.
+#[test]
+fn ordinary_space_and_cjk_letters_are_not_escaped() {
+    for c in ['\u{0020}', '\u{3042}'] {
+        assert!(
+            !is_untrusted_display_control(c),
+            "U+{:04X} must not escape",
+            c as u32
+        );
+    }
+    assert_eq!(escape_untrusted_chars(" \u{3042}"), " \u{3042}");
+}

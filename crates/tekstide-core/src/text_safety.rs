@@ -24,11 +24,17 @@
 //!
 //! **Policy: escape and isolate**, exactly RFC-016 §Security's two points:
 //!
-//! 1. **Escape, never obey.** Every Unicode **Control (`Cc`)** and
-//!    **Format (`Cf`)** category character -- bidi overrides/isolates,
-//!    zero-width joiners, soft hyphen, BOM, and anything else in either
-//!    category -- is rendered as a visible `<U+XXXX>` marker, never
-//!    passed to a shaper as a directionality instruction. Stripping
+//! 1. **Escape, never obey.** Every Unicode **Control (`Cc`)** character
+//!    plus every character with the **`Default_Ignorable_Code_Point`**
+//!    property -- bidi overrides/isolates, zero-width joiners, soft
+//!    hyphen, BOM, the Hangul filler letters, variation selectors, and
+//!    anything else in that set -- is rendered as a visible `<U+XXXX>`
+//!    marker, never passed to a shaper as a directionality instruction
+//!    or left to render invisibly. `Default_Ignorable_Code_Point` is the
+//!    standard Unicode concept for exactly this (response 118: the
+//!    earlier `Cc` + `Cf` rule left several genuine invisible shapes
+//!    unescaped -- see [`is_default_ignorable_extra`]'s doc for the
+//!    probe that found them, all of which sit outside `Cf`). Stripping
 //!    instead of escaping was considered and rejected (RFC-016
 //!    Requirement 1): a stripped display still differs from the real
 //!    value, which is the same defect in a different shape.
@@ -54,19 +60,58 @@
 //! Invisible characters are unambiguously wrong in a security display;
 //! visible non-Latin characters are the point of having i18n. This is
 //! the line, and it stops here.
+//!
+//! **`U+2800` BRAILLE PATTERN BLANK is deliberately NOT escaped**
+//! (response 118 Required 1): it renders blank to a sighted reader
+//! unfamiliar with Braille, which makes it *look* like the invisible
+//! characters this module targets, but it is not
+//! `Default_Ignorable_Code_Point` and there is a real argument that
+//! Braille content is legitimate text a Braille-literate user is
+//! entitled to see rendered, not a security-relevant invisible
+//! character. Recorded as a deliberate boundary decision, not an
+//! oversight -- see `text_safety::tests::braille_pattern_blank_is_not_escaped`.
+//!
+//! **Full Unicode `Cn` (unassigned-codepoint) coverage is deliberately
+//! out of scope for this slice** (response 118): correctly tracking
+//! every unassigned codepoint, and keeping `Default_Ignorable_Code_Point`
+//! itself correct as Unicode revises it, needs real Unicode property
+//! data, not a hand-rolled table -- the same "no dependency yet" call
+//! this module already made for `Cf` in RFC-021 response 115, now
+//! reaching its limit. Folding a small Unicode-properties crate into
+//! RFC-016 PR-016-B's already-required dependency measurement (alongside
+//! Fluent) is the deferred decision; `U+2065` (an unassigned codepoint
+//! RFC-016 §Security explicitly names) is hand-covered below as the one
+//! demonstrated case that could not wait.
+//!
+//! **The `<U+XXXX>` marker itself is spoofable** (RFC-021 response 115,
+//! restated here since this is now shared API): literal ASCII text
+//! `<U+202E>` typed by an adapter renders identically to this module's
+//! own escape output for a real `U+202E`. This errs toward
+//! over-suspicion -- a real override renders as inert text either way --
+//! which is the safe direction, so it is accepted rather than chased.
 
-/// Every Unicode **Format (`Cf`)** category codepoint currently assigned.
-/// Hand-rolled rather than a dependency, per RFC-021 response 115: `Cf` is
-/// a small, stable set of ranges. Escaping only the two bidi-override
-/// ranges (RFC-016 §Security point 1 read narrowly) implements point 1
-/// but not point 3 ("other invisible or format characters ... made
-/// visible on the same principle") -- zero-width joiners/non-joiners,
-/// zero-width space, soft hyphen, and other bidi *marks* (not just
-/// overrides) all sit outside those two ranges, and a probe found three
-/// genuine bidi controls (LRM `U+200E`, RLM `U+200F`, ALM `U+061C`) and
-/// several zero-width/invisible characters (ZWSP, ZWNJ, ZWJ, soft hyphen,
-/// BOM) passing through unescaped under the narrower rule.
-pub fn is_format_char(c: char) -> bool {
+/// Every Unicode **Format (`Cf`)** category codepoint, as a hand-
+/// transcribed snapshot of **Unicode 15.0**'s `UnicodeData.txt` -- not
+/// verified mechanically against that or any other version's published
+/// data, and not guaranteed current for later Unicode revisions. This is
+/// a version-pinned table, not a live category query: record the version
+/// so a future reader can check it against the real data rather than
+/// trust the claim (response 118 Required 2 -- an earlier version of
+/// this doc claimed the rule was "whatever invisible-character shape
+/// nobody has thought of yet," which a hand-transcribed table can never
+/// actually promise). A known open question, deliberately not resolved
+/// either way here: response 115 listed the Shorthand Format Controls
+/// block as extending to `0x1343F`; this table stops at `0x13438`. Not
+/// asserting which bound is correct -- that discrepancy is exactly the
+/// kind of drift a version-pinned, dated table makes checkable instead
+/// of invisible.
+///
+/// Private: this is an implementation slice of the shared policy, not
+/// itself the API (response 118 Required 3) -- publishing it would let a
+/// caller assemble a different escape rule from its parts, which is the
+/// duplication this module exists to end. [`is_untrusted_display_control`]
+/// is the public predicate.
+fn is_format_char(c: char) -> bool {
     matches!(
         c as u32,
         0x00AD
@@ -93,14 +138,76 @@ pub fn is_format_char(c: char) -> bool {
     )
 }
 
+/// The rest of Unicode's **`Default_Ignorable_Code_Point`** property --
+/// everything in that set not already covered by [`is_format_char`]'s
+/// `Cf` table. Added in response 118: probing the original `Cc` + `Cf`
+/// rule against a small set of genuinely invisible-rendering characters
+/// found five it did not cover, all outside `Cf`:
+///
+/// ```text
+/// U+3164 HANGUL FILLER            (Lo -- a LETTER that renders blank)
+/// U+FFA0 HALFWIDTH HANGUL FILLER  (Lo)
+/// U+115F HANGUL CHOSEONG FILLER   (Lo)
+/// U+1160 HANGUL JUNGSEONG FILLER  (Lo)
+/// U+2065 <reserved>               (Cn -- RFC-016 §Security point 3 names
+///                                   "unassigned-but-rendering-invisible
+///                                   codepoints" explicitly)
+/// ```
+///
+/// The attack this closes is the same one response 115 found for
+/// `U+200B`, one Unicode general category over: `impor<U+3164>tant.txt`
+/// and `important.txt` render identically to the eye, because
+/// `U+3164` is classified `Lo` (a Letter), not a control or format
+/// character, so the response-115 fix did not catch it.
+///
+/// Hand-transcribed against **Unicode 15.0**'s `DerivedCoreProperties.txt`
+/// for `Default_Ignorable_Code_Point`, with the same not-mechanically-
+/// verified caveat as [`is_format_char`]. Deliberately **not** attempting
+/// full `Cn` (every unassigned codepoint) coverage here -- see the
+/// module doc's note on why that is a dependency decision for PR-016-B,
+/// not a hand-rolled addition. `U+2065` is included explicitly because
+/// RFC-016 §Security names "unassigned-but-rendering-invisible
+/// codepoints" as in scope and it is the demonstrated case; the rest of
+/// `Cn` is not.
+///
+/// **`U+2800` BRAILLE PATTERN BLANK is deliberately excluded** -- see the
+/// module doc's dedicated note. It renders blank but is category `So`
+/// (Symbol, other), not `Default_Ignorable_Code_Point`, and Braille
+/// content is legitimate text.
+fn is_default_ignorable_extra(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x034F
+            | 0x115F..=0x1160
+            | 0x17B4..=0x17B5
+            | 0x180B..=0x180D
+            | 0x180F
+            | 0x2065
+            | 0x3164
+            | 0xFE00..=0xFE0F
+            | 0xFFA0
+            | 0xFFF0..=0xFFF8
+            | 0xE0000
+            | 0xE0002..=0xE001F
+            | 0xE0080..=0xE00FF
+            | 0xE0100..=0xE01EF
+            | 0xE01F0..=0xE0FFF
+    )
+}
+
 /// Any character this module escapes to a visible `<U+XXXX>` marker
 /// rather than passing through raw: every Unicode **Control (`Cc`)**
-/// character (`char::is_control`) plus every **Format (`Cf`)** character
-/// ([`is_format_char`]) -- a general-category rule rather than an
-/// enumerated list, so it covers whatever invisible-character shape
-/// nobody has thought of yet, not just the ones already found.
+/// character (`char::is_control`) plus every character with the
+/// **`Default_Ignorable_Code_Point`** property ([`is_format_char`]'s
+/// `Cf` table plus [`is_default_ignorable_extra`]'s remainder).
+///
+/// This is a documented *policy* -- a specific, version-pinned snapshot
+/// of Unicode data chosen to cover the invisible-character shapes found
+/// so far, not a live query guaranteed to cover every future one (see
+/// both tables' docs for the versions they reflect and their known
+/// gaps).
 pub fn is_untrusted_display_control(c: char) -> bool {
-    c.is_control() || is_format_char(c)
+    c.is_control() || is_format_char(c) || is_default_ignorable_extra(c)
 }
 
 /// Escapes every [`is_untrusted_display_control`] character in `text` to
@@ -145,6 +252,16 @@ const POP_DIRECTIONAL_ISOLATE: char = '\u{2069}';
 pub struct DisplayText(String);
 
 impl DisplayText {
+    /// **Losing the isolation wrapping is the caller's responsibility to
+    /// avoid, not something this type prevents** (response 118 Q2): this
+    /// returns the escaped-and-isolated text as a plain `&str`, and
+    /// nothing stops a caller from slicing, truncating, or concatenating
+    /// it into a larger string in a way that separates the isolate marks
+    /// from the content they wrap. `DisplayText` guarantees that raw,
+    /// *unescaped* untrusted text cannot reach a widget requiring this
+    /// type -- it does not guarantee that whatever a caller builds
+    /// *after* calling this stays isolated. Render the result as-is; do
+    /// not reprocess it.
     pub fn as_str(&self) -> &str {
         &self.0
     }
