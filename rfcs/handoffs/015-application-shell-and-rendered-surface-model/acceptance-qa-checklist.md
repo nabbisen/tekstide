@@ -43,9 +43,9 @@ updated: "2026-07-31"
 
 ## Seam Checklist
 
-- [x] No hardcoded user-facing strings; all through the i18n lookup. Mechanically checked: `shell_view_source_contains_no_raw_string_literal_passed_to_text`, ablation-verified.
-- [x] No hardcoded colours or font sizes; all through `Theme`. Mechanically checked: `shell_view_source_contains_no_raw_color_construction`, `shell_view_source_contains_no_raw_font_size_literal`, both ablation-verified.
-- [x] Seam enforcement is mechanical where practical; otherwise the limitation is recorded. Heuristic source-text scans, not a full parse — recorded as a limitation in `qa-evidence.md`, not claimed as a complete guarantee.
+- [x] No hardcoded user-facing strings; all through the i18n lookup. Mechanically checked, crate-tree-wide (response 128 Required): `no_raw_string_literal_is_passed_to_text_anywhere_in_the_crate`, ablation-verified twice (once against `shell.rs`, once against `main.rs` after the fix broadened coverage to it).
+- [x] No hardcoded colours or font sizes; all through `Theme`. Mechanically checked, crate-tree-wide: `no_raw_color_construction_anywhere_in_the_crate`, `no_raw_font_size_literal_anywhere_in_the_crate`, both ablation-verified.
+- [x] Seam enforcement is mechanical where practical; otherwise the limitation is recorded. Heuristic source-text scans, not a full parse — recorded as a limitation in `qa-evidence.md`, not claimed as a complete guarantee. Scans walk `crates/tekstide/src` recursively rather than naming one file, so new source files are covered automatically.
 - [x] English default and compiled theme default work without RFC-016/RFC-023. Screenshot: `evidence/pr-015-b/shell-chrome-over-real-state.png`; `theme::tests` cover the compiled `Theme` default directly.
 
 ## Project Board Checklist
