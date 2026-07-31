@@ -2,7 +2,7 @@
 title: "RFC-015: Application Shell and Rendered Surface Model - Acceptance / QA Checklist"
 rfc: "RFC-015"
 rfc_file: "../../proposed/015-application-shell-and-rendered-surface-model.md"
-status: "Proposed — implementation in progress (PR-015-B, PR-015-C accepted [responses 128-131]; PR-015-D landed 2026-07-31, not yet reviewed)"
+status: "Proposed — implementation in progress (PR-015-B, PR-015-C accepted [responses 128-131]; PR-015-D: response 132 required fix applied 2026-07-31, pending re-review)"
 target_milestone: "M8"
 source_rfc_status: "Proposed"
 created: "2026-07-29"

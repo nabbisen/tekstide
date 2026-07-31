@@ -100,6 +100,53 @@ fn status_bar_summary_pluralizes_a_single_project_correctly() {
     );
 }
 
+/// Response 132 Required: the status bar's project count must agree
+/// with the number of rows the Project Board actually renders, even
+/// when they are genuinely different collections -- an open project
+/// plus a recent-but-not-open one (RFC-005's model; the board lists
+/// both, `ApplicationShell::state().projects()` lists only the open
+/// one). Before this fix, the status bar counted only open sessions,
+/// so this exact scenario would have shown "1 project" in chrome next
+/// to two rows on the board beneath it.
+#[test]
+fn status_bar_project_count_matches_the_board_row_count_including_recent_projects() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("status-bar-parity-open"))
+        .expect("a freshly created directory is a valid project root");
+
+    let recent = tekstide_core::project::recent::RecentProject::new(
+        tekstide_core::project::ProjectId::new_uuid(),
+        "recent-only-project",
+        "/tmp/recent-only-project",
+        "/tmp/recent-only-project",
+        tekstide_core::project::recent::Timestamp::now_utc(),
+        "Restricted",
+    );
+    app_shell.restore_recent_projects(tekstide_core::project::recent::RecentProjectState {
+        state_version: tekstide_core::project::recent::RECENT_PROJECT_STATE_VERSION,
+        projects: vec![recent],
+    });
+
+    let board_row_count = app_shell.project_board().rows.len();
+    let open_project_count = app_shell.state().projects().len();
+    assert_ne!(
+        board_row_count, open_project_count,
+        "test precondition: an open project plus a recent-but-not-open one must make the two \
+         collections genuinely different sizes, or this test cannot prove the fix matters"
+    );
+
+    let state = state_with(app_shell);
+    let summary = status_bar_summary(&state);
+    assert!(
+        summary.contains(&format!(
+            "{ISOLATE_START}{ISOLATE_START}{board_row_count}{ISOLATE_END}"
+        )),
+        "the status bar must count what the board renders ({board_row_count} rows), not just \
+         open sessions ({open_project_count}): {summary:?}"
+    );
+}
+
 // --- PR-015-C: input routing and focus model --------------------------
 
 /// `pr-015-c-input-routing.md`'s own required check: a stale (never

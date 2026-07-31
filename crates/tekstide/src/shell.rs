@@ -356,8 +356,18 @@ fn route_symbol(route: AppRoute) -> &'static str {
 
 /// The status bar's text, factored out from [`status_bar`] so it is
 /// directly testable without going through `iced`'s `Element` tree.
+/// Response 132 Required: this count must agree with the number of rows
+/// the Project Board actually renders, or the first thing a user sees
+/// is chrome disagreeing with the surface directly below it. Counting
+/// `state.app_shell.state().projects().len()` (open sessions only) was
+/// correct in PR-015-B, when no board existed to disagree with it --
+/// PR-015-D's board deliberately also lists recent-but-not-open
+/// projects (RFC-005's model), so the two collections are different
+/// sizes in general. Using `project_board().rows.len()` here is the
+/// same computation `surface::board::view` renders from, not a second,
+/// independently-arrived-at count that could drift again.
 pub(crate) fn status_bar_summary(state: &State) -> String {
-    let project_count = state.app_shell.state().projects().len();
+    let project_count = state.app_shell.project_board().rows.len();
     state.catalog.get_with_args(
         "status-bar-summary",
         &CatalogArgs::new()
