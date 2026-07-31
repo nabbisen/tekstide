@@ -2,11 +2,11 @@
 title: "RFC-015: Application Shell and Rendered Surface Model - Acceptance / QA Checklist"
 rfc: "RFC-015"
 rfc_file: "../../proposed/015-application-shell-and-rendered-surface-model.md"
-status: "Proposed — implementation pending"
+status: "Proposed — implementation in progress (PR-015-B landed 2026-07-31, not yet reviewed)"
 target_milestone: "M8"
 source_rfc_status: "Proposed"
 created: "2026-07-29"
-updated: "2026-07-29"
+updated: "2026-07-31"
 ---
 
 # RFC-015 Acceptance / QA Checklist
@@ -15,18 +15,18 @@ updated: "2026-07-29"
 
 ## Architecture Checklist
 
-- [ ] `crates/tekstide` is a real GUI application; the text harness is replaced.
-- [ ] `crates/tekstide-core` gains **no GUI dependency**.
-- [ ] Shell renders `shell.state()` and dispatches `AppCommand`.
-- [ ] **No shell-local state mirrors core state.**
-- [ ] Keybindings come from `KeybindingPolicy::linux_mvp()`, not invented.
+- [x] `crates/tekstide` is a real GUI application; the text harness is replaced. `iced::application(boot, shell::update, shell::view)`, `main.rs`'s `print!("{}", shell.render_text())` removed.
+- [x] `crates/tekstide-core` gains **no GUI dependency**. `cargo tree -p tekstide-core --edges normal | grep -i iced` returns nothing.
+- [ ] Shell renders `shell.state()` and dispatches `AppCommand`. Renders `shell.state()`/`shell.route()` (chrome only, this slice). **Dispatches nothing yet** — there is no interactivity in PR-015-B (`Message` is uninhabited); `AppCommand` dispatch begins with real input in PR-015-C. Left unchecked rather than claimed early.
+- [x] **No shell-local state mirrors core state.** `shell::State` holds one `ApplicationShell` plus purely presentational fields (`catalog`, `theme`, `layer_composition_demo_modal_open`) — recorded by inspection per `implementation-handoff.md` §2's own examples, not mechanically checked.
+- [ ] Keybindings come from `KeybindingPolicy::linux_mvp()`, not invented. Not applicable yet — this slice has no keybindings at all (no input routing until PR-015-C). Left unchecked rather than claimed vacuously true.
 
 ## Layer Model Checklist
 
-- [ ] Chrome / content / modal layers composed via `stack`/`opaque`.
-- [ ] Surface code cannot open, populate, or dismiss a modal.
-- [ ] Surface code cannot render trusted chrome.
-- [ ] Enforcement is module privacy, not convention.
+- [x] Chrome / content / modal layers composed via `stack`/`opaque`. Screenshot: `evidence/pr-015-b/layer-composition-demo-modal-above-content.png`.
+- [ ] Surface code cannot open, populate, or dismiss a modal. Not applicable yet — no surface code exists until PR-015-D. Left unchecked rather than claimed vacuously true.
+- [ ] Surface code cannot render trusted chrome. Same as above — not applicable yet.
+- [x] Enforcement is module privacy, not convention (for what exists in this slice). `layer_composition_demo_modal_open`'s setter is private to `shell.rs`; nothing outside it can open the modal. The real enforcement claim (surface code specifically cannot reach the modal layer) awaits PR-015-D's surface module.
 
 ## Input Routing Checklist (PR-015-C)
 
@@ -43,10 +43,10 @@ updated: "2026-07-29"
 
 ## Seam Checklist
 
-- [ ] No hardcoded user-facing strings; all through the i18n lookup.
-- [ ] No hardcoded colours or font sizes; all through `Theme`.
-- [ ] Seam enforcement is mechanical where practical; otherwise the limitation is recorded.
-- [ ] English default and compiled theme default work without RFC-016/RFC-023.
+- [x] No hardcoded user-facing strings; all through the i18n lookup. Mechanically checked: `shell_view_source_contains_no_raw_string_literal_passed_to_text`, ablation-verified.
+- [x] No hardcoded colours or font sizes; all through `Theme`. Mechanically checked: `shell_view_source_contains_no_raw_color_construction`, `shell_view_source_contains_no_raw_font_size_literal`, both ablation-verified.
+- [x] Seam enforcement is mechanical where practical; otherwise the limitation is recorded. Heuristic source-text scans, not a full parse — recorded as a limitation in `qa-evidence.md`, not claimed as a complete guarantee.
+- [x] English default and compiled theme default work without RFC-016/RFC-023. Screenshot: `evidence/pr-015-b/shell-chrome-over-real-state.png`; `theme::tests` cover the compiled `Theme` default directly.
 
 ## Project Board Checklist
 

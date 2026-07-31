@@ -1,6 +1,6 @@
 # RFC-015: Application Shell and Rendered Surface Model - QA Evidence
 
-Status: Proposed — implementation pending
+Status: Proposed — implementation in progress (PR-015-B landed 2026-07-31, not yet reviewed; PR-015-C onward pending)
 Date opened: 2026-07-29
 Date accepted: Pending
 
@@ -27,7 +27,42 @@ Pending PR-015-A acceptance.
 
 ### PR-015-B — Window, layers, chrome, seams
 
-Pending implementation.
+**Scope followed.** `crates/tekstide` is now a real `iced` (0.14) application; `main.rs`'s text harness (`print!("{}", shell.render_text())`) is gone. `crates/tekstide/src/shell.rs` owns layer composition and the (currently uninhabited) `Message`/`update`/`view`; `crates/tekstide/src/theme.rs` owns the `Theme` seam; `crates/tekstide/src/main.rs` owns process boot (recent-project restore, CLI project-path arguments, catalog resolution), matching `implementation-handoff.md` §1's suggested layout.
+
+**This slice is deliberately non-interactive.** `shell::Message` is an uninhabited enum (`pub enum Message {}`) and `shell::update` is unreachable (`match message {}`). No keyboard subscription exists. This is not an oversight: PR-015-C is the slice that introduces any input at all, and `pr-015-c-input-routing.md` is explicit that a slice inventing its own ad hoc key handling ahead of that document is exactly the shape of mistake it warns against. There was therefore nothing for this slice to route.
+
+**Layer composition** — chrome (top bar, status bar) / content (placeholder; no surface exists until PR-015-D) / modal, composed via `stack`/`opaque`, the mechanism RFC-014 C8 proved. The modal layer's only occupant in this slice is a placeholder demo, per `implementation-handoff.md` §8's explicit allowance ("a placeholder dialog for testing the layer is fine and should be clearly marked as such"). It is env-gated (`TEKSTIDE_LAYER_DEMO`, read once at boot), not keyboard-gated — the same convention RFC-014's own spike used for its measurement/demo flags (`TEKSTIDE_MEASURE_CRITERION`, `TEKSTIDE_I18N_DEMO`) — specifically so this slice adds no input path of its own.
+
+**Theme seam.** `theme::Theme` (background/foreground/accent/border/surface colours, three font sizes), compiled default via `Default`. No `border_focused` field: nothing in this slice has a focus concept yet (no surfaces, no input routing), so a field with no caller was removed rather than shipped dead — the same discipline `LocalePreference`'s ahead-of-caller fields are held to elsewhere in this codebase (those are still *reachable*, just always `None` today; an unused method is a different, weaker case and was cut).
+
+**i18n seam.** Wired through the already-reviewed `i18n::Catalog`/`i18n::CatalogArgs` (RFC-016 PR-016-B/D, response 126 approved). New keys added to `en.ftl`: `content-area-placeholder-title`, `content-area-placeholder-body`, `status-bar-summary` (a two-part key: a literal-variant route selector plus a genuine plural count, in one lookup — the same one-key pattern PR-016-D established for `blocked-automation-count`), and the three `layer-demo-modal-*` keys. Not mirrored into `pl.ftl`: those keys are chrome, not plural-machinery content, and `pl.ftl` exists only to prove CLDR plural-category selection (RFC-016 §Non-Goals); leaving them absent there deliberately exercises the real fallback-to-source-locale path rather than being an oversight.
+
+**Seam enforcement — mechanical, per the review gate's stated preference.** Three heuristic scans of `shell.rs`'s own source (`shell::tests`), each ablation-verified by temporarily reintroducing the violation and confirming the specific test fails, then reverting:
+- `shell_view_source_contains_no_raw_string_literal_passed_to_text` — no `text("literal")` call anywhere in `shell.rs`; every string comes from `state.catalog.get(...)` or a helper that does.
+- `shell_view_source_contains_no_raw_color_construction` — no `Color::from_rgb`/`from_rgba` in `shell.rs`; every colour comes from `state.theme`.
+- `shell_view_source_contains_no_raw_font_size_literal` — no bare numeric literal passed to `.size(...)` in `shell.rs`; every size comes from `state.theme.font_size_*()`.
+
+These are heuristics over the file's own text, not a full parse — recorded as a limitation, not a full mechanical guarantee (a literal split across an expression the scan doesn't recognize could slip past). No hardcoded-strings scan exists yet at the `tekstide-core::shell::render_text` level; that is RFC-016 PR-016-E's job and is unaffected by this slice.
+
+**Behavioral tests**, decomposed so the underlying string logic is testable without going through `iced`'s `Element` tree (`status_bar_summary` returns a `String`, called by both `view` and the tests directly):
+- `window_title_resolves_through_the_catalog_not_a_literal` — proves the title comes from a real catalog key (`Catalog::get`'s "missing key renders as the key itself" fallback would fail this loudly if the key name were ever mistyped).
+- `status_bar_summary_reflects_the_default_route_and_zero_projects` and `status_bar_summary_pluralizes_a_single_project_correctly` — the route-label/plural-count summary resolves correctly at zero and at exactly one project (the English singular/plural boundary), reusing PR-016-D's own plural machinery through a real, non-numeric-plus-numeric one-key lookup (`status-bar-summary`, structured like `blocked-automation-count`). Both assertions include Fluent's automatic bidi isolate marks explicitly (two select-expression placeables in one pattern each get isolated, with the inner `{$count}` isolated a second time nested inside) — the same accepted double-isolation response 125 ruled on, arising here from adjacent select expressions rather than `CatalogArgs::untrusted`, and asserted literally rather than stripped, matching `i18n::tests`' own convention.
+
+**No GUI dependency in `tekstide-core`, verified not assumed.** `cargo tree -p tekstide-core --edges normal | grep -i iced` returns nothing.
+
+**No shell-local state mirrors core state.** `shell::State` holds exactly one `ApplicationShell` (the sole source of model state) plus purely presentational fields: `catalog`, `theme`, and `layer_composition_demo_modal_open` (this slice's only "which zone has focus, whether a modal is open"-shaped field, and it is scaffolding, not a real modal occupant). This is recorded by inspection, per `implementation-handoff.md` §2's own examples of what counts as legitimate shell-local state — there is no automated check for "no field secretly duplicates a core value" and none is claimed.
+
+**Screenshot evidence** (response 127's standing convention: `niri msg action screenshot-window --id <id> --path <repo-relative-file>`, targeted by window ID so the owner's desktop focus was never touched — no `focus-window` call was made or needed, since this slice has no input to deliver):
+
+- `evidence/pr-015-b/shell-chrome-over-real-state.png` — the shell running with no projects: window titled "Tekstide" (confirming the i18n-sourced window title), top bar, content placeholder, status bar reading "Project Board | 0 projects" (confirming `status_bar_summary` against real, empty `ApplicationShell` state).
+- `evidence/pr-015-b/layer-composition-demo-modal-above-content.png` — `TEKSTIDE_LAYER_DEMO=1`: the placeholder dialog renders centered, above the content area, chrome still visible above and below it — the `stack`/`opaque` composition holds.
+
+**What these screenshots prove, and what they must not be cited for** (response 127, so a future closeout does not overclaim from them):
+- They prove Tekstide's own shell — not the RFC-014 spike — actually boots on `iced`, renders chrome over real `ApplicationShell` state, and composes a layer above content. That is "the product is wired up," and nothing more.
+- **They do not re-prove substrate modal composition.** RFC-014 PR-014-D already did that, with a stronger artifact (`evidence/pr-014-d/genuine-and-adversarial-dialog-one-frame.png`: a real modal beside an adversarial terminal imitation in one frame). A placeholder box here adds nothing to that claim.
+- **They do not make the RFC-009 §212 trusted-UI claim.** That claim is about a trusted dialog composited above *untrusted terminal output*; there is no terminal surface until RFC-017, and no untrusted content renders anywhere in this slice. The security-relevant version of this evidence lands in RFC-018, not here.
+
+Gates run 2026-07-31: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (490 `tekstide-core` + 23 `tekstide` — up from 15, 8 net new — + 18 `tekstide-gui-spike`, 0 failures), `git diff --check` — all passed.
 
 ### PR-015-C — Input routing and focus model
 

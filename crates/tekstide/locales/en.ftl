@@ -39,3 +39,27 @@ blocked-automation-count = { $count ->
     [one] {$count} blocked automation
    *[other] {$count} blocked automations
 }
+
+# RFC-015 PR-015-B: chrome and layer-composition-demo keys. No real
+# surface exists yet (PR-015-D), so the content area shows only this
+# placeholder; `status-bar-summary` covers both the two possible routes
+# (a literal-variant selector, exactly `blocked-automation-count`'s
+# non-numeric branches) and a genuine plural count in one lookup, per
+# the same one-key pattern PR-016-D established.
+content-area-placeholder-title = No surface rendered yet
+content-area-placeholder-body = RFC-015 PR-015-D adds the Project Board surface here.
+
+status-bar-summary = { $route ->
+    [project-board] Project Board
+   *[active-project-workspace] Project Workspace
+} | { $count ->
+    [one] {$count} project
+   *[other] {$count} projects
+}
+
+# Scaffolding for this slice's own layer-composition screenshot evidence
+# only (see `shell.rs`'s module doc) -- not a real dialog. RFC-022 supplies
+# real trusted dialogs.
+layer-demo-modal-title = Layer Composition Demo
+layer-demo-modal-body = This placeholder proves the modal layer renders above content, never inside it.
+layer-demo-modal-dismiss-hint = Scaffolding only -- PR-015-C replaces this with real input routing.

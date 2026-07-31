@@ -2999,6 +2999,7 @@ name = "tekstide"
 version = "0.3.0"
 dependencies = [
  "fluent-bundle",
+ "iced",
  "sys-locale",
  "tekstide-core",
  "unic-langid",

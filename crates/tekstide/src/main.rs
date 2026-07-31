@@ -1,28 +1,38 @@
-// RFC-016 PR-016-B: no caller yet. RFC-015 (the shell that would render
-// localized chrome through `i18n::Catalog`) has not been implemented --
-// `main.rs` below predates it and only dumps `ApplicationShell`'s plain-
-// text debug rendering, which is not RFC-015's rendered surface and is
-// not in scope for localization. Matching PR-016-C's `text_safety`
-// precedent: proven by this module's own tests, not by a fabricated call
-// site (`quote_untrusted` had the identical "no re-review, do not stub
-// anything" ruling in response 118 Q1).
-//
-// `pub`, not a blanket `#[allow(dead_code)]` (response 122 Required 3):
-// a module-level allow suppresses the lint for everything added here
-// from now on, including code that becomes genuinely dead later --
-// exactly where a headless module most needs the compiler's help.
-// Making the module `pub` lets the lint keep working for the right
-// reason instead.
+// RFC-015 PR-015-B: `crates/tekstide` becomes a real `iced` application.
+// The RFC-016 PR-016-B text harness this module used to be (printing
+// `shell.render_text()` and exiting) is gone -- `i18n::Catalog` now has
+// its real caller, and `shell`/`theme` hold the layer composition,
+// chrome, and theme/i18n seams `implementation-handoff.md` describes.
+// `pub`, not `#[allow(dead_code)]` (response 122 Required 3 precedent):
+// letting the dead-code lint keep working is more useful than a blanket
+// suppression, including for whatever in these modules is genuinely
+// unused later.
 pub mod i18n;
+mod shell;
+mod theme;
 
+use std::path::{Path, PathBuf};
+
+use tekstide_core::project::recent::{AppStatePathProvider, RecentProjectStore};
 use tekstide_core::shell::ApplicationShell;
 
-fn main() -> std::process::ExitCode {
-    let mut shell = ApplicationShell::new();
-    let store = match tekstide_core::project::recent::AppStatePathProvider::linux_default() {
-        Ok(path_provider) => Some(tekstide_core::project::recent::RecentProjectStore::new(
-            path_provider,
-        )),
+fn main() -> iced::Result {
+    iced::application(boot, shell::update, shell::view)
+        .title(shell::State::window_title)
+        .run()
+}
+
+/// `iced::application`'s boot function: called once, with no arguments,
+/// so all of this crate's process bootstrapping (recent-project restore,
+/// CLI project-path arguments, catalog resolution) has to happen inside
+/// it rather than in `main` beforehand -- `iced`'s `BootFn` requires
+/// `Fn() -> State`, not `FnOnce`, which rules out constructing state in
+/// `main` and moving it in.
+fn boot() -> shell::State {
+    let mut app_shell = ApplicationShell::new();
+
+    let store = match AppStatePathProvider::linux_default() {
+        Ok(path_provider) => Some(RecentProjectStore::new(path_provider)),
         Err(error) => {
             eprintln!("{error}");
             None
@@ -31,27 +41,34 @@ fn main() -> std::process::ExitCode {
 
     if let Some(store) = &store {
         match store.load() {
-            Ok(recent_project_state) => shell.restore_recent_projects(recent_project_state),
-            Err(error) => {
-                eprintln!("{error}");
-            }
+            Ok(recent_project_state) => app_shell.restore_recent_projects(recent_project_state),
+            Err(error) => eprintln!("{error}"),
         }
     }
 
+    // No window has opened yet at this point, so exiting on an invalid
+    // CLI project path preserves the pre-GUI harness's exact behaviour
+    // (abort rather than boot with a partially-applied argument list)
+    // without needing `iced::Result`/`iced::Error` to express a custom
+    // exit code.
     for selected_path in std::env::args_os().skip(1) {
-        if let Err(error) = shell.add_project_from_path(selected_path) {
+        if let Err(error) = app_shell.add_project_from_path(selected_path) {
             eprintln!("{error}");
-            return std::process::ExitCode::FAILURE;
+            std::process::exit(1);
         }
     }
 
     if let Some(store) = &store
-        && let Err(error) = store.save(&shell.recent_project_state())
+        && let Err(error) = store.save(&app_shell.recent_project_state())
     {
         eprintln!("{error}");
-        return std::process::ExitCode::FAILURE;
+        std::process::exit(1);
     }
 
-    print!("{}", shell.render_text());
-    std::process::ExitCode::SUCCESS
+    let catalog = i18n::Catalog::resolve(i18n::LocalePreference::default(), Some(&locales_dir()));
+    shell::State::new(app_shell, catalog)
+}
+
+fn locales_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")
 }
