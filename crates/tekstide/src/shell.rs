@@ -223,15 +223,29 @@ pub fn view(state: &State) -> Element<'_, Message> {
     }
 }
 
-/// Structural proof this module cannot bypass modal exclusivity:
-/// `route_non_modal_input` needs an `input::ModalAbsent`, obtainable
-/// only by checking `state.modal` itself -- there is no other way to
-/// reach [`non_modal_subscription`]. See `input`'s module doc for why
-/// deleting this `match` is a compile error, not a behaviour change.
+/// Structural proof this module cannot bypass modal exclusivity for the
+/// *call*: `route_non_modal_input` needs an `input::ModalAbsent`,
+/// obtainable only by checking `state.modal` itself -- there is no other
+/// way to reach [`non_modal_subscription`]. See `input`'s module doc for
+/// why deleting this `match` is a compile error, not a behaviour change.
+///
+/// **What that alone does not prove** (response 130 Required 1): actual
+/// exclusivity -- that `SurfaceInput`/`TextStream` are never produced
+/// while a modal is shown -- also depends on `iced` tearing down the
+/// non-modal subscription (and the `ModalAbsent` it captured, which is
+/// `Copy` and therefore can outlive the instant it was checked) the
+/// moment this function starts returning [`input::SubscriptionMode::Modal`]
+/// instead. That is a real dependency on `iced`'s subscription-rebuild
+/// lifecycle, not a second type-level guarantee -- named here rather
+/// than left implicit, and `input::SubscriptionMode::for_modal` is
+/// tested directly (`shell::tests`) so at least the branch this function
+/// picks is asserted, even though the framework half is not.
 pub fn subscription(state: &State) -> Subscription<Message> {
-    match input::ModalAbsent::check(&state.modal) {
-        Some(proof) => non_modal_subscription(proof, state.focus).map(Message::Input),
-        None => modal_subscription(),
+    match input::SubscriptionMode::for_modal(&state.modal) {
+        input::SubscriptionMode::NonModal(proof) => {
+            non_modal_subscription(proof, state.focus).map(Message::Input)
+        }
+        input::SubscriptionMode::Modal => modal_subscription(),
     }
 }
 

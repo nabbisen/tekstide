@@ -154,3 +154,67 @@ fn tab_cycles_focus_even_with_a_terminal_focused() {
         RoutedInput::FocusPrevious
     );
 }
+
+/// Response 130 Recommended: `format_binding` only handles
+/// `Key::Character` -- a `KeybindingPolicy` rule bound to a named key
+/// (`F1`, `Escape`, `Delete`) would make `matching_global_action` return
+/// `None` for it, silently falling through to `SurfaceInput` and
+/// quietly defeating "global keybindings are not capturable by a
+/// surface" for that one binding. No live gap today (both real
+/// `default_binding`s are single-character), but this test fails the
+/// day that changes, which is the day it matters, rather than staying
+/// silent until someone notices a keybinding "doesn't work."
+#[test]
+fn every_default_binding_in_linux_mvp_round_trips_through_format_binding() {
+    let policy = KeybindingPolicy::linux_mvp();
+    for rule in &policy.rules {
+        let Some(binding) = rule.default_binding else {
+            continue;
+        };
+        let press = key_press_for_binding(binding);
+        assert_eq!(
+            super::format_binding(&press),
+            Some(binding.to_string()),
+            "binding {binding:?} (action {:?}) does not round-trip through format_binding -- \
+             it will silently fall through to SurfaceInput instead of reaching the shell",
+            rule.action
+        );
+    }
+}
+
+/// Reconstructs a plausible `KeyPress` for a binding string like
+/// `"Ctrl+Alt+P"` -- the inverse of `format_binding`, built only for
+/// this test. Panics on a key segment it does not recognize rather than
+/// silently skipping it, so a future named-key binding is a loud
+/// failure here, not a silent gap.
+fn key_press_for_binding(binding: &str) -> KeyPress {
+    let mut modifiers = iced::keyboard::Modifiers::empty();
+    let mut parts = binding.split('+').peekable();
+    let mut key_segment = "";
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            key_segment = part;
+            break;
+        }
+        match part {
+            "Ctrl" => modifiers |= iced::keyboard::Modifiers::CTRL,
+            "Alt" => modifiers |= iced::keyboard::Modifiers::ALT,
+            "Shift" => modifiers |= iced::keyboard::Modifiers::SHIFT,
+            other => {
+                panic!("test does not know how to parse modifier {other:?} in binding {binding:?}")
+            }
+        }
+    }
+
+    assert_eq!(
+        key_segment.chars().count(),
+        1,
+        "test does not know how to construct a KeyPress for named key segment {key_segment:?} \
+         in binding {binding:?} -- extend this helper (and check format_binding still needs to \
+         change too) rather than skip it"
+    );
+    KeyPress {
+        key: iced::keyboard::Key::Character(key_segment.to_lowercase().into()),
+        modifiers,
+    }
+}

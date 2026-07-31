@@ -86,14 +86,27 @@ Gates run 2026-07-31: `cargo fmt --all --check`, `cargo clippy --workspace --all
 
 All three probed by temporarily adding the offending code to `shell.rs`, confirming the exact compile error, then reverting — `git diff --check` clean afterward.
 
-**Modal exclusivity is structural in `shell::subscription`**, not "checked":
+**Response 130 Required 1 — corrected: the *call gate* is structural; *exclusivity* additionally depends on `iced`'s subscription lifecycle, and that dependency was unstated.** The original wording here claimed "modal exclusivity is structural... not 'checked'" without qualification. That overstates what the type proves. `route_non_modal_input` genuinely cannot be called without a `ModalAbsent`, and none can be constructed outside `input` — the *call* is gated structurally, confirmed above. But `ModalAbsent` is `Copy` (required by `.with()`'s `Hash` bound, so it can be threaded into a long-lived subscription closure), which means a proof obtained once can outlive the instant it was true. The architect probed this directly:
+```
+modal active = true
+routed anyway with a stale proof -> Surface(SurfaceInput { target: MainArea, ... })
+SurfaceInput produced while a modal is open? true
+```
+**A captured proof does produce `SurfaceInput` while a modal is active.** This is not exploitable today: `shell::subscription` re-evaluates on each rebuild and returns `modal_subscription()` once `state.modal` is `Some`, so the non-modal subscription — and its captured proof — is torn down by `iced` before that stale proof could ever be used against a real key event. **But the property holds because of `iced`'s subscription-rebuild lifecycle, not because of the type alone.** That is the corrected claim: the call gate is structural (type-level, tested by the three compile-fail probes above); full exclusivity is that gate *plus* a framework-lifecycle assumption that `iced` actually tears down a dropped subscription branch promptly. This matters beyond bookkeeping because RFC-022's approval-dialog property ("no keystroke reaches a PTY while a dialog is open") rests on exactly this chain, and RFC-017 will put real PTY keystrokes through it — so it needs to inherit an accurate description of what it depends on, not an overstated one.
+
+To make at least the branch-selection half assertable rather than left implicit, the decision is now extracted into `input::SubscriptionMode`:
 ```rust
-match input::ModalAbsent::check(&state.modal) {
-    Some(proof) => non_modal_subscription(proof, state.focus).map(Message::Input),
-    None => modal_subscription(),
+pub enum SubscriptionMode {
+    NonModal(ModalAbsent),
+    Modal,
+}
+impl SubscriptionMode {
+    pub fn for_modal<T>(modal: &Option<T>) -> Self { /* wraps ModalAbsent::check */ }
 }
 ```
-`modal_subscription()` is a *separate* function producing only `Message::Modal*` variants — it has no path to constructing `RoutedInput::Surface` or `RoutedInput::Terminal` at all. While a modal is shown, the subscription that could produce those is not subscribed, matching the required property verbatim: "not produced," not "produced and discarded."
+`shell::subscription` matches on `SubscriptionMode::for_modal(&state.modal)`; `shell::tests::subscription_mode_reflects_whether_a_modal_is_active` asserts directly that a `State` with a modal yields `Modal` and one without yields `NonModal(_)` — converting that half from an implicit assumption into a tested one, without touching the routing design or fighting `Subscription`'s opacity (`Copy` was kept on `ModalAbsent`, per the architect's explicit instruction not to remove it — `.with()` needs it, and removing it would fight the framework for no gain now that the branch itself is tested).
+
+`modal_subscription()` remains a *separate* function producing only `Message::Modal*` variants — it has no path to constructing `RoutedInput::Surface` or `RoutedInput::Terminal` at all. While a modal is shown, the subscription that could produce those is not subscribed (modulo the framework-lifecycle dependency named above), matching the required property's language: "not produced," not "produced and discarded."
 
 **Precedence, and the one deliberate simplification recorded rather than silently resolved.** `route_non_modal_input` checks, in order: (1) a key matching a live `KeybindingPolicy` rule — global keybindings always win, proven with a terminal nominally focused (`a_global_keybinding_wins_over_a_focused_terminal`); (2) Tab/Shift+Tab, the shell's own focus cycle; (3) `terminal_focus`, if set; (4) otherwise `SurfaceInput` for the focused zone. Tab is checked *ahead of* terminal focus deliberately — whether Tab should instead reach a terminal's text input (shell completion, etc.) is a real, currently unanswerable question with no terminal surface yet to decide it against; recorded for RFC-017, not resolved here (this is RFC-015's Open Question 2, "raw key events or pre-interpreted intents" — answered narrowly: raw `KeyPress` for now, since the actual raw-vs-intent tradeoff has no real surface yet to weigh it against; deferred to whichever of PR-015-D/RFC-019 first needs to decide).
 
@@ -111,14 +124,25 @@ match input::ModalAbsent::check(&state.modal) {
 
 **No `tekstide-core` changes.** All of the above is new `tekstide` code; nothing in `crates/tekstide-core` was touched.
 
-Gates run 2026-07-31: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (490 `tekstide-core` + 35 `tekstide` — up from 23, 12 net new — + 18 `tekstide-gui-spike`, 0 failures), `git diff --check` — all passed.
+Gates run 2026-07-31 (original submission): `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (490 `tekstide-core` + 35 `tekstide` — up from 23, 12 net new — + 18 `tekstide-gui-spike`, 0 failures), `git diff --check` — all passed.
+
+**Response 130 fixes, gates re-run 2026-07-31:** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (490 `tekstide-core` + 37 `tekstide` — up from 35, 2 net new — + 18 `tekstide-gui-spike`, 0 failures), `git diff --check` — all passed.
 
 **Screenshot evidence, with real synthetic input.** Flagged before running, per response 129's explicit instruction, and the owner approved it explicitly before any command ran. Captured exactly per RFC-014's precedent: relaunched with `WAYLAND_DISPLAY` unset (`env -u WAYLAND_DISPLAY TEKSTIDE_LAYER_DEMO=1 ./target/debug/tekstide`) to force the X11/XWayland `winit` backend, `xdotool search --name Tekstide` for the X11 window id, `xdotool windowfocus <id>` (required here — a first attempt via `key --window <id>` alone, without focusing, delivered nothing; `windowactivate` failed outright since niri's `XWayland` support does not answer `_NET_ACTIVE_WINDOW`, but plain `windowfocus` worked), then `xdotool key --window <id> <Key>`. Screenshots captured by niri's own window id (`niri msg action screenshot-window --id <id> --path <file>`, response 127's convention) — a *different* id namespace than xdotool's X11 id, confirmed by cross-checking `niri msg windows`.
 
 - `evidence/pr-015-c/modal-1-initial-dismiss-focused.png` — modal open (`TEKSTIDE_LAYER_DEMO=1`), `ModalContent::default()`'s `Dismiss` focused (`>` marker), matching the code.
-- `evidence/pr-015-c/modal-2-tab-to-acknowledge-focused.png` — after one real `Tab` keystroke: focus moved to `Acknowledge`. Byte-different from the first screenshot (confirmed before treating it as evidence, not assumed from the command succeeding).
-- `evidence/pr-015-c/modal-3-tab-cycles-back-to-dismiss.png` — after a second real `Tab`: focus cycled back to `Dismiss` — proves a genuine two-way cycle, not a one-shot toggle.
+- `evidence/pr-015-c/modal-2-tab-to-acknowledge-focused.png` — after one real `Tab` keystroke: focus moved to `Acknowledge`.
+- `evidence/pr-015-c/modal-3-tab-cycles-back-to-dismiss.png` — after a second real `Tab`: focus cycled back to `Dismiss`.
 - `evidence/pr-015-c/modal-4-escape-dismisses.png` — after a real `Escape` keystroke: the modal is gone, content area and chrome visible underneath, undamaged.
+
+**The cycle proof (response 130), stated precisely, not just "byte-different."** `md5sum` of all four:
+```
+modal-1-initial-dismiss-focused.png        0ce3842440110517b7f51cb963309fc4
+modal-2-tab-to-acknowledge-focused.png     ed18602bd19b1746522409da655e2558
+modal-3-tab-cycles-back-to-dismiss.png     0ce3842440110517b7f51cb963309fc4
+modal-4-escape-dismisses.png               f359fcdcd86c3434c3753364c844000e
+```
+**1 and 3 are byte-identical; 2 differs from both.** If the second `Tab` press had done nothing, 3 would equal 2, not 1. It equals 1 — focus genuinely traversed to `Acknowledge` and back to `Dismiss`. That is proof of a real two-way *cycle*, the property `modal_focus_cycling_never_touches_the_shell_focus_cycle`'s name actually claims, not merely proof that a keystroke changed something on screen.
 
 **What these screenshots prove, and what they do not** (same discipline as response 127 applied to PR-015-B's): they prove the modal's Tab-cycle and Escape-dismiss genuinely work end-to-end through real input, on this exact `iced` substrate. They do not prove modal *exclusivity* (that surface/terminal input is *not produced* while the modal is shown) — that property is structural (`ModalAbsent`, a different subscription function entirely) and is proven by code inspection and the compile-fail probes above, not by a screenshot; there is no surface or terminal yet whose non-delivery a screenshot could show either way.
 
@@ -148,3 +172,4 @@ Pending implementation.
 - **`xdotool windowactivate` does not work under this niri/XWayland setup** (`_NET_ACTIVE_WINDOW` unanswered); `xdotool windowfocus` does. Recorded for the next slice needing synthetic input (PR-015-E onward) so it isn't rediscovered.
 - `SurfaceInput`'s payload has no real consumer yet (PR-015-D); `shell::update` receives and discards it, proven only at the routing layer (`input::tests`).
 - `format_binding`'s modifier ordering (Ctrl, Alt, Shift) matches the two bindings `KeybindingPolicy::linux_mvp()` currently ships; a future binding combining modifiers in an order this function doesn't anticipate would need the function extended, not the policy.
+- **Response 130 Recommended, closed: `format_binding` only handles `Key::Character`.** A `KeybindingPolicy` rule bound to a named key (`F1`, `Escape`, `Delete`) would make `matching_global_action` return `None` for it, silently falling through to `SurfaceInput` and quietly defeating "global keybindings are not capturable by a surface" for that one binding — no live gap today (both real bindings are single-character), but a real one the day a named-key binding is added. `input::tests::every_default_binding_in_linux_mvp_round_trips_through_format_binding` now asserts every real `default_binding` round-trips through `format_binding`; ablation-verified by temporarily giving `OpenSafeCloseDialog` a `Some("F1")` binding in `tekstide-core` — the test failed with a clear message pointing at the unhandled named key — then reverted (`tekstide-core` untouched in the committed diff).

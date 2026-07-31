@@ -4,7 +4,7 @@ use tekstide_core::shell::ApplicationShell;
 
 use super::{Message, ModalButton, ModalContent, State, status_bar_summary};
 use crate::i18n::{Catalog, LocalePreference};
-use crate::input::FocusZone;
+use crate::input::{FocusZone, SubscriptionMode};
 
 fn real_locales_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")
@@ -205,6 +205,35 @@ fn dismissing_the_modal_clears_it_and_leaves_shell_focus_undisturbed() {
     let _ = super::update(&mut state, Message::ModalActivate);
     assert!(state.modal.is_none());
     assert_eq!(state.focus, focus_before);
+}
+
+/// Response 130 Required 2: `SubscriptionMode::for_modal` -- the branch
+/// `shell::subscription` picks -- asserted directly against a real
+/// `State`, rather than left as an untested seam between `ModalAbsent`'s
+/// own tests (`input::tests`) and `route_non_modal_input` given a proof.
+/// This does not, and cannot, prove that `iced` actually tears down the
+/// non-modal subscription when the branch flips to `Modal` -- that half
+/// is a framework-lifecycle dependency, named in the module docs rather
+/// than tested here.
+#[test]
+fn subscription_mode_reflects_whether_a_modal_is_active() {
+    let mut state = state_with(ApplicationShell::new());
+    assert!(matches!(
+        SubscriptionMode::for_modal(&state.modal),
+        SubscriptionMode::NonModal(_)
+    ));
+
+    state.modal = Some(ModalContent::default());
+    assert_eq!(
+        SubscriptionMode::for_modal(&state.modal),
+        SubscriptionMode::Modal
+    );
+
+    state.modal = None;
+    assert!(matches!(
+        SubscriptionMode::for_modal(&state.modal),
+        SubscriptionMode::NonModal(_)
+    ));
 }
 
 /// A `ShellInput` for `OpenProjectBoard` must actually dispatch

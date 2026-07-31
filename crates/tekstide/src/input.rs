@@ -145,6 +145,35 @@ impl ModalAbsent {
     }
 }
 
+/// Response 130 Required 2: the branch `shell::subscription` takes,
+/// extracted so a test can assert it directly instead of the choice
+/// living only inside an opaque `Subscription` value. Naming this
+/// separately from `ModalAbsent` matters for a reason beyond style:
+/// `ModalAbsent` is `Copy` (required by `.with()`'s `Hash` bound for
+/// threading it into a subscription closure), so a proof obtained once
+/// can be held past the instant it was true. The actual exclusivity
+/// guarantee is therefore `ModalAbsent`'s call-time gate *plus* `iced`
+/// tearing down the non-modal subscription -- and its captured proof --
+/// the moment `subscription()` starts returning [`Self::Modal`] instead.
+/// That second half is a framework-lifecycle dependency, not a type-level
+/// one; naming it here, and testing that this function alone picks the
+/// right branch, is what keeps that dependency visible rather than an
+/// implicit assumption RFC-017 could inherit unknowingly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscriptionMode {
+    NonModal(ModalAbsent),
+    Modal,
+}
+
+impl SubscriptionMode {
+    pub fn for_modal<T>(modal: &Option<T>) -> Self {
+        match ModalAbsent::check(modal) {
+            Some(proof) => Self::NonModal(proof),
+            None => Self::Modal,
+        }
+    }
+}
+
 /// The router. Requires [`ModalAbsent`] -- see the module doc for why
 /// deleting the check that produces one is a compile error here, not a
 /// behaviour change.
