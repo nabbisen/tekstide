@@ -1,0 +1,249 @@
+use std::path::{Path, PathBuf};
+
+use tekstide_core::project::ProjectId;
+use tekstide_core::project_board::{AttentionState, BoardRowKind, CountDisplay, ProjectBoardRow};
+
+use super::row_lines;
+use crate::i18n::{Catalog, LocalePreference};
+
+fn real_locales_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")
+}
+
+fn real_catalog() -> Catalog {
+    Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()))
+}
+
+/// A row with every `CountDisplay` field `Unavailable` and a plain,
+/// non-malicious name -- the baseline every test below overrides from.
+fn baseline_row() -> ProjectBoardRow {
+    ProjectBoardRow {
+        project_id: ProjectId::new_uuid(),
+        display_name: "demo-project".to_string(),
+        root_path_hint: "/home/user/demo-project".to_string(),
+        secondary_path_hint: None,
+        availability_label: None,
+        trust_label: "Trusted".to_string(),
+        security_mode_label: "Full Access".to_string(),
+        restricted_mode: false,
+        blocked_automation_count: 0,
+        blocked_automation_labels: Vec::new(),
+        branch_status: CountDisplay::Unavailable,
+        terminal_count: CountDisplay::Unavailable,
+        agent_run_count: CountDisplay::Unavailable,
+        approval_count: CountDisplay::Unavailable,
+        review_count: CountDisplay::Unavailable,
+        dirty_file_count: CountDisplay::Unavailable,
+        attention: AttentionState::Calm,
+        attention_label: AttentionState::Calm.label().to_string(),
+        row_kind: BoardRowKind::ActiveSession,
+    }
+}
+
+/// **`CountDisplay` fidelity, the acceptance criterion RFC-005/RFC-015
+/// both name explicitly**: `Unavailable` and `NotImplemented` must never
+/// render as `0`, or as anything containing a bare `0` that could be
+/// mistaken for a real zero count. Checked against the real rendered
+/// strings, not `CountDisplay::label()`'s output (never called here --
+/// see the module doc).
+#[test]
+fn unavailable_and_not_implemented_never_render_as_zero() {
+    let catalog = real_catalog();
+
+    let mut unavailable_row = baseline_row();
+    unavailable_row.terminal_count = CountDisplay::Unavailable;
+    unavailable_row.agent_run_count = CountDisplay::Unavailable;
+    unavailable_row.approval_count = CountDisplay::Unavailable;
+    unavailable_row.review_count = CountDisplay::Unavailable;
+    unavailable_row.dirty_file_count = CountDisplay::Unavailable;
+
+    let mut not_implemented_row = baseline_row();
+    not_implemented_row.terminal_count = CountDisplay::NotImplemented;
+    not_implemented_row.agent_run_count = CountDisplay::NotImplemented;
+    not_implemented_row.approval_count = CountDisplay::NotImplemented;
+    not_implemented_row.review_count = CountDisplay::NotImplemented;
+    not_implemented_row.dirty_file_count = CountDisplay::NotImplemented;
+
+    for row in [&unavailable_row, &not_implemented_row] {
+        for line in row_lines(row, &catalog) {
+            assert!(
+                !line.contains('0'),
+                "a CountDisplay::Unavailable/NotImplemented field must never render with a \
+                 bare 0 anywhere in its text: {line:?}"
+            );
+        }
+    }
+}
+
+/// The positive case, so the test above is not merely "nothing contains
+/// 0 because nothing renders": a genuine `KnownCount(0)` -- a real,
+/// known-zero terminal count -- legitimately does render `0`, through
+/// real CLDR plural selection (`"0 terminals"`), not a hardcoded string.
+#[test]
+fn a_genuine_known_zero_count_does_render_as_zero() {
+    let catalog = real_catalog();
+    let mut row = baseline_row();
+    row.terminal_count = CountDisplay::KnownCount(0);
+
+    let rendered = row_lines(&row, &catalog);
+    // Fluent's automatic bidi isolation wraps the interpolated `{$count}`
+    // placeable (documented and asserted the same way throughout
+    // `i18n::tests`/`shell::tests` since PR-016-D) -- the literal digit
+    // is `\u{2068}0\u{2069}`, not a bare `0`.
+    assert!(
+        rendered
+            .iter()
+            .any(|line| line.contains("\u{2068}0\u{2069} terminals")),
+        "a real KnownCount(0) must render as a real zero, distinguishable from Unavailable/\
+         NotImplemented by more than coincidence: {rendered:?}"
+    );
+}
+
+/// A single non-numeric `CountDisplay` state renders through real
+/// catalog selection, not `label()` -- proven by checking the exact
+/// wording, which only exists in `en.ftl`, not in `CountDisplay::label()`
+/// (whose `"not available"` differs from this key's `"not available"`
+/// only by coincidence of wording choice, not by being the same code
+/// path -- the two are deliberately kept independent).
+#[test]
+fn unavailable_terminal_count_uses_the_catalog_not_label() {
+    let catalog = real_catalog();
+    let mut row = baseline_row();
+    row.terminal_count = CountDisplay::Unavailable;
+    let rendered = row_lines(&row, &catalog);
+    assert!(
+        rendered
+            .iter()
+            .any(|line| line == "terminals: not available"),
+        "expected the catalog's own wording for an unavailable terminal count: {rendered:?}"
+    );
+}
+
+/// The security-critical case, mirroring response 130's own probe plan:
+/// a project whose *name* carries a live bidi override must render with
+/// the override escaped to its visible `<U+202E>` marker, never live --
+/// exactly RFC-016's Trojan Source threat model, now with a real render
+/// call site to defend for the first time (PR-015-D is the first
+/// surface to render untrusted text at all).
+#[test]
+fn an_untrusted_project_name_with_a_bidi_override_is_escaped_not_live() {
+    let catalog = real_catalog();
+    let mut row = baseline_row();
+    row.display_name = "proj\u{202E}gpj.exe".to_string();
+
+    let rendered = row_lines(&row, &catalog);
+    let name_line = rendered.first().expect("name is always the first line");
+
+    assert!(
+        !name_line.contains('\u{202E}'),
+        "a live bidi override must never survive into the rendered row: {name_line:?}"
+    );
+    assert!(
+        name_line.contains("<U+202E>"),
+        "the override must be escaped to its visible marker by text_safety, not silently \
+         dropped: {name_line:?}"
+    );
+}
+
+/// The same property for `root_path_hint` -- a different untrusted
+/// field, same requirement, proven separately rather than assumed to
+/// follow from the name case.
+#[test]
+fn an_untrusted_root_path_with_a_bidi_override_is_escaped_not_live() {
+    let catalog = real_catalog();
+    let mut row = baseline_row();
+    row.root_path_hint = "/home/user/proj\u{202E}gpj.exe".to_string();
+
+    let rendered = row_lines(&row, &catalog);
+    let path_line = rendered
+        .get(1)
+        .expect("root path is always the second line");
+
+    assert!(!path_line.contains('\u{202E}'));
+    assert!(path_line.contains("<U+202E>"));
+}
+
+/// Ordinary, non-malicious names and paths must render with no visible
+/// `<U+XXXX>` marker -- `text_safety::quote_untrusted` always wraps an
+/// untrusted span in bidi isolate marks unconditionally (a separate,
+/// permanent property, already documented in `text_safety`'s own
+/// module doc), but *escaping* to a visible marker is conditional on
+/// content, not blanket mangling of every project name.
+#[test]
+fn an_ordinary_project_name_renders_unescaped() {
+    let catalog = real_catalog();
+    let row = baseline_row();
+    let rendered = row_lines(&row, &catalog);
+    assert_eq!(rendered[0], "\u{2068}demo-project\u{2069}");
+    assert_eq!(rendered[1], "\u{2068}/home/user/demo-project\u{2069}");
+    assert!(!rendered[0].contains("<U+"));
+    assert!(!rendered[1].contains("<U+"));
+}
+
+/// `blocked_automation_count` reuses PR-016-D's own key -- proven with a
+/// nonzero count (the zero case is deliberately omitted from the row
+/// entirely, see `board::row_lines`, so there is nothing to render when
+/// there is nothing blocked).
+#[test]
+fn a_nonzero_blocked_automation_count_reuses_the_pr_016_d_key() {
+    let catalog = real_catalog();
+    let mut row = baseline_row();
+    row.blocked_automation_count = 3;
+    let rendered = row_lines(&row, &catalog);
+    assert!(
+        rendered
+            .iter()
+            .any(|line| line.contains("blocked automations")),
+        "expected the shared blocked-automation-count key's plural wording: {rendered:?}"
+    );
+}
+
+/// A zero blocked-automation count renders no line at all for it --
+/// proven directly, since silence is the intended behaviour, not an
+/// oversight.
+#[test]
+fn a_zero_blocked_automation_count_renders_no_line_for_it() {
+    let catalog = real_catalog();
+    let row = baseline_row();
+    assert_eq!(row.blocked_automation_count, 0, "test precondition");
+    let rendered = row_lines(&row, &catalog);
+    assert!(
+        !rendered
+            .iter()
+            .any(|line| line.contains("blocked automation"))
+    );
+}
+
+/// Attention state renders through the catalog's own wording, using the
+/// real `AttentionState` enum -- not `attention_label`'s pre-baked
+/// string (which happens to read identically, by design, but is not the
+/// code path under test).
+#[test]
+fn attention_state_renders_through_the_catalog() {
+    let catalog = real_catalog();
+    let mut row = baseline_row();
+    row.attention = AttentionState::Risk;
+    let rendered = row_lines(&row, &catalog);
+    assert!(rendered.iter().any(|line| line == "Risk"));
+}
+
+/// The empty-state keys resolve to real text, not the key itself --
+/// `Catalog::get`'s "missing key renders as the key" fallback would
+/// fail this loudly if any of the three key names were ever mistyped.
+/// Deliberately does not check against `ProjectBoardEmptyState`'s own
+/// pre-baked English (the module doc: those strings are never read).
+#[test]
+fn empty_state_keys_resolve_to_real_catalog_text() {
+    let catalog = real_catalog();
+    for key in [
+        "project-board-empty-heading",
+        "project-board-empty-primary-action",
+        "project-board-empty-secondary-action",
+    ] {
+        let rendered = catalog.get(key);
+        assert_ne!(
+            rendered, key,
+            "empty-state key {key:?} did not resolve to real text -- check the key name against en.ftl"
+        );
+    }
+}

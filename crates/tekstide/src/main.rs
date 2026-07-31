@@ -10,6 +10,7 @@
 pub mod i18n;
 pub mod input;
 mod shell;
+mod surface;
 mod theme;
 
 use std::path::{Path, PathBuf};

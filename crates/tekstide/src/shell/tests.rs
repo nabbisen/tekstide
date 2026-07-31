@@ -425,3 +425,25 @@ fn no_raw_font_size_literal_anywhere_in_the_crate() {
         }
     }
 }
+
+/// Response 130's decision, made mechanical: `CountDisplay`/
+/// `AttentionState::label()` must never be called from this crate's
+/// rendering code -- `surface::board`'s module doc explains why
+/// (hardcoded English at the render layer, and the easiest way to
+/// quietly fail "Unavailable/NotImplemented never render as 0"). Test
+/// fixtures legitimately construct a `.label()` value when building a
+/// `ProjectBoardRow` (the field exists on the core type regardless of
+/// whether this crate reads it back), so `tests.rs` files are exempt,
+/// same as the other scans.
+#[test]
+fn no_count_display_or_attention_label_is_called_anywhere_in_the_crate() {
+    for path in scannable_source_files() {
+        let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
+        assert!(
+            !source.contains(".label()"),
+            "{} calls .label() -- CountDisplay/AttentionState must render through the catalog \
+             (CatalogArgs::number/trusted_symbol), never through label()'s hardcoded English",
+            path.display()
+        );
+    }
+}

@@ -2,7 +2,7 @@
 title: "RFC-015: Application Shell and Rendered Surface Model - Acceptance / QA Checklist"
 rfc: "RFC-015"
 rfc_file: "../../proposed/015-application-shell-and-rendered-surface-model.md"
-status: "Proposed — implementation in progress (PR-015-B accepted [response 128, follow-up confirmed by response 129]; PR-015-C: response 130 required fixes applied 2026-07-31, pending re-review)"
+status: "Proposed — implementation in progress (PR-015-B, PR-015-C accepted [responses 128-131]; PR-015-D landed 2026-07-31, not yet reviewed)"
 target_milestone: "M8"
 source_rfc_status: "Proposed"
 created: "2026-07-29"
@@ -24,9 +24,9 @@ updated: "2026-07-31"
 ## Layer Model Checklist
 
 - [x] Chrome / content / modal layers composed via `stack`/`opaque`. Screenshot: `evidence/pr-015-b/layer-composition-demo-modal-above-content.png`.
-- [ ] Surface code cannot open, populate, or dismiss a modal. Not applicable yet — no surface code exists until PR-015-D. Left unchecked rather than claimed vacuously true.
-- [ ] Surface code cannot render trusted chrome. Same as above — not applicable yet.
-- [x] Enforcement is module privacy, not convention (for what exists in this slice). `state.modal`'s setter is private to `shell.rs`; nothing outside it can open or populate the modal, and dismissal only happens through `update`'s own `ModalActivate`/`ModalDismiss` handling. The real enforcement claim (surface code specifically cannot reach the modal layer) awaits PR-015-D's surface module.
+- [x] Surface code cannot open, populate, or dismiss a modal. `surface::board` (the first and only surface) has no path to `shell::State.modal` at all — it is never passed in; `board::view`'s signature is `(&ProjectBoardViewModel, &Catalog, &Theme) -> Element`. By construction, not a runtime check.
+- [x] Surface code cannot render trusted chrome. `board::view`'s return value only ever fills `shell::content_area`'s content slot; it has no path to `top_bar`/`status_bar`.
+- [x] Enforcement is module privacy, not convention. `state.modal`'s setter is private to `shell.rs`; `surface::board` is never given a `&mut State` or anything reaching `modal` — the same "cannot construct/cannot reach" shape as PR-015-C's input-class privacy, applied to the layer boundary.
 
 ## Input Routing Checklist (PR-015-C)
 
@@ -50,9 +50,9 @@ updated: "2026-07-31"
 
 ## Project Board Checklist
 
-- [ ] `Surface` contract defined and implemented by the Project Board.
-- [ ] Rows render name, branch, trust, terminal count, AgentRun state, pending approvals, last activity.
-- [ ] **`CountDisplay` fidelity: `Unavailable`/`NotImplemented` never render as `0`.** Test required.
+- [x] `Surface` contract defined and implemented by the Project Board. Defined as concrete methods (`surface.rs`'s module doc), not a `trait Surface` — deliberate, with exactly one implementor; recorded as a decision, not an oversight.
+- [x] Rows render name, branch, trust, terminal count, AgentRun state, pending approvals, last activity. `surface/board.rs::row_lines`; name/root path escaped via `text_safety`, branch/terminal/agent-run/approval/review/dirty-file counts via the catalog. "Last activity" is not a field `ProjectBoardRow` exposes — not rendered, not fabricated.
+- [x] **`CountDisplay` fidelity: `Unavailable`/`NotImplemented` never render as `0`.** `unavailable_and_not_implemented_never_render_as_zero` (negative path) + `a_genuine_known_zero_count_does_render_as_zero` (positive path, so the rule is proven to discriminate real zero from fake). `CountDisplay::label()` never called — mechanically enforced (`no_count_display_or_attention_label_is_called_anywhere_in_the_crate`), both ablation-verified.
 
 ## Mode Switching Checklist
 

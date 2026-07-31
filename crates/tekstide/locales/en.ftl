@@ -68,3 +68,79 @@ layer-demo-modal-body = This placeholder proves the modal layer renders above co
 layer-demo-modal-acknowledge = Acknowledge
 layer-demo-modal-dismiss = Dismiss
 layer-demo-modal-dismiss-hint = Tab/Shift+Tab moves focus; Enter or Escape dismisses.
+
+# RFC-015 PR-015-D: the Project Board surface. Empty-state keys are
+# catalog-driven purely from `Option::is_some()` -- no core change
+# needed, unlike the CountDisplay/attention keys below, which select on
+# a real enum the view model already exposes. Never used to render
+# `tekstide-core`'s own pre-baked English for these three strings
+# (`ProjectBoardEmptyState`'s fields exist but are not read).
+project-board-empty-heading = No projects yet
+project-board-empty-primary-action = Add Project
+project-board-empty-secondary-action = Open from path
+
+# Every `project-board-*-count` key below shares `blocked-automation-count`'s
+# vocabulary for `CountDisplay`'s three non-numeric states
+# (`not_implemented`/`unavailable`/`unknown`) -- learned once, reused
+# everywhere a `CountDisplay` needs a selector. `CountDisplay::label()` is
+# never called for any of these (response 130's explicit decision,
+# `surface/board.rs`'s module doc) -- these keys are the alternative
+# that makes "never render Unavailable/NotImplemented as 0" a property
+# of real CLDR plural selection, not a string comparison to `label()`'s
+# output.
+project-board-branch-status = { $status ->
+    [not_implemented] branch: not implemented
+    [unavailable] branch: not available
+    [unknown] branch: unknown
+   *[other] branch: {$status}
+}
+
+project-board-terminal-count = { $count ->
+    [not_implemented] terminals: not implemented
+    [unavailable] terminals: not available
+    [unknown] terminals: unknown
+    [one] {$count} terminal
+   *[other] {$count} terminals
+}
+
+project-board-agent-run-count = { $count ->
+    [not_implemented] agent runs: not implemented
+    [unavailable] agent runs: not available
+    [unknown] agent runs: unknown
+    [one] {$count} agent run
+   *[other] {$count} agent runs
+}
+
+project-board-approval-count = { $count ->
+    [not_implemented] approvals: not implemented
+    [unavailable] approvals: not available
+    [unknown] approvals: unknown
+    [one] {$count} pending approval
+   *[other] {$count} pending approvals
+}
+
+project-board-review-count = { $count ->
+    [not_implemented] reviews: not implemented
+    [unavailable] reviews: not available
+    [unknown] reviews: unknown
+    [one] {$count} review
+   *[other] {$count} reviews
+}
+
+project-board-dirty-file-count = { $count ->
+    [not_implemented] dirty files: not implemented
+    [unavailable] dirty files: not available
+    [unknown] dirty files: unknown
+    [one] {$count} dirty file
+   *[other] {$count} dirty files
+}
+
+project-board-attention = { $attention ->
+    [risk] Risk
+    [approval_needed] Approval needed
+    [review] Review
+    [failed] Failed
+    [running] Running
+    [dirty] Dirty
+   *[calm] Calm
+}

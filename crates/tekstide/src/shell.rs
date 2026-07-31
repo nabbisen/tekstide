@@ -379,6 +379,32 @@ fn status_bar(state: &State) -> Element<'_, Message> {
 }
 
 fn content_area(state: &State) -> Element<'_, Message> {
+    let content: Element<'_, Message> = match state.app_shell.route() {
+        AppRoute::ProjectBoard => crate::surface::board::view(
+            &state.app_shell.project_board(),
+            &state.catalog,
+            &state.theme,
+        ),
+        AppRoute::ActiveProjectWorkspace => no_surface_placeholder(state),
+    };
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_base_theme: &iced::Theme| container::Style {
+            background: Some(Background::Color(state.theme.background())),
+            text_color: Some(state.theme.foreground()),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// `AppRoute::ActiveProjectWorkspace` has no real surface yet -- the
+/// editor/explorer/terminal surfaces RFC-019/RFC-017 add. Kept as its
+/// own function (not a shared default `content_area` fallback) so the
+/// day a real workspace surface lands, this becomes the one line that
+/// changes.
+fn no_surface_placeholder(state: &State) -> Element<'_, Message> {
     container(
         column![
             text(state.catalog.get("content-area-placeholder-title"))
@@ -391,11 +417,6 @@ fn content_area(state: &State) -> Element<'_, Message> {
     .width(Length::Fill)
     .height(Length::Fill)
     .padding(16)
-    .style(move |_base_theme: &iced::Theme| container::Style {
-        background: Some(Background::Color(state.theme.background())),
-        text_color: Some(state.theme.foreground()),
-        ..container::Style::default()
-    })
     .into()
 }
 
