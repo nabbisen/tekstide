@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 
 use tekstide_core::shell::ApplicationShell;
 
-use super::{State, status_bar_summary};
+use super::{Message, ModalButton, ModalContent, State, status_bar_summary};
 use crate::i18n::{Catalog, LocalePreference};
+use crate::input::FocusZone;
 
 fn real_locales_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")
@@ -12,6 +13,19 @@ fn real_locales_dir() -> PathBuf {
 fn state_with(app_shell: ApplicationShell) -> State {
     let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
     State::new(app_shell, catalog)
+}
+
+fn fresh_project_dir(label: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "tekstide-shell-test-{label}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
 }
 
 /// The window title comes from the catalog, not a literal -- if the key
@@ -84,6 +98,165 @@ fn status_bar_summary_pluralizes_a_single_project_correctly() {
         ),
         "exactly one project must use the singular form, not \"1 projects\""
     );
+}
+
+// --- PR-015-C: input routing and focus model --------------------------
+
+/// `pr-015-c-input-routing.md`'s own required check: a stale (never
+/// existed) `TerminalId` must be treated as not-live, not
+/// best-effort-accepted.
+///
+/// **Only the negative path is testable from this crate today.** A
+/// positive "genuinely live terminal" fixture needs `AppState::project_mut`
+/// to attach a `TerminalSession`, and that method is `#[cfg(test)]`-gated
+/// *inside `tekstide-core` itself* with zero production call sites yet
+/// (terminal creation is RFC-017's job -- `grep`-confirmed: every
+/// `add_terminal_session` caller in the tree is a `tekstide-core` test).
+/// `#[cfg(test)]` items do not cross the crate boundary, so `tekstide`'s
+/// own tests cannot reach it, and widening `tekstide-core`'s API just to
+/// satisfy this test would be exactly the "change to `tekstide-core`
+/// state models without raising it first" `implementation-handoff.md`
+/// §8 forbids. Recorded as a real, disclosed testability gap in
+/// `qa-evidence.md`, not hidden behind a fixture that only proves the
+/// easy half.
+#[test]
+fn a_never_added_terminal_id_is_not_live() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("stale-terminal"))
+        .expect("a freshly created directory is a valid project root");
+    let stale_id = tekstide_core::domain::TerminalId::new_uuid();
+    let stream =
+        crate::input::terminal_stream_for_test(stale_id, iced::keyboard::Modifiers::empty());
+    assert!(!super::terminal_stream_targets_a_live_terminal(
+        &app_shell, &stream
+    ));
+}
+
+/// The other negative case: no active project at all. Exercises the
+/// `active_project()` short-circuit specifically (distinct code path
+/// from the "active project exists, terminal not in it" case above).
+#[test]
+fn with_no_active_project_no_terminal_id_is_ever_live() {
+    let app_shell = ApplicationShell::new();
+    let some_id = tekstide_core::domain::TerminalId::new_uuid();
+    let stream =
+        crate::input::terminal_stream_for_test(some_id, iced::keyboard::Modifiers::empty());
+    assert!(!super::terminal_stream_targets_a_live_terminal(
+        &app_shell, &stream
+    ));
+}
+
+/// **The real focus-trap test RFC-014 R6 requires**, not a structural
+/// argument: while a modal is shown, Tab/Shift+Tab must cycle only the
+/// modal's own two targets, and `state.focus` (the shell's own focus
+/// cycle) must never move -- proven by dispatching real `Message`
+/// values through `update`, not by inspecting the routing code and
+/// asserting it "should" hold.
+#[test]
+fn modal_focus_cycling_never_touches_the_shell_focus_cycle() {
+    let mut state = state_with(ApplicationShell::new());
+    state.modal = Some(ModalContent::default());
+    let focus_before = state.focus;
+
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    assert_eq!(
+        state.modal.as_ref().map(|modal| modal.focus),
+        Some(ModalButton::Acknowledge),
+        "ModalFocusNext must cycle the modal's own focus"
+    );
+    assert_eq!(
+        state.focus, focus_before,
+        "the shell's own focus cycle must not move while a modal is shown"
+    );
+
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    assert_eq!(
+        state.modal.as_ref().map(|modal| modal.focus),
+        Some(ModalButton::Dismiss)
+    );
+    assert_eq!(state.focus, focus_before);
+
+    let _ = super::update(&mut state, Message::ModalFocusPrevious);
+    assert_eq!(
+        state.modal.as_ref().map(|modal| modal.focus),
+        Some(ModalButton::Acknowledge)
+    );
+    assert_eq!(state.focus, focus_before);
+}
+
+/// Dismissal (`Enter`/`ModalActivate` or `Escape`/`ModalDismiss`) clears
+/// the modal -- and because the shell's own `focus` field was never
+/// touched while the modal was shown (proven above), whatever it held
+/// before is simply still there afterward. That *is* "focus returns to
+/// the invoking element" (UI/UX §18): there is nothing to restore
+/// because nothing else was ever allowed to move it.
+#[test]
+fn dismissing_the_modal_clears_it_and_leaves_shell_focus_undisturbed() {
+    let mut state = state_with(ApplicationShell::new());
+    state.modal = Some(ModalContent::default());
+    let focus_before = state.focus;
+
+    let _ = super::update(&mut state, Message::ModalDismiss);
+    assert!(state.modal.is_none());
+    assert_eq!(state.focus, focus_before);
+
+    state.modal = Some(ModalContent::default());
+    let _ = super::update(&mut state, Message::ModalActivate);
+    assert!(state.modal.is_none());
+    assert_eq!(state.focus, focus_before);
+}
+
+/// A `ShellInput` for `OpenProjectBoard` must actually dispatch
+/// `AppCommand::OpenProjectBoard` -- proven by starting from
+/// `ActiveProjectWorkspace` (reachable only with a project open and its
+/// mode toggled) and confirming the route changes, not merely that
+/// `update` returns without panicking.
+#[test]
+fn a_project_board_shell_input_dispatches_the_real_app_command() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("shell-input-dispatch"))
+        .expect("a freshly created directory is a valid project root");
+    app_shell.dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+    assert_eq!(
+        app_shell.route(),
+        tekstide_core::route::AppRoute::ActiveProjectWorkspace,
+        "test precondition: must not already be on the Project Board route"
+    );
+
+    let mut state = state_with(app_shell);
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenProjectBoard,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+
+    assert!(status_bar_summary(&state).contains("Project Board"));
+}
+
+/// Focus cycling: with a single real `FocusZone` variant today,
+/// `FocusNext`/`FocusPrevious` are legitimate no-ops -- proven directly
+/// rather than assumed, so the day `FocusZone` grows a second variant
+/// (PR-015-E), this test either still passes trivially or fails loudly
+/// pointing at exactly what needs updating.
+#[test]
+fn focus_next_and_previous_route_through_update() {
+    let mut state = state_with(ApplicationShell::new());
+    let focus_before = state.focus;
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::FocusNext),
+    );
+    assert_eq!(state.focus, focus_before);
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::FocusPrevious),
+    );
+    assert_eq!(state.focus, focus_before);
+    let _ = FocusZone::MainArea;
 }
 
 // --- Mechanical seam scans -------------------------------------------

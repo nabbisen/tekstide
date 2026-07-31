@@ -1,9 +1,9 @@
-//! RFC-015 PR-015-B: window, layer composition, chrome, and the theme
-//! and i18n seams. **No surfaces yet** -- PR-015-D adds the Project
-//! Board; PR-015-C adds real input routing (`ShellInput`/`SurfaceInput`/
-//! `TextStream`). This slice is deliberately non-interactive: it renders
-//! a static chrome over real `ApplicationShell` state and has no message
-//! that changes anything, which is why `Message` below is uninhabited.
+//! RFC-015 PR-015-B/PR-015-C: window, layer composition, chrome, the
+//! theme/i18n seams (PR-015-B), and real input routing (PR-015-C).
+//! **No surfaces yet** -- PR-015-D adds the Project Board. Input
+//! *classification* lives in [`crate::input`]; this module is the one
+//! place that turns a classified [`input::RoutedInput`] into an actual
+//! state change, via [`update`].
 //!
 //! **Layer composition** follows RFC-015's layer model:
 //!
@@ -11,46 +11,94 @@
 //! | --- | --- | --- |
 //! | Chrome | top bar, status bar | Trusted |
 //! | Content | placeholder (no surface yet) | untrusted content will land here from PR-015-D |
-//! | Modal | layer-composition demo only in this slice | Trusted, exclusive |
+//! | Modal | layer-composition demo | Trusted, exclusive |
 //!
 //! Composed via `stack`/`opaque`, the mechanism the RFC-014 spike proved
 //! (C8). Real dialogs are RFC-022's job; this slice's modal occupant is
-//! a placeholder that exists solely to prove the layer renders above
-//! content rather than inside it -- exactly the exception
-//! `implementation-handoff.md` §8 allows ("a placeholder dialog for
-//! testing the layer is fine and should be clearly marked as such").
+//! still the PR-015-B placeholder (`implementation-handoff.md` §8's
+//! explicit allowance), but PR-015-C makes it genuinely dismissible via
+//! real input, since a placeholder that never closes cannot exercise
+//! the focus-trap and modal-exclusivity properties this slice must
+//! prove. Opening it remains env-gated (`TEKSTIDE_LAYER_DEMO`, read once
+//! at boot) -- there is still no real trigger to open a dialog
+//! (RFC-022), only a real way to close one now that input exists.
 //!
-//! **The demo modal is env-gated, not keyboard-gated.** `TEKSTIDE_LAYER_DEMO`
-//! is read once at boot, the same convention the RFC-014 spike used for
-//! its own demo/measurement flags (`TEKSTIDE_MEASURE_CRITERION`,
-//! `TEKSTIDE_I18N_DEMO`). Deliberately not a keyboard toggle: PR-015-C
-//! is the slice that introduces any input at all, and giving this slice
-//! its own ad hoc key handler would be exactly the kind of pre-empting
-//! of PR-015-C's job that `pr-015-c-input-routing.md` warns against.
+//! **Modal exclusivity is structural**, via [`input::ModalAbsent`]: see
+//! [`subscription`] and `input`'s module doc. While `state.modal` is
+//! `Some`, the *only* subscription active is [`modal_subscription`],
+//! which has no path to producing `input::SurfaceInput` or
+//! `input::TextStream` at all -- not "produced and ignored."
 //!
 //! **No shell-local state mirrors core state** (`implementation-handoff.md`
 //! §2). [`State`] holds exactly one [`ApplicationShell`] -- the sole
 //! source of model state -- plus purely presentational fields
-//! (`catalog`, `theme`, `layer_composition_demo_modal_open`), none of
-//! which duplicate a value already inside it.
+//! (`catalog`, `theme`, `focus`, `modal`), none of which duplicate a
+//! value already inside it.
 
 use iced::widget::{center, column, container, opaque, stack, text};
-use iced::{Background, Border, Element, Length, Task};
+use iced::{Background, Border, Element, Length, Subscription, Task, keyboard};
 
+use tekstide_core::command::AppCommand;
+use tekstide_core::navigation::{KeybindingPolicy, NavigationAction};
 use tekstide_core::route::AppRoute;
 use tekstide_core::shell::ApplicationShell;
 
 use crate::i18n::{Catalog, CatalogArgs};
+use crate::input::{self, FocusZone, RoutedInput, TextStream};
 use crate::theme::Theme;
+
+/// The two focusable targets of the layer-composition demo modal --
+/// still scaffolding (see the module doc), but now real enough for a
+/// genuine focus-trap test: while `state.modal` is `Some`, Tab/Shift+Tab
+/// must cycle only between these two, never `state.focus`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModalButton {
+    Acknowledge,
+    Dismiss,
+}
+
+impl ModalButton {
+    const ORDER: [ModalButton; 2] = [ModalButton::Acknowledge, ModalButton::Dismiss];
+
+    fn next(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + 1) % Self::ORDER.len()]
+    }
+
+    fn previous(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + Self::ORDER.len() - 1) % Self::ORDER.len()]
+    }
+}
+
+pub(crate) struct ModalContent {
+    focus: ModalButton,
+}
+
+impl Default for ModalContent {
+    fn default() -> Self {
+        // Defaulting to the less destructive-sounding target, the same
+        // reasoning the RFC-014 spike's `DialogButton::Deny` default
+        // used -- this modal has no real consequence either way, but the
+        // convention is cheap to keep consistent.
+        Self {
+            focus: ModalButton::Dismiss,
+        }
+    }
+}
 
 pub struct State {
     app_shell: ApplicationShell,
     catalog: Catalog,
     theme: Theme,
-    /// Layer-composition demo scaffolding only -- see the module doc.
-    /// Set once at boot from `TEKSTIDE_LAYER_DEMO`; nothing in this
-    /// slice can change it at runtime, since there is no input yet.
-    layer_composition_demo_modal_open: bool,
+    focus: FocusZone,
+    modal: Option<ModalContent>,
 }
 
 impl State {
@@ -59,7 +107,10 @@ impl State {
             app_shell,
             catalog,
             theme: Theme::default(),
-            layer_composition_demo_modal_open: std::env::var("TEKSTIDE_LAYER_DEMO").is_ok(),
+            focus: FocusZone::MainArea,
+            modal: std::env::var("TEKSTIDE_LAYER_DEMO")
+                .is_ok()
+                .then(ModalContent::default),
         }
     }
 
@@ -68,15 +119,90 @@ impl State {
     }
 }
 
-/// Uninhabited: this slice has no interactivity. `update` therefore can
-/// never actually be called -- `match message {}` typechecks because
-/// `Message` has no variants to match, not because a case was left
-/// unhandled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Message {}
+#[derive(Debug, Clone, PartialEq)]
+pub enum Message {
+    Input(RoutedInput),
+    ModalFocusNext,
+    ModalFocusPrevious,
+    ModalActivate,
+    ModalDismiss,
+}
 
-pub fn update(_state: &mut State, message: Message) -> Task<Message> {
-    match message {}
+pub fn update(state: &mut State, message: Message) -> Task<Message> {
+    match message {
+        Message::Input(RoutedInput::Shell(shell_input)) => {
+            if let Some(command) = app_command_for(shell_input.action()) {
+                state.app_shell.dispatch(command);
+            }
+        }
+        Message::Input(RoutedInput::Surface(_surface_input)) => {
+            // No surface exists yet to receive this (PR-015-D). The
+            // routing that produced it is proven correct in
+            // `input::tests`; there is nothing to consume here yet.
+        }
+        Message::Input(RoutedInput::Terminal(text_stream)) => {
+            // No PTY-writing path exists yet (RFC-017) -- only the
+            // liveness check this slice owns is exercised here. RFC-017
+            // will call the same function before actually writing.
+            let _ = terminal_stream_targets_a_live_terminal(&state.app_shell, &text_stream);
+        }
+        Message::Input(RoutedInput::FocusNext) => state.focus = state.focus.next(),
+        Message::Input(RoutedInput::FocusPrevious) => state.focus = state.focus.previous(),
+        Message::ModalFocusNext => {
+            if let Some(modal) = state.modal.as_mut() {
+                modal.focus = modal.focus.next();
+            }
+        }
+        Message::ModalFocusPrevious => {
+            if let Some(modal) = state.modal.as_mut() {
+                modal.focus = modal.focus.previous();
+            }
+        }
+        // Both dismiss. Real distinct outcomes (e.g. an actual
+        // accept/reject decision) belong to RFC-022's real dialogs; this
+        // placeholder has no decision to record.
+        Message::ModalActivate | Message::ModalDismiss => {
+            state.modal = None;
+        }
+    }
+    Task::none()
+}
+
+/// Only `OpenProjectBoard` maps to an existing `AppCommand` today.
+/// `OpenCommandPalette` has a real, reserved binding
+/// (`KeybindingPolicy::linux_mvp()`) but no command palette feature
+/// exists yet to dispatch to; every other `NavigationAction` has no
+/// default binding at all until RFC-023 supplies one. Not a placeholder
+/// -- an honest reflection of what is real right now.
+fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
+    match action {
+        NavigationAction::OpenProjectBoard => Some(AppCommand::OpenProjectBoard),
+        NavigationAction::OpenCommandPalette
+        | NavigationAction::SwitchActiveProject
+        | NavigationAction::ToggleProjectMode
+        | NavigationAction::CycleVisibleTerminalSession
+        | NavigationAction::OpenCurrentAgentRunDetail
+        | NavigationAction::OpenPendingApproval
+        | NavigationAction::OpenDiffReview
+        | NavigationAction::OpenSafeCloseDialog => None,
+    }
+}
+
+/// The check `pr-015-c-input-routing.md` requires before a `TextStream`
+/// may be delivered: "a stale or cross-project id is dropped, not
+/// best-effort delivered." No PTY-writing code exists yet for this to
+/// gate in practice (RFC-017); proven directly against `ApplicationShell`
+/// fixtures in `shell::tests` so the property is real the moment RFC-017
+/// calls it, not discovered wrong then.
+pub(crate) fn terminal_stream_targets_a_live_terminal(
+    app_shell: &ApplicationShell,
+    stream: &TextStream,
+) -> bool {
+    app_shell
+        .state()
+        .active_project()
+        .and_then(|project| project.terminal_session(stream.target()))
+        .is_some()
 }
 
 pub fn view(state: &State) -> Element<'_, Message> {
@@ -86,10 +212,88 @@ pub fn view(state: &State) -> Element<'_, Message> {
             .height(Length::Fill)
             .into();
 
-    if state.layer_composition_demo_modal_open {
-        stack![base, opaque(center(layer_composition_demo_modal(state)))].into()
+    if let Some(modal) = &state.modal {
+        stack![
+            base,
+            opaque(center(layer_composition_demo_modal(state, modal)))
+        ]
+        .into()
     } else {
         base
+    }
+}
+
+/// Structural proof this module cannot bypass modal exclusivity:
+/// `route_non_modal_input` needs an `input::ModalAbsent`, obtainable
+/// only by checking `state.modal` itself -- there is no other way to
+/// reach [`non_modal_subscription`]. See `input`'s module doc for why
+/// deleting this `match` is a compile error, not a behaviour change.
+pub fn subscription(state: &State) -> Subscription<Message> {
+    match input::ModalAbsent::check(&state.modal) {
+        Some(proof) => non_modal_subscription(proof, state.focus).map(Message::Input),
+        None => modal_subscription(),
+    }
+}
+
+fn non_modal_subscription(
+    proof: input::ModalAbsent,
+    focus: FocusZone,
+) -> Subscription<RoutedInput> {
+    // No terminal surface exists yet (RFC-017), so nothing can ever set
+    // this to `Some` today -- the parameter exists so `route_non_modal_input`
+    // does not need to change shape when RFC-017 lands, the same reason
+    // `LocalePreference`'s fields exist ahead of their real callers.
+    let terminal_focus: Option<tekstide_core::domain::TerminalId> = None;
+    // `.filter_map`'s closure must be non-capturing (`iced` panics
+    // otherwise: "cannot capture external variables"). `.with(...)`
+    // threads `proof`/`focus`/`terminal_focus` in through the closure's
+    // own parameter instead of a capture, which is why `ModalAbsent` and
+    // `FocusZone` both derive `Hash` -- `.with` requires it to detect
+    // whether the subscription's identity changed across rebuilds.
+    keyboard::listen()
+        .with((proof, focus, terminal_focus))
+        .filter_map(|((proof, focus, terminal_focus), event)| {
+            let press = key_press_from_event(event)?;
+            let policy = KeybindingPolicy::linux_mvp();
+            Some(input::route_non_modal_input(
+                proof,
+                &policy,
+                focus,
+                terminal_focus.as_ref(),
+                press,
+            ))
+        })
+}
+
+fn modal_subscription() -> Subscription<Message> {
+    keyboard::listen().filter_map(|event| match event {
+        keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Tab),
+            modifiers,
+            ..
+        } if modifiers.shift() => Some(Message::ModalFocusPrevious),
+        keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Tab),
+            ..
+        } => Some(Message::ModalFocusNext),
+        keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Enter),
+            ..
+        } => Some(Message::ModalActivate),
+        keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Escape),
+            ..
+        } => Some(Message::ModalDismiss),
+        _ => None,
+    })
+}
+
+fn key_press_from_event(event: keyboard::Event) -> Option<input::KeyPress> {
+    match event {
+        keyboard::Event::KeyPressed { key, modifiers, .. } => {
+            Some(input::KeyPress { key, modifiers })
+        }
+        _ => None,
     }
 }
 
@@ -181,11 +385,21 @@ fn content_area(state: &State) -> Element<'_, Message> {
     .into()
 }
 
-fn layer_composition_demo_modal(state: &State) -> Element<'_, Message> {
+fn layer_composition_demo_modal<'a>(
+    state: &'a State,
+    modal: &ModalContent,
+) -> Element<'a, Message> {
+    let button_line = |target: ModalButton, label_key: &str| {
+        let marker = if modal.focus == target { "> " } else { "  " };
+        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+    };
+
     container(
         column![
             text(state.catalog.get("layer-demo-modal-title")).size(state.theme.font_size_heading()),
             text(state.catalog.get("layer-demo-modal-body")).size(state.theme.font_size_body()),
+            button_line(ModalButton::Acknowledge, "layer-demo-modal-acknowledge"),
+            button_line(ModalButton::Dismiss, "layer-demo-modal-dismiss"),
             text(state.catalog.get("layer-demo-modal-dismiss-hint"))
                 .size(state.theme.font_size_status()),
         ]

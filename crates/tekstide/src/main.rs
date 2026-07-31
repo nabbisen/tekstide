@@ -8,6 +8,7 @@
 // suppression, including for whatever in these modules is genuinely
 // unused later.
 pub mod i18n;
+pub mod input;
 mod shell;
 mod theme;
 
@@ -19,6 +20,7 @@ use tekstide_core::shell::ApplicationShell;
 fn main() -> iced::Result {
     iced::application(boot, shell::update, shell::view)
         .title(shell::State::window_title)
+        .subscription(shell::subscription)
         .run()
 }
 

@@ -59,7 +59,12 @@ status-bar-summary = { $route ->
 
 # Scaffolding for this slice's own layer-composition screenshot evidence
 # only (see `shell.rs`'s module doc) -- not a real dialog. RFC-022 supplies
-# real trusted dialogs.
+# real trusted dialogs. PR-015-C made it genuinely dismissible (Tab/
+# Shift+Tab cycles Acknowledge/Dismiss, Enter or Escape closes it) so the
+# modal-exclusivity and focus-trap properties have something real to
+# exercise -- a placeholder that never closed could not prove either one.
 layer-demo-modal-title = Layer Composition Demo
 layer-demo-modal-body = This placeholder proves the modal layer renders above content, never inside it.
-layer-demo-modal-dismiss-hint = Scaffolding only -- PR-015-C replaces this with real input routing.
+layer-demo-modal-acknowledge = Acknowledge
+layer-demo-modal-dismiss = Dismiss
+layer-demo-modal-dismiss-hint = Tab/Shift+Tab moves focus; Enter or Escape dismisses.
