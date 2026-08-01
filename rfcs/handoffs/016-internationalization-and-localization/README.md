@@ -22,7 +22,15 @@ Read before starting:
 - [RFC-015](../../proposed/015-application-shell-and-rendered-surface-model.md) — creates the i18n seam this RFC fills. If RFC-015 has not landed, PR-016-C (text safety) can still proceed; it has no catalog dependency.
 - [RFC-009](../../done/009-terminal-security-boundary.md) — why terminal output is untrusted.
 
-## Do this first (added 2026-07-30)
+## Active work: PR-016-E (added 2026-08-01)
+
+**Unblocked.** PR-016-E's scan scope depended on whether RFC-015 PR-015-D would delete `tekstide_core::shell::render_text`. It investigated and deliberately kept it (response 130), so the question is settled and this slice can start.
+
+- **[`pr-016-e-enforcement.md`](./pr-016-e-enforcement.md)** — read this before `task-breakdown-pr-plan.md`'s PR-016-E entry, which is three lines from 2026-07-29 and predates everything this slice inherited.
+
+`task-breakdown-pr-plan.md` still states the scope correctly; what it does not carry is the four hardcoded-string sites found across responses 122/123/128/132, the scan-scope decision those force, the Fluent-type-exposure guard folded in at response 126, or the overlap with RFC-015 PR-015-B's seam scans. Those accumulated in `qa-evidence.md`'s Known Limitations — the file where results are recorded, not the one you read before starting. The consolidation above is the fix.
+
+## Historical: PR-016-B/C/D sequencing (added 2026-07-30)
 
 **Land the two required fixes from response 116 before starting PR-016-C.** They close RFC-021 PR-021-E2:
 
