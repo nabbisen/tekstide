@@ -49,14 +49,17 @@ use crate::measurement::{self, Measurement};
 use crate::theme::Theme;
 
 /// RFC-015 PR-015-F: the synthetic typing-measurement surface's preloaded
-/// content -- a real ~1,500-line source file from this workspace, not a
-/// lorem-ipsum placeholder, matching the RFC-014 spike's own precedent
-/// (`tekstide-gui-spike`'s identical choice of this same file) so the
-/// layout cost the measurement exercises is the same shape a real editor
-/// would see. Only loaded into `State.typing_doc` when actually
+/// content -- a real ~1,500-line source file, not a lorem-ipsum
+/// placeholder, so the layout cost the measurement exercises is the same
+/// shape a real editor would see. `tekstide-gui-spike` (`publish = false`)
+/// used the RFC-014 spike's own precedent of `include_str!`-ing this file
+/// directly out of `tekstide-core`; `tekstide` is a published crate, and a
+/// package tarball can never contain a sibling crate's source, so this is
+/// a static, committed snapshot living inside this crate instead --
+/// discovered by `cargo package`'s verification step during 0.4.0 RC prep,
+/// not by inspection. Only loaded into `State.typing_doc` when actually
 /// measuring `Typing` (see `State::new`); otherwise never referenced.
-const TYPING_MEASUREMENT_DOCUMENT: &str =
-    include_str!("../../tekstide-core/src/project/session.rs");
+const TYPING_MEASUREMENT_DOCUMENT: &str = include_str!("../typing-measurement-sample.rs");
 
 /// The two focusable targets of the layer-composition demo modal --
 /// still scaffolding (see the module doc), but now real enough for a

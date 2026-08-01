@@ -41,17 +41,19 @@ Status: implemented by RFC-013 with documented limitations; three of twelve v1 e
 - Durable local SQLite store, schema identity, migration harness, corruption diagnostics, restart-safe recovery, and explicit project/global purge are implemented by RFC-013 with documented limitations.
 - Wired producers: trust decisions, managed AgentRun lifecycle, and blocked root/symlink access.
 - Remaining work — producers represented in the v1 schema but not yet wired: command approval, terminal paste blocks, restricted-feature blocks, safe-close/destructive decisions, sensitive configuration changes, transcript purge, project added, and plain-terminal lifecycle observation.
-- Command approval, safe-close, and configuration-change producers require rendered surfaces and move to the GUI milestone (M8). Paste blocks and project-added producers are feasible headlessly and remain available for wiring before then.
+- Command approval, safe-close, and configuration-change producers require rendered dialogs and move to M11, not M8 — `0.4.0` delivered the application shell and Project Board only, with no dialog surface yet. Paste blocks and project-added producers are feasible headlessly and remain available for wiring before then.
 - Keep audit records local and avoid storing unnecessary file contents or private output.
 
 ### Desktop GUI Runtime
 
-Status: deferred after `0.1.0`.
+Status: substrate decided and application shell implemented by RFC-014/RFC-015 (`0.4.0`); remaining product surfaces deferred.
 
-- Select and implement the desktop GUI runtime.
-- Replace shell-visible evidence with real Project Board, file tree, and editor surfaces.
-- Add focus, keyboard, mouse, dialog, and confirmation flows.
-- Validate responsive layout, accessibility, and visual polish.
+- Desktop GUI substrate selected (`iced`, RFC-014) and application shell implemented: window/chrome/content/modal layer composition, keyboard focus and input routing, i18n-backed text, a compiled theme, and a Project Board surface rendering real `ApplicationShell` state with untrusted names and paths escaped (RFC-015).
+- Mode switching between Content and Terminal views, and the `NFR-PERF-002` mode-switch latency measurement that depends on it, move to `0.4.1` (RFC-015 PR-015-E).
+- Replace the Project Board placeholder content area with real file tree and editor surfaces (later GUI milestones, M10).
+- Add dialog and confirmation flows (trust, safe-close, destructive, configuration change) — M11.
+- Validate responsive layout and visual polish beyond the Project Board's current row-based rendering.
+- Accessibility: no visible focus indicator exists yet at the shell-chrome level — low-stakes today since the shell has only one focus zone, but required before PR-015-E adds a second one (tracked for `0.4.1`, RFC-015 closeout). Screen-reader support remains out of scope for the life of the `iced` substrate decision (RFC-014 R2, owner-accepted).
 
 ### File Workflow Follow-Up
 

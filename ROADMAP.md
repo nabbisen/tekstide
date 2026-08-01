@@ -14,7 +14,7 @@ Everything from M8 onward builds the product surface. This roadmap is milestone-
 | M5 | `0.3.0` (released 2026-07-28) | AgentRun Launch + Active File Safety | Executable AI CLI profiles, AgentRun launch, active-document external-change detection. |
 | M6 | `0.3.0` (released 2026-07-28) | Transcript And Review Foundations | Bounded transcript capture, retention controls, generated-change review models. |
 | M7 | `0.3.0` (released 2026-07-28) | Durable Audit | Local durable audit storage for trust decisions, managed process launches, blocked root/symlink access, and recovery outcomes. |
-| M8 | `0.4.x` | GUI Foundation | Substrate decision, application shell, layout and focus model, i18n scaffolding, Project Board surface. |
+| M8 | `0.4.0` (release candidate) | GUI Foundation | Substrate decision, application shell, layout and focus model, i18n scaffolding, Project Board surface. |
 | M9 | `0.5.x` | Terminal Surface | Terminal renderer honoring the RFC-009 boundary, immersion mode, split policy, rendered paste protection, trusted-UI evidence. |
 | M10 | `0.6.x` | Content Surfaces | Editor, file explorer tree, diff/review surface, AgentRun report surface. |
 | M11 | `0.7.x` | Approval And Safety Dialogs | Command approval model and dialog, trust/safe-close/destructive dialogs, remaining security audit producers. |
@@ -60,7 +60,7 @@ Purpose:
 
 Scope:
 
-- Desktop GUI substrate and terminal-rendering strategy decision (RFC-014, in progress).
+- Desktop GUI substrate decision (RFC-014, accepted); terminal-rendering strategy is scoped in the decision record but implemented in M9, not M8.
 - Application window, Content Mode / Terminal Mode layout, mode switching without animation.
 - Keyboard focus model and routing; all shell navigation reachable without a mouse.
 - Theme and typography primitives, with the font family/size seam plumbed through. **User-configurable** typography needs RFC-023 (M12) and is not an M8 deliverable — corrected 2026-07-30; the original wording overstated what M8 can deliver.
@@ -79,6 +79,8 @@ Review gates:
 `0.4.0` ships the shell, input routing, text safety, and the Project Board. `0.4.1` ships mode switching and the Content-mode scaffolding for M9/M10 surfaces. See `rfcs/delivery-plan.md` §Release Cycle Tracking for the reasoning.
 
 Explicitly not in M8: terminal rendering, editor, dialogs.
+
+**Accessibility baseline partially delivered.** No colour-only status holds (mechanically checked). Screen-reader support does not exist, stated rather than simulated (RFC-014 R2, owner-accepted) — that item is a disclosed absence, not an M8 gap. Visible focus indicators do not render at the shell-chrome level, though: `state.focus` is tracked but nothing in `shell::view` renders a distinct style for it, low-stakes only because the shell currently has a single focus zone. Required before `0.4.1`'s PR-015-E adds a second one — recorded in RFC-015's closeout, corrected 2026-08-01.
 
 ## M9: Terminal Surface
 

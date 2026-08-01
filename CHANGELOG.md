@@ -1,5 +1,73 @@
 # Changelog
 
+## 0.4.0 - Application Shell and Project Board
+
+Status: release candidate, prepared 2026-08-01, pending review and the owner's signed tag.
+
+Tekstide `0.4.0` covers milestone M8 (GUI Foundation): RFC-014's substrate decision,
+RFC-016 PR-016-B/C/D's i18n and text-safety foundations, and RFC-015 PR-015-B/C/D/F/G's
+application shell and Project Board. Owner-approved `0.4.0`/`0.4.1` split (2026-07-30):
+mode switching and its latency measurement move to `0.4.1` because M8 has no second
+mode to switch into that isn't the Project Board against an empty placeholder. It
+remains a GUI shell over the headless core, not the full AI CLI workbench.
+
+### Implemented
+
+- RFC-014 desktop GUI substrate decision:
+  - `iced` approved as the substrate, with Option A terminal filtering;
+  - spike evidence and findings R1-R9 recorded; R1 (latency unverified) and R6
+    (focus-trap property) discharged by RFC-015; R2 (no screen-reader support) and R9
+    (survivorship bias in confirmed-only percentiles) owner-accepted and carried
+    forward as standing findings, not defects.
+- RFC-016 i18n, locale, and text-safety foundations (PR-016-B/C/D):
+  - string catalog, locale selection with fallback, and the discipline that no
+    user-facing string is hardcoded;
+  - a canonical shared text-safety primitive (escaping and bidi isolation for
+    untrusted text) adopted by both the shell and `approval::coordinator::display_argv`,
+    retiring the duplicate-escaping debt recorded in `rfcs/delivery-plan.md`;
+  - `CatalogArgs`' typed `number`/`untrusted`/`trusted_symbol` interpolation API,
+    closing the untrusted-text interpolation bypass structurally rather than by
+    convention, plus pluralization support.
+- RFC-015 application shell and rendered surface model (PR-015-B/C/D/F/G):
+  - a real `iced` desktop application replacing the headless text harness: window,
+    chrome/content/modal layer composition via `stack`/`opaque`, with surface code
+    structurally unable to open, populate, or dismiss a modal or render trusted chrome;
+  - a keyboard-driven focus and input-routing model (`ShellInput`/`SurfaceInput`/
+    `TextStream` as distinct, module-private types) with modal exclusivity and
+    input-class privacy enforced by the compiler, not a runtime check;
+  - a Project Board surface rendering live `ApplicationShell` state, with untrusted
+    project names and paths escaped and honest `CountDisplay` fidelity
+    (`Unavailable`/`NotImplemented` never render as `0`);
+  - app-internal latency measurement (behind an opt-in flag, proven non-contaminating
+    by idle-CPU comparison) discharging RFC-014 R1 for typing latency
+    (`NFR-PERF-003`) and warm start (`NFR-PERF-001`) — both met by roughly two orders
+    of magnitude.
+
+### Dependencies
+
+- Added to `tekstide` only (`tekstide-core` gains no GUI dependency, mechanically
+  checked via `cargo tree -p tekstide-core --edges normal | grep -i iced`): `iced 0.14`
+  (`tokio`, `advanced` features), `fluent-bundle 0.16`, `unic-langid 0.9`,
+  `sys-locale 0.3`.
+
+### Deferred
+
+- Mode switching between Content and Terminal views, and the `NFR-PERF-002`
+  mode-switch latency measurement that depends on it — `0.4.1`, RFC-015 PR-015-E.
+- Visible focus indicators at the shell-chrome level. Low-stakes today because the
+  shell has a single focus zone, but required before PR-015-E adds a second one —
+  tracked for `0.4.1`.
+- Terminal rendering, editor, file explorer, and diff/review surfaces — M9/M10.
+- Rendered security dialogs (trust, safe-close, destructive, configuration change) and
+  an adapter-spawn pathway that would make command approval reachable — M11. Command
+  approval remains implemented but unreachable, as in `0.3.0`.
+- Screen-reader support — out of scope for the life of the `iced` substrate decision
+  (RFC-014 R2, owner-accepted).
+- Cross-platform terminal, storage, and GUI evidence beyond
+  `x86_64-unknown-linux-gnu`.
+- **RFC-015 is not closed by this release.** Per RFC-000, it stays in
+  `rfcs/proposed/` until PR-015-E and `NFR-PERF-002` land in `0.4.1`.
+
 ## 0.3.0 - AgentRun, Transcript, Review, and Durable Audit
 
 Status: released on 2026-07-28.
