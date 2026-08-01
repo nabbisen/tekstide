@@ -24,6 +24,14 @@ Read before starting — RFC-015 conforms to these rather than amending them:
 - [RFC-014](../../proposed/014-desktop-gui-substrate-and-terminal-rendering.md) — the substrate decision and its residual risks **R1** (latency unverified) and **R6** (focus-trap property does not transfer). RFC-015 discharges both.
 - [RFC-005](../../done/005-application-shell-and-project-board.md) — the `ApplicationShell` and Project Board state you are rendering.
 
+## Active work: PR-015-E — `0.4.1` (added 2026-08-01)
+
+`0.4.0` shipped on 2026-08-01 with PR-015-B/C/D/F/G. **PR-015-E is next**, and its entry in `task-breakdown-pr-plan.md` lists two of its four obligations — the other two (C4 / `NFR-PERF-002`, and the chrome-level focus indicator) arrived through review responses and the `0.4.0`/`0.4.1` split.
+
+- **[`pr-015-e-mode-switching.md`](./pr-015-e-mode-switching.md)** — read this before the task-breakdown entry.
+
+The focus indicator is the one to read first: `0.4.0` shipped without it, defensibly, because `FocusZone` has a single variant so there is nothing to distinguish. **This slice adds the second zone, and the defence expires the moment it does.**
+
 ## Two things landed ahead of you (added 2026-07-30)
 
 RFC-016 was implemented before RFC-015, so two seams this RFC was originally expected to *create* already exist. **Conform to them; do not redesign them.**
