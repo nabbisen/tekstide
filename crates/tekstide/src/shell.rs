@@ -35,11 +35,12 @@
 //! (`catalog`, `theme`, `focus`, `modal`), none of which duplicate a
 //! value already inside it.
 
-use iced::widget::{center, column, container, opaque, stack, text};
+use iced::widget::{center, column, container, opaque, row, stack, text};
 use iced::{Background, Border, Element, Length, Subscription, Task, keyboard};
 
 use tekstide_core::command::AppCommand;
 use tekstide_core::navigation::{KeybindingPolicy, NavigationAction};
+use tekstide_core::project::ProjectMode;
 use tekstide_core::route::AppRoute;
 use tekstide_core::shell::ApplicationShell;
 
@@ -173,14 +174,28 @@ impl State {
         self.catalog.get("app-title")
     }
 
-    /// Whether `main.rs`'s view wrapper should time this render as a
-    /// view-build-cost sample (RFC-015 PR-015-F). `Startup` times its one
-    /// frame via `frames()` instead and needs no view-cost log; with no
-    /// measurement active (the default), this is always `false`.
+    /// Whether `content_area` should substitute the synthetic
+    /// typing-measurement view for the real content (RFC-015 PR-015-F).
+    /// `false` for `ModeSwitch`: C4 measures the *real* content's view
+    /// cost, so nothing is substituted for it.
     pub fn is_measuring_typing(&self) -> bool {
         matches!(
             self.measurement.as_ref().map(Measurement::criterion),
             Some(measurement::Criterion::Typing)
+        )
+    }
+
+    /// Whether `main.rs`'s view wrapper should time this render as a
+    /// view-build-cost sample (RFC-015 PR-015-F/PR-015-E). `Startup`
+    /// times its one frame via `frames()` instead and needs no view-cost
+    /// log; with no measurement active (the default), this is always
+    /// `false`. Broader than [`Self::is_measuring_typing`]: `ModeSwitch`
+    /// also needs view-cost timing, but over the real content, not a
+    /// substituted one.
+    pub fn is_measuring_view_cost(&self) -> bool {
+        matches!(
+            self.measurement.as_ref().map(Measurement::criterion),
+            Some(measurement::Criterion::Typing) | Some(measurement::Criterion::ModeSwitch)
         )
     }
 }
@@ -202,6 +217,11 @@ pub enum Message {
     MeasurementTick,
     /// RFC-015 PR-015-F: a frame was painted during `Startup` measurement.
     MeasurementFrame(std::time::Instant),
+    /// RFC-015 PR-015-E: a synthetic C4 measurement keystroke arrived;
+    /// same timing convention as `MeasuredKey`, but its handler dispatches
+    /// the real `AppCommand::ToggleActiveProjectMode` instead of
+    /// appending to a synthetic document.
+    MeasuredModeSwitch(std::time::Instant),
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -259,22 +279,36 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
             }
         }
+        Message::MeasuredModeSwitch(sent_at) => {
+            if let Some(measurement) = state.measurement.as_mut() {
+                measurement.record_input(sent_at);
+            }
+            // The real command a `Ctrl+Alt+M` press would dispatch --
+            // measuring the actual state mutation and the view rebuild
+            // it causes, not a synthetic stand-in. Requires a real
+            // active project (see `pr-015-e-mode-switching.md`'s C4
+            // section); a measurement run without one records real,
+            // if uninformative, ~0-cost samples rather than panicking.
+            state
+                .app_shell
+                .dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+        }
     }
     Task::none()
 }
 
-/// Only `OpenProjectBoard` maps to an existing `AppCommand` today.
-/// `OpenCommandPalette` has a real, reserved binding
-/// (`KeybindingPolicy::linux_mvp()`) but no command palette feature
-/// exists yet to dispatch to; every other `NavigationAction` has no
-/// default binding at all until RFC-023 supplies one. Not a placeholder
-/// -- an honest reflection of what is real right now.
+/// `OpenProjectBoard` and, since PR-015-E, `ToggleProjectMode` map to
+/// existing `AppCommand`s. `OpenCommandPalette` has a real, reserved
+/// binding (`KeybindingPolicy::linux_mvp()`) but no command palette
+/// feature exists yet to dispatch to; every other `NavigationAction` has
+/// no default binding at all until RFC-023 supplies one. Not a
+/// placeholder -- an honest reflection of what is real right now.
 fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
     match action {
         NavigationAction::OpenProjectBoard => Some(AppCommand::OpenProjectBoard),
+        NavigationAction::ToggleProjectMode => Some(AppCommand::ToggleActiveProjectMode),
         NavigationAction::OpenCommandPalette
         | NavigationAction::SwitchActiveProject
-        | NavigationAction::ToggleProjectMode
         | NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenCurrentAgentRunDetail
         | NavigationAction::OpenPendingApproval
@@ -365,20 +399,42 @@ pub fn subscription(state: &State) -> Subscription<Message> {
 fn measurement_subscription(criterion: measurement::Criterion) -> Subscription<Message> {
     match criterion {
         measurement::Criterion::Startup => iced::window::frames().map(Message::MeasurementFrame),
-        measurement::Criterion::Typing => Subscription::batch([
-            keyboard::listen().filter_map(|event| match event {
+        measurement::Criterion::Typing => {
+            measured_key_subscription(Message::MeasuredKey as fn(std::time::Instant) -> Message)
+        }
+        // RFC-015 PR-015-E: identical shape to `Typing`'s arm -- the same
+        // measurement key, the same self-terminating tick -- differing
+        // only in which `Message` variant (and therefore which `update`
+        // handler) the keystroke produces. See `measured_key_subscription`.
+        measurement::Criterion::ModeSwitch => measured_key_subscription(
+            Message::MeasuredModeSwitch as fn(std::time::Instant) -> Message,
+        ),
+    }
+}
+
+/// Shared by `Typing` and `ModeSwitch`: a measurement-only keyboard
+/// listener for [`measurement::MEASURED_KEY_CHARACTER`], paired with the
+/// periodic self-exit tick. Parameterized on which `Message` variant to
+/// produce so the two criteria's `update` handlers stay distinct (one
+/// appends to a synthetic document, the other dispatches a real
+/// `AppCommand`) without duplicating this subscription's shape twice.
+fn measured_key_subscription(
+    to_message: fn(std::time::Instant) -> Message,
+) -> Subscription<Message> {
+    Subscription::batch([
+        keyboard::listen()
+            .with(to_message)
+            .filter_map(|(to_message, event)| match event {
                 keyboard::Event::KeyPressed {
                     key: keyboard::Key::Character(ref character),
                     ..
                 } if character.as_str() == measurement::MEASURED_KEY_CHARACTER => {
-                    Some(Message::MeasuredKey(std::time::Instant::now()))
+                    Some(to_message(std::time::Instant::now()))
                 }
                 _ => None,
             }),
-            iced::time::every(std::time::Duration::from_millis(100))
-                .map(|_| Message::MeasurementTick),
-        ]),
-    }
+        iced::time::every(std::time::Duration::from_millis(100)).map(|_| Message::MeasurementTick),
+    ])
 }
 
 fn non_modal_subscription(
@@ -530,7 +586,7 @@ fn content_area(state: &State) -> Element<'_, Message> {
                 &state.catalog,
                 &state.theme,
             ),
-            AppRoute::ActiveProjectWorkspace => no_surface_placeholder(state),
+            AppRoute::ActiveProjectWorkspace => active_project_workspace_view(state),
         }
     };
 
@@ -545,24 +601,112 @@ fn content_area(state: &State) -> Element<'_, Message> {
         .into()
 }
 
-/// `AppRoute::ActiveProjectWorkspace` has no real surface yet -- the
-/// editor/explorer/terminal surfaces RFC-019/RFC-017 add. Kept as its
-/// own function (not a shared default `content_area` fallback) so the
-/// day a real workspace surface lands, this becomes the one line that
-/// changes.
-fn no_surface_placeholder(state: &State) -> Element<'_, Message> {
+/// RFC-015 PR-015-E: the sidebar/main-area scaffolding RFC-017 (terminal),
+/// RFC-019 (editor/explorer), and RFC-020 (diff/review) plug real content
+/// into. Both zones are catalog-driven placeholders today -- `surface.rs`'s
+/// contract stays concrete methods, not a `trait Surface`, because a
+/// second implementor still gives nothing to generalise from (unchanged
+/// from PR-015-D's reasoning; this slice adds a second *zone*, not a
+/// second surface implementation).
+fn active_project_workspace_view(state: &State) -> Element<'_, Message> {
+    let mode = state
+        .app_shell
+        .state()
+        .active_project()
+        .map(tekstide_core::project::ProjectSession::mode);
+
+    row![sidebar_view(state), main_area_view(state, mode)]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+/// Style for a focusable content-area zone (sidebar, main area):
+/// `NFR-UX-002` forbids a colour-only status, so `focused` changes two
+/// channels at once -- border colour (`Theme::border_focused`) and
+/// border width -- never colour alone. Callers additionally prefix their
+/// own text with the same `"> "`/`"  "` marker `shell.rs`'s modal
+/// buttons already use, a third, purely textual channel.
+fn zone_style(theme: Theme, focused: bool) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_base_theme: &iced::Theme| container::Style {
+        background: Some(Background::Color(theme.background())),
+        text_color: Some(theme.foreground()),
+        border: Border {
+            color: if focused {
+                theme.border_focused()
+            } else {
+                theme.border_default()
+            },
+            width: if focused { 2.0 } else { 1.0 },
+            radius: 0.0.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+/// Focus marker matching the modal's own convention
+/// (`layer_composition_demo_modal`'s `button_line`) -- a textual channel
+/// independent of colour or border width, so the indicator survives even
+/// if a future theme makes the two border widths visually similar.
+fn focus_marker(focused: bool) -> &'static str {
+    if focused { "> " } else { "  " }
+}
+
+/// Factored out from [`sidebar_view`] so the focus-marker/catalog-text
+/// combination is directly testable, the same shape as
+/// `status_bar_summary`/`surface::board::row_lines`.
+pub(crate) fn sidebar_label(state: &State) -> String {
+    let focused = state.focus == FocusZone::Sidebar;
+    format!(
+        "{}{}",
+        focus_marker(focused),
+        state.catalog.get("sidebar-placeholder-title")
+    )
+}
+
+/// The catalog key [`main_area_label`]/[`main_area_view`] select on for a
+/// given `mode` -- `None` (no active project) should not be reachable
+/// while routed to `ActiveProjectWorkspace` (core guards every
+/// transition into this route on an active project existing), but the
+/// fallback is Content Mode's placeholder rather than a panic, matching
+/// this crate's "fail visible" convention.
+fn main_area_key(mode: Option<ProjectMode>) -> &'static str {
+    match mode {
+        None | Some(ProjectMode::Content) => "main-area-content-mode-placeholder",
+        Some(ProjectMode::TerminalImmersion) => "main-area-terminal-mode-placeholder",
+    }
+}
+
+/// Factored out from [`main_area_view`] for the same reason as
+/// [`sidebar_label`].
+pub(crate) fn main_area_label(state: &State, mode: Option<ProjectMode>) -> String {
+    let focused = state.focus == FocusZone::MainArea;
+    format!(
+        "{}{}",
+        focus_marker(focused),
+        state.catalog.get(main_area_key(mode))
+    )
+}
+
+fn sidebar_view(state: &State) -> Element<'_, Message> {
+    let focused = state.focus == FocusZone::Sidebar;
+    container(text(sidebar_label(state)))
+        .width(Length::Fixed(220.0))
+        .height(Length::Fill)
+        .padding(16)
+        .style(zone_style(state.theme, focused))
+        .into()
+}
+
+fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message> {
+    let focused = state.focus == FocusZone::MainArea;
     container(
-        column![
-            text(state.catalog.get("content-area-placeholder-title"))
-                .size(state.theme.font_size_body()),
-            text(state.catalog.get("content-area-placeholder-body"))
-                .size(state.theme.font_size_body()),
-        ]
-        .spacing(6),
+        column![text(main_area_label(state, mode)).size(state.theme.font_size_body()),].spacing(6),
     )
     .width(Length::Fill)
     .height(Length::Fill)
     .padding(16)
+    .style(zone_style(state.theme, focused))
     .into()
 }
 

@@ -40,14 +40,19 @@ blocked-automation-count = { $count ->
    *[other] {$count} blocked automations
 }
 
-# RFC-015 PR-015-B: chrome and layer-composition-demo keys. No real
-# surface exists yet (PR-015-D), so the content area shows only this
-# placeholder; `status-bar-summary` covers both the two possible routes
-# (a literal-variant selector, exactly `blocked-automation-count`'s
+# RFC-015 PR-015-B: `status-bar-summary` covers both the two possible
+# routes (a literal-variant selector, exactly `blocked-automation-count`'s
 # non-numeric branches) and a genuine plural count in one lookup, per
 # the same one-key pattern PR-016-D established.
-content-area-placeholder-title = No surface rendered yet
-content-area-placeholder-body = RFC-015 PR-015-D adds the Project Board surface here.
+#
+# RFC-015 PR-015-E: the Active Project Workspace's sidebar and main-area
+# scaffolding for RFC-017/019/020 -- both zones are catalog-driven
+# placeholders; `content-area-placeholder-title`/`-body` (PR-015-B's own
+# placeholder, shown when no surface existed at all) are retired, since
+# every route now has real scaffolding to show.
+sidebar-placeholder-title = Sidebar
+main-area-content-mode-placeholder = Content Mode. RFC-019 adds the editor and explorer here.
+main-area-terminal-mode-placeholder = Terminal / Agent Immersion Mode. RFC-017 adds the terminal here.
 
 status-bar-summary = { $route ->
     [project-board] Project Board

@@ -1,8 +1,8 @@
 # RFC-015: Application Shell and Rendered Surface Model - QA Evidence
 
-Status: Proposed — `0.4.0` scope (PR-016-C, PR-015-B/C/D/F/G) implemented; PR-015-G is `0.4.0`'s closeout slice, pending review. RFC-015 itself stays in `rfcs/proposed/` per RFC-000 until PR-015-E and `NFR-PERF-002` land in `0.4.1`.
+Status: Proposed — `0.4.0` scope (PR-016-C, PR-015-B/C/D/F/G) shipped. PR-015-E (mode switching, focus indicator, C4/`NFR-PERF-002`) implemented 2026-08-01 for `0.4.1`, pending review. RFC-015 itself stays in `rfcs/proposed/` per RFC-000 until PR-015-E is accepted and the architect performs the `rfcs/done/` transition.
 Date opened: 2026-07-29
-Date accepted: Pending (0.4.1 will close RFC-015; this slice does not)
+Date accepted: Pending (this slice does not close RFC-015 itself — see above)
 
 ## Scope
 
@@ -185,9 +185,57 @@ Gates run 2026-07-31 (original submission): `cargo fmt --all --check`, `cargo cl
 
 Gates re-run 2026-07-31 (response 132 fix): `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (490 `tekstide-core` + 49 `tekstide` — up from 48, 1 net new — + 18 `tekstide-gui-spike`, 0 failures), `git diff --check` — all passed.
 
-### PR-015-E — Mode switching and Content-mode scaffolding
+### PR-015-E — Mode switching, focus indicator, and C4
 
-Pending implementation.
+Per `pr-015-e-mode-switching.md`'s four obligations (two named in `task-breakdown-pr-plan.md`, two that arrived through review responses and the `0.4.0`/`0.4.1` split).
+
+**A necessary `tekstide-core` change, disclosed rather than folded in silently.** `NavigationAction::ToggleProjectMode` had `default_binding: None` in `KeybindingPolicy::linux_mvp()` — with no binding, `matching_global_action` can never produce it, so "Content ↔ Terminal route switching" had no reachable trigger at all before this slice. Added `Some("Ctrl+Alt+M")`, status `Candidate` (matching `OpenProjectBoard`'s own precedent), in `crates/tekstide-core/src/navigation.rs`. This is different in kind from response 139's "site 4" scope question (which needed a real `ProjectBoardRow` API redesign): here the enum variant already existed, reserved exactly for this; supplying its value is what makes the obligation this slice owes even possible, not a scope expansion. `toggle_project_mode_shortcut_is_configurable_candidate` (new, `navigation/tests.rs`) proves the binding and its non-collision with `OpenProjectBoard`'s.
+
+**1. Mode switching, wired end-to-end.** `shell::app_command_for` now maps `ToggleProjectMode -> AppCommand::ToggleActiveProjectMode` (previously `None`). `a_toggle_project_mode_shell_input_dispatches_the_real_app_command` (new) proves a real `ShellInput` reaches the real command and the project's `ProjectMode` actually flips — ablation-verified (reverted the mapping to `None`, confirmed the test fails asserting `Some(Content)` against the expected `Some(TerminalImmersion)`, reverted back). No animation: `AppCommand::ToggleActiveProjectMode`'s dispatch is a synchronous state mutation in `tekstide-core` with no `iced::Task` delay, tween, or interpolation anywhere in the path — confirmed by inspection, matching the review gate's own instruction for this property.
+
+**2. Sidebar and main-area scaffolding.** `FocusZone` grows `Sidebar` (still `#[non_exhaustive]`); `next()`/`previous()` are a genuine two-way toggle now instead of the single-variant no-op. `route_non_modal_input`'s structure needed **no changes at all** — confirmed by inspection, exactly the property `#[non_exhaustive]` was kept for. `content_area`'s `AppRoute::ActiveProjectWorkspace` arm now calls `active_project_workspace_view`, replacing the retired `no_surface_placeholder`; it renders `sidebar_view` and `main_area_view` side by side (`row![...]`), the latter selecting one of two catalog-driven placeholders by the active project's real `ProjectMode` (`main_area_key`, tested directly: `main_area_key_falls_back_to_content_mode_for_no_active_project`). `content-area-placeholder-title`/`-body` (PR-015-B's pre-surface placeholder, now unreachable) are retired from `en.ftl`; `sidebar-placeholder-title`, `main-area-content-mode-placeholder`, `main-area-terminal-mode-placeholder` added. **Terminal sessions/AgentRuns unaffected by mode switching**: no terminal exists yet (RFC-017), so this is a structural argument (nothing exists for the switch to disturb), not an observed one — stated as such, not checked on an absence.
+
+**No `trait Surface` introduced.** The handoff explicitly invited this decision either way if a second zone made the abstraction pay for itself. It does not: `sidebar_view`/`main_area_view` are called by name from `active_project_workspace_view`, nothing iterates over "all zones" polymorphically, and both are simple `&State -> Element` functions with no shared behaviour beyond that shape. Same reasoning PR-015-D recorded for the single-implementor `surface.rs` contract, unchanged by having two zones now instead of one surface.
+
+**3. Visible, non-colour-only focus indicator (`NFR-UX-002`, the gate obligation).** `Theme::border_focused` reinstated (cut in PR-015-B for having no caller — correctly, then). `zone_style(theme, focused)` changes **two** channels together: border colour (`border_focused` vs `border_default`) and border width (`2.0` vs `1.0`); `focus_marker(focused)` adds a third, textual channel (`"> "`/`"  "`, the modal's own convention). `sidebar_label`/`main_area_label` factor the marker+catalog-text combination out for direct testability (`status_bar_summary`'s shape), proving `state.focus` genuinely drives the rendered text (`sidebar_label_reflects_focus`, `main_area_label_reflects_focus_and_mode`), not just that the helper functions exist. Ablation-verified twice: reverting `zone_style`'s width branch to a constant `1.0` failed `zone_style_changes_both_border_colour_and_width_when_focused` naming exactly which channel stopped differing; reverting `app_command_for`'s mapping (above) is the second ablation this same commit exercises.
+
+**Screenshots, both modes and the focus cycle** (`rfcs/handoffs/015-application-shell-and-rendered-surface-model/evidence/pr-015-e/`), captured with the owner's explicit approval per response 127's standing convention: relaunched with `WAYLAND_DISPLAY` unset, `xdotool search --name Tekstide` for the window id, `xdotool windowfocus <id>` (`windowactivate` still does not work under this niri/XWayland setup), then discrete `xdotool key --window <id> <keys>` presses, screenshotted via `niri msg action screenshot-window --id <niri-id> --path <file>` (a different id namespace than xdotool's, per the PR-015-C finding).
+
+- `00-initial-project-board.png` — the real Project Board over four recent/open projects (context, not itself required evidence).
+- `01-terminal-mode.png` — one `Ctrl+Alt+M` press from Project Board: Terminal / Agent Immersion Mode, `MainArea` focused (blue 2px border, `"> "` marker).
+- `02-content-mode.png` — a second `Ctrl+Alt+M`: Content Mode, distinct placeholder text, `MainArea` still focused.
+- `03-sidebar-focused.png` — `Tab` from `02`'s state: `Sidebar` now focused (`"> Sidebar"`, blue border moves to the sidebar container), `MainArea` loses both the colour and the marker.
+- `04-mainarea-refocused.png` — a second `Tab`: **byte-identical to `02-content-mode.png`** (`md5sum` confirmed), proving the cycle returns exactly, the same "two that differ, one that returns" standard PR-015-C's modal focus-trap screenshots set.
+
+**A synthetic-input reliability finding, recorded rather than silently retried away.** The first `Tab` press after two rapid `Ctrl+Alt+M` chord presses delivered no visible change (confirmed via `md5sum` against the pre-press screenshot — genuinely a no-op, not a misread). Adding `--clearmodifiers` to the `xdotool key` invocation and a fresh `windowfocus --sync` immediately before sending resolved it on retry, reliably, across the subsequent captures and the full C4 batch below. Recorded for the next slice needing synthetic input: a modifier-chord press immediately preceding a plain-key press is the specific sequence that triggered it here, and `--clearmodifiers` is the mitigation, not merely re-sending and hoping.
+
+**4. C4 (`NFR-PERF-002`, mode-switch latency, budget p95 ≤ 32ms) — reusing PR-015-F's harness, not a new one.** `measurement::Criterion::ModeSwitch` (env value `mode_switch`) shares the exact input-to-state-change/view-build decomposition `Typing` uses (`Criterion::uses_input_view_decomposition`); `Message::MeasuredModeSwitch` dispatches the real `AppCommand::ToggleActiveProjectMode` on each measurement keystroke (the same `MEASURED_KEY_CHARACTER` = `"j"`, bypassing only the `KeybindingPolicy` lookup a real `Ctrl+Alt+M` would go through first — irrelevant to what this measures). `measured_key_subscription` factors the shared keyboard-listener/tick shape out of `Typing`'s own arm so both criteria use one mechanism, parameterized on which `Message` variant a keystroke produces.
+
+**Machine**: same as PR-015-F's own figures (AMD Ryzen 9 9950X, niri/Wayland, CachyOS, Rust 1.97.1) — see that section for the full identification, unchanged here.
+
+**Idle-CPU comparison, re-proven for this criterion specifically, not inherited from `Typing`.** First attempt measured a 3s window starting 1s after launch and found 66 ticks/3s (~22%) — investigated rather than reported: a second, clean 3s window (after a longer settle) read 2 ticks/3s, confirming the first figure was startup tail (project restore, recent-projects load), not steady-state contamination:
+
+| Configuration | Ticks / 3s idle |
+| --- | --- |
+| No measurement env var set (default) | **0** |
+| `TEKSTIDE_MEASURE_CRITERION=mode_switch`, idle, settled window | **2** (~0.7% of one core) |
+
+Comparable to (marginally better than) `Typing`'s own 3 ticks/3s — expected, since both share the identical `MeasurementTick`-only overhead mechanism.
+
+**C4 — 1,100 dispatched (`xdotool key --clearmodifiers --repeat 1100 --repeat-delay 15 j`, global, matching C2's own "never `--window`-targeted for rapid delivery" finding), 1,100 confirmed on-disk, 0.00% delivery loss.** First 100 of each stream discarded as warmup:
+
+| Stream | n | min | p50 | p95 | p99 | max |
+| --- | --- | --- | --- | --- | --- | --- |
+| input-to-state-change | 1,000 | 7µs | 18µs | **29µs** | 35µs | 467µs |
+| view-build cost | 1,394 | 7µs | 24µs | **39µs** | 44µs | 63µs |
+
+**Result: sum of the two streams' p95s is 68µs (0.068ms) against a 32ms budget — met by roughly 470×, and non-degenerate** (not RFC-014's `0µs` artifact; the real, per-toggle cost of dispatching `AppCommand::ToggleActiveProjectMode` plus rebuilding the real workspace view). Stated with the same precision discipline response 137 required for C2: this is the sum of two independently-computed p95s from differently-sized samples (n=1,000 vs 1,394, `view` again sampling on every `MeasurementTick` in addition to every processed toggle), an upper-bound proxy, not itself a p95.
+
+**The structural note the handoff asked to be resolved, not left implicit**: `shell::subscription`'s measurement branch (checked before `SubscriptionMode::for_modal`) and `modal_for_state`'s measurement/demo-modal exclusivity both key on `measurement_active: bool` — criterion-agnostic by construction. `ModeSwitch` setting `state.measurement = Some(...)` is therefore already covered by the exact same exclusivity `Typing` established (response 134): no separate arrangement was needed, and none was added. Confirmed by inspection of `modal_for_state`'s signature, not assumed.
+
+**Escalation policy check**: no figure here misses its budget by any margin, so RFC-014 handoff §5's ">2× miss stops work" policy was never triggered.
+
+Gates: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (491 `tekstide-core` — up from 490, 1 net new — + 70 `tekstide` — up from 61, 9 net new + `focus_next_and_previous_route_through_update` rewritten — + 18 `tekstide-gui-spike`, 0 failures), `git diff --check` — all passed.
 
 ### PR-015-F — Measurement: R1 discharge
 

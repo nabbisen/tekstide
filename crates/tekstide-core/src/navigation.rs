@@ -60,8 +60,8 @@ impl KeybindingPolicy {
                 ),
                 KeybindingRule::new(
                     NavigationAction::ToggleProjectMode,
-                    None,
-                    KeybindingStatus::Configurable,
+                    Some("Ctrl+Alt+M"),
+                    KeybindingStatus::Candidate,
                 ),
                 KeybindingRule::new(
                     NavigationAction::SwitchActiveProject,

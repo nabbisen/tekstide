@@ -185,8 +185,10 @@ const CORE_BLANKET_EXEMPT_FILES: &[&str] = &["shell.rs"];
 ///   producers** not in the table: `ProjectOpenSurface::label()` and
 ///   `ProjectMode::label()`. Both are reachable only through
 ///   `render_active_project_workspace` (site 1) -- the real GUI's
-///   `AppRoute::ActiveProjectWorkspace` route is still a placeholder
-///   (`shell::no_surface_placeholder`), so neither is live.
+///   `AppRoute::ActiveProjectWorkspace` route (`shell::
+///   active_project_workspace_view`, since RFC-015 PR-015-E) selects a
+///   catalog key directly from the `ProjectMode` enum, never calling
+///   `.label()`, so neither producer is live.
 ///
 /// These corrections are raised as an open scope question in
 /// `qa-evidence.md`, per the handoff's own instruction for site 4 ("raise

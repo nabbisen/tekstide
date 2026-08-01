@@ -46,11 +46,16 @@
 //! redraw-forcing during any real interactive session for it to
 //! contaminate.
 //!
-//! **Mode switch (C4 / `NFR-PERF-002`) is out of scope for this
-//! slice** (response 133): it was moved to `0.4.1` alongside PR-015-E,
-//! since M8 today has no real mode to switch into that isn't the
-//! Project Board against an empty placeholder -- measuring it now
-//! would measure scaffolding.
+//! **Mode switch (C4 / `NFR-PERF-002`) reuses this exact mechanism**
+//! (RFC-015 PR-015-E) rather than a new one: `Criterion::ModeSwitch`'s
+//! measurement key dispatches the real `AppCommand::ToggleActiveProjectMode`
+//! (bypassing only the `KeybindingPolicy` lookup step a real `Ctrl+Alt+M`
+//! press would go through first -- irrelevant to what this measures, the
+//! cost of the state mutation and view rebuild, not input classification),
+//! and the same input-to-state-change/view-build decomposition applies.
+//! Deferred here in PR-015-F (response 133) because M8 had no real mode
+//! to switch into that wasn't the Project Board against an empty
+//! placeholder; PR-015-E is what makes it a real target.
 //!
 //! # Non-contamination when inactive
 //!
@@ -90,6 +95,10 @@ pub enum Criterion {
     Typing,
     /// C5 (`NFR-PERF-001`): process start to first frame painted.
     Startup,
+    /// C4 (`NFR-PERF-002`, RFC-015 PR-015-E): input-to-state-change and
+    /// view-build cost for a real mode switch, the same decomposition
+    /// `Typing` uses -- see the module doc.
+    ModeSwitch,
 }
 
 impl Criterion {
@@ -97,8 +106,15 @@ impl Criterion {
         match value {
             "typing" => Some(Self::Typing),
             "startup" => Some(Self::Startup),
+            "mode_switch" => Some(Self::ModeSwitch),
             _ => None,
         }
+    }
+
+    /// Both criteria needing the input-to-state-change/view-build
+    /// decomposition, as opposed to `Startup`'s single `frames()` sample.
+    fn uses_input_view_decomposition(self) -> bool {
+        matches!(self, Self::Typing | Self::ModeSwitch)
     }
 }
 
@@ -177,7 +193,7 @@ impl Measurement {
     pub fn is_done(&self) -> bool {
         match self.criterion {
             Criterion::Startup => self.startup_recorded,
-            Criterion::Typing => self.received >= self.target,
+            Criterion::Typing | Criterion::ModeSwitch => self.received >= self.target,
         }
     }
 
@@ -210,7 +226,7 @@ impl Measurement {
 /// an `&State`-shaped function record a side channel of evidence, never
 /// to influence what gets rendered.
 pub fn init_view_log(criterion: Criterion, log_path: &str) {
-    if criterion != Criterion::Typing {
+    if !criterion.uses_input_view_decomposition() {
         // Startup's frame is timed via `Measurement::record_startup_frame`
         // instead; no view-cost log is meaningful for a process that
         // exits after its first frame.

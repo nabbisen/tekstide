@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use tekstide_core::shell::ApplicationShell;
 
-use super::{Message, ModalButton, ModalContent, State, status_bar_summary};
+use super::{
+    Message, ModalButton, ModalContent, State, focus_marker, main_area_key, main_area_label,
+    sidebar_label, status_bar_summary, zone_style,
+};
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
 
@@ -313,26 +316,161 @@ fn a_project_board_shell_input_dispatches_the_real_app_command() {
     assert!(status_bar_summary(&state).contains("Project Board"));
 }
 
-/// Focus cycling: with a single real `FocusZone` variant today,
-/// `FocusNext`/`FocusPrevious` are legitimate no-ops -- proven directly
-/// rather than assumed, so the day `FocusZone` grows a second variant
-/// (PR-015-E), this test either still passes trivially or fails loudly
-/// pointing at exactly what needs updating.
+/// RFC-015 PR-015-E: `ToggleProjectMode`'s real default binding
+/// (`KeybindingPolicy::linux_mvp`, `Ctrl+Alt+M`) makes this the second
+/// `NavigationAction` with a genuine dispatch path -- proven the same
+/// way `OpenProjectBoard`'s dispatch is proven above: a real `ShellInput`
+/// routed through the real `update`, asserting the project's actual
+/// `ProjectMode` changed, not merely that `update` returned.
+#[test]
+fn a_toggle_project_mode_shell_input_dispatches_the_real_app_command() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("toggle-project-mode-dispatch"))
+        .expect("a freshly created directory is a valid project root");
+    assert_eq!(
+        app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::Content),
+        "test precondition: a freshly opened project starts in Content Mode"
+    );
+
+    let mut state = state_with(app_shell);
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::ToggleProjectMode,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "ToggleProjectMode must reach the real AppCommand, not be silently swallowed"
+    );
+    assert_eq!(
+        state.app_shell.route(),
+        tekstide_core::route::AppRoute::ActiveProjectWorkspace
+    );
+}
+
+/// Focus cycling now has somewhere real to go: `FocusZone::Sidebar`
+/// (PR-015-E). This replaces the PR-015-C-era version of this test,
+/// which only proved `FocusNext`/`FocusPrevious` were legitimate no-ops
+/// -- correct then, with one variant; the comment predicted this test
+/// would need updating the day a second one arrived, and it did.
 #[test]
 fn focus_next_and_previous_route_through_update() {
+    // RFC-015 PR-015-E: with a second `FocusZone` variant, cycling is a
+    // genuine toggle -- this replaces the PR-015-C-era version of this
+    // test, which only asserted focus stayed put, correct back when
+    // `MainArea` was the only zone and cycling was necessarily a no-op.
     let mut state = state_with(ApplicationShell::new());
     let focus_before = state.focus;
+    assert_eq!(focus_before, FocusZone::MainArea);
+
     let _ = super::update(
         &mut state,
         Message::Input(crate::input::RoutedInput::FocusNext),
     );
-    assert_eq!(state.focus, focus_before);
+    assert_eq!(state.focus, FocusZone::Sidebar);
+
     let _ = super::update(
         &mut state,
         Message::Input(crate::input::RoutedInput::FocusPrevious),
     );
     assert_eq!(state.focus, focus_before);
-    let _ = FocusZone::MainArea;
+}
+
+/// RFC-015 PR-015-E, `NFR-UX-002`: the focus indicator must not rely on
+/// colour alone. Proves two independent channels both flip with
+/// `state.focus`, not just one -- a border-colour-only change would
+/// satisfy neither this test's width assertion nor the marker one below.
+#[test]
+fn zone_style_changes_both_border_colour_and_width_when_focused() {
+    let theme = crate::theme::Theme::default();
+    let base = iced::Theme::Light;
+
+    let unfocused = zone_style(theme, false)(&base);
+    let focused = zone_style(theme, true)(&base);
+
+    assert_ne!(
+        unfocused.border.color, focused.border.color,
+        "focus must change the border colour"
+    );
+    assert_ne!(
+        unfocused.border.width, focused.border.width,
+        "focus must also change a non-colour channel (border width), per NFR-UX-002"
+    );
+}
+
+/// The textual channel (`NFR-UX-002`'s second, colour-independent
+/// signal), matching the modal's own `"> "`/`"  "` convention.
+#[test]
+fn focus_marker_differs_and_is_not_colour_dependent() {
+    assert_ne!(focus_marker(true), focus_marker(false));
+    assert!(focus_marker(true).contains('>'));
+}
+
+/// RFC-015 PR-015-E: the sidebar's rendered label actually changes when
+/// `state.focus` moves onto it -- proven against the real `State`, not
+/// just the marker function in isolation, so a wiring mistake (e.g.
+/// `sidebar_view` reading the wrong `FocusZone` variant) would be caught.
+#[test]
+fn sidebar_label_reflects_focus() {
+    let mut state = state_with(ApplicationShell::new());
+    assert_eq!(state.focus, FocusZone::MainArea);
+    let unfocused_label = sidebar_label(&state);
+
+    state.focus = FocusZone::Sidebar;
+    let focused_label = sidebar_label(&state);
+
+    assert_ne!(unfocused_label, focused_label);
+    assert!(focused_label.starts_with(focus_marker(true)));
+    assert!(unfocused_label.starts_with(focus_marker(false)));
+}
+
+/// Same property for the main area, plus proving `main_area_key` selects
+/// distinct catalog keys per `ProjectMode` -- a regression here would
+/// mean Content and Terminal Mode render identical scaffolding text.
+#[test]
+fn main_area_label_reflects_focus_and_mode() {
+    let mut state = state_with(ApplicationShell::new());
+    assert_eq!(state.focus, FocusZone::MainArea);
+
+    let content_label = main_area_label(&state, Some(tekstide_core::project::ProjectMode::Content));
+    let terminal_label = main_area_label(
+        &state,
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+    );
+    assert_ne!(
+        content_label, terminal_label,
+        "Content and Terminal Mode must render different scaffolding text"
+    );
+
+    state.focus = FocusZone::Sidebar;
+    let unfocused_content_label =
+        main_area_label(&state, Some(tekstide_core::project::ProjectMode::Content));
+    assert_ne!(content_label, unfocused_content_label);
+}
+
+/// `main_area_key`'s `None` fallback (no active project, which core
+/// guards against reaching this route without) renders Content Mode's
+/// placeholder, not a panic -- `main_area_key` is the pure decision
+/// function `main_area_label`/`main_area_view` both defer to.
+#[test]
+fn main_area_key_falls_back_to_content_mode_for_no_active_project() {
+    assert_eq!(
+        main_area_key(None),
+        main_area_key(Some(tekstide_core::project::ProjectMode::Content))
+    );
 }
 
 // --- Mechanical seam scans -------------------------------------------

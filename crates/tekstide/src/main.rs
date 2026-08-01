@@ -31,12 +31,13 @@ fn main() -> iced::Result {
 
 /// Wraps `shell::view` with view-build-cost timing (RFC-015 PR-015-F,
 /// discharging R1's typing-latency half without `iced::window::frames()`
-/// -- see `measurement`'s module doc). `shell::view` itself takes no
-/// timing dependency; this wrapper is the one and only place the timing
-/// happens, kept out of `shell.rs` entirely so the reviewed layer-
-/// composition/routing code is untouched by this slice.
+/// -- see `measurement`'s module doc; extended to `ModeSwitch` in
+/// PR-015-E for C4, the same decomposition). `shell::view` itself takes
+/// no timing dependency; this wrapper is the one and only place the
+/// timing happens, kept out of `shell.rs` entirely so the reviewed
+/// layer-composition/routing code is untouched by either slice.
 fn timed_view(state: &shell::State) -> iced::Element<'_, shell::Message> {
-    if state.is_measuring_typing() {
+    if state.is_measuring_view_cost() {
         let start = std::time::Instant::now();
         let element = shell::view(state);
         measurement::record_view_cost(start.elapsed());

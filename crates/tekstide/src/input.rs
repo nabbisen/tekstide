@@ -61,27 +61,38 @@ pub struct KeyPress {
     pub modifiers: iced::keyboard::Modifiers,
 }
 
-/// The shell's own focus zones -- deliberately a single real variant
-/// today. PR-015-B built no sidebar (that is PR-015-E's scaffolding);
-/// `#[non_exhaustive]` lets PR-015-E add `Sidebar` without this module's
-/// routing logic changing shape, the same reason `LocalePreference`'s
-/// fields exist ahead of their real callers.
+/// The shell's own focus zones. PR-015-B shipped a single real variant;
+/// PR-015-E adds `Sidebar`, the scaffolding for RFC-017/019/020's real
+/// sidebar content -- `#[non_exhaustive]` was kept specifically so this
+/// addition would not need `route_non_modal_input`'s structure to
+/// change, the same reason `LocalePreference`'s fields exist ahead of
+/// their real callers. It did not; only this enum and its `next`/
+/// `previous` grew.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FocusZone {
     MainArea,
+    Sidebar,
 }
 
 impl FocusZone {
-    /// With a single variant, cycling is a no-op -- correct, not a
-    /// placeholder: there is nowhere else to go until PR-015-E adds a
-    /// second zone.
+    /// Two zones, so cycling is a genuine toggle now, not the no-op it
+    /// was with one.
     pub fn next(self) -> Self {
-        self
+        match self {
+            Self::MainArea => Self::Sidebar,
+            Self::Sidebar => Self::MainArea,
+        }
     }
 
     pub fn previous(self) -> Self {
-        self
+        // Two zones: reverse cycling is identical to forward cycling.
+        // Kept as its own function (not aliased to `next`) so a third
+        // zone later does not need callers of `previous` to notice a
+        // silent behaviour change -- the same reasoning `ModalButton`'s
+        // `next`/`previous` in `shell.rs` already applies to its own
+        // two-item cycle.
+        self.next()
     }
 }
 

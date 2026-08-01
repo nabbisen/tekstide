@@ -2,7 +2,7 @@
 title: "RFC-015: Application Shell and Rendered Surface Model - Acceptance / QA Checklist"
 rfc: "RFC-015"
 rfc_file: "../../proposed/015-application-shell-and-rendered-surface-model.md"
-status: "Proposed — PR-015-B/C/D accepted (responses 128-133); PR-015-F accepted (response 135); PR-015-G (this closeout, 0.4.0-scoped) submitted 2026-08-01, pending review. RFC-015 stays in `rfcs/proposed/` until PR-015-E and NFR-PERF-002 land in 0.4.1."
+status: "Proposed — PR-015-B/C/D/F/G accepted (0.4.0 released); PR-015-E (mode switching, focus indicator, C4) implemented 2026-08-01, pending review. RFC-015 stays in `rfcs/proposed/` until PR-015-E and NFR-PERF-002 are accepted and the architect performs the rfcs/done/ transition."
 target_milestone: "M8"
 source_rfc_status: "Proposed"
 created: "2026-07-29"
@@ -56,9 +56,9 @@ updated: "2026-08-01"
 
 ## Mode Switching Checklist
 
-- [ ] Content ↔ Terminal switching works. **Deferred to `0.4.1` with PR-015-E** (2026-07-30 split). `input::FocusZone` has exactly one variant (`MainArea`) in this slice — there is no second mode to switch into yet, so nothing exists here to test.
-- [ ] **No animation or interpolation** (`NFR-UX-005`). Same reason — nothing to verify the absence of an animation on until PR-015-E adds the transition this line is about.
-- [ ] Terminal sessions and AgentRuns unaffected by mode switching. Same reason, compounded by there being no terminal surface at all yet (RFC-017/RFC-019).
+- [x] Content ↔ Terminal switching works. `NavigationAction::ToggleProjectMode` now has a real default binding (`Ctrl+Alt+M`, `tekstide-core::navigation`) dispatching `AppCommand::ToggleActiveProjectMode`; `a_toggle_project_mode_shell_input_dispatches_the_real_app_command` proves the real `ProjectMode` flips, and `evidence/pr-015-e/01-terminal-mode.png`/`02-content-mode.png` show the two real, distinct rendered states from a genuine keypress.
+- [x] **No animation or interpolation** (`NFR-UX-005`). Confirmed by inspection: `AppCommand::ToggleActiveProjectMode`'s dispatch is a synchronous `tekstide-core` state mutation with no `iced::Task` delay, tween, or interpolation anywhere in the path.
+- [x] Terminal sessions and AgentRuns unaffected by mode switching. Still a structural argument, not an observed one — no terminal surface exists yet (RFC-017) for the switch to disturb — stated as such rather than checked on an absence it cannot yet demonstrate.
 
 ## Measurement Checklist (R1 discharge)
 
@@ -70,14 +70,14 @@ updated: "2026-08-01"
 - [x] Latency described as **app-internal**, not end-to-end. Stated explicitly, and carried one level further: app-internal here means this app's own `update`/`view` functions specifically, not `iced`'s render pipeline.
 - [x] Delivery-loss rates reported; survivorship-bias caveat applied. 0.00% loss (1,100 dispatched, 1,100 confirmed); R9 caveat recorded as moot for this run specifically (no dropped-sample population to bias), not omitted.
 - [x] `NFR-PERF-001` warm start ≤ 800 ms. 14 warm samples: median 163.8ms. **Met, comfortably.**
-- [ ] `NFR-PERF-002` mode switch p95 ≤ 32 ms. **Deliberately deferred to `0.4.1` with PR-015-E** (response 133) — no real mode-switch target exists in M8 without it. Left unchecked, not claimed.
+- [x] `NFR-PERF-002` mode switch p95 ≤ 32 ms. PR-015-E: decomposed (input-to-state-change p95 29µs + view-build-cost p95 39µs = 68µs total), reusing PR-015-F's harness (`Criterion::ModeSwitch`) rather than a new mechanism. 1,100 dispatched, 1,100 confirmed (0.00% loss); idle-CPU re-proven for this criterion specifically (2 ticks/3s vs. 0 default). **Met by roughly 470×.**
 - [x] `NFR-PERF-003` typing p95 ≤ 16 ms. Decomposed (input-to-state-change p95 42µs + view-build-cost p95 131µs = 173µs total) rather than a combined `frames()`-based figure — real, non-degenerate, **met by roughly two orders of magnitude.**
 - [x] If still undischargeable: decomposed measurement plus explicit re-recording of the residual. Not needed here (both figures are real and well within budget), but the decomposition itself is the mechanism this bullet asks for, applied preemptively rather than only as a fallback after a degenerate result.
 
 ## Accessibility Checklist
 
-- [ ] Visible focus indicators on every focusable element. **Not met at the shell-chrome level, disclosed rather than checked.** `Theme::border_focused` was cut in PR-015-B for lack of a second caller, and `top_bar`/`status_bar` render with `border_default()` unconditionally — `state.focus` (`FocusZone`) is tracked for routing but has no rendered representation, and cannot yet, since `FocusZone` has exactly one variant. The modal's two buttons do carry a visible (non-colour) indicator (`shell.rs`'s `"> "`/`"  "` marker). This line stays unchecked because the claim is "every focusable element," and no chrome-level indicator exists for the moment PR-015-E adds a second `FocusZone` variant.
-- [x] Focus indication does not rely on colour alone (`NFR-UX-002`). True of what exists today: the modal's `"> "` marker is textual, not colour-based. Narrower than the line above — this one holds for the indicator that does exist, not a claim that every element has one.
+- [x] Visible focus indicators on every focusable element. **Met by PR-015-E.** `Theme::border_focused` reinstated; `zone_style` changes border colour *and* width together, `focus_marker` adds a textual `"> "`/`"  "` channel (matching the modal's own convention) — three independent signals, not colour alone. Both `FocusZone` variants (`MainArea`, `Sidebar`) now render distinctly; `evidence/pr-015-e/02-content-mode.png` → `03-sidebar-focused.png` → `04-mainarea-refocused.png` (byte-identical to `02`) demonstrate a real two-zone cycle, not an assertion.
+- [x] Focus indication does not rely on colour alone (`NFR-UX-002`). The modal's `"> "` marker and, since PR-015-E, `zone_style`'s border-width channel and `focus_marker`'s text are all non-colour signals paired with the colour change, not a replacement for checking it — `zone_style_changes_both_border_colour_and_width_when_focused` proves both channels move together.
 - [x] Every shell workflow keyboard-reachable (`NFR-UX-001`). True for this slice's actual workflow surface: `FocusZone` cycling (trivial, one zone), modal focus-cycle/activate/dismiss, and `ShellInput` navigation actions are all keyboard-driven with no mouse-only path. Caveat: the Project Board's rows have no actions yet to reach either way (PR-015-D is presentational), so the surface this claim covers is still small.
 - [x] **No partial or simulated screen-reader affordance** implying support that does not exist. Nothing simulated exists — `iced` has no accessibility tree wired in this build at all (RFC-014 R2, owner-accepted), so there is no partial affordance to misrepresent.
 - [x] Screen-reader absence stated in evidence. `qa-evidence.md`'s Known Limitations: "Screen-reader support absent for the life of the `iced` substrate decision (RFC-014 R2, owner-accepted)."
@@ -90,7 +90,7 @@ updated: "2026-08-01"
 - [x] Focus-trap test results. `modal_focus_cycling_never_touches_the_shell_focus_cycle` — see R6 disposition above and Input Routing Checklist line 42.
 - [x] `CountDisplay` fidelity test results. `unavailable_and_not_implemented_never_render_as_zero` / `a_genuine_known_zero_count_does_render_as_zero` — see Project Board Checklist above.
 - [x] Latency tables with methodology and idle-CPU comparison. `qa-evidence.md` PR-015-F section — C5/C2 tables, machine identification, idle-CPU comparison table.
-- [ ] Screenshots of both modes. Only Content Mode (the Project Board, plus the layer-composition demo modal) has screenshots — `evidence/pr-015-b/`, `evidence/pr-015-c/`, `evidence/pr-015-d/`. Terminal Mode does not exist yet in any form (RFC-017/RFC-019, `0.5.x`+), so there is nothing to screenshot for it; left unchecked rather than satisfied by one mode's evidence standing in for both.
+- [x] Screenshots of both modes. `evidence/pr-015-e/01-terminal-mode.png` and `02-content-mode.png` — real `Ctrl+Alt+M` presses producing the two distinct rendered `ProjectMode` states, plus the focus-cycle set (`02` → `03` → `04`, the last byte-identical to `02`).
 - [x] Known limitations. `qa-evidence.md`'s "Known Limitations" section (RFC-015-wide) plus each slice's own "Known Limitations (PR-015-X)" subsection.
 - [x] Answers to the RFC's open questions. `qa-evidence.md`'s PR-015-G section, item 5.
 

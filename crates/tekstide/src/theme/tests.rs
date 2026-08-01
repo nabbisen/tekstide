@@ -27,6 +27,32 @@ fn the_compiled_default_is_a_dark_theme_with_in_range_channels() {
     );
 }
 
+/// RFC-015 PR-015-E: `border_focused` must be in range and genuinely
+/// distinct from `border_default` -- the colour channel is not the sole
+/// indicator (`NFR-UX-002`; callers also change border width), but a
+/// focus ring identical in colour to the unfocused border would still
+/// defeat the point of having a separate role at all.
+#[test]
+fn border_focused_is_in_range_and_distinct_from_border_default() {
+    let theme = Theme::default();
+
+    for channel in [
+        theme.border_focused().r,
+        theme.border_focused().g,
+        theme.border_focused().b,
+    ] {
+        assert!(
+            (0.0..=1.0).contains(&channel),
+            "colour channel out of range: {channel}"
+        );
+    }
+    assert_ne!(
+        theme.border_focused(),
+        theme.border_default(),
+        "a focus ring identical to the unfocused border renders no differently"
+    );
+}
+
 /// Font sizes must be positive and heading text must be visually larger
 /// than body/status text -- the shape `NFR-UX-004` implies even before
 /// RFC-023 makes these configurable.

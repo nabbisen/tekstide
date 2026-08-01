@@ -25,6 +25,7 @@ pub struct Theme {
     foreground: Color,
     accent: Color,
     border_default: Color,
+    border_focused: Color,
     surface_elevated: Color,
     font_size_body: f32,
     font_size_heading: f32,
@@ -46,6 +47,16 @@ impl Theme {
 
     pub fn border_default(&self) -> Color {
         self.border_default
+    }
+
+    /// RFC-015 PR-015-E: reinstated -- cut in PR-015-B for having no
+    /// caller (there was no focus concept to render with one
+    /// `FocusZone` variant), correctly. `FocusZone::Sidebar` gives Tab
+    /// somewhere to go, and `NFR-UX-002` requires the indicator not rely
+    /// on colour alone, so callers pair this with a second channel
+    /// (border width, a marker glyph) rather than colour by itself.
+    pub fn border_focused(&self) -> Color {
+        self.border_focused
     }
 
     pub fn surface_elevated(&self) -> Color {
@@ -72,6 +83,7 @@ impl Default for Theme {
             foreground: Color::from_rgb(0.90, 0.90, 0.90),
             accent: Color::from_rgb(0.30, 0.60, 1.0),
             border_default: Color::from_rgb(0.35, 0.35, 0.35),
+            border_focused: Color::from_rgb(0.30, 0.60, 1.0),
             surface_elevated: Color::from_rgb(0.12, 0.12, 0.12),
             font_size_body: 14.0,
             font_size_heading: 16.0,

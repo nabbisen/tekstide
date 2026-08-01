@@ -22,6 +22,29 @@ fn project_board_shortcut_is_configurable_candidate() {
 }
 
 #[test]
+fn toggle_project_mode_shortcut_is_configurable_candidate() {
+    // RFC-015 PR-015-E: Content<->Terminal mode switching has no
+    // reachable trigger without a real default binding -- unlike the
+    // other `Configurable` entries above, this one is exercised by a
+    // real feature as of this slice, not deferred to RFC-023.
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::ToggleProjectMode)
+        .expect("Toggle Project Mode should have a keyboard policy");
+
+    assert_eq!(rule.default_binding, Some("Ctrl+Alt+M"));
+    assert_eq!(rule.status, KeybindingStatus::Candidate);
+
+    let project_board_rule = policy
+        .rule_for(NavigationAction::OpenProjectBoard)
+        .expect("Project Board should have a keyboard policy");
+    assert_ne!(
+        rule.default_binding, project_board_rule.default_binding,
+        "the two candidate bindings must not collide"
+    );
+}
+
+#[test]
 fn primary_navigation_workflows_have_keyboard_policy_entries() {
     let policy = KeybindingPolicy::linux_mvp();
 
