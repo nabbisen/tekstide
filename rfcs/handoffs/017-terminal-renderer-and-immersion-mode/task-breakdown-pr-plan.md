@@ -1,0 +1,103 @@
+---
+title: "RFC-017: Terminal Renderer and Immersion Mode - Task Breakdown / PR Plan"
+rfc: "RFC-017"
+rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
+status: "Accepted 2026-08-01 — ready for implementation"
+target_milestone: "M9"
+created: "2026-08-01"
+---
+
+# RFC-017 Task Breakdown
+
+Eight slices. **PR-017-B is the security-critical one and has its own document** ([`pr-017-b-filter-promotion.md`](./pr-017-b-filter-promotion.md)) — read it before writing code.
+
+## PR-017-A — Design and handoff acceptance
+
+Granted 2026-08-01 with the RFC. Nothing to implement.
+
+## PR-017-B — Filter promotion
+
+Scope: `SecurityFilter` from spike to product code, delegating to `tekstide-core`'s existing classifier; P1-P4 re-proven including adversarially chunked input.
+
+Review gate:
+
+- P1-P4 each **independently ablated**, one ablation per property.
+- The single-ingress and side-channel enumerations written out, not summarised.
+- `cargo tree -p tekstide-core --edges normal | grep -ciE 'vte|alacritty'` → `0`.
+- Split corpus: every family, every internal byte boundary, generated not hand-written; classification and observable grid effect identical to the unsplit case.
+- Unsupported families produce **no observable grid effect**, compared on full grid state.
+- Truncated/malformed sequences fail closed without unbounded buffering.
+
+**If P1-P4 cannot be re-established, stop and escalate rather than proceeding to C.** Option B (own the parser) is live.
+
+## PR-017-C — Terminal pane rendering
+
+Scope: the emulator grid rendered as a surface under RFC-015's contract. No input yet.
+
+Review gate:
+
+- Surface contract holds: no state duplicating `tekstide-core`, cannot render trusted chrome, cannot reach modal state.
+- Grid renders unescaped (the RFC-016 exception); **any chrome around it goes through `text_safety`** — session titles, pane headers, tooltips.
+- Bounded scrollback, with the bound stated and tested under sustained output.
+- Screenshot of a real PTY session, with what it proves and does not stated explicitly.
+
+## PR-017-D — Input
+
+Scope: `TextStream` with a real `TerminalId`; modal exclusivity and global-keybinding precedence verified under a live terminal; the Tab decision made.
+
+Review gate:
+
+- **Modal exclusivity demonstrated, not argued**: a dialog open means no PTY write. RFC-015 proved this headless with `terminal_focus` hard-coded `None`; it must be re-proven with a real terminal.
+- `TextStream` still cannot address shell or modal state.
+- Global keybindings still win over terminal focus — a terminal that swallows shell navigation is one the user cannot escape.
+- **The Tab decision made, recorded with its reasoning, and its escape hatch tested** — the hatch must not depend on the terminal cooperating.
+
+## PR-017-E — Immersion mode, split policy, session bar
+
+Scope: at most two visible panes; split from real font metrics and DPI; session bar with non-colour-reliant state; hidden-session handling.
+
+Review gate:
+
+- Uses `TerminalPanePolicy`/`TerminalLayoutClass`/`visible_terminal_limit` from `tekstide-core::navigation` — **no parallel layout model**.
+- Split driven by real font metrics; a split producing panes below the minimum column count is refused, not rendered.
+- `NFR-UX-002`: session state distinguishable without colour, including for hidden sessions.
+- **The hidden-session grid-state decision made**, against the bounded-scrollback decision rather than separately from it.
+- Screenshots of both split and single-pane layouts.
+
+## PR-017-F — `plain_terminal_observation` audit producer
+
+Scope: wire the family that already exists in the frozen v1 schema and has no producer.
+
+Review gate:
+
+- Conforms to the frozen family; **no schema amendment.** If one seems needed, that is an RFC-013 amendment with owner authorisation — see RFC-013 Amendment 1 for the shape and the migration it required.
+- **Sentinel privacy test**: no command text, no output, no path reaches the durable store. Probe raw bytes on disk, not just the typed query — the shape RFC-021 PR-021-E2 used.
+- Written via `AuditCoordinator`, not directly to the store.
+
+## PR-017-G — Measurement: `NFR-PERF-004`
+
+Scope: terminal input latency p95 ≤ 16 ms **under bounded background output**.
+
+Review gate:
+
+- **Under flood.** Latency on an idle terminal measures nothing, and flood is where P4 failures surface.
+- Reuses PR-015-F's harness; **`iced::window::frames()` is not reintroduced** — it forced continuous redraw and produced RFC-014's degenerate all-`0µs` results.
+- Non-contamination proven for this criterion, not inherited.
+- p50/p95/p99 and max, delivery-loss rate reported, stopping on confirmed on-disk sample counts rather than dispatched ones (R9).
+- **Another all-zero figure is not an acceptable outcome.**
+
+## PR-017-H — Closeout evidence
+
+Scope: checklist, QA evidence, known limitations, answers to the RFC's open questions, and an explicit statement of what may be claimed about the terminal surface.
+
+Review gate: the claim statement must survive the honesty test. In particular it **may not claim trusted-UI separation or spoofing resistance** — that is RFC-018, and RFC-014 PR-014-D's spike screenshot does not transfer.
+
+## Sequencing
+
+**B → C is strict.** D needs C. E needs C. F is independent of D/E and can run in parallel. G needs D and E. H needs all.
+
+```
+A ─→ B ─→ C ─┬─→ D ─┬─→ G ─→ H
+             ├─→ E ─┘
+             └─→ F ─────────┘
+```

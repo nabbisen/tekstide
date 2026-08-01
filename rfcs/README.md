@@ -20,7 +20,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | --- | --- | --- |
 | 014 | [Desktop GUI Substrate and Terminal Rendering Strategy](./proposed/014-desktop-gui-substrate-and-terminal-rendering.md) | Proposed — spike complete; substrate decision approved 2026-07-29 |
 | 015 | [Application Shell and Rendered Surface Model](./proposed/015-application-shell-and-rendered-surface-model.md) | Proposed |
-| 017 | [Terminal Renderer and Immersion Mode](./proposed/017-terminal-renderer-and-immersion-mode.md) | Proposed — authored 2026-08-01, awaiting owner acceptance |
+| 017 | [Terminal Renderer and Immersion Mode](./proposed/017-terminal-renderer-and-immersion-mode.md) | **Accepted 2026-08-01** — ready for implementation |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ## Handoffs
@@ -43,6 +43,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 014 | [Desktop GUI Substrate and Terminal Rendering Strategy](./handoffs/014-desktop-gui-substrate-and-terminal-rendering/README.md) |
 | 015 | [Application Shell and Rendered Surface Model](./handoffs/015-application-shell-and-rendered-surface-model/README.md) |
 | 016 | [Internationalization and Localization](./handoffs/016-internationalization-and-localization/README.md) |
+| 017 | [Terminal Renderer and Immersion Mode](./handoffs/017-terminal-renderer-and-immersion-mode/README.md) |
 | 021 | [Command Approval Model and Adapter Capability](./handoffs/021-command-approval-model-and-adapter-capability/README.md) |
 | 023 | [Configuration System](./handoffs/023-configuration-system/README.md) |
 

@@ -1,6 +1,6 @@
 # RFC-017: Terminal Renderer and Immersion Mode
 
-Status: Proposed
+Status: Accepted by the human owner 2026-08-01 — ready for implementation
 Target milestone: M9 (`0.5.x`)
 Date: 2026-08-01
 
