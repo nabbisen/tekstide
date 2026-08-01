@@ -1,7 +1,7 @@
 ---
 title: "RFC-014: Desktop GUI Substrate and Terminal Rendering Strategy - Acceptance / QA Checklist"
 rfc: "RFC-014"
-rfc_file: "../../proposed/014-desktop-gui-substrate-and-terminal-rendering.md"
+rfc_file: "../../done/014-desktop-gui-substrate-and-terminal-rendering.md"
 status: "Proposed — criteria accepted, spike pending"
 target_milestone: "M8"
 source_rfc_status: "Proposed — criteria accepted"
@@ -95,7 +95,7 @@ Criteria accepted 2026-07-28 (PR-014-A). Spike evidence pending.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted — decision record may proceed.
+- [x] **Accepted — decision record may proceed.**
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 - [ ] Substrate disqualified — return to candidate selection.
@@ -103,5 +103,24 @@ Criteria accepted 2026-07-28 (PR-014-A). Spike evidence pending.
 Reviewer notes:
 
 ```text
-Pending spike evidence.
-```
+Recorded 2026-08-01, retrospectively. The owner accepted the substrate decision on
+2026-07-29 and the architect wrote the decision record (f769871), but this box was
+never ticked -- the acceptance lived only in the RFC body and the review trail. Found
+while closing RFC-014, and worth noting as a pattern: RFC-015's decision box had the
+same gap, caught the same way. The reviewer's field is the one nobody's checklist
+walk covers, because implementers correctly do not fill it in.
+
+DECISION: iced 0.14 + Option A (alacritty_terminal behind an RFC-009 filter).
+
+R1 (latency unverified) and R6 (focus-trap property does not transfer) are DISCHARGED
+by RFC-015 across 0.4.0 and 0.4.1. With those closed this decision record has no open
+items.
+
+R2 (no accessibility bridge in iced 0.14) and R9 (survivorship bias in confirmed-only
+percentiles) are owner-accepted standing findings, not defects -- R2 with the explicit
+reasoning that i18n is mandatory with verified evidence while screen-reader support is
+a "should".
+
+R4-R7 are properties the spike proved under spike conditions. RFC-017 re-establishes
+them under real product conditions; that is carried scope, not an open item here.
+

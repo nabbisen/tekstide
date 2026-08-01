@@ -1,6 +1,8 @@
 # RFC-014: Desktop GUI Substrate and Terminal Rendering Strategy
 
-Status: Proposed — spike complete; substrate decision approved by the human owner 2026-07-29 (see §PR-014-F)
+Status: Implemented with documented limitations — closed 2026-08-01. Substrate decision (`iced` 0.14 + Option A) accepted by the owner 2026-07-29; **R1 and R6 discharged by RFC-015** across `0.4.0`/`0.4.1`, so this decision record has no open items. R2 (no accessibility bridge) and R9 (survivorship bias) are owner-accepted standing findings. **R4-R7 are carried scope for RFC-017**, which re-establishes them under real product conditions.
+
+**The spike crate (`crates/tekstide-gui-spike`, `publish = false`) outlives this RFC on purpose** — see §"When the spike crate is deleted" below. — spike complete; substrate decision approved by the human owner 2026-07-29 (see §PR-014-F)
 Target milestone: M8
 Date: 2026-07-28
 
@@ -300,4 +302,32 @@ Verified: zero matches for `accesskit`/`a11y`/`accessibility` in vendored `iced`
 ## D7. What M8 inherits
 
 - **Proven:** terminal rendering strategy, the RFC-009 interposition point, trusted-UI separability, font metrics for the split policy, startup and idle-memory baselines.
-- **Unproven and owed:** latency verification (R1), accessibility posture (R2), and every property in R4-R7 that RFC-017 must re-establish under real product conditions.
+- ~~**Unproven and owed:** latency verification (R1), accessibility posture (R2), and every property in R4-R7 that RFC-017 must re-establish under real product conditions.~~ **Updated 2026-08-01 on closure.** R1 is **discharged** — RFC-015 PR-015-F measured C2/C5 non-degenerately in `0.4.0` and PR-015-E measured C4 in `0.4.1`, all inside budget. R2 is **owner-accepted** as a standing disclosed absence, not an owed item. **R4-R7 remain owed and are RFC-017's**, to re-establish under real product conditions — they are carried scope, not open items in this record.
+
+
+## When the spike crate is deleted
+
+Recorded on closure, 2026-08-01, because "the RFC is closed" is not the same question as "the spike is finished" and conflating them would delete evidence or keep dead code.
+
+**Nothing compiles against the spike today.** The only reference in product code is a doc comment in `shell.rs`. So this is not a dependency question — it is about what still needs *reading*.
+
+The spike uniquely holds three things, and RFC-017 draws on each in a different slice:
+
+| File | Drawn on by | Superseded when |
+| --- | --- | --- |
+| `filter.rs`, `filter/tests.rs` | PR-017-B (filter promotion) | PR-017-B lands |
+| `terminal_pane.rs` | PR-017-C (grid rendering) | PR-017-C lands |
+| `font_metrics.rs` | PR-017-E (split policy) | PR-017-E lands |
+
+**Delete when all four hold:**
+
+1. No product code compiles against it — already true, and mechanically checkable.
+2. Every property it proved has a product-code equivalent with its own tests.
+3. Its evidence artifacts live outside the crate — already true; the nine screenshots are committed under `../handoffs/014-desktop-gui-substrate-and-terminal-rendering/evidence/`.
+4. Nothing still needs to read it as reference — i.e. PR-017-B, C, and E have all landed.
+
+**The forcing event is PR-017-E.** Until then the crate stays.
+
+**One thing to do earlier, at PR-017-B**, and the reason this section exists rather than a one-line note: once the filter is promoted, **the spike holds a second copy of a security-policy implementation.** This project has hit the duplicate-implementation problem twice already — `text_safety` escaping duplicated in `approval::coordinator`, and the string seam scans duplicated between RFC-015 and RFC-016 — and both times the cost was a later consolidation. The spike never ships, so the risk here is not divergent behaviour in production; it is someone reading `filter.rs` and taking it for current. **Mark it superseded in its module doc when PR-017-B lands**, naming the product module that replaced it.
+
+**One consequence to check at deletion**, not before: removing the crate changes the *workspace* dependency tree. `sys-locale` was once reported as costing `+0` because the spike pulled it transitively through `iced` → `cosmic-text` — an error corrected in review 122 by measuring `cargo tree -p tekstide` instead of diffing the workspace lock. Any figure still measured workspace-wide would shift on deletion. The correct measurements are already per-crate, so this should be a no-op; confirm rather than assume.

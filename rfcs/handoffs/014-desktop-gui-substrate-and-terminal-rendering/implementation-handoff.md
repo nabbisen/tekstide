@@ -1,7 +1,7 @@
 ---
 title: "RFC-014: Desktop GUI Substrate and Terminal Rendering Strategy - Implementation Handoff"
 rfc: "RFC-014"
-rfc_file: "../../proposed/014-desktop-gui-substrate-and-terminal-rendering.md"
+rfc_file: "../../done/014-desktop-gui-substrate-and-terminal-rendering.md"
 target_milestone: "M8"
 source_rfc_status: "Proposed — criteria accepted"
 created: "2026-07-28"

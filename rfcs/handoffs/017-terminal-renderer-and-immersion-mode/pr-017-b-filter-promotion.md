@@ -105,6 +105,14 @@ That last one is a resource question as much as a correctness one: an unterminat
 
 The same instruction RFC-021 PR-021-D carried applies here: escalating is a success.
 
+## Mark the spike's filter superseded when this lands
+
+Once you promote it, `crates/tekstide-gui-spike/src/filter.rs` becomes a **second copy of a security-policy implementation.** The spike never ships, so this is not a production risk — it is someone reading that file two months from now and taking it for current.
+
+Add a line to its module doc naming the product module that replaced it and the commit that did so. The crate itself stays until PR-017-E (see RFC-014 §"When the spike crate is deleted"); this is the cheap mitigation for the window in between.
+
+This project has paid for duplicate implementations twice — `text_safety` escaping duplicated in `approval::coordinator`, and the string seam scans duplicated between RFC-015 and RFC-016. Both cost a later consolidation. One doc line now is the whole fix.
+
 ## One thing I will check that is easy to get right and easy to skip
 
 The spike is `publish = false`. The product crate is published. **`include_str!` and any path reaching outside the crate will break `cargo package`** — that exact defect shipped in PR-015-F and was caught only by running the packaging gate at release time.

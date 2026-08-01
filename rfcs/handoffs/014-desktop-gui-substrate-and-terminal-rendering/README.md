@@ -1,6 +1,6 @@
 # RFC-014: Desktop GUI Substrate and Terminal Rendering Strategy - Developer Handoff Pack
 
-Source RFC: [RFC-014](../../proposed/014-desktop-gui-substrate-and-terminal-rendering.md)
+Source RFC: [RFC-014](../../done/014-desktop-gui-substrate-and-terminal-rendering.md)
 Target milestone: **M8**
 Source RFC status: **Proposed — criteria accepted 2026-07-28**
 
@@ -10,7 +10,7 @@ Source RFC status: **Proposed — criteria accepted 2026-07-28**
 
 | # | Document | Purpose |
 | --- | --- | --- |
-| 1 | [RFC-014](../../proposed/014-desktop-gui-substrate-and-terminal-rendering.md) | The decision, criteria C1-C14, and why a pure TUI was rejected. |
+| 1 | [RFC-014](../../done/014-desktop-gui-substrate-and-terminal-rendering.md) | The decision, criteria C1-C14, and why a pure TUI was rejected. |
 | 2 | This file | Orientation, resolved open questions, and what is binding on you. |
 | 3 | [`implementation-handoff.md`](./implementation-handoff.md) | Quarantine rules, candidate selection, measurement methodology, evidence requirements. |
 | 4 | [`pr-014-c-filter-interposition.md`](./pr-014-c-filter-interposition.md) | **Detailed instructions for PR-014-C, the security-boundary slice. Read before choosing a terminal-emulation crate, not after.** |

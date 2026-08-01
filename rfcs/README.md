@@ -18,7 +18,6 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 014 | [Desktop GUI Substrate and Terminal Rendering Strategy](./proposed/014-desktop-gui-substrate-and-terminal-rendering.md) | Proposed — spike complete; substrate decision approved 2026-07-29 |
 | 017 | [Terminal Renderer and Immersion Mode](./proposed/017-terminal-renderer-and-immersion-mode.md) | **Accepted 2026-08-01** — ready for implementation |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
@@ -64,6 +63,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 011 | [Transcript Retention and Local Data Policy](./done/011-transcript-retention-and-local-data-policy.md) | Implemented with documented limitations |
 | 012 | [Generated Change Review Foundations](./done/012-generated-change-review-foundations.md) | Implemented with documented limitations on main at 34a1c55 |
 | 013 | [Durable Audit Store and Local Data Policy](./done/013-durable-audit-store-and-local-data-policy.md) | Implemented with documented limitations · **Amendment 1 complete 2026-07-30** (additive v1 → v2 schema migration for RFC-021's `command_cwd_mismatch`; migration, convergence, and interrupted-migration properties all proven) |
+| 014 | [Desktop GUI Substrate and Terminal Rendering Strategy](./done/014-desktop-gui-substrate-and-terminal-rendering.md) | Implemented with documented limitations — `iced` + Option A; R1/R6 discharged, R4-R7 carried to RFC-017 |
 | 015 | [Application Shell and Rendered Surface Model](./done/015-application-shell-and-rendered-surface-model.md) | Implemented with documented limitations — `0.4.0` + `0.4.1`; RFC-014 R1 and R6 discharged |
 | 016 | [Internationalization and Localization](./done/016-internationalization-and-localization.md) | Implemented with documented limitations — catalog, fallback, text safety, pluralization, enforcement; translation content and runtime locale switching out of scope |
 | 021 | [Command Approval Model and Adapter Capability](./done/021-command-approval-model-and-adapter-capability.md) | Implemented **headless** with documented limitations — not reachable by any user; cooperative, not enforced. Fully closed 2026-07-30 |

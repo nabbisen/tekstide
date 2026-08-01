@@ -89,7 +89,7 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 
 | RFC | Title | Milestone | Depends on | Headless | Status |
 | --- | --- | --- | --- | --- | --- |
-| 014 | Desktop GUI Substrate and Terminal Rendering Strategy | M8 | — | no | **Decision approved 2026-07-29 — `iced` + Option A** |
+| 014 | Desktop GUI Substrate and Terminal Rendering Strategy | M8 | — | no | **Closed 2026-08-01.** Decision `iced` + Option A; R1/R6 discharged by RFC-015, R4-R7 carried to RFC-017. Moved to `done/` |
 | 015 | Application Shell and Rendered Surface Model | M8 | 014 | no | **Implemented and closed 2026-08-01.** `0.4.0` (B/C/D/F/G) + `0.4.1` (E, focus indicator, C4). Moved to `done/`. RFC-014 R1 and R6 discharged |
 | 016 | Internationalization and Localization | M8 | 014 | partly | **Implemented and closed 2026-08-01** (PR-016-B/C/D/E/F). Moved to `done/` |
 | 017 | Terminal Renderer and Immersion Mode | M9 | 014, 015 | no | **Accepted 2026-08-01 — next up.** Unblocked: 014 decided, 015 shipped `0.4.0` |

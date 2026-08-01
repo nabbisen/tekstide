@@ -1,7 +1,7 @@
 ---
 title: "RFC-014 PR-014-C: Filter Interposition - Detailed Developer Instructions"
 rfc: "RFC-014"
-rfc_file: "../../proposed/014-desktop-gui-substrate-and-terminal-rendering.md"
+rfc_file: "../../done/014-desktop-gui-substrate-and-terminal-rendering.md"
 target_milestone: "M8"
 created: "2026-07-28"
 updated: "2026-07-28"

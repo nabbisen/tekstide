@@ -21,7 +21,7 @@ Source RFC status: **Accepted by the human owner 2026-08-01**
 Read before starting — RFC-017 conforms to these rather than amending them:
 
 - [RFC-009](../../done/009-terminal-security-boundary.md) — the accepted-sequence policy. **This RFC renders it. It does not widen it.**
-- [RFC-014](../../proposed/014-desktop-gui-substrate-and-terminal-rendering.md) — the Option A decision, and the spike whose filter you are promoting.
+- [RFC-014](../../done/014-desktop-gui-substrate-and-terminal-rendering.md) — the Option A decision, and the spike whose filter you are promoting.
 - [RFC-015](../../done/015-application-shell-and-rendered-surface-model.md) — the surface contract and the three input classes. `TextStream` was built for this surface and has been waiting for it.
 
 ## Where to start work

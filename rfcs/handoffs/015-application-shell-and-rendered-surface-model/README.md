@@ -21,7 +21,7 @@ Source RFC status: **Proposed**
 Read before starting — RFC-015 conforms to these rather than amending them:
 
 - [RFC-009](../../done/009-terminal-security-boundary.md) — §212 requires trusted dialogs rendered outside terminal output. This is the property PR-015-C must make structurally true.
-- [RFC-014](../../proposed/014-desktop-gui-substrate-and-terminal-rendering.md) — the substrate decision and its residual risks **R1** (latency unverified) and **R6** (focus-trap property does not transfer). RFC-015 discharges both.
+- [RFC-014](../../done/014-desktop-gui-substrate-and-terminal-rendering.md) — the substrate decision and its residual risks **R1** (latency unverified) and **R6** (focus-trap property does not transfer). RFC-015 discharges both.
 - [RFC-005](../../done/005-application-shell-and-project-board.md) — the `ApplicationShell` and Project Board state you are rendering.
 
 ## Active work: PR-015-E — `0.4.1` (added 2026-08-01)
