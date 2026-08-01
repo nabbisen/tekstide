@@ -494,3 +494,34 @@ fn no_count_display_or_attention_label_is_called_anywhere_in_the_crate() {
         );
     }
 }
+
+// --- PR-015-F: measurement, discharging R1 -----------------------------
+
+/// `State::is_measuring_typing()` must be `false` with no measurement
+/// env var set -- the default for every normal interactive run, and the
+/// property `main.rs`'s view-cost timing wrapper and the idle-CPU
+/// comparison both depend on. Does not itself set or clear
+/// `TEKSTIDE_MEASURE_CRITERION`, relying on the ambient test environment
+/// not setting it (true for every gate run in this repo).
+#[test]
+fn is_measuring_typing_is_false_by_default() {
+    let state = state_with(ApplicationShell::new());
+    assert!(!state.is_measuring_typing());
+}
+
+/// `tail_lines` -- the typing-measurement surface's only rendering
+/// logic worth testing in isolation from `iced`'s `Element` tree --
+/// keeps exactly the last `count` lines, joined back with `\n`, and
+/// does not panic when the document has fewer lines than requested.
+#[test]
+fn tail_lines_keeps_only_the_last_n_lines() {
+    let doc = "one\ntwo\nthree\nfour\nfive";
+    assert_eq!(super::tail_lines(doc, 2), "four\nfive");
+    assert_eq!(super::tail_lines(doc, 5), doc);
+    assert_eq!(
+        super::tail_lines(doc, 100),
+        doc,
+        "must not panic when count exceeds line count"
+    );
+    assert_eq!(super::tail_lines("", 5), "");
+}

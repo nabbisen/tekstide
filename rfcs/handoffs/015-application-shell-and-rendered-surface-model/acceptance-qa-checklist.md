@@ -2,11 +2,11 @@
 title: "RFC-015: Application Shell and Rendered Surface Model - Acceptance / QA Checklist"
 rfc: "RFC-015"
 rfc_file: "../../proposed/015-application-shell-and-rendered-surface-model.md"
-status: "Proposed — implementation in progress (PR-015-B, PR-015-C accepted [responses 128-131]; PR-015-D: response 132 required fix applied 2026-07-31, pending re-review)"
+status: "Proposed — implementation in progress (PR-015-B, PR-015-C, PR-015-D accepted [responses 128-133]; PR-015-F landed 2026-08-01, not yet reviewed)"
 target_milestone: "M8"
 source_rfc_status: "Proposed"
 created: "2026-07-29"
-updated: "2026-07-31"
+updated: "2026-08-01"
 ---
 
 # RFC-015 Acceptance / QA Checklist
@@ -62,17 +62,17 @@ updated: "2026-07-31"
 
 ## Measurement Checklist (R1 discharge)
 
-- [ ] Instrumentation built into the shell behind a flag.
-- [ ] **Non-contamination proven** by idle-CPU comparison.
-- [ ] Release builds only; no debug figures recorded.
-- [ ] ≥1,000 samples; p50/p95/p99 reported.
-- [ ] Machine identification recorded.
-- [ ] Latency described as **app-internal**, not end-to-end.
-- [ ] Delivery-loss rates reported; survivorship-bias caveat applied.
-- [ ] `NFR-PERF-001` warm start ≤ 800 ms.
-- [ ] `NFR-PERF-002` mode switch p95 ≤ 32 ms.
-- [ ] `NFR-PERF-003` typing p95 ≤ 16 ms.
-- [ ] If still undischargeable: decomposed measurement plus explicit re-recording of the residual.
+- [x] Instrumentation built into the shell behind a flag. `crates/tekstide/src/measurement.rs`, `TEKSTIDE_MEASURE_CRITERION`/`TEKSTIDE_MEASURE_LOG`/`TEKSTIDE_MEASURE_TARGET`; `Measurement::from_env()` returns `None` unless explicitly set.
+- [x] **Non-contamination proven** by idle-CPU comparison. 0 ticks/3s with the flag unset; 3 ticks/3s (~1%) with `Typing` active but idle — the disclosed, flag-gated `MeasurementTick` overhead, never present in a normal run.
+- [x] Release builds only; no debug figures recorded. All figures from `cargo build --release`.
+- [x] ≥1,000 samples; p50/p95/p99 reported. Typing: 1,000 input-to-state-change samples, 1,475 view-build-cost samples (both post-warmup-discard).
+- [x] Machine identification recorded. Same machine as RFC-014's own measurements — see `qa-evidence.md`.
+- [x] Latency described as **app-internal**, not end-to-end. Stated explicitly, and carried one level further: app-internal here means this app's own `update`/`view` functions specifically, not `iced`'s render pipeline.
+- [x] Delivery-loss rates reported; survivorship-bias caveat applied. 0.00% loss (1,100 dispatched, 1,100 confirmed); R9 caveat recorded as moot for this run specifically (no dropped-sample population to bias), not omitted.
+- [x] `NFR-PERF-001` warm start ≤ 800 ms. 14 warm samples: median 163.8ms. **Met, comfortably.**
+- [ ] `NFR-PERF-002` mode switch p95 ≤ 32 ms. **Deliberately deferred to `0.4.1` with PR-015-E** (response 133) — no real mode-switch target exists in M8 without it. Left unchecked, not claimed.
+- [x] `NFR-PERF-003` typing p95 ≤ 16 ms. Decomposed (input-to-state-change p95 42µs + view-build-cost p95 131µs = 173µs total) rather than a combined `frames()`-based figure — real, non-degenerate, **met by roughly two orders of magnitude.**
+- [x] If still undischargeable: decomposed measurement plus explicit re-recording of the residual. Not needed here (both figures are real and well within budget), but the decomposition itself is the mechanism this bullet asks for, applied preemptively rather than only as a fallback after a degenerate result.
 
 ## Accessibility Checklist
 

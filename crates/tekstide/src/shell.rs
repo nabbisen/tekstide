@@ -45,7 +45,18 @@ use tekstide_core::shell::ApplicationShell;
 
 use crate::i18n::{Catalog, CatalogArgs};
 use crate::input::{self, FocusZone, RoutedInput, TextStream};
+use crate::measurement::{self, Measurement};
 use crate::theme::Theme;
+
+/// RFC-015 PR-015-F: the synthetic typing-measurement surface's preloaded
+/// content -- a real ~1,500-line source file from this workspace, not a
+/// lorem-ipsum placeholder, matching the RFC-014 spike's own precedent
+/// (`tekstide-gui-spike`'s identical choice of this same file) so the
+/// layout cost the measurement exercises is the same shape a real editor
+/// would see. Only loaded into `State.typing_doc` when actually
+/// measuring `Typing` (see `State::new`); otherwise never referenced.
+const TYPING_MEASUREMENT_DOCUMENT: &str =
+    include_str!("../../tekstide-core/src/project/session.rs");
 
 /// The two focusable targets of the layer-composition demo modal --
 /// still scaffolding (see the module doc), but now real enough for a
@@ -99,10 +110,26 @@ pub struct State {
     theme: Theme,
     focus: FocusZone,
     modal: Option<ModalContent>,
+    /// RFC-015 PR-015-F: `None` unless `TEKSTIDE_MEASURE_CRITERION` names
+    /// a recognized criterion -- see `measurement`'s module doc.
+    measurement: Option<Measurement>,
+    /// RFC-015 PR-015-F: the typing-measurement surface's live content.
+    /// Empty unless actually measuring `Typing`.
+    typing_doc: String,
 }
 
 impl State {
     pub fn new(app_shell: ApplicationShell, catalog: Catalog) -> Self {
+        let measurement = Measurement::from_env();
+        let typing_doc = if matches!(
+            measurement.as_ref().map(Measurement::criterion),
+            Some(measurement::Criterion::Typing)
+        ) {
+            TYPING_MEASUREMENT_DOCUMENT.to_string()
+        } else {
+            String::new()
+        };
+
         Self {
             app_shell,
             catalog,
@@ -111,11 +138,24 @@ impl State {
             modal: std::env::var("TEKSTIDE_LAYER_DEMO")
                 .is_ok()
                 .then(ModalContent::default),
+            measurement,
+            typing_doc,
         }
     }
 
     pub fn window_title(&self) -> String {
         self.catalog.get("app-title")
+    }
+
+    /// Whether `main.rs`'s view wrapper should time this render as a
+    /// view-build-cost sample (RFC-015 PR-015-F). `Startup` times its one
+    /// frame via `frames()` instead and needs no view-cost log; with no
+    /// measurement active (the default), this is always `false`.
+    pub fn is_measuring_typing(&self) -> bool {
+        matches!(
+            self.measurement.as_ref().map(Measurement::criterion),
+            Some(measurement::Criterion::Typing)
+        )
     }
 }
 
@@ -126,6 +166,16 @@ pub enum Message {
     ModalFocusPrevious,
     ModalActivate,
     ModalDismiss,
+    /// RFC-015 PR-015-F: a synthetic measurement keystroke arrived; the
+    /// `Instant` is when the measurement subscription first saw it, not
+    /// when `update` gets around to handling it -- the gap between the
+    /// two is exactly the input-to-state-change sample.
+    MeasuredKey(std::time::Instant),
+    /// RFC-015 PR-015-F: periodic check for whether the measurement run
+    /// has reached its sample target and should self-exit.
+    MeasurementTick,
+    /// RFC-015 PR-015-F: a frame was painted during `Startup` measurement.
+    MeasurementFrame(std::time::Instant),
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -163,6 +213,25 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         // placeholder has no decision to record.
         Message::ModalActivate | Message::ModalDismiss => {
             state.modal = None;
+        }
+        Message::MeasuredKey(sent_at) => {
+            if let Some(measurement) = state.measurement.as_mut() {
+                measurement.record_input(sent_at);
+            }
+            state.typing_doc.push('x');
+        }
+        Message::MeasurementTick => {
+            if state.measurement.as_ref().is_some_and(Measurement::is_done) {
+                std::process::exit(0);
+            }
+        }
+        Message::MeasurementFrame(at) => {
+            if let Some(measurement) = state.measurement.as_mut() {
+                measurement.record_startup_frame(at);
+                if measurement.is_done() {
+                    std::process::exit(0);
+                }
+            }
         }
     }
     Task::none()
@@ -241,11 +310,48 @@ pub fn view(state: &State) -> Element<'_, Message> {
 /// tested directly (`shell::tests`) so at least the branch this function
 /// picks is asserted, even though the framework half is not.
 pub fn subscription(state: &State) -> Subscription<Message> {
+    // Checked first, ahead of modal/non-modal routing entirely: a
+    // measurement run is a special, bounded, self-terminating mode (see
+    // `measurement`'s module doc), never part of ordinary interactive
+    // use -- `state.measurement` is `None` unless the env var is set, so
+    // this branch changes nothing about PR-015-C's reviewed structure
+    // for any normal run.
+    if let Some(measurement) = &state.measurement {
+        return measurement_subscription(measurement.criterion());
+    }
+
     match input::SubscriptionMode::for_modal(&state.modal) {
         input::SubscriptionMode::NonModal(proof) => {
             non_modal_subscription(proof, state.focus).map(Message::Input)
         }
         input::SubscriptionMode::Modal => modal_subscription(),
+    }
+}
+
+/// `Startup` reuses the RFC-014 spike's exact mechanism (subscribe
+/// `frames()`, record the first one, exit) -- safe here specifically
+/// because the process exits immediately after, so there is no
+/// *sustained* redraw-forcing during any real interactive session for
+/// it to contaminate. `Typing` never subscribes to `frames()` at all --
+/// see `measurement`'s module doc for why -- and instead pairs a
+/// measurement-only keyboard listener with a periodic tick used solely
+/// to detect "target sample count reached, time to self-exit."
+fn measurement_subscription(criterion: measurement::Criterion) -> Subscription<Message> {
+    match criterion {
+        measurement::Criterion::Startup => iced::window::frames().map(Message::MeasurementFrame),
+        measurement::Criterion::Typing => Subscription::batch([
+            keyboard::listen().filter_map(|event| match event {
+                keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Character(ref character),
+                    ..
+                } if character.as_str() == measurement::MEASURED_KEY_CHARACTER => {
+                    Some(Message::MeasuredKey(std::time::Instant::now()))
+                }
+                _ => None,
+            }),
+            iced::time::every(std::time::Duration::from_millis(100))
+                .map(|_| Message::MeasurementTick),
+        ]),
     }
 }
 
@@ -389,13 +495,17 @@ fn status_bar(state: &State) -> Element<'_, Message> {
 }
 
 fn content_area(state: &State) -> Element<'_, Message> {
-    let content: Element<'_, Message> = match state.app_shell.route() {
-        AppRoute::ProjectBoard => crate::surface::board::view(
-            &state.app_shell.project_board(),
-            &state.catalog,
-            &state.theme,
-        ),
-        AppRoute::ActiveProjectWorkspace => no_surface_placeholder(state),
+    let content: Element<'_, Message> = if state.is_measuring_typing() {
+        typing_measurement_view(state)
+    } else {
+        match state.app_shell.route() {
+            AppRoute::ProjectBoard => crate::surface::board::view(
+                &state.app_shell.project_board(),
+                &state.catalog,
+                &state.theme,
+            ),
+            AppRoute::ActiveProjectWorkspace => no_surface_placeholder(state),
+        }
     };
 
     container(content)
@@ -428,6 +538,40 @@ fn no_surface_placeholder(state: &State) -> Element<'_, Message> {
     .height(Length::Fill)
     .padding(16)
     .into()
+}
+
+/// RFC-015 PR-015-F: renders the tail of `state.typing_doc` in a
+/// monospace font, matching the RFC-014 spike's own typing-measurement
+/// view -- deliberately not a real editor (RFC-019's job), only enough
+/// rendering cost to make view-build-cost measurement meaningful against
+/// a realistically-sized document. Only ever reached when
+/// `state.is_measuring_typing()` is true, i.e. never during normal use.
+fn typing_measurement_view(state: &State) -> Element<'_, Message> {
+    let visible = tail_lines(&state.typing_doc, 50);
+    container(
+        column(
+            visible
+                .lines()
+                .map(|line| {
+                    text(line.to_string())
+                        .size(state.theme.font_size_body())
+                        .font(iced::Font::MONOSPACE)
+                        .into()
+                })
+                .collect::<Vec<Element<'_, Message>>>(),
+        )
+        .spacing(2),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .padding(16)
+    .into()
+}
+
+pub(crate) fn tail_lines(doc: &str, count: usize) -> String {
+    let lines: Vec<&str> = doc.lines().collect();
+    let start = lines.len().saturating_sub(count);
+    lines[start..].join("\n")
 }
 
 fn layer_composition_demo_modal<'a>(

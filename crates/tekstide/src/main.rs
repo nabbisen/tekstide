@@ -9,6 +9,7 @@
 // unused later.
 pub mod i18n;
 pub mod input;
+pub mod measurement;
 mod shell;
 mod surface;
 mod theme;
@@ -19,10 +20,30 @@ use tekstide_core::project::recent::{AppStatePathProvider, RecentProjectStore};
 use tekstide_core::shell::ApplicationShell;
 
 fn main() -> iced::Result {
-    iced::application(boot, shell::update, shell::view)
+    // Must be the very first statement -- see `measurement`'s module doc
+    // on why this is the only honest definition of "process start."
+    measurement::mark_process_start();
+    iced::application(boot, shell::update, timed_view)
         .title(shell::State::window_title)
         .subscription(shell::subscription)
         .run()
+}
+
+/// Wraps `shell::view` with view-build-cost timing (RFC-015 PR-015-F,
+/// discharging R1's typing-latency half without `iced::window::frames()`
+/// -- see `measurement`'s module doc). `shell::view` itself takes no
+/// timing dependency; this wrapper is the one and only place the timing
+/// happens, kept out of `shell.rs` entirely so the reviewed layer-
+/// composition/routing code is untouched by this slice.
+fn timed_view(state: &shell::State) -> iced::Element<'_, shell::Message> {
+    if state.is_measuring_typing() {
+        let start = std::time::Instant::now();
+        let element = shell::view(state);
+        measurement::record_view_cost(start.elapsed());
+        element
+    } else {
+        shell::view(state)
+    }
 }
 
 /// `iced::application`'s boot function: called once, with no arguments,

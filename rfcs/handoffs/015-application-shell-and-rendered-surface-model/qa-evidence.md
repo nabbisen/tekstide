@@ -191,7 +191,67 @@ Pending implementation.
 
 ### PR-015-F — Measurement: R1 discharge
 
-Pending implementation.
+**R1, closed.** When the owner approved `iced` on 2026-07-29, input latency was accepted explicitly *unverified*, conditional on this RFC discharging it. This slice discharges it for warm start (C5) and typing latency (C2); mode switch (C4/`NFR-PERF-002`) is out of scope here — moved to `0.4.1` with PR-015-E (response 133): M8 today has no real mode to switch into that isn't the Project Board against an empty placeholder, so measuring it now would measure scaffolding, not the substrate.
+
+**Why this does not reuse RFC-014 PR-014-E's measurement shape as-is.** The spike proved `iced::window::frames()` is the only application-level "a frame was painted" signal, and subscribing to it forces continuous compositor-driven redraw (~57 Hz, ~2.7% of one core, idle) — every one of its C2/C3/C4 samples read exactly `0µs` as a direct, disclosed consequence, a degenerate result rather than a pass. RFC-015 anticipated this and requires a specific fallback: "measure input-to-state-change and frame cost separately, and report the decomposition... another all-zero figure is not an acceptable outcome." `crates/tekstide/src/measurement.rs` implements that fallback **structurally** rather than reusing `frames()` for typing latency at all:
+- **input-to-state-change**: wall-clock time from a measurement keystroke's arrival (timestamped the instant the subscription receives it) to `shell::update` returning. Pure Rust function-call timing — no `frames()` involved, nothing for it to contaminate.
+- **view-build cost**: wall-clock time for `shell::view` to construct its `Element` tree, timed by wrapping the view function passed to `iced::application` in `main.rs` (`timed_view`), not by anything inside `shell::view` itself — also `frames()`-free.
+
+Neither figure is "full paint-to-screen time" — that would still need `frames()` and reintroduce the exact contamination this design avoids. Disclosed precisely: this is the "app-internal, not end-to-end" framing RFC-014 already established, carried one level further — even "app-internal" here means this app's own `update`/`view` functions, not `iced`'s internal render pipeline (GPU submission, compositor).
+
+**`Startup` (C5) is the one criterion that still uses `frames()`**, exactly as the spike did — safely, because the process exits immediately after the first frame (`shell::update`'s `MeasurementFrame` handling calls `std::process::exit(0)` once recorded), so there is no *sustained* redraw-forcing during any real interactive session for it to contaminate.
+
+**Machine identification** (same machine as RFC-014's own measurements, for direct comparability): AMD Ryzen 9 9950X (16c/32t); 59 GiB RAM; NVIDIA GeForce RTX 5060 Ti, driver 610.43.03, OpenGL 4.6; compositor niri (Wayland); CachyOS, kernel 7.1.5-1-cachyos; Rust 1.97.1; display 2560×1440@59.951Hz (non-native; native 3840×2160@59.997Hz), fractional scale 1.2×. All figures below from `cargo build --release` — no debug-build numbers recorded.
+
+**Idle-CPU comparison, proving non-contamination empirically, not assumed.** `/proc/<pid>/stat` `utime+stime` ticks (100 ticks/s), diffed over a fixed 3s window:
+
+| Configuration | Ticks / 3s idle |
+| --- | --- |
+| No measurement env var set (default, every normal run) | **0** |
+| `TEKSTIDE_MEASURE_CRITERION=typing`, process idle, no keystrokes sent | **3** (~1% of one core) |
+
+The `3` ticks are the periodic 100ms `MeasurementTick` subscription's real, small, disclosed overhead — used solely to detect "target sample count reached, self-exit," active *only* during an explicit measurement run (never when `state.measurement` is `None`, which is every normal interactive session). This is markedly lower than RFC-014's `frames()`-based ~8 ticks/3s (~2.7%), a direct consequence of avoiding `frames()` for `Typing` entirely rather than a tuning difference.
+
+**C5 — warm start (`NFR-PERF-001`, budget ≤ 800ms).** 15 consecutive release-binary launches (`TEKSTIDE_MEASURE_CRITERION=startup`), first discarded as cold:
+
+| n (warm) | min | median | mean | max | Budget | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| 14 | 156.1ms | **163.8ms** | 165.2ms | 178.1ms | ≤ 800ms | **Met, comfortably** |
+
+(Cold first launch: 237.2ms — excluded, matching RFC-014's own methodology of discarding a cold first sample.)
+
+**C2 — typing latency (`NFR-PERF-003`, budget p95 ≤ 16ms), decomposed.** Delivered per RFC-014's established methodology: relaunched with `WAYLAND_DISPLAY` unset (forcing the X11/XWayland `winit` backend), `xdotool search --name Tekstide` for the window id, `xdotool windowfocus <id>` (not `windowactivate` — confirmed again not to work under this niri/XWayland setup, per the PR-015-C finding), then **global** `xdotool key --repeat 100 --repeat-delay 15 j` in batches — **never** `--window`-targeted (RFC-014's own finding: `--window` delivery drops events; global delivery after focusing does not). Batches sent only until the **on-disk log line count** (not a trusted dispatched-count) reached the 1,100 target, per RFC-014's methodology of never padding for a possibly-lost key:
+
+| Dispatched | Confirmed (on-disk) | Delivery loss |
+| --- | --- | --- |
+| 1,100 | 1,100 | **0.00%** |
+
+First 100 samples of *each* stream discarded as warmup (RFC-014's convention), leaving:
+
+| Stream | n | min | p50 | p95 | p99 | max | mean |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| input-to-state-change | 1,000 | 8µs | 23µs | **42µs** | 75µs | 688µs | 25.7µs |
+| view-build cost | 1,475 | 33µs | 75µs | **131µs** | 141µs | 164µs | 84.1µs |
+
+(`view` has more samples than `input` because `view()` also runs on each `MeasurementTick` and at boot, not only after a processed keystroke — expected, and irrelevant to the percentiles, which are computed per-stream.)
+
+**Result: sum of the two p95s is 173µs (0.173ms) against a 16ms budget — met by roughly two orders of magnitude, and this is a genuine, non-degenerate figure, not RFC-014's `0µs` artifact.** Stated precisely: this sum approximates the cost of this app's own `update`+`view` logic per keystroke; it is **not** a claim about full paint-to-screen latency, which would require the `frames()` path this design deliberately avoids (see above). The `max` (688µs on `input`) is worth naming rather than hiding behind percentiles — still 0.688ms, over 20× under budget even at the single worst observed sample.
+
+**Survivorship bias (RFC-014 R9) — the caveat is inherited, and moot here specifically because it doesn't apply.** RFC-014 recorded that percentiles computed over confirmed-received samples only would carry survivorship bias if delivery loss correlated with the app being busy (dropped samples being disproportionately the slow ones). At **0.00% delivery loss** in this run, there is no dropped-sample population for that bias to hide in — the caveat is carried forward as a standing methodology note for any *future* reuse of this harness that sees nonzero loss, not because this run needed it.
+
+**Unit tests** (`measurement::tests`), proving the bookkeeping independent of any real process launch: `record_input_writes_a_real_nonzero_elapsed_sample` (a real 2ms sleep is not measured as ~0µs — the same non-degeneracy property proven live above, proven first at the unit level); `typing_is_done_exactly_at_target`; `startup_is_done_after_one_frame_and_does_not_record_a_second`; `record_startup_frame_is_a_no_op_for_typing`. `shell::tests` adds `is_measuring_typing_is_false_by_default` (the off-by-default contract the idle-CPU comparison's first row depends on) and `tail_lines_keeps_only_the_last_n_lines` (the typing-measurement surface's only view logic worth testing outside `iced`'s `Element` tree).
+
+**Escalation policy check**: no figure here misses its budget by any margin, let alone 2×, so RFC-014 handoff §5's "a >2× miss stops work" policy was never triggered.
+
+Gates run 2026-08-01: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (490 `tekstide-core` + 55 `tekstide` — up from 49, 6 net new — + 18 `tekstide-gui-spike`, 0 failures), `git diff --check` — all passed.
+
+## Known Limitations (PR-015-F)
+
+- **The measurement-only `MeasurementTick` overhead (~1% of one core) exists only during an active measurement run**, never during normal use — disclosed precisely above, not folded into the "0 ticks" idle-CPU claim, which is specifically about the default (no env var) state.
+- **View-build cost is a proxy for rendering cost, not full paint-to-screen time.** `iced`'s own internal render pipeline (layout solving beyond tree construction, GPU submission, compositor presentation) remains unmeasured — the same category of gap RFC-014's "app-internal, not end-to-end" disclosure already named, here applied one level further in.
+- **C4 (mode switch, `NFR-PERF-002`) is not measured in this slice** — deferred to `0.4.1` with PR-015-E, per response 133's explicit sequencing decision, not an oversight.
+- **The typing-measurement surface (`shell::typing_measurement_view`) is deliberately not a real editor** — RFC-019's job. It exists solely to give `view()` a realistically-sized document to build a tree from, matching RFC-014 spike's own precedent (the identical source file, `tekstide-core/src/project/session.rs`, reused for the same reason).
+- **No external driver script is committed** — RFC-014's own C2-C5 driver was run ad hoc and never committed either (confirmed by inspection: no `xdotool`/`TEKSTIDE_MEASURE`-referencing script exists anywhere in the tree). The exact commands used here are recorded above in enough detail to reproduce, matching that precedent rather than introducing a new one.
 
 ### PR-015-G — Closeout evidence
 
