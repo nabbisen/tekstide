@@ -1,8 +1,8 @@
 # RFC-015: Application Shell and Rendered Surface Model - QA Evidence
 
-Status: Proposed — implementation in progress (PR-015-B landed 2026-07-31, not yet reviewed; PR-015-C onward pending)
+Status: Proposed — `0.4.0` scope (PR-016-C, PR-015-B/C/D/F/G) implemented; PR-015-G is `0.4.0`'s closeout slice, pending review. RFC-015 itself stays in `rfcs/proposed/` per RFC-000 until PR-015-E and `NFR-PERF-002` land in `0.4.1`.
 Date opened: 2026-07-29
-Date accepted: Pending
+Date accepted: Pending (0.4.1 will close RFC-015; this slice does not)
 
 ## Scope
 
@@ -261,7 +261,24 @@ Gates re-run 2026-08-01 (response 134 fix): `cargo fmt --all --check`, `cargo cl
 
 ### PR-015-G — Closeout evidence
 
-Pending implementation.
+**Scope correction (response 135): this slice closes out `0.4.0`, not RFC-015.** The task breakdown's original sequencing ("G needs all") predates the `0.4.0`/`0.4.1` split of 2026-07-30 that moved PR-015-E and `NFR-PERF-002` out; it was corrected in `task-breakdown-pr-plan.md` directly by the architect (commit `7d203d3`). Actual shipped order: **B → C → D → F → G**, with **E → C4 → RFC-015 closure** in `0.4.1`. Per RFC-000, an RFC's folder (`rfcs/proposed/` vs `rfcs/done/`) is the source of truth for lifecycle state — **RFC-015 stays in `rfcs/proposed/`** until PR-015-E and `NFR-PERF-002` land. This closeout does not move it, and does not claim to.
+
+**1. What `0.4.0` may claim, precisely — the RFC-021 precedent.** The shell is real and a user can see the Project Board with escaped untrusted names; there is no terminal surface, no editor, no dialogs, no mode switching, and command approval remains implemented-but-unreachable. The top-level `README.md`'s "Current Status" section described a pre-GUI state (it predated PR-015-B and did not mention the shell at all) and has been corrected to state what now exists — the `iced` shell, layer composition, focus/input routing, i18n-backed text and theme, and the Project Board surface — alongside what is still missing, in the same sentence shape used above.
+
+**2. R1's disposition.** Closed for C2 (typing) and C5 (warm start) by PR-015-F; both figures are genuine and non-degenerate (not RFC-014's `0µs` artifact), app-internal rather than paint-to-screen (this app's own `update`/`view` calls, not `iced`'s render pipeline), and within budget by roughly two orders of magnitude (see PR-015-F above for the numbers and methodology). C4 (mode switch, `NFR-PERF-002`) is not discharged here — there is no real mode-switch target to measure until PR-015-E ships in `0.4.1`; carried forward as an open item, not a silent drop.
+
+**R6's disposition.** Closed by PR-015-C. `modal_focus_cycling_never_touches_the_shell_focus_cycle` dispatches real `Message`s through `update` and asserts the modal's own focus cycles while `state.focus` never moves — a real behavioral test under the actual input-accepting design, not the structural argument the RFC-014 spike relied on (whose property held only because its terminal emitted no messages, per Inherited obligations above). This test landed in PR-015-C (response 130) and discharged R6 at that point; recording it here explicitly because no closeout document had stated so until now.
+
+**3. Checklist walk.** Every unchecked line in `acceptance-qa-checklist.md` now carries a stated reason inline (Mode Switching, `NFR-PERF-002`, Accessibility, and Evidence Required sections) rather than being left silently open. Summary: Mode Switching and Accessibility checklist items belong to PR-015-E/RFC-014 R2 respectively and are out of this slice's scope; the Evidence Required checkboxes are satisfied by the material this file and its linked evidence directories already contain, and are now checked to reflect that.
+
+**4. What `0.4.1` carries.** PR-015-E (mode switching and Content-mode scaffolding), `NFR-PERF-002`/C4 (mode-switch latency measurement, which depends on PR-015-E existing), and — once both land — the RFC-015 lifecycle transition itself (`rfcs/proposed/` → `rfcs/done/`). None of these are addressed by this slice.
+
+**5. RFC-015's Open Questions, answered.**
+1. *Rows, cards, or responsive both?* Shipped as rows (`surface/board.rs::row_lines`) — the RFC's own escape hatch ("RFC-015 can settle it or defer to RFC-019's layout work") was exercised by settling on rows for M8; RFC-019 remains free to revisit the layout question when the surface gains real width/responsive requirements.
+2. *Raw key events or pre-interpreted intents for `SurfaceInput`?* Raw (`SurfaceInput{target: FocusZone, key: KeyPress}`), decided in PR-015-C — already recorded in that slice's own evidence; restated here since the question is RFC-015-level, not PR-015-C-local. `SurfaceInput`'s payload still has no real consumer (see Known Limitations), so this is a shape decision, not yet a load-bearing one.
+3. *Measurement harness: release build behind a flag, or separate profile?* Behind a flag (`TEKSTIDE_MEASURE_CRITERION`/`_LOG`/`_TARGET`), inside the normal release binary — `Measurement::from_env()` returns `None` unless explicitly set, and the idle-CPU comparison (PR-015-F above) is the evidence that the flag's absence costs nothing. No separate build profile was introduced.
+
+Gates run 2026-08-01: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features`, `git diff --check` — all passed (figures in the commit's review-request package).
 
 ## Known Limitations
 

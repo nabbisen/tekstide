@@ -16,7 +16,8 @@ Tekst IDE (`tekstide`) is a local-first, multi-project workbench for supervising
 The current implementation is a headless core through RFC-013, plus the headless
 command-approval model of RFC-021 and the shared text-safety primitive of RFC-016
 PR-016-C: terminal runtime, AgentRun launch, transcript retention, generated-change
-review, and durable audit storage. It includes:
+review, and durable audit storage. As of RFC-015 (PR-015-B/C/D/F), there is also a
+real desktop GUI application shell. It includes:
 
 - Project Board and ProjectSession state, root-bound file access, bounded explorer,
   UTF-8 text buffers, and safe save with external-change detection;
@@ -32,13 +33,18 @@ review, and durable audit storage. It includes:
 - bounded local transcript capture with retention limits, per-run opt-out, and purge;
 - metadata-only generated-change detection and review-state tracking;
 - durable local SQLite audit storage with schema identity, migration harness,
-  corruption diagnostics, restart-safe recovery, and explicit purge.
+  corruption diagnostics, restart-safe recovery, and explicit purge;
+- a real `iced` desktop shell: window/chrome/content/modal layer composition, a
+  keyboard-driven focus and input-routing model, i18n-backed text and a compiled
+  theme, and a Project Board surface rendering live `ApplicationShell` state with
+  untrusted project names and paths escaped, never trusted.
 
-It is not yet the full AI CLI workbench. The desktop GUI, rendered terminal surface,
-app/UI terminal and launch commands, rendered paste/approval/trust dialogs, an
-adapter-spawn pathway that would make command approval reachable, Git-based change
-detection, file watcher, overwrite-confirmation UI, and cross-platform evidence beyond
-Linux are deferred.
+It is not yet the full AI CLI workbench. There is no rendered terminal surface, no
+editor, no mode switching between Content and Terminal views, no rendered
+paste/approval/trust dialogs, no adapter-spawn pathway that would make command
+approval reachable, no Git-based change detection, file watcher, or
+overwrite-confirmation UI, and no cross-platform evidence beyond Linux. Command
+approval (below) remains implemented but unreachable.
 
 Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked
 root/symlink access, and audit-store recovery outcomes. Paste, restricted-feature,

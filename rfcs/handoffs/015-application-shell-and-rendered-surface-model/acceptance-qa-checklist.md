@@ -2,7 +2,7 @@
 title: "RFC-015: Application Shell and Rendered Surface Model - Acceptance / QA Checklist"
 rfc: "RFC-015"
 rfc_file: "../../proposed/015-application-shell-and-rendered-surface-model.md"
-status: "Proposed — implementation in progress (PR-015-B, PR-015-C, PR-015-D accepted [responses 128-133]; PR-015-F: response 134 required fix applied 2026-08-01, pending re-review)"
+status: "Proposed — PR-015-B/C/D accepted (responses 128-133); PR-015-F accepted (response 135); PR-015-G (this closeout, 0.4.0-scoped) submitted 2026-08-01, pending review. RFC-015 stays in `rfcs/proposed/` until PR-015-E and NFR-PERF-002 land in 0.4.1."
 target_milestone: "M8"
 source_rfc_status: "Proposed"
 created: "2026-07-29"
@@ -56,9 +56,9 @@ updated: "2026-08-01"
 
 ## Mode Switching Checklist
 
-- [ ] Content ↔ Terminal switching works.
-- [ ] **No animation or interpolation** (`NFR-UX-005`).
-- [ ] Terminal sessions and AgentRuns unaffected by mode switching.
+- [ ] Content ↔ Terminal switching works. **Deferred to `0.4.1` with PR-015-E** (2026-07-30 split). `input::FocusZone` has exactly one variant (`MainArea`) in this slice — there is no second mode to switch into yet, so nothing exists here to test.
+- [ ] **No animation or interpolation** (`NFR-UX-005`). Same reason — nothing to verify the absence of an animation on until PR-015-E adds the transition this line is about.
+- [ ] Terminal sessions and AgentRuns unaffected by mode switching. Same reason, compounded by there being no terminal surface at all yet (RFC-017/RFC-019).
 
 ## Measurement Checklist (R1 discharge)
 
@@ -76,23 +76,23 @@ updated: "2026-08-01"
 
 ## Accessibility Checklist
 
-- [ ] Visible focus indicators on every focusable element.
-- [ ] Focus indication does not rely on colour alone (`NFR-UX-002`).
-- [ ] Every shell workflow keyboard-reachable (`NFR-UX-001`).
-- [ ] **No partial or simulated screen-reader affordance** implying support that does not exist.
-- [ ] Screen-reader absence stated in evidence.
+- [ ] Visible focus indicators on every focusable element. **Not met at the shell-chrome level, disclosed rather than checked.** `Theme::border_focused` was cut in PR-015-B for lack of a second caller, and `top_bar`/`status_bar` render with `border_default()` unconditionally — `state.focus` (`FocusZone`) is tracked for routing but has no rendered representation, and cannot yet, since `FocusZone` has exactly one variant. The modal's two buttons do carry a visible (non-colour) indicator (`shell.rs`'s `"> "`/`"  "` marker). This line stays unchecked because the claim is "every focusable element," and no chrome-level indicator exists for the moment PR-015-E adds a second `FocusZone` variant.
+- [x] Focus indication does not rely on colour alone (`NFR-UX-002`). True of what exists today: the modal's `"> "` marker is textual, not colour-based. Narrower than the line above — this one holds for the indicator that does exist, not a claim that every element has one.
+- [x] Every shell workflow keyboard-reachable (`NFR-UX-001`). True for this slice's actual workflow surface: `FocusZone` cycling (trivial, one zone), modal focus-cycle/activate/dismiss, and `ShellInput` navigation actions are all keyboard-driven with no mouse-only path. Caveat: the Project Board's rows have no actions yet to reach either way (PR-015-D is presentational), so the surface this claim covers is still small.
+- [x] **No partial or simulated screen-reader affordance** implying support that does not exist. Nothing simulated exists — `iced` has no accessibility tree wired in this build at all (RFC-014 R2, owner-accepted), so there is no partial affordance to misrepresent.
+- [x] Screen-reader absence stated in evidence. `qa-evidence.md`'s Known Limitations: "Screen-reader support absent for the life of the `iced` substrate decision (RFC-014 R2, owner-accepted)."
 
 ## Evidence Required
 
-- [ ] Commit/PR list.
-- [ ] Gate command output.
-- [ ] Compile-fail check results for the input-class privacy properties.
-- [ ] Focus-trap test results.
-- [ ] `CountDisplay` fidelity test results.
-- [ ] Latency tables with methodology and idle-CPU comparison.
-- [ ] Screenshots of both modes.
-- [ ] Known limitations.
-- [ ] Answers to the RFC's open questions.
+- [x] Commit/PR list. PR-015-B: `773b410`, fix `cf047f0`. PR-015-C: `ac8b7be`, evidence `4a5af92`, fix `5b652e6`. PR-015-D: `0d0793d`, fix `7021c70`. PR-015-F: `6b06882`, fix `e834470`. Sequencing correction (architect): `7d203d3`.
+- [x] Gate command output. Recorded per-slice in `qa-evidence.md`'s Implementation Evidence sections — `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features`, `git diff --check`, all passing at each commit.
+- [x] Compile-fail check results for the input-class privacy properties. `qa-evidence.md` PR-015-C section; this file's Input Routing Checklist lines 34-35, 41 quote the exact `rustc` error codes (`E0624`, `E0603`).
+- [x] Focus-trap test results. `modal_focus_cycling_never_touches_the_shell_focus_cycle` — see R6 disposition above and Input Routing Checklist line 42.
+- [x] `CountDisplay` fidelity test results. `unavailable_and_not_implemented_never_render_as_zero` / `a_genuine_known_zero_count_does_render_as_zero` — see Project Board Checklist above.
+- [x] Latency tables with methodology and idle-CPU comparison. `qa-evidence.md` PR-015-F section — C5/C2 tables, machine identification, idle-CPU comparison table.
+- [ ] Screenshots of both modes. Only Content Mode (the Project Board, plus the layer-composition demo modal) has screenshots — `evidence/pr-015-b/`, `evidence/pr-015-c/`, `evidence/pr-015-d/`. Terminal Mode does not exist yet in any form (RFC-017/RFC-019, `0.5.x`+), so there is nothing to screenshot for it; left unchecked rather than satisfied by one mode's evidence standing in for both.
+- [x] Known limitations. `qa-evidence.md`'s "Known Limitations" section (RFC-015-wide) plus each slice's own "Known Limitations (PR-015-X)" subsection.
+- [x] Answers to the RFC's open questions. `qa-evidence.md`'s PR-015-G section, item 5.
 
 ## Final Acceptance Decision
 
@@ -104,5 +104,6 @@ updated: "2026-08-01"
 Reviewer notes:
 
 ```text
-Pending implementation.
+Pending review of PR-015-G (closeout evidence for 0.4.0's scope: PR-016-C, PR-015-B/C/D/F/G).
+Decision above is the reviewer's, not the implementer's, to make.
 ```
