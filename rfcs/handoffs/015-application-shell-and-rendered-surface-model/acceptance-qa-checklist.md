@@ -96,7 +96,7 @@ updated: "2026-08-01"
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] **Accepted** — for `0.4.0`'s scope (PR-016-C, PR-015-B/C/D/F/G). Not a closure of RFC-015.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 - [ ] Blocked — input routing cannot be made structural.
@@ -104,6 +104,57 @@ updated: "2026-08-01"
 Reviewer notes:
 
 ```text
-Pending review of PR-015-G (closeout evidence for 0.4.0's scope: PR-016-C, PR-015-B/C/D/F/G).
-Decision above is the reviewer's, not the implementer's, to make.
+PR-015-G accepted, high-capability model (architect), 2026-08-01. Reviewed unprompted:
+the commit landed before a review request, and a closeout that gates a release does
+not wait for one.
+
+SCOPE OF THIS ACCEPTANCE. It covers 0.4.0's contents only. RFC-015 is NOT closed and
+stays in rfcs/proposed/ per RFC-000, because PR-015-E and NFR-PERF-002 remain. The
+closeout says so itself rather than needing to be told -- status line, "Date accepted:
+Pending", and the deferred checklist lines all agree. That consistency is the thing I
+checked first, since the sequencing correction it implements was mine and only landed
+the day before.
+
+ALL FOUR REQUIRED ITEMS DELIVERED.
+
+1. What 0.4.0 may claim. The README's Current Status now describes the real shell and,
+   more importantly, states what is absent -- no terminal surface, no editor, no mode
+   switching, no dialogs -- and preserves command approval's honest framing
+   (implemented, unreachable, cooperative rather than enforced). It described a
+   pre-GUI state as recently as PR-015-F.
+
+2. R1's disposition, with the caveat attached and not merely appended. The figure is
+   stated as "the sum of the two measured streams' p95s, used as an upper-bound proxy",
+   the non-pairing of the streams (n=1,000 vs 1,475) is explained rather than asserted,
+   and the 688µs max is named rather than hidden behind percentiles. The
+   app-internal-not-paint-to-screen boundary is drawn twice, in both the result and the
+   limitations. A reader quoting this later has to work to quote it wrongly.
+
+   R6 is discharged by a real test, not the structural argument that sufficed for the
+   spike -- modal_focus_cycling_never_touches_the_shell_focus_cycle dispatches real
+   Messages through update and asserts state.focus never moves.
+
+   With R1 and R6 closed, the RFC-014 substrate decision record has no open items.
+
+3. Unchecked lines each carry a reason. Seven substantive, and the causal chains are
+   traced rather than gestured at -- the focus-indicator line names Theme::border_focused
+   being cut in PR-015-B as the cause, which is honest about a decision this reviewer
+   endorsed at the time.
+
+4. What 0.4.1 carries: PR-015-E, C4, NFR-PERF-002, and RFC-015's own lifecycle
+   transition.
+
+CARRIED TO 0.4.1, NOT BLOCKING 0.4.0.
+
+- Visible focus indicators. Not met at chrome level. Defensible now: FocusZone has one
+  variant, chrome is non-interactive, and the modal does render focus visibly (the
+  PR-015-C screenshots differ between focused buttons and 1 == 3 proves the cycle).
+  It stops being defensible the moment PR-015-E adds a second zone -- a keyboard-driven
+  shell where you cannot see what has focus is an accessibility defect, not a cosmetic
+  one. Required for 0.4.1.
+- Screenshots of both modes. Only Content Mode exists to screenshot.
+- Post-dismissal keystroke queuing. No queue exists to drain; a property of the
+  subscription shape rather than a tested behaviour.
+
+WHAT REMAINS FOR 0.4.0 IS A RELEASE, NOT A SLICE -- and that is the owner's call.
 ```
