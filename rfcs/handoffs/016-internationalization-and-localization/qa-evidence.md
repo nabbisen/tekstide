@@ -1,6 +1,6 @@
 # RFC-016: Internationalization and Localization - QA Evidence
 
-Status: Proposed — implementation in progress (PR-016-C complete and accepted; PR-016-B complete and accepted [response 122, fixes confirmed by response 123]; PR-016-D complete and accepted [response 126]; PR-016-E waits for RFC-015 per the scan-scope obligation in response 122, now also carries response 126's interpolation-guard scope note; PR-016-F last)
+Status: Proposed — PR-016-B/C/D/E complete and accepted (responses 122/126/139); PR-016-F (this closeout) submitted 2026-08-01, pending review. Unlike RFC-015, RFC-016 has no deferred slice — accepting PR-016-F can move this RFC to `rfcs/done/`.
 Date opened: 2026-07-29
 Date accepted: Pending
 
@@ -197,7 +197,41 @@ Gates: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-
 
 ### PR-016-F — Closeout evidence
 
-Pending implementation.
+**RFC-016 has no deferred implementation slice** — unlike RFC-015, which stays in `rfcs/proposed/` until `0.4.1`. Per RFC-000, an RFC's folder is the source of truth for lifecycle state; this closeout is what moves `016-internationalization-and-localization.md` from `rfcs/proposed/` to `rfcs/done/`, once accepted.
+
+**1. What RFC-016 may claim, precisely.** The catalog, locale fallback chain, text-safety escaping/isolation, and the enforcement scans are real and shipped: `crates/tekstide/src/i18n.rs` (`Catalog`, `CatalogArgs`), `crates/tekstide-core/src/text_safety.rs` (`quote_untrusted`, shared with `approval::coordinator`), `crates/tekstide/src/i18n/enforcement.rs`. **Translation is not** — `pl.ftl` exists to prove the CLDR plural-category machinery (`one`/`few`/`many`/`other`), not as a reviewed Polish translation; RFC-016 §Non-Goals states this explicitly and no evidence in this file claims otherwise. Runtime locale switching is out of scope for M8 (resolved once at startup). Confusable/homoglyph attacks remain unaddressed by design — full detection is heavy and error-prone, and a partial implementation would imply a guarantee that does not exist (Known Limitations, below).
+
+**2. The five hardcoded-string sites, carried forward as open items, not resolved ones** (PR-016-E, response 139's explicit instruction: "PR-016-F must not say the four sites are resolved or enforced. They are listed. One of them renders today."):
+
+| Site | Location | Status |
+| --- | --- | --- |
+| 1 | `tekstide-core::shell::render_text` (~16 strings) | Dormant. Pre-GUI text harness, kept deliberately (RFC-015 PR-015-D, response 130) as the assertion mechanism for ~20 `tekstide-core::shell::tests`. |
+| 2 | `tekstide-core::project_board::{CountDisplay, AttentionState}::label()` | Dormant. Only caller is site 1; the real GUI (`surface::board.rs`) never calls `label()` at all (mechanically enforced). |
+| 3 (was listed as `main.rs`'s `eprintln!`) | Not a literal-matching violation | `main.rs`'s four `eprintln!("{error}")` calls interpolate `tekstide-core` error `Display` impls, not string literals this crate wrote — a known category the scan does not cover, stated rather than silently omitted. |
+| 4 | `tekstide-core::project_board::ProjectBoardRow`'s four candidate fields | **Live for exactly one of four.** `trust_label` is rendered (`surface::board.rs::row_lines`); `security_mode_label`/`availability_label`/`blocked_automation_labels` are constructed but never read. The literal that reaches a user comes from two independent sources: `tekstide_core::project::metadata::WorkspaceTrust::label()` (open projects) and a hardcoded `"Restricted"`/`"Restricted Mode"` pair in `project_board::recent_project_row` (recent, unopened projects). Closing this needs `ProjectBoardRow` to expose the underlying enum instead of a pre-rendered string — a small `tekstide-core` API change, not RFC-016's to make. Per response 139: recorded in `rfcs/delivery-plan.md`'s gap analysis by the architect, not assigned an RFC number (the fix is small enough to belong to whoever next touches `ProjectBoardRow`, likely RFC-019/RFC-020). |
+| 5 (found during PR-016-E, not in the original table) | `tekstide-core::project_board::ProjectBoardViewModel::from_app_state`'s `ProjectBoardEmptyState` construction (3 strings) | Dormant. `board.rs`'s `empty_state_view` reads only `.is_some()` and renders its own catalog-driven strings instead. |
+
+Two further dormant producers, also found during PR-016-E and not in the original table, share site 1's disposition: `tekstide_core::project::metadata::ProjectOpenSurface::label()` (7 strings) and `ProjectMode::label()` (2 strings) — both reachable only through `render_active_project_workspace`, since the real GUI's `AppRoute::ActiveProjectWorkspace` route is still `shell::no_surface_placeholder`.
+
+**Non-blocking, recorded per response 139**: `crates/tekstide/src/surface/board.rs`'s own module doc (written in PR-015-D) still groups all four `ProjectBoardRow` fields as "rendered as-is," which overstates it by three. Correct, but belongs to whoever next edits that file, not to this closeout or to a scan.
+
+**3. Scan limitations, stated precisely, not discovered later:**
+- **Fixed file list, not the whole crate.** `tekstide_core_hardcoded_strings_match_the_closed_exemption_list` scans exactly `shell.rs`, `project_board.rs`, and `project/metadata.rs` in `tekstide-core` — a blanket scan was tried first, by inspection, and rejected because 43 non-test files contain a space-containing literal (SQL, ANSI/VT sequences, error text, audit codes), which would make the exemption list unreviewable. **A new `tekstide-core` module producing user-facing text elsewhere is not caught until added to `CORE_TARGET_FILES`.**
+- **Heuristic, not a real parser**, for both the string-literal scans and `message_keys()`'s Fluent key extraction — matches this crate's existing convention (colour/font-size scans), verified by inspection against the actual target files rather than assumed safe.
+
+**4. Full commit list, PR-016-B through PR-016-F:**
+- PR-016-B: `18be9df` (catalog/locale/fallback), `c4e47bf` (response 122 fixes — dependency-cost re-measurement, dead-code handling).
+- PR-016-C: `621053e` (text safety, shared with `approval::coordinator`), `b9cf8a7` (response 118 — `Default_Ignorable_Code_Point` extension).
+- PR-016-D: `a311cba` (pluralization/interpolation), `6dc2f67` (response 125 fixes — `CatalogArgs` interpolation guard), `6198e9b` (response 126 closeout note).
+- PR-016-E: `68ecd0e` (enforcement scans), `2714dfa` (architect handoff record).
+- PR-016-F: this commit.
+
+**5. RFC-016's Open Questions, answered:**
+1. *Should the escaping function live in `tekstide-core` or stay shell-local?* Decided by PR-016-C with evidence: `tekstide-core`, shared with `approval::coordinator::display_argv` — retiring the duplicate-escaping debt `rfcs/delivery-plan.md` recorded (response 115's sequencing error). Answered in the handoff's 2026-07-30 addendum, restated here as the formal closeout answer.
+2. *Should the editor gain a "show invisibles" toggle in M8, or wait for RFC-019?* **Wait for RFC-019.** No editor surface exists in M8 at all (RFC-015 shipped only the application shell and Project Board); there is nothing to add a toggle to yet. The exception this RFC carves out for the editor (render file content as-is, never escape) remains a documented policy, not an implemented UI affordance, until RFC-019 builds the editor.
+3. *Which second locale — complex plurals (Polish/Russian) or RTL (Arabic)?* **Polish, not Arabic, and not both.** Polish's CLDR categories (`one`/`few`/`many`/`other`) stress the pluralization machinery PR-016-D needed proven; RTL rendering is already covered at the `text_safety` primitive level (`legitimate_rtl_letters_are_not_escaped`, genuine Arabic script text), so a second RTL-locale `.ftl` file would have proven the same escaping property again without adding a new one. Consequence, stated plainly: no non-Latin-script locale is shipped, so the RTL Checklist's chrome-rendering line and the Evidence Required screenshot line stay unchecked — a scope choice, not an oversight.
+
+Gates: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (490 `tekstide-core` + 61 `tekstide` + 18 `tekstide-gui-spike`, 0 failures — no source changes in this slice, docs only), `git diff --check` — all passed.
 
 ## Known Limitations
 

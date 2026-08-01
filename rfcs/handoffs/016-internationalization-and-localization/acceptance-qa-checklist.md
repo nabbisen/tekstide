@@ -35,7 +35,7 @@ updated: "2026-08-01"
 - [x] Catalog format chosen; **dependency cost measured and recorded**, scoped to the shipped `tekstide` binary. **Corrected per response 122** — the original `git diff Cargo.lock` measurement scored the whole workspace lock (including `tekstide-gui-spike`'s `iced` tree), not what `tekstide` actually ships. Re-measured with `cargo tree -p tekstide --edges normal`, before/after: whole binary tree **39 packages** (23 baseline + **16 net new**: Fluent/`unic-langid` +15, `sys-locale` +1 — not the originally-reported +0).
 - [x] Decision reasoning recorded, not just the outcome. Compared against RFC-014 R3's iced precedent (+345 packages) in `qa-evidence.md`; +12 for native plurals/gendered forms/interpolation/asymmetric translation judged proportionate.
 - [x] Source-locale catalog compiled into the binary. `crates/tekstide/locales/en.ftl` via `include_str!` in `i18n/catalog.rs`; `source_locale_bundle()` takes no disk path at all.
-- [ ] **Lookup replaces RFC-015's placeholder without changing the call shape.** Not met as literally stated — **RFC-015 has not been implemented**, so no placeholder exists to replace and no call shape exists to preserve. This slice establishes the call shape (`i18n::Catalog::resolve`/`Catalog::get`) instead, documented as a disclosed sequencing gap in `qa-evidence.md`, not a silent substitution. Left unchecked pending the reviewer's view on whether establishing the shape now satisfies the intent.
+- [x] **Lookup replaces RFC-015's placeholder without changing the call shape.** **Resolved by PR-016-F**: RFC-015 has since landed (`0.4.0`), and its real shell (`crates/tekstide/src/shell.rs`, `surface/board.rs`) calls `Catalog::get`/`Catalog::get_with_args` with exactly the signature this slice established — no change was needed at the RFC-015 side. What PR-016-B actually established (call shape, not a placeholder swap, since none existed yet) turned out to be the shape RFC-015 adopted unmodified.
 - [x] Locale precedence: CLI flag → configuration → OS locale → source locale. `Catalog::resolve`; `cli_flag_takes_precedence_over_configured_locale` (both supplied, confirms CLI wins), ablation-verified.
 - [x] Fallback chain: locale → language → source → key. `Catalog::get`; `a_region_specific_locale_falls_back_to_its_language_subtag_catalog`, `a_key_missing_from_a_loaded_locale_falls_back_to_the_source_value`, `a_missing_key_renders_as_the_key_itself_never_blank` — all three links ablation-verified independently.
 - [x] Missing key renders the key. **Never blank, never panic.** `a_missing_key_renders_as_the_key_itself_never_blank`; `no_locales_directory_falls_back_to_source_without_panicking` covers the no-locales-directory-at-all case too.
@@ -52,19 +52,19 @@ updated: "2026-08-01"
 
 ## Never-Localized Checklist
 
-- [ ] Commands, argv, paths, file names untranslated.
-- [ ] Identifiers untranslated.
-- [ ] Terminal output, transcripts, file contents untranslated.
-- [ ] Git branch, commit, author strings untranslated.
-- [ ] Audit field values and reason codes untranslated.
+- [x] Commands, argv, paths, file names untranslated. Every real `Catalog::get`/`get_with_args` call site (`crates/tekstide/src/shell.rs`, `surface/board.rs`) uses a fixed, compile-time `&'static str` key (`"app-title"`, `"project-board-empty-heading"`, etc.) — never a runtime-derived one. Project paths/names are interpolated as **escaped values** via `CatalogArgs::untrusted`, never as keys. Verified by enumerating every call site in the crate (PR-016-F).
+- [x] Identifiers untranslated. Same evidence — no identifier (project ID, terminal ID, route symbol) is ever passed to `Catalog::get` as a key; route/state symbols go through `CatalogArgs::trusted_symbol`, which selects a Fluent *variant*, not a translated string of the identifier itself.
+- [ ] Terminal output, transcripts, file contents untranslated. No terminal or transcript rendering surface exists yet (M9/M10) to check.
+- [ ] Git branch, commit, author strings untranslated. No Git integration surface exists yet (M12).
+- [x] Audit field values and reason codes untranslated. No audit viewer exists yet, so nothing renders these today; the property that matters now — that `Catalog::get`/`get_with_args` is never called with an audit-derived key or value — holds by the same call-site enumeration above, since audit code has no dependency on `i18n` at all (`tekstide-core` gains no GUI/i18n dependency, mechanically checked, RFC-015's own Architecture Checklist).
 
 ## RTL Checklist
 
-- [ ] RTL text renders correctly in chrome and dialogs.
-- [ ] RTL renders correctly in the editor surface.
-- [ ] Terminal non-reordering documented as correct, not as a gap.
-- [ ] Terminal wide-cell CJK gap recorded as RFC-017's ownership.
-- [ ] RTL layout mirroring recorded as deferred, not claimed.
+- [ ] RTL text renders correctly in chrome and dialogs. No RTL-script locale is shipped (Polish was chosen over Arabic — RFC-016 Open Question 3, answered below); no dialogs exist yet either (M11). RTL *rendering itself* is proven at the `text_safety` primitive level (`legitimate_rtl_letters_are_not_escaped`, genuine Arabic text), not through a shipped chrome surface.
+- [ ] RTL renders correctly in the editor surface. No editor surface exists yet (M10).
+- [x] Terminal non-reordering documented as correct, not as a gap. `qa-evidence.md` Known Limitations: "Terminal-grid bidi reordering is out of scope by design — real terminals do not implement it, and reordering would break cursor and column arithmetic."
+- [x] Terminal wide-cell CJK gap recorded as RFC-017's ownership. `qa-evidence.md` Known Limitations: "Terminal wide-cell CJK is a genuine gap owned by RFC-017, not by this RFC."
+- [x] RTL layout mirroring recorded as deferred, not claimed. `qa-evidence.md` Known Limitations: "RTL layout mirroring is deferred. Text renders correctly RTL; surrounding layout stays LTR."
 
 ## Enforcement Checklist
 
@@ -75,12 +75,12 @@ updated: "2026-08-01"
 
 ## Evidence Required
 
-- [x] Commit/PR list; gate output. See qa-evidence.md PR-016-C section (this slice only; B/D/E/F pending).
+- [x] Commit/PR list; gate output. Full list, PR-016-B through PR-016-F, in `qa-evidence.md`'s PR-016-F section.
 - [x] Bidi corpus results including the Trojan Source case. `crates/tekstide-core/src/text_safety/tests.rs`.
 - [ ] Byte-fidelity test results for audit and transcript paths. Audit path only; no transcript integration point exists yet.
 - [x] Dependency-cost measurement. Corrected per response 122: `cargo tree -p tekstide --edges normal`, scoped to the shipped binary, not the workspace lock. 39 packages total; +16 net new (Fluent/`unic-langid` +15, `sys-locale` +1). See `qa-evidence.md` PR-016-B section.
-- [ ] Screenshot of a non-Latin locale rendering the shell. Requires RFC-015's shell to exist first.
-- [x] Known limitations; answers to the RFC's open questions. Open Question 1 (escaping function's home) answered by the README's 2026-07-30 addendum: `tekstide-core`, shared — see qa-evidence.md.
+- [ ] Screenshot of a non-Latin locale rendering the shell. **Still not met, for a different reason than before.** RFC-015's shell exists now (`0.4.0`), but no non-Latin-script locale is shipped — Polish (Latin script, differing plural categories) was chosen over Arabic (RFC-016 Open Question 3), so there is no non-Latin-script `.ftl` file to screenshot rendering. Not a sequencing gap anymore; a scope choice.
+- [x] Known limitations; answers to the RFC's open questions. All three answered in `qa-evidence.md`'s PR-016-F section.
 
 ## Final Acceptance Decision
 
@@ -92,5 +92,7 @@ updated: "2026-08-01"
 Reviewer notes:
 
 ```text
-Pending implementation.
+Pending review of PR-016-F (closeout). Decision above is the reviewer's, not the
+implementer's, to make. Per response 139: unlike RFC-015, RFC-016 has no deferred
+implementation slice, so accepting PR-016-F can move this RFC to rfcs/done/.
 ```
