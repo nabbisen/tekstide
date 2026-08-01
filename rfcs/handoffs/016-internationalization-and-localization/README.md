@@ -1,6 +1,6 @@
 # RFC-016: Internationalization and Localization - Developer Handoff Pack
 
-Source RFC: [RFC-016](../../proposed/016-internationalization-and-localization.md)
+Source RFC: [RFC-016](../../done/016-internationalization-and-localization.md)
 Target milestone: **M8**
 Source RFC status: **Proposed**
 
@@ -10,7 +10,7 @@ Source RFC status: **Proposed**
 
 | # | Document | Purpose |
 | --- | --- | --- |
-| 1 | [RFC-016](../../proposed/016-internationalization-and-localization.md) | Catalog, locale, fallback, RTL — **and the text-safety policy in §Security, which is the security-critical half.** |
+| 1 | [RFC-016](../../done/016-internationalization-and-localization.md) | Catalog, locale, fallback, RTL — **and the text-safety policy in §Security, which is the security-critical half.** |
 | 2 | This file | Orientation and what is binding. |
 | 3 | [`implementation-handoff.md`](./implementation-handoff.md) | Module layout, catalog decision, escaping implementation, enforcement. |
 | 4 | [`task-breakdown-pr-plan.md`](./task-breakdown-pr-plan.md) | Slice boundaries and review gates. |

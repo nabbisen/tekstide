@@ -1,6 +1,6 @@
 # RFC-016: Internationalization and Localization
 
-Status: Proposed
+Status: Implemented with documented limitations — closed 2026-08-01 by PR-016-F. Catalog, locale fallback, text safety, pluralization, and enforcement are real; **translation content is not** (`pl.ftl` proves plural machinery, not translated strings), runtime locale switching is out of scope for M8, and confusables are unaddressed by design. Five hardcoded-string sites in `tekstide-core` are *listed and enforced-visible*, not resolved — one renders today. See `../handoffs/016-internationalization-and-localization/qa-evidence.md` §PR-016-F.
 Target milestone: M8
 Date: 2026-07-29
 

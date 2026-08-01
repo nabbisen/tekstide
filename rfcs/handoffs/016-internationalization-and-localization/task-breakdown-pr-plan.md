@@ -1,7 +1,7 @@
 ---
 title: "RFC-016: Internationalization and Localization - Task Breakdown and PR Plan"
 rfc: "RFC-016"
-rfc_file: "../../proposed/016-internationalization-and-localization.md"
+rfc_file: "../../done/016-internationalization-and-localization.md"
 target_milestone: "M8"
 created: "2026-07-29"
 updated: "2026-07-29"

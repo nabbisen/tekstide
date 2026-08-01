@@ -1,7 +1,7 @@
 ---
 title: "RFC-016 PR-016-E — Enforcement: implementation handoff"
 rfc: "RFC-016"
-rfc_file: "../../proposed/016-internationalization-and-localization.md"
+rfc_file: "../../done/016-internationalization-and-localization.md"
 slice: "PR-016-E"
 status: "Ready for implementation — unblocked 2026-08-01 by RFC-015 PR-015-D's render_text decision"
 created: "2026-08-01"
@@ -33,7 +33,11 @@ All four are user-facing English the catalog cannot reach. Three are in `tekstid
 | 3 | `crates/tekstide/src/main.rs` | four `eprintln!("{error}")` — text from `tekstide-core` error `Display` impls, not literals this crate wrote | response 128 |
 | 4 | `tekstide-core::project_board::ProjectBoardRow` | `trust_label`, `security_mode_label`, `availability_label`, `blocked_automation_labels` | response 132 |
 
-Site 4 is the one that matters most: those are **genuinely rendered by the real GUI today** (`crates/tekstide/src/surface/board.rs`), so they are live untranslated strings in a shipped surface, not latent ones.
+~~Site 4 is the one that matters most: those are **genuinely rendered by the real GUI today**~~ — **CORRECTED 2026-08-01 by PR-016-E (review 139).** This table overcounted. `board.rs` reads exactly **one** of the four fields (`trust_label`); the other three are constructed and never rendered. And the live literal is not in `project_board.rs` at all: `trust_label` comes from `WorkspaceTrust::label()` in `project/metadata.rs` for an open project, and from a hardcoded `"Restricted"` in `recent_project_row` for a recent one — two independent sources feeding one field, in a file this table never named.
+
+PR-016-E also found a **fifth** site (`ProjectBoardEmptyState`) and two further dormant producers in `project/metadata.rs` (`ProjectOpenSurface::label()`, `ProjectMode::label()`). The authoritative list is `enforcement.rs`'s `CORE_EXEMPT_LITERALS`, which is mechanically checked in both directions; this table is historical.
+
+The error was the reviewer's: PR-015-D's request described all four as rendering "as-is", response 132 repeated it unverified, and this handoff wrote it down as fact. The disproof was already in the PR-015-D screenshot.
 
 Site 2 is already defended in the other direction: PR-015-D never calls `label()` and added a crate-wide scan (`no_count_display_or_attention_label_is_called_anywhere_in_the_crate`) that fails if anyone reaches for it. The strings still exist in core; nothing in the GUI renders them.
 

@@ -39,6 +39,7 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | Terminal security | `REQ-SEC-030`..`033` | Boundary complete; rendering deferred |
 | Filesystem safety | `REQ-SEC-040`..`043` | Complete |
 | Session recovery | `REQ-RECOVER-001`, `003`, `004` | Recent projects and run records restore |
+| i18n and text safety | Project rules, UI/UX §18 | **Complete** — catalog, locale fallback, pluralization, shared text-safety primitive, and mechanical enforcement. Translation *content* and runtime locale switching remain out of scope (RFC-016 closed 2026-08-01) |
 | Command approval | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **Model complete and audited; headless and unreachable** — no adapter-spawn pathway, no dialog. Cooperative, not enforced. RFC-021 closed 2026-07-30 |
 
 ### Not implemented
@@ -47,7 +48,6 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | --- | --- | --- |
 | **Desktop GUI** — every rendered surface | External design §3, UI/UX baseline | M8-M11 |
 | **Configuration system** — no module at all | `REQ-CONFIG-001`..`007` | M12 |
-| **i18n** — no module; mandated by project rules | Project rules, UI/UX §18 | M8 |
 | **Git integration** — no module; RFC-012 detector reports Git unavailable | `REQ-GIT-001`..`007` | M12 |
 | **Notifications** — no domain type | `REQ-NOTIFY-001`..`005` | M12 |
 | **File watcher** | `REQ-FILE-003`, `004` | M13 |
@@ -59,6 +59,7 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | **Cross-platform** — Linux only | `NFR-PORT-001`..`003` | M14 |
 | **Documentation** — `docs/` absent | Project rules | M14 |
 | **CI** | — | M14 |
+| **Pre-rendered English in `tekstide-core`** — 5 sites the catalog cannot reach; `ProjectBoardRow::trust_label` renders today, from two independent sources (`WorkspaceTrust::label()` and `recent_project_row`'s hardcoded literal) | RFC-016 §Enforcement | Unassigned — belongs to whoever next changes `ProjectBoardRow` to expose enums instead of pre-rendered strings (plausibly RFC-019/020) |
 | **Environment secret redaction** — RFC-004 states the policy; no pattern set exists in code | RFC-004 | M12 (with configuration) |
 
 **Note on the redaction gap.** Found during PR-021-C review (response 110): RFC-004 says Tekstide "may redact known secret-like environment variable values," and the RFC-021 handoff told the developer to reuse "the secret-like patterns already used for environment redaction." No such pattern set is implemented. RFC-021's classifier carries its own `SECRET_LIKE_PATH_PATTERNS`, deliberately **not** shared: that list matches filesystem path components (`.ssh`, `.aws`), while redaction needs environment *variable names* (`AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`). These are different pattern kinds and must not be consolidated into one list where half the entries are inert in each use. Whichever RFC implements environment redaction authors its own.
@@ -89,13 +90,13 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | RFC | Title | Milestone | Depends on | Headless | Status |
 | --- | --- | --- | --- | --- | --- |
 | 014 | Desktop GUI Substrate and Terminal Rendering Strategy | M8 | — | no | **Decision approved 2026-07-29 — `iced` + Option A** |
-| 015 | Application Shell and Rendered Surface Model | M8 | 014 | no | **Authored — ready for implementation** |
-| 016 | Internationalization and Localization | M8 | 014 | partly | **Authored — ready for implementation** |
+| 015 | Application Shell and Rendered Surface Model | M8 | 014 | no | **PR-015-B/C/D/F/G shipped in `0.4.0`.** Stays in `proposed/` until PR-015-E and `NFR-PERF-002` land in `0.4.1` |
+| 016 | Internationalization and Localization | M8 | 014 | partly | **Implemented and closed 2026-08-01** (PR-016-B/C/D/E/F). Moved to `done/` |
 | 017 | Terminal Renderer and Immersion Mode | M9 | 014, 015 | no | Blocked |
 | 018 | Rendered Paste Protection and Trusted UI | M9 | 017 | no | Blocked |
 | 019 | Editor and Explorer Surfaces | M10 | 015 | no | Blocked |
 | 020 | Diff Review and AgentRun Report Surfaces | M10 | 015 | no | Blocked |
-| 021 | Command Approval Model and Adapter Capability | M11 | — | **yes** | **Implemented headless; F closeout accepted with one required follow-up 2026-07-30. Moved to `done/`. Not reachable by any user until the adapter-spawn slice lands** |
+| 021 | Command Approval Model and Adapter Capability | M11 | — | **yes** | **Implemented headless and fully closed 2026-07-30. Moved to `done/`. Not reachable by any user until the adapter-spawn slice lands** |
 | 022 | Security Dialogs and Audit Producer Completion | M11 | 015, 021 | no | Blocked |
 | 023 | Configuration System | M12 | — | **yes** | **Authored — ready for implementation** |
 | 024 | Git Integration | M12 | — | **yes** | Queued (parallel-ready) |
