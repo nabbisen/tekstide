@@ -69,6 +69,8 @@ Review gate:
 
 ## PR-015-E — Mode switching and Content-mode scaffolding
 
+**Deferred to `0.4.1`** by the owner-approved `0.4.0`/`0.4.1` split of 2026-07-30. In M8 a mode switch toggles the Project Board against an empty content area, because Terminal Mode has no terminal until M9 — measuring or shipping it here would exercise scaffolding. See `rfcs/delivery-plan.md` §Release Cycle Tracking.
+
 Scope:
 
 - Content ↔ Terminal route switching, **no animation**.
@@ -86,7 +88,7 @@ Review gate:
 Scope:
 
 - Shell-internal measurement behind a flag.
-- C2 typing latency, C4 mode switch, C5 warm start.
+- C2 typing latency and C5 warm start. **C4 mode switch moves to `0.4.1` with PR-015-E** (2026-07-30 split) — it cannot be measured before the thing it measures exists.
 - Idle-CPU comparison proving the harness does not force redraw when inactive.
 
 Review gate:
@@ -98,10 +100,14 @@ Review gate:
 
 ## PR-015-G — Closeout evidence
 
+**Scoped to `0.4.0`, and it does not close RFC-015.** Corrected 2026-08-01 (review 135): the sequencing line below says "G needs all", which the `0.4.0`/`0.4.1` split made impossible to satisfy in one slice. PR-015-G records everything through PR-015-F and states plainly what remains; **RFC-015 stays in `rfcs/proposed/` until PR-015-E and `NFR-PERF-002` land in `0.4.1`.** The folder is the source of truth for lifecycle state (RFC-000), so an RFC with an outstanding implementation slice does not move to `done/` — that transition is a separate, later commit.
+
 Scope: checklist, QA evidence, known limitations, answers to the RFC's open questions, and an explicit statement of R1's disposition and R6's discharge.
 
 ## Sequencing
 
-B → C is strict. D and E both need B and C. F needs E. G needs all.
+B → C is strict. D and E both need B and C.
+
+~~F needs E. G needs all.~~ **Superseded 2026-08-01 (review 135).** F needed E only for the C4 mode-switch criterion; with C4 deferred, F's remaining criteria (C2 typing, C5 warm start) have no dependency on E, and F landed without it. G is scoped to `0.4.0` and does not close the RFC. Actual order shipped: **B → C → D → F → G**, with **E → C4 → RFC-015 closure** in `0.4.1`.
 
 **PR-015-C blocks D and E.** If its structure cannot be achieved, stop and escalate before building surfaces on an input model that may need reworking — reworking routing after four surfaces exist is far more expensive than pausing here.
