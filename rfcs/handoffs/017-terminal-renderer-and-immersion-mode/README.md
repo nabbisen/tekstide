@@ -55,6 +55,12 @@ Read before starting — RFC-017 conforms to these rather than amending them:
 | Measurement harness | `crates/tekstide/src/measurement.rs` | PR-015-F; **do not reintroduce `iced::window::frames()`** |
 | Text safety | `tekstide_core::text_safety` | For chrome, not the grid |
 
+## One obligation inherited from `0.4.1`
+
+**`NFR-PERF-002` (mode switch, p95 ≤ 32 ms) must be re-checked in this RFC.** PR-015-E discharged it at ~470× headroom — but against a switch between two *placeholder strings*, because neither Terminal Mode nor Content Mode rendered anything real yet. PR-017-E is what makes Terminal Mode real, and a grid rebuild is not a single line of text.
+
+Re-measure it once the terminal renders, and treat the `0.4.1` figure as a floor rather than a result. If it no longer holds, that is a finding, not a regression to hide.
+
 ## Two questions this RFC hands you to decide
 
 Both were deliberately left open because they could not be judged without a terminal to judge them against. Decide them **with evidence and record why**, do not default.
@@ -65,6 +71,9 @@ Both were deliberately left open because they could not be judged without a term
 ## Conventions that carry from `0.4.0`
 
 - **Screenshots**: `niri msg action screenshot-window --id <id> --path <repo-relative>`, stored under `evidence/pr-017-*/`, committed, each with an explicit statement of what it proves **and does not**.
-- **Synthetic input**: flag it in the review request *before* running it. niri does not forward XTest to native Wayland clients — relaunch with `WAYLAND_DISPLAY` unset, and use `xdotool windowfocus`; `windowactivate` does not work here.
+- **Synthetic input**: flag it in the review request *before* running it. Three findings this project paid for, in one place:
+  1. **niri does not forward XTest to native Wayland clients** (RFC-014). Relaunch with `WAYLAND_DISPLAY` unset to force the X11/XWayland backend.
+  2. **`xdotool windowactivate` fails here; `windowfocus` works** (PR-015-C).
+  3. **Always pass `--clearmodifiers`** (PR-015-E). X11 modifier state is global to the connection, so a chord like `Ctrl+Alt+M` followed immediately by a plain key can deliver that key while the server still considers a modifier down — the client sees `Ctrl+Tab`, the routing correctly ignores it, and the keystroke vanishes *silently*. Pair it with a fresh `windowfocus --sync`. In a measurement run this is a survivorship-bias source (R9): confirm delivery by on-disk sample count, never by eye.
 - **The mechanical scans** live in `i18n::enforcement` and walk the crate tree, so new files are covered automatically. If a new file legitimately needs a literal, **raise it — do not add an exemption to make the scan pass.**
 - **Ablate, do not assert.** Every mechanical guarantee gets one ablation per property. A test that passes with the thing it tests deleted is the failure mode this project has found five times.
