@@ -39,9 +39,10 @@ remains a GUI shell over the headless core, not the full AI CLI workbench.
     project names and paths escaped and honest `CountDisplay` fidelity
     (`Unavailable`/`NotImplemented` never render as `0`);
   - app-internal latency measurement (behind an opt-in flag, proven non-contaminating
-    by idle-CPU comparison) discharging RFC-014 R1 for typing latency
-    (`NFR-PERF-003`) and warm start (`NFR-PERF-001`) — both met by roughly two orders
-    of magnitude.
+    by idle-CPU comparison) discharging RFC-014 R1: typing latency
+    (`NFR-PERF-003`, an upper-bound proxy from the sum of two measured streams' p95s)
+    clears its budget by roughly two orders of magnitude, and warm start
+    (`NFR-PERF-001`) clears its budget comfortably, at about a fifth of it.
 
 ### Dependencies
 

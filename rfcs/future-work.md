@@ -72,6 +72,7 @@ Status: active after `0.1.0`.
 - Add release build, package, and package smoke evidence before each release.
 - Decide whether future releases need scripts, `xtask`, or CI gates.
 - Keep the changelog aligned with implemented and deferred scope.
+- **`NOTICE` and third-party dependency trees (`iced` and similar): not owed today, becomes owed at RFC-029.** A `cargo publish` tarball redistributes only this project's own sources — confirmed for `0.4.0` by inspecting `cargo package --list`, which shows no third-party files in either crate. The Apache-2.0 §4(d) notice-propagation obligation attaches to redistributing a work, and `cargo publish` does not redistribute `iced`'s sources, only a dependency reference resolved separately by Cargo. This becomes live the day a prebuilt binary ships (RFC-029: documentation, CI, release automation, M14) — audit `iced`'s dependency tree for upstream `NOTICE` obligations then, not at every source-only release before it.
 
 ## Milestone Roadmap
 
