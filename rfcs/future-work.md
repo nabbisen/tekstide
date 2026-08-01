@@ -46,14 +46,14 @@ Status: implemented by RFC-013 with documented limitations; three of twelve v1 e
 
 ### Desktop GUI Runtime
 
-Status: substrate decided and application shell implemented by RFC-014/RFC-015 (`0.4.0`); remaining product surfaces deferred.
+Status: substrate decided, application shell, and mode switching implemented by RFC-014/RFC-015 (`0.4.0`/`0.4.1`, RFC-015 now closed); remaining product surfaces deferred.
 
-- Desktop GUI substrate selected (`iced`, RFC-014) and application shell implemented: window/chrome/content/modal layer composition, keyboard focus and input routing, i18n-backed text, a compiled theme, and a Project Board surface rendering real `ApplicationShell` state with untrusted names and paths escaped (RFC-015).
-- Mode switching between Content and Terminal views, and the `NFR-PERF-002` mode-switch latency measurement that depends on it, move to `0.4.1` (RFC-015 PR-015-E).
-- Replace the Project Board placeholder content area with real file tree and editor surfaces (later GUI milestones, M10).
+- Desktop GUI substrate selected (`iced`, RFC-014) and application shell implemented: window/chrome/content/modal layer composition, keyboard focus and input routing, i18n-backed text, a compiled theme, and a Project Board surface rendering real `ApplicationShell` state with untrusted names and paths escaped (RFC-015 `0.4.0`).
+- Content ↔ Terminal mode switching, a visible chrome-level focus indicator, and the `NFR-PERF-002` mode-switch latency measurement all implemented in `0.4.1` (RFC-015 PR-015-E) — both against Content/Terminal-mode placeholders, since neither RFC-017's terminal grid nor RFC-019's editor exists yet. `NFR-PERF-002` needs re-checking once either does (RFC-017's own handoff carries this obligation).
+- Replace the sidebar/main-area scaffolding and Project Board placeholder content with real file tree and editor surfaces (later GUI milestones, M9/M10).
 - Add dialog and confirmation flows (trust, safe-close, destructive, configuration change) — M11.
 - Validate responsive layout and visual polish beyond the Project Board's current row-based rendering.
-- Accessibility: no visible focus indicator exists yet at the shell-chrome level — low-stakes today since the shell has only one focus zone, but required before PR-015-E adds a second one (tracked for `0.4.1`, RFC-015 closeout). Screen-reader support remains out of scope for the life of the `iced` substrate decision (RFC-014 R2, owner-accepted).
+- Accessibility: visible focus indicators now render at the shell-chrome level (`0.4.1`, three independent channels — border colour, border width, textual marker). Screen-reader support remains out of scope for the life of the `iced` substrate decision (RFC-014 R2, owner-accepted).
 
 ### File Workflow Follow-Up
 

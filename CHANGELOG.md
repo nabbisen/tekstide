@@ -1,8 +1,59 @@
 # Changelog
 
-## 0.4.0 - Application Shell and Project Board
+## 0.4.1 - Mode Switching, Focus Indicator, and RFC-015 Closure
 
 Status: release candidate, prepared 2026-08-01, pending review and the owner's signed tag.
+
+Tekstide `0.4.1` completes milestone M8 (GUI Foundation) with RFC-015 PR-015-E: the
+`0.4.0`/`0.4.1` split deferred mode switching and its latency measurement here because
+M8 had no second mode to switch into until this slice built it. **RFC-015 is closed**
+(`rfcs/done/`) as of this release — both risks the RFC-014 substrate decision carried
+unverified are now discharged: **R1** (input latency) by `0.4.0`'s C2/C5 measurements
+and this release's C4, and **R6** (the focus-trap property not transferring from the
+spike) by PR-015-C's real test. The RFC-014 substrate decision record has no open
+items remaining.
+
+### Implemented
+
+- RFC-015 PR-015-E mode switching and Content-mode scaffolding:
+  - Content ↔ Terminal route switching, dispatched through a real `Ctrl+Alt+M`
+    keybinding (`NavigationAction::ToggleProjectMode`, previously unbound) to the
+    pre-existing `AppCommand::ToggleActiveProjectMode`; no animation or interpolation
+    in the switch path;
+  - sidebar and main-area scaffolding (`FocusZone::Sidebar`, still `#[non_exhaustive]`
+    for RFC-017/019/020) that required no changes to the input-routing structure
+    PR-015-C established;
+  - a visible, non-colour-only focus indicator (`NFR-UX-002`): border colour, border
+    width, and a textual `"> "` marker all change together with `state.focus` —
+    `0.4.0` shipped without one, defensibly, because the shell had only one focus
+    zone; this release adds the second zone the indicator was always meant for.
+- RFC-014 R1 discharge, completed: C4 (`NFR-PERF-002`, mode-switch latency, budget
+  p95 ≤ 32ms), reusing `0.4.0`'s measurement harness rather than a new mechanism.
+  Decomposed input-to-state-change (p95 29µs) and view-build cost (p95 39µs) sum to
+  68µs, met by roughly 470× — **measured against the Content/Terminal-mode
+  placeholders this release ships** (single-line catalog text each), not against the
+  real editor (RFC-019) or terminal grid (RFC-017) those placeholders stand in for.
+  RFC-017's handoff carries the obligation to re-check `NFR-PERF-002` once Terminal
+  Mode renders a real grid.
+
+### Dependencies
+
+No new dependencies; this release is entirely `crates/tekstide-core`/`crates/tekstide`
+source changes (one new default keybinding, no new crates).
+
+### Deferred
+
+- Terminal rendering, editor, file explorer, and diff/review surfaces — M9/M10, RFC-017/019/020.
+- Rendered security dialogs and an adapter-spawn pathway that would make command
+  approval reachable — M11. Command approval remains implemented but unreachable.
+- Screen-reader support — out of scope for the life of the `iced` substrate decision
+  (RFC-014 R2, owner-accepted), unchanged.
+- `NFR-PERF-002`'s re-check against real Content/Terminal-mode content once RFC-017
+  and RFC-019 render it — the placeholder boundary above, not a new finding.
+
+## 0.4.0 - Application Shell and Project Board
+
+Status: released on 2026-08-01.
 
 Tekstide `0.4.0` covers milestone M8 (GUI Foundation): RFC-014's substrate decision,
 RFC-016 PR-016-B/C/D's i18n and text-safety foundations, and RFC-015 PR-015-B/C/D/F/G's

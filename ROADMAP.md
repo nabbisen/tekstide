@@ -14,7 +14,7 @@ Everything from M8 onward builds the product surface. This roadmap is milestone-
 | M5 | `0.3.0` (released 2026-07-28) | AgentRun Launch + Active File Safety | Executable AI CLI profiles, AgentRun launch, active-document external-change detection. |
 | M6 | `0.3.0` (released 2026-07-28) | Transcript And Review Foundations | Bounded transcript capture, retention controls, generated-change review models. |
 | M7 | `0.3.0` (released 2026-07-28) | Durable Audit | Local durable audit storage for trust decisions, managed process launches, blocked root/symlink access, and recovery outcomes. |
-| M8 | `0.4.0` (release candidate) | GUI Foundation | Substrate decision, application shell, layout and focus model, i18n scaffolding, Project Board surface. |
+| M8 | `0.4.0` (released 2026-08-01) + `0.4.1` (release candidate) | GUI Foundation | Substrate decision, application shell, layout and focus model, i18n scaffolding, Project Board surface, mode switching, focus indicator. |
 | M9 | `0.5.x` | Terminal Surface | Terminal renderer honoring the RFC-009 boundary, immersion mode, split policy, rendered paste protection, trusted-UI evidence. |
 | M10 | `0.6.x` | Content Surfaces | Editor, file explorer tree, diff/review surface, AgentRun report surface. |
 | M11 | `0.7.x` | Approval And Safety Dialogs | Command approval model and dialog, trust/safe-close/destructive dialogs, remaining security audit producers. |
@@ -80,7 +80,7 @@ Review gates:
 
 Explicitly not in M8: terminal rendering, editor, dialogs.
 
-**Accessibility baseline partially delivered.** No colour-only status holds (mechanically checked). Screen-reader support does not exist, stated rather than simulated (RFC-014 R2, owner-accepted) — that item is a disclosed absence, not an M8 gap. Visible focus indicators do not render at the shell-chrome level, though: `state.focus` is tracked but nothing in `shell::view` renders a distinct style for it, low-stakes only because the shell currently has a single focus zone. Required before `0.4.1`'s PR-015-E adds a second one — recorded in RFC-015's closeout, corrected 2026-08-01.
+**Accessibility baseline delivered as of `0.4.1`.** No colour-only status holds (mechanically checked). Screen-reader support does not exist, stated rather than simulated (RFC-014 R2, owner-accepted) — a disclosed absence, not an M8 gap. Visible focus indicators render at the shell-chrome level since PR-015-E (`0.4.1`): border colour, border width, and a textual marker all change with `state.focus` across both `FocusZone` variants — corrected 2026-08-01, having been correctly unmet in `0.4.0` when the shell had only one focus zone.
 
 ## M9: Terminal Surface
 

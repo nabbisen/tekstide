@@ -16,8 +16,8 @@ Tekst IDE (`tekstide`) is a local-first, multi-project workbench for supervising
 The current implementation is a headless core through RFC-013, plus the headless
 command-approval model of RFC-021 and the shared text-safety primitive of RFC-016
 PR-016-C: terminal runtime, AgentRun launch, transcript retention, generated-change
-review, and durable audit storage. As of RFC-015 (PR-015-B/C/D/F), there is also a
-real desktop GUI application shell. It includes:
+review, and durable audit storage. As of RFC-015 (now closed, `rfcs/done/`), there is
+also a real desktop GUI application shell with mode switching. It includes:
 
 - Project Board and ProjectSession state, root-bound file access, bounded explorer,
   UTF-8 text buffers, and safe save with external-change detection;
@@ -35,14 +35,17 @@ real desktop GUI application shell. It includes:
 - durable local SQLite audit storage with schema identity, migration harness,
   corruption diagnostics, restart-safe recovery, and explicit purge;
 - a real `iced` desktop shell: window/chrome/content/modal layer composition, a
-  keyboard-driven focus and input-routing model, i18n-backed text and a compiled
-  theme, and a Project Board surface rendering live `ApplicationShell` state with
-  untrusted project names and paths escaped, never trusted.
+  keyboard-driven focus and input-routing model with a visible, non-colour-only focus
+  indicator, i18n-backed text and a compiled theme, and a Project Board surface
+  rendering live `ApplicationShell` state with untrusted project names and paths
+  escaped, never trusted;
+- Content ↔ Terminal mode switching for an active project, with sidebar and
+  main-area scaffolding that RFC-017 (terminal) and RFC-019 (editor/explorer) render
+  real content into.
 
 It is not yet the full AI CLI workbench. There is no rendered terminal surface, no
-editor, no mode switching between Content and Terminal views, no rendered
-paste/approval/trust dialogs, no adapter-spawn pathway that would make command
-approval reachable, no Git-based change detection, file watcher, or
+editor, no rendered paste/approval/trust dialogs, no adapter-spawn pathway that would
+make command approval reachable, no Git-based change detection, file watcher, or
 overwrite-confirmation UI, and no cross-platform evidence beyond Linux. Command
 approval (below) remains implemented but unreachable.
 
