@@ -20,6 +20,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | --- | --- | --- |
 | 014 | [Desktop GUI Substrate and Terminal Rendering Strategy](./proposed/014-desktop-gui-substrate-and-terminal-rendering.md) | Proposed — spike complete; substrate decision approved 2026-07-29 |
 | 015 | [Application Shell and Rendered Surface Model](./proposed/015-application-shell-and-rendered-surface-model.md) | Proposed |
+| 017 | [Terminal Renderer and Immersion Mode](./proposed/017-terminal-renderer-and-immersion-mode.md) | Proposed — authored 2026-08-01, awaiting owner acceptance |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ## Handoffs
