@@ -509,6 +509,36 @@ fn is_measuring_typing_is_false_by_default() {
     assert!(!state.is_measuring_typing());
 }
 
+/// Response 134 Required: measurement and the demo modal must never both
+/// be active -- otherwise `subscription()`'s measurement branch (checked
+/// ahead of `SubscriptionMode::for_modal` entirely) would skip modal
+/// exclusivity while the modal is still on screen. Tests the pure
+/// decision function directly (not by setting `TEKSTIDE_LAYER_DEMO`/
+/// `TEKSTIDE_MEASURE_CRITERION` env vars, which are process-global and
+/// would race against concurrently-running tests that also construct a
+/// `State`) -- all four input combinations, not only the one that
+/// matters for the fix, so a future change to the *other* branch is
+/// caught too.
+#[test]
+fn measurement_and_the_demo_modal_are_mutually_exclusive() {
+    assert!(
+        super::modal_for_state(true, true).is_none(),
+        "measurement active + layer-demo requested must not open the modal"
+    );
+    assert!(
+        super::modal_for_state(true, false).is_none(),
+        "measurement active, no layer-demo requested: still no modal"
+    );
+    assert!(
+        super::modal_for_state(false, true).is_some(),
+        "no measurement, layer-demo requested: modal opens as before"
+    );
+    assert!(
+        super::modal_for_state(false, false).is_none(),
+        "no measurement, no layer-demo requested: no modal"
+    );
+}
+
 /// `tail_lines` -- the typing-measurement surface's only rendering
 /// logic worth testing in isolation from `iced`'s `Element` tree --
 /// keeps exactly the last `count` lines, joined back with `\n`, and

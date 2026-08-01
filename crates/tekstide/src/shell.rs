@@ -104,6 +104,26 @@ impl Default for ModalContent {
     }
 }
 
+/// Response 134 Required: measurement and the demo modal must be mutually
+/// exclusive, or `subscription()`'s measurement branch (checked first,
+/// ahead of `SubscriptionMode::for_modal` entirely -- see `subscription`'s
+/// doc) would skip modal exclusivity while the modal is still on screen,
+/// silently reopening the "produced-then-ignored" gap PR-015-C closed.
+/// Measurement wins: it is a bounded, self-terminating diagnostic run
+/// PR-015-C's structural property has no reason to apply to in the first
+/// place, whereas the demo modal exists only to be screenshotted
+/// interactively. A pure function, not inlined into `State::new`, so the
+/// exclusivity itself is testable without racing on process-global
+/// `TEKSTIDE_LAYER_DEMO`/`TEKSTIDE_MEASURE_CRITERION` env vars against
+/// concurrently-running tests that also construct a `State`.
+fn modal_for_state(measurement_active: bool, layer_demo_requested: bool) -> Option<ModalContent> {
+    if measurement_active {
+        None
+    } else {
+        layer_demo_requested.then(ModalContent::default)
+    }
+}
+
 pub struct State {
     app_shell: ApplicationShell,
     catalog: Catalog,
@@ -130,14 +150,17 @@ impl State {
             String::new()
         };
 
+        let modal = modal_for_state(
+            measurement.is_some(),
+            std::env::var("TEKSTIDE_LAYER_DEMO").is_ok(),
+        );
+
         Self {
             app_shell,
             catalog,
             theme: Theme::default(),
             focus: FocusZone::MainArea,
-            modal: std::env::var("TEKSTIDE_LAYER_DEMO")
-                .is_ok()
-                .then(ModalContent::default),
+            modal,
             measurement,
             typing_doc,
         }
