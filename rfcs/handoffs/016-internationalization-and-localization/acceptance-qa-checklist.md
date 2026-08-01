@@ -2,11 +2,11 @@
 title: "RFC-016: Internationalization and Localization - Acceptance / QA Checklist"
 rfc: "RFC-016"
 rfc_file: "../../proposed/016-internationalization-and-localization.md"
-status: "Proposed — implementation in progress (PR-016-C, PR-016-B, PR-016-D complete and accepted [response 126]; PR-016-E waits for RFC-015)"
+status: "Proposed — implementation in progress (PR-016-B/C/D complete and accepted [response 126]; PR-016-E implemented 2026-08-01, pending review; PR-016-F closeout remains)"
 target_milestone: "M8"
 source_rfc_status: "Proposed"
 created: "2026-07-29"
-updated: "2026-07-31"
+updated: "2026-08-01"
 ---
 
 # RFC-016 Acceptance / QA Checklist
@@ -68,10 +68,10 @@ updated: "2026-07-31"
 
 ## Enforcement Checklist
 
-- [ ] No-hardcoded-strings scan exists.
-- [ ] **Scan demonstrated to catch a deliberately introduced literal** — shown, not asserted.
-- [ ] Catalog-completeness test: every referenced key exists in the source locale.
-- [ ] Unused-key report advisory only.
+- [x] No-hardcoded-strings scan exists. `i18n::enforcement::no_raw_string_literal_is_passed_to_text_anywhere_in_the_crate` (canonical, absorbing PR-015-B's copy) for `crates/tekstide`; `tekstide_core_hardcoded_strings_match_the_closed_exemption_list` for `tekstide-core`'s three known text-producing files.
+- [x] **Scan demonstrated to catch a deliberately introduced literal** — shown, not asserted. Both scans ablation-verified; the `tekstide-core` scan additionally demonstrated catching a stale exemption and a blanket-exemption trigger going false. See `qa-evidence.md`.
+- [x] Catalog-completeness test: every referenced key exists in the source locale. `every_source_locale_key_resolves_in_every_shipped_locale` — proven against the real `Catalog` fallback machinery for all 21 `en.ftl` keys against the shipped `pl` locale, not just PR-016-B/D's hand-picked cases. Ablation-verified (disabled the fallback branch, confirmed failure on the first key `pl.ftl` doesn't define).
+- [x] Unused-key report advisory only. `report_catalog_keys_unused_by_any_render_call` — never asserts; prints a report (currently: no unused keys).
 
 ## Evidence Required
 

@@ -316,4 +316,6 @@ fn log_missing_key(key: &str, fallback_locale_used: &str) {
 }
 
 #[cfg(test)]
+mod enforcement;
+#[cfg(test)]
 mod tests;

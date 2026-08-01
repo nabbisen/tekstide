@@ -362,7 +362,11 @@ fn crate_src_dir() -> PathBuf {
 fn is_scan_exempt(path: &Path) -> bool {
     matches!(
         path.file_name().and_then(|name| name.to_str()),
-        Some("theme.rs") | Some("tests.rs")
+        // `enforcement.rs` (PR-016-E) is test-support code that names
+        // `.label()` in prose describing what it must never call in
+        // real rendering code -- exempt for the same reason `tests.rs`
+        // is: it talks about the shape, it does not render it.
+        Some("theme.rs") | Some("tests.rs") | Some("enforcement.rs")
     )
 }
 
@@ -387,44 +391,13 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Mechanical seam check (response 125's "ideally mechanically" standard,
-/// broadened per response 128 to cover the crate's source tree): no
-/// scanned file may contain a `text("literal")` call -- every user-facing
-/// string must come from `state.catalog.get(...)` or a helper that does.
-/// A heuristic scan of each file's own text, not a full parse --
-/// ablation-verified in `qa-evidence.md`.
-#[test]
-fn no_raw_string_literal_is_passed_to_text_anywhere_in_the_crate() {
-    for path in scannable_source_files() {
-        let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
-        for (line_number, line) in source.lines().enumerate() {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("//") || trimmed.starts_with("///") || trimmed.starts_with("//!")
-            {
-                continue;
-            }
-            assert!(
-                !contains_text_call_with_string_literal(line),
-                "{}:{} passes a string literal directly to text(...): {line}",
-                path.display(),
-                line_number + 1
-            );
-        }
-    }
-}
-
-fn contains_text_call_with_string_literal(line: &str) -> bool {
-    let mut search_from = 0;
-    while let Some(relative_index) = line[search_from..].find("text(") {
-        let call_start = search_from + relative_index + "text(".len();
-        let after_paren = line[call_start..].trim_start();
-        if after_paren.starts_with('"') {
-            return true;
-        }
-        search_from = call_start;
-    }
-    false
-}
+// RFC-016 PR-016-E: the no-hardcoded-string scan this file introduced in
+// PR-015-B (response 128) is now canonical in
+// `crate::i18n::enforcement::no_raw_string_literal_is_passed_to_text_anywhere_in_the_crate`,
+// which absorbs this file's directory walk rather than duplicating it --
+// see that module's doc for why PR-016-E, not PR-015-B, owns this policy
+// going forward. Colour and font-size stay here; they are RFC-015's own
+// seam, not RFC-016's.
 
 /// Mechanical seam check for colour, broadened per response 128: no
 /// scanned file may construct an `iced::Color` directly
