@@ -1,7 +1,7 @@
 ---
 title: "RFC-015 PR-015-C: Input Routing - Detailed Developer Instructions"
 rfc: "RFC-015"
-rfc_file: "../../proposed/015-application-shell-and-rendered-surface-model.md"
+rfc_file: "../../done/015-application-shell-and-rendered-surface-model.md"
 target_milestone: "M8"
 created: "2026-07-29"
 updated: "2026-07-29"

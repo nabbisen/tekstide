@@ -1,6 +1,6 @@
 # RFC-015: Application Shell and Rendered Surface Model
 
-Status: Proposed
+Status: Implemented with documented limitations — closed 2026-08-01. PR-015-B/C/D/F/G shipped in `0.4.0`; PR-015-E, the chrome-level focus indicator, and `NFR-PERF-002` in `0.4.1`. RFC-014 residual risks **R1** (input latency) and **R6** (focus trap) are both discharged here. `NFR-PERF-002` is measured against mode placeholders, not a real editor or terminal grid — RFC-017 re-checks it. See `../handoffs/015-application-shell-and-rendered-surface-model/qa-evidence.md`.
 Target milestone: M8
 Date: 2026-07-29
 

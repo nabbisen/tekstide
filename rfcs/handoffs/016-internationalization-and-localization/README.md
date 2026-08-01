@@ -19,7 +19,7 @@ Source RFC status: **Proposed**
 
 Read before starting:
 
-- [RFC-015](../../proposed/015-application-shell-and-rendered-surface-model.md) — creates the i18n seam this RFC fills. If RFC-015 has not landed, PR-016-C (text safety) can still proceed; it has no catalog dependency.
+- [RFC-015](../../done/015-application-shell-and-rendered-surface-model.md) — creates the i18n seam this RFC fills. (Historical: when this pack was written RFC-015 had not landed, so PR-016-C was sequenced to proceed without it. Both closed 2026-08-01.)
 - [RFC-009](../../done/009-terminal-security-boundary.md) — why terminal output is untrusted.
 
 ## Active work: PR-016-E (added 2026-08-01)

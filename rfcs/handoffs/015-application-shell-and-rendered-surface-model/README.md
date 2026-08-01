@@ -1,6 +1,6 @@
 # RFC-015: Application Shell and Rendered Surface Model - Developer Handoff Pack
 
-Source RFC: [RFC-015](../../proposed/015-application-shell-and-rendered-surface-model.md)
+Source RFC: [RFC-015](../../done/015-application-shell-and-rendered-surface-model.md)
 Target milestone: **M8**
 Source RFC status: **Proposed**
 
@@ -10,7 +10,7 @@ Source RFC status: **Proposed**
 
 | # | Document | Purpose |
 | --- | --- | --- |
-| 1 | [RFC-015](../../proposed/015-application-shell-and-rendered-surface-model.md) | Surface contract, layer model, input routing, seams. **Read "Input routing" before writing any code.** |
+| 1 | [RFC-015](../../done/015-application-shell-and-rendered-surface-model.md) | Surface contract, layer model, input routing, seams. **Read "Input routing" before writing any code.** |
 | 2 | This file | Orientation and what is binding. |
 | 3 | [`implementation-handoff.md`](./implementation-handoff.md) | Module layout, the seams, `CountDisplay` fidelity, R1 measurement. |
 | 4 | [`pr-015-c-input-routing.md`](./pr-015-c-input-routing.md) | **Detailed instructions for PR-015-C, the security-critical slice.** Read before designing the message enum. |

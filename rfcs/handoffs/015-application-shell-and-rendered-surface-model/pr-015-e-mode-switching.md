@@ -1,7 +1,7 @@
 ---
 title: "RFC-015 PR-015-E — Mode switching and Content-mode scaffolding: implementation handoff"
 rfc: "RFC-015"
-rfc_file: "../../proposed/015-application-shell-and-rendered-surface-model.md"
+rfc_file: "../../done/015-application-shell-and-rendered-surface-model.md"
 slice: "PR-015-E"
 release: "0.4.1"
 status: "Ready for implementation — 0.4.0 shipped 2026-08-01"
