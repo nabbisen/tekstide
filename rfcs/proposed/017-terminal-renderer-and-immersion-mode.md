@@ -32,6 +32,8 @@ Turn the reviewed terminal security boundary into a rendered surface: a PTY-back
 
 **Does not close, and must not claim to:** rendered paste protection and its confirmation dialog, the `paste_blocked` producer, and screenshot-backed spoofing evidence under adversarial output. **Those are RFC-018.** ROADMAP M9 lists them under the same milestone; the delivery plan splits them across two RFCs, and this document is the first half.
 
+**A configuration RFC-018 will want, found during PR-017-D's review (2026-08-03).** `terminal_demo_subscription()` sits outside the modal gate, so **terminal output keeps rendering while a modal is open** — correct behaviour, since a real terminal does not stop producing output because a dialog appeared. Setting `TEKSTIDE_LAYER_DEMO` and `TEKSTIDE_TERMINAL_DEMO` together is reachable (they are constructed independently at boot) and produces exactly the adversarial condition RFC-018 must prove against: a trusted dialog distinguishable from terminal content *while that content is actively updating*. A modal over a frozen terminal is much weaker evidence than a modal over a live one. PR-017-D correctly declined to manufacture that screenshot for its own scope; RFC-018 should seek it deliberately.
+
 That split matters for one reason. RFC-014 PR-014-D already produced a genuine-versus-adversarial screenshot **in the spike**, and it is the strongest artifact this project has on trusted-UI separation. It does not transfer: it proved the spike's modal composited above the spike's terminal. RFC-018 must re-establish it in the product, and **RFC-017 must not cite PR-014-D's image as evidence for the product's boundary.**
 
 ## Non-goals
