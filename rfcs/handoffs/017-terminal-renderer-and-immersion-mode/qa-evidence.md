@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B (filter promotion) implemented 2026-08-01; PR-017-C (terminal pane rendering) implemented 2026-08-02, pending review"
+status: "Accepted 2026-08-01 — PR-017-B (filter promotion) implemented 2026-08-01, reviewed; PR-017-C (terminal pane rendering) implemented 2026-08-02, reviewed and approved with no required items (response 148)"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -165,7 +165,11 @@ Captured with the owner's explicit approval (`AskUserQuestion`), per response 12
 
 `TerminalPanePolicy`/`TerminalLayoutClass`/`visible_terminal_limit`, real font-metrics/DPI-driven split sizing, colour-independent session-state distinction, and the hidden-session grid-state decision are unchanged from `task-breakdown-pr-plan.md`'s own scoping — all four are PR-017-E's job ("Immersion mode, split policy, session bar"), not this slice's. This slice's pane is fixed at 80×24 and is the only terminal surface in the application; there is no split or session bar yet for those items to apply to.
 
-## PR-017-D — Input
+### Review outcome (response 148)
+
+**Approved, no required items.** P1/P2's re-enumeration against production code confirmed independently (same grep, same result: exactly one construction/advance site, always filtered). The `terminal.rs` colour-scan exemption confirmed correct, with an expiry recorded: it holds only because the file's single `Color::from_rgb` call is currently the grid's own PTY-determined colour — the moment PR-017-E gives this file chrome (a session bar, a pane focus indicator), the file-level exemption stops being justified by that claim and must narrow or move. Both obligations are recorded directly in `task-breakdown-pr-plan.md`'s PR-017-E entry, not only here.
+
+**Named as the third instance of the same pattern this RFC**: a green ablation result that was wrong (PR-017-B's silent-decline gap, the classifier parity test, and this slice's OSC-0 ablation, which passed even with the filter bypassed because `set_title` has no grid effect to lose). Recorded here as a standing reminder for any future ablation in this RFC: a passing result after deliberately breaking something is not evidence until the failure mode it's supposed to catch has been confirmed observable through the same lens the test uses.
 
 Pending implementation.
 

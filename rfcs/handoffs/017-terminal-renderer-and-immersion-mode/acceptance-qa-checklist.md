@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - Acceptance / QA Checklist"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B (filter promotion) implemented 2026-08-01; PR-017-C (terminal pane rendering) implemented 2026-08-02, pending review"
+status: "Accepted 2026-08-01 — PR-017-B (filter promotion) implemented 2026-08-01, reviewed; PR-017-C (terminal pane rendering) implemented 2026-08-02, reviewed and approved with no required items (response 148)"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
