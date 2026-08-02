@@ -442,30 +442,31 @@ fn is_private_mode(body: &[u8]) -> bool {
         .is_some_and(|byte| matches!(*byte, b'?' | b'>' | b'='))
 }
 
+/// Parses the mode number out of `body` (`?`/`>`/`=` followed by decimal
+/// digits, e.g. `?1000`) and delegates to
+/// [`classify_private_mode_number`]. Response 144 Required: an earlier
+/// version of this function held its own copy of the mouse/focus mode
+/// numbers as a byte-substring search, so this and
+/// `classify_private_mode_number` were two independently-maintained
+/// lists of the same six numbers -- exactly the drift risk this module's
+/// own doc comment (below) warns a second entry point against, just
+/// displaced into this crate instead of the shell crate. One list now;
+/// this function contributes only byte-parsing, no policy of its own.
 fn classify_private_mode(body: &[u8]) -> TerminalSequenceFamily {
-    if body.windows(4).any(|window| {
-        matches!(
-            window,
-            b"1000" | b"1002" | b"1003" | b"1004" | b"1005" | b"1006"
-        )
-    }) {
-        TerminalSequenceFamily::MouseFocusReporting
-    } else {
-        TerminalSequenceFamily::PrivateMode
-    }
+    let mode = first_param_or_default(&body[1..], 0);
+    classify_private_mode_number(u16::try_from(mode).unwrap_or(0))
 }
 
-/// The same mouse/focus-vs-ordinary-private-mode distinction as
-/// [`classify_private_mode`], keyed on an already-parsed raw mode number
-/// rather than raw CSI body bytes. RFC-017 PR-017-B's `vte::ansi::Handler`
-/// interposition filter receives a parsed `PrivateMode`/`NamedPrivateMode`
-/// value from `vte`, never the raw bytes this byte-level parser works
-/// from -- a second, independent copy of "which numbers mean mouse/focus
-/// reporting" in the shell crate would be exactly the duplicate-classifier
-/// risk `implementation-handoff.md` §3 warns against, so both entry points
-/// share this one function instead. Not a replacement for
-/// `classify_private_mode` (which still parses raw bytes for this
-/// module's own headless callers); additive.
+/// The mouse/focus-vs-ordinary-private-mode distinction, keyed on an
+/// already-parsed raw mode number. Two entry points share it:
+/// [`classify_private_mode`] (this module's own byte-level parser) and
+/// `crates/tekstide`'s `vte::ansi::Handler` interposition filter (RFC-017
+/// PR-017-B), which receives a parsed `PrivateMode`/`NamedPrivateMode`
+/// value from `vte` and never sees the raw bytes this byte-level parser
+/// works from. A second, independent copy of "which numbers mean
+/// mouse/focus reporting" in the shell crate would be the
+/// duplicate-classifier risk `implementation-handoff.md` §3 warns
+/// against; this is the one list both read.
 pub fn classify_private_mode_number(mode: u16) -> TerminalSequenceFamily {
     match mode {
         1000 | 1002 | 1003 | 1004 | 1005 | 1006 => TerminalSequenceFamily::MouseFocusReporting,
@@ -764,20 +765,23 @@ mod tests {
 
     #[test]
     fn classify_private_mode_number_agrees_with_the_byte_based_classifier() {
-        // RFC-017 PR-017-B: the two entry points to this policy must not
-        // drift. For every mode number the byte-based classifier
-        // recognizes as mouse/focus reporting, the number-based one must
-        // agree, and vice versa.
-        for mouse_mode in [1000u16, 1002, 1003, 1004, 1005, 1006] {
+        // Response 144 Required: this must call the byte-based classifier
+        // directly rather than asserting the number-based one against a
+        // second, hand-copied literal list -- the earlier version of this
+        // test did the latter, so it stayed green when response 144's own
+        // ablation (adding 1007 to one list only) desynchronised the two.
+        // Sweeping every mode number in the range both classifiers can
+        // reach and comparing them directly is the actual cross-check;
+        // now that `classify_private_mode` delegates to
+        // `classify_private_mode_number`, this also serves as a
+        // regression guard against a future edit re-introducing a second
+        // list.
+        for mode in 0u16..=2100 {
+            let body = format!("?{mode}");
             assert_eq!(
-                classify_private_mode_number(mouse_mode),
-                TerminalSequenceFamily::MouseFocusReporting
-            );
-        }
-        for ordinary_mode in [25u16, 1049, 2004, 9999] {
-            assert_eq!(
-                classify_private_mode_number(ordinary_mode),
-                TerminalSequenceFamily::PrivateMode
+                classify_private_mode(body.as_bytes()),
+                classify_private_mode_number(mode),
+                "mode {mode}: byte-based and number-based classifiers disagree"
             );
         }
     }
