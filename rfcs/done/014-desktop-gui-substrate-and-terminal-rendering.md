@@ -263,12 +263,12 @@ The handoff's original instruction would have created the very dual-parser drift
 
 Numbered for carry-forward. **R1 and R2 require owner acknowledgement.**
 
-**R1 — Latency budgets unverified (C2/C3/C4).** *Owner acknowledgement required.*
+**R1 — Latency budgets unverified (C2/C3/C4).** ~~*Owner acknowledgement required.*~~ **Acknowledged by the owner 2026-07-29 and DISCHARGED 2026-08-01** — RFC-015 PR-015-F measured C2/C5 in `0.4.0` and PR-015-E measured C4 in `0.4.1`, all non-degenerate and inside budget. C3 (`NFR-PERF-004`, terminal input latency under flood) is RFC-017's, not open here.
 `iced` 0.14's only application-level frame-observation hook, `window::frames()`, forces continuous compositor-driven redraw once subscribed (~57 Hz, ~2.7 % of one core, with nothing animating). Input-to-frame therefore measures frame availability, not rendering cost. All samples read 0 µs — a degenerate result, not a pass.
 *Impact:* the substrate's responsiveness against `NFR-PERF-002/003/004` is unknown. It may be excellent; it is unproven.
 *Mitigation:* verify in M8 with instrumentation built into the real shell, where a non-contaminating path is available. **Do not amend the NFRs** — nothing was measured, so there is nothing to calibrate against.
 
-**R2 — No accessibility bridge exists in `iced` 0.14.** *Owner decision required.*
+**R2 — No accessibility bridge exists in `iced` 0.14.** ~~*Owner decision required.*~~ **Decided by the owner 2026-07-29**: `iced` accepted knowing this, on the reasoning that i18n is mandatory with verified evidence while screen-reader support is a "should". **Not closed — watched.** The release checklist carries a standing per-release check (`cargo tree -p tekstide | grep -i accesskit`); a hit reopens this. Recorded 2026-08-01 at the owner's direction that accessibility is a social need, not a nice-to-have.
 Verified: zero matches for `accesskit`/`a11y`/`accessibility` in vendored `iced`/`iced_winit`, and `accesskit` is absent from the resolved graph. **`egui` 0.35 depends on `accesskit` 0.24.1 as a required, non-optional dependency.**
 *Impact:* `NFR-UX-001` (keyboard accessibility) is satisfiable and satisfied. UI/UX §18's *"screen-reader labels should be provided for Project Board rows, approval actions, and process state"* is **not achievable** on this substrate unless `iced` adds a bridge upstream. Accessibility cannot be retrofitted onto a toolkit with no bridge.
 *Honest attribution:* the spike did not surface this comparison because **my own handoff scoped the second candidate to a narrow C1/C7 probe**, excluding accessibility. That scoping error is mine, not the implementer's.
