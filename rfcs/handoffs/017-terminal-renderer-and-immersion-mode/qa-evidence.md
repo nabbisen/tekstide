@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B implemented 2026-08-01, reviewed; PR-017-C implemented 2026-08-02, reviewed and approved (response 148); PR-017-D (input) implemented 2026-08-03, pending review"
+status: "Accepted 2026-08-01 — PR-017-B/PR-017-C reviewed and approved (responses 144-148); PR-017-D (input) implemented 2026-08-03, reviewed and approved with no required items (response 149)"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -197,6 +197,8 @@ Captured with the owner's explicit approval (`AskUserQuestion`), per response 12
 
 **No GUI screenshot for the modal case, disclosed rather than manufactured.** The demo modal (`TEKSTIDE_LAYER_DEMO`) opens exactly once, at boot, with no runtime trigger to reopen it (RFC-015 PR-015-B's own design: no real dialog trigger exists until RFC-022). There is no real, user-accessible sequence that gets Terminal Mode active *and* the modal open at the same time — toggling to Terminal Mode requires `Ctrl+Alt+M`, a global keybinding, and `modal_subscription()` (active whenever the modal is shown) has no path to routing global keybindings at all. The live-`TerminalPane` test above is the demonstration this property gets; a screenshot was not force-fit around a launch-order coincidence.
 
+**Two independent mechanisms, confirmed by response 149, each the other's defence.** RFC-015's stated property is *non-production* of `TextStream` while a modal is open: `subscription`'s `Modal` arm returns `modal_subscription()`, which has no path to constructing one at all (`subscription_mode_reflects_whether_a_modal_is_active`, PR-015-C). `update`'s `state.modal.is_none()` guard is a second, independent mechanism — *discard*, not non-production — added this slice. Neither substitutes for the other: mechanism 2 exists specifically in case mechanism 1 is ever wrong (a future subscription change, a message queued before a modal opened and delivered after), and mechanism 1 is what makes mechanism 2 unreachable in ordinary operation. Recorded explicitly so neither is later read as dead weight and removed — `terminal_demo_subscription()` was independently confirmed to sit outside the modal gate but produce only `Message::TerminalDemoTick` (a poll tick, never a `TextStream`), so it is not a third path in either direction.
+
 ### Real-PTY, real-input negative case
 
 `a_text_stream_targeting_a_different_id_does_not_write_to_the_pane`: a `TextStream` naming a fresh, unrelated `TerminalId`, delivered through the real `update`, never reaches the demo pane's PTY. Ablated: removed the `terminal_stream_targets_the_demo_pane` check from `update`'s guard — the test failed immediately (the character appeared despite the mismatched id). Reverted.
@@ -214,6 +216,14 @@ Captured with the owner's explicit approval (`AskUserQuestion`), per response 12
 - `02-tab-escapes-to-sidebar.png` — `xdotool key Tab` while the pane was focused and receiving real input: chrome focus border moves to the sidebar (`"> Sidebar"`), and the terminal content is unchanged from the previous screenshot — no stray tab character, no new prompt line.
 
 **What this proves**: real, individually-dispatched keystrokes reach a live PTY through the full production path, and Tab's escape hatch holds under a real terminal with real input flowing. **What this does not prove**: trusted-UI separation or spoofing resistance (RFC-018's job, unchanged); nor real project-terminal session lifecycle (unrelated to and unblocked by this evidence, still PR-017-E's job).
+
+### Review outcome (response 149)
+
+**Approved, no required items.** The reviewer independently confirmed modal exclusivity rests on two separate mechanisms (non-production via `SubscriptionMode::for_modal`/`modal_subscription`, and the `state.modal.is_none()` discard this slice added) and traced `terminal_demo_subscription()`'s placement outside the modal gate specifically to rule out a second ingress -- confirmed clean: it produces only `Message::TerminalDemoTick`, never a `TextStream`.
+
+**One clarification requested and added above**: the two-mechanism relationship is now stated explicitly in this file (see "Two independent mechanisms" above), so neither the subscription-level guarantee nor the `update`-level guard is later mistaken for redundant dead weight and removed.
+
+**Recorded for RFC-018, not an obligation on this slice**: since `terminal_demo` and `modal` are constructed independently at boot, launching with both `TEKSTIDE_TERMINAL_DEMO` and `TEKSTIDE_LAYER_DEMO` set is reachable for evidence purposes even though no ordinary user-accessible sequence reaches that state -- and it produces exactly what RFC-018 needs: a trusted dialog over *actively updating* terminal content, not a frozen one. The reviewer recorded this against RFC-018's boundary directly; nothing further for PR-017-E/H to do about it.
 
 ## PR-017-E — Immersion mode, split policy, session bar
 
