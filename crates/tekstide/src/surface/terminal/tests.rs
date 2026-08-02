@@ -171,9 +171,7 @@ impl Drop for ScratchPane {
 #[test]
 fn a_launched_pane_renders_real_pty_output_end_to_end() {
     let mut scratch = ScratchPane::launch();
-    scratch
-        .pane
-        .write_input_for_test(b"printf 'PTY_MARKER_017C\\n'\n");
+    scratch.pane.write_input(b"printf 'PTY_MARKER_017C\\n'\n");
 
     assert!(
         scratch.poll_until("PTY_MARKER_017C"),
@@ -210,7 +208,7 @@ fn a_launched_pane_blocks_a_disallowed_sequence_at_the_real_call_site() {
     let mut scratch = ScratchPane::launch();
     scratch
         .pane
-        .write_input_for_test(b"printf 'PRIMARY_SCREEN_017C\\n'\n");
+        .write_input(b"printf 'PRIMARY_SCREEN_017C\\n'\n");
     assert!(
         scratch.poll_until("PRIMARY_SCREEN_017C"),
         "the marker must render before the alt-screen attempt, so its \
@@ -220,9 +218,7 @@ fn a_launched_pane_blocks_a_disallowed_sequence_at_the_real_call_site() {
     // CSI ?1049h: DECSET, switch to the alternate screen buffer. If
     // forwarded, `renderable_content()` would now read a blank grid and
     // the marker above would vanish from the render.
-    scratch
-        .pane
-        .write_input_for_test(b"printf '\\033[?1049h'\n");
+    scratch.pane.write_input(b"printf '\\033[?1049h'\n");
     for _ in 0..20 {
         scratch.pane.poll();
         std::thread::sleep(Duration::from_millis(10));

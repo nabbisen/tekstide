@@ -36,14 +36,39 @@
 //! no path to constructing `SurfaceInput` or `TextStream` at all --
 //! "not produced," not "produced and discarded."
 //!
-//! # What this slice does not have a real caller for yet
+//! # The Tab decision (RFC-017 PR-017-D)
 //!
-//! `TextStream` and terminal-focused routing have no real terminal
-//! surface to receive input from (RFC-017 has not landed) --
-//! `terminal_focus` is always `None` from `shell.rs` today. The type and
-//! its routing rules are proven directly via synthetic
-//! `TerminalId`/`KeyPress` values in `input::tests`, the same "headless"
-//! shape as `i18n::Catalog` before RFC-015 gave it a caller.
+//! **Tab does not reach the terminal. It always cycles shell focus.**
+//! [`route_non_modal_input`] checks the focus-cycle keys (item 2 in its
+//! own precedence list) *before* `terminal_focus` (item 3) -- Tab is
+//! routed to [`RoutedInput::FocusNext`] before the function has even
+//! looked at whether a terminal is focused, so a terminal is never given
+//! the chance to consume it.
+//!
+//! This was a real, undecided question, not a default: RFC-017 named it
+//! explicitly ("shell completion makes Tab-to-terminal genuinely useful;
+//! an inescapable focus trap makes it dangerous"). Decided against
+//! Tab-to-terminal because the reverse is true today: no shell
+//! completion or other feature exists yet that Tab-to-terminal would
+//! serve, while an inescapable focus trap is a real, immediate risk the
+//! moment any terminal is focusable at all. The escape hatch this buys
+//! is structural, not conditional: Tab never becomes a `TextStream` in
+//! the first place, so there is no PTY behaviour for it to depend on --
+//! "must not depend on the terminal cooperating" is satisfied by the key
+//! never reaching one. Proven with a real, live terminal (not only the
+//! synthetic `TerminalId` this module's own tests use) in
+//! `shell::tests`, and ablated: swapping the two precedence checks makes
+//! that live-terminal test fail immediately.
+//!
+//! # `TextStream` now has a real caller
+//!
+//! RFC-017 PR-017-D wires `shell.rs`'s `TEKSTIDE_TERMINAL_DEMO` pane as
+//! `terminal_focus` when it is the focused zone's real content -- no
+//! longer the hardcoded `None` RFC-015 shipped with. Modal exclusivity
+//! and global-keybinding precedence, both proven headless in RFC-015,
+//! are re-proven in `shell::tests` against that same real, live
+//! terminal, per RFC-017's explicit requirement not to assume the
+//! headless proof transfers.
 
 mod terminal_surface;
 

@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - Acceptance / QA Checklist"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B (filter promotion) implemented 2026-08-01, reviewed; PR-017-C (terminal pane rendering) implemented 2026-08-02, reviewed and approved with no required items (response 148)"
+status: "Accepted 2026-08-01 — PR-017-B implemented 2026-08-01, reviewed; PR-017-C implemented 2026-08-02, reviewed and approved (response 148); PR-017-D (input) implemented 2026-08-03, pending review"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -38,10 +38,10 @@ created: "2026-08-01"
 
 ## Input Checklist (PR-017-D)
 
-- [ ] **Modal open ⇒ no PTY write, demonstrated with a live terminal**, not argued.
-- [ ] `TextStream` cannot address shell or modal state.
-- [ ] Global keybindings win over terminal focus.
-- [ ] Tab decision made, reasoning recorded, escape hatch tested — and the hatch does not depend on the terminal cooperating.
+- [x] **Modal open ⇒ no PTY write, demonstrated with a live terminal**, not argued. `modal_open_blocks_pty_write_and_closing_it_resumes_delivery` sends the same `TextStream` at a real, launched `TerminalPane`, once with `state.modal` set and once cleared, polling the real PTY both times — not a synthetic id, not an assertion about `update`'s return value. Ablated: removing the `state.modal.is_none()` guard makes the blocked half of this test fail immediately. **No GUI screenshot for this one**: the demo modal only ever opens once, at boot (`TEKSTIDE_LAYER_DEMO`, read once), with no runtime trigger to reopen it — there is no real user-accessible sequence that gets Terminal Mode active *and* the modal open at the same time to screenshot. The live-`TerminalPane` test above is the demonstration; see `qa-evidence.md`.
+- [x] `TextStream` cannot address shell or modal state. Unchanged from RFC-015 — `to_pty_bytes` converts the key it already carries, never reaches into `shell::State`.
+- [x] Global keybindings win over terminal focus. Unchanged routing precedence (`input::tests::a_global_keybinding_wins_over_a_focused_terminal`), now also proven with a real, live terminal id in `shell::tests` rather than only a synthetic one.
+- [x] Tab decision made, reasoning recorded, escape hatch tested — and the hatch does not depend on the terminal cooperating. **Decided: Tab never reaches the terminal**, recorded in `input`'s own module doc. Escape hatch is structural (Tab is intercepted in routing before `terminal_focus` is even consulted), tested against a real, live terminal (`tab_cycles_shell_focus_with_a_real_terminal_focused_and_writes_nothing`) and ablated: swapping the two precedence checks makes both this test and RFC-015's original headless one fail.
 
 ## Audit Checklist (PR-017-F)
 

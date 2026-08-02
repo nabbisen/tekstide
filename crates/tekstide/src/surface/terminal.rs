@@ -3,11 +3,13 @@
 //! PTY-backed pane rendering the emulator grid under RFC-015's surface
 //! contract.
 //!
-//! **No input yet** (PR-017-D's job) — this module never calls
-//! `LinuxTerminalRuntime::write_input` from any production code path.
-//! `#[cfg(test)]` code does, to produce output worth rendering in a
-//! test, the same way `shell::tests`'s fixtures construct state a real
-//! user action would otherwise produce.
+//! **Input, RFC-017 PR-017-D.** [`TerminalPane::write_input`] is the one
+//! production path that reaches `LinuxTerminalRuntime::write_input`;
+//! `shell.rs`'s `update` is its only caller, gated on `state.modal` being
+//! absent (re-proven live in `shell::tests`, not only headless as RFC-015
+//! left it) and on `input::TextStream::to_pty_bytes` -- this module never
+//! constructs a `TextStream` itself or reaches into `iced::keyboard::Key`
+//! directly, matching `TextStream`'s own privacy boundary.
 //!
 //! **P1 (single ingress), re-proven against production code, not just a
 //! test harness.** [`TerminalPane`] is the *only* place in this crate
@@ -163,9 +165,31 @@ impl TerminalPane {
         self.processor.advance(&mut filter, &bytes);
     }
 
-    #[cfg(test)]
-    pub(crate) fn write_input_for_test(&mut self, bytes: &[u8]) {
+    /// This pane's real, live `TerminalId` -- what a caller compares a
+    /// `TextStream`'s target against before calling [`Self::write_input`].
+    pub fn terminal_id(&self) -> &tekstide_core::domain::TerminalId {
+        &self.handle.terminal_id
+    }
+
+    /// Writes bytes to this pane's PTY. The caller (`shell::update`) is
+    /// responsible for the two things this method does not itself
+    /// check: that `bytes` came from `TextStream::to_pty_bytes` (never a
+    /// raw `iced::keyboard::Key`), and that no modal is currently open --
+    /// this method has no access to `shell::State` to verify either.
+    pub fn write_input(&mut self, bytes: &[u8]) {
         let _ = self.runtime.write_input(&self.handle, bytes);
+    }
+
+    /// Plain-text rendering, for `shell::tests`'s live-input assertions
+    /// (RFC-017 PR-017-D) -- `pub(crate)` rather than a bare
+    /// `#[cfg(test)]` fn, since it must be reachable from `shell`'s own
+    /// test module, a different module tree than this one's.
+    #[cfg(test)]
+    pub(crate) fn rendered_text(&self) -> String {
+        styled_rows(&self.term)
+            .into_iter()
+            .flat_map(|runs| runs.into_iter().map(|(text, _)| text))
+            .collect()
     }
 }
 

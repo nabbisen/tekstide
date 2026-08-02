@@ -244,10 +244,20 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // `input::tests`; there is nothing to consume here yet.
         }
         Message::Input(RoutedInput::Terminal(text_stream)) => {
-            // No PTY-writing path exists yet (RFC-017) -- only the
-            // liveness check this slice owns is exercised here. RFC-017
-            // will call the same function before actually writing.
-            let _ = terminal_stream_targets_a_live_terminal(&state.app_shell, &text_stream);
+            // Defense in depth, not the modal-exclusivity boundary
+            // itself: `non_modal_subscription` structurally cannot
+            // produce this message while a modal is open (see `input`'s
+            // module doc), so `state.modal.is_none()` here should always
+            // already be true. Checked anyway, at the one place bytes
+            // would actually reach a PTY, rather than trusting that
+            // upstream property alone -- ablated in `shell::tests`.
+            if state.modal.is_none()
+                && terminal_stream_targets_the_demo_pane(state.terminal_demo.as_ref(), &text_stream)
+                && let (Some(pane), Some(bytes)) =
+                    (state.terminal_demo.as_mut(), text_stream.to_pty_bytes())
+            {
+                pane.write_input(&bytes);
+            }
         }
         Message::Input(RoutedInput::FocusNext) => state.focus = state.focus.next(),
         Message::Input(RoutedInput::FocusPrevious) => state.focus = state.focus.previous(),
@@ -365,10 +375,19 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
 
 /// The check `pr-015-c-input-routing.md` requires before a `TextStream`
 /// may be delivered: "a stale or cross-project id is dropped, not
-/// best-effort delivered." No PTY-writing code exists yet for this to
-/// gate in practice (RFC-017); proven directly against `ApplicationShell`
-/// fixtures in `shell::tests` so the property is real the moment RFC-017
-/// calls it, not discovered wrong then.
+/// best-effort delivered." Still no production caller: RFC-017 PR-017-D
+/// wires real input to the `TEKSTIDE_TERMINAL_DEMO` pane, which is
+/// deliberately not registered as a `TerminalSession` on the real active
+/// project (PR-017-C's "no state duplicating `tekstide-core`" contract),
+/// so this check -- which asks the real project model -- correctly
+/// cannot recognize it; `terminal_stream_targets_the_demo_pane` is that
+/// pane's own gate. This function's real caller arrives with PR-017-E/F,
+/// once a terminal session is actually registered against a project.
+/// Same shape as `filter.rs`'s own pre-PR-017-C suppression: proven
+/// directly against `ApplicationShell` fixtures in `shell::tests` so the
+/// property is real the moment it gets a caller, not discovered wrong
+/// then.
+#[allow(dead_code)]
 pub(crate) fn terminal_stream_targets_a_live_terminal(
     app_shell: &ApplicationShell,
     stream: &TextStream,
@@ -378,6 +397,23 @@ pub(crate) fn terminal_stream_targets_a_live_terminal(
         .active_project()
         .and_then(|project| project.terminal_session(stream.target()))
         .is_some()
+}
+
+/// RFC-017 PR-017-D's actual delivery gate today: the demo-pane
+/// counterpart to [`terminal_stream_targets_a_live_terminal`] above.
+/// `state.terminal_demo` is deliberately **not** registered as a
+/// `TerminalSession` on the real active project -- PR-017-C's "no state
+/// duplicating `tekstide-core`" contract -- so the real, core-backed
+/// check above can never recognize it, and correctly returns `false`
+/// for it. Real project-terminal session registration is unrelated to
+/// and unblocked by this: it is PR-017-E's job. This checks the one
+/// thing that matters for the diagnostic pane that exists today: does
+/// the stream's target name its real, live `TerminalId`?
+pub(crate) fn terminal_stream_targets_the_demo_pane(
+    terminal_demo: Option<&crate::surface::terminal::TerminalPane>,
+    stream: &TextStream,
+) -> bool {
+    terminal_demo.is_some_and(|pane| pane.terminal_id() == stream.target())
 }
 
 pub fn view(state: &State) -> Element<'_, Message> {
@@ -428,7 +464,8 @@ pub fn subscription(state: &State) -> Subscription<Message> {
 
     let routing = match input::SubscriptionMode::for_modal(&state.modal) {
         input::SubscriptionMode::NonModal(proof) => {
-            non_modal_subscription(proof, state.focus).map(Message::Input)
+            non_modal_subscription(proof, state.focus, active_terminal_focus(state))
+                .map(Message::Input)
         }
         input::SubscriptionMode::Modal => modal_subscription(),
     };
@@ -493,21 +530,44 @@ fn measured_key_subscription(
     ])
 }
 
+/// RFC-017 PR-017-D: the demo pane is "focused" for input-routing
+/// purposes exactly when it is what the focused zone is currently
+/// showing -- `FocusZone::MainArea` *and* the active project is in
+/// `TerminalImmersion` mode, matching `main_area_view`'s own
+/// substitution condition. Outside that, `None`: a hidden or
+/// content-mode pane must not receive keystrokes just because it
+/// happens to exist.
+fn active_terminal_focus(state: &State) -> Option<tekstide_core::domain::TerminalId> {
+    if state.focus != FocusZone::MainArea {
+        return None;
+    }
+    let mode = state
+        .app_shell
+        .state()
+        .active_project()
+        .map(tekstide_core::project::ProjectSession::mode);
+    if mode != Some(ProjectMode::TerminalImmersion) {
+        return None;
+    }
+    state
+        .terminal_demo
+        .as_ref()
+        .map(|pane| pane.terminal_id().clone())
+}
+
 fn non_modal_subscription(
     proof: input::ModalAbsent,
     focus: FocusZone,
+    terminal_focus: Option<tekstide_core::domain::TerminalId>,
 ) -> Subscription<RoutedInput> {
-    // No terminal surface exists yet (RFC-017), so nothing can ever set
-    // this to `Some` today -- the parameter exists so `route_non_modal_input`
-    // does not need to change shape when RFC-017 lands, the same reason
-    // `LocalePreference`'s fields exist ahead of their real callers.
-    let terminal_focus: Option<tekstide_core::domain::TerminalId> = None;
     // `.filter_map`'s closure must be non-capturing (`iced` panics
     // otherwise: "cannot capture external variables"). `.with(...)`
     // threads `proof`/`focus`/`terminal_focus` in through the closure's
     // own parameter instead of a capture, which is why `ModalAbsent` and
     // `FocusZone` both derive `Hash` -- `.with` requires it to detect
     // whether the subscription's identity changed across rebuilds.
+    // `TerminalId` derives `Hash` too, so a real value here changes
+    // nothing about that requirement.
     keyboard::listen()
         .with((proof, focus, terminal_focus))
         .filter_map(|((proof, focus, terminal_focus), event)| {

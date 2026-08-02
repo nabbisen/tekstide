@@ -680,3 +680,282 @@ fn tail_lines_keeps_only_the_last_n_lines() {
     );
     assert_eq!(super::tail_lines("", 5), "");
 }
+
+// RFC-017 PR-017-D: input. A real, live `TerminalPane` (not a synthetic
+// `TerminalId`) is what turns "modal exclusivity holds" and "global
+// keybindings win" from a headless proof (`input::tests`, unchanged
+// from RFC-015) into a proof against an actual PTY -- the explicit
+// requirement review 148/RFC-017 both name: do not assume the headless
+// proof transfers.
+
+fn state_with_a_real_terminal_focused(label: &str) -> State {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir(label))
+        .expect("a freshly created directory is a valid project root");
+    app_shell.dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+    assert_eq!(
+        app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "test precondition: the active project must be in Terminal Mode"
+    );
+
+    let mut state = state_with(app_shell);
+    state.focus = FocusZone::MainArea;
+    let pane = crate::surface::terminal::TerminalPane::launch(
+        tekstide_core::project::ProjectId::new_uuid(),
+        "shell-test pane",
+        fresh_project_dir(&format!("{label}-pane")),
+        PathBuf::from("/bin/sh"),
+    )
+    .expect("launch a real shell for a live-terminal input test");
+    state.terminal_demo = Some(pane);
+    state
+}
+
+fn rendered_demo_pane_text(state: &State) -> String {
+    state
+        .terminal_demo
+        .as_ref()
+        .expect("test precondition: a demo pane must exist")
+        .rendered_text()
+}
+
+fn poll_demo_pane_until(state: &mut State, needle: &str) -> bool {
+    for _ in 0..200 {
+        if let Some(pane) = state.terminal_demo.as_mut() {
+            pane.poll();
+        }
+        if rendered_demo_pane_text(state).contains(needle) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    false
+}
+
+/// `active_terminal_focus` is `Some` only when both halves of its own
+/// stated condition hold (`FocusZone::MainArea` *and* `TerminalImmersion`
+/// mode) -- proven against all four combinations with one real pane,
+/// not assumed from reading the `&&`.
+#[test]
+fn active_terminal_focus_requires_both_main_area_and_terminal_mode() {
+    let mut state = state_with_a_real_terminal_focused("active-terminal-focus");
+    let real_id = state
+        .terminal_demo
+        .as_ref()
+        .expect("test precondition")
+        .terminal_id()
+        .clone();
+
+    assert_eq!(super::active_terminal_focus(&state), Some(real_id));
+
+    state.focus = FocusZone::Sidebar;
+    assert_eq!(
+        super::active_terminal_focus(&state),
+        None,
+        "Sidebar focused: the terminal is not the focused zone's content"
+    );
+
+    state.focus = FocusZone::MainArea;
+    state
+        .app_shell
+        .dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+    assert_eq!(
+        super::active_terminal_focus(&state),
+        None,
+        "back in Content Mode: MainArea is focused, but it is not showing the terminal"
+    );
+}
+
+/// `terminal_stream_targets_the_demo_pane`: the demo-pane-specific
+/// liveness gate, proven against all three cases a real pane and a
+/// mismatched/absent one can produce.
+#[test]
+fn terminal_stream_targets_the_demo_pane_matches_only_the_real_id() {
+    let state = state_with_a_real_terminal_focused("demo-pane-liveness");
+    let real_id = state
+        .terminal_demo
+        .as_ref()
+        .expect("test precondition")
+        .terminal_id()
+        .clone();
+
+    let matching =
+        crate::input::terminal_stream_for_test(real_id, iced::keyboard::Modifiers::empty());
+    assert!(super::terminal_stream_targets_the_demo_pane(
+        state.terminal_demo.as_ref(),
+        &matching
+    ));
+
+    let other_id = tekstide_core::domain::TerminalId::new_uuid();
+    let mismatched =
+        crate::input::terminal_stream_for_test(other_id, iced::keyboard::Modifiers::empty());
+    assert!(!super::terminal_stream_targets_the_demo_pane(
+        state.terminal_demo.as_ref(),
+        &mismatched
+    ));
+    assert!(
+        !super::terminal_stream_targets_the_demo_pane(None, &mismatched),
+        "no demo pane at all must never match"
+    );
+}
+
+/// The accept path, end to end: a `TextStream` addressed to the real,
+/// live pane's own id, delivered through the real `update`, actually
+/// reaches the PTY -- confirmed by polling the pane's own rendered
+/// output for the character sent, not by inspecting `update`'s return
+/// value.
+#[test]
+fn a_text_stream_targeting_the_real_pane_writes_to_it() {
+    let mut state = state_with_a_real_terminal_focused("live-input-accept");
+    let real_id = state
+        .terminal_demo
+        .as_ref()
+        .expect("test precondition")
+        .terminal_id()
+        .clone();
+    let stream =
+        crate::input::terminal_stream_for_test(real_id, iced::keyboard::Modifiers::empty());
+
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Terminal(stream)),
+    );
+
+    assert!(
+        poll_demo_pane_until(&mut state, "x"),
+        "the character carried by the TextStream must reach the real PTY and render"
+    );
+}
+
+/// The other half of `terminal_stream_targets_the_demo_pane`'s
+/// enforcement: a stream naming a *different* id, delivered through the
+/// real `update`, must never reach this pane's PTY -- "a stale or
+/// cross-project id is dropped, not best-effort delivered"
+/// (`pr-015-c-input-routing.md`) proven end to end, not only against
+/// the pure function in isolation.
+#[test]
+fn a_text_stream_targeting_a_different_id_does_not_write_to_the_pane() {
+    let mut state = state_with_a_real_terminal_focused("live-input-wrong-target");
+    let other_id = tekstide_core::domain::TerminalId::new_uuid();
+    let stream =
+        crate::input::terminal_stream_for_test(other_id, iced::keyboard::Modifiers::empty());
+
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Terminal(stream)),
+    );
+    for _ in 0..20 {
+        if let Some(pane) = state.terminal_demo.as_mut() {
+            pane.poll();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    assert!(
+        !rendered_demo_pane_text(&state).contains('x'),
+        "a TextStream naming a different terminal id must never write to this pane"
+    );
+}
+
+/// **Modal exclusivity, demonstrated against a real PTY, not argued.**
+/// The same `TextStream` that reaches the pane above must produce
+/// *zero* bytes while a modal is open, and must resume working the
+/// moment it closes -- both halves proven in one test so the "resumes
+/// afterward" half rules out "the pane was simply broken" as an
+/// alternative explanation for "nothing appeared."
+#[test]
+fn modal_open_blocks_pty_write_and_closing_it_resumes_delivery() {
+    let mut state = state_with_a_real_terminal_focused("live-modal-exclusivity");
+    let real_id = state
+        .terminal_demo
+        .as_ref()
+        .expect("test precondition")
+        .terminal_id()
+        .clone();
+    state.modal = Some(ModalContent::default());
+
+    let blocked_stream =
+        crate::input::terminal_stream_for_test(real_id.clone(), iced::keyboard::Modifiers::empty());
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Terminal(blocked_stream)),
+    );
+    for _ in 0..20 {
+        if let Some(pane) = state.terminal_demo.as_mut() {
+            pane.poll();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        !rendered_demo_pane_text(&state).contains('x'),
+        "a TextStream delivered while a modal is open must never reach the PTY"
+    );
+
+    state.modal = None;
+    let allowed_stream =
+        crate::input::terminal_stream_for_test(real_id, iced::keyboard::Modifiers::empty());
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Terminal(allowed_stream)),
+    );
+    assert!(
+        poll_demo_pane_until(&mut state, "x"),
+        "the same stream, sent after the modal closes, must reach the PTY -- proving the pane \
+         itself was never broken and the earlier silence was the modal check, not a fluke"
+    );
+}
+
+/// The Tab decision (recorded in `input`'s module doc), proven against
+/// a real live terminal rather than only the synthetic `TerminalId`
+/// `input::tests::tab_cycles_focus_even_with_a_terminal_focused` uses:
+/// Tab still cycles shell focus, and -- because it never becomes a
+/// `TextStream` in the first place -- writes nothing to the real pane.
+#[test]
+fn tab_cycles_shell_focus_with_a_real_terminal_focused_and_writes_nothing() {
+    let mut state = state_with_a_real_terminal_focused("live-tab-escape-hatch");
+    let real_id = state
+        .terminal_demo
+        .as_ref()
+        .expect("test precondition")
+        .terminal_id()
+        .clone();
+    let focus_before = state.focus;
+
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let tab_press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        modifiers: iced::keyboard::Modifiers::empty(),
+    };
+    let proof = crate::input::ModalAbsent::check(&state.modal)
+        .expect("test precondition: no modal is open");
+    let routed =
+        crate::input::route_non_modal_input(proof, &policy, state.focus, Some(&real_id), tab_press);
+    assert_eq!(
+        routed,
+        crate::input::RoutedInput::FocusNext,
+        "Tab must cycle focus even though a real, live terminal is focused"
+    );
+
+    let _ = super::update(&mut state, Message::Input(routed));
+    assert_ne!(
+        state.focus, focus_before,
+        "the real FocusNext message must actually move shell focus"
+    );
+
+    for _ in 0..20 {
+        if let Some(pane) = state.terminal_demo.as_mut() {
+            pane.poll();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        rendered_demo_pane_text(&state).trim().is_empty()
+            || !rendered_demo_pane_text(&state).contains('\t'),
+        "Tab must never reach the PTY as literal input"
+    );
+}

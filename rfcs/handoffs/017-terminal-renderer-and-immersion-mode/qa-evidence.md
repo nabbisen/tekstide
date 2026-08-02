@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B (filter promotion) implemented 2026-08-01, reviewed; PR-017-C (terminal pane rendering) implemented 2026-08-02, reviewed and approved with no required items (response 148)"
+status: "Accepted 2026-08-01 — PR-017-B implemented 2026-08-01, reviewed; PR-017-C implemented 2026-08-02, reviewed and approved (response 148); PR-017-D (input) implemented 2026-08-03, pending review"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -171,7 +171,49 @@ Captured with the owner's explicit approval (`AskUserQuestion`), per response 12
 
 **Named as the third instance of the same pattern this RFC**: a green ablation result that was wrong (PR-017-B's silent-decline gap, the classifier parity test, and this slice's OSC-0 ablation, which passed even with the filter bypassed because `set_title` has no grid effect to lose). Recorded here as a standing reminder for any future ablation in this RFC: a passing result after deliberately breaking something is not evidence until the failure mode it's supposed to catch has been confirmed observable through the same lens the test uses.
 
-Pending implementation.
+## PR-017-D — Input
+
+`TextStream` gets its first real production caller. `input::terminal_surface::TextStream::to_pty_bytes` converts an already-routed keystroke into the bytes a PTY receives (printable UTF-8, Enter → `\r`, Backspace → `0x7f`, Escape, Tab, Space, the four arrow keys as normal-mode `CSI` sequences, `Ctrl`+ASCII-letter control codes — disclosed as not a complete VT100/xterm encoder, not claimed as one). `crate::surface::terminal::TerminalPane` gains `terminal_id()` and a real (non-test-gated) `write_input`; `shell::update`'s `RoutedInput::Terminal` arm is the one production call site, gated on `state.modal.is_none()` and `terminal_stream_targets_the_demo_pane`.
+
+### `TextStream` targets the real, live demo pane
+
+`active_terminal_focus` (new, `shell.rs`) computes `non_modal_subscription`'s `terminal_focus` parameter for real — `Some(pane.terminal_id().clone())` exactly when `FocusZone::MainArea` is focused *and* the active project is in `TerminalImmersion` mode (matching `main_area_view`'s own substitution condition), `None` otherwise. No longer the hardcoded `None` RFC-015 shipped with.
+
+**The demo pane is deliberately not registered on the real `ApplicationShell` project model** (PR-017-C's "no state duplicating `tekstide-core`" contract holds), so the existing, real, core-backed `terminal_stream_targets_a_live_terminal` correctly cannot recognize it — confirmed by reading `ApplicationShell`: there is no public API today to attach a running `TerminalSession` to the active project (`AppState::active_project_mut` is private; `ProjectSession::add_terminal_session` has no caller outside `tekstide-core` itself). Rather than add that `tekstide-core` API to make the demo path "real" in core's model — scope creep into PR-017-E/F's actual job of real session registration — a sibling, demo-scoped check (`terminal_stream_targets_the_demo_pane`) gates delivery instead. `terminal_stream_targets_a_live_terminal` keeps its exact existing meaning, now `#[allow(dead_code)]`-suppressed with a comment naming PR-017-E/F as its real caller, the same shape `filter.rs`'s own pre-PR-017-C suppression used.
+
+### The Tab decision, recorded
+
+**Tab does not reach the terminal. It always cycles shell focus.** This was already `route_non_modal_input`'s precedence (Tab/Shift+Tab checked before `terminal_focus`, inherited unchanged from RFC-015/PR-015-C) — this slice's job was to decide whether that precedence is the final answer or a placeholder, and record why. Decided: no shell completion or other terminal-Tab feature exists yet to justify the risk, while an inescapable focus trap is a real, immediate risk the moment any terminal is focusable at all (which, as of this slice, it now genuinely is). The escape hatch is structural: Tab is intercepted in routing *before* `terminal_focus` is even consulted, so the terminal is never given the chance to consume it — "must not depend on the terminal cooperating" is satisfied by the key never reaching one. Recorded in `input`'s own module doc, not only here.
+
+**Proven with a real, live terminal**, not only the pre-existing headless proof (`input::tests::tab_cycles_focus_even_with_a_terminal_focused`, unchanged): `tab_cycles_shell_focus_with_a_real_terminal_focused_and_writes_nothing` routes a real Tab press with the demo pane's actual `TerminalId` as `terminal_focus`, dispatches the result through the real `update`, confirms `state.focus` moved, and polls the real pane confirming no tab byte reached it.
+
+**Ablated**: temporarily swapped the two precedence checks in `route_non_modal_input` (`terminal_focus` before Tab). Both the pre-existing headless test and the new live-terminal test failed immediately, each reporting `Terminal(TextStream {..})` where `FocusNext` was expected. Reverted.
+
+### Modal exclusivity, demonstrated with a real terminal
+
+`modal_open_blocks_pty_write_and_closing_it_resumes_delivery`: a real, launched `TerminalPane`, a `TextStream` addressed to its actual id, delivered through the real `update` — once with `state.modal = Some(ModalContent::default())`, once with it cleared. The blocked half polls the pane and confirms the character never renders; the accepted half (same stream, same pane, modal cleared) confirms it does, ruling out "the pane was simply broken" as an alternative explanation for the earlier silence.
+
+**Ablated**: temporarily removed the `state.modal.is_none()` guard from `update`'s `RoutedInput::Terminal` arm. The blocked half of the test failed immediately (the character appeared while the modal was still open). Reverted.
+
+**No GUI screenshot for the modal case, disclosed rather than manufactured.** The demo modal (`TEKSTIDE_LAYER_DEMO`) opens exactly once, at boot, with no runtime trigger to reopen it (RFC-015 PR-015-B's own design: no real dialog trigger exists until RFC-022). There is no real, user-accessible sequence that gets Terminal Mode active *and* the modal open at the same time — toggling to Terminal Mode requires `Ctrl+Alt+M`, a global keybinding, and `modal_subscription()` (active whenever the modal is shown) has no path to routing global keybindings at all. The live-`TerminalPane` test above is the demonstration this property gets; a screenshot was not force-fit around a launch-order coincidence.
+
+### Real-PTY, real-input negative case
+
+`a_text_stream_targeting_a_different_id_does_not_write_to_the_pane`: a `TextStream` naming a fresh, unrelated `TerminalId`, delivered through the real `update`, never reaches the demo pane's PTY. Ablated: removed the `terminal_stream_targets_the_demo_pane` check from `update`'s guard — the test failed immediately (the character appeared despite the mismatched id). Reverted.
+
+### Gates
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (492 `tekstide-core` — unchanged + 101 `tekstide` — up from 88, 13 net new — + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures), `git diff --check` — all passed.
+
+### Screenshot evidence, real keystrokes
+
+`rfcs/handoffs/017-terminal-renderer-and-immersion-mode/evidence/pr-017-d/`, captured with the owner's explicit approval, same convention as prior slices:
+
+- `00-terminal-mode-before-typing.png` — Terminal Mode, freshly toggled, before any keystroke.
+- `01-real-keystrokes-typed-and-executed.png` — `xdotool type 'echo hello-017d'` then `xdotool key Return`, both real, individually-dispatched keystrokes (not a pre-seeded `printf`, unlike every prior PR-017-C screenshot): the shell echoes the typed command and its own real output, both rendered through the same `TextStream` → `to_pty_bytes` → `write_input` → real PTY → `poll()` → `SecurityFilter` → grid path this slice built.
+- `02-tab-escapes-to-sidebar.png` — `xdotool key Tab` while the pane was focused and receiving real input: chrome focus border moves to the sidebar (`"> Sidebar"`), and the terminal content is unchanged from the previous screenshot — no stray tab character, no new prompt line.
+
+**What this proves**: real, individually-dispatched keystrokes reach a live PTY through the full production path, and Tab's escape hatch holds under a real terminal with real input flowing. **What this does not prove**: trusted-UI separation or spoofing resistance (RFC-018's job, unchanged); nor real project-terminal session lifecycle (unrelated to and unblocked by this evidence, still PR-017-E's job).
 
 ## PR-017-E — Immersion mode, split policy, session bar
 
