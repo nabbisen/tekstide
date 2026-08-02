@@ -34,6 +34,8 @@ Review gate:
 
 Scope: the emulator grid rendered as a surface under RFC-015's contract. No input yet.
 
+**P1 and P2 re-open here** (review 144). PR-017-B established them against a crate whose only `Term` construction is in a test harness — a true statement about a system with no production caller. This slice builds the first code that constructs an emulator for real, and "no second ingress exists" cannot be finally settled against code that did not yet exist. Re-enumerate and re-ablate both against production code; do not treat PR-017-B's enumeration as the final word.
+
 Review gate:
 
 - Surface contract holds: no state duplicating `tekstide-core`, cannot render trusted chrome, cannot reach modal state.
@@ -67,6 +69,8 @@ Review gate:
 ## PR-017-F — `plain_terminal_observation` audit producer
 
 Scope: wire the family that already exists in the frozen v1 schema and has no producer.
+
+**This slice makes a README claim false, and must fix it in the same change** (review 145). `README.md` §Local Data and Privacy currently states that the desktop application creates *only* the recent-projects list, and that running `tekstide` "does not create an audit database or retain any transcripts" — verified true at `0.4.1`. This is the first audit producer with a real GUI caller, so from here `tekstide` creates an audit database on the user's machine. Update the privacy section to say where it lives, what it holds, and how to purge it, citing RFC-013's policy. A privacy claim that silently expires is worse than one that was never made.
 
 Review gate:
 
