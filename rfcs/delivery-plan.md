@@ -57,7 +57,7 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | **Audit producers** — 7 of 12 families unwired | `REQ-SEC-014` | M9, M11, M12 |
 | **LSP** | `REQ-LSP-001`..`005` | Deferred beyond 1.0 by design |
 | **Cross-platform** — Linux only | `NFR-PORT-001`..`003` | M14 |
-| **Documentation** — `docs/` absent | Project rules | M14 |
+| **Documentation** — `docs/` absent | Project rules | **Split 2026-08-01 at the owner's direction ("as soon as possible").** Minimal user documentation → **M9, alongside RFC-017**. Full `docs/src` mdBook by persona stays with RFC-029 (M14). |
 | **CI** | — | M14 |
 | **Pre-rendered English in `tekstide-core`** — 5 sites the catalog cannot reach; `ProjectBoardRow::trust_label` renders today, from two independent sources (`WorkspaceTrust::label()` and `recent_project_row`'s hardcoded literal) | RFC-016 §Enforcement | **M9, alongside RFC-017** — scheduled 2026-08-01. Small (`ProjectBoardRow` exposes `WorkspaceTrust` and an equivalent for the recent-project path; the shell selects catalog keys). Not deferred to RFC-019/020: the string renders **today**, and M10 is two milestones away. No RFC needed — the same treatment as the RFC-004 redaction gap. |
 | **Environment secret redaction** — RFC-004 states the policy; no pattern set exists in code | RFC-004 | M12 (with configuration) |
@@ -122,7 +122,15 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 - **026 Watcher and Multi-Document** — debounced watching, batching under churn, multi-document model replacing the RFC-006 single-document limitation, overwrite confirmation.
 - **027 Crash Recovery** — unsaved buffer persistence and labelled recovery on restart.
 - **028 Cross-Platform** — PTY, watcher, process groups, config paths, clipboard on Windows and macOS, with per-platform evidence.
-- **029 Documentation, CI, Release Automation** — `docs/src` mdBook by persona, CI gates and build matrix, release automation.
+- **029 Documentation, CI, Release Automation** — `docs/src` mdBook by persona, CI gates and build matrix, release automation. **Minimal user documentation was pulled forward to M9** (owner, 2026-08-01); RFC-029 keeps the full mdBook.
+
+**Minimal user documentation — M9 scope, and why it is small.** `0.4.1` is installable from crates.io and starts a GUI, so there are now users who are not contributors. README's Quick Start still says `cargo run -p tekstide`, which is a *contributor* instruction — someone who ran `cargo install tekstide` has no correct command anywhere. Five items, none of them design work:
+
+1. **Fix Quick Start for installed users** (`cargo install tekstide`, then `tekstide`), keeping the from-checkout instructions clearly marked as such.
+2. **Keyboard reference.** `Ctrl+Alt+P` (Project Board), `Ctrl+Alt+M` (mode switch), `Tab`/`Shift+Tab` (focus cycle), `Esc`/`Enter` in modals. These exist and are documented nowhere a user would look.
+3. **What Tekstide does and does not do today** — largely assembling what README's Current Status and the changelog already say honestly.
+4. **Where local state lives** (recent projects, audit store) and how to purge it. A privacy-relevant question a user can currently only answer by reading source.
+5. **A pointer to known limitations**, so the honest disclosures are reachable from the README rather than only from RFC closeouts.
 
 ## Scheduling Recommendation
 
