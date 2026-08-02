@@ -341,6 +341,8 @@ A future retention RFC may add automatic age/size policy. RFC-013 must not intro
 
 ## Schema Versioning and Migration
 
+**"v1" and "v2" in this document mean the *audit database schema* version (`PRAGMA user_version`), never the application's release version.** They are independent: Tekstide `0.4.1` ships audit schema v2. The schema was v1 from `0.1.0` through `0.3.0` and became v2 under Amendment 1, mid-`0.4.x`. A reader seeing "v1 event-family matrix" while the app is at `0.x` is looking at two different numbering systems — clarified 2026-08-01 after the ambiguity caused real confusion.
+
 The database uses both an application id and `PRAGMA user_version` (or an equivalently explicit metadata table) to distinguish Tekstide audit data and schema version.
 
 Migration rules:
