@@ -42,6 +42,7 @@ Review gate:
 - Grid renders unescaped (the RFC-016 exception); **any chrome around it goes through `text_safety`** — session titles, pane headers, tooltips.
 - Bounded scrollback, with the bound stated and tested under sustained output.
 - Screenshot of a real PTY session, with what it proves and does not stated explicitly.
+- **Rendering tests compare full grid-plus-cursor state against a pristine baseline**, not marker presence or absence on one line. PR-017-B set this standard for its own corpus, above what its gate asked for; it carries here because a rendering test that checks only what it expects to see is the failure class this project has hit six times — a test that passes for the wrong reason.
 
 ## PR-017-D — Input
 
