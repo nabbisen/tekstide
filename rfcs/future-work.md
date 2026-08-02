@@ -53,6 +53,8 @@ Status: substrate decided, application shell, and mode switching implemented by 
 - Replace the sidebar/main-area scaffolding and Project Board placeholder content with real file tree and editor surfaces (later GUI milestones, M9/M10).
 - Add dialog and confirmation flows (trust, safe-close, destructive, configuration change) — M11.
 - Validate responsive layout and visual polish beyond the Project Board's current row-based rendering.
+- **Audit-schema migration guide.** Owner decision 2026-08-01: breaking audit-schema changes are accepted during `0.x`, *and* a migration guide becomes required in the near future. Belongs with RFC-029 (documentation, M14) unless the end condition above arrives sooner — if breaking changes stop being acceptable before M14, the guide is needed at that point, not at M14. See RFC-013 §Schema Versioning and Migration.
+
 - Accessibility: visible focus indicators now render at the shell-chrome level (`0.4.1`, three independent channels — border colour, border width, textual marker). Screen-reader support remains out of scope for the life of the `iced` substrate decision (RFC-014 R2, owner-accepted).
 
   **Recorded as a standing theme with an explicit trigger, so it is revisited rather than forgotten.** It is not "hard" — `iced` 0.14 has *no* accessibility bridge at all (grepped for `accesskit`/`a11y`: zero matches in `iced`/`iced_winit`), so no amount of effort inside Tekstide produces it. Two things would change that, and either should reopen the question:

@@ -345,7 +345,14 @@ A future retention RFC may add automatic age/size policy. RFC-013 must not intro
 
 The database uses both an application id and `PRAGMA user_version` (or an equivalently explicit metadata table) to distinguish Tekstide audit data and schema version.
 
-Migration rules:
+**Breaking audit-schema changes are accepted during `0.x`** — owner decision, 2026-08-01. A migration that fails against an existing store, or a schema change that abandons prior data, is not a release blocker at this stage. This is why RFC-013 Amendment 1's v1 → v2 migration shipped in `0.4.0` without field verification and that was acceptable rather than an oversight.
+
+Two things follow, and both are obligations rather than caveats:
+
+- **A migration guide becomes required in the near future** (owner, same decision). It is recorded in `../future-work.md` and belongs with RFC-029's documentation work.
+- **The end condition is not yet set.** "During `0.x`" is the owner's stated scope; exactly when breaking changes stop being acceptable — at `1.0.0`, or earlier once real users hold data — is an open decision, not an inference this document should make. Whoever asks the question next should ask the owner, not read a default out of semver.
+
+Migration rules (these still apply — the policy above is about the *consequence* of a failed migration, not a licence to skip the rules):
 
 - schema creation and every migration run in a transaction;
 - migrations are forward-only and sequential;
