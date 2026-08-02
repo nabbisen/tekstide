@@ -42,6 +42,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 015 | [Application Shell and Rendered Surface Model](./handoffs/015-application-shell-and-rendered-surface-model/README.md) |
 | 016 | [Internationalization and Localization](./handoffs/016-internationalization-and-localization/README.md) |
 | 017 | [Terminal Renderer and Immersion Mode](./handoffs/017-terminal-renderer-and-immersion-mode/README.md) |
+| — | [Minimal user documentation](./handoffs/minimal-user-documentation.md) — no RFC; pulled forward from RFC-029 to M9 |
 | 021 | [Command Approval Model and Adapter Capability](./handoffs/021-command-approval-model-and-adapter-capability/README.md) |
 | 023 | [Configuration System](./handoffs/023-configuration-system/README.md) |
 

@@ -124,7 +124,7 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 - **028 Cross-Platform** — PTY, watcher, process groups, config paths, clipboard on Windows and macOS, with per-platform evidence.
 - **029 Documentation, CI, Release Automation** — `docs/src` mdBook by persona, CI gates and build matrix, release automation. **Minimal user documentation was pulled forward to M9** (owner, 2026-08-01); RFC-029 keeps the full mdBook.
 
-**Minimal user documentation — M9 scope, and why it is small.** `0.4.1` is installable from crates.io and starts a GUI, so there are now users who are not contributors. README's Quick Start still says `cargo run -p tekstide`, which is a *contributor* instruction — someone who ran `cargo install tekstide` has no correct command anywhere. Five items, none of them design work:
+**Minimal user documentation — M9 scope, and why it is small.** Handoff: [`handoffs/minimal-user-documentation.md`](./handoffs/minimal-user-documentation.md). `0.4.1` is installable from crates.io and starts a GUI, so there are now users who are not contributors. README's Quick Start still says `cargo run -p tekstide`, which is a *contributor* instruction — someone who ran `cargo install tekstide` has no correct command anywhere. Five items, none of them design work:
 
 1. **Fix Quick Start for installed users** (`cargo install tekstide`, then `tekstide`), keeping the from-checkout instructions clearly marked as such.
 2. **Keyboard reference.** `Ctrl+Alt+P` (Project Board), `Ctrl+Alt+M` (mode switch), `Tab`/`Shift+Tab` (focus cycle), `Esc`/`Enter` in modals. These exist and are documented nowhere a user would look.
