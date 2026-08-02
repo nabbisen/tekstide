@@ -59,6 +59,11 @@ Review gate:
 
 Scope: at most two visible panes; split from real font metrics and DPI; session bar with non-colour-reliant state; hidden-session handling.
 
+**This is the slice that gives the terminal pane chrome, and two obligations land with it** (review 148):
+
+1. **The `terminal.rs` colour-scan exemption must narrow or move.** PR-017-C exempted the file because its single `Color::from_rgb` builds a grid cell's *PTY-determined* colour — per-cell data no theme defines. That justification is about the call, not the file, and `is_scan_exempt` matches on file name. A session bar or pane focus border is chrome, wants theme colours, and would be silently permitted to hardcode them. Narrow the exemption, move the grid rendering, or add a companion check — but do not leave a file-level exemption justified by a claim that has stopped being true.
+2. **The RFC-016 grid-not-chrome boundary becomes live for the first time.** Nothing PTY-derived currently reaches chrome because the pane has no chrome — a true statement about an absence, not a property being enforced. A session title derived from OSC 0 is untrusted text in trusted chrome and goes through `tekstide_core::text_safety`. This is the first slice where that boundary can actually be violated.
+
 Review gate:
 
 - Uses `TerminalPanePolicy`/`TerminalLayoutClass`/`visible_terminal_limit` from `tekstide-core::navigation` — **no parallel layout model**.
