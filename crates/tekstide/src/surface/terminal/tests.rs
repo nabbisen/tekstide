@@ -31,7 +31,7 @@ fn feed(term: &mut Term<VoidListener>, bytes: &[u8]) {
 /// not just the row a narrower test happened to check -- shows up as a
 /// diff.
 fn snapshot(term: &Term<VoidListener>) -> String {
-    let rows = super::styled_rows(term);
+    let rows = super::grid_colors::styled_rows(term);
     let cursor = term.renderable_content().cursor.point;
     let mut out = String::new();
     for (index, runs) in rows.iter().enumerate() {
@@ -133,7 +133,7 @@ impl ScratchPane {
         ));
         std::fs::create_dir_all(&root).expect("create scratch project root");
         let project = test_project(&root);
-        let pane = TerminalPane::launch(
+        let (pane, _session) = TerminalPane::launch(
             project.id().clone(),
             "test pane",
             root.clone(),
@@ -144,7 +144,7 @@ impl ScratchPane {
     }
 
     fn rendered_text(&self) -> String {
-        super::styled_rows(&self.pane.term)
+        super::grid_colors::styled_rows(&self.pane.term)
             .into_iter()
             .flat_map(|runs| runs.into_iter().map(|(text, _)| text))
             .collect()

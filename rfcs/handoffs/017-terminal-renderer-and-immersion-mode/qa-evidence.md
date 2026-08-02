@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/PR-017-C reviewed and approved (responses 144-148); PR-017-D (input) implemented 2026-08-03, reviewed and approved with no required items (response 149)"
+status: "Accepted 2026-08-01 — PR-017-B/C/D reviewed and approved (responses 144-149); PR-017-E (immersion mode, split policy, session bar) implemented 2026-08-03, pending review"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -227,7 +227,69 @@ Captured with the owner's explicit approval (`AskUserQuestion`), per response 12
 
 ## PR-017-E — Immersion mode, split policy, session bar
 
-Pending implementation.
+Gives the terminal pane real chrome: `TerminalPanePolicy`/`VisibleSlot` wired for real (not a parallel model), a split decided from real font metrics rather than a fraction, a session bar naming state without colour, and the hidden-session grid-state decision.
+
+### Module restructuring, and the two carried obligations (`83f8c1a`)
+
+`crates/tekstide/src/surface/terminal.rs` split into:
+
+- `grid_colors.rs` — `styled_rows`/`resolve_color`/`named_color_from_index`/`view` (the grid-only rendering: the *only* legitimate `Color::from_rgb` call in this crate).
+- `font_metrics.rs` — ported from the RFC-014 spike's own module, parameterized on `font_size` (not hardcoded) so the measurement matches what the pane actually renders at.
+- `layout.rs` — `layout_class_for`, the split decision.
+- `session_bar.rs` — the pane's first chrome, `pub`, theme-sourced colours.
+
+**Obligation 1, discharged**: the colour-scan exemption (`shell::tests::is_scan_exempt`) narrowed from `terminal.rs` to `grid_colors.rs` exactly. `session_bar.rs` is deliberately **not** exempt — every colour there comes from `crate::theme::Theme`, proven by the unchanged `no_raw_color_construction_anywhere_in_the_crate` scan passing against it.
+
+**Obligation 2, discharged**: the RFC-016 grid-not-chrome boundary is now live. `session_bar.rs` renders real chrome (slot + status labels) derived from `tekstide-core`'s own `TerminalSession` data, not from PTY output — there is still no session-title-from-OSC-0 case in this slice (no title is derived from terminal output anywhere), so the boundary has nothing to violate yet, but the chrome/grid split the boundary depends on now structurally exists (two different files, two different exemption statuses) rather than being one file where the distinction was only a comment.
+
+### `tekstide-core`: the missing lifecycle glue
+
+`AppState::attach_terminal_session`/`assign_terminal_visible_slot` added (`crates/tekstide-core/src/app.rs`), delegating to `ProjectSession::add_terminal_session`/`assign_terminal_visible_slot` — both already existed with **no caller outside `tekstide-core`** (confirmed by inspection while implementing PR-017-D, disclosed there as this slice's obligation, not added speculatively then). `TerminalPane::launch` now returns `(Self, TerminalSession)` instead of discarding the session, so a caller can register it. 4 new `tekstide-core` tests (`app::tests`): registration success, fails-closed with no active project (both `attach_terminal_session` and `assign_terminal_visible_slot`), and slot-uniqueness enforcement (assigning `Primary` to a second terminal bumps the first to `Hidden`, proving `ProjectSession`'s own enforcement rather than assuming it).
+
+**This closes PR-017-D's own disclosed gap**: `terminal_stream_targets_a_live_terminal` (`shell.rs`) was `#[allow(dead_code)]` because the demo pane wasn't registered on the real project. It is registered now (`launch_terminal_demo_panes`), the suppression is removed, and a new test (`terminal_stream_targets_a_live_terminal_recognizes_the_registered_demo_session`) proves the previously-always-`false` check now recognizes a real session. `terminal_stream_targets_the_demo_pane` (PR-017-D's demo-only counterpart) is deleted — its whole reason for existing was that the real check couldn't see the demo pane, which is no longer true.
+
+### `TerminalPanePolicy`/`VisibleSlot` — real, not a parallel model
+
+The demo launches three real sessions (`launch_terminal_demo_panes`): `Primary`, `Secondary` (matching `visible_terminal_limit`'s default of 2 and `TerminalPanePolicy::max_visible_panes`), and one deliberately `Hidden` from the start. `active_project_terminal_sessions` (`shell.rs`) reads them from the real active project fresh each call — no shell-local slot bookkeeping. `terminal_workspace_view` renders `visible_terminal_sessions()`'s output only (never more than 2 by construction, since only `Primary`/`Secondary` are non-`Hidden`), sorted `Primary` before `Secondary`.
+
+### The split decision: real font metrics, not a fraction
+
+`layout_class_for(available_width_px, font_size)` measures the real monospace glyph advance at the pane's actual render size (`iced::advanced::graphics::text::Paragraph`, the same primitive `iced`'s own `Text` widget uses) and computes the real column count each pane would get if split in two. `Wide` only if that is at least [`COLS`] (80) — the pane's own fixed grid width, since this slice does not reflow a live `Term` to an arbitrary width (a materially larger feature, disclosed as out of scope in `layout.rs`'s module doc). Below that, `Narrow`: one pane rendered full-width rather than two clipped ones.
+
+**Real width comes from `iced::widget::responsive`** (`terminal_workspace_view`), not a window-size field mirrored in `State` — the measured `Size` `responsive`'s closure receives at layout time is asked fresh on every rebuild.
+
+**7 unit tests** (`font_metrics::tests`, `layout::tests`): glyph advance is positive and plausible; a larger font size measures a wider advance (proves the parameter is actually used, not a hardcoded stand-in); `columns_for_width` floors and never underflows; a generously wide window classifies `Wide`; a window fitting only one pane's real columns classifies `Narrow`; the boundary is the real column count, not an arbitrary pixel threshold (exactly enough per-pane width classifies `Wide`, one glyph-width less classifies `Narrow`); `layout_class_for` (the font-size-driven public entry point) measures from a real theme font size, not just the glyph-advance-parameterized internal helper.
+
+### The session bar: `NFR-UX-002` by construction
+
+`session_bar::view` renders one entry per registered session — slot (`Primary`/`Secondary`/`Hidden`) and status (`Running`/etc.), both as distinct text labels. Satisfied by text alone: there is no second channel to add on top of information already stated in words. `session_bar::tests::every_slot_and_status_has_a_distinct_textual_label` proves no two slots or statuses share a label (a real distinctness check, not just "labels exist").
+
+### The hidden-session grid-state decision, demonstrated
+
+**Decided: retained in memory, always polled — not torn down and rebuilt from scrollback.** Reasoning recorded in `surface/terminal.rs`'s module doc, against the bounded-scrollback decision as required: a hidden pane's `Term` costs exactly the same bounded amount (`SCROLLBACK_LINES = 2_000`) a visible one does — visibility does not change the bound — and the number of sessions a project can hold at all is itself bounded (`ProjectResourceLimits::terminal_session_limit`). Tearing a hidden session down would lose state and change what "hidden" means to a user checking on it later; retaining it costs a bound already paid for, not a new, unbounded one.
+
+**Demonstrated, not only argued** (`shell::tests`):
+
+- `active_project_terminal_sessions_lists_hidden_sessions_too`: the hidden session is not silently dropped from the list the session bar renders from.
+- `a_hidden_pane_keeps_polling_and_retains_its_content_across_a_slot_change`: writes a real marker to the hidden pane's PTY, polls via the real `Message::TerminalDemoTick` → `update` path (not a direct `pane.poll()` call — the actual production tick handler), confirms the marker renders despite never being displayed, then reassigns that session to `Secondary` (bumping whatever held it back to `Hidden`, per `ProjectSession`'s own enforcement) and confirms the marker is *still* there — proving retention survives a slot change, not just the hidden period itself.
+- **Ablated**: `ablation_polling_only_visible_panes_would_miss_the_hidden_ones_output` simulates the alternative design (poll only visible panes) directly and confirms the hidden pane's marker is absent — the failure mode the real, poll-everything `TerminalDemoTick` handler exists to avoid.
+
+### Input targeting among multiple panes: a scoped decision
+
+`active_terminal_focus` targets whichever session holds `VisibleSlot::Primary` — the only defensible choice with no per-pane click-to-focus or cycle keybinding built yet (not asked for by this slice's review gate). Recorded in `active_terminal_focus`'s own doc as a deliberately narrower scope than "solve pane-to-pane input focus," not a silent limitation.
+
+### Gates
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (496 `tekstide-core` — up from 492, 4 net new — + 112 `tekstide` — up from 101, 11 net new — + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures), `git diff --check` — all passed. One `tekstide-core` test (`approval::tests::channel::bind_recovers_from_a_stale_socket_file`, unrelated to this slice — RFC-021 approval-channel socket binding) failed once under full-workspace parallel execution and passed both in isolation and on a full re-run; not touched by this slice's changes, disclosed rather than silently re-run away.
+
+### Screenshot evidence, both layouts
+
+`rfcs/handoffs/017-terminal-renderer-and-immersion-mode/evidence/pr-017-e/`, captured with the owner's explicit approval:
+
+- `00-narrow-single-pane-with-session-bar.png` — default window width (1042px), Terminal Mode toggled: the session bar shows all three registered sessions ("Terminal 1 (Primary) — Running", "Terminal 2 (Secondary) — Running", "Terminal 3 (Hidden) — Running"), and only the `Primary` pane's grid renders (`Narrow`, correctly refusing a two-pane split at this width).
+- `01-wide-split-two-panes.png` — same window, column maximized (`niri msg action maximize-column`, 2101px), same three-entry session bar: **two independent, real shell prompts render side by side** (`Primary` left, `Secondary` right) -- the real, font-metrics-driven `Wide` classification triggered by a genuine width change, not simulated.
+
+**What this proves**: the split is a real function of measured width and font metrics, not a fixed layout; the session bar reflects real, registered session state including a session that is never rendered. **What this does not prove**: trusted-UI separation or spoofing resistance (RFC-018's job, unchanged); real per-project terminal *creation* UX (no keybinding/command exists to launch a terminal — the three sessions here are the demo's own construction, matching the established `TEKSTIDE_TERMINAL_DEMO` convention).
 
 ## PR-017-F — `plain_terminal_observation` audit producer
 

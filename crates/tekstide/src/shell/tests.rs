@@ -505,20 +505,31 @@ fn is_scan_exempt(path: &Path) -> bool {
         // real rendering code -- exempt for the same reason `tests.rs`
         // is: it talks about the shape, it does not render it.
         //
-        // `terminal.rs` (RFC-017 PR-017-C, flagged for review rather
-        // than assumed correct): the colour this scan otherwise forbids
-        // is the terminal grid's *own*, PTY-determined ANSI colour --
-        // RFC-016's grid exception ("the terminal grid itself renders
-        // untrusted bytes unescaped... the ONLY place this exception
-        // applies"). That colour cannot come from `state.theme`: it is
-        // per-cell data chosen by whatever program is writing to the
-        // PTY, not a chrome role this crate's theme defines. This is
-        // not the same carve-out as `theme.rs` (which defines the raw
-        // palette chrome draws from) -- it is the other legitimate case
-        // this scan's own module doc anticipates: a new file that
-        // genuinely needs a literal, raised here rather than silently
-        // exempted.
-        Some("theme.rs") | Some("tests.rs") | Some("enforcement.rs") | Some("terminal.rs")
+        // `grid_colors.rs` (RFC-017 PR-017-C's exemption, narrowed here
+        // in PR-017-E per review 148's expiry): the colour this scan
+        // otherwise forbids is the terminal grid's *own*, PTY-determined
+        // ANSI colour -- RFC-016's grid exception ("the terminal grid
+        // itself renders untrusted bytes unescaped... the ONLY place
+        // this exception applies"). That colour cannot come from
+        // `state.theme`: it is per-cell data chosen by whatever program
+        // is writing to the PTY, not a chrome role this crate's theme
+        // defines. This is not the same carve-out as `theme.rs` (which
+        // defines the raw palette chrome draws from) -- it is the other
+        // legitimate case this scan's own module doc anticipates: a new
+        // file that genuinely needs a literal, raised here rather than
+        // silently exempted.
+        //
+        // **`terminal.rs` and `terminal/session_bar.rs` are deliberately
+        // NOT exempt.** PR-017-C's exemption was file-level, covering a
+        // file whose only colour call was the grid's; PR-017-E gives
+        // `terminal.rs` real chrome (`session_bar`), so the file-level
+        // exemption was narrowed to exactly the file whose claim is
+        // still true -- the grid-rendering code, moved to
+        // `grid_colors.rs` for exactly this reason. `session_bar.rs`
+        // sources every colour from `crate::theme::Theme`, same as
+        // `shell::zone_style`, and must keep failing this scan if it
+        // ever stops.
+        Some("theme.rs") | Some("tests.rs") | Some("enforcement.rs") | Some("grid_colors.rs")
     )
 }
 
@@ -687,6 +698,13 @@ fn tail_lines_keeps_only_the_last_n_lines() {
 // from RFC-015) into a proof against an actual PTY -- the explicit
 // requirement review 148/RFC-017 both name: do not assume the headless
 // proof transfers.
+//
+// RFC-017 PR-017-E: the pane launched below is now registered as a real
+// `TerminalSession` on the active project (`Primary` slot) -- the
+// change response 149 anticipated ("registering for real is what
+// PR-017-E's job means"). `terminal_stream_targets_a_live_terminal`
+// (the real, core-backed check) is what these fixtures exercise now,
+// not the demo-only counterpart PR-017-D added and this slice removes.
 
 fn state_with_a_real_terminal_focused(label: &str) -> State {
     let mut app_shell = ApplicationShell::new();
@@ -702,31 +720,46 @@ fn state_with_a_real_terminal_focused(label: &str) -> State {
         Some(tekstide_core::project::ProjectMode::TerminalImmersion),
         "test precondition: the active project must be in Terminal Mode"
     );
+    let project_id = app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .expect("test precondition: a project was just added");
 
-    let mut state = state_with(app_shell);
-    state.focus = FocusZone::MainArea;
-    let pane = crate::surface::terminal::TerminalPane::launch(
-        tekstide_core::project::ProjectId::new_uuid(),
+    let (pane, session) = crate::surface::terminal::TerminalPane::launch(
+        project_id,
         "shell-test pane",
         fresh_project_dir(&format!("{label}-pane")),
         PathBuf::from("/bin/sh"),
     )
     .expect("launch a real shell for a live-terminal input test");
-    state.terminal_demo = Some(pane);
+    let terminal_id = session.id.clone();
+    app_shell
+        .state_mut()
+        .attach_terminal_session(session)
+        .expect("registering a session on its own project must succeed");
+    app_shell
+        .state_mut()
+        .assign_terminal_visible_slot(&terminal_id, tekstide_core::domain::VisibleSlot::Primary)
+        .expect("assigning Primary on a just-registered session must succeed");
+
+    let mut state = state_with(app_shell);
+    state.focus = FocusZone::MainArea;
+    state.terminal_demo = vec![pane];
     state
 }
 
 fn rendered_demo_pane_text(state: &State) -> String {
     state
         .terminal_demo
-        .as_ref()
+        .first()
         .expect("test precondition: a demo pane must exist")
         .rendered_text()
 }
 
 fn poll_demo_pane_until(state: &mut State, needle: &str) -> bool {
     for _ in 0..200 {
-        if let Some(pane) = state.terminal_demo.as_mut() {
+        for pane in &mut state.terminal_demo {
             pane.poll();
         }
         if rendered_demo_pane_text(state).contains(needle) {
@@ -746,7 +779,7 @@ fn active_terminal_focus_requires_both_main_area_and_terminal_mode() {
     let mut state = state_with_a_real_terminal_focused("active-terminal-focus");
     let real_id = state
         .terminal_demo
-        .as_ref()
+        .first()
         .expect("test precondition")
         .terminal_id()
         .clone();
@@ -771,37 +804,35 @@ fn active_terminal_focus_requires_both_main_area_and_terminal_mode() {
     );
 }
 
-/// `terminal_stream_targets_the_demo_pane`: the demo-pane-specific
-/// liveness gate, proven against all three cases a real pane and a
-/// mismatched/absent one can produce.
+/// RFC-017 PR-017-E: `terminal_stream_targets_a_live_terminal` (the
+/// real, core-backed check `#[allow(dead_code)]` in PR-017-D) now has a
+/// real, positive case to recognize -- the demo pane's session is a
+/// genuinely registered `TerminalSession` on the active project. This
+/// is the behaviour change response 149 named as this slice's job.
 #[test]
-fn terminal_stream_targets_the_demo_pane_matches_only_the_real_id() {
-    let state = state_with_a_real_terminal_focused("demo-pane-liveness");
+fn terminal_stream_targets_a_live_terminal_recognizes_the_registered_demo_session() {
+    let state = state_with_a_real_terminal_focused("demo-session-now-registered");
     let real_id = state
         .terminal_demo
-        .as_ref()
+        .first()
         .expect("test precondition")
         .terminal_id()
         .clone();
 
     let matching =
         crate::input::terminal_stream_for_test(real_id, iced::keyboard::Modifiers::empty());
-    assert!(super::terminal_stream_targets_the_demo_pane(
-        state.terminal_demo.as_ref(),
+    assert!(super::terminal_stream_targets_a_live_terminal(
+        &state.app_shell,
         &matching
     ));
 
     let other_id = tekstide_core::domain::TerminalId::new_uuid();
     let mismatched =
         crate::input::terminal_stream_for_test(other_id, iced::keyboard::Modifiers::empty());
-    assert!(!super::terminal_stream_targets_the_demo_pane(
-        state.terminal_demo.as_ref(),
+    assert!(!super::terminal_stream_targets_a_live_terminal(
+        &state.app_shell,
         &mismatched
     ));
-    assert!(
-        !super::terminal_stream_targets_the_demo_pane(None, &mismatched),
-        "no demo pane at all must never match"
-    );
 }
 
 /// The accept path, end to end: a `TextStream` addressed to the real,
@@ -814,7 +845,7 @@ fn a_text_stream_targeting_the_real_pane_writes_to_it() {
     let mut state = state_with_a_real_terminal_focused("live-input-accept");
     let real_id = state
         .terminal_demo
-        .as_ref()
+        .first()
         .expect("test precondition")
         .terminal_id()
         .clone();
@@ -832,12 +863,11 @@ fn a_text_stream_targeting_the_real_pane_writes_to_it() {
     );
 }
 
-/// The other half of `terminal_stream_targets_the_demo_pane`'s
-/// enforcement: a stream naming a *different* id, delivered through the
-/// real `update`, must never reach this pane's PTY -- "a stale or
-/// cross-project id is dropped, not best-effort delivered"
-/// (`pr-015-c-input-routing.md`) proven end to end, not only against
-/// the pure function in isolation.
+/// The other half of the liveness check's enforcement: a stream naming
+/// a *different* id, delivered through the real `update`, must never
+/// reach this pane's PTY -- "a stale or cross-project id is dropped,
+/// not best-effort delivered" (`pr-015-c-input-routing.md`) proven end
+/// to end, not only against the pure function in isolation.
 #[test]
 fn a_text_stream_targeting_a_different_id_does_not_write_to_the_pane() {
     let mut state = state_with_a_real_terminal_focused("live-input-wrong-target");
@@ -850,7 +880,7 @@ fn a_text_stream_targeting_a_different_id_does_not_write_to_the_pane() {
         Message::Input(crate::input::RoutedInput::Terminal(stream)),
     );
     for _ in 0..20 {
-        if let Some(pane) = state.terminal_demo.as_mut() {
+        for pane in &mut state.terminal_demo {
             pane.poll();
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -873,7 +903,7 @@ fn modal_open_blocks_pty_write_and_closing_it_resumes_delivery() {
     let mut state = state_with_a_real_terminal_focused("live-modal-exclusivity");
     let real_id = state
         .terminal_demo
-        .as_ref()
+        .first()
         .expect("test precondition")
         .terminal_id()
         .clone();
@@ -886,7 +916,7 @@ fn modal_open_blocks_pty_write_and_closing_it_resumes_delivery() {
         Message::Input(crate::input::RoutedInput::Terminal(blocked_stream)),
     );
     for _ in 0..20 {
-        if let Some(pane) = state.terminal_demo.as_mut() {
+        for pane in &mut state.terminal_demo {
             pane.poll();
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -920,7 +950,7 @@ fn tab_cycles_shell_focus_with_a_real_terminal_focused_and_writes_nothing() {
     let mut state = state_with_a_real_terminal_focused("live-tab-escape-hatch");
     let real_id = state
         .terminal_demo
-        .as_ref()
+        .first()
         .expect("test precondition")
         .terminal_id()
         .clone();
@@ -948,7 +978,7 @@ fn tab_cycles_shell_focus_with_a_real_terminal_focused_and_writes_nothing() {
     );
 
     for _ in 0..20 {
-        if let Some(pane) = state.terminal_demo.as_mut() {
+        for pane in &mut state.terminal_demo {
             pane.poll();
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -957,5 +987,196 @@ fn tab_cycles_shell_focus_with_a_real_terminal_focused_and_writes_nothing() {
         rendered_demo_pane_text(&state).trim().is_empty()
             || !rendered_demo_pane_text(&state).contains('\t'),
         "Tab must never reach the PTY as literal input"
+    );
+}
+
+// --- RFC-017 PR-017-E: immersion mode, split policy, session bar ---
+
+/// Three real, launched panes registered on the active project:
+/// `Primary`, `Secondary`, and one deliberately `Hidden` from the start
+/// -- the same shape `launch_terminal_demo_panes` builds for the real
+/// `TEKSTIDE_TERMINAL_DEMO` path, constructed directly here so these
+/// tests do not depend on an env var for determinism.
+fn state_with_two_visible_and_one_hidden_pane(label: &str) -> State {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir(label))
+        .expect("a freshly created directory is a valid project root");
+    app_shell.dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+    let project_id = app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .expect("test precondition: a project was just added");
+
+    let mut panes = Vec::new();
+    for (index, slot) in [
+        tekstide_core::domain::VisibleSlot::Primary,
+        tekstide_core::domain::VisibleSlot::Secondary,
+        tekstide_core::domain::VisibleSlot::Hidden,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (pane, session) = crate::surface::terminal::TerminalPane::launch(
+            project_id.clone(),
+            format!("{label} pane {index}"),
+            fresh_project_dir(&format!("{label}-pane-{index}")),
+            PathBuf::from("/bin/sh"),
+        )
+        .expect("launch a real shell for a multi-pane test");
+        let terminal_id = session.id.clone();
+        app_shell
+            .state_mut()
+            .attach_terminal_session(session)
+            .expect("registering a session on its own project must succeed");
+        app_shell
+            .state_mut()
+            .assign_terminal_visible_slot(&terminal_id, slot)
+            .expect("assigning a slot on a just-registered session must succeed");
+        panes.push(pane);
+    }
+
+    let mut state = state_with(app_shell);
+    state.focus = FocusZone::MainArea;
+    state.terminal_demo = panes;
+    state
+}
+
+fn poll_all_via_real_update(state: &mut State) {
+    let _ = super::update(state, Message::TerminalDemoTick);
+}
+
+/// `active_project_terminal_sessions` must list every registered
+/// session -- hidden included -- not only the visible ones: "a session
+/// that is producing output, has exited, or is blocked must be
+/// distinguishable while hidden" (RFC-017) requires the hidden session
+/// to appear somewhere, not silently drop out of the list the session
+/// bar renders from.
+#[test]
+fn active_project_terminal_sessions_lists_hidden_sessions_too() {
+    let state = state_with_two_visible_and_one_hidden_pane("sessions-include-hidden");
+    let sessions = super::active_project_terminal_sessions(&state);
+    assert_eq!(
+        sessions.len(),
+        3,
+        "all three registered sessions must be listed"
+    );
+    assert!(
+        sessions
+            .iter()
+            .any(|session| session.visible_slot() == tekstide_core::domain::VisibleSlot::Hidden),
+        "the hidden session must still appear in the list"
+    );
+}
+
+/// **The hidden-session grid-state decision, demonstrated, not argued.**
+/// A hidden pane is still polled every tick (`Message::TerminalDemoTick`
+/// iterates every pane in `state.terminal_demo`, not only the visible
+/// ones) and its content is retained across a later slot reassignment --
+/// proving "hidden" means "not currently displayed," not "torn down."
+#[test]
+fn a_hidden_pane_keeps_polling_and_retains_its_content_across_a_slot_change() {
+    let mut state = state_with_two_visible_and_one_hidden_pane("hidden-pane-retained");
+    let hidden_session_id = super::active_project_terminal_sessions(&state)
+        .iter()
+        .find(|session| session.visible_slot() == tekstide_core::domain::VisibleSlot::Hidden)
+        .expect("test precondition: one session must be Hidden")
+        .id
+        .clone();
+    let hidden_pane_index = state
+        .terminal_demo
+        .iter()
+        .position(|pane| pane.terminal_id() == &hidden_session_id)
+        .expect("test precondition: the hidden session's pane must be in terminal_demo");
+
+    state.terminal_demo[hidden_pane_index].write_input(b"printf 'HIDDEN_PANE_017E\\n'\n");
+    let mut seen = false;
+    for _ in 0..200 {
+        poll_all_via_real_update(&mut state);
+        if state.terminal_demo[hidden_pane_index]
+            .rendered_text()
+            .contains("HIDDEN_PANE_017E")
+        {
+            seen = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        seen,
+        "a hidden pane must still be polled and render real output -- retained in memory, not \
+         torn down"
+    );
+
+    // Reassign the previously-hidden session to Secondary (bumping
+    // whatever held Secondary back to Hidden, per
+    // `ProjectSession::assign_terminal_visible_slot`'s own enforcement).
+    // The content produced while hidden must still be there: retention
+    // is a property of the pane, not of momentarily being displayed.
+    state
+        .app_shell
+        .state_mut()
+        .assign_terminal_visible_slot(
+            &hidden_session_id,
+            tekstide_core::domain::VisibleSlot::Secondary,
+        )
+        .expect("reassigning an existing session's slot must succeed");
+    assert!(
+        state.terminal_demo[hidden_pane_index]
+            .rendered_text()
+            .contains("HIDDEN_PANE_017E"),
+        "content produced while hidden must survive becoming visible again -- the whole point \
+         of retaining rather than rebuilding from scrollback"
+    );
+}
+
+/// **Ablated**: if `Message::TerminalDemoTick` only polled visible
+/// panes (the alternative to the decision this slice made), the hidden
+/// pane's content would never appear. Simulated here by polling only
+/// the non-hidden panes directly, confirming the hidden pane's own
+/// content is absent -- the failure mode the real, poll-everything
+/// handler exists to avoid.
+#[test]
+fn ablation_polling_only_visible_panes_would_miss_the_hidden_ones_output() {
+    let mut state = state_with_two_visible_and_one_hidden_pane("hidden-pane-ablation");
+    let hidden_session_id = super::active_project_terminal_sessions(&state)
+        .iter()
+        .find(|session| session.visible_slot() == tekstide_core::domain::VisibleSlot::Hidden)
+        .expect("test precondition")
+        .id
+        .clone();
+    let hidden_pane_index = state
+        .terminal_demo
+        .iter()
+        .position(|pane| pane.terminal_id() == &hidden_session_id)
+        .expect("test precondition");
+
+    state.terminal_demo[hidden_pane_index].write_input(b"printf 'SHOULD_NOT_APPEAR_017E\\n'\n");
+
+    for _ in 0..20 {
+        let visible_ids: Vec<tekstide_core::domain::TerminalId> =
+            super::active_project_terminal_sessions(&state)
+                .iter()
+                .filter(|session| {
+                    session.visible_slot() != tekstide_core::domain::VisibleSlot::Hidden
+                })
+                .map(|session| session.id.clone())
+                .collect();
+        for pane in &mut state.terminal_demo {
+            if visible_ids.contains(pane.terminal_id()) {
+                pane.poll();
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    assert!(
+        !state.terminal_demo[hidden_pane_index]
+            .rendered_text()
+            .contains("SHOULD_NOT_APPEAR_017E"),
+        "polling only visible panes must miss the hidden pane's real output -- confirming the \
+         previous test's poll-everything behaviour is what makes retention actually work, not \
+         an accident of timing"
     );
 }

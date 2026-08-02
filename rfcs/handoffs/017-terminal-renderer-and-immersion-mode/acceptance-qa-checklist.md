@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - Acceptance / QA Checklist"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/PR-017-C reviewed and approved (responses 144-148); PR-017-D (input) implemented 2026-08-03, reviewed and approved with no required items (response 149)"
+status: "Accepted 2026-08-01 — PR-017-B/C/D reviewed and approved (responses 144-149); PR-017-E (immersion mode, split policy, session bar) implemented 2026-08-03, pending review"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -31,10 +31,10 @@ created: "2026-08-01"
 - [x] **The RFC-016 exception is the grid only** — session titles, pane headers, and tooltips derived from output go through `text_safety`. No chrome element derived from terminal output exists in this slice (session titles/pane headers are PR-017-E's `session_bar.rs`) for the exception boundary to be tested against yet; the grid itself renders unescaped, deliberately, per the exception.
 - [x] Grid renders as data; nothing from PTY bytes occupies, overlaps, or imitates Tekstide's own chrome. `main_area_view` substitutes the pane only for the inner content of the existing zone container — the chrome-level focus border is unaffected (screenshot evidence, `qa-evidence.md`).
 - [x] Bounded scrollback, bound stated, tested under sustained output. `SCROLLBACK_LINES = 2_000`; ablation-verified (`qa-evidence.md`).
-- [ ] Uses `TerminalPanePolicy`/`TerminalLayoutClass`/`visible_terminal_limit` — no parallel layout model. **Deferred to PR-017-E**: this slice has one fixed-size (80×24) pane, no split policy yet for these types to govern.
-- [ ] Split driven by real font metrics and DPI; sub-minimum-column splits refused. **Deferred to PR-017-E**: no split exists in this slice.
-- [ ] Session state distinguishable without colour (`NFR-UX-002`), including hidden sessions. **Deferred to PR-017-E**: no session bar/multi-session state exists in this slice.
-- [ ] Hidden-session grid-state decision made and recorded against the scrollback bound. **Deferred to PR-017-E**: no hidden-session concept exists in this slice.
+- [x] Uses `TerminalPanePolicy`/`TerminalLayoutClass`/`visible_terminal_limit` — no parallel layout model. `launch_terminal_demo_panes` registers real sessions via `AppState::attach_terminal_session`/`assign_terminal_visible_slot` (new, delegating straight to `ProjectSession`'s existing methods); `active_project_terminal_sessions`/`terminal_workspace_view` read slot state fresh from `tekstide-core` every call, no shell-local bookkeeping.
+- [x] Split driven by real font metrics and DPI; sub-minimum-column splits refused. `layout_class_for` measures the real monospace glyph advance at the pane's actual render size and refuses a two-pane split below a full pane's worth of real columns (`COLS` = 80), rendering one pane instead — proven with 7 unit tests and a real window-resize screenshot (`qa-evidence.md`).
+- [x] Session state distinguishable without colour (`NFR-UX-002`), including hidden sessions. `session_bar::view` renders slot and status as distinct text labels for every registered session, hidden included — proven distinct (`every_slot_and_status_has_a_distinct_textual_label`) and shown live in the screenshot evidence.
+- [x] Hidden-session grid-state decision made and recorded against the scrollback bound. **Decided: retained in memory, always polled, not torn down** — the bound does not change with visibility, and session count is itself bounded (`terminal_session_limit`). Demonstrated (not only argued): a hidden pane keeps accumulating real PTY output across the real `TerminalDemoTick` → `update` path and retains it across a later slot reassignment; ablated by simulating "poll only visible panes" and confirming the hidden pane's content is then missed.
 
 ## Input Checklist (PR-017-D)
 

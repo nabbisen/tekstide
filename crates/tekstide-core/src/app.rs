@@ -1,5 +1,6 @@
 use crate::close::{CloseAssessment, assess_close};
 use crate::content::{ExternalChangeDecision, SaveDecision};
+use crate::domain::{OwnershipError, TerminalId, TerminalSession, VisibleSlot};
 use crate::project::recent::{
     RECENT_PROJECT_STATE_VERSION, RecentProject, RecentProjectAvailability, RecentProjectState,
     RestoredRecentProject, Timestamp, assess_recent_project_availability,
@@ -9,6 +10,7 @@ use crate::project::root::{
 };
 use crate::project::{
     ProjectContentError, ProjectId, ProjectMode, ProjectOpenSurface, ProjectSession,
+    ProjectTerminalError,
 };
 
 #[derive(Debug, Default)]
@@ -199,6 +201,39 @@ impl AppState {
         project.set_open_surface(surface);
         project.set_mode(ProjectMode::Content);
         true
+    }
+
+    /// RFC-017 PR-017-E: the missing lifecycle glue identified while
+    /// implementing PR-017-D -- a caller outside `tekstide-core` had no
+    /// way to attach a real, already-launched `TerminalSession` to the
+    /// active project (`ProjectSession::add_terminal_session` existed
+    /// with no external caller). This is that caller's entry point,
+    /// delegating straight to it; the ownership/duplicate-id checks stay
+    /// exactly where they already were.
+    pub fn attach_terminal_session(
+        &mut self,
+        terminal: TerminalSession,
+    ) -> Result<(), OwnershipError> {
+        let project = self
+            .active_project_mut()
+            .ok_or(OwnershipError::MissingProject)?;
+        project.add_terminal_session(terminal)
+    }
+
+    /// The other half of the same gap: assigning which slot (`Primary`,
+    /// `Secondary`, or `Hidden`) a registered terminal occupies, against
+    /// the active project.
+    pub fn assign_terminal_visible_slot(
+        &mut self,
+        terminal_id: &TerminalId,
+        visible_slot: VisibleSlot,
+    ) -> Result<(), ProjectTerminalError> {
+        let project = self
+            .active_project_mut()
+            .ok_or(ProjectTerminalError::Ownership(
+                OwnershipError::MissingProject,
+            ))?;
+        project.assign_terminal_visible_slot(terminal_id, visible_slot)
     }
 
     pub fn open_active_project_text_document(

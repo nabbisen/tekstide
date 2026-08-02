@@ -456,6 +456,118 @@ fn active_project_cannot_be_removed_as_recent_metadata() {
     assert!(state.project(&project_id).is_some());
 }
 
+// --- RFC-017 PR-017-E: attach_terminal_session / assign_terminal_visible_slot ---
+
+#[test]
+fn attach_terminal_session_registers_it_on_the_active_project() {
+    let mut state = AppState::default();
+    let project_id =
+        state.add_project_session("Project", "/workspace/project", "/workspace/project");
+    let terminal = TerminalSession::new(
+        project_id.clone(),
+        TerminalKind::Plain,
+        "Shell",
+        "/workspace/project",
+        "/bin/sh",
+    );
+    let terminal_id = terminal.id.clone();
+
+    state
+        .attach_terminal_session(terminal)
+        .expect("attaching a terminal owned by the active project must succeed");
+
+    assert!(
+        state
+            .project(&project_id)
+            .unwrap()
+            .terminal_sessions()
+            .iter()
+            .any(|session| session.id == terminal_id)
+    );
+}
+
+#[test]
+fn attach_terminal_session_fails_closed_with_no_active_project() {
+    let mut state = AppState::default();
+    let terminal = TerminalSession::new(
+        ProjectId::new_uuid(),
+        TerminalKind::Plain,
+        "Shell",
+        "/workspace/project",
+        "/bin/sh",
+    );
+
+    assert_eq!(
+        state.attach_terminal_session(terminal),
+        Err(crate::domain::OwnershipError::MissingProject),
+        "no active project must be a real, distinguishable error, not a silent no-op"
+    );
+}
+
+#[test]
+fn assign_terminal_visible_slot_enforces_at_most_one_terminal_per_slot() {
+    let mut state = AppState::default();
+    let project_id =
+        state.add_project_session("Project", "/workspace/project", "/workspace/project");
+    let first = TerminalSession::new(
+        project_id.clone(),
+        TerminalKind::Plain,
+        "First",
+        "/workspace/project",
+        "/bin/sh",
+    );
+    let second = TerminalSession::new(
+        project_id.clone(),
+        TerminalKind::Plain,
+        "Second",
+        "/workspace/project",
+        "/bin/sh",
+    );
+    let first_id = first.id.clone();
+    let second_id = second.id.clone();
+    state.attach_terminal_session(first).unwrap();
+    state.attach_terminal_session(second).unwrap();
+
+    state
+        .assign_terminal_visible_slot(&first_id, crate::domain::VisibleSlot::Primary)
+        .unwrap();
+    state
+        .assign_terminal_visible_slot(&second_id, crate::domain::VisibleSlot::Primary)
+        .unwrap();
+
+    let project = state.project(&project_id).unwrap();
+    let find = |id: &crate::domain::TerminalId| {
+        project
+            .terminal_sessions()
+            .iter()
+            .find(|session| &session.id == id)
+            .unwrap()
+    };
+    assert_eq!(
+        find(&second_id).visible_slot(),
+        crate::domain::VisibleSlot::Primary
+    );
+    assert_eq!(
+        find(&first_id).visible_slot(),
+        crate::domain::VisibleSlot::Hidden,
+        "assigning Primary to the second terminal must bump the first back to Hidden -- at \
+         most one terminal per non-Hidden slot"
+    );
+}
+
+#[test]
+fn assign_terminal_visible_slot_fails_closed_with_no_active_project() {
+    let mut state = AppState::default();
+    let terminal_id = crate::domain::TerminalId::new_uuid();
+
+    assert_eq!(
+        state.assign_terminal_visible_slot(&terminal_id, crate::domain::VisibleSlot::Primary),
+        Err(crate::project::ProjectTerminalError::Ownership(
+            crate::domain::OwnershipError::MissingProject
+        ))
+    );
+}
+
 struct TestSandbox {
     root: PathBuf,
 }

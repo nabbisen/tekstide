@@ -140,13 +140,16 @@ pub struct State {
     /// RFC-015 PR-015-F: the typing-measurement surface's live content.
     /// Empty unless actually measuring `Typing`.
     typing_doc: String,
-    /// RFC-017 PR-017-C: `None` unless `TEKSTIDE_TERMINAL_DEMO` is set --
-    /// see [`terminal_demo_pane`].
-    terminal_demo: Option<crate::surface::terminal::TerminalPane>,
+    /// RFC-017 PR-017-E: empty unless `TEKSTIDE_TERMINAL_DEMO` is set --
+    /// see [`launch_terminal_demo_panes`]. Rendering state only; *which*
+    /// slot each pane's session occupies is asked of `tekstide-core`
+    /// fresh each time (`active_project_terminal_sessions`), not cached
+    /// alongside these panes.
+    terminal_demo: Vec<crate::surface::terminal::TerminalPane>,
 }
 
 impl State {
-    pub fn new(app_shell: ApplicationShell, catalog: Catalog) -> Self {
+    pub fn new(mut app_shell: ApplicationShell, catalog: Catalog) -> Self {
         let measurement = Measurement::from_env();
         let typing_doc = if matches!(
             measurement.as_ref().map(Measurement::criterion),
@@ -161,6 +164,7 @@ impl State {
             measurement.is_some(),
             std::env::var("TEKSTIDE_LAYER_DEMO").is_ok(),
         );
+        let terminal_demo = launch_terminal_demo_panes(&mut app_shell);
 
         Self {
             app_shell,
@@ -170,7 +174,7 @@ impl State {
             modal,
             measurement,
             typing_doc,
-            terminal_demo: terminal_demo_pane(),
+            terminal_demo,
         }
     }
 
@@ -226,8 +230,11 @@ pub enum Message {
     /// the real `AppCommand::ToggleActiveProjectMode` instead of
     /// appending to a synthetic document.
     MeasuredModeSwitch(std::time::Instant),
-    /// RFC-017 PR-017-C: periodic poll for `state.terminal_demo` -- see
-    /// [`terminal_demo_pane`] and [`terminal_demo_subscription`].
+    /// RFC-017 PR-017-C/E: periodic poll for every pane in
+    /// `state.terminal_demo` -- see [`launch_terminal_demo_panes`] and
+    /// [`terminal_demo_subscription`]. Every pane is polled every tick
+    /// regardless of its session's visible slot (the hidden-session
+    /// decision, `surface::terminal`'s module doc).
     TerminalDemoTick,
 }
 
@@ -251,10 +258,19 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // already be true. Checked anyway, at the one place bytes
             // would actually reach a PTY, rather than trusting that
             // upstream property alone -- ablated in `shell::tests`.
+            //
+            // `terminal_stream_targets_a_live_terminal` gets its first
+            // real caller this slice: the demo panes are now registered
+            // `TerminalSession`s on the real active project (RFC-017
+            // PR-017-E), so the check RFC-015 wrote against the real
+            // project model finally has something real to check.
             if state.modal.is_none()
-                && terminal_stream_targets_the_demo_pane(state.terminal_demo.as_ref(), &text_stream)
-                && let (Some(pane), Some(bytes)) =
-                    (state.terminal_demo.as_mut(), text_stream.to_pty_bytes())
+                && terminal_stream_targets_a_live_terminal(&state.app_shell, &text_stream)
+                && let Some(bytes) = text_stream.to_pty_bytes()
+                && let Some(pane) = state
+                    .terminal_demo
+                    .iter_mut()
+                    .find(|pane| pane.terminal_id() == text_stream.target())
             {
                 pane.write_input(&bytes);
             }
@@ -311,7 +327,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 .dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
         }
         Message::TerminalDemoTick => {
-            if let Some(pane) = state.terminal_demo.as_mut() {
+            for pane in &mut state.terminal_demo {
                 pane.poll();
             }
         }
@@ -319,30 +335,73 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
     Task::none()
 }
 
-/// RFC-017 PR-017-C: launches a real, filtered PTY session for Terminal
+/// RFC-017 PR-017-E: launches real, filtered PTY sessions for Terminal
 /// Mode's main area to render, gated behind `TEKSTIDE_TERMINAL_DEMO` --
 /// the same env-gated-demo convention as `TEKSTIDE_LAYER_DEMO`/
-/// `TEKSTIDE_MEASURE_CRITERION`. The launched shell is a scratch,
-/// temp-dir session (matching `TerminalPane::launch`'s own test/spike
-/// precedent), never wired to any real project's actual terminal --
-/// real project-terminal session management, and the input this demo
-/// deliberately has none of, are PR-017-D/PR-017-E's job, not this
-/// slice's. Returns `None` (silently -- this is a diagnostic path, not
-/// a user-facing feature yet) if the env var is unset or the launch
-/// fails.
-fn terminal_demo_pane() -> Option<crate::surface::terminal::TerminalPane> {
+/// `TEKSTIDE_MEASURE_CRITERION`. Three scratch, temp-dir sessions are
+/// launched -- `Primary`, `Secondary` (matching
+/// `visible_terminal_limit`'s default of 2, and `TerminalPanePolicy`'s
+/// own `max_visible_panes`), and one deliberately assigned `Hidden` from
+/// the start so the hidden-session decision this slice makes
+/// (`surface::terminal`'s module doc: retained in memory, still polled)
+/// has something real to demonstrate -- and each is registered on the
+/// real active project via `AppState::attach_terminal_session`/
+/// `assign_terminal_visible_slot`.
+///
+/// **Registering for real is a change from PR-017-D**, disclosed rather
+/// than silent: that slice's demo pane stayed deliberately unregistered
+/// because nothing needed the real session model yet. This slice's job
+/// *is* that model's layout/chrome ("no parallel layout model" applies
+/// to session bookkeeping as much as to `TerminalPanePolicy` itself), so
+/// registering is what discharges that requirement rather than
+/// violating it.
+///
+/// Requires an active project (a CLI project-path argument); returns an
+/// empty `Vec` (silently -- this is a diagnostic path, not a
+/// user-facing feature yet) otherwise, if the env var is unset, or if a
+/// given pane's launch/registration fails.
+fn launch_terminal_demo_panes(
+    app_shell: &mut ApplicationShell,
+) -> Vec<crate::surface::terminal::TerminalPane> {
     if std::env::var("TEKSTIDE_TERMINAL_DEMO").is_err() {
-        return None;
+        return Vec::new();
     }
-    let root = std::env::temp_dir().join(format!("tekstide-terminal-demo-{}", std::process::id()));
-    std::fs::create_dir_all(&root).ok()?;
-    crate::surface::terminal::TerminalPane::launch(
-        tekstide_core::project::ProjectId::new_uuid(),
-        "terminal demo",
-        root,
-        std::path::PathBuf::from("/bin/sh"),
-    )
-    .ok()
+    let Some(project_id) = app_shell.state().active_project_id().cloned() else {
+        return Vec::new();
+    };
+
+    [
+        tekstide_core::domain::VisibleSlot::Primary,
+        tekstide_core::domain::VisibleSlot::Secondary,
+        tekstide_core::domain::VisibleSlot::Hidden,
+    ]
+    .into_iter()
+    .enumerate()
+    .filter_map(|(index, slot)| {
+        let root = std::env::temp_dir().join(format!(
+            "tekstide-terminal-demo-{}-{index}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).ok()?;
+        let (pane, session) = crate::surface::terminal::TerminalPane::launch(
+            project_id.clone(),
+            format!("terminal demo {}", index + 1),
+            root,
+            std::path::PathBuf::from("/bin/sh"),
+        )
+        .ok()?;
+        let terminal_id = session.id.clone();
+        app_shell
+            .state_mut()
+            .attach_terminal_session(session)
+            .ok()?;
+        app_shell
+            .state_mut()
+            .assign_terminal_visible_slot(&terminal_id, slot)
+            .ok()?;
+        Some(pane)
+    })
+    .collect()
 }
 
 /// Periodic poll driving [`State::terminal_demo`] -- only ever added to
@@ -375,19 +434,13 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
 
 /// The check `pr-015-c-input-routing.md` requires before a `TextStream`
 /// may be delivered: "a stale or cross-project id is dropped, not
-/// best-effort delivered." Still no production caller: RFC-017 PR-017-D
-/// wires real input to the `TEKSTIDE_TERMINAL_DEMO` pane, which is
+/// best-effort delivered." **Gets its first real caller this slice**:
+/// PR-017-D left this `#[allow(dead_code)]` because its demo pane was
 /// deliberately not registered as a `TerminalSession` on the real active
-/// project (PR-017-C's "no state duplicating `tekstide-core`" contract),
-/// so this check -- which asks the real project model -- correctly
-/// cannot recognize it; `terminal_stream_targets_the_demo_pane` is that
-/// pane's own gate. This function's real caller arrives with PR-017-E/F,
-/// once a terminal session is actually registered against a project.
-/// Same shape as `filter.rs`'s own pre-PR-017-C suppression: proven
-/// directly against `ApplicationShell` fixtures in `shell::tests` so the
-/// property is real the moment it gets a caller, not discovered wrong
-/// then.
-#[allow(dead_code)]
+/// project. RFC-017 PR-017-E's demo panes are (`launch_terminal_demo_panes`),
+/// so this now-real, core-backed check is what actually gates delivery
+/// in `update`. Proven directly against `ApplicationShell` fixtures in
+/// `shell::tests`.
 pub(crate) fn terminal_stream_targets_a_live_terminal(
     app_shell: &ApplicationShell,
     stream: &TextStream,
@@ -397,23 +450,6 @@ pub(crate) fn terminal_stream_targets_a_live_terminal(
         .active_project()
         .and_then(|project| project.terminal_session(stream.target()))
         .is_some()
-}
-
-/// RFC-017 PR-017-D's actual delivery gate today: the demo-pane
-/// counterpart to [`terminal_stream_targets_a_live_terminal`] above.
-/// `state.terminal_demo` is deliberately **not** registered as a
-/// `TerminalSession` on the real active project -- PR-017-C's "no state
-/// duplicating `tekstide-core`" contract -- so the real, core-backed
-/// check above can never recognize it, and correctly returns `false`
-/// for it. Real project-terminal session registration is unrelated to
-/// and unblocked by this: it is PR-017-E's job. This checks the one
-/// thing that matters for the diagnostic pane that exists today: does
-/// the stream's target name its real, live `TerminalId`?
-pub(crate) fn terminal_stream_targets_the_demo_pane(
-    terminal_demo: Option<&crate::surface::terminal::TerminalPane>,
-    stream: &TextStream,
-) -> bool {
-    terminal_demo.is_some_and(|pane| pane.terminal_id() == stream.target())
 }
 
 pub fn view(state: &State) -> Element<'_, Message> {
@@ -474,7 +510,7 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     // was set), so this changes nothing about the routing above for any
     // normal run -- the same "checked but usually absent" shape the
     // measurement branch above already uses.
-    if state.terminal_demo.is_some() {
+    if !state.terminal_demo.is_empty() {
         Subscription::batch([routing, terminal_demo_subscription()])
     } else {
         routing
@@ -530,13 +566,22 @@ fn measured_key_subscription(
     ])
 }
 
-/// RFC-017 PR-017-D: the demo pane is "focused" for input-routing
-/// purposes exactly when it is what the focused zone is currently
-/// showing -- `FocusZone::MainArea` *and* the active project is in
-/// `TerminalImmersion` mode, matching `main_area_view`'s own
-/// substitution condition. Outside that, `None`: a hidden or
-/// content-mode pane must not receive keystrokes just because it
-/// happens to exist.
+/// RFC-017 PR-017-D/E: a terminal is "focused" for input-routing
+/// purposes exactly when `FocusZone::MainArea` is focused *and* the
+/// active project is in `TerminalImmersion` mode, matching
+/// `main_area_view`'s own substitution condition. Outside that, `None`:
+/// a hidden or content-mode pane must not receive keystrokes just
+/// because it happens to exist.
+///
+/// **Which of up to two visible panes, decided this slice**: the one
+/// holding `VisibleSlot::Primary`. Multiple visible panes competing for
+/// one keyboard-input target is a real question this slice does not
+/// have a UI feature (a per-pane click-to-focus, a cycle keybinding) to
+/// answer against yet -- picking `Primary` as the sole input target is
+/// a deliberate, narrower scope than "solve pane-to-pane input focus,"
+/// consistent with `visible_terminal_limit`'s own model where `Primary`
+/// is the first slot. Revisit if/when a feature needs the `Secondary`
+/// pane to receive keystrokes too.
 fn active_terminal_focus(state: &State) -> Option<tekstide_core::domain::TerminalId> {
     if state.focus != FocusZone::MainArea {
         return None;
@@ -549,10 +594,24 @@ fn active_terminal_focus(state: &State) -> Option<tekstide_core::domain::Termina
     if mode != Some(ProjectMode::TerminalImmersion) {
         return None;
     }
+    active_project_terminal_sessions(state)
+        .iter()
+        .find(|session| session.visible_slot() == tekstide_core::domain::VisibleSlot::Primary)
+        .map(|session| session.id.clone())
+}
+
+/// The real active project's registered terminal sessions -- visible
+/// and hidden alike, in registration order. Factored out since both
+/// [`active_terminal_focus`] and [`terminal_workspace_view`] need it,
+/// and neither should cache a second copy of what `tekstide-core`
+/// already owns.
+fn active_project_terminal_sessions(state: &State) -> &[tekstide_core::domain::TerminalSession] {
     state
-        .terminal_demo
-        .as_ref()
-        .map(|pane| pane.terminal_id().clone())
+        .app_shell
+        .state()
+        .active_project()
+        .map(tekstide_core::project::ProjectSession::terminal_sessions)
+        .unwrap_or(&[])
 }
 
 fn non_modal_subscription(
@@ -816,17 +875,17 @@ fn sidebar_view(state: &State) -> Element<'_, Message> {
 
 fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message> {
     let focused = state.focus == FocusZone::MainArea;
-    // RFC-017 PR-017-C: `terminal_demo_pane` is `None` for every normal
-    // run (`TEKSTIDE_TERMINAL_DEMO` unset), so this substitutes nothing
-    // for the reviewed placeholder outside the env-gated demo path --
-    // the same shape `state.is_measuring_typing()`'s substitution in
-    // `content_area` already uses. The pane renders the emulator grid
-    // as data (RFC-016's exception); it is not chrome and proves nothing
-    // about trusted-UI separation (RFC-018's job).
-    let content: Element<'_, Message> = match (mode, state.terminal_demo.as_ref()) {
-        (Some(ProjectMode::TerminalImmersion), Some(pane)) => {
-            crate::surface::terminal::view(pane, state.theme.font_size_body())
-        }
+    // RFC-017 PR-017-E: `launch_terminal_demo_panes` returns an empty
+    // `Vec` for every normal run (`TEKSTIDE_TERMINAL_DEMO` unset), so
+    // this substitutes nothing for the reviewed placeholder outside the
+    // env-gated demo path -- the same shape `state.is_measuring_typing()`'s
+    // substitution in `content_area` already uses. The pane renders the
+    // emulator grid as data (RFC-016's exception); the session bar is
+    // real chrome (RFC-016's boundary becomes live here for the first
+    // time) and proves nothing about trusted-UI separation (RFC-018's
+    // job).
+    let content: Element<'_, Message> = match (mode, state.terminal_demo.is_empty()) {
+        (Some(ProjectMode::TerminalImmersion), false) => terminal_workspace_view(state),
         _ => column![text(main_area_label(state, mode)).size(state.theme.font_size_body())]
             .spacing(6)
             .into(),
@@ -837,6 +896,76 @@ fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Messa
         .padding(16)
         .style(zone_style(state.theme, focused))
         .into()
+}
+
+/// RFC-017 PR-017-E: the session bar (real chrome, `theme`-sourced
+/// colours) above a split view of up to two *visible* panes' grids,
+/// ordered `Primary` before `Secondary`. The split itself is decided
+/// from the real, measured width `iced::widget::responsive` provides at
+/// layout time -- not a fraction of the window -- via
+/// `surface::terminal::layout_class_for`; a `Narrow` classification
+/// shows only the `Primary` pane rather than rendering a clipped
+/// two-column split (see `surface::terminal::layout`'s module doc for
+/// why the refusal threshold is a full pane's worth of real columns).
+fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
+    let font_size = state.theme.font_size_body();
+    let theme = state.theme;
+    let sessions = active_project_terminal_sessions(state);
+
+    let entries: Vec<crate::surface::terminal::session_bar::SessionBarEntry> = sessions
+        .iter()
+        .enumerate()
+        .map(
+            |(index, session)| crate::surface::terminal::session_bar::SessionBarEntry {
+                label: format!("Terminal {}", index + 1),
+                slot: session.visible_slot(),
+                status: session.status(),
+            },
+        )
+        .collect();
+    let bar = crate::surface::terminal::session_bar::view(theme, &entries);
+
+    let mut visible_sessions: Vec<&tekstide_core::domain::TerminalSession> = sessions
+        .iter()
+        .filter(|session| session.visible_slot() != tekstide_core::domain::VisibleSlot::Hidden)
+        .collect();
+    visible_sessions.sort_by_key(|session| match session.visible_slot() {
+        tekstide_core::domain::VisibleSlot::Primary => 0,
+        tekstide_core::domain::VisibleSlot::Secondary => 1,
+        tekstide_core::domain::VisibleSlot::Hidden => 2,
+    });
+    let visible_panes: Vec<&crate::surface::terminal::TerminalPane> = visible_sessions
+        .into_iter()
+        .filter_map(|session| {
+            state
+                .terminal_demo
+                .iter()
+                .find(|pane| pane.terminal_id() == &session.id)
+        })
+        .collect();
+
+    let panes_view: Element<'_, Message> = if visible_panes.is_empty() {
+        column![].into()
+    } else {
+        iced::widget::responsive(move |size| {
+            let shown: Vec<&crate::surface::terminal::TerminalPane> =
+                match crate::surface::terminal::layout_class_for(size.width, font_size) {
+                    tekstide_core::navigation::TerminalLayoutClass::Wide => visible_panes.clone(),
+                    tekstide_core::navigation::TerminalLayoutClass::Narrow => {
+                        visible_panes.first().copied().into_iter().collect()
+                    }
+                };
+            row(shown
+                .into_iter()
+                .map(|pane| crate::surface::terminal::view(pane, font_size))
+                .collect::<Vec<Element<'_, Message>>>())
+            .spacing(8)
+            .into()
+        })
+        .into()
+    };
+
+    column![bar, panes_view].spacing(8).into()
 }
 
 /// RFC-015 PR-015-F: renders the tail of `state.typing_doc` in a
