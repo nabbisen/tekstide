@@ -2998,11 +2998,13 @@ dependencies = [
 name = "tekstide"
 version = "0.4.1"
 dependencies = [
+ "alacritty_terminal",
  "fluent-bundle",
  "iced",
  "sys-locale",
  "tekstide-core",
  "unic-langid",
+ "vte",
 ]
 
 [[package]]

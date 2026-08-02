@@ -20,3 +20,5 @@ iced                        = { workspace = true }
 fluent-bundle               = { workspace = true }
 unic-langid                 = { workspace = true }
 sys-locale                  = { workspace = true }
+alacritty_terminal          = { workspace = true }
+vte                         = { workspace = true }

@@ -5,7 +5,8 @@ mod paste;
 mod trusted_ui;
 
 pub use parser::{
-    TerminalAcceptedSequence, TerminalInertSequence, TerminalSecurityParser, TerminalSequencePolicy,
+    TerminalAcceptedSequence, TerminalInertSequence, TerminalSecurityParser,
+    TerminalSequencePolicy, classify_private_mode_number,
 };
 pub use paste::{
     TerminalInputDecision, TerminalInputDecisionReason, TerminalInputPolicy, TerminalInputSource,

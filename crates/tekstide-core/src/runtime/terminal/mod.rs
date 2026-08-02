@@ -15,7 +15,7 @@ pub use security::{
     TerminalSecurityLabelView, TerminalSecurityParser, TerminalSequenceFamily,
     TerminalSequencePolicy, TerminalSpoofingAssessment, TerminalStyleEffect, TerminalSurfaceEffect,
     TerminalTextEffect, TerminalTrustedSurfaceKind, TerminalTrustedUiBoundary,
-    TerminalTrustedUiEffect, TerminalTrustedUiState,
+    TerminalTrustedUiEffect, TerminalTrustedUiState, classify_private_mode_number,
 };
 pub use types::{
     BoundedRuntimeSummary, TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec,

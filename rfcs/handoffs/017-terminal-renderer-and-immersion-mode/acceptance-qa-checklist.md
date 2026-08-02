@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - Acceptance / QA Checklist"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — pending implementation"
+status: "Accepted 2026-08-01 — PR-017-B (filter promotion) implemented 2026-08-01, pending review"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -13,16 +13,16 @@ created: "2026-08-01"
 
 ## Filter Checklist (PR-017-B)
 
-- [ ] **P1 — single ingress.** Every PTY byte reaches the emulator through one filter entry point; enumeration written out, not summarised.
-- [ ] **P2 — no side channels.** Every mutating emulator API enumerated and shown unreachable or wrapped. Resize identified as a second, non-byte input and bounded.
-- [ ] **P3 — classification parity.** One parse, shared between filter and emulator. No separate pre-scan pass.
-- [ ] **P4 — stream-position independence.** Every family split at every internal byte boundary; classification and grid effect identical to unsplit.
-- [ ] Each of P1-P4 **independently ablated**.
-- [ ] `cargo tree -p tekstide-core --edges normal | grep -ciE 'vte|alacritty'` → `0`.
-- [ ] The shell-side filter contains **no policy decision** — no conditional deciding acceptability.
-- [ ] Unsupported families produce **no observable grid effect**, compared on full grid state.
-- [ ] Accepted families produce the effect core says they should — the boundary proven in both directions.
-- [ ] Truncated/malformed sequences fail closed without unbounded buffering.
+- [x] **P1 — single ingress.** Enumerated, not summarised: `grep -rl "alacritty_terminal\|vte::" crates/tekstide/src/` finds exactly two files (`filter.rs`, `filter/tests.rs`); the only `Term`/`Processor` construction and the only `.advance()` call are in the test harness, always through one `SecurityFilter::new(&mut term)` per chunk. **Partial claim, disclosed**: no production caller exists yet (PR-017-C builds the pane), so this is the enumeration available today, not a system-wide guarantee re-established over real production code — that re-check is PR-017-C's.
+- [x] **P2 — no side channels.** `Term::grid_mut()` confirmed unreachable from the PTY byte path by reading `vte` 0.15's dispatch tables directly; it appears in this crate only inside doc-comment prose, never as a call. Same partial-claim disclosure as P1 — no real pane exists yet to have a second input (e.g. resize) to identify and bound; that is PR-017-C's job, not asserted here.
+- [x] **P3 — classification parity.** One `vte::ansi::Processor` shared per chunk sequence, unchanged from the spike's own construction; no separate pre-scan pass exists.
+- [x] **P4 — stream-position independence.** `every_named_family_blocks_with_no_grid_effect_at_every_split_boundary` (8 families, 80 generated split points, 88 total cases) plus the carried V2/V4/V5/V7 findings from the spike.
+- [x] Each of P1-P4 **independently ablated**. P1: simulated a second ingress (unconditional `set_title` forwarding) — the corpus test failed naming `osc_title`. P3/P4 together: fresh `Processor` per chunk instead of one shared instance — four independent tests failed for four different reasons (title leak, DCS leak, OSC-52 split misclassification, UTF-8 reassembly failure). Both reverted and re-confirmed passing. See `qa-evidence.md` for the exact diffs and failure output.
+- [x] `cargo tree -p tekstide-core --edges normal | grep -ciE 'vte|alacritty'` → `0`.
+- [x] The shell-side filter contains **no policy decision**. Every accepted method's forward call is gated on `tekstide_core::runtime::terminal::security::TerminalSequencePolicy::ACCEPTED.contains(...)`, asked live at the call site — ablation-verified by removing `CsiClearScreen` from that list in `tekstide-core` and confirming the shell-crate filter's forwarding behaviour changed with it (three tests failed, none of them in `tekstide-core`'s own suite).
+- [x] Unsupported families produce **no observable grid effect**, compared on full grid state. `grid_snapshot` (full grid text across all lines, plus cursor position) asserted equal to a pristine baseline for every corpus case and every split point — stronger than the spike's own marker-on-line-0 check.
+- [x] Accepted families produce the effect core says they should — the boundary proven in both directions. `accepted_printable_text_reaches_the_grid`, `accepted_sgr_cursor_and_clear_do_not_block`, `accepted_c0_controls_do_not_block`, `accepted_clear_screen_actually_clears_previously_written_text` (the last checking the real grid effect, not just the blocked-list, after a gap in that direction was found by ablation and fixed — see `qa-evidence.md`).
+- [x] Truncated/malformed sequences fail closed without unbounded buffering. `vte::ansi::Processor`'s own fixed-capacity parameter/intermediate buffers handle this; this filter never buffers anything of its own. `v5_parameter_overflow_does_not_desync_the_parser`/`v5_parameter_overflow_followed_by_osc_52_still_blocks_clipboard` (carried from the spike) prove parameter-list length cannot be used to desync classification of what follows.
 
 ## Surface Checklist (PR-017-C, PR-017-E)
 

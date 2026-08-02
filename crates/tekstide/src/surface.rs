@@ -29,3 +29,4 @@
 //! `top_bar`/`status_bar`.
 
 pub mod board;
+pub mod terminal;

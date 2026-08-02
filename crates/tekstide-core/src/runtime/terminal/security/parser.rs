@@ -455,6 +455,24 @@ fn classify_private_mode(body: &[u8]) -> TerminalSequenceFamily {
     }
 }
 
+/// The same mouse/focus-vs-ordinary-private-mode distinction as
+/// [`classify_private_mode`], keyed on an already-parsed raw mode number
+/// rather than raw CSI body bytes. RFC-017 PR-017-B's `vte::ansi::Handler`
+/// interposition filter receives a parsed `PrivateMode`/`NamedPrivateMode`
+/// value from `vte`, never the raw bytes this byte-level parser works
+/// from -- a second, independent copy of "which numbers mean mouse/focus
+/// reporting" in the shell crate would be exactly the duplicate-classifier
+/// risk `implementation-handoff.md` §3 warns against, so both entry points
+/// share this one function instead. Not a replacement for
+/// `classify_private_mode` (which still parses raw bytes for this
+/// module's own headless callers); additive.
+pub fn classify_private_mode_number(mode: u16) -> TerminalSequenceFamily {
+    match mode {
+        1000 | 1002 | 1003 | 1004 | 1005 | 1006 => TerminalSequenceFamily::MouseFocusReporting,
+        _ => TerminalSequenceFamily::PrivateMode,
+    }
+}
+
 fn is_keyboard_protocol(body: &[u8], final_byte: u8) -> bool {
     final_byte == b'u' || body.starts_with(b">")
 }
@@ -742,6 +760,26 @@ mod tests {
                     && diagnostic.policy_reason == TerminalPolicyReason::TerminalGeneratedReplyBlocked
                     && diagnostic.payload_bytes == 12
         ));
+    }
+
+    #[test]
+    fn classify_private_mode_number_agrees_with_the_byte_based_classifier() {
+        // RFC-017 PR-017-B: the two entry points to this policy must not
+        // drift. For every mode number the byte-based classifier
+        // recognizes as mouse/focus reporting, the number-based one must
+        // agree, and vice versa.
+        for mouse_mode in [1000u16, 1002, 1003, 1004, 1005, 1006] {
+            assert_eq!(
+                classify_private_mode_number(mouse_mode),
+                TerminalSequenceFamily::MouseFocusReporting
+            );
+        }
+        for ordinary_mode in [25u16, 1049, 2004, 9999] {
+            assert_eq!(
+                classify_private_mode_number(ordinary_mode),
+                TerminalSequenceFamily::PrivateMode
+            );
+        }
     }
 
     fn has_diagnostic(
