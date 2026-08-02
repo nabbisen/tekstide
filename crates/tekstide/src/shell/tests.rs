@@ -504,7 +504,21 @@ fn is_scan_exempt(path: &Path) -> bool {
         // `.label()` in prose describing what it must never call in
         // real rendering code -- exempt for the same reason `tests.rs`
         // is: it talks about the shape, it does not render it.
-        Some("theme.rs") | Some("tests.rs") | Some("enforcement.rs")
+        //
+        // `terminal.rs` (RFC-017 PR-017-C, flagged for review rather
+        // than assumed correct): the colour this scan otherwise forbids
+        // is the terminal grid's *own*, PTY-determined ANSI colour --
+        // RFC-016's grid exception ("the terminal grid itself renders
+        // untrusted bytes unescaped... the ONLY place this exception
+        // applies"). That colour cannot come from `state.theme`: it is
+        // per-cell data chosen by whatever program is writing to the
+        // PTY, not a chrome role this crate's theme defines. This is
+        // not the same carve-out as `theme.rs` (which defines the raw
+        // palette chrome draws from) -- it is the other legitimate case
+        // this scan's own module doc anticipates: a new file that
+        // genuinely needs a literal, raised here rather than silently
+        // exempted.
+        Some("theme.rs") | Some("tests.rs") | Some("enforcement.rs") | Some("terminal.rs")
     )
 }
 

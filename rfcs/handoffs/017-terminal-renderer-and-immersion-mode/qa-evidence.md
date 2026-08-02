@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B (filter promotion) implemented 2026-08-01, pending review"
+status: "Accepted 2026-08-01 — PR-017-B (filter promotion) implemented 2026-08-01; PR-017-C (terminal pane rendering) implemented 2026-08-02, pending review"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -82,7 +82,88 @@ Per `pr-017-b-filter-promotion.md`'s own scope: it does not fix or wire anything
 
 ## PR-017-C — Terminal pane rendering
 
-Pending implementation.
+`crates/tekstide/src/surface/terminal.rs` gains `TerminalPane`: a PTY-backed pane rendering the emulator grid under RFC-015's surface contract (`pub fn view<'a, Message: 'a>(pane: &TerminalPane, font_size: f32) -> Element<'a, Message>`, the same shape `surface::board::view` uses). No input yet — `TerminalPane` exposes no public method that writes to the PTY; only `#[cfg(test)]` code does, the same way `shell::tests`'s fixtures construct state a real user action would otherwise produce. `filter::SecurityFilter` (PR-017-B) gets its first production caller here; `#[allow(dead_code)]` was removed from the `filter` module declaration accordingly (`clippy -D warnings` confirms nothing is unused now).
+
+An improvement over the RFC-014 spike's own `terminal_pane.rs` template, found before writing any code: `alacritty_terminal::event::VoidListener` is a real, already-public, no-op `EventListener` in `alacritty_terminal` 0.26 itself (`event.rs:108-110`) — used directly, rather than reimplementing the spike's private `NullListener` type.
+
+### P1 — Single ingress, re-enumerated against production code
+
+Response 144/146-147 named this slice's obligation explicitly: PR-017-B's own enumeration covered a crate whose only `Term`/`Processor` construction was a test harness — a true statement about a system with no production caller, not a system-wide guarantee. This is that re-enumeration:
+
+```
+$ grep -rn "Term::new\|Processor::new\|Processor::<" crates/tekstide/src | grep -v "surface/terminal/tests.rs"
+crates/tekstide/src/surface/terminal.rs:139:            processor: Processor::new(),
+crates/tekstide/src/surface/terminal.rs:140:            term: Term::new(pane_config(), &PaneSize, VoidListener),
+crates/tekstide/src/surface/terminal/filter/tests.rs:65:    Term::new(Config::default(), &SIZE, RecordingListener::default())
+crates/tekstide/src/surface/terminal/filter/tests.rs:73:    let mut processor = Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new();
+
+$ grep -rn "\.advance(" crates/tekstide/src | grep -v "surface/terminal/tests.rs"
+crates/tekstide/src/surface/terminal.rs:163:        self.processor.advance(&mut filter, &bytes);
+crates/tekstide/src/surface/terminal/filter/tests.rs:79:        processor.advance(&mut filter, chunk);
+
+$ grep -rn "grid_mut" crates/tekstide/src
+(no matches outside doc-comment prose in terminal.rs/filter.rs/filter/tests.rs explaining why it must not be called)
+
+$ cargo tree -p tekstide-core --edges normal | grep -ciE 'vte|alacritty'
+0
+```
+
+**Exactly one production `Term`/`Processor` construction site and exactly one production `.advance()` call**, both in `TerminalPane::launch`/`TerminalPane::poll` (`terminal.rs:139-140`, `:163`), and the `.advance()` call always passes through `SecurityFilter::new(&mut self.term)` first — never a second, unfiltered path to `self.term`. `tekstide-core` still carries zero `vte`/`alacritty_terminal` dependency.
+
+**Ablated at the real call site, not just enumerated.** Temporarily changed `poll()` to call `self.processor.advance(&mut self.term, &bytes)` directly, bypassing `SecurityFilter` entirely — simulating exactly the regression P1's re-enumeration exists to catch (a second, unfiltered path this crate's own production code takes).
+
+- First attempt at a distinguishing test used OSC 0 (set title) as the disallowed sequence sent through a real, launched pane's real PTY. It passed even with the filter bypassed — a **"test that cannot fail," caught before being trusted**: `alacritty_terminal::Term::set_title` stores the title in a private field with no grid effect either way, so blocking it can never be told apart from bypassing the filter by inspecting the rendered grid alone. Discarded rather than kept as false coverage.
+- Redesigned around CSI `?1049h` (DECSET, switch to the alternate screen buffer) instead: forwarding it genuinely swaps which grid `renderable_content()` reads from, a real, observable difference. Sent via a real `printf` executed inside the launched shell (not written directly to the PTY master as raw bytes — canonical-mode local echo reflects raw input back in `^X` caret notation (`ECHOCTL`), not as real control bytes, so a direct write would never actually reach `Processor::advance` as a genuine CSI sequence in either the filtered or bypassed case; a `printf`'s stdout is real process output, not echoed input).
+- With the filter bypassed: the pre-alt-screen marker (`PRIMARY_SCREEN_017C`) disappeared from the rendered grid — confirming the ablation actually changes the outcome. Reverted; the marker is present again with the filter restored.
+
+### P2 — No side channels
+
+`Term::grid_mut()` is not called anywhere in production code (confirmed by the enumeration above); the only non-byte input `TerminalPane`'s own `Term` receives is its fixed, construction-time `PaneSize` (80×24) — not a live resize path (RFC-017 PR-017-E's job). `TerminalPane` does nothing with `SecurityFilter::blocked`'s contents beyond letting the value drop at the end of each `poll()` call — no logging, no forwarding, no side effect of any kind for a blocked family's payload.
+
+### Bounded scrollback
+
+`SCROLLBACK_LINES = 2_000`, well under `alacritty_terminal`'s own 10,000-line default, set explicitly via `Config { scrolling_history: SCROLLBACK_LINES, ..Config::default() }` rather than left at the library default.
+
+**Tested under sustained output** (`bounded_scrollback_holds_under_sustained_output`): two `Term`s, one configured at `SCROLLBACK_LINES`, one at double that, both fed the same `SCROLLBACK_LINES * 2 + ROWS + 500` lines (deliberately more than *either* configured bound, not just the smaller one — feeding only enough to exceed the smaller bound would let the larger `Term` merely reflect its natural, unclamped scroll count, passing the "doubling the bound doubles the retained total" assertion below for the wrong reason). Result: the narrow `Term` holds exactly `ROWS + SCROLLBACK_LINES` total lines; the wide one holds exactly `ROWS + SCROLLBACK_LINES * 2` — proving the cap tracks the configured bound, not an incidental number both `Term`s would hit regardless.
+
+**Ablated**: temporarily reverted `pane_config()` to `Config::default()` (the library's unbounded-by-comparison 10,000-line default). The test failed immediately: `left: 4525, right: 2024` — confirming the assertion genuinely depends on the explicit bound, not a coincidence of the test's own line count. Reverted.
+
+### Rendering fidelity
+
+`renders_full_grid_plus_cursor_snapshot_for_known_output`: feeds known bytes (plain text plus one SGR-coloured line) directly to a bare `Term`/`Processor` (no PTY — this test is about `styled_rows`'s own correctness, not the PTY plumbing, which the real-PTY tests below cover separately) and asserts the **entire 24-row grid, plus cursor position**, against a pristine baseline — not marker presence on one line, carrying forward PR-017-B's own corpus standard as the house standard the review gate named. Every unwritten cell is a real, present blank cell (space character, default foreground) rather than absent, since the grid is always `COLS` wide; the baseline reflects that directly rather than assuming rows end where written text does.
+
+**Ablated**: temporarily changed the ANSI green resolution (`resolve_color`) from `[0.0, 0.75, 0.0]` to `[0.0, 0.80, 0.0]`. The snapshot test failed, diffing the exact row and channel that changed. Reverted.
+
+### Real-PTY end-to-end tests
+
+- `a_launched_pane_renders_real_pty_output_end_to_end`: launches a real `/bin/sh` via `TerminalPane::launch`, writes a `printf` command through a `#[cfg(test)]`-only input path, polls until the marker appears in the rendered grid. Proves the accept path works end-to-end through the real production `poll()` call site, not just PR-017-B's own test-harness corpus.
+- `a_launched_pane_blocks_a_disallowed_sequence_at_the_real_call_site`: the P1 ablation target above, kept as a permanent regression test.
+
+### Gates
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (492 `tekstide-core` — unchanged + 88 `tekstide` — up from 84, 4 net new — + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures), `git diff --check` — all passed.
+
+### A necessary scan-policy carve-out, flagged rather than silently added
+
+`shell::tests::no_raw_color_construction_anywhere_in_the_crate` (RFC-015's own mechanical scan: every colour must come from `state.theme`) initially failed against `terminal.rs`'s `Color::from_rgb(...)` call in `view`. Added `terminal.rs` to `is_scan_exempt`'s match arm in `crates/tekstide/src/shell/tests.rs`, with the reasoning recorded in that file rather than only here: the colour the scan otherwise forbids is the terminal grid's *own*, PTY-determined ANSI colour (RFC-016's grid exception — untrusted bytes render as data, unescaped, the one place that exception applies), not a chrome role `state.theme` defines. Distinct from `theme.rs`'s existing exemption (which defines the palette chrome draws *from*); this is the scan's own module doc anticipating "a new file that genuinely needs a literal" rather than being silently exempted. Flagged here for the reviewer to confirm, not assumed correct unilaterally.
+
+### Screenshot evidence, real PTY session
+
+Captured with the owner's explicit approval (`AskUserQuestion`), per response 127's standing convention: `env -u WAYLAND_DISPLAY TEKSTIDE_TERMINAL_DEMO=1 ./target/debug/tekstide <scratch-project-path>`, `xdotool search --name Tekstide`, `xdotool windowfocus --sync <id>`, `xdotool key --clearmodifiers ctrl+alt+m` to toggle Terminal Mode, screenshotted via `niri msg action screenshot-window --id <niri-id> --path <file>` (`rfcs/handoffs/017-terminal-renderer-and-immersion-mode/evidence/pr-017-c/`):
+
+- `00-initial-content-mode.png` — Content Mode's placeholder, before any toggle.
+- `01-terminal-mode-initial-shell.png` — Terminal Mode after the toggle: a real `/bin/sh` prompt (`tekstide$`) rendered through `TerminalPane::view`, launched via `TEKSTIDE_TERMINAL_DEMO`'s scratch, temp-dir shell (matching `TerminalPane::launch`'s own test/spike precedent) — **not** wired to the active project's own terminal session (that wiring is PR-017-D/PR-017-E's job). The chrome-level focus border (blue, 2px) remains on the outer container; only the inner placeholder text was substituted.
+- `02-back-to-content-mode.png` — toggled back; matches `00`'s layout, confirming the round-trip and that the sidebar's focus marker (`"> "` restored on the main-area label) is unaffected by the pane's presence. (A first attempt at this second toggle silently failed to deliver — confirmed via `md5sum` showing `02` byte-identical to `01` — the same synthetic-input reliability finding PR-015-E recorded; a retry with a fresh `windowfocus --sync` succeeded.)
+
+**What this proves**: a real, filtered PTY session renders as a genuine RFC-015 surface, toggling correctly with the existing mode-switch command, without touching chrome. **What this does not prove**: trusted-UI separation or spoofing resistance (RFC-018's job, not claimed here) — nor does the demo pane exercise real project-terminal session lifecycle, which is unrelated to and unblocked by this evidence.
+
+### Known limitation, disclosed rather than fixed silently
+
+`terminal_demo_pane`'s scratch temp directory (`$TMPDIR/tekstide-terminal-demo-<pid>`) is not cleaned up on exit — matching the RFC-014 spike's own `TerminalPane::launch` precedent (also uncleaned), and low-stakes for a diagnostic, env-gated path only ever run manually. Not fixed here since this demo path is not shipped, real user-facing behavior.
+
+### Deferred, per the shared Surface Checklist
+
+`TerminalPanePolicy`/`TerminalLayoutClass`/`visible_terminal_limit`, real font-metrics/DPI-driven split sizing, colour-independent session-state distinction, and the hidden-session grid-state decision are unchanged from `task-breakdown-pr-plan.md`'s own scoping — all four are PR-017-E's job ("Immersion mode, split policy, session bar"), not this slice's. This slice's pane is fixed at 80×24 and is the only terminal surface in the application; there is no split or session bar yet for those items to apply to.
 
 ## PR-017-D — Input
 

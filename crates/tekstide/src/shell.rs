@@ -140,6 +140,9 @@ pub struct State {
     /// RFC-015 PR-015-F: the typing-measurement surface's live content.
     /// Empty unless actually measuring `Typing`.
     typing_doc: String,
+    /// RFC-017 PR-017-C: `None` unless `TEKSTIDE_TERMINAL_DEMO` is set --
+    /// see [`terminal_demo_pane`].
+    terminal_demo: Option<crate::surface::terminal::TerminalPane>,
 }
 
 impl State {
@@ -167,6 +170,7 @@ impl State {
             modal,
             measurement,
             typing_doc,
+            terminal_demo: terminal_demo_pane(),
         }
     }
 
@@ -222,6 +226,9 @@ pub enum Message {
     /// the real `AppCommand::ToggleActiveProjectMode` instead of
     /// appending to a synthetic document.
     MeasuredModeSwitch(std::time::Instant),
+    /// RFC-017 PR-017-C: periodic poll for `state.terminal_demo` -- see
+    /// [`terminal_demo_pane`] and [`terminal_demo_subscription`].
+    TerminalDemoTick,
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -293,8 +300,47 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 .app_shell
                 .dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
         }
+        Message::TerminalDemoTick => {
+            if let Some(pane) = state.terminal_demo.as_mut() {
+                pane.poll();
+            }
+        }
     }
     Task::none()
+}
+
+/// RFC-017 PR-017-C: launches a real, filtered PTY session for Terminal
+/// Mode's main area to render, gated behind `TEKSTIDE_TERMINAL_DEMO` --
+/// the same env-gated-demo convention as `TEKSTIDE_LAYER_DEMO`/
+/// `TEKSTIDE_MEASURE_CRITERION`. The launched shell is a scratch,
+/// temp-dir session (matching `TerminalPane::launch`'s own test/spike
+/// precedent), never wired to any real project's actual terminal --
+/// real project-terminal session management, and the input this demo
+/// deliberately has none of, are PR-017-D/PR-017-E's job, not this
+/// slice's. Returns `None` (silently -- this is a diagnostic path, not
+/// a user-facing feature yet) if the env var is unset or the launch
+/// fails.
+fn terminal_demo_pane() -> Option<crate::surface::terminal::TerminalPane> {
+    if std::env::var("TEKSTIDE_TERMINAL_DEMO").is_err() {
+        return None;
+    }
+    let root = std::env::temp_dir().join(format!("tekstide-terminal-demo-{}", std::process::id()));
+    std::fs::create_dir_all(&root).ok()?;
+    crate::surface::terminal::TerminalPane::launch(
+        tekstide_core::project::ProjectId::new_uuid(),
+        "terminal demo",
+        root,
+        std::path::PathBuf::from("/bin/sh"),
+    )
+    .ok()
+}
+
+/// Periodic poll driving [`State::terminal_demo`] -- only ever added to
+/// the real subscription tree when a demo pane exists (see
+/// [`subscription`]), so this changes nothing about `subscription`'s
+/// reviewed non-modal/modal routing for any normal run.
+fn terminal_demo_subscription() -> Subscription<Message> {
+    iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::TerminalDemoTick)
 }
 
 /// `OpenProjectBoard` and, since PR-015-E, `ToggleProjectMode` map to
@@ -380,11 +426,21 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         return measurement_subscription(measurement.criterion());
     }
 
-    match input::SubscriptionMode::for_modal(&state.modal) {
+    let routing = match input::SubscriptionMode::for_modal(&state.modal) {
         input::SubscriptionMode::NonModal(proof) => {
             non_modal_subscription(proof, state.focus).map(Message::Input)
         }
         input::SubscriptionMode::Modal => modal_subscription(),
+    };
+
+    // RFC-017 PR-017-C: only added when a demo pane exists (the env var
+    // was set), so this changes nothing about the routing above for any
+    // normal run -- the same "checked but usually absent" shape the
+    // measurement branch above already uses.
+    if state.terminal_demo.is_some() {
+        Subscription::batch([routing, terminal_demo_subscription()])
+    } else {
+        routing
     }
 }
 
@@ -700,14 +756,27 @@ fn sidebar_view(state: &State) -> Element<'_, Message> {
 
 fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message> {
     let focused = state.focus == FocusZone::MainArea;
-    container(
-        column![text(main_area_label(state, mode)).size(state.theme.font_size_body()),].spacing(6),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .padding(16)
-    .style(zone_style(state.theme, focused))
-    .into()
+    // RFC-017 PR-017-C: `terminal_demo_pane` is `None` for every normal
+    // run (`TEKSTIDE_TERMINAL_DEMO` unset), so this substitutes nothing
+    // for the reviewed placeholder outside the env-gated demo path --
+    // the same shape `state.is_measuring_typing()`'s substitution in
+    // `content_area` already uses. The pane renders the emulator grid
+    // as data (RFC-016's exception); it is not chrome and proves nothing
+    // about trusted-UI separation (RFC-018's job).
+    let content: Element<'_, Message> = match (mode, state.terminal_demo.as_ref()) {
+        (Some(ProjectMode::TerminalImmersion), Some(pane)) => {
+            crate::surface::terminal::view(pane, state.theme.font_size_body())
+        }
+        _ => column![text(main_area_label(state, mode)).size(state.theme.font_size_body())]
+            .spacing(6)
+            .into(),
+    };
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(16)
+        .style(zone_style(state.theme, focused))
+        .into()
 }
 
 /// RFC-015 PR-015-F: renders the tail of `state.typing_doc` in a
