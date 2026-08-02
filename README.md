@@ -107,11 +107,14 @@ The shell is keyboard-navigable by design. These bindings exist today
 | `Ctrl+Alt+P` | Open the Project Board |
 | `Ctrl+Alt+M` | Toggle Content / Terminal mode for the active project |
 | `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |
-| `Esc` | Dismiss an open modal |
-| `Enter` | Activate the focused modal button |
 
 `Ctrl+Shift+P` is reserved for a command palette that does not exist yet — it is
 bound in the keybinding policy but currently does nothing.
+
+`Esc` (dismiss) and `Enter` (activate) work on the shell's modal layer, but nothing
+in the shipped application can currently open one — the only modal today is
+developer-only scaffolding gated behind an environment variable. Real dialogs
+arrive with RFC-022; these bindings currently do nothing a user can reach.
 
 ## Local Data and Privacy
 
