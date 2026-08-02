@@ -46,8 +46,10 @@ also a real desktop GUI application shell with mode switching. It includes:
 It is not yet the full AI CLI workbench. There is no rendered terminal surface, no
 editor, no rendered paste/approval/trust dialogs, no adapter-spawn pathway that would
 make command approval reachable, no Git-based change detection, file watcher, or
-overwrite-confirmation UI, and no cross-platform evidence beyond Linux. Command
-approval (below) remains implemented but unreachable.
+overwrite-confirmation UI, and no cross-platform evidence beyond Linux. There is
+**no screen-reader support** — not limited, not planned, absent for the life of the
+`iced` substrate decision (RFC-014). Command approval (below) remains implemented but
+unreachable.
 
 Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked
 root/symlink access, and audit-store recovery outcomes. Paste, restricted-feature,
@@ -74,15 +76,61 @@ run.
 
 ## Quick Start
 
+Install from crates.io and run:
+
 ```sh
-cargo run -p tekstide
+cargo install tekstide
+tekstide
 ```
 
 Open one or more local project paths from the command line:
 
 ```sh
+tekstide /path/to/project
+```
+
+### Building from a checkout (contributors)
+
+```sh
+cargo run -p tekstide
 cargo run -p tekstide -- /path/to/project
 ```
+
+## Keyboard Reference
+
+The shell is keyboard-navigable by design. These bindings exist today
+(`crates/tekstide-core/src/navigation.rs`'s `KeybindingPolicy::linux_mvp()` and
+`crates/tekstide/src/input.rs`):
+
+| Binding | Action |
+| --- | --- |
+| `Ctrl+Alt+P` | Open the Project Board |
+| `Ctrl+Alt+M` | Toggle Content / Terminal mode for the active project |
+| `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |
+| `Esc` | Dismiss an open modal |
+| `Enter` | Activate the focused modal button |
+
+`Ctrl+Shift+P` is reserved for a command palette that does not exist yet — it is
+bound in the keybinding policy but currently does nothing.
+
+## Local Data and Privacy
+
+Tekstide is local-first: it does not send project data anywhere. Today, the only
+local state the desktop application creates is the **recent-projects list**, at
+`$XDG_STATE_HOME/tekstide/recent-projects.json`
+(`~/.local/state/tekstide/recent-projects.json` if `XDG_STATE_HOME` is unset) —
+the paths of projects you have opened, used to restore the Project Board across
+sessions. There is no in-app command to clear it yet; delete the file to reset it.
+
+RFC-013's durable audit store and RFC-011's transcript retention are implemented
+and tested, but **neither is wired into the desktop application yet** — running
+`tekstide` today does not create an audit database or retain any transcripts.
+See [`rfcs/done/013-durable-audit-store-and-local-data-policy.md`](rfcs/done/013-durable-audit-store-and-local-data-policy.md)
+and [`rfcs/done/011-transcript-retention-and-local-data-policy.md`](rfcs/done/011-transcript-retention-and-local-data-policy.md)
+for the retention and purge policy that applies once they are.
+
+For a consolidated list of what else is missing or deferred, see
+[`rfcs/future-work.md`](rfcs/future-work.md).
 
 ## RFCs
 
