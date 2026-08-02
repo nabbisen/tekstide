@@ -1,6 +1,17 @@
 //! PR-014-C: RFC-009 accepted-sequence policy interposed in front of
 //! `alacritty_terminal`'s emulator, at the `vte::ansi::Handler` boundary.
 //!
+//! **Superseded** by `crates/tekstide/src/surface/terminal/filter.rs`
+//! (RFC-017 PR-017-B, commit `d99bccb`). This spike never ships
+//! (`publish = false`), so this is not a production risk -- it is
+//! someone reading this file after the product version exists and
+//! taking it for current. The product version differs in one load-
+//! bearing way: it delegates every accept/reject decision to
+//! `tekstide_core::runtime::terminal::security::TerminalSequencePolicy`
+//! at the call site, rather than hardcoding the accepted set here. This
+//! file stays until PR-017-E deletes the spike crate (RFC-014
+//! §"When the spike crate is deleted").
+//!
 //! # Why this boundary, not the byte/`Perform` boundary
 //!
 //! `alacritty_terminal` 0.26 depends directly on `vte` 0.15's bundled `ansi`
