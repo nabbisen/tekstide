@@ -180,9 +180,18 @@ impl State {
         // (PR-017-F), and this measurement path must not exercise that
         // unrelated I/O while timing, the same non-contamination
         // principle every other criterion already follows.
+        //
+        // `TEKSTIDE_TERMINAL_FLOOD_DEMO` (response 155 item 5) launches
+        // the exact same pane-plus-flood scenario **without** enabling
+        // measurement -- the control the non-contamination proof needs:
+        // identical workload, instrumentation the only difference,
+        // rather than comparing against a genuinely idle baseline that
+        // cannot separate the two. Same disclosed, checked-but-usually-
+        // absent shape every other demo/measurement env var here uses.
         let mut audit_health = tekstide_core::audit::AuditHealth::default();
         let terminal_demo = if measurement.as_ref().map(Measurement::criterion)
             == Some(measurement::Criterion::TerminalFlood)
+            || std::env::var("TEKSTIDE_TERMINAL_FLOOD_DEMO").is_ok()
         {
             launch_measurement_terminal_pane(&mut app_shell)
         } else {
@@ -331,6 +340,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::MeasurementTick => {
             if state.measurement.as_ref().is_some_and(Measurement::is_done) {
+                // Response 155 item 3: printed once, right before exit,
+                // rather than left to accumulate unread -- the same "ad
+                // hoc, computed externally" evidence convention every
+                // other measurement figure here already uses (no
+                // percentile computation lives in this binary either).
+                if let Some(pane) = state.terminal_demo.first() {
+                    eprintln!(
+                        "terminal_flood dropped_bytes_total {}",
+                        pane.dropped_bytes_total()
+                    );
+                }
                 std::process::exit(0);
             }
         }
@@ -497,24 +517,43 @@ fn launch_terminal_demo_panes(
 /// precedent) backgrounds an infinite loop that only ever stops if
 /// something kills it; RFC-017's own review gate asks for "bounded
 /// background output" specifically, so this loop instead computes its
-/// own end time once and checks the wall clock each iteration,
-/// self-terminating after 30 seconds -- response 154's "to tighten"
-/// note: an earlier 120s bound was disclosed-but-avoidable margin (a
-/// stray reparented-to-init process on the owner's machine for up to
-/// two minutes past an early exit); 30s is still generous over
-/// RFC-014/RFC-015's own C2/C4 precedent (1,100 repeats at a 15ms pace
-/// finished in ~17 seconds) without ever needing this process to kill
-/// it. Backgrounded (`&`) so the shell stays interactive for the
-/// measured keystrokes written into the same pty concurrently.
+/// own end time once and checks the wall clock only every 2,000
+/// iterations, self-terminating after 30 seconds -- response 154's "to
+/// tighten" note: an earlier 120s bound was disclosed-but-avoidable
+/// margin (a stray reparented-to-init process on the owner's machine
+/// for up to two minutes past an early exit); 30s is still generous
+/// over RFC-014/RFC-015's own C2/C4 precedent (1,100 repeats at a 15ms
+/// pace finished in ~17 seconds) without ever needing this process to
+/// kill it.
+///
+/// **Response 155's own finding, fixed here: the first version checked
+/// `$(date +%s)` in the loop *condition*, so every single output line
+/// cost a `fork`+`exec` of `date`.** Measured at 121.7 KiB/s -- 173×
+/// below the same loop's throughput with the per-iteration fork
+/// removed (20.6 MiB/s, verified by the reviewer) -- never exceeding
+/// the 64KiB read cap per 5ms poll window, so no backpressure, no
+/// chunk-boundary stress: a trickle much closer to idle than to flood,
+/// under a script whose own name said otherwise. Checking the clock
+/// only every 2,000 iterations keeps the `date` cost negligible while
+/// still bounding real duration close to 30s (worst case, a few
+/// thousand extra lines past the bound before the next check; harmless
+/// -- the bound exists to avoid an indefinite process, not to be exact
+/// to the millisecond). Backgrounded (`&`) so the shell stays
+/// interactive for the measured keystrokes written into the same pty
+/// concurrently.
 const FLOOD_SCRIPT: &str = "i=0; end=$(( $(date +%s) + 30 )); \
-    while [ \"$(date +%s)\" -lt \"$end\" ]; do \
+    while :; do \
     printf 'tekstide-flood-%08d-filler-filler-filler-filler-filler\\n' \"$i\"; \
-    i=$((i+1)); done &\n";
+    i=$((i+1)); \
+    [ $((i % 2000)) -eq 0 ] && [ \"$(date +%s)\" -ge \"$end\" ] && break; \
+    done &\n";
 
 /// RFC-017 PR-017-G: launches exactly one live, filtered PTY terminal
-/// pane for the `TerminalFlood` criterion, registers it with
-/// `tekstide-core` and switches the active project into
-/// `ProjectMode::TerminalImmersion` (the real `AppCommand`, not a
+/// pane for the `TerminalFlood` criterion (or for
+/// `TEKSTIDE_TERMINAL_FLOOD_DEMO`'s non-contamination control, the same
+/// scenario with measurement deliberately absent -- see `State::new`),
+/// registers it with `tekstide-core` and switches the active project
+/// into `ProjectMode::TerminalImmersion` (the real `AppCommand`, not a
 /// shell-local shortcut -- `ProjectSession::new` always starts in
 /// `Content`, so dispatching `ToggleActiveProjectMode` once is enough)
 /// so the pane genuinely renders every `view()` cycle exactly as a real
@@ -524,16 +563,16 @@ const FLOOD_SCRIPT: &str = "i=0; end=$(( $(date +%s) + 30 )); \
 /// Deliberately separate from [`launch_terminal_demo_panes`] (see
 /// `State::new`'s call site for why) and requires an active project --
 /// **panics** rather than silently measuring nothing if one is missing,
-/// since a `TerminalFlood` run with no real pane to write into would
-/// otherwise produce samples that look real but measure a no-op; the
-/// operator error (forgetting the CLI project-path argument) should be
-/// loud, not a quietly meaningless log file.
+/// since running this scenario with no real pane to write into would
+/// otherwise produce samples (or a control run) that look real but
+/// measure a no-op; the operator error (forgetting the CLI project-path
+/// argument) should be loud, not a quietly meaningless log file.
 fn launch_measurement_terminal_pane(
     app_shell: &mut ApplicationShell,
 ) -> Vec<crate::surface::terminal::TerminalPane> {
     let project_id = app_shell.state().active_project_id().cloned().expect(
-        "TEKSTIDE_MEASURE_CRITERION=terminal_flood requires an active project -- pass a \
-             project path on the CLI",
+        "TEKSTIDE_MEASURE_CRITERION=terminal_flood / TEKSTIDE_TERMINAL_FLOOD_DEMO requires an \
+         active project -- pass a project path on the CLI",
     );
     let root = std::env::temp_dir().join(format!(
         "tekstide-terminal-flood-measure-{}",

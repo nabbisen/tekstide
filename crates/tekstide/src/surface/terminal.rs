@@ -81,7 +81,7 @@ use tekstide_core::domain::TerminalSession;
 use tekstide_core::project::{ProjectId, ProjectSession};
 use tekstide_core::runtime::terminal::{
     LinuxTerminalRuntime, TerminalDimensions, TerminalLaunchError, TerminalLaunchSpec,
-    TerminalRuntimeHandle,
+    TerminalRuntimeEvent, TerminalRuntimeHandle,
 };
 
 use filter::SecurityFilter;
@@ -137,6 +137,12 @@ pub struct TerminalPane {
     handle: TerminalRuntimeHandle,
     processor: Processor<StdSyncHandler>,
     term: Term<VoidListener>,
+    /// RFC-017 PR-017-G (response 155 item 3): cumulative bytes
+    /// discarded across every `poll()` call because a single bounded
+    /// read exceeded its 64KiB cap -- surfaced for the flood
+    /// measurement's own evidence ("dropped bytes are a result, not a
+    /// footnote"), not consumed by any production decision.
+    dropped_bytes_total: u64,
 }
 
 impl TerminalPane {
@@ -178,6 +184,7 @@ impl TerminalPane {
                 handle,
                 processor: Processor::new(),
                 term: Term::new(pane_config(), &PaneSize, VoidListener),
+                dropped_bytes_total: 0,
             },
             session,
         ))
@@ -192,19 +199,36 @@ impl TerminalPane {
     /// visible slot (see the module doc's hidden-session decision) --
     /// callers must not skip `poll()` for a hidden pane.
     pub fn poll(&mut self) {
-        let Ok((bytes, _event)) = self.runtime.read_available_bounded_for(
+        let Ok((bytes, event)) = self.runtime.read_available_bounded_for(
             &self.handle,
             Duration::from_millis(5),
             64 * 1024,
         ) else {
             return;
         };
+        // RFC-017 PR-017-G (response 155 item 3): the event this call
+        // produces alongside `bytes` names how many bytes this read
+        // discarded, if the pty had more available than the 64KiB cap --
+        // previously discarded here unread (`let Ok((bytes, _event))`).
+        // Accumulated, not acted on: nothing downstream changes because
+        // of this count today, it exists only to be reported.
+        if let TerminalRuntimeEvent::OutputBuffered { summary, .. } = &event {
+            self.dropped_bytes_total += summary.dropped_bytes as u64;
+        }
         if bytes.is_empty() {
             return;
         }
 
         let mut filter = SecurityFilter::new(&mut self.term);
         self.processor.advance(&mut filter, &bytes);
+    }
+
+    /// RFC-017 PR-017-G: cumulative bytes discarded across every
+    /// `poll()` call this pane has made so far -- see the field's own
+    /// doc comment. Read by the flood measurement's evidence-gathering
+    /// only; no production caller.
+    pub fn dropped_bytes_total(&self) -> u64 {
+        self.dropped_bytes_total
     }
 
     /// This pane's real, live `TerminalId` -- what a caller compares a
