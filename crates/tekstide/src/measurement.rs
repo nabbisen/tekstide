@@ -58,27 +58,65 @@
 //! placeholder; PR-015-E is what makes it a real target.
 //!
 //! **Terminal input under flood (C3 / `NFR-PERF-004`, RFC-017 PR-017-G)
-//! reuses the same input-to-state-change half only**, not the
-//! decomposition: `Criterion::TerminalFlood`'s measurement key writes a
-//! real byte directly to a real, live `TerminalPane` (`shell.rs`'s
-//! `Message::MeasuredTerminalInput` handler) -- the same real
-//! `write_input` call a routed keystroke would eventually make,
-//! bypassing only the `TextStream`/routing-target lookup step, the same
-//! kind of bypass `ModeSwitch` already established as measuring the
-//! real cost rather than input classification. It does **not** use the
-//! view-build decomposition (`uses_input_view_decomposition` is `false`
-//! for it): writing to a pty does not itself cause a synchronous view
-//! rebuild the way pushing a character into `typing_doc` or toggling
-//! project mode does -- the grid only changes on the next, unrelated
-//! `TerminalDemoTick` poll, so a `view` sample logged against *this*
-//! message would not describe this message's own cost. The one real
-//! terminal pane this criterion measures against still renders normally
-//! in `view()` every cycle (registered with `tekstide-core`, project
-//! mode set to `TerminalImmersion`) -- that rendering, and the
-//! concurrent flood's PTY-read/VTE-processing cost inside
-//! `TerminalDemoTick`'s handler, are exactly the real, uninstrumented
-//! contention this criterion exists to observe; only `record_input`'s
-//! figure is the graded one.
+//! reuses the same input-to-state-change mechanism**, not the
+//! decomposition, but **its definition is narrower than the budget's own
+//! name suggests, and this is stated explicitly here per response 154's
+//! finding that the module doc previously explained what was skipped
+//! without ever stating what the interval spans.**
+//!
+//! **What the figure currently covers**: wall-clock time from a
+//! measurement keystroke's arrival (timestamped the instant the
+//! subscription receives it) to the completion of the real
+//! `TerminalPane::write_input` call this same message makes
+//! (`shell.rs`'s `Message::MeasuredTerminalInput` handler,
+//! `record_input` called *after* the write, response 154 Finding 1 --
+//! recording before it, as an earlier revision of this handler did,
+//! would have measured only `iced`'s event-to-update dispatch latency,
+//! silently excluding the write). That is: **dispatch plus one pty
+//! `write(2)`.** It does **not** cover the PTY round-trip, the poll
+//! pickup, the VTE parse, or the view rebuild -- none of which happen
+//! synchronously inside this message's handler.
+//!
+//! **This is not yet `NFR-PERF-004` as that requirement is actually
+//! understood** ("terminal input latency" means keystroke-to-echo-
+//! visible, which is what a p95 ≤ 16ms -- one 60Hz frame -- budget's
+//! magnitude is about). Echo visibility depends on
+//! [`crate::shell::terminal_demo_subscription`]'s 50ms poll tick, the
+//! only place PTY bytes reach the emulator grid; a keystroke's echo
+//! waits for the next tick, uncorrelated with when the key arrived, so
+//! poll-wait alone contributes an expected p95 of ~47.5ms (0.95 × 50ms)
+//! before any pty, VTE, layout, or paint cost is added -- roughly three
+//! times the entire budget, arithmetically, independent of any live run.
+//! **This is under analysis (response 154), not yet resolved**: the
+//! options (shorten the tick and pay a permanent idle-CPU cost on every
+//! terminal pane forever, move to a readiness-driven wake that removes
+//! the tradeoff instead of tuning it, or record `NFR-PERF-004` as
+//! honestly not met under the current architecture) are the owner's
+//! choice, not this module's to silently pick by tuning a constant until
+//! a number passes.
+//!
+//! It does **not** use the view-build decomposition
+//! (`uses_input_view_decomposition` is `false` for it): writing to a pty
+//! does not itself cause a synchronous view rebuild the way pushing a
+//! character into `typing_doc` or toggling project mode does -- the
+//! grid only changes on the next, unrelated `TerminalDemoTick` poll, so
+//! a `view` sample logged against *this* message would not describe
+//! this message's own cost. **This reasoning holds only for the
+//! definition above**; if the definition is later widened to span poll
+//! pickup, the tick's grid update and view rebuild stop being
+//! "unrelated" and become the dominant term being measured, and this
+//! decomposition question would need revisiting then, not now.
+//!
+//! The one real terminal pane this criterion measures against still
+//! renders normally in `view()` every cycle (registered with
+//! `tekstide-core`, project mode set to `TerminalImmersion`) -- that
+//! rendering, and the concurrent flood's PTY-read/VTE-processing cost
+//! inside `TerminalDemoTick`'s handler, are real, uninstrumented
+//! contention on the same executor as this message's dispatch, and do
+//! affect the currently-graded figure even though they are not part of
+//! it -- a flood busy enough to delay `MeasuredTerminalInput`'s own
+//! dispatch would still show up as a higher `record_input` sample, via
+//! queuing, even under today's narrower definition.
 //!
 //! # Non-contamination when inactive
 //!

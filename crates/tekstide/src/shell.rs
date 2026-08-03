@@ -357,20 +357,26 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 .dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
         }
         Message::MeasuredTerminalInput(sent_at) => {
-            if let Some(measurement) = state.measurement.as_mut() {
-                measurement.record_input(sent_at);
-            }
-            // The real `write_input` call a routed keystroke would
-            // eventually make -- bypassing only the `TextStream`/
-            // routing-target lookup step, the same kind of bypass
-            // `MeasuredModeSwitch` already established. `launch_measurement_terminal_pane`
-            // guarantees exactly one pane exists whenever this
-            // criterion is active; a measurement run somehow missing
-            // one records real, if uninformative, samples against
-            // nothing rather than panicking, matching `MeasuredModeSwitch`'s
-            // own "no active project" fallback.
+            // Response 154 Finding 1: `record_input` must come *after*
+            // `write_input`, not before -- the interval it computes is
+            // supposed to span this message's own work. Recording first
+            // measured only iced's event-to-update dispatch latency (the
+            // same quantity `Typing` already measures), with the write
+            // itself silently excluded. The real `write_input` call is
+            // the one a routed keystroke would eventually make --
+            // bypassing only the `TextStream`/routing-target lookup
+            // step, the same kind of bypass `MeasuredModeSwitch` already
+            // established. `launch_measurement_terminal_pane` guarantees
+            // exactly one pane exists whenever this criterion is active;
+            // a measurement run somehow missing one records real, if
+            // uninformative, samples against nothing rather than
+            // panicking, matching `MeasuredModeSwitch`'s own "no active
+            // project" fallback.
             if let Some(pane) = state.terminal_demo.first_mut() {
                 pane.write_input(measurement::MEASURED_KEY_CHARACTER.as_bytes());
+            }
+            if let Some(measurement) = state.measurement.as_mut() {
+                measurement.record_input(sent_at);
             }
         }
         Message::TerminalDemoTick => {
@@ -492,13 +498,15 @@ fn launch_terminal_demo_panes(
 /// something kills it; RFC-017's own review gate asks for "bounded
 /// background output" specifically, so this loop instead computes its
 /// own end time once and checks the wall clock each iteration,
-/// self-terminating after 120 seconds -- generous enough to outlast any
-/// real measurement run (RFC-014/RFC-015's own C2/C4 precedent sent
-/// 1,100 repeats at a 15ms pace in ~17 seconds) without ever needing
-/// this process to kill it. Backgrounded (`&`) so the shell stays
-/// interactive for the measured keystrokes written into the same pty
-/// concurrently.
-const FLOOD_SCRIPT: &str = "i=0; end=$(( $(date +%s) + 120 )); \
+/// self-terminating after 30 seconds -- response 154's "to tighten"
+/// note: an earlier 120s bound was disclosed-but-avoidable margin (a
+/// stray reparented-to-init process on the owner's machine for up to
+/// two minutes past an early exit); 30s is still generous over
+/// RFC-014/RFC-015's own C2/C4 precedent (1,100 repeats at a 15ms pace
+/// finished in ~17 seconds) without ever needing this process to kill
+/// it. Backgrounded (`&`) so the shell stays interactive for the
+/// measured keystrokes written into the same pty concurrently.
+const FLOOD_SCRIPT: &str = "i=0; end=$(( $(date +%s) + 30 )); \
     while [ \"$(date +%s)\" -lt \"$end\" ]; do \
     printf 'tekstide-flood-%08d-filler-filler-filler-filler-filler\\n' \"$i\"; \
     i=$((i+1)); done &\n";
