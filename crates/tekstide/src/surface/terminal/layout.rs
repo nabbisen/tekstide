@@ -66,13 +66,23 @@ mod tests {
         )
     }
 
+    /// One pane's width, at the exact real per-pane padding
+    /// (`PANE_PADDING_PX`, both sides) this module's own formula
+    /// subtracts, plus `extra_margin_px` slack -- referencing the real
+    /// constant here, not a re-derived literal, is what response 150
+    /// flagged: a test asserting against its own hand-copied number
+    /// keeps passing if `PANE_PADDING_PX` ever changes.
+    fn one_pane_width(glyph_advance: f32, extra_margin_px: f32) -> f32 {
+        super::super::COLS as f32 * glyph_advance + 2.0 * PANE_PADDING_PX + extra_margin_px
+    }
+
     #[test]
     fn a_generously_wide_window_is_classified_wide() {
         let glyph_advance = real_glyph_advance();
-        // Comfortably wider than 2x(COLS columns + padding + gap) at
+        // Comfortably wider than 2x(COLS columns + padding) + gap at
         // this glyph width -- not a boundary case, a sanity check that
         // the obviously-splittable case actually splits.
-        let comfortable_width = 2.0 * (super::super::COLS as f32 * glyph_advance + 32.0) + 16.0;
+        let comfortable_width = 2.0 * one_pane_width(glyph_advance, 16.0) + PANE_GAP_PX;
         assert_eq!(
             layout_class_from_glyph_advance(comfortable_width, glyph_advance),
             TerminalLayoutClass::Wide
@@ -85,7 +95,7 @@ mod tests {
         // Enough for exactly one pane's real columns, nowhere near
         // enough for two -- the case RFC-017 explicitly says must not
         // render as a clipped two-pane split.
-        let narrow_width = super::super::COLS as f32 * glyph_advance + 32.0;
+        let narrow_width = one_pane_width(glyph_advance, 16.0);
         assert_eq!(
             layout_class_from_glyph_advance(narrow_width, glyph_advance),
             TerminalLayoutClass::Narrow
@@ -97,8 +107,7 @@ mod tests {
         let glyph_advance = real_glyph_advance();
         // Exactly enough per-pane width for super::COLS columns, both
         // panes: must classify Wide. One glyph-width less: must not.
-        let exact_columns_width =
-            2.0 * (super::super::COLS as f32 * glyph_advance + 2.0 * 8.0) + PANE_GAP_PX;
+        let exact_columns_width = 2.0 * one_pane_width(glyph_advance, 0.0) + PANE_GAP_PX;
         assert_eq!(
             layout_class_from_glyph_advance(exact_columns_width, glyph_advance),
             TerminalLayoutClass::Wide,
@@ -114,15 +123,21 @@ mod tests {
         );
     }
 
-    /// The real public entry point, `layout_class_for`, taking a font
-    /// size rather than a pre-measured glyph advance -- proves it
-    /// actually wires `font_metrics::monospace_glyph_advance_px` in,
-    /// not just that the glyph-advance-parameterized helper works.
+    /// **Not a directional proof that `font_size` is wired in** --
+    /// `comfortable_width` is derived from the same `glyph_advance` this
+    /// test passes to `layout_class_for`, so a `layout_class_for` that
+    /// ignored `font_size` and hardcoded a *narrower* advance would
+    /// still classify `Wide` here (response 150's finding). What this
+    /// test actually proves: `layout_class_for`'s font-size-taking
+    /// signature composes correctly end to end against a real theme
+    /// font size. The directional proof that a different `font_size`
+    /// genuinely changes the measurement lives in
+    /// `font_metrics::tests::a_larger_font_size_measures_a_wider_glyph_advance`.
     #[test]
-    fn layout_class_for_measures_from_a_real_font_size() {
+    fn layout_class_for_composes_correctly_with_a_real_font_size() {
         let font_size = crate::theme::Theme::default().font_size_body();
         let glyph_advance = super::super::font_metrics::monospace_glyph_advance_px(font_size);
-        let comfortable_width = 2.0 * (super::super::COLS as f32 * glyph_advance + 32.0) + 16.0;
+        let comfortable_width = 2.0 * one_pane_width(glyph_advance, 16.0) + PANE_GAP_PX;
         assert_eq!(
             layout_class_for(comfortable_width, font_size),
             TerminalLayoutClass::Wide

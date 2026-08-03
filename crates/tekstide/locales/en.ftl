@@ -149,3 +149,23 @@ project-board-attention = { $attention ->
     [dirty] Dirty
    *[calm] Calm
 }
+
+# RFC-017 PR-017-E: response 150 Required -- `session_bar.rs`'s entries
+# were hardcoded English (`slot_label`/`status_label`), the same shape
+# `CountDisplay::label()`/`AttentionState::label()` are banned from this
+# crate for. One key, two symbol selectors (`$slot`, `$status`) plus a
+# genuine number (`$number`) -- the same one-message-one-lookup pattern
+# `status-bar-summary`/`project-board-attention` already use, not a
+# string built by concatenating three separately-resolved lookups.
+session-bar-entry = Terminal { $number } ({ $slot ->
+    [primary] Primary
+    [secondary] Secondary
+   *[hidden] Hidden
+}) — { $status ->
+    [starting] Starting
+    [running] Running
+    [exited] Exited
+    [failed] Failed
+    [terminating] Terminating
+   *[unknown] Unknown
+}

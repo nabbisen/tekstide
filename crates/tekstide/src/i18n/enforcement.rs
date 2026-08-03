@@ -464,20 +464,23 @@ fn message_keys(ftl_text: &str) -> Vec<String> {
 }
 
 /// One value for every variable any `en.ftl` message references today
-/// (`$count`, `$route`, `$status`, `$attention`). Fluent ignores
-/// arguments a pattern does not reference, so passing all four to every
-/// key's lookup is safe and lets this test stay generic across keys
-/// rather than needing per-key argument shapes. **A future key
-/// introducing a new variable name needs an entry here too** -- if it
-/// does not get one, that key's lookup will error on the missing
+/// (`$count`, `$route`, `$status`, `$attention`, `$number`, `$slot`).
+/// Fluent ignores arguments a pattern does not reference, so passing all
+/// six to every key's lookup is safe and lets this test stay generic
+/// across keys rather than needing per-key argument shapes. **A future
+/// key introducing a new variable name needs an entry here too** -- if
+/// it does not get one, that key's lookup will error on the missing
 /// variable and this test will fail, which is the intended signal, not
-/// a false alarm.
+/// a false alarm. RFC-017 PR-017-E's `session-bar-entry` (response 150's
+/// fix) is what added `$number`/`$slot` here.
 fn generic_args() -> CatalogArgs<'static> {
     CatalogArgs::new()
         .number("count", 1u32)
         .trusted_symbol("route", "project-board")
         .trusted_symbol("status", "unknown")
         .trusted_symbol("attention", "calm")
+        .number("number", 1u32)
+        .trusted_symbol("slot", "hidden")
 }
 
 fn shipped_additional_locales() -> Vec<String> {

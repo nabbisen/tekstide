@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D reviewed and approved (responses 144-149); PR-017-E (immersion mode, split policy, session bar) implemented 2026-08-03, pending review"
+status: "Accepted 2026-08-01 — PR-017-B/C/D reviewed and approved (responses 144-149); PR-017-E implemented 2026-08-03, approved with one required item (response 150), fixed and re-gated same day"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -290,6 +290,30 @@ The demo launches three real sessions (`launch_terminal_demo_panes`): `Primary`,
 - `01-wide-split-two-panes.png` — same window, column maximized (`niri msg action maximize-column`, 2101px), same three-entry session bar: **two independent, real shell prompts render side by side** (`Primary` left, `Secondary` right) -- the real, font-metrics-driven `Wide` classification triggered by a genuine width change, not simulated.
 
 **What this proves**: the split is a real function of measured width and font metrics, not a fixed layout; the session bar reflects real, registered session state including a session that is never rendered. **What this does not prove**: trusted-UI separation or spoofing resistance (RFC-018's job, unchanged); real per-project terminal *creation* UX (no keybinding/command exists to launch a terminal — the three sessions here are the demo's own construction, matching the established `TEKSTIDE_TERMINAL_DEMO` convention).
+
+### Review outcome (response 150) — Required: the session bar bypassed the i18n catalog
+
+**Approved with one required item, now fixed.** `session_bar.rs`'s `slot_label`/`status_label` and `shell.rs`'s `format!("Terminal {}", ...)` were ten hardcoded English strings in trusted chrome — the exact shape `CountDisplay::label()`/`AttentionState::label()` are banned from this crate for (response 130), in a project that ships `en.ftl`/`pl.ftl` and would show English to a Polish user in the one surface this slice added.
+
+**Fixed**: one Fluent message, `session-bar-entry` (`en.ftl`), selecting on two compile-time literal symbols (`$slot`, `$status`, resolved by `slot_symbol`/`status_symbol` -- the same division of labour `route_symbol`/`status-bar-summary` already use: the Rust side names a branch, the `.ftl` file supplies the words) plus a genuine number (`$number`, real plural-category selection available if a locale ever needs it) — not three separately-resolved lookups concatenated by Rust `format!`. `session_bar::view` now takes `&Catalog`; `SessionBarEntry::label: String` became `number: u32`.
+
+**Not added to `pl.ftl`**: matching this project's own established precedent (`pl.ftl` deliberately defines only 3 of `en.ftl`'s keys, RFC-016 §Non-Goals -- actual translation is content work), the new key resolves for Polish via the source-locale fallback chain, proven by the existing completeness scan (`every_source_locale_key_resolves_in_every_shipped_locale`) rather than assumed.
+
+**`generic_args()` (`i18n/enforcement.rs`) required an addition**, exactly as that function's own doc comment anticipates ("a future key introducing a new variable name needs an entry here too"): added `$number`/`$slot` alongside the existing `$count`/`$route`/`$status`/`$attention`. Without it, the completeness scan itself failed for the new key, catching the omission immediately rather than silently passing.
+
+**The regression test rewritten, not just re-passed**: `every_slot_and_status_has_a_distinct_textual_label` (asserting distinctness of hardcoded strings) replaced with `every_slot_and_status_combination_resolves_to_distinct_text`, asserting distinctness over `Catalog::get_with_args`'s real resolved output against the real, shipped `en.ftl` -- per the review's own point, the old test would have kept passing on the old hardcoded strings and proven nothing about whether the catalog was actually reached. A second new test, `resolved_text_contains_the_real_words_not_symbol_names`, asserts the exact resolved string including Fluent's bidi isolation marks around each placeable (`\u{2068}`/`\u{2069}`, the same `ISOLATE_START`/`ISOLATE_END` convention `shell/tests.rs` already documents) -- catches a regression to raw symbol names or an empty string, which the distinctness test alone would not.
+
+**Why no scan caught this originally, recorded per the review's explicit instruction** (not to be inferred later): `no_raw_string_literal_is_passed_to_text_anywhere_in_the_crate` requires the literal to *immediately* follow `text(`, and `text(format!(...))` with the English arriving from a helper function never matches; `no_count_display_or_attention_label_is_called_anywhere_in_the_crate` matches the literal substring `.label()`, and `slot_label(...)`/`status_label(...)` are the same shape under a name the scan does not know; `is_scan_exempt` covers colour and font size only, nothing about text. **This is a demonstrated gap in the `text(`-adjacency scan, not a theoretical one** -- broadening it is `i18n::enforcement`/PR-016-E's territory, not absorbed into this slice per the review's explicit instruction.
+
+**Two secondary fixes from the same review, applied**:
+- `layout.rs`'s test module previously re-derived the padding constant inline (`32.0`, `2.0 * 8.0`) instead of referencing `PANE_PADDING_PX` -- the two-sources-of-truth shape this project has already found and fixed once (`font_metrics.rs`'s own module doc names it). Fixed: a `one_pane_width` test helper now references `PANE_PADDING_PX` directly.
+- `layout_class_for_measures_from_a_real_font_size`'s doc comment overclaimed: it derives `comfortable_width` from the same glyph advance it passes to `layout_class_for`, so a `layout_class_for` that hardcoded a narrower advance would still pass. Renamed to `layout_class_for_composes_correctly_with_a_real_font_size`, with its doc comment now stating exactly what it proves and pointing at `font_metrics::tests::a_larger_font_size_measures_a_wider_glyph_advance` for the real directional proof, per the review's own recommendation to correct the comment rather than the test.
+
+**Recorded for PR-017-H, not fixed here (non-blocking)**: in `01-wide-split-two-panes.png`, the two panes occupy roughly three-quarters of the measured width, not the full width — `grid_colors::view` sets no width, so each pane shrinks to its fixed 80-column content and `row` packs them left rather than filling the space it was measured against. Safe (the layout decision and the render disagree only in the direction that avoids clipping), a direct, disclosed consequence of not reflowing a live `Term`, but worth one line in the closeout's known limitations so "wide split leaves dead space" reads as a documented boundary rather than a rediscovered bug.
+
+**Not this slice's responsibility, recorded per the review**: the flaky `approval::tests::channel::bind_recovers_from_a_stale_socket_file` (noted above) is flagged by the reviewer as potentially a real TOCTOU narrowing in the RFC-021 socket-binding path, not merely test-isolation noise, and should be diagnosed before RFC-021 is claimed closed -- unrelated to and unblocked by this slice.
+
+Gates re-run after the fix: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (496 `tekstide-core` + 113 `tekstide` + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures), `git diff --check` — all passed.
 
 ## PR-017-F — `plain_terminal_observation` audit producer
 

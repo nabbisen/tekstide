@@ -917,13 +917,13 @@ fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
         .enumerate()
         .map(
             |(index, session)| crate::surface::terminal::session_bar::SessionBarEntry {
-                label: format!("Terminal {}", index + 1),
+                number: (index + 1) as u32,
                 slot: session.visible_slot(),
                 status: session.status(),
             },
         )
         .collect();
-    let bar = crate::surface::terminal::session_bar::view(theme, &entries);
+    let bar = crate::surface::terminal::session_bar::view(theme, &state.catalog, &entries);
 
     let mut visible_sessions: Vec<&tekstide_core::domain::TerminalSession> = sessions
         .iter()

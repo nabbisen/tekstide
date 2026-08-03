@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - Acceptance / QA Checklist"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D reviewed and approved (responses 144-149); PR-017-E (immersion mode, split policy, session bar) implemented 2026-08-03, pending review"
+status: "Accepted 2026-08-01 — PR-017-B/C/D reviewed and approved (responses 144-149); PR-017-E implemented 2026-08-03, approved with one required item (response 150), fixed and re-gated same day"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -33,7 +33,7 @@ created: "2026-08-01"
 - [x] Bounded scrollback, bound stated, tested under sustained output. `SCROLLBACK_LINES = 2_000`; ablation-verified (`qa-evidence.md`).
 - [x] Uses `TerminalPanePolicy`/`TerminalLayoutClass`/`visible_terminal_limit` — no parallel layout model. `launch_terminal_demo_panes` registers real sessions via `AppState::attach_terminal_session`/`assign_terminal_visible_slot` (new, delegating straight to `ProjectSession`'s existing methods); `active_project_terminal_sessions`/`terminal_workspace_view` read slot state fresh from `tekstide-core` every call, no shell-local bookkeeping.
 - [x] Split driven by real font metrics and DPI; sub-minimum-column splits refused. `layout_class_for` measures the real monospace glyph advance at the pane's actual render size and refuses a two-pane split below a full pane's worth of real columns (`COLS` = 80), rendering one pane instead — proven with 7 unit tests and a real window-resize screenshot (`qa-evidence.md`).
-- [x] Session state distinguishable without colour (`NFR-UX-002`), including hidden sessions. `session_bar::view` renders slot and status as distinct text labels for every registered session, hidden included — proven distinct (`every_slot_and_status_has_a_distinct_textual_label`) and shown live in the screenshot evidence.
+- [x] Session state distinguishable without colour (`NFR-UX-002`), including hidden sessions. `session_bar::view` renders slot and status as distinct, catalog-resolved text labels for every registered session, hidden included — proven distinct over real resolved values, not hardcoded strings (response 150 Required; `every_slot_and_status_combination_resolves_to_distinct_text`) and shown live in the screenshot evidence.
 - [x] Hidden-session grid-state decision made and recorded against the scrollback bound. **Decided: retained in memory, always polled, not torn down** — the bound does not change with visibility, and session count is itself bounded (`terminal_session_limit`). Demonstrated (not only argued): a hidden pane keeps accumulating real PTY output across the real `TerminalDemoTick` → `update` path and retains it across a later slot reassignment; ablated by simulating "poll only visible panes" and confirming the hidden pane's content is then missed.
 
 ## Input Checklist (PR-017-D)
