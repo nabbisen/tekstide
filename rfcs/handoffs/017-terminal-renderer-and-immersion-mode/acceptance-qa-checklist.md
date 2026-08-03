@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - Acceptance / QA Checklist"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E reviewed and approved (responses 144-151); PR-017-F (plain_terminal_observation audit producer) response 152 Required fixes applied 2026-08-03, pending re-review"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004 measurement) not yet started"
 target_milestone: "M9"
 created: "2026-08-01"
 ---

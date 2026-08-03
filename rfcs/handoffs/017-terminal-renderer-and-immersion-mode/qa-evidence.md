@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E reviewed and approved (responses 144-151); PR-017-F (plain_terminal_observation audit producer) response 152 Required fixes applied 2026-08-03, pending re-review"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004 measurement) not yet started"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -387,6 +387,12 @@ Response 152 confirmed the producer, schema conformance, and `Started`-only reas
 Gates re-run clean after both fixes: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (497 `tekstide-core` + 115 `tekstide` + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures — no test count change; both fixes are inside existing tests), `git diff --check`.
 
 **Escalation noted, not this slice's fix**: response 152 found the identical defect in RFC-021 PR-021-E2's own sentinel test (`approval/tests/coordinator.rs:980`), which the reviewer had approved without checking which file it read. Raised against RFC-021, not fixed here.
+
+### Confirmed (response 153) — PR-017-F fully approved
+
+Both required items confirmed closed, independently re-probed by the reviewer (their own probe agreed with the re-ablation panic recorded above). The positive-control assertion was singled out as the stronger fix: it "converts the vacuous-pass failure mode from something a reviewer has to notice into something the test itself refuses to allow" for every future edit, not just the moment it was written. The RFC-021 escalation was moved off this file entirely — the reviewer recorded both open RFC-021 items (this WAL-blind-spot defect, plus an unrelated intermittent test failure) directly in `rfcs/handoffs/021-.../qa-evidence.md`, judging this file to be "where I was writing, not where implementers read." Nothing further owed here; this line is a cross-reference only.
+
+PR-017-F is closed. Next: PR-017-G (`NFR-PERF-004` under bounded background output, not idle — flood is where P4 failures surface; `iced::window::frames()` stays out; non-contamination proven for this criterion; stop on confirmed on-disk sample counts, not dispatched ones).
 
 ## PR-017-G — Measurement: `NFR-PERF-004`
 
