@@ -132,3 +132,39 @@ fn record_startup_frame_is_a_no_op_for_mode_switch() {
         "ModeSwitch must not write a startup-shaped line: {contents:?}"
     );
 }
+
+/// RFC-017 PR-017-G: `TerminalFlood` reuses `Typing`/`ModeSwitch`'s exact
+/// `is_done` boundary -- the input-to-state-change half of the
+/// decomposition, even though (unlike those two) it does not use the
+/// view-build half. This proves the new criterion did not silently fall
+/// through to `Startup`'s single-frame arm.
+#[test]
+fn terminal_flood_is_done_exactly_at_target() {
+    let log_path = scratch_log_path("terminal-flood-done");
+    let mut measurement = Measurement::for_test(Criterion::TerminalFlood, &log_path, 3);
+
+    for _ in 0..2 {
+        assert!(!measurement.is_done());
+        measurement.record_input(Instant::now());
+    }
+    assert!(
+        !measurement.is_done(),
+        "2 of 3 samples must not be done yet"
+    );
+    measurement.record_input(Instant::now());
+    assert!(measurement.is_done(), "3 of 3 samples must be done");
+}
+
+/// `record_startup_frame` is a no-op for `TerminalFlood` too: it never
+/// subscribes to `frames()` either.
+#[test]
+fn record_startup_frame_is_a_no_op_for_terminal_flood() {
+    let log_path = scratch_log_path("startup-frame-ignored-for-terminal-flood");
+    let mut measurement = Measurement::for_test(Criterion::TerminalFlood, &log_path, 1100);
+    measurement.record_startup_frame(Instant::now());
+    let contents = std::fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        contents.is_empty(),
+        "TerminalFlood must not write a startup-shaped line: {contents:?}"
+    );
+}

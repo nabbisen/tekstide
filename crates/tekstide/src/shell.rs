@@ -174,8 +174,20 @@ impl State {
         // false. Not stored on `State` either way -- see that
         // function's doc comment for why a persistent field isn't
         // justified yet.
+        // RFC-017 PR-017-G: `TerminalFlood` gets its own, separate
+        // launch path -- not `launch_terminal_demo_panes` -- because
+        // that function also opens the real, durable audit store
+        // (PR-017-F), and this measurement path must not exercise that
+        // unrelated I/O while timing, the same non-contamination
+        // principle every other criterion already follows.
         let mut audit_health = tekstide_core::audit::AuditHealth::default();
-        let terminal_demo = launch_terminal_demo_panes(&mut app_shell, &mut audit_health);
+        let terminal_demo = if measurement.as_ref().map(Measurement::criterion)
+            == Some(measurement::Criterion::TerminalFlood)
+        {
+            launch_measurement_terminal_pane(&mut app_shell)
+        } else {
+            launch_terminal_demo_panes(&mut app_shell, &mut audit_health)
+        };
 
         Self {
             app_shell,
@@ -241,6 +253,13 @@ pub enum Message {
     /// the real `AppCommand::ToggleActiveProjectMode` instead of
     /// appending to a synthetic document.
     MeasuredModeSwitch(std::time::Instant),
+    /// RFC-017 PR-017-G: a synthetic C3 measurement keystroke arrived;
+    /// same timing convention as `MeasuredKey`, but its handler writes a
+    /// real byte directly into the one real, live `TerminalPane` this
+    /// criterion launches, under a concurrent bounded background output
+    /// flood -- see `measurement`'s module doc for why this one skips
+    /// the view-build half of the decomposition.
+    MeasuredTerminalInput(std::time::Instant),
     /// RFC-017 PR-017-C/E: periodic poll for every pane in
     /// `state.terminal_demo` -- see [`launch_terminal_demo_panes`] and
     /// [`terminal_demo_subscription`]. Every pane is polled every tick
@@ -336,6 +355,23 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state
                 .app_shell
                 .dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+        }
+        Message::MeasuredTerminalInput(sent_at) => {
+            if let Some(measurement) = state.measurement.as_mut() {
+                measurement.record_input(sent_at);
+            }
+            // The real `write_input` call a routed keystroke would
+            // eventually make -- bypassing only the `TextStream`/
+            // routing-target lookup step, the same kind of bypass
+            // `MeasuredModeSwitch` already established. `launch_measurement_terminal_pane`
+            // guarantees exactly one pane exists whenever this
+            // criterion is active; a measurement run somehow missing
+            // one records real, if uninformative, samples against
+            // nothing rather than panicking, matching `MeasuredModeSwitch`'s
+            // own "no active project" fallback.
+            if let Some(pane) = state.terminal_demo.first_mut() {
+                pane.write_input(measurement::MEASURED_KEY_CHARACTER.as_bytes());
+            }
         }
         Message::TerminalDemoTick => {
             for pane in &mut state.terminal_demo {
@@ -446,6 +482,76 @@ fn launch_terminal_demo_panes(
         panes.push(pane);
     }
     panes
+}
+
+/// RFC-017 PR-017-G: the background output flood for the `TerminalFlood`
+/// measurement criterion -- **bounded by wall-clock time, not an
+/// unbounded `while true`** loop. `tekstide-gui-spike`'s own
+/// `send_flood_script_once` (superseded, RFC-014 PR-014-E's C3
+/// precedent) backgrounds an infinite loop that only ever stops if
+/// something kills it; RFC-017's own review gate asks for "bounded
+/// background output" specifically, so this loop instead computes its
+/// own end time once and checks the wall clock each iteration,
+/// self-terminating after 120 seconds -- generous enough to outlast any
+/// real measurement run (RFC-014/RFC-015's own C2/C4 precedent sent
+/// 1,100 repeats at a 15ms pace in ~17 seconds) without ever needing
+/// this process to kill it. Backgrounded (`&`) so the shell stays
+/// interactive for the measured keystrokes written into the same pty
+/// concurrently.
+const FLOOD_SCRIPT: &str = "i=0; end=$(( $(date +%s) + 120 )); \
+    while [ \"$(date +%s)\" -lt \"$end\" ]; do \
+    printf 'tekstide-flood-%08d-filler-filler-filler-filler-filler\\n' \"$i\"; \
+    i=$((i+1)); done &\n";
+
+/// RFC-017 PR-017-G: launches exactly one live, filtered PTY terminal
+/// pane for the `TerminalFlood` criterion, registers it with
+/// `tekstide-core` and switches the active project into
+/// `ProjectMode::TerminalImmersion` (the real `AppCommand`, not a
+/// shell-local shortcut -- `ProjectSession::new` always starts in
+/// `Content`, so dispatching `ToggleActiveProjectMode` once is enough)
+/// so the pane genuinely renders every `view()` cycle exactly as a real
+/// interactive session would, then starts [`FLOOD_SCRIPT`] with one real
+/// `write_input` call before returning.
+///
+/// Deliberately separate from [`launch_terminal_demo_panes`] (see
+/// `State::new`'s call site for why) and requires an active project --
+/// **panics** rather than silently measuring nothing if one is missing,
+/// since a `TerminalFlood` run with no real pane to write into would
+/// otherwise produce samples that look real but measure a no-op; the
+/// operator error (forgetting the CLI project-path argument) should be
+/// loud, not a quietly meaningless log file.
+fn launch_measurement_terminal_pane(
+    app_shell: &mut ApplicationShell,
+) -> Vec<crate::surface::terminal::TerminalPane> {
+    let project_id = app_shell.state().active_project_id().cloned().expect(
+        "TEKSTIDE_MEASURE_CRITERION=terminal_flood requires an active project -- pass a \
+             project path on the CLI",
+    );
+    let root = std::env::temp_dir().join(format!(
+        "tekstide-terminal-flood-measure-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root)
+        .expect("must be able to create a scratch directory for the measurement terminal");
+    let (mut pane, session) = crate::surface::terminal::TerminalPane::launch(
+        project_id,
+        "terminal flood measurement",
+        root,
+        std::path::PathBuf::from("/bin/sh"),
+    )
+    .expect("must be able to launch a real shell for the measurement terminal");
+    let terminal_id = session.id.clone();
+    app_shell
+        .state_mut()
+        .attach_terminal_session(session)
+        .expect("a freshly launched session must attach cleanly");
+    app_shell
+        .state_mut()
+        .assign_terminal_visible_slot(&terminal_id, tekstide_core::domain::VisibleSlot::Primary)
+        .expect("the sole measurement pane must be assignable to Primary");
+    app_shell.dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+    pane.write_input(FLOOD_SCRIPT.as_bytes());
+    vec![pane]
 }
 
 /// RFC-017 PR-017-F: resolves and opens the real, durable audit store
@@ -578,8 +684,22 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     // use -- `state.measurement` is `None` unless the env var is set, so
     // this branch changes nothing about PR-015-C's reviewed structure
     // for any normal run.
+    //
+    // RFC-017 PR-017-G: `TerminalFlood` also needs its one live pane
+    // polled during the run -- otherwise its background flood would be
+    // written into a pty nothing ever reads, and the contention this
+    // criterion exists to measure (poll's PTY-read/VTE-processing cost
+    // competing with input handling on the same executor) would never
+    // happen. Batched in exactly like the non-measurement path below
+    // does for `state.terminal_demo`, rather than a second copy of that
+    // condition living only inside `measurement_subscription`.
     if let Some(measurement) = &state.measurement {
-        return measurement_subscription(measurement.criterion());
+        let measurement_routing = measurement_subscription(measurement.criterion());
+        return if state.terminal_demo.is_empty() {
+            measurement_routing
+        } else {
+            Subscription::batch([measurement_routing, terminal_demo_subscription()])
+        };
     }
 
     let routing = match input::SubscriptionMode::for_modal(&state.modal) {
@@ -621,6 +741,14 @@ fn measurement_subscription(criterion: measurement::Criterion) -> Subscription<M
         // handler) the keystroke produces. See `measured_key_subscription`.
         measurement::Criterion::ModeSwitch => measured_key_subscription(
             Message::MeasuredModeSwitch as fn(std::time::Instant) -> Message,
+        ),
+        // RFC-017 PR-017-G: same shape again; `subscription` additionally
+        // batches in `terminal_demo_subscription()` for this criterion
+        // (see `subscription`'s own doc) so the concurrent flood this
+        // criterion's one pane is running actually gets polled during
+        // the run, not just written into and left unread.
+        measurement::Criterion::TerminalFlood => measured_key_subscription(
+            Message::MeasuredTerminalInput as fn(std::time::Instant) -> Message,
         ),
     }
 }

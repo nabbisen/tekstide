@@ -57,6 +57,29 @@
 //! to switch into that wasn't the Project Board against an empty
 //! placeholder; PR-015-E is what makes it a real target.
 //!
+//! **Terminal input under flood (C3 / `NFR-PERF-004`, RFC-017 PR-017-G)
+//! reuses the same input-to-state-change half only**, not the
+//! decomposition: `Criterion::TerminalFlood`'s measurement key writes a
+//! real byte directly to a real, live `TerminalPane` (`shell.rs`'s
+//! `Message::MeasuredTerminalInput` handler) -- the same real
+//! `write_input` call a routed keystroke would eventually make,
+//! bypassing only the `TextStream`/routing-target lookup step, the same
+//! kind of bypass `ModeSwitch` already established as measuring the
+//! real cost rather than input classification. It does **not** use the
+//! view-build decomposition (`uses_input_view_decomposition` is `false`
+//! for it): writing to a pty does not itself cause a synchronous view
+//! rebuild the way pushing a character into `typing_doc` or toggling
+//! project mode does -- the grid only changes on the next, unrelated
+//! `TerminalDemoTick` poll, so a `view` sample logged against *this*
+//! message would not describe this message's own cost. The one real
+//! terminal pane this criterion measures against still renders normally
+//! in `view()` every cycle (registered with `tekstide-core`, project
+//! mode set to `TerminalImmersion`) -- that rendering, and the
+//! concurrent flood's PTY-read/VTE-processing cost inside
+//! `TerminalDemoTick`'s handler, are exactly the real, uninstrumented
+//! contention this criterion exists to observe; only `record_input`'s
+//! figure is the graded one.
+//!
 //! # Non-contamination when inactive
 //!
 //! `Measurement::from_env()` returns `None` unless
@@ -99,6 +122,11 @@ pub enum Criterion {
     /// view-build cost for a real mode switch, the same decomposition
     /// `Typing` uses -- see the module doc.
     ModeSwitch,
+    /// C3 (`NFR-PERF-004`, RFC-017 PR-017-G): input-to-state-change only,
+    /// against a real, live terminal pane under a bounded background
+    /// output flood -- see the module doc for why this one does not use
+    /// the view-build half of the decomposition.
+    TerminalFlood,
 }
 
 impl Criterion {
@@ -107,12 +135,14 @@ impl Criterion {
             "typing" => Some(Self::Typing),
             "startup" => Some(Self::Startup),
             "mode_switch" => Some(Self::ModeSwitch),
+            "terminal_flood" => Some(Self::TerminalFlood),
             _ => None,
         }
     }
 
     /// Both criteria needing the input-to-state-change/view-build
-    /// decomposition, as opposed to `Startup`'s single `frames()` sample.
+    /// decomposition, as opposed to `Startup`'s single `frames()` sample
+    /// and `TerminalFlood`'s input-only figure (see the module doc).
     fn uses_input_view_decomposition(self) -> bool {
         matches!(self, Self::Typing | Self::ModeSwitch)
     }
@@ -193,7 +223,9 @@ impl Measurement {
     pub fn is_done(&self) -> bool {
         match self.criterion {
             Criterion::Startup => self.startup_recorded,
-            Criterion::Typing | Criterion::ModeSwitch => self.received >= self.target,
+            Criterion::Typing | Criterion::ModeSwitch | Criterion::TerminalFlood => {
+                self.received >= self.target
+            }
         }
     }
 
