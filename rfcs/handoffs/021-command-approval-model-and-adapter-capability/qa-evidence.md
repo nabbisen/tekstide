@@ -367,6 +367,26 @@ Gates run 2026-07-30: `cargo fmt --all --check`, `cargo clippy --workspace --all
 
 **RFC-021 needs nothing further** until the adapter-spawn slice makes any of it reachable, per the README.
 
+## Open defects found after closeout
+
+Unlike the section below, **these are RFC-021's own** — found while reviewing later work, recorded here rather than in the finding slice's evidence so that whoever revisits RFC-021 encounters them.
+
+1. **PR-021-E2's sentinel test cannot detect what it claims to check** (found 2026-08-03, reviewing RFC-017 PR-017-F; response 152).
+
+   `a_full_approval_lifecycle_leaks_no_command_text_or_cwd_to_the_durable_store` reads raw bytes via `std::fs::read(test_audit.store.storage_path().database_file())` (`approval/tests/coordinator.rs:980`) **while the store is still open**. The audit store runs in WAL mode, so freshly appended records live in `audit.sqlite3-wal` until checkpoint; the main database file at that moment is a 4096-byte header page holding none of them. SQLite's auto-checkpoint threshold is 1000 pages, which five-plus records do not approach.
+
+   The raw-byte assertion is therefore **vacuously true** — it would pass unchanged if the coordinator wrote `SENTINEL_ARG` and `SENTINEL_CWD` verbatim into the schema. So the claim *"no command text or cwd reaches the durable store"* — load-bearing in the approval model — is currently **undemonstrated**. The typed-query half of the test is unaffected and still holds.
+
+   **This is very likely an evidence defect, not a leak.** Probing the equivalent path under PR-017-F showed the record does land in `audit.sqlite3` once the store is dropped, and `DurableAuditRecordV1`'s validation forbids the relevant fields structurally. Do not go hunting a leak; fix the test so it *could* find one.
+
+   **The fix is already written** — RFC-017 PR-017-F `afe5083` hit the identical defect and corrected it: drop the store before scanning (which is what makes SQLite checkpoint and remove the sidecars, reproducing the on-disk state a real session leaves), scan **every file** under `audit_dir()` rather than one named file, and add a **positive control** asserting a genuinely-persisted field appears in the scanned bytes — so a scan that stops reaching real content fails loudly instead of passing quietly. Copy that shape.
+
+   Recorded by the reviewer. The original approval of this evidence was mine, and I checked that a raw-byte assertion existed rather than which file it read.
+
+2. **`approval::tests::channel::bind_recovers_from_a_stale_socket_file` fails intermittently** under full-workspace parallel execution, passing in isolation and on re-run (observed 2026-08-03 during RFC-017 PR-017-E; disclosed rather than re-run away).
+
+   Undiagnosed. It is either test-isolation noise or a real TOCTOU window in the bind path — and that path is where two genuine defects have already been found and fixed (socket placeable outside the state root via symlink swap, then via ancestor swap after the first fix), which is why it does not get the benefit of the doubt. **Diagnose before RFC-021 is claimed closed**; a flaky test guarding a boundary that has failed twice is not a flake to live with.
+
 ## Obligations carried forward
 
 These are not RFC-021 defects; they are work this RFC's design requires of others.
