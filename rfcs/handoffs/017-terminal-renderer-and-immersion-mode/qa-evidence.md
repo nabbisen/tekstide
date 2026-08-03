@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D reviewed and approved (responses 144-149); PR-017-E implemented 2026-08-03, approved with one required item (response 150), fixed and re-gated same day"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E reviewed and approved (responses 144-151)"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -314,6 +314,12 @@ The demo launches three real sessions (`launch_terminal_demo_panes`): `Primary`,
 **Not this slice's responsibility, recorded per the review**: the flaky `approval::tests::channel::bind_recovers_from_a_stale_socket_file` (noted above) is flagged by the reviewer as potentially a real TOCTOU narrowing in the RFC-021 socket-binding path, not merely test-isolation noise, and should be diagnosed before RFC-021 is claimed closed -- unrelated to and unblocked by this slice.
 
 Gates re-run after the fix: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (496 `tekstide-core` + 113 `tekstide` + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures), `git diff --check` — all passed.
+
+### Confirmed (response 151) — PR-017-E fully approved
+
+**Confirmed. Required item closed.** The reviewer independently re-ran the gates (matching counts) and specifically noted the single-Fluent-message design (rather than ten separately-catalogued fragments concatenated by `format!`) was the better fix than the one they described in response 150, since it lets word order/punctuation vary by locale rather than hardcoding English sentence structure even after cataloguing every word. Declining to add the new key to `pl.ftl` was confirmed correct against the real numbers (`pl.ftl` defines 3 of `en.ftl`'s 23 keys). `resolved_text_contains_the_real_words_not_symbol_names` (the exact-string test, added alongside the distinctness test) was named as the one that actually matters, since the distinctness test alone would still pass under a full regression to the old hardcoded strings.
+
+**One forward note, not an obligation on this or any named slice**: `is_scan_exempt`'s exemption list has no staleness check in either direction (unlike PR-016-E's `CORE_EXEMPT_LITERALS`) — if `grid_colors.rs` ever stops constructing a colour, it keeps a permanent exemption from scans it no longer needs. Recorded here for whichever future slice next touches `i18n::enforcement`, not raised as a requirement now.
 
 ## PR-017-F — `plain_terminal_observation` audit producer
 
