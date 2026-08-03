@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004) recorded not met 2026-08-03, arithmetic verdict; owner ship/hold decision pending"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004) recorded not met 2026-08-03 (arithmetic verdict, owner ship/hold decision pending); re-run made self-validating, awaiting a quiet machine"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -466,6 +466,25 @@ Per response 155 item 4 ("record `NFR-PERF-004` as not met, with the arithmetic 
 **The fix (Option B: readiness-driven terminal I/O instead of fixed-interval polling) is out of scope for this slice**, per response 155: it changes the shape of the one ingress path P1 (single-ingress)/P2 (no side channels) were proven against, and needs the same re-enumeration/re-ablation treatment, sized as its own PR or RFC amendment, not absorbed here.
 
 **The ship decision is the owner's** (response 155's own framing): whether `0.5.x`/M9 ships with `NFR-PERF-004` recorded as not met and Option B scheduled as follow-up work, or whether RFC-017's closeout holds until Option B lands. Not decided in this file.
+
+### Response 156 — confound independently confirmed, but under-determined; two more items before any re-run
+
+The reviewer verified the confound directly: `free -h` at review time showed 849MiB free RAM against 53GiB swap in use, with `rust-analyzer` ×2, `soffice.bin`, `librewolf`, and `codium` ×2 as the identifiable consumers — this is the owner's own live working environment under real, unrelated load, not an artifact of this test. Discarding the numbers was confirmed correct.
+
+**But the reviewer pushed back on the diagnosis, correctly**: swap pressure explains the ~1.1-1.2s plateau; it is not the *only* thing that would. This was the first run against a real (non-fork-bound) flood, and a single-threaded update loop falling behind a flood it cannot keep up with produces the same signature (a step to a backlog-shaped plateau) as environment noise does. The two hypotheses were indistinguishable from the run's own output — which is the actual defect to fix, not the specific number.
+
+**`dropped_bytes_total 0` was also re-read as evidence against the run, not reassurance.** At the flood's measured ~17.2 MiB/s against a drain that accepts at most 64KiB per 50ms tick (~1.28 MiB/s), a genuine in-app flood should push well past the cap on most windows. Zero drops says the flood never reached rate *inside the application* — a cheaper, more direct invalidity signal than interpreting the latency plateau.
+
+**Two required items for the re-run, both implemented (`b4e10ff`), neither exercised yet**:
+
+1. **Observed in-app flood throughput.** `TerminalPane::bytes_read_total()` (new) accumulates bytes actually accepted across `poll()` calls; `Measurement::elapsed()` (new) gives wall-clock time since the measurement began; both are printed together at exit (`bytes_read_total`, `elapsed_secs`) alongside `dropped_bytes_total`. Dividing the two externally gives observed throughput, checkable against the flood script's own ~17.2 MiB/s standalone figure — if far lower, the flood didn't flood and the run is void, detectable from the run's own output rather than argued afterward.
+2. **Tick-handler wall time, its own distribution.** `Measurement::record_tick_handler` (new) logs `poll()`'s own wall time (PTY read plus `Processor::advance`) as a `tick`-prefixed sample in the same log file, from `Message::TerminalDemoTick`'s handler. This is the discriminator: if handler cost approaches the 50ms tick period, the update loop genuinely cannot keep up (a real, structural finding that would recur on a quiet machine); if it stays in single-digit milliseconds while `record_input` shows seconds, the environment is confirmed as the sole cause. Meaningful relative to the tick period regardless of machine load — unlike `record_input`'s own figure, this one doesn't itself need a quiet machine to be informative.
+
+**A one-line environment snapshot** (`write_environment_snapshot`, new) reads `/proc/meminfo` once at measurement construction and logs `mem_available_kib`/`swap_used_kib` for every criterion, not just `TerminalFlood` — so any future reader of any measurement log can tell at a glance whether it was taken on a sane machine, without cross-referencing a separate `free -h` capture. Parsing factored into `parse_meminfo_snapshot` for direct unit testing against a fixture (field order shuffled, extra fields interspersed, to prove field-name lookup doesn't depend on `/proc/meminfo`'s real ordering) and a missing-field case; ablation-verified by reverting the swap-used computation to `SwapFree` alone and confirming the test fails on the exact wrong value, then reverted.
+
+Gates re-passed: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (497 `tekstide-core` + 119 `tekstide` — up from 117, 2 net new — + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures), `git diff --check`.
+
+**No re-run performed.** Per the reviewer's own words — "there is no urgency, and a run taken on a loaded machine is worse than no run" — the re-run is deferred until this shared machine's memory pressure has cleared (checked via `free -h`/the new environment snapshot before running again), not attempted against the same loaded state that just invalidated two prior runs. `NFR-PERF-004`'s not-met verdict above is unaffected either way. PR-017-H stays blocked until a usable run lands.
 
 ## PR-017-H — Closeout evidence
 
