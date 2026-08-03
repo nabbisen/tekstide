@@ -1196,6 +1196,35 @@ fn temp_audit_state_dir(label: &str) -> PathBuf {
     dir
 }
 
+/// Concatenates the raw bytes of every regular file under `dir`,
+/// recursively, lossily decoded -- used to scan the real on-disk state
+/// an `AuditStore` leaves behind rather than naming `audit.sqlite3`
+/// alone. Response 152 Required 2: while the store is open in WAL mode,
+/// a freshly appended record lives in the `-wal` sidecar, not the main
+/// database file, so a check that reads only `database_file()` while
+/// the store is still open scans a page that never received the write.
+/// Scanning every file (after the caller drops the store, see the
+/// sentinel test below) is also robust to SQLite's sidecar set changing
+/// -- it doesn't need updating if a new companion file is ever added.
+fn read_every_file_in_dir(dir: &std::path::Path) -> String {
+    let mut contents = String::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                contents.push_str(&String::from_utf8_lossy(&bytes));
+            }
+        }
+    }
+    contents
+}
+
 /// `record_plain_terminal_started` actually persists a `Started` record
 /// for a real, launched pane -- proven against a real, file-backed
 /// `AuditStore` (`open_audit_store`, the same function
@@ -1251,6 +1280,18 @@ fn record_plain_terminal_started_persists_against_a_real_store() {
 /// holds all the way from a real launch through the real
 /// `AuditCoordinator` call this crate makes, not merely that the type
 /// looks safe on paper.
+///
+/// **Response 152 Required 2**: the store runs in WAL mode, and the
+/// first version of this test read only `database_file()` while the
+/// store was still open -- at that point the just-appended record
+/// lives in the `-wal` sidecar, so the assertion scanned a 4096-byte
+/// header page that never held the record and passed for the wrong
+/// reason (it would have passed unchanged even if the producer wrote
+/// the sentinels straight into the schema). The store is dropped here
+/// before scanning, which is what makes SQLite checkpoint the WAL and
+/// remove the sidecars -- the exact on-disk state a real session
+/// leaves behind -- and every file under the audit directory is
+/// scanned, not just the named database file.
 #[test]
 fn sentinel_terminal_derived_text_never_reaches_the_durable_audit_store() {
     const SENTINEL_TITLE: &str = "SENTINEL-TITLE-b23f9b3e-terminal-title";
@@ -1271,7 +1312,7 @@ fn sentinel_terminal_derived_text_never_reaches_the_durable_audit_store() {
         .expect("open a real, temp-dir-backed audit store");
     let mut health = tekstide_core::audit::AuditHealth::default();
     tekstide_core::audit::AuditCoordinator::new(&mut store, &mut health)
-        .record_plain_terminal_started(project_id, terminal_id);
+        .record_plain_terminal_started(project_id, terminal_id.clone());
 
     let records = store
         .query(&tekstide_core::audit::AuditQuery::latest(10))
@@ -1282,9 +1323,23 @@ fn sentinel_terminal_derived_text_never_reaches_the_durable_audit_store() {
     assert!(!typed_debug.contains(SENTINEL_ROOT_MARKER));
     assert!(!typed_debug.contains(root.to_string_lossy().as_ref()));
 
-    let raw_bytes =
-        std::fs::read(store.storage_path().database_file()).expect("read the raw audit store file");
-    let raw_text = String::from_utf8_lossy(&raw_bytes);
+    let audit_dir = store.storage_path().audit_dir().to_path_buf();
+    // Dropping the store closes its single connection, which is what
+    // makes SQLite checkpoint the WAL into the main database file and
+    // remove the `-wal`/`-shm` sidecars -- reproducing exactly what a
+    // real session leaves on disk, not an open store's transient state.
+    drop(store);
+
+    let raw_text = read_every_file_in_dir(&audit_dir);
+    // Positive control: `terminal_id` is a real, persisted field, written
+    // by this same real producer call. If this failed, the scan would be
+    // finding nothing at all (the vacuous-pass failure mode Required 2
+    // named), regardless of what the sentinel assertions below say.
+    assert!(
+        raw_text.contains(terminal_id.as_str()),
+        "the scan must reach the real record this test just wrote -- otherwise the sentinel \
+         assertions below pass merely because nothing was read at all"
+    );
     assert!(
         !raw_text.contains(SENTINEL_TITLE),
         "the terminal's window title must never reach the raw on-disk audit store"

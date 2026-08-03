@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E reviewed and approved (responses 144-151); PR-017-F (plain_terminal_observation audit producer) implemented 2026-08-03, pending review"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E reviewed and approved (responses 144-151); PR-017-F (plain_terminal_observation audit producer) response 152 Required fixes applied 2026-08-03, pending re-review"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -373,6 +373,20 @@ Per this slice's own required gate: `README.md` §Local Data and Privacy previou
 ### What this slice does not do
 
 No real terminal-launch UI (still `TEKSTIDE_TERMINAL_DEMO`-gated, matching PR-017-C/D/E). No `Failed`/`Terminated` observations (see above — schema-constrained and instrumentation-constrained, not merely deferred by choice). No screenshot evidence: this slice adds no new visual affordance over PR-017-E's session bar/split view, so a screenshot would not demonstrate anything the audit-store gates above do not already prove.
+
+### Review outcome (response 152) — Required: two evidence gaps found by probe, both fixed
+
+Response 152 confirmed the producer, schema conformance, and `Started`-only reasoning as correct, but found **both of this slice's own review-gate items unsatisfied** — proven by a reproducible probe (`.git-exclude/tmp/audit-open-probe/`), not by inspection:
+
+**Required 1 — the README privacy claim was still false, one layer in.** `open_real_audit_store` was called unconditionally in `State::new`, before and independent of the `TEKSTIDE_TERMINAL_DEMO` check inside `launch_terminal_demo_panes`. Opening is not passive: `AuditStore::open_internal` creates the audit directory and, on a not-existed database, runs `create_current_schema` — so **every ordinary launch of `tekstide` was already creating `audit.sqlite3` with the full schema**, empty of events but real, exactly contradicting "ordinary use still does not create this file." **Fixed** by moving the open inside `launch_terminal_demo_panes`, after both early-return gates (the env var and an active project) — the reviewer's preferred option, since it makes the README's sentence true as written rather than requiring a weaker sentence. `open_real_audit_store` no longer runs at all unless a demo terminal is actually about to be launched.
+
+**Required 2 — the sentinel test scanned a file that did not contain the record.** `store` was still open (WAL mode) when the test read `store.storage_path().database_file()`; a freshly appended record lives in the `-wal` sidecar until checkpoint, so the assertion was reading a static 4096-byte header page and would have passed unchanged even if the producer wrote the sentinels directly into the schema — a vacuous pass. The prior ablation (appending a sentinel directly to the main file and confirming the assertion caught it) proved the *reader* worked on planted bytes; it never proved the reader looked where real bytes land, which is exactly the gap. **Fixed**: the store is now dropped before scanning (closing the single connection triggers SQLite's automatic WAL checkpoint, reproducing exactly the on-disk state a real session leaves — the reviewer's own probe confirmed this: `audit.sqlite3` alone holds the record after drop, with no `-wal`/`-shm` remaining), and every file under the audit directory is scanned (`read_every_file_in_dir`, new in `shell::tests`), not the named database file alone — robust to SQLite's sidecar set changing.
+
+**Re-ablated against the real path, per the reviewer's instruction** ("an ablation that plants bytes proves less than one that routes a real value through the real producer"): added a positive-control assertion that the raw scan contains `terminal_id.as_str()` — a real, persisted field written by this same real producer call, not a sentinel invented for the test. Ablated by temporarily reverting the scan to the original open-store, `database_file()`-only form: the positive control failed immediately (`the scan must reach the real record this test just wrote`), proving the old scan was blind to genuine content, not merely insensitive to planted sentinels. Reverted.
+
+Gates re-run clean after both fixes: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (497 `tekstide-core` + 115 `tekstide` + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures — no test count change; both fixes are inside existing tests), `git diff --check`.
+
+**Escalation noted, not this slice's fix**: response 152 found the identical defect in RFC-021 PR-021-E2's own sentinel test (`approval/tests/coordinator.rs:980`), which the reviewer had approved without checking which file it read. Raised against RFC-021, not fixed here.
 
 ## PR-017-G — Measurement: `NFR-PERF-004`
 

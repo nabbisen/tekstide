@@ -132,10 +132,12 @@ nothing else. This family's schema has no field for command text, output, or a
 path at all, so none can ever be recorded in it. The store lives at
 `$XDG_STATE_HOME/tekstide/audit/audit.sqlite3`
 (`~/.local/state/tekstide/audit/audit.sqlite3` if `XDG_STATE_HOME` is unset).
-**As shipped today, this only happens under the developer-only
-`TEKSTIDE_TERMINAL_DEMO` diagnostic flag** — no in-app feature launches a real
-terminal session yet, so ordinary use of `tekstide` still does not create this
-file. There is no in-app command to purge it yet; delete the `audit/` directory
+**As shipped today, the store is opened — and the file created — only under
+the developer-only `TEKSTIDE_TERMINAL_DEMO` diagnostic flag**, which is also
+what gates the terminal session that produces the event: no in-app feature
+launches a real terminal session yet, and nothing opens this database without
+one to record, so ordinary use of `tekstide` still does not create this file.
+There is no in-app command to purge it yet; delete the `audit/` directory
 to reset it, or see
 [`rfcs/done/013-durable-audit-store-and-local-data-policy.md`](rfcs/done/013-durable-audit-store-and-local-data-policy.md)
 for the store's full retention and purge policy.

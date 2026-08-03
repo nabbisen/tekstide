@@ -164,18 +164,18 @@ impl State {
             measurement.is_some(),
             std::env::var("TEKSTIDE_LAYER_DEMO").is_ok(),
         );
-        // RFC-017 PR-017-F: opened and used once, here, for this
-        // slice's one producer call -- not stored on `State`. Nothing
-        // in this slice writes a second audit event after boot (no
-        // "launch a new terminal" feature exists yet to call one from),
-        // so a persistent field would be a field this slice cannot
-        // justify a second reader for. Reconsider keeping the store
-        // open for the app's lifetime the moment a second, later-than-
-        // boot producer call exists.
-        let mut audit_store = open_real_audit_store(&app_shell);
+        // RFC-017 PR-017-F: the store itself (not just the event) is
+        // opened only inside `launch_terminal_demo_panes`, behind the
+        // same `TEKSTIDE_TERMINAL_DEMO` gate -- response 152 Required 1:
+        // opening unconditionally here created
+        // `$XDG_STATE_HOME/tekstide/audit/audit.sqlite3` (empty, but
+        // with the full schema) on every ordinary launch, which made
+        // the README's "ordinary use still does not create this file"
+        // false. Not stored on `State` either way -- see that
+        // function's doc comment for why a persistent field isn't
+        // justified yet.
         let mut audit_health = tekstide_core::audit::AuditHealth::default();
-        let terminal_demo =
-            launch_terminal_demo_panes(&mut app_shell, audit_store.as_mut(), &mut audit_health);
+        let terminal_demo = launch_terminal_demo_panes(&mut app_shell, &mut audit_health);
 
         Self {
             app_shell,
@@ -378,13 +378,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 /// (`.record_plain_terminal_started`'s own `AuditObservationStatus` is
 /// discarded here, matching every other producer call in this crate: an
 /// audit write failing must never fail the terminal launch it
-/// observes). `audit_store` is `None` for every normal run without a
-/// writable state root, in which case this is a no-op, the same
-/// "checked but usually harmless to skip" shape the demo gate itself
-/// already uses.
+/// observes). The store itself is opened here, after both early-return
+/// gates, rather than unconditionally in `State::new` -- response 152
+/// Required 1: an unconditional open creates the database file (schema
+/// and all) on every launch regardless of this env var, which is
+/// exactly the claim the README's privacy section exists to get right.
+/// `open_real_audit_store` returning `None` (no writable state root) is
+/// a no-op, the same "checked but usually harmless to skip" shape the
+/// demo gate itself already uses.
 fn launch_terminal_demo_panes(
     app_shell: &mut ApplicationShell,
-    mut audit_store: Option<&mut tekstide_core::audit::AuditStore>,
     audit_health: &mut tekstide_core::audit::AuditHealth,
 ) -> Vec<crate::surface::terminal::TerminalPane> {
     if std::env::var("TEKSTIDE_TERMINAL_DEMO").is_err() {
@@ -394,6 +397,7 @@ fn launch_terminal_demo_panes(
         return Vec::new();
     };
 
+    let mut audit_store = open_real_audit_store(app_shell);
     let mut panes = Vec::new();
     for (index, slot) in [
         tekstide_core::domain::VisibleSlot::Primary,
@@ -434,7 +438,7 @@ fn launch_terminal_demo_panes(
             continue;
         }
 
-        if let Some(store) = audit_store.as_deref_mut() {
+        if let Some(store) = audit_store.as_mut() {
             let _ = tekstide_core::audit::AuditCoordinator::new(store, audit_health)
                 .record_plain_terminal_started(project_id.clone(), terminal_id);
         }

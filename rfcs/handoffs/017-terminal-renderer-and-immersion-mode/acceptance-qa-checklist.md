@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - Acceptance / QA Checklist"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E reviewed and approved (responses 144-151); PR-017-F (plain_terminal_observation audit producer) implemented 2026-08-03, pending review"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E reviewed and approved (responses 144-151); PR-017-F (plain_terminal_observation audit producer) response 152 Required fixes applied 2026-08-03, pending re-review"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -47,7 +47,8 @@ created: "2026-08-01"
 
 - [x] `plain_terminal_observation` conforms to the frozen v1 family; **schema unamended**. `record.validate()` asserted directly against a real producer's output; ablated by attaching a field `valid_plain_terminal` forbids and confirming the store's own validation rejects the write (`Degraded`, not `Persisted`).
 - [x] Written via `AuditCoordinator`, not directly to the store. `AuditCoordinator::record_plain_terminal_started` is the only production call site in `crates/tekstide`; no direct `AuditStore::append` call exists there.
-- [x] **Sentinel test on raw on-disk bytes**: no command text, output, or path reaches the durable store. `sentinel_terminal_derived_text_never_reaches_the_durable_audit_store` launches a real pane with sentinel-laden title/root path, checks both the typed query and raw bytes read off the real `.sqlite3` file; ablated by appending the sentinel directly to the file and confirming the raw-byte assertion catches it.
+- [x] **Sentinel test on raw on-disk bytes**: no command text, output, or path reaches the durable store. `sentinel_terminal_derived_text_never_reaches_the_durable_audit_store` launches a real pane with sentinel-laden title/root path, checks both the typed query and raw bytes read off the real audit directory **after the store is dropped** (response 152 Required 2: the store's own write lives in the `-wal` sidecar while open, so scanning `database_file()` alone while the store was still open was a vacuous check — fixed by dropping the store first, which triggers SQLite's WAL checkpoint, and scanning every file under the audit directory). Re-ablated with a positive control (the real, persisted `terminal_id` must appear in the scan) against the original open-store scan, confirming that scan was blind to genuine content, not just insensitive to planted sentinels.
+- [x] **The store is not created by ordinary use.** Response 152 Required 1: `open_real_audit_store` was called unconditionally in `State::new`, creating the (empty) database with full schema on every launch regardless of `TEKSTIDE_TERMINAL_DEMO` — probe-confirmed. Fixed by moving the open inside `launch_terminal_demo_panes`, behind both the env-var gate and the active-project check, so the store is opened only when a demo terminal is actually about to launch; README updated to match.
 
 ## Performance Checklist (PR-017-G)
 
