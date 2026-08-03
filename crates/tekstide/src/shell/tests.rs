@@ -1180,3 +1180,121 @@ fn ablation_polling_only_visible_panes_would_miss_the_hidden_ones_output() {
          an accident of timing"
     );
 }
+
+// --- RFC-017 PR-017-F: plain_terminal_observation audit producer ---
+
+fn temp_audit_state_dir(label: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "tekstide-shell-audit-test-{label}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// `record_plain_terminal_started` actually persists a `Started` record
+/// for a real, launched pane -- proven against a real, file-backed
+/// `AuditStore` (`open_audit_store`, the same function
+/// `open_real_audit_store` calls with the real `XDG_STATE_HOME`-derived
+/// directory), not a mock writer.
+#[test]
+fn record_plain_terminal_started_persists_against_a_real_store() {
+    let project_id = tekstide_core::project::ProjectId::new_uuid();
+    let (_pane, session) = crate::surface::terminal::TerminalPane::launch(
+        project_id.clone(),
+        "audit producer test pane",
+        fresh_project_dir("audit-producer-pane"),
+        PathBuf::from("/bin/sh"),
+    )
+    .expect("launch a real shell for the audit producer test");
+    let terminal_id = session.id.clone();
+
+    let mut store = super::open_audit_store(&temp_audit_state_dir("started"), Vec::new())
+        .expect("open a real, temp-dir-backed audit store");
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    let status = tekstide_core::audit::AuditCoordinator::new(&mut store, &mut health)
+        .record_plain_terminal_started(project_id.clone(), terminal_id.clone());
+    assert_eq!(
+        status,
+        tekstide_core::audit::AuditObservationStatus::Persisted
+    );
+
+    let records = store
+        .query(&tekstide_core::audit::AuditQuery::latest(10))
+        .unwrap()
+        .records;
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records[0].record.family,
+        tekstide_core::audit::AuditEventFamily::PlainTerminalObservation
+    );
+    assert_eq!(
+        records[0].record.outcome,
+        tekstide_core::audit::AuditOutcome::Started
+    );
+    assert_eq!(records[0].record.project_id, Some(project_id));
+    assert_eq!(records[0].record.terminal_id, Some(terminal_id));
+}
+
+/// **RFC-017 PR-017-F's required sentinel test.** Matching RFC-021
+/// PR-021-E2's shape: sentinel strings baked into the real inputs a
+/// plain-terminal launch actually carries (its project root path and
+/// its window title -- the closest analogues this family's callers have
+/// to PR-021-E2's sentinel argv/cwd) must never reach the durable
+/// store, checked against **raw on-disk bytes**, not only the typed
+/// query. `DurableAuditRecordV1` has no path/title field for this
+/// family at all -- this test is what proves that structural absence
+/// holds all the way from a real launch through the real
+/// `AuditCoordinator` call this crate makes, not merely that the type
+/// looks safe on paper.
+#[test]
+fn sentinel_terminal_derived_text_never_reaches_the_durable_audit_store() {
+    const SENTINEL_TITLE: &str = "SENTINEL-TITLE-b23f9b3e-terminal-title";
+    const SENTINEL_ROOT_MARKER: &str = "sentinel-root-a71c4d02-terminal-path";
+
+    let project_id = tekstide_core::project::ProjectId::new_uuid();
+    let root = fresh_project_dir(SENTINEL_ROOT_MARKER);
+    let (_pane, session) = crate::surface::terminal::TerminalPane::launch(
+        project_id.clone(),
+        SENTINEL_TITLE,
+        root.clone(),
+        PathBuf::from("/bin/sh"),
+    )
+    .expect("launch a real shell for the sentinel test");
+    let terminal_id = session.id.clone();
+
+    let mut store = super::open_audit_store(&temp_audit_state_dir("sentinel"), Vec::new())
+        .expect("open a real, temp-dir-backed audit store");
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    tekstide_core::audit::AuditCoordinator::new(&mut store, &mut health)
+        .record_plain_terminal_started(project_id, terminal_id);
+
+    let records = store
+        .query(&tekstide_core::audit::AuditQuery::latest(10))
+        .unwrap()
+        .records;
+    let typed_debug = format!("{records:?}");
+    assert!(!typed_debug.contains(SENTINEL_TITLE));
+    assert!(!typed_debug.contains(SENTINEL_ROOT_MARKER));
+    assert!(!typed_debug.contains(root.to_string_lossy().as_ref()));
+
+    let raw_bytes =
+        std::fs::read(store.storage_path().database_file()).expect("read the raw audit store file");
+    let raw_text = String::from_utf8_lossy(&raw_bytes);
+    assert!(
+        !raw_text.contains(SENTINEL_TITLE),
+        "the terminal's window title must never reach the raw on-disk audit store"
+    );
+    assert!(
+        !raw_text.contains(SENTINEL_ROOT_MARKER),
+        "the terminal's project root path must never reach the raw on-disk audit store"
+    );
+    assert!(
+        !raw_text.contains(root.to_string_lossy().as_ref()),
+        "the real, full project root path must never reach the raw on-disk audit store"
+    );
+}

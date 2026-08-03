@@ -46,6 +46,16 @@ impl AppStatePathProvider {
     pub fn recent_projects_file(&self) -> PathBuf {
         self.state_dir.join("recent-projects.json")
     }
+
+    /// RFC-017 PR-017-F: the same Tekstide application state root
+    /// `recent_projects_file` is a filename under -- reused as-is for
+    /// the audit store's `<tekstide-state-root>` (RFC-013's own
+    /// diagram), rather than a second, independently-resolved
+    /// `XDG_STATE_HOME`/`HOME` fallback for the audit path. One
+    /// resolution, two consumers.
+    pub fn state_dir(&self) -> &Path {
+        &self.state_dir
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

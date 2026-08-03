@@ -125,12 +125,26 @@ local state the desktop application creates is the **recent-projects list**, at
 the paths of projects you have opened, used to restore the Project Board across
 sessions. There is no in-app command to clear it yet; delete the file to reset it.
 
-RFC-013's durable audit store and RFC-011's transcript retention are implemented
-and tested, but **neither is wired into the desktop application yet** — running
-`tekstide` today does not create an audit database or retain any transcripts.
-See [`rfcs/done/013-durable-audit-store-and-local-data-policy.md`](rfcs/done/013-durable-audit-store-and-local-data-policy.md)
-and [`rfcs/done/011-transcript-retention-and-local-data-policy.md`](rfcs/done/011-transcript-retention-and-local-data-policy.md)
-for the retention and purge policy that applies once they are.
+RFC-013's durable audit store is implemented, tested, and now has its first real
+producer (RFC-017): opening or launching a terminal records a
+`plain_terminal_observation` event — that a plain terminal session started, and
+nothing else. This family's schema has no field for command text, output, or a
+path at all, so none can ever be recorded in it. The store lives at
+`$XDG_STATE_HOME/tekstide/audit/audit.sqlite3`
+(`~/.local/state/tekstide/audit/audit.sqlite3` if `XDG_STATE_HOME` is unset).
+**As shipped today, this only happens under the developer-only
+`TEKSTIDE_TERMINAL_DEMO` diagnostic flag** — no in-app feature launches a real
+terminal session yet, so ordinary use of `tekstide` still does not create this
+file. There is no in-app command to purge it yet; delete the `audit/` directory
+to reset it, or see
+[`rfcs/done/013-durable-audit-store-and-local-data-policy.md`](rfcs/done/013-durable-audit-store-and-local-data-policy.md)
+for the store's full retention and purge policy.
+
+RFC-011's transcript retention is implemented and tested, but **is not wired
+into the desktop application yet** — running `tekstide` does not retain any
+transcripts. See
+[`rfcs/done/011-transcript-retention-and-local-data-policy.md`](rfcs/done/011-transcript-retention-and-local-data-policy.md)
+for the retention and purge policy that applies once it is.
 
 For a consolidated list of what else is missing or deferred, see
 [`rfcs/future-work.md`](rfcs/future-work.md).

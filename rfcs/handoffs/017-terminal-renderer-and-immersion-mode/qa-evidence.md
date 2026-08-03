@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E reviewed and approved (responses 144-151)"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E reviewed and approved (responses 144-151); PR-017-F (plain_terminal_observation audit producer) implemented 2026-08-03, pending review"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -323,7 +323,56 @@ Gates re-run after the fix: `cargo fmt --all --check`, `cargo clippy --workspace
 
 ## PR-017-F — `plain_terminal_observation` audit producer
 
-Pending implementation.
+Wires the `plain_terminal_observation` family (frozen v1 schema, no producer until now) end to end: a real, durable audit store the desktop application opens for the first time, a `tekstide-core` producer method reachable only through `AuditCoordinator`, and a real GUI call site.
+
+### The missing lifecycle glue, discovered while researching this slice
+
+**No production code anywhere constructed `AuditCoordinator`/`AuditStore` before this slice** — confirmed by `grep` across `crates/tekstide` and `tekstide-core/src/lib.rs`: every existing call site was inside `tekstide-core`'s own tests. Even `ManagedProcessLifecycle` (agent-run audit) had no real caller. This is the first audit write the GUI application ever performs, not merely a new family added to an already-wired mechanism.
+
+### `AppState::attach_terminal_session`'s sibling: audit needs no new core-side threading
+
+Unlike the session-registration gap PR-017-E closed (which needed a new `AppState` method), the audit store is deliberately **not** threaded through `ApplicationShell`/`AppState` at all. `AuditStore`/`AuditHealth` are opened and held in `crates/tekstide/src/shell.rs` (the GUI crate), the same boundary `main.rs`'s `RecentProjectStore` already draws: `ApplicationShell`/`AppState` hold domain state; I/O-owning resources (a real file, a real SQLite connection) live in the GUI crate that has a lifecycle to open and close them against.
+
+**One new `tekstide-core` accessor was needed**: `AppStatePathProvider::state_dir(&self) -> &Path` (`project/recent/store.rs`), exposing the same `<tekstide-state-root>` directory `recent_projects_file()` already computes a filename under. The audit store's directory is resolved from this *same* provider instance, not a second, independently-derived `XDG_STATE_HOME`/`HOME` fallback — one resolution, two consumers, matching RFC-013's own diagram (`<tekstide-state-root>/audit/audit.sqlite3`).
+
+### The producer, and why it emits exactly one outcome
+
+`AuditCoordinator::record_plain_terminal_started(project_id, terminal_id)` (`tekstide-core`), delegating to a new `plain_terminal_record` helper matching `managed_process_record`'s existing shape exactly (family, actor/source, terminal id, no free-text field). Written via `append_observation` (best-effort) — an unavailable or degraded audit store must never block a terminal from launching, the same reasoning `ManagedProcessLifecycle`'s own `Started`/`Terminated` observations already use.
+
+**Only `Started` is produced, disclosed rather than left implicit.** `valid_plain_terminal` requires `terminal_id.is_some()` for *every* outcome of this family, including `Failed` — meaning a launch failure that occurs before a `TerminalSession` exists (the actual failure mode `TerminalPane::launch`'s `Result` surfaces today) has no valid way to be represented in this frozen schema at all; there is no `TerminalId` yet for such a record to name. `Terminated` would need real process-exit detection wired into `TerminalPane::poll()`'s plain-terminal loop, which does not exist yet (PR-017-C/D/E's poll only advances the emulator; it never inspects `TerminalRuntimeEvent`/`TerminationOutcome` for a plain terminal, unlike the managed-agent path, which already does). `plain_terminal_record` stays general (takes any `AuditOutcome`/`Option<AuditReasonCode>`) precisely so a later slice wiring real exit detection has the right shape to call into, rather than a `Started`-only helper to generalize then.
+
+### Conforms to the frozen family — schema unamended, proven two ways
+
+1. `record.validate()` called directly against a real producer's output (`plain_terminal_started_persists_a_valid_record`, `tekstide-core`), not merely assumed to satisfy `valid_plain_terminal`.
+2. **Ablated**: temporarily set `record.adapter_profile_ref = Some(...)` (a field `valid_plain_terminal` requires `None` for this family) before writing. The write was rejected by the store's own `record.validate()` call inside `AuditStore::append` — `AuditObservationStatus::Degraded`, not `Persisted` — confirming the frozen schema's own validation is a real, structural defense against a future accidental field addition, not merely a comment. Reverted.
+
+No schema amendment was made or needed.
+
+### Written via `AuditCoordinator`, not directly to the store
+
+`shell.rs`'s only interaction with `AuditStore` is `AuditStore::open`/`.query` (evidence-gathering in tests) and the one production call inside `launch_terminal_demo_panes`, which goes through `AuditCoordinator::new(...).record_plain_terminal_started(...)` — no direct `store.append(...)` call exists in the GUI crate.
+
+### The sentinel test — raw on-disk bytes, matching RFC-021 PR-021-E2's shape
+
+`sentinel_terminal_derived_text_never_reaches_the_durable_audit_store` (`shell::tests`): launches a real `TerminalPane` whose window title and project root path both carry unique sentinel strings, records a real `plain_terminal_observation` via the real `AuditCoordinator` call this crate makes, then asserts the sentinels are absent from **both** the typed query's debug output and the raw bytes read directly off `store.storage_path().database_file()`.
+
+**Ablated**: temporarily appended the sentinel title directly to the on-disk file after the real write (simulating a leak), confirming the raw-byte assertion fails exactly as intended — `AuditObservationStatus`/typed checks alone would not have caught bytes appended outside the normal write path; only reading the file itself does. Reverted.
+
+**Why this test can prove something the type system already prevents structurally**: `DurableAuditRecordV1` has no path/title field for any family, so no valid write could carry one regardless of this test. What the test actually adds is proof that this crate's own wiring — `TerminalPane::launch(project_id, title, root, shell)` → `AuditCoordinator::record_plain_terminal_started(project_id, terminal_id)` — never threads `title`/`root` into the audit call at all, end to end from a real launch, not merely "the schema wouldn't allow it if someone tried."
+
+### Gates
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (497 `tekstide-core` — up from 496, 1 net new — + 115 `tekstide` — up from 113, 2 net new — + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures), `git diff --check` — all passed.
+
+### README.md's privacy claim, fixed in this same change
+
+Per this slice's own required gate: `README.md` §Local Data and Privacy previously stated running `tekstide` "does not create an audit database or retain any transcripts" — true at `0.4.1`, false the moment this producer has a real call site. Updated to state where the store lives (`$XDG_STATE_HOME/tekstide/audit/audit.sqlite3`, with the `~/.local/state` fallback), what it holds (a `plain_terminal_observation` "started" event — no command text, output, or path, and the schema has no field for any of those), and how to purge it (delete the `audit/` directory; no in-app command yet), citing RFC-013.
+
+**Disclosed rather than overclaimed**: the real producer call only fires today under `TEKSTIDE_TERMINAL_DEMO` (the same developer-only diagnostic gate every terminal-pane demo since PR-017-C has used) — no in-app feature launches a real terminal session yet, so ordinary use of `tekstide` still does not create this file today. The README says this explicitly rather than letting "tekstide creates an audit database" read as true for every user right now, when it is only true under a flag developers use for evidence-gathering.
+
+### What this slice does not do
+
+No real terminal-launch UI (still `TEKSTIDE_TERMINAL_DEMO`-gated, matching PR-017-C/D/E). No `Failed`/`Terminated` observations (see above — schema-constrained and instrumentation-constrained, not merely deferred by choice). No screenshot evidence: this slice adds no new visual affordance over PR-017-E's session bar/split view, so a screenshot would not demonstrate anything the audit-store gates above do not already prove.
 
 ## PR-017-G — Measurement: `NFR-PERF-004`
 

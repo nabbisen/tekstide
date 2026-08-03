@@ -164,7 +164,18 @@ impl State {
             measurement.is_some(),
             std::env::var("TEKSTIDE_LAYER_DEMO").is_ok(),
         );
-        let terminal_demo = launch_terminal_demo_panes(&mut app_shell);
+        // RFC-017 PR-017-F: opened and used once, here, for this
+        // slice's one producer call -- not stored on `State`. Nothing
+        // in this slice writes a second audit event after boot (no
+        // "launch a new terminal" feature exists yet to call one from),
+        // so a persistent field would be a field this slice cannot
+        // justify a second reader for. Reconsider keeping the store
+        // open for the app's lifetime the moment a second, later-than-
+        // boot producer call exists.
+        let mut audit_store = open_real_audit_store(&app_shell);
+        let mut audit_health = tekstide_core::audit::AuditHealth::default();
+        let terminal_demo =
+            launch_terminal_demo_panes(&mut app_shell, audit_store.as_mut(), &mut audit_health);
 
         Self {
             app_shell,
@@ -360,8 +371,21 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 /// empty `Vec` (silently -- this is a diagnostic path, not a
 /// user-facing feature yet) otherwise, if the env var is unset, or if a
 /// given pane's launch/registration fails.
+///
+/// **RFC-017 PR-017-F**: each successful launch also records a
+/// `plain_terminal_observation` `Started` event via `AuditCoordinator`
+/// (never directly to `audit_store`) -- best-effort
+/// (`.record_plain_terminal_started`'s own `AuditObservationStatus` is
+/// discarded here, matching every other producer call in this crate: an
+/// audit write failing must never fail the terminal launch it
+/// observes). `audit_store` is `None` for every normal run without a
+/// writable state root, in which case this is a no-op, the same
+/// "checked but usually harmless to skip" shape the demo gate itself
+/// already uses.
 fn launch_terminal_demo_panes(
     app_shell: &mut ApplicationShell,
+    mut audit_store: Option<&mut tekstide_core::audit::AuditStore>,
+    audit_health: &mut tekstide_core::audit::AuditHealth,
 ) -> Vec<crate::surface::terminal::TerminalPane> {
     if std::env::var("TEKSTIDE_TERMINAL_DEMO").is_err() {
         return Vec::new();
@@ -370,38 +394,94 @@ fn launch_terminal_demo_panes(
         return Vec::new();
     };
 
-    [
+    let mut panes = Vec::new();
+    for (index, slot) in [
         tekstide_core::domain::VisibleSlot::Primary,
         tekstide_core::domain::VisibleSlot::Secondary,
         tekstide_core::domain::VisibleSlot::Hidden,
     ]
     .into_iter()
     .enumerate()
-    .filter_map(|(index, slot)| {
+    {
         let root = std::env::temp_dir().join(format!(
             "tekstide-terminal-demo-{}-{index}",
             std::process::id()
         ));
-        std::fs::create_dir_all(&root).ok()?;
-        let (pane, session) = crate::surface::terminal::TerminalPane::launch(
+        if std::fs::create_dir_all(&root).is_err() {
+            continue;
+        }
+        let Ok((pane, session)) = crate::surface::terminal::TerminalPane::launch(
             project_id.clone(),
             format!("terminal demo {}", index + 1),
             root,
             std::path::PathBuf::from("/bin/sh"),
-        )
-        .ok()?;
+        ) else {
+            continue;
+        };
         let terminal_id = session.id.clone();
-        app_shell
+        if app_shell
             .state_mut()
             .attach_terminal_session(session)
-            .ok()?;
-        app_shell
+            .is_err()
+        {
+            continue;
+        }
+        if app_shell
             .state_mut()
             .assign_terminal_visible_slot(&terminal_id, slot)
-            .ok()?;
-        Some(pane)
-    })
-    .collect()
+            .is_err()
+        {
+            continue;
+        }
+
+        if let Some(store) = audit_store.as_deref_mut() {
+            let _ = tekstide_core::audit::AuditCoordinator::new(store, audit_health)
+                .record_plain_terminal_started(project_id.clone(), terminal_id);
+        }
+
+        panes.push(pane);
+    }
+    panes
+}
+
+/// RFC-017 PR-017-F: resolves and opens the real, durable audit store
+/// at `<tekstide-state-root>/audit/` -- `<tekstide-state-root>` is the
+/// exact same directory `main.rs`'s `RecentProjectStore` already
+/// resolves (`AppStatePathProvider::linux_default`), reused rather than
+/// independently re-derived, per RFC-013's own diagram ("one resolution,
+/// two consumers," `AppStatePathProvider::state_dir`'s own doc comment).
+/// `None` on any failure (no `HOME`/`XDG_STATE_HOME`, the directory
+/// cannot be created, or the store fails to open) -- the same
+/// fail-silent, log-nothing-to-the-user shape appropriate for a
+/// diagnostic/observability path that must never block the app from
+/// starting.
+fn open_real_audit_store(app_shell: &ApplicationShell) -> Option<tekstide_core::audit::AuditStore> {
+    let path_provider =
+        tekstide_core::project::recent::AppStatePathProvider::linux_default().ok()?;
+    let project_roots = app_shell
+        .state()
+        .projects()
+        .iter()
+        .map(|project| project.canonical_root_path().clone())
+        .collect();
+    open_audit_store(path_provider.state_dir(), project_roots)
+}
+
+/// Factored out from [`open_real_audit_store`] so tests can open a
+/// real, file-backed store against a deterministic temp directory
+/// instead of the real `XDG_STATE_HOME`/`HOME`-resolved one -- the same
+/// reason `RecentProjectStore::new` takes an already-resolved
+/// `AppStatePathProvider` rather than resolving it itself.
+fn open_audit_store(
+    state_dir: &std::path::Path,
+    project_roots: Vec<std::path::PathBuf>,
+) -> Option<tekstide_core::audit::AuditStore> {
+    std::fs::create_dir_all(state_dir).ok()?;
+    let request = tekstide_core::audit::AuditPathRequest::new(state_dir, project_roots);
+    let storage_path = tekstide_core::audit::AuditPathResolver
+        .resolve(request)
+        .ok()?;
+    tekstide_core::audit::AuditStore::open(storage_path).ok()
 }
 
 /// Periodic poll driving [`State::terminal_demo`] -- only ever added to

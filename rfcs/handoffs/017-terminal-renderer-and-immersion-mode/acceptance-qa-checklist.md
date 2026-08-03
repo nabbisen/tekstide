@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - Acceptance / QA Checklist"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E reviewed and approved (responses 144-151)"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E reviewed and approved (responses 144-151); PR-017-F (plain_terminal_observation audit producer) implemented 2026-08-03, pending review"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -45,9 +45,9 @@ created: "2026-08-01"
 
 ## Audit Checklist (PR-017-F)
 
-- [ ] `plain_terminal_observation` conforms to the frozen v1 family; **schema unamended**.
-- [ ] Written via `AuditCoordinator`, not directly to the store.
-- [ ] **Sentinel test on raw on-disk bytes**: no command text, output, or path reaches the durable store.
+- [x] `plain_terminal_observation` conforms to the frozen v1 family; **schema unamended**. `record.validate()` asserted directly against a real producer's output; ablated by attaching a field `valid_plain_terminal` forbids and confirming the store's own validation rejects the write (`Degraded`, not `Persisted`).
+- [x] Written via `AuditCoordinator`, not directly to the store. `AuditCoordinator::record_plain_terminal_started` is the only production call site in `crates/tekstide`; no direct `AuditStore::append` call exists there.
+- [x] **Sentinel test on raw on-disk bytes**: no command text, output, or path reaches the durable store. `sentinel_terminal_derived_text_never_reaches_the_durable_audit_store` launches a real pane with sentinel-laden title/root path, checks both the typed query and raw bytes read off the real `.sqlite3` file; ablated by appending the sentinel directly to the file and confirming the raw-byte assertion catches it.
 
 ## Performance Checklist (PR-017-G)
 

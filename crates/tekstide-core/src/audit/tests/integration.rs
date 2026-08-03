@@ -20,7 +20,7 @@ use crate::audit::{
 };
 use crate::domain::{
     AgentCompatibilityLevel, AgentRunId, AgentRunStatus, ApprovalDecision, ApprovalId, RiskLevel,
-    TerminalStatus,
+    TerminalId, TerminalStatus,
 };
 use crate::project::{ProjectContentError, ProjectId, ProjectSession, WorkspaceTrust};
 use crate::runtime::terminal::{
@@ -161,6 +161,48 @@ fn managed_launch_persists_authorized_started_and_terminated_runtime_truth() {
     assert!(!debug.contains("private prompt sentinel"));
     assert!(!debug.contains("private command sentinel"));
     assert!(!debug.contains(project.root_path().to_string_lossy().as_ref()));
+}
+
+/// RFC-017 PR-017-F: `plain_terminal_observation`'s first producer,
+/// proven against a real, file-backed `AuditStore` (not a mock writer)
+/// -- the same convention `trust_grant_commits_authorization_before_mutation_and_applied_outcome`
+/// above uses. `record.validate()` is the direct proof this conforms to
+/// the frozen family (`valid_plain_terminal`) rather than assuming a
+/// hand-built record happens to satisfy it.
+#[test]
+fn plain_terminal_started_persists_a_valid_record() {
+    let dirs = TestAuditDirs::new("plain-terminal-started");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let project_id = ProjectId::new_uuid();
+    let terminal_id = TerminalId::new_uuid();
+
+    let status = AuditCoordinator::new(&mut store, &mut health)
+        .record_plain_terminal_started(project_id.clone(), terminal_id.clone());
+
+    assert_eq!(status, AuditObservationStatus::Persisted);
+    assert_eq!(health.status(), AuditHealthStatus::Healthy);
+
+    let records = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    let record = &records[0];
+    assert_eq!(record.family, AuditEventFamily::PlainTerminalObservation);
+    assert_eq!(record.outcome, AuditOutcome::Started);
+    assert_eq!(record.project_id, Some(project_id));
+    assert_eq!(record.terminal_id, Some(terminal_id));
+    assert!(
+        record.reason_code.is_none(),
+        "Started must carry no reason code, per valid_plain_terminal"
+    );
+    record
+        .validate()
+        .expect("a real producer's record must satisfy the frozen family's own predicate");
 }
 
 #[test]
