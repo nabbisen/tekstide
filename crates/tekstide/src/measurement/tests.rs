@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use super::{Criterion, Measurement};
+use super::{Criterion, Measurement, parse_meminfo_snapshot};
 
 fn scratch_log_path(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -167,4 +167,38 @@ fn record_startup_frame_is_a_no_op_for_terminal_flood() {
         contents.is_empty(),
         "TerminalFlood must not write a startup-shaped line: {contents:?}"
     );
+}
+
+/// RFC-017 PR-017-G response 156: the environment snapshot's parser
+/// reads real `/proc/meminfo` field names and computes swap-in-use as
+/// `SwapTotal - SwapFree`, not `SwapFree` itself -- proven against a
+/// realistic fixture (fields in a different order than they appear on
+/// a real Linux system, and extra fields interspersed, to prove this
+/// does not depend on `/proc/meminfo`'s field order).
+#[test]
+fn parse_meminfo_snapshot_reads_available_and_computed_swap_used() {
+    let fixture = "\
+MemTotal:       61865472 kB
+SwapTotal:      61865472 kB
+Cached:          8317972 kB
+MemAvailable:   18294740 kB
+SwapFree:        5700000 kB
+";
+    let (mem_available_kib, swap_used_kib) =
+        parse_meminfo_snapshot(fixture).expect("a well-formed fixture must parse");
+    assert_eq!(mem_available_kib, 18294740);
+    assert_eq!(swap_used_kib, 61865472 - 5700000);
+}
+
+/// A field this parser needs missing entirely (not merely zero) must
+/// fail closed to `None` rather than silently reporting a wrong number
+/// -- proven by removing `SwapFree` specifically, the field the swap
+/// computation depends on.
+#[test]
+fn parse_meminfo_snapshot_is_none_when_a_needed_field_is_missing() {
+    let fixture = "\
+MemTotal:       61865472 kB
+MemAvailable:   18294740 kB
+";
+    assert!(parse_meminfo_snapshot(fixture).is_none());
 }

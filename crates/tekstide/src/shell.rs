@@ -340,15 +340,25 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::MeasurementTick => {
             if state.measurement.as_ref().is_some_and(Measurement::is_done) {
-                // Response 155 item 3: printed once, right before exit,
-                // rather than left to accumulate unread -- the same "ad
-                // hoc, computed externally" evidence convention every
-                // other measurement figure here already uses (no
-                // percentile computation lives in this binary either).
-                if let Some(pane) = state.terminal_demo.first() {
+                // Response 155 item 3 / response 156: printed once,
+                // right before exit, rather than left to accumulate
+                // unread -- the same "ad hoc, computed externally"
+                // evidence convention every other measurement figure
+                // here already uses (no percentile computation lives in
+                // this binary either). `bytes_read_total` paired with
+                // `elapsed_secs` is the precondition check: divide the
+                // two externally to get observed in-app throughput, and
+                // compare against the flood script's own standalone
+                // throughput -- if far lower, the flood never reached
+                // rate inside the application and the run is void.
+                if let (Some(pane), Some(measurement)) =
+                    (state.terminal_demo.first(), state.measurement.as_ref())
+                {
                     eprintln!(
-                        "terminal_flood dropped_bytes_total {}",
-                        pane.dropped_bytes_total()
+                        "terminal_flood dropped_bytes_total {} bytes_read_total {} elapsed_secs {:.3}",
+                        pane.dropped_bytes_total(),
+                        pane.bytes_read_total(),
+                        measurement.elapsed().as_secs_f64(),
                     );
                 }
                 std::process::exit(0);
@@ -401,7 +411,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::TerminalDemoTick => {
             for pane in &mut state.terminal_demo {
+                // Response 156's discriminator: this handler's own wall
+                // time (the PTY read plus VTE parse), reported relative
+                // to the 50ms tick period regardless of machine load --
+                // unlike `record_input`'s figure, this does not itself
+                // need a quiet machine to be informative.
+                let started = std::time::Instant::now();
                 pane.poll();
+                if let Some(measurement) = state.measurement.as_mut() {
+                    measurement.record_tick_handler(started.elapsed());
+                }
             }
         }
     }

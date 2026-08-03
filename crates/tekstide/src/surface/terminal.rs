@@ -143,6 +143,12 @@ pub struct TerminalPane {
     /// measurement's own evidence ("dropped bytes are a result, not a
     /// footnote"), not consumed by any production decision.
     dropped_bytes_total: u64,
+    /// RFC-017 PR-017-G (response 156): cumulative bytes actually read
+    /// (accepted, not dropped) across every `poll()` call -- paired with
+    /// `Measurement::elapsed` to compute the flood's *observed*,
+    /// in-app throughput, the precondition check for whether a flood
+    /// run actually reached rate inside the application at all.
+    bytes_read_total: u64,
 }
 
 impl TerminalPane {
@@ -185,6 +191,7 @@ impl TerminalPane {
                 processor: Processor::new(),
                 term: Term::new(pane_config(), &PaneSize, VoidListener),
                 dropped_bytes_total: 0,
+                bytes_read_total: 0,
             },
             session,
         ))
@@ -215,6 +222,7 @@ impl TerminalPane {
         if let TerminalRuntimeEvent::OutputBuffered { summary, .. } = &event {
             self.dropped_bytes_total += summary.dropped_bytes as u64;
         }
+        self.bytes_read_total += bytes.len() as u64;
         if bytes.is_empty() {
             return;
         }
@@ -229,6 +237,14 @@ impl TerminalPane {
     /// only; no production caller.
     pub fn dropped_bytes_total(&self) -> u64 {
         self.dropped_bytes_total
+    }
+
+    /// RFC-017 PR-017-G (response 156): cumulative bytes actually read
+    /// across every `poll()` call this pane has made so far -- see the
+    /// field's own doc comment. Read by the flood measurement's
+    /// evidence-gathering only; no production caller.
+    pub fn bytes_read_total(&self) -> u64 {
+        self.bytes_read_total
     }
 
     /// This pane's real, live `TerminalId` -- what a caller compares a

@@ -197,6 +197,7 @@ pub struct Measurement {
     received: u32,
     target: u32,
     startup_recorded: bool,
+    started_at: Instant,
 }
 
 impl Measurement {
@@ -214,13 +215,14 @@ impl Measurement {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(1100);
-        let log = std::fs::OpenOptions::new()
+        let mut log = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log_path)
             .ok()?;
 
         init_view_log(criterion, &log_path);
+        write_environment_snapshot(&mut log);
 
         Some(Self {
             criterion,
@@ -228,11 +230,41 @@ impl Measurement {
             received: 0,
             target,
             startup_recorded: false,
+            started_at: Instant::now(),
         })
     }
 
     pub fn criterion(&self) -> Criterion {
         self.criterion
+    }
+
+    /// Wall-clock time since this `Measurement` was constructed --
+    /// RFC-017 PR-017-G response 156: paired with
+    /// [`crate::surface::terminal::TerminalPane::bytes_read_total`] at
+    /// report time to compute the flood's *observed* (in-app) throughput,
+    /// as opposed to the flood script's own standalone throughput --
+    /// the precondition check the reviewer asked for: if observed
+    /// throughput is far below what the script produces alone, the flood
+    /// never reached rate inside the application and the run is void,
+    /// detectable from the run's own output rather than argued after the
+    /// fact.
+    pub fn elapsed(&self) -> Duration {
+        self.started_at.elapsed()
+    }
+
+    /// Records one terminal-poll tick-handler sample (`poll()`'s own
+    /// wall time -- the PTY read plus `Processor::advance`) -- RFC-017
+    /// PR-017-G response 156's discriminator between "the environment
+    /// was loaded" and "the update loop cannot keep up with a real
+    /// flood": if this stays in single-digit milliseconds while
+    /// `record_input`'s figure is orders of magnitude higher, the
+    /// bottleneck is not this handler. Meaningful relative to the tick
+    /// period regardless of machine load, so -- unlike `record_input`'s
+    /// figure -- it does not itself need a quiet machine to be
+    /// informative. Prefixed `tick` in the same log file, same
+    /// separate-streams convention `input`/`view` already use.
+    pub fn record_tick_handler(&mut self, elapsed: Duration) {
+        let _ = writeln!(self.log, "tick {}", elapsed.as_micros());
     }
 
     /// Records one input-to-state-change sample: the elapsed time from
@@ -283,8 +315,50 @@ impl Measurement {
             received: 0,
             target,
             startup_recorded: false,
+            started_at: Instant::now(),
         }
     }
+}
+
+/// RFC-017 PR-017-G response 156: "a one-line environment capture (free
+/// RAM, swap in use) at run start, so a future reader can tell at a
+/// glance whether a recorded figure was taken on a sane machine." Read
+/// directly from `/proc/meminfo` (Linux-only, matching this crate's
+/// existing Linux-specific runtime); silently a no-op if unreadable --
+/// an environment snapshot failing to write must never block the
+/// measurement it exists to contextualize.
+fn write_environment_snapshot(log: &mut std::fs::File) {
+    let Ok(contents) = std::fs::read_to_string("/proc/meminfo") else {
+        return;
+    };
+    let Some((mem_available_kib, swap_used_kib)) = parse_meminfo_snapshot(&contents) else {
+        return;
+    };
+    let _ = writeln!(
+        log,
+        "env mem_available_kib={mem_available_kib} swap_used_kib={swap_used_kib}"
+    );
+}
+
+/// Pure parsing half of [`write_environment_snapshot`], factored out so
+/// it is testable against a fixed string rather than the real,
+/// machine-dependent `/proc/meminfo`. `None` if any of the three fields
+/// this needs is missing or unparsable.
+fn parse_meminfo_snapshot(contents: &str) -> Option<(u64, u64)> {
+    let field = |name: &str| -> Option<u64> {
+        contents.lines().find_map(|line| {
+            line.strip_prefix(name)
+                .and_then(|rest| rest.split_whitespace().next())
+                .and_then(|value| value.parse().ok())
+        })
+    };
+    let mem_available_kib = field("MemAvailable:")?;
+    let swap_total_kib = field("SwapTotal:")?;
+    let swap_free_kib = field("SwapFree:")?;
+    Some((
+        mem_available_kib,
+        swap_total_kib.saturating_sub(swap_free_kib),
+    ))
 }
 
 /// Records one view-build-cost sample -- called from `main.rs`'s
