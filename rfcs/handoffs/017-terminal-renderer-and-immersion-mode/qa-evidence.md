@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004 measurement) not yet started"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004 measurement) implemented 2026-08-03, live run pending review"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -396,7 +396,33 @@ PR-017-F is closed. Next: PR-017-G (`NFR-PERF-004` under bounded background outp
 
 ## PR-017-G — Measurement: `NFR-PERF-004`
 
-Pending implementation.
+Scope: terminal input latency p95 ≤ 16 ms under bounded background output. Reuses PR-015-F's measurement harness rather than a new mechanism; the code is implemented and gated, but **the live measurement run has not yet been performed** — see the last section below.
+
+### `Criterion::TerminalFlood` reuses the input-to-state-change half only
+
+`record_input`, `measured_key_subscription`, and the 100ms self-exit tick (`MeasurementTick`) are all reused byte-for-byte from `Typing`/`ModeSwitch` — no new timing mechanism, and `iced::window::frames()` is not touched anywhere in this criterion's path (only `Startup` uses it, unchanged). The measurement key ("j") writes a real byte directly into a real, live `TerminalPane` via `write_input` (`Message::MeasuredTerminalInput`'s handler, `shell.rs`), bypassing only the `TextStream`/routing-target lookup step — the same kind of bypass `ModeSwitch` already established as measuring the real cost, not input classification.
+
+**This criterion deliberately does not use the view-build half of the decomposition** (`uses_input_view_decomposition` stays `false` for it, matching `Startup`): writing to a pty causes no synchronous view rebuild the way pushing a character into `typing_doc` or toggling project mode does — the grid only changes on the next, unrelated `TerminalDemoTick` poll. A `view` sample logged against the measured message would describe an unrelated tick's cost, not this input's own, so it is left out rather than logged and disclosed as noisy after the fact.
+
+### One real pane, registered and rendered like a real session
+
+`launch_measurement_terminal_pane` (deliberately **not** `launch_terminal_demo_panes`, which also opens the real audit store — PR-017-F's unrelated I/O this measurement path must not exercise while timing) launches exactly one live `TerminalPane`, registers it via the same `attach_terminal_session`/`assign_terminal_visible_slot(Primary)` calls PR-017-E's demo panes use, then dispatches the real `AppCommand::ToggleActiveProjectMode` (`ProjectSession::new` always starts in `Content`, so one dispatch is enough) so the project is genuinely in `TerminalImmersion` — the pane renders every `view()` cycle exactly as a real interactive session would, rather than existing off-screen while only its pty is exercised.
+
+### The flood is bounded, unlike the superseded demo's
+
+`FLOOD_SCRIPT` computes its own wall-clock end time once (`$(date +%s) + 120`) and checks it every loop iteration, self-terminating after 120 seconds — RFC-014 PR-014-E's own `tekstide-gui-spike` precedent (`send_flood_script_once`, now superseded) backgrounds an unbounded `while true` that only stops if killed; RFC-017's review gate asks for "bounded background output" specifically. 120s is generous margin over RFC-014/015's own C2/C4 precedent (1,100 repeats at a 15ms `xdotool --repeat-delay` pace finished in ~17 seconds) without this process ever needing to kill it — a real, disclosed consequence is that the flood can outlive the measurement process itself by up to the remainder of that 120s window if the run finishes early, reparented under init, until it self-terminates on its own; it is never explicitly killed by this code.
+
+### `subscription()` batches the poll tick in, so the flood is actually read
+
+`state.measurement`'s early-return branch in `subscription()` previously returned only `measurement_subscription(criterion)`, bypassing `state.terminal_demo`'s poll tick entirely (harmless for `Typing`/`ModeSwitch`/`Startup`, which never populate `terminal_demo`). `TerminalFlood` does populate it, so that branch now batches in `terminal_demo_subscription()` whenever a pane exists — otherwise the flood would be written into a pty nothing ever reads, both stalling it against the kernel pipe's own capacity once full and, more importantly, eliminating the actual contention (poll's PTY-read/VTE-processing cost competing with input-message handling on the same executor) this criterion exists to observe.
+
+### Gates
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (497 `tekstide-core` + 117 `tekstide` — up from 115, 2 net new: `terminal_flood_is_done_exactly_at_target`, `record_startup_frame_is_a_no_op_for_terminal_flood`, the same coverage density `ModeSwitch` got — + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures), `git diff --check` — all passed. Committed as `fcf1e91`.
+
+### Not yet done: the live measurement run itself
+
+Per RFC-017's review gate, this slice still owes: p50/p95/p99/max against the ≤16ms budget, delivery-loss rate, a non-contamination proof specific to this criterion (not inherited from `Typing`/`ModeSwitch`), and confirmed-on-disk (not dispatched) sample counts — all requiring a real `xdotool`-driven run against a live window. Per the owner's redirect this session ("make question as review request to architect on it"), the decision of whether/how to run this live GUI measurement is raised to the architect via the accompanying review request rather than executed unilaterally. The code above is otherwise complete and gated.
 
 ## PR-017-H — Closeout evidence
 

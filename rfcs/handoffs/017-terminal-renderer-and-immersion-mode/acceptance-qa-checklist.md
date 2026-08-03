@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - Acceptance / QA Checklist"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004 measurement) not yet started"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004 measurement) implemented 2026-08-03, live run pending review"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -52,11 +52,11 @@ created: "2026-08-01"
 
 ## Performance Checklist (PR-017-G)
 
-- [ ] `NFR-PERF-004` p95 ≤ 16 ms **under bounded background output**.
-- [ ] `iced::window::frames()` not reintroduced.
-- [ ] Non-contamination proven for this criterion by idle-CPU comparison.
-- [ ] p50/p95/p99 and max reported; delivery loss reported; stopped on confirmed on-disk counts.
-- [ ] Result is non-degenerate.
+- [x] **`iced::window::frames()` not reintroduced.** `Criterion::TerminalFlood` reuses `Typing`/`ModeSwitch`'s `record_input`/`measured_key_subscription` mechanism unchanged; only `Startup` uses `frames()`, untouched by this slice.
+- [ ] `NFR-PERF-004` p95 ≤ 16 ms **under bounded background output** — code implemented and gated (`qa-evidence.md`), **live run not yet performed**: raised to the architect via review request rather than run unilaterally, per the owner's redirect this session.
+- [ ] Non-contamination proven for this criterion by idle-CPU comparison — pending the live run above.
+- [ ] p50/p95/p99 and max reported; delivery loss reported; stopped on confirmed on-disk counts — pending the live run above.
+- [ ] Result is non-degenerate — pending the live run above.
 
 ## Honesty Checklist (PR-017-H)
 
