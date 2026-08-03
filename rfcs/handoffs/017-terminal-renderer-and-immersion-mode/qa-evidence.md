@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004 measurement) implemented 2026-08-03, live run pending review"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004) recorded not met 2026-08-03, arithmetic verdict; owner ship/hold decision pending"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -438,6 +438,34 @@ Per RFC-017's review gate, this slice still owes: p50/p95/p99/max against the �
 3. Keep 50ms, record `NFR-PERF-004` as honestly not met, with the reason — costs nothing to build, is the first real verdict this criterion has ever received (RFC-014 never verified C3 at all), and is a legitimate outcome per the project's own standing rule that a measured figure must be non-degenerate in both directions.
 
 **My recommendation, sent with the options**: (3) now, (2) as scoped future work, explicitly not (1) alone — narrowing the gap by tuning a constant, while its cost is unquantified and it's coupled to an undesigned second fix, is exactly what the reviewer warned against doing to make a number pass. Awaiting the owner's answer before any further code changes or the live run; the non-contamination control also needs redesigning once the definition is settled (same pane, same flood, measurement env var on vs. off — not the idle comparison originally proposed, which couldn't separate instrumentation cost from intended workload cost).
+
+### Response 155 — analysis accepted, flood script fixed, and the live run attempted
+
+Response 155 endorsed the recommendation above (Option C now, Option B as scoped future work) and required two more things before any run: fix `FLOOD_SCRIPT` (it measured `$(date +%s)` in the loop *condition*, so every output line cost a `fork`+`exec` — the reviewer measured 121.7 KiB/s, 173× below a fork-free equivalent, never exceeding the 64KiB/5ms cap, "much closer to the idle case than to the flood case"), and surface dropped bytes instead of discarding the event that carries them.
+
+**Fixed (`ba039a9`)**: `FLOOD_SCRIPT` now checks the wall clock only every 2,000 iterations instead of every one — verified locally afterward at ~17.2 MiB/s (46.5MB over ~2.7s wall time via `time sh`), comfortably above the 64KiB/5ms threshold this time. `TerminalPane::dropped_bytes_total()` (new) accumulates `TerminalOutputSummary::dropped_bytes` across every `poll()` call and is printed to stderr once, right before the measurement process exits. `TEKSTIDE_TERMINAL_FLOOD_DEMO` (new) launches the identical pane-plus-flood scenario with measurement deliberately absent, for the "same workload, instrumentation on vs. off" control response 155 asked for. All gates re-passed (497 + 117 + 18, 0 failures).
+
+**The live run was attempted three times and the results are not usable as `NFR-PERF-004` evidence — a measurement-environment confound, disclosed rather than reported as a clean number.**
+
+All three runs (`env -u WAYLAND_DISPLAY XDG_STATE_HOME=<scratch> TEKSTIDE_MEASURE_CRITERION=terminal_flood TEKSTIDE_MEASURE_LOG=<scratch> ./target/release/tekstide <scratch-project>`, `xdotool windowfocus --sync` then global `xdotool key --clearmodifiers --repeat 1100 --repeat-delay 15 j`) delivered all 1,100 samples with 0% dispatched-vs-confirmed loss and `dropped_bytes_total 0` — but the latency values themselves are not credible as real software behavior:
+
+- **Run 1**: samples 1–490 measured 13–70μs (consistent with the arithmetic dispatch-only floor); sample 491 jumped, in one step, to ~999,882μs (≈1.0s); a second step to ~1,181,485μs around sample 515; a third to ~1,201,863μs around sample 519; then a flat plateau (creeping by single-digit μs per sample) through sample 1,100 (~1,161,329μs before the second run overwrote the log — the final plateau value differed slightly per run, see below).
+- **Run 2**: *every* sample, including the first, measured ~1.15–1.17ms **seconds** (1,148,547–1,172,086μs) — the step had already happened before the first keystroke was even sent.
+- **Run 3**: aborted before sending input (see below) once the cause became apparent.
+
+A step function, not a gradual ramp, appearing at an inconsistent sample offset between otherwise-identical runs, is not consistent with either the arithmetic poll-wait floor (which would show as a smooth ~0–50ms spread, not a discrete jump to over a second) or with `TerminalDemoTick`'s 10ms `WouldBlock` stall (which would add tens of milliseconds, not entire seconds). **Checked the environment directly**: `free -h` showed **54–57GiB of swap in use out of 59GiB**, on a 32-core/59GiB machine, at the time of all three runs — memory pressure this test's own tiny footprint (one Rust GUI process, one shell script) cannot explain; it is pre-existing load from other activity sharing this sandbox. `vmstat 1` during a third attempt (aborted before sending any keys) showed a real swap-in burst (~70MB in one 1-second window, `si`/`bi` columns) even with zero test input yet delivered. This is the far more parsimonious explanation for a ~1-second one-time cliff than a code defect: a major page fault against a heavily swapped system, not `tekstide`'s own architecture.
+
+**Conclusion**: today's live numbers are not attributable to `tekstide` and are not reported as `NFR-PERF-004` evidence. They neither confirm nor worsen the arithmetic finding from response 154 (the ~47.5ms poll-wait floor, independent of any live run, stands on its own). The dropped-bytes/non-contamination/delivery-loss items the review gate still asks for need a live run in an environment not already under heavy unrelated memory pressure — deferred, not abandoned, and not blocking the verdict below, which does not depend on a live run.
+
+All three processes and the `xdotool`-focused window were confirmed cleaned up afterward (`ps aux`/`xdotool search` both empty); no stray flood or GUI process was left running.
+
+### Verdict recorded: `NFR-PERF-004` not met
+
+Per response 155 item 4 ("record `NFR-PERF-004` as not met, with the arithmetic — you are right that this needs no live run"): **`NFR-PERF-004` (terminal input latency p95 ≤ 16ms) is recorded as not met**, under the current architecture. Reason: `terminal_demo_subscription`'s 50ms poll tick is the only place PTY bytes reach the emulator grid; a keystroke's echo waits for the next tick, uncorrelated with arrival, contributing an expected p95 of ~47.5ms (0.95 × 50ms) from poll-wait alone — before any pty write, VTE parse, layout, or paint cost — roughly 3× the entire budget. This is arithmetic (uniform-distribution wait time over a fixed, code-visible interval), not empirical, and every omitted term can only make the true figure worse, never better. RFC-014 never verified this criterion at all (marked "Not verified — see R1"; R1 assigned it to RFC-017), so this is the first real verdict it has received, not a regression from a prior pass.
+
+**The fix (Option B: readiness-driven terminal I/O instead of fixed-interval polling) is out of scope for this slice**, per response 155: it changes the shape of the one ingress path P1 (single-ingress)/P2 (no side channels) were proven against, and needs the same re-enumeration/re-ablation treatment, sized as its own PR or RFC amendment, not absorbed here.
+
+**The ship decision is the owner's** (response 155's own framing): whether `0.5.x`/M9 ships with `NFR-PERF-004` recorded as not met and Option B scheduled as follow-up work, or whether RFC-017's closeout holds until Option B lands. Not decided in this file.
 
 ## PR-017-H — Closeout evidence
 

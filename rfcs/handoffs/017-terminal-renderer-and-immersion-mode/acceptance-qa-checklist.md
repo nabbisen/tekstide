@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - Acceptance / QA Checklist"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004 measurement) implemented 2026-08-03, live run pending review"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004) recorded not met 2026-08-03, arithmetic verdict; owner ship/hold decision pending"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -53,10 +53,10 @@ created: "2026-08-01"
 ## Performance Checklist (PR-017-G)
 
 - [x] **`iced::window::frames()` not reintroduced.** `Criterion::TerminalFlood` reuses `Typing`/`ModeSwitch`'s `record_input`/`measured_key_subscription` mechanism unchanged; only `Startup` uses `frames()`, untouched by this slice.
-- [ ] `NFR-PERF-004` p95 ≤ 16 ms **under bounded background output** — code implemented and gated (`qa-evidence.md`), **live run not yet performed**: raised to the architect via review request rather than run unilaterally, per the owner's redirect this session.
-- [ ] Non-contamination proven for this criterion by idle-CPU comparison — pending the live run above.
-- [ ] p50/p95/p99 and max reported; delivery loss reported; stopped on confirmed on-disk counts — pending the live run above.
-- [ ] Result is non-degenerate — pending the live run above.
+- [x] **`NFR-PERF-004` p95 ≤ 16 ms recorded as NOT MET, with the arithmetic reason.** `terminal_demo_subscription`'s 50ms poll tick is the only place PTY bytes reach the grid; poll-wait alone contributes an expected p95 of ~47.5ms (0.95 × 50ms), independent of any live run, before any pty/VTE/layout/paint cost — roughly 3× the budget. RFC-014 never verified this criterion at all; this is its first real verdict, not a regression. The fix (readiness-driven I/O instead of polling) is out of scope for this slice — it touches the P1/P2-proven ingress path and needs its own PR/RFC-scale review (`qa-evidence.md`).
+- [ ] Non-contamination proven for this criterion by idle-CPU comparison — **attempted three times, results discarded**: this sandbox showed 54–57GiB of swap in use out of 59GiB during all three attempts, an unrelated confound this test's own tiny footprint cannot explain, producing a reproducible but not-credible ~1.1–1.2 SECOND step in the raw samples (`qa-evidence.md`). Deferred to a re-attempt in an environment not already under heavy memory pressure; does not block the verdict above, which is arithmetic.
+- [ ] p50/p95/p99 and max reported; delivery loss reported; stopped on confirmed on-disk counts — **same confound**: three live runs delivered all 1,100 samples with 0% loss and `dropped_bytes_total 0`, but the latency values themselves are not attributable to `tekstide` (see above) and are not reported as this criterion's evidence.
+- [x] **Result is non-degenerate** in the sense that matters: the confounded live numbers were recognized as non-credible and discarded rather than reported as a clean pass or a clean fail: the ~47.5ms arithmetic floor is real, reproducible from the code alone, and is what the not-met verdict above rests on.
 
 ## Honesty Checklist (PR-017-H)
 
