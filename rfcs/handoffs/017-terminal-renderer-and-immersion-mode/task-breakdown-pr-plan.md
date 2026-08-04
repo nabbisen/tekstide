@@ -1,7 +1,7 @@
 ---
 title: "RFC-017: Terminal Renderer and Immersion Mode - Task Breakdown / PR Plan"
 rfc: "RFC-017"
-rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
+rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
 status: "Accepted 2026-08-01 — ready for implementation"
 target_milestone: "M9"
 created: "2026-08-01"

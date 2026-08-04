@@ -1,6 +1,6 @@
 # RFC-017: Terminal Renderer and Immersion Mode - Developer Handoff Pack
 
-Source RFC: [RFC-017](../../proposed/017-terminal-renderer-and-immersion-mode.md)
+Source RFC: [RFC-017](../../done/017-terminal-renderer-and-immersion-mode.md)
 Target milestone: **M9** (`0.5.x`)
 Source RFC status: **Accepted by the human owner 2026-08-01**
 
@@ -10,7 +10,7 @@ Source RFC status: **Accepted by the human owner 2026-08-01**
 
 | # | Document | Purpose |
 | --- | --- | --- |
-| 1 | [RFC-017](../../proposed/017-terminal-renderer-and-immersion-mode.md) | The surface, the security core, and the RFC-018 boundary. **Read "The security core" before anything else.** |
+| 1 | [RFC-017](../../done/017-terminal-renderer-and-immersion-mode.md) | The surface, the security core, and the RFC-018 boundary. **Read "The security core" before anything else.** |
 | 2 | This file | Orientation and what is binding. |
 | 3 | [`pr-017-b-filter-promotion.md`](./pr-017-b-filter-promotion.md) | **Detailed instructions for PR-017-B, the security-critical slice.** Read before writing any code. |
 | 4 | [`implementation-handoff.md`](./implementation-handoff.md) | Module layout, the seams, what already exists to reuse. |

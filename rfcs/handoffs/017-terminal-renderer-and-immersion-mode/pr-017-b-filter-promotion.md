@@ -1,7 +1,7 @@
 ---
 title: "RFC-017 PR-017-B — Filter promotion: detailed instructions"
 rfc: "RFC-017"
-rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
+rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
 slice: "PR-017-B"
 status: "Ready — the security-critical slice; read before writing any code"
 created: "2026-08-01"

@@ -1,6 +1,6 @@
 # RFC-017: Terminal Renderer and Immersion Mode
 
-Status: Accepted by the human owner 2026-08-01 — ready for implementation
+Status: Implemented with documented limitations — closed 2026-08-04 by PR-017-H, with the owner accepting `NFR-PERF-004` as **not met**. A real, filtered PTY-backed terminal renders as a surface with P1-P4 re-proven against product code and independently ablated; input reaches it with modal exclusivity and global-keybinding precedence demonstrated under a live terminal; `plain_terminal_observation` has its first producer with a sentinel-proven privacy boundary. **Not met:** `NFR-PERF-004` (terminal input latency p95 ≤ 16 ms) — the 50 ms poll tick puts the floor near 47.5 ms p95; the fix is readiness-driven terminal I/O, scheduled as follow-up (`../future-work.md` §Terminal / PTY Runtime). **Not claimed:** trusted-UI separation or spoofing resistance — that is RFC-018, and RFC-014 PR-014-D's spike screenshot does not transfer. See `../handoffs/017-terminal-renderer-and-immersion-mode/qa-evidence.md` §PR-017-H.
 Target milestone: M9 (`0.5.x`)
 Date: 2026-08-01
 
