@@ -263,16 +263,36 @@ impl Measurement {
     /// figure -- it does not itself need a quiet machine to be
     /// informative. Prefixed `tick` in the same log file, same
     /// separate-streams convention `input`/`view` already use.
-    pub fn record_tick_handler(&mut self, elapsed: Duration) {
-        let _ = writeln!(self.log, "tick {}", elapsed.as_micros());
+    ///
+    /// **`bytes_read_total`, response 156 Required 2**: the pane's
+    /// cumulative accepted-bytes count *at this tick*, not just at exit.
+    /// `elapsed()` alone cannot safely denominate observed throughput,
+    /// because `FLOOD_SCRIPT` self-terminates after 30s: a run that
+    /// takes *longer* than that (the update loop genuinely saturating,
+    /// exactly the scenario this instrumentation exists to catch) would
+    /// see `bytes_read_total` plateau while `elapsed_secs` keeps
+    /// climbing, collapsing observed throughput and misreading a
+    /// saturating run as "flood never reached rate." Logging the running
+    /// total per tick lets throughput be computed over the flood's
+    /// actual active window instead, derived rather than assumed.
+    pub fn record_tick_handler(&mut self, elapsed: Duration, bytes_read_total: u64) {
+        let _ = writeln!(self.log, "tick {} {bytes_read_total}", elapsed.as_micros());
     }
 
     /// Records one input-to-state-change sample: the elapsed time from
     /// when the measurement subscription first saw the keystroke
     /// (`sent_at`) to this call, which happens at the end of
     /// `shell::update`'s handling of it. One line per sample, prefixed
-    /// `input` so the driver can separate this stream from `view`
-    /// samples in the same log file.
+    /// `input` so the driver can separate this stream from the `view`/
+    /// `tick`/`env` lines that can share the same log file (RFC-017
+    /// PR-017-G response 156: **the confirmed sample count for R9's
+    /// stopping/reporting rule is `grep -c '^input ' <log>`, never
+    /// `wc -l`** -- once `tick`/`env` lines exist alongside `input`
+    /// ones, a bare line count silently stops meaning "samples received."
+    /// Do not substitute `Measurement::received` for this either: it
+    /// counts arrivals at this handler, the dispatched-side quantity R9
+    /// exists to distrust, not the on-disk, survives-a-crash ground
+    /// truth the grep gives.
     pub fn record_input(&mut self, sent_at: Instant) {
         self.received += 1;
         let elapsed = Instant::now().saturating_duration_since(sent_at);

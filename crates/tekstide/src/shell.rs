@@ -419,7 +419,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 let started = std::time::Instant::now();
                 pane.poll();
                 if let Some(measurement) = state.measurement.as_mut() {
-                    measurement.record_tick_handler(started.elapsed());
+                    measurement.record_tick_handler(started.elapsed(), pane.bytes_read_total());
                 }
             }
         }
