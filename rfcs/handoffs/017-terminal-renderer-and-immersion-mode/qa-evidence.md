@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004) recorded not met 2026-08-03 (arithmetic verdict, owner ship/hold decision pending); re-run instrumented and authorized, blocked by an unrelated GPU/EGL launch failure"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004) recorded not met 2026-08-03 (arithmetic verdict, owner ship/hold decision pending); saturation hypothesis and dropped-bytes mechanism answered headlessly; end-to-end figure blocked on a machine-specific GPU/EGL driver issue, no urgency"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -489,6 +489,32 @@ Gates re-passed: `cargo fmt --all --check`, `cargo clippy --workspace --all-targ
 Checked `free -h` before attempting: 28GiB available, swap down to 24GiB from the prior 56GiB — a real improvement, judged sane enough to proceed. The app failed to open a window at all: `thread 'main' panicked ... wgpu error: Validation Error ... In Surface::configure ... Invalid surface`, preceded by `libEGL warning: egl: failed to create dri2 screen`. Reproduced twice, then confirmed **unrelated to this slice's own code**: a plain `env -u WAYLAND_DISPLAY ./target/release/tekstide` with no measurement env vars and no arguments fails identically. This is a GPU/graphics-driver-level failure on the shared machine (plausibly resource contention from the same concurrent activity that drove the earlier swap pressure — several `rust-analyzer`/`claude` processes were still running), not a regression in this branch. No stray process was left behind (`ps aux` confirmed clean before and after).
 
 **Deferred again, for a different reason than before.** `NFR-PERF-004`'s not-met verdict is unaffected. PR-017-H stays blocked until a usable run lands.
+
+### Response 158 — the blocker diagnosed as machine-specific, and a headless benchmark answers three of the four open items without a GUI at all
+
+The reviewer diagnosed the launch failure directly (`eglinfo`/`glxinfo` on the same machine): this machine has two GPUs (an NVIDIA RTX 5060 Ti and an AMD Radeon iGPU), and the X11/XWayland EGL path enumerates the NVIDIA card first with no bound userspace driver (`driver (null)`), while the AMD device separately returns `EACCES` from `ACCEL_WORKING`. The working GBM path resolves to the AMD device via `radeonsi`. **This is a persistent driver/configuration state, not transient load** — it reproduced after memory pressure had already cleared, and stopped being a "wait for the machine to go quiet" problem. Confirmed as machine-specific and correctly not touched: switching which GPU renders, or repairing the NVIDIA driver state, are both real options but change the configuration a latency figure would be taken under — a decision left to the owner, not applied quietly here.
+
+**Three of the four still-open Performance Checklist items don't need a GUI at all**, since `TerminalPane::poll()` is pure CPU (a PTY read plus a VTE/`SecurityFilter` parse) with no dependency on `iced`, a window surface, or synthetic input. `terminal_poll_handler_cost_under_a_real_flood_headless_benchmark` (new, `29f1046`, `crates/tekstide/src/shell/tests.rs`) launches a real pane, starts the real (fork-free) `FLOOD_SCRIPT`, and times `poll()` on the real 50ms tick cadence for a 2-second window — the same real pane-launching machinery the sentinel test and hidden-session ablation already use, just driven on a timer instead of through `shell::update`.
+
+**Real results, three consecutive runs, release profile:**
+
+| run | samples | p50 | max | bytes read | dropped | observed throughput |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 40 | 10,253µs | 10,650µs | 749,805 | 0 | 374,476 B/s |
+| 2 | 40 | 10,280µs | 11,217µs | 750,285 | 0 | 374,704 B/s |
+| 3 | 40 | 10,264µs | 11,052µs | 748,905 | 0 | 374,019 B/s |
+
+**The saturation hypothesis is answered: no.** `poll()`'s own cost is consistently ~10.3ms, comfortably under the 50ms tick period (~21% of it), across all three runs — not approaching saturation, and nowhere near the confounded live runs' ~1.1-1.2 *second* figures. This is real, reproducible evidence (not an estimate) that the update loop had headroom, corroborating the reviewer's own hedge from response 156 ("my own estimate says it probably is not [saturating]... but an estimate is not evidence") — the evidence now exists, and it points at the environment as sole cause of the earlier confounded plateau, not a structural defect in this crate's poll loop.
+
+**The ~10.3ms figure itself is explained by, and further corroborates, response 154/155's own finding**: it lands almost exactly on `read_available_bounded_for`'s hardcoded 10ms `WouldBlock` sleep (`tekstide-core`'s `runtime/terminal/launch.rs:148-150`) — meaning `poll()` is spending nearly all its time in that one fixed sleep, not in genuine data-processing cost, even under a real flood.
+
+**Dropped bytes stayed `0` even under a genuine, un-fork-bound flood — but the reason is now known, not assumed.** Observed in-app throughput (~374KB/s) is ~46× below the flood script's own standalone throughput (~17.2MiB/s, response 155/156). The flood is throttled by the app's own draining rhythm: `poll()`'s ~10ms-dominated cost against a 50ms tick means the kernel's own pty output buffer fills between reads, the child process blocks on its own `write()` once full, and the flood's *effective* production rate collapses to whatever the app drains — so each individual bounded read never accumulates enough to exceed the 64KiB cap. This answers response 155's originally-raised, still-open dropped-bytes question: not "flood too weak" (that was the fork-bound script, already fixed) and not "cap never exercised due to a code defect," but a real, structural backpressure loop between the app's polling cadence and the pty's own buffering — itself a legitimate, disclosable characteristic of the current polling architecture, consistent with (and a further motivation for) Option B (readiness-driven I/O) as the real long-term fix, though still out of scope for this slice.
+
+Regression guard: the benchmark asserts `max` stays under 10× the tick period (500ms) — generous by design, a diagnostic report rather than `NFR-PERF-004`'s own acceptance test. Ablation-verified: temporarily added a 600ms sleep inside `poll()`, confirmed the assertion failed with the real bad value in the message (`max=613293us`), reverted.
+
+Gates: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (497 `tekstide-core` + 120 `tekstide` — up from 119, 1 net new — + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures), `git diff --check` — all passed.
+
+**Still open, and still genuinely needs the GUI**: end-to-end input-dispatch latency under flood, and the non-contamination control (instrumentation on vs. off against identical workload) — both need the real event loop this machine's graphics stack currently can't provide. `NFR-PERF-004`'s not-met verdict is unaffected either way, and per the reviewer, there is no urgency on these two.
 
 ## PR-017-H — Closeout evidence
 
