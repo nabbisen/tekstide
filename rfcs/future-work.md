@@ -18,6 +18,28 @@ Status: partially implemented by RFC-007/RFC-008/RFC-009; product UI and GUI evi
 - Implement safe GUI terminal rendering and screenshot-backed spoofing evidence in the GUI milestone.
 - Add macOS/Windows terminal runtime evidence before claiming cross-platform terminal support.
 
+#### Readiness-driven terminal I/O ("Option B") — owns `NFR-PERF-004`
+
+Recorded 2026-08-04 at RFC-017's closeout, because everything below otherwise lives only inside a closed RFC's evidence file and would not be found by whoever picks this up.
+
+**`NFR-PERF-004` (terminal input latency p95 ≤ 16 ms) is recorded as not met** by RFC-017 PR-017-G. RFC-014 never verified it either ("Not verified — see R1"), so this is the criterion's first evidenced verdict rather than a regression.
+
+**Why the current architecture cannot meet it.** `terminal_demo_subscription`'s **50 ms** poll tick is the only path by which PTY bytes reach the grid, so poll-wait alone contributes an expected p95 near **47.5 ms** — roughly 3× the budget, before any PTY, VTE, layout or paint cost. This is arithmetic over a fixed, code-visible interval, not a measurement artifact. A headless benchmark confirms the update loop is *not* saturating (`poll()` costs ~10.3 ms against the 50 ms period, 21% duty), so the ceiling is the tick interval itself.
+
+**The fix is readiness-driven I/O**: wake on PTY readability rather than polling — an async or dedicated-thread reader that blocks at the OS level and pushes a message the instant bytes arrive. This removes the interval/cost tradeoff rather than tuning it. **Shortening the tick is not an acceptable substitute**: it narrows a structural ceiling by tuning a constant whose permanent idle-CPU cost, across every open terminal pane, is unquantified.
+
+**Scope warning.** This changes the shape of the one ingress path RFC-017 PR-017-B/C's **P1 (single ingress)** and **P2 (no side channels)** were enumerated and ablated against. It needs the same re-enumeration and re-ablation treatment those got — sized as its own slice, plausibly an RFC-009/RFC-017 amendment, not a patch.
+
+**Two coupled `tekstide-core` defects that must be fixed *in the same change*:**
+
+1. **The 10 ms `WouldBlock` sleep.** `read_available_bounded_for` (`crates/tekstide-core/src/runtime/terminal/launch.rs:147-150`) sleeps a hardcoded 10 ms against a caller-supplied 5 ms bound, so an idle `poll()` blocks **twice its own budget** and returns having read nothing — synchronously, on `iced`'s single update thread. It also **caps real terminal output throughput at roughly 374 KB/s** (measured): the reader sustains ~69 MB/s while actually reading, but spends about 0.5% of each tick doing so. A verbose build or a `cat` of a large log will hit that ceiling and block on write.
+
+2. **The 64 KiB per-poll cap's truncation policy.** `read_available_bounded_for` truncates a read chunk at an arbitrary byte once `output` reaches `max_buffered_bytes`, discards the remainder, and keeps reading — feeding the emulator a byte stream **with a hole in it** — while `TerminalPane::poll()` discards the `TerminalOutputSummary` carrying `dropped_bytes`, so nothing reports that it happened.
+
+**Why they are one change and not two.** Today `dropped_bytes` is always `0` **only because the sleep starves the reader** — about 18.7 KB accumulates per poll, nowhere near the cap. Fix the sleep alone and a 5 ms window would offer roughly 104 KB against a 64 KiB cap (two independent measurements agree on that figure), and the truncation becomes live. **P4 (stream-position independence) does not cover this**: P4 proves classification is stable across arbitrary *chunking*, where every byte still arrives. Dropped bytes are a different property and were never proven. A hole landing mid-escape-sequence leaves the parser consuming later output as that sequence's parameters.
+
+So the cap needs a real decision — block, grow, or drop-with-a-reported-count — not the current silent truncation with the event discarded. **Fixing the sleep in isolation trades a throughput cap for a stream-corruption bug.**
+
 ### AgentRun And AI CLI Execution
 
 Status: partially implemented by RFC-010; GUI launch/review surfaces and command approval remain.
