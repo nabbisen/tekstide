@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - Acceptance / QA Checklist"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004) recorded not met 2026-08-03 (arithmetic verdict, owner ship/hold decision pending); reviewed and confirmed (response 159); PR-017-H unblocked"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004) recorded not met 2026-08-03 (arithmetic verdict, owner ship/hold decision pending); PR-017-H closeout evidence complete, pending owner sign-off on the NFR-PERF-004 ship/hold trade"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -61,32 +61,36 @@ created: "2026-08-01"
 
 ## Honesty Checklist (PR-017-H)
 
-- [ ] Closeout states what may be claimed about the terminal surface.
-- [ ] **No claim of trusted-UI separation or spoofing resistance** — RFC-018 owns it.
-- [ ] **RFC-014 PR-014-D's screenshot is not cited** as evidence for the product's boundary.
-- [ ] Screenshots each state what they prove **and do not**.
-- [ ] Every unchecked line above carries a stated reason.
+- [x] Closeout states what may be claimed about the terminal surface. `qa-evidence.md`'s "The claim statement" section, PR-017-H.
+- [x] **No claim of trusted-UI separation or spoofing resistance** — RFC-018 owns it. Stated explicitly; the grid-spoofing risk item in the RFC's own Risks section is recorded as RFC-018's to close, not this RFC's.
+- [x] **RFC-014 PR-014-D's screenshot is not cited** as evidence for the product's boundary. Confirmed by construction — no PR-017 evidence section references it, and the claim statement names the trap explicitly.
+- [x] Screenshots each state what they prove **and do not**. Confirmed per-slice in the Surface/Input Checklists above (PR-017-C/D/E each state what their screenshots do not prove: trusted-UI separation/spoofing resistance, real per-project terminal creation UX).
+- [x] Every unchecked line above carries a stated reason. The two unchecked Performance Checklist items above (end-to-end GUI figure, non-contamination control) each state theirs: blocked by machine-specific issues, no urgency, don't affect the recorded verdict.
 
 ## Evidence Required
 
-- [ ] Commit/PR list.
-- [ ] Gate command output.
-- [ ] P1-P4 ablation results.
-- [ ] Split-corpus generation method and case count.
-- [ ] Sentinel privacy test result.
-- [ ] `NFR-PERF-004` measurement under flood.
-- [ ] Known limitations.
-- [ ] Answers to the RFC's open questions.
+- [x] Commit/PR list. `qa-evidence.md`, PR-017-H.
+- [x] Gate command output. `qa-evidence.md`, PR-017-H — same four gates, every slice, final state 497 + 120 + 18 + 0, 0 failures.
+- [x] P1-P4 ablation results. `qa-evidence.md`, PR-017-H, pointing to the Filter Checklist's per-property detail.
+- [x] Split-corpus generation method and case count. 8 families, 80 generated split points, 88 total cases.
+- [x] Sentinel privacy test result. Fully approved, response 153.
+- [x] `NFR-PERF-004` measurement under flood. Recorded not met, arithmetic + headless-benchmark-corroborated; two GUI-bound items open, no urgency.
+- [x] Known limitations. Nine items consolidated in `qa-evidence.md`, PR-017-H.
+- [x] Answers to the RFC's open questions. All three answered, PR-017-H.
 
 ## Final Acceptance Decision
 
 - [ ] Accepted.
-- [ ] Accepted with required follow-up.
+- [x] **Accepted with required follow-up** — the architect's recommendation (response 155/159): accept `NFR-PERF-004` recorded not met for `0.5.x`/M9, schedule Option B (readiness-driven terminal I/O) as scoped follow-up work. **Formal owner sign-off on this specific trade is the one item this closeout surfaces rather than resolves** — see Reviewer notes.
 - [ ] Requires re-review after changes.
 - [ ] Blocked — the filter cannot be shown single-ingress in product code (Option B fallback).
 
 Reviewer notes:
 
 ```text
-Pending implementation.
+Pending the owner's confirmation of the ship/hold trade recorded above. Every other checklist item in this
+document is checked with evidence, or unchecked with a stated reason that does not block closeout. The
+architect's own recommendation stands as recorded in qa-evidence.md's PR-017-G section (responses 155, 159);
+this file does not put words in the owner's mouth by checking "Accepted" outright before that confirmation
+arrives.
 ```

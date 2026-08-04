@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004) recorded not met 2026-08-03 (arithmetic verdict, owner ship/hold decision pending); reviewed and confirmed (response 159); PR-017-H unblocked"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004) recorded not met 2026-08-03 (arithmetic verdict, owner ship/hold decision pending); PR-017-H closeout evidence complete, pending owner sign-off on the NFR-PERF-004 ship/hold trade"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -524,7 +524,72 @@ Gates: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-
 
 ## PR-017-H — Closeout evidence
 
-Pending implementation.
+### Commit list, PR-017-B through PR-017-G
+
+`d99bccb` filter promotion; `c4f92d0` spike `filter.rs` marked superseded; `fe70b27` terminal pane rendering; `81ae4e4` input/Tab decision; `f98de67` immersion mode/split/session bar; `f81ac30`, `096f59e` response 150 fix and approval; `03476ae` `plain_terminal_observation` producer; `afe5083`, `f619a6c` response 152 fix and approval; `fcf1e91`, `fcb186a` `NFR-PERF-004` measurement wired; `5c43e98`, `0d36da6` response 154 (Finding 1 fix, definition stated); `ba039a9`, `1218c37` response 155 (flood script fixed, live-run confound recorded); `b4e10ff`, `8d0c9d4` response 156 (self-validating instrumentation); `76037d2`, `3f8cf74` response 157 (fixes applied, second blocker recorded); `29f1046`, `97cb158` response 158 (headless benchmark); `9e503fb` response 159 (correction, sleep/cap coupling recorded).
+
+### Gate command output
+
+Every slice above passed the same four gates before its commit: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features`, `git diff --check`. Final state: 497 `tekstide-core` + 120 `tekstide` + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures.
+
+### P1-P4 ablation results
+
+Re-proven against product code (not the spike's test harness) at two points: PR-017-B's own promotion, and PR-017-C's re-enumeration once a real `TerminalPane` existed to violate the claims for the first time. Each ablated independently — see the Filter Checklist above for the exact ablation shape per property (a simulated second ingress for P1, a fresh-`Processor`-per-chunk break for P3/P4).
+
+### Split-corpus generation method and case count
+
+8 accepted/inert sequence families, split at every generated internal byte boundary — 80 generated split points, 88 total cases (`every_named_family_blocks_with_no_grid_effect_at_every_split_boundary`), plus the carried V2/V4/V5/V7 findings from the RFC-014 spike. Classification and observable grid effect asserted identical to the unsplit case at every boundary.
+
+### Sentinel privacy test result
+
+`plain_terminal_observation`'s sentinel test (PR-017-F) proves no terminal-derived text (title, root path) reaches the durable audit store, checked against raw on-disk bytes after the store is dropped (response 152's fix — the first version read a page that never held the write) with a positive control proving the scan reaches real content. Fully approved, response 153.
+
+### `NFR-PERF-004` measurement under flood
+
+**Recorded as not met.** `terminal_demo_subscription`'s 50ms poll tick is the only place PTY bytes reach the grid; poll-wait alone contributes an expected p95 of ~47.5ms (0.95 × 50ms) before any pty/VTE/layout/paint cost — arithmetic, independent of any live run, roughly 3× the 16ms budget. RFC-014 never verified this criterion at all ("Not verified — see R1"); this is its first real verdict.
+
+**Corroborated by a real, headless measurement**, not only arithmetic: `terminal_poll_handler_cost_under_a_real_flood_headless_benchmark` measured `poll()`'s own cost at a consistent ~10.3ms against the 50ms period (21% duty cycle, independently reproduced by the reviewer) — the update loop does not saturate under a genuine flood, so the confounded live-GUI runs' ~1.1-1.2 *second* figures are attributable to this session's shared-machine swap pressure, not to a structural defect in this crate's poll loop. That competing hypothesis, raised explicitly in response 156, is excluded on evidence.
+
+**Delivery loss**: three completed live-GUI runs (before the confound was diagnosed) each delivered all 1,100 dispatched samples with 0% loss, confirmed on-disk (`grep -c '^input '`, never `wc -l` once the log gained multiple line shapes — response 157). The latency values from those runs were discarded as evidence, not reported, once the confound was found; delivery loss itself is unaffected by the confound and stands as measured.
+
+**Two GUI-bound items remain open**: end-to-end input-dispatch latency under real synthetic input, and the non-contamination control (instrumentation on vs. off against identical workload). Both were blocked in turn by shared-machine swap pressure, then by a machine-specific GPU/EGL driver failure (diagnosed as a dual-GPU driver/configuration issue unrelated to this crate — a plain, unmodified `tekstide` binary with no arguments fails identically). Per the reviewer: no urgency on either, since neither can change the `NFR-PERF-004` verdict, which rests on arithmetic and the headless benchmark, not on these two.
+
+### Known Limitations
+
+- **Terminal output throughput is capped around ~374KB/s**, and the cause is a `tekstide-core` defect, not a design point (PR-017-G, response 159 — full mechanism and the required coupled fix stated below and in the file's own Known Limitations block).
+- **`TerminalPane::launch`'s scratch temp directory is not cleaned up on exit** (PR-017-C; matches the RFC-014 spike's own precedent; diagnostic-only, not user-facing).
+- **Input targeting among multiple visible panes is scoped to `Primary` only** — no per-pane click-to-focus or cycle keybinding exists yet (PR-017-E, deliberate scope, not silent).
+- **The wide-split layout leaves visible dead space**: panes occupy roughly three-quarters of measured width because individual pane grids are not reflowed (PR-017-E, direct consequence of the deliberately smaller "decide pane count, not per-pane resize" scope).
+- **`is_scan_exempt`'s colour-scan exemption list has no staleness check** in either direction (PR-017-E forward note, not an obligation on any slice).
+- **`plain_terminal_observation` can only ever emit `Started`** — `Failed`/`Terminated` are unrepresentable in the frozen schema today (no `TerminalId` exists before a launch failure; no exit-detection wiring exists in `poll()`) (PR-017-F).
+- **`TextStream::to_pty_bytes` is a defined subset, not a complete VT100/xterm encoder** (PR-017-D, disclosed scope boundary).
+- **No screenshot exists for modal-exclusivity under live terminal output** — no real user-accessible sequence reaches that state today; the live-terminal test is the demonstration instead (PR-017-D, disclosed rather than manufactured).
+- **A configuration RFC-018 must reproduce deliberately**: `terminal_demo_subscription()` sits outside the modal gate, so terminal output keeps rendering while a modal is open (correct behavior) — setting `TEKSTIDE_LAYER_DEMO` and `TEKSTIDE_TERMINAL_DEMO` together reaches exactly the adversarial condition RFC-018 must prove separation against (found during PR-017-D's review, recorded in the RFC document itself).
+
+### Answers to the RFC's open questions
+
+1. **Does Tab reach the terminal?** No — decided in PR-017-D. Structural, not conditional: Tab is intercepted in `route_non_modal_input`'s precedence before `terminal_focus` is even consulted, proven against a real, live terminal and ablated by swapping the precedence check.
+2. **Where does the emulator's grid state live when a session is hidden?** Retained in memory, always polled, never torn down — decided in PR-017-E against the bounded-scrollback decision (the bound doesn't change with visibility; session count is itself bounded). Demonstrated: a hidden pane keeps accumulating real PTY output and retains it across a later slot reassignment; ablated by simulating "poll only visible panes."
+3. **Does the filter belong in a separate crate?** Still no — nothing needs the terminal without the GUI today. Unchanged from the RFC's own stated revisit condition (RFC-024 or a headless test harness); PR-017-G's own headless benchmark is a test *inside* this crate using its existing pane-launching machinery, not an external headless consumer, so it does not itself trigger the revisit condition.
+
+### Risks (from the RFC), mitigation status
+
+- **The filter is bypassable in a way the spike did not surface.** Mitigated: P1-P4 re-proven against product code with adversarial chunking (PR-017-B, re-enumerated PR-017-C), each independently ablated.
+- **The grid becomes a spoofing surface.** Not this RFC's to close — RFC-018's job, explicitly. This RFC's obligation was narrower: produce no chrome-adjacent grid regions and no terminal-controlled text in shell chrome, which held (grid renders as data only, PR-017-C/E screenshots; session titles go through `text_safety`, though no chrome element derived from terminal output exists yet to exercise that path against).
+- **Latency measured only when idle.** Addressed as a stated gate, not skipped: the flood condition was built, fixed twice (fork-bound, then the drain-cadence throttling finding), and measured (headlessly) rather than only argued — see `NFR-PERF-004` above.
+- **The pane duplicates core state for rendering convenience.** Held: `TerminalPane`'s fields are its own rendering state or a handle back to `tekstide-core`'s runtime; nothing shadows `ProjectSession`/`ApplicationShell` state (Surface Checklist).
+- **Scrollback growth under hostile output.** Held: bounded at `SCROLLBACK_LINES = 2,000`, ablation-verified under sustained output (PR-017-C).
+- **Tab routing traps the user.** Held: the escape hatch is structural, not contingent on the terminal cooperating, tested against a real live terminal and ablated (PR-017-D, open question 1 above).
+
+### The claim statement
+
+**What RFC-017 may claim**: a real, filtered PTY-backed terminal renders as a surface under RFC-015's contract, with the single-ingress/no-side-channel security properties re-proven against product code and independently ablated; real keyboard input reaches it with modal exclusivity and global-keybinding precedence demonstrated live, not argued; a real, first-ever audit producer exists for terminal sessions with a sentinel-proven privacy boundary; and `NFR-PERF-004` has its first real, product-scale verdict (not met), with the reason understood down to a specific, named defect and a scoped path to closing it.
+
+**What RFC-017 may not claim, and does not**:
+- **No trusted-UI separation or spoofing resistance.** That is RFC-018's, explicitly, per the RFC document's own scope split. Nothing in this evidence file asserts the grid cannot be used to spoof chrome; every screenshot's own caption states only what it proves (pane renders inside the existing zone container, chrome-level focus border unaffected) and not that separation.
+- **RFC-014 PR-014-D's spike screenshot is not cited anywhere in this evidence as proof of the product's boundary** — the RFC document itself names this exact trap and this file does not fall into it.
+- **`NFR-PERF-004` is not claimed as met.** It is recorded not met, with the arithmetic and headless-benchmark reasoning stated plainly, not glossed over or redefined until it passed (the project's own standing rule: a criterion redefined until it passes is the degenerate case in a suit).
+- **The ship/hold decision for `NFR-PERF-004`'s not-met status is not decided by this file.** The architect's recommendation (accept "not met" for `0.5.x`/M9, schedule Option B — readiness-driven terminal I/O — as scoped follow-up work) is recorded above; formal owner sign-off on that specific trade is the one item this closeout surfaces rather than resolves.
 
 ## Known Limitations
 
