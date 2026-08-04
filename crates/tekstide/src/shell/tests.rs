@@ -1353,3 +1353,92 @@ fn sentinel_terminal_derived_text_never_reaches_the_durable_audit_store() {
         "the real, full project root path must never reach the raw on-disk audit store"
     );
 }
+
+/// RFC-017 PR-017-G response 158: a **headless** benchmark answering the
+/// discriminator question response 156 raised, without a GUI or GPU at
+/// all -- `poll()`'s own cost (a real PTY read plus `Processor::advance`
+/// through `SecurityFilter`) under a real, un-fork-bound flood, against
+/// the 50ms tick period `terminal_demo_subscription` polls at in
+/// production. `poll()` is pure CPU (no `iced`, no surface, no
+/// synthetic input), so this needs none of the machinery the three live
+/// GUI attempts kept getting blocked by (swap pressure, then a broken
+/// X11/EGL path unrelated to this crate) -- the same real pane-launching
+/// machinery `sentinel_terminal_derived_text_never_reaches_the_durable_audit_store`
+/// and the hidden-session ablation above already use, just driven on a
+/// timer instead of through `shell::update`.
+///
+/// **Answers three things this benchmark's own output makes legible,
+/// not the end-to-end `NFR-PERF-004` figure** (that needs the real
+/// event loop and stays parked on the GUI): whether handler cost
+/// approaches the 50ms tick period (the saturation hypothesis -- if
+/// so, that's a real, structural contributor independent of any
+/// environment noise); dropped bytes under a *genuine* flood (still
+/// unexamined before this -- the confounded live runs' `0` was, per
+/// response 156's re-reading, evidence the flood never reached rate,
+/// not evidence of no drops); and observed in-app throughput against
+/// the flood script's own ~17.2 MiB/s standalone figure.
+///
+/// The only assertion is a generous, order-of-magnitude regression
+/// guard (10x the tick period) -- this is a diagnostic report, not
+/// `NFR-PERF-004`'s acceptance test, and asserting a tight bound here
+/// would make this flaky against exactly the kind of shared-machine
+/// noise the three GUI attempts already ran into.
+#[test]
+fn terminal_poll_handler_cost_under_a_real_flood_headless_benchmark() {
+    let project_id = tekstide_core::project::ProjectId::new_uuid();
+    let (mut pane, _session) = crate::surface::terminal::TerminalPane::launch(
+        project_id,
+        "headless flood benchmark",
+        fresh_project_dir("headless-flood-benchmark"),
+        PathBuf::from("/bin/sh"),
+    )
+    .expect("launch a real shell for the headless benchmark");
+
+    pane.write_input(super::FLOOD_SCRIPT.as_bytes());
+    // Give the backgrounded flood a moment to actually start producing
+    // before the timed window begins -- otherwise the first samples
+    // would measure an empty pipe, not the flood this benchmark exists
+    // to observe.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    let tick_period = std::time::Duration::from_millis(50);
+    let benchmark_window = std::time::Duration::from_secs(2);
+    let benchmark_started = std::time::Instant::now();
+    let mut tick_micros: Vec<u128> = Vec::new();
+    while benchmark_started.elapsed() < benchmark_window {
+        let tick_started = std::time::Instant::now();
+        pane.poll();
+        let elapsed = tick_started.elapsed();
+        tick_micros.push(elapsed.as_micros());
+        // Sleeping only the remainder of the tick period matches
+        // production's `iced::time::every(50ms)` cadence when `poll()`
+        // is fast, and correctly busy-polls with no extra delay when
+        // `poll()` itself already exceeds the period -- exactly what a
+        // saturating update loop would do in production too.
+        std::thread::sleep(tick_period.saturating_sub(elapsed));
+    }
+
+    tick_micros.sort_unstable();
+    let sample_count = tick_micros.len();
+    let p50_micros = tick_micros[sample_count / 2];
+    let max_micros = *tick_micros.last().expect("at least one tick must have run");
+    let bytes_read_total = pane.bytes_read_total();
+    let dropped_bytes_total = pane.dropped_bytes_total();
+    let observed_bytes_per_sec =
+        bytes_read_total as f64 / benchmark_started.elapsed().as_secs_f64();
+
+    eprintln!(
+        "terminal_poll_headless_benchmark samples={sample_count} p50_us={p50_micros} \
+         max_us={max_micros} bytes_read_total={bytes_read_total} \
+         dropped_bytes_total={dropped_bytes_total} \
+         observed_bytes_per_sec={observed_bytes_per_sec:.0}"
+    );
+
+    assert!(
+        max_micros < tick_period.as_micros() * 10,
+        "poll() cost blew past a sane, order-of-magnitude-over-the-tick-period bound: \
+         max={max_micros}us against a {}us tick period -- this is a real regression, not \
+         measurement noise, since the bound is 10x the period it is meant to fit inside",
+        tick_period.as_micros()
+    );
+}
