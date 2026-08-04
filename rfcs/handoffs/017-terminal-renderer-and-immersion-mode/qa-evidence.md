@@ -2,7 +2,7 @@
 title: "RFC-017: Terminal Renderer and Immersion Mode - QA Evidence"
 rfc: "RFC-017"
 rfc_file: "../../proposed/017-terminal-renderer-and-immersion-mode.md"
-status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004) recorded not met 2026-08-03 (arithmetic verdict, owner ship/hold decision pending); re-run made self-validating, awaiting a quiet machine"
+status: "Accepted 2026-08-01 — PR-017-B/C/D/E/F reviewed and approved (responses 144-153); PR-017-G (NFR-PERF-004) recorded not met 2026-08-03 (arithmetic verdict, owner ship/hold decision pending); re-run instrumented and authorized, blocked by an unrelated GPU/EGL launch failure"
 target_milestone: "M9"
 created: "2026-08-01"
 ---
@@ -484,7 +484,11 @@ The reviewer verified the confound directly: `free -h` at review time showed 849
 
 Gates re-passed: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features` (497 `tekstide-core` + 119 `tekstide` — up from 117, 2 net new — + 18 `tekstide-gui-spike` + 0 `tekstide-pty-spike`, 0 failures), `git diff --check`.
 
-**No re-run performed.** Per the reviewer's own words — "there is no urgency, and a run taken on a loaded machine is worse than no run" — the re-run is deferred until this shared machine's memory pressure has cleared (checked via `free -h`/the new environment snapshot before running again), not attempted against the same loaded state that just invalidated two prior runs. `NFR-PERF-004`'s not-met verdict above is unaffected either way. PR-017-H stays blocked until a usable run lands.
+**No re-run performed in this round either — memory pressure cleared, but a different, unrelated failure blocked it.** Response 157 required two fixes (both implemented, `76037d2`: `record_tick_handler` now logs the pane's running `bytes_read_total` alongside each tick sample rather than only at exit, since `elapsed_secs` alone can't safely denominate throughput once `FLOOD_SCRIPT`'s 30s self-termination is in play; the confirmed-sample-count rule — `grep -c '^input ' <log>`, never `wc -l`, never `Measurement::received` — is now stated at `record_input`'s own definition) and granted standing authorization for the re-run (scope: the release binary, scratch project/state/log, `xdotool` as described in review request 154).
+
+Checked `free -h` before attempting: 28GiB available, swap down to 24GiB from the prior 56GiB — a real improvement, judged sane enough to proceed. The app failed to open a window at all: `thread 'main' panicked ... wgpu error: Validation Error ... In Surface::configure ... Invalid surface`, preceded by `libEGL warning: egl: failed to create dri2 screen`. Reproduced twice, then confirmed **unrelated to this slice's own code**: a plain `env -u WAYLAND_DISPLAY ./target/release/tekstide` with no measurement env vars and no arguments fails identically. This is a GPU/graphics-driver-level failure on the shared machine (plausibly resource contention from the same concurrent activity that drove the earlier swap pressure — several `rust-analyzer`/`claude` processes were still running), not a regression in this branch. No stray process was left behind (`ps aux` confirmed clean before and after).
+
+**Deferred again, for a different reason than before.** `NFR-PERF-004`'s not-met verdict is unaffected. PR-017-H stays blocked until a usable run lands.
 
 ## PR-017-H — Closeout evidence
 
