@@ -28,9 +28,11 @@ Turn the reviewed terminal security boundary into a rendered surface: a PTY-back
 
 ## What this closes, and what it does not
 
-**Closes:** RFC-009's deferral of a rendered surface; RFC-014's C3 latency criterion (`NFR-PERF-004`) at product scale rather than spike scale; the `plain_terminal_observation` audit producer.
+**Closes:** RFC-009's deferral of a rendered surface; the `plain_terminal_observation` audit producer.
 
-**Does not close, and must not claim to:** rendered paste protection and its confirmation dialog, the `paste_blocked` producer, and screenshot-backed spoofing evidence under adversarial output. **Those are RFC-018.** ROADMAP M9 lists them under the same milestone; the delivery plan splits them across two RFCs, and this document is the first half.
+**Corrected 2026-08-04 at closeout.** This line originally also claimed to close RFC-014's C3 latency criterion (`NFR-PERF-004`) "at product scale rather than spike scale." **It does not.** PR-017-G recorded `NFR-PERF-004` as **not met** — see §Performance below and `rfcs/handoffs/017-.../qa-evidence.md`. The criterion now has its first real verdict, which is a different and lesser thing than being closed.
+
+**Does not close, and must not claim to:** rendered paste protection and its confirmation dialog, the `paste_blocked` producer, and screenshot-backed spoofing evidence under adversarial output. **Those are RFC-018.** Nor `NFR-PERF-004`, per the correction above — closing it requires readiness-driven terminal I/O (Option B), which is scoped follow-up work, not this RFC's. ROADMAP M9 lists them under the same milestone; the delivery plan splits them across two RFCs, and this document is the first half.
 
 **A configuration RFC-018 will want, found during PR-017-D's review (2026-08-03).** `terminal_demo_subscription()` sits outside the modal gate, so **terminal output keeps rendering while a modal is open** — correct behaviour, since a real terminal does not stop producing output because a dialog appeared. Setting `TEKSTIDE_LAYER_DEMO` and `TEKSTIDE_TERMINAL_DEMO` together is reachable (they are constructed independently at boot) and produces exactly the adversarial condition RFC-018 must prove against: a trusted dialog distinguishable from terminal content *while that content is actively updating*. A modal over a frozen terminal is much weaker evidence than a modal over a live one. PR-017-D correctly declined to manufacture that screenshot for its own scope; RFC-018 should seek it deliberately.
 
@@ -114,7 +116,13 @@ One question RFC-015 deliberately left open and this RFC must answer: **should T
 
 ## Performance
 
-`NFR-PERF-004`: terminal input latency p95 ≤ 16 ms **with bounded background output**. RFC-014's C3 measured this in the spike; this RFC re-establishes it in the product.
+`NFR-PERF-004`: terminal input latency p95 ≤ 16 ms **with bounded background output**.
+
+**Correction, 2026-08-04 — the original sentence here was wrong when written.** It read "RFC-014's C3 measured this in the spike; this RFC re-establishes it in the product." RFC-014 records C3 as **"Not verified — see R1"** ([`014`](../done/014-desktop-gui-substrate-and-terminal-rendering.md), acceptance table), and R1's discharge assigns it to this RFC. The spike never measured it. That error was the architect's, made at authoring time and repeated unchecked until PR-017-G; had anyone relied on it, this RFC would have been framed as re-establishing a known-good figure rather than producing the criterion's first verdict — which would have made a not-met result read as a regression instead of as new information.
+
+**Outcome, PR-017-G: not met.** `terminal_demo_subscription`'s 50 ms poll tick is the only path by which PTY bytes reach the grid, so poll-wait alone contributes an expected p95 near 47.5 ms — roughly 3× the budget, before any PTY, VTE, layout or paint cost. Arithmetic, independent of any live run. Corroborated headlessly: `poll()` costs ~10.3 ms against the 50 ms period (21% duty), so the update loop does **not** saturate; the cost is dominated by a hardcoded 10 ms `WouldBlock` sleep in `read_available_bounded_for` that overshoots its own 5 ms budget.
+
+Two consequences recorded rather than fixed here: terminal output throughput is capped near **374 KB/s** by that same sleep, and the sleep is currently **masking** a stream-truncation risk — `poll()`'s 64 KiB cap truncates mid-read and discards the remainder, and a faster reader would begin exceeding it. **The sleep fix and the cap policy are one change, not two.**
 
 Reuse RFC-015 PR-015-F's harness and its lessons:
 
@@ -160,7 +168,7 @@ If P1-P4 cannot be re-established in product code, **stop and escalate** rather 
 - **Inert-family corpus**: each family RFC-009 marks unsupported produces no observable grid effect.
 - **A real PTY**, not a synthetic byte source, for at least the round-trip and flood tests.
 - **Modal exclusivity under a live terminal**: a dialog open means no PTY write, demonstrated rather than argued.
-- **`NFR-PERF-004` under flood**, non-degenerate, with delivery loss reported.
+- **`NFR-PERF-004` under flood**, non-degenerate, with delivery loss reported. **Met as a gate, failed as a budget**: measured non-degenerately (not the all-`0µs` outcome this gate existed to prevent) and delivery loss reported at 0%, but the criterion itself is **not met** — see §Performance.
 - **Sentinel privacy** for `plain_terminal_observation`.
 - **Bounded scrollback** under sustained output.
 - Screenshots per response 127's convention: `--id` and `--path`, stored under `evidence/pr-017-*/`, committed, each with an explicit statement of what it does **and does not** prove.
