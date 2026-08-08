@@ -82,12 +82,23 @@ impl Default for ProjectResourceLimits {
             // unenforced -- harmless while the only launch path was an
             // env-gated demo that always stopped at three, but a real
             // keybinding a user can hold down would spawn unbounded real
-            // shell processes without this. 8 is generous for genuine
-            // multi-tasking (more hidden sessions than any one person
-            // realistically juggles at once) while still bounding what a
-            // held-down key can do -- small enough that hitting it is a
-            // deliberate act, not an accident of normal use.
-            terminal_session_limit: Some(8),
+            // shell processes without this.
+            //
+            // This is a function of poll cost, not process count. Every
+            // live session (visible or hidden) is polled sequentially each
+            // tick by `Message::TerminalPollTick`, and each `poll()` call
+            // carries `read_available_bounded_for`'s hardcoded 10ms
+            // `WouldBlock` sleep -- measured linear at ~10.1ms/pane against
+            // a 50ms tick period. 5 panes (~50.3ms) saturates the tick; 4
+            // (~40.3ms) leaves ~10ms for everything else in the handler,
+            // which is tight. 3 (~30.2ms) leaves ~20ms of headroom, and
+            // matches the pane count this project already shipped and
+            // exercised via the diagnostic demo path before this handoff.
+            // Revisit this number deliberately -- not by raising it in
+            // isolation -- once readiness-driven terminal I/O
+            // (`rfcs/future-work.md` §Readiness-driven terminal I/O)
+            // removes the per-poll sleep this bound is defending against.
+            terminal_session_limit: Some(3),
             agent_run_limit: None,
             approval_request_limit: None,
         }

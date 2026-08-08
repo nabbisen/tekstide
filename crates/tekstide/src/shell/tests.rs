@@ -1524,10 +1524,11 @@ fn launch_terminal_shell_input_switches_to_terminal_immersion_and_launches_a_rea
 
 /// **Review gate**: "the session limit is enforced in core and
 /// demonstrated, including what the user sees on refusal." Runs the
-/// default limit (`ProjectResourceLimits::default`, 8) to exhaustion
-/// with real launches, confirms the typed refusal names the real
-/// number, and confirms the refusal notice a user would actually see
-/// states that number too -- not a generic message that could pass
+/// default limit (`ProjectResourceLimits::default`, 3 -- a function of
+/// tick-poll cost, not process count, see that doc comment) to
+/// exhaustion with real launches, confirms the typed refusal names the
+/// real number, and confirms the refusal notice a user would actually
+/// see states that number too -- not a generic message that could pass
 /// whether or not the real limit made it through.
 #[test]
 fn terminal_session_limit_is_enforced_end_to_end_with_a_visible_notice() {
@@ -1537,35 +1538,35 @@ fn terminal_session_limit_is_enforced_end_to_end_with_a_visible_notice() {
         .expect("a freshly created directory is a valid project root");
     let mut state = state_with(app_shell);
 
-    for index in 0..8 {
+    for index in 0..3 {
         super::attempt_terminal_launch(&mut state).unwrap_or_else(|error| {
             panic!("launch {index} must succeed, under the limit: {error:?}")
         });
     }
-    assert_eq!(state.terminal_panes.len(), 8);
+    assert_eq!(state.terminal_panes.len(), 3);
 
     let refusal = super::attempt_terminal_launch(&mut state)
-        .expect_err("the 9th launch must be refused once the default limit of 8 is reached");
+        .expect_err("the 4th launch must be refused once the default limit of 3 is reached");
     assert_eq!(
         refusal,
-        super::TerminalLaunchRefusal::SessionLimitExceeded { limit: 8 }
+        super::TerminalLaunchRefusal::SessionLimitExceeded { limit: 3 }
     );
     assert_eq!(
         state.terminal_panes.len(),
-        8,
+        3,
         "a refused launch must not add a pane"
     );
 
     let notice_text = super::terminal_launch_refusal_text(&state.catalog, &refusal);
     assert!(
-        notice_text.contains('8'),
+        notice_text.contains('3'),
         "the refusal notice a user sees must state the real limit, not a generic message: \
          {notice_text:?}"
     );
 }
 
 /// **Ablation** for the limit above: with the pre-check and the
-/// `add_terminal_session` refusal both bypassed, a 9th real process
+/// `add_terminal_session` refusal both bypassed, a 4th real process
 /// would be spawned -- confirming the assertions above are load-bearing,
 /// not passing for an unrelated reason. Simulated here by calling the
 /// real spawn machinery directly past where `attempt_terminal_launch`
@@ -1573,14 +1574,14 @@ fn terminal_session_limit_is_enforced_end_to_end_with_a_visible_notice() {
 /// run (`tekstide-core`'s own `terminal_session_limit_is_enforced_with_a_typed_refusal`
 /// ablates the enforcement itself at its real call site).
 #[test]
-fn ablation_a_ninth_real_process_would_spawn_without_the_limit_check() {
+fn ablation_a_fourth_real_process_would_spawn_without_the_limit_check() {
     let mut app_shell = ApplicationShell::new();
     app_shell
         .add_project_from_path(fresh_project_dir("terminal-session-limit-ablation"))
         .expect("a freshly created directory is a valid project root");
     let mut state = state_with(app_shell);
 
-    for index in 0..8 {
+    for index in 0..3 {
         super::attempt_terminal_launch(&mut state).unwrap_or_else(|error| {
             panic!("launch {index} must succeed, under the limit: {error:?}")
         });
@@ -1588,18 +1589,18 @@ fn ablation_a_ninth_real_process_would_spawn_without_the_limit_check() {
 
     // The real project-level check tekstide-core::project::tests::collections
     // ablates directly; this proves the *consequence* would be a real,
-    // ninth spawned process if that check were absent, by launching one
+    // fourth spawned process if that check were absent, by launching one
     // through the same TerminalPane::launch the production path uses,
     // bypassing only the registration (which would itself refuse).
-    let root = fresh_project_dir("terminal-session-limit-ablation-9th");
+    let root = fresh_project_dir("terminal-session-limit-ablation-4th");
     let (pane, _session) = crate::surface::terminal::TerminalPane::launch(
         tekstide_core::project::ProjectId::new_uuid(),
-        "ablation 9th",
+        "ablation 4th",
         root,
         PathBuf::from("/bin/sh"),
     )
     .expect(
-        "a 9th real shell can always be spawned -- nothing in the OS stops it, which is \
+        "a 4th real shell can always be spawned -- nothing in the OS stops it, which is \
              exactly why the application-level limit above is the only thing that does",
     );
     assert!(
@@ -1725,6 +1726,43 @@ fn ablation_without_check_exit_a_dead_shell_still_reports_running() {
         tekstide_core::domain::TerminalStatus::Running,
         "without check_exit, a dead shell must still (wrongly) report Running -- this is the \
          exact lie the real TerminalPollTick handler exists to prevent"
+    );
+}
+
+/// **Non-blocking recommendation, review response 163.** `check_exit`'s
+/// non-blocking claim (`Duration::ZERO` degrades `wait_for_exit`'s retry
+/// loop to a single non-blocking `try_wait()`) is a real property of
+/// that loop as written, not a contract of it -- if the loop's
+/// `elapsed() > timeout` guard ever changed to `>=`, this would
+/// silently reintroduce a 10ms blocking sleep per live pane per tick,
+/// on top of the tick-budget cost `ProjectResourceLimits::default`'s
+/// `terminal_session_limit` doc comment already accounts for. Pins the
+/// property with a real timer against a real, still-running shell
+/// (never called `exit`), with a bound generous enough not to be flaky
+/// under CI load but tight enough that a reintroduced 10ms sleep trips
+/// it.
+#[test]
+fn check_exit_on_a_live_shell_returns_without_blocking() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("terminal-check-exit-non-blocking"))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    super::attempt_terminal_launch(&mut state).expect("the launch must succeed");
+
+    let started = std::time::Instant::now();
+    let outcome = state.terminal_panes[0].check_exit();
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        outcome, None,
+        "a shell that was never told to exit must not report an outcome"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(5),
+        "check_exit on a live shell took {elapsed:?} -- the 10ms WouldBlock sleep this test \
+         exists to catch appears to have leaked back into the Duration::ZERO path"
     );
 }
 
