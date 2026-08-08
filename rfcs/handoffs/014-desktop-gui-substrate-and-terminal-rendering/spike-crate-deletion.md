@@ -2,7 +2,7 @@
 title: "RFC-014 — Spike crate deletion: implementation handoff"
 rfc: "RFC-014"
 rfc_file: "../../done/014-desktop-gui-substrate-and-terminal-rendering.md"
-status: "Ready for implementation — all four deletion conditions satisfied 2026-08-03 by RFC-017 PR-017-E"
+status: "Discharged 2026-08-04 — both crates deleted"
 created: "2026-08-04"
 ---
 
@@ -78,3 +78,26 @@ What is **not** acceptable is leaving it as-is with no condition. That is the st
 - Evidence files untouched; RFC-014's deletion section annotated with the date.
 - Gate-count change called out explicitly in the commit message.
 - `tekstide-pty-spike` decided either way, with the reasoning stated.
+
+## Outcome, 2026-08-04
+
+**Both crates deleted in the same change.**
+
+**`cargo tree`, confirmed not assumed.** `cargo tree -p tekstide` and `-p tekstide-core`, captured before and after: byte-identical. `Cargo.lock`'s only diff is the two spike crates' own `[[package]]` entries disappearing — every dependency either pulled (`alacritty_terminal`, `iced`, `tekstide-core`, `vte` for the GUI spike; `libc` for the pty spike) was already a strict subset of `tekstide`/`tekstide-core`'s own, so nothing shifted. No `sys-locale`-shaped surprise this time.
+
+**The four source references**, reworded per Decision 1 (kept, not deleted; historical framing; provenance preserved on the two security-critical ones): `crates/tekstide/src/surface/terminal/filter.rs`, `.../filter/tests.rs`, and two in `crates/tekstide/src/shell.rs` (the typing-measurement precedent, the flood-script precedent). Each now names the RFC/PR/review that did the promotion and points at this document rather than a path that no longer exists.
+
+**Evidence files left alone**, per Decision 2 — none of the ten-plus files that mention either crate were touched. RFC-014's own §"When the spike crate is deleted" (the one live-instruction exception) is annotated with the discharge date and a pointer here.
+
+**Gate-count change, called out explicitly**: the `497 tekstide-core + 120 tekstide + 18 tekstide-gui-spike + 0 tekstide-pty-spike` line this cycle used throughout RFC-017's evidence becomes `497 tekstide-core + 120 tekstide` from this commit forward. **Not a regression** — the 18 `tekstide-gui-spike` tests were the spike's own corpus, ported into `crates/tekstide/src/surface/terminal/filter/tests.rs` at PR-017-B and counted there ever since; nothing was lost, only a now-redundant second copy.
+
+### `tekstide-pty-spike` — decided: delete
+
+Applying RFC-014's own four-condition set to RFC-007, as this document's own framing suggested:
+
+1. **No product code compiles against it** — confirmed, `grep` across `crates/tekstide/src` and `crates/tekstide-core/src` finds nothing.
+2. **Every property it proved has a product-code equivalent with its own tests.** RFC-007's spike proved PTY feasibility as a **gate**, not a lineage of files meant for literal promotion (its own acceptance checklist states this explicitly: "RFC-007 is complete only as a feasibility gate; it does not mean production terminal behavior is implemented" — unlike the GUI spike, there was never a named "this file becomes that module" table). What it proved is covered, with real product tests, by `tekstide-core::runtime::terminal`: real-shell launch (`linux_runtime_launches_project_shell_and_reads_marker`), resize delivery (`linux_runtime_routes_resize_to_project_terminal`), termination signal sequencing including the SIGTERM/SIGKILL-fallback/orphan cases the spike's own termination smoke test recorded (`linux_runtime_terminates_process_group_with_sigterm`, `linux_runtime_uses_sigkill_fallback_for_foreground_child_after_sigterm_timeout`, `linux_runtime_does_not_overclaim_when_child_outlives_direct_shell_after_sigterm`), bounded output reads (`read_available_bounded_for`, exercised extensively by RFC-017 PR-017-G), and the security classification the spike's own "security smoke" informally checked (RFC-009's classifier, promoted and re-proven under RFC-017 PR-017-B with independent ablation of every property).
+3. **Its evidence artifacts live outside the crate** — `rfcs/handoffs/007-runtime-substrate-pty-feasibility/` already holds `qa-evidence.md`, `acceptance-qa-checklist.md`, and the implementation handoff; nothing lives only in the crate.
+4. **Nothing still needs to read it as reference** — `grep`-confirmed: every remaining mention across `rfcs/` is inside an evidence file (RFC-007, RFC-008, RFC-014, RFC-017's own `qa-evidence.md`s), never in `rfcs/proposed/`, i.e. no currently-open RFC cites it as a live design source.
+
+Deleted alongside `tekstide-gui-spike` in the same commit. RFC-007's own closed document (`rfcs/done/007-runtime-substrate-pty-feasibility.md`) is left untouched, matching Decision 2's "evidence files, leave alone" principle — it never had a live-instruction section the way RFC-014 did, so there is nothing there to annotate; this document is the durable record of the decision instead.

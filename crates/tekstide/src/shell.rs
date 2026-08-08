@@ -52,10 +52,12 @@ use crate::theme::Theme;
 /// RFC-015 PR-015-F: the synthetic typing-measurement surface's preloaded
 /// content -- a real ~1,500-line source file, not a lorem-ipsum
 /// placeholder, so the layout cost the measurement exercises is the same
-/// shape a real editor would see. `tekstide-gui-spike` (`publish = false`)
-/// used the RFC-014 spike's own precedent of `include_str!`-ing this file
-/// directly out of `tekstide-core`; `tekstide` is a published crate, and a
-/// package tarball can never contain a sibling crate's source, so this is
+/// shape a real editor would see. The RFC-014 spike crate
+/// (`tekstide-gui-spike`, `publish = false`, deleted 2026-08-04 -- see
+/// `rfcs/handoffs/014-desktop-gui-substrate-and-terminal-rendering/spike-crate-deletion.md`)
+/// set the precedent of `include_str!`-ing this file directly out of
+/// `tekstide-core`; `tekstide` is a published crate, and a package
+/// tarball can never contain a sibling crate's source, so this is
 /// a static, committed snapshot living inside this crate instead --
 /// discovered by `cargo package`'s verification step during 0.4.0 RC prep,
 /// not by inspection. Only loaded into `State.typing_doc` when actually
@@ -531,10 +533,13 @@ fn launch_terminal_demo_panes(
 
 /// RFC-017 PR-017-G: the background output flood for the `TerminalFlood`
 /// measurement criterion -- **bounded by wall-clock time, not an
-/// unbounded `while true`** loop. `tekstide-gui-spike`'s own
-/// `send_flood_script_once` (superseded, RFC-014 PR-014-E's C3
-/// precedent) backgrounds an infinite loop that only ever stops if
-/// something kills it; RFC-017's own review gate asks for "bounded
+/// unbounded `while true`** loop. The RFC-014 spike crate's own
+/// `send_flood_script_once` (`tekstide-gui-spike`, deleted 2026-08-04 --
+/// see
+/// `rfcs/handoffs/014-desktop-gui-substrate-and-terminal-rendering/spike-crate-deletion.md`;
+/// superseded, RFC-014 PR-014-E's C3 precedent) backgrounds an infinite
+/// loop that only ever stops if something kills it; RFC-017's own review
+/// gate asks for "bounded
 /// background output" specifically, so this loop instead computes its
 /// own end time once and checks the wall clock only every 2,000
 /// iterations, self-terminating after 30 seconds -- response 154's "to

@@ -6,7 +6,7 @@
 //! (not just the cursor, not just one line) and accepted families
 //! produce the effect core's policy says they should.
 //!
-//! Ported from `crates/tekstide-gui-spike/src/filter/tests.rs`
+//! Ported from the RFC-014 spike crate's own `filter/tests.rs`
 //! (RFC-014 PR-014-C), not rewritten from scratch -- the harness shape,
 //! the V2/V4/V5/V6/V7 findings, and the split-boundary methodology are
 //! unchanged. What changed: the corpus is a data table iterated by one
@@ -14,7 +14,9 @@
 //! blocked-family type is `tekstide-core`'s own `TerminalSequenceFamily`
 //! instead of a shell-local enum, and "no effect" is proven by full
 //! grid-plus-cursor snapshot equality rather than marker absence on one
-//! line.
+//! line. The spike crate (`tekstide-gui-spike`) was deleted 2026-08-04
+//! -- see
+//! `rfcs/handoffs/014-desktop-gui-substrate-and-terminal-rendering/spike-crate-deletion.md`.
 
 use super::SecurityFilter;
 use alacritty_terminal::event::{Event, EventListener};

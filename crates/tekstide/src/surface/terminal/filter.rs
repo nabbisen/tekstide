@@ -1,8 +1,13 @@
-//! RFC-017 PR-017-B: promoted from `crates/tekstide-gui-spike/src/filter.rs`
-//! (reviewed under RFC-014 PR-014-C). This is not a rewrite -- it is the
-//! same interposition shape, re-pointed so the accept/reject *decision*
-//! comes from `tekstide_core::runtime::terminal::security`'s policy data
-//! instead of a second, shell-local copy of RFC-009's accepted set.
+//! RFC-017 PR-017-B: promoted from the RFC-014 spike crate's own
+//! `filter.rs` (reviewed under RFC-014 PR-014-C). This is not a rewrite
+//! -- it is the same interposition shape, re-pointed so the
+//! accept/reject *decision* comes from
+//! `tekstide_core::runtime::terminal::security`'s policy data instead of
+//! a second, shell-local copy of RFC-009's accepted set. The spike crate
+//! (`tekstide-gui-spike`) was deleted 2026-08-04, its own promotion
+//! having landed here first -- see
+//! `rfcs/handoffs/014-desktop-gui-substrate-and-terminal-rendering/spike-crate-deletion.md`
+//! for the deletion record and where its evidence now lives.
 //!
 //! # Why this boundary, not the byte/`Perform` boundary
 //!
