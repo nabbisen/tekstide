@@ -516,23 +516,56 @@ impl<'a> AuditCoordinator<'a> {
 
     /// RFC-017 PR-017-F: `plain_terminal_observation`'s first producer.
     /// `project_id`/`terminal_id` are both real ids already assigned to
-    /// an existing `TerminalSession` -- this is the one signal current
-    /// plain-terminal lifecycle instrumentation makes honestly
-    /// available (a successful launch). `Failed`/`Terminated` are not
-    /// produced by this method: `valid_plain_terminal` requires
-    /// `terminal_id` for *every* outcome of this family, so a launch
-    /// failure -- which has no `TerminalSession` to name -- has no valid
-    /// way to be recorded in this frozen schema at all, and mid-session
-    /// runtime failure/process-exit detection is not wired into
-    /// `tekstide`'s plain-terminal poll loop yet. Best-effort
-    /// (`append_observation`), matching this family's own `Started`
-    /// case never blocking the launch it observes.
+    /// an existing `TerminalSession`. **`Failed` is still never produced
+    /// by this producer family**: `valid_plain_terminal` requires
+    /// `terminal_id` for *every* outcome, so a launch failure -- which
+    /// has no `TerminalSession` to name -- has no valid way to be
+    /// recorded in this frozen schema at all. `Terminated` is
+    /// [`Self::record_plain_terminal_terminated`], wired into the GUI's
+    /// poll loop by the terminal-launch-UX handoff. Best-effort
+    /// (`append_observation`), matching this family's own `Started` case
+    /// never blocking the launch it observes.
     pub fn record_plain_terminal_started(
         &mut self,
         project_id: ProjectId,
         terminal_id: TerminalId,
     ) -> AuditObservationStatus {
         let record = plain_terminal_record(project_id, terminal_id, AuditOutcome::Started, None);
+        self.append_observation(&record)
+    }
+
+    /// Terminal launch UX handoff: `plain_terminal_observation`'s second
+    /// producer, closing the PR-017-F known limitation that only
+    /// `Started` was ever reachable. `outcome` is the real
+    /// `TerminationOutcome` a non-blocking exit check produced -- the
+    /// same `TerminationOutcome`-to-`AuditReasonCode` mapping
+    /// `apply_managed_agent_terminal_outcome` already established for
+    /// `ManagedProcessLifecycle`, reused rather than re-decided: a clean
+    /// exit is `ProcessExited`, a signal-caused end is
+    /// `ProcessTerminated`. `OrphanedUnknown`/`Failed` are not audited
+    /// here either, matching that same precedent's own choice --
+    /// `NotRequired`, not a forced guess at a reason code for an outcome
+    /// this ambiguous.
+    pub fn record_plain_terminal_terminated(
+        &mut self,
+        project_id: ProjectId,
+        terminal_id: TerminalId,
+        outcome: &TerminationOutcome,
+    ) -> AuditObservationStatus {
+        let reason_code = match outcome {
+            TerminationOutcome::Exited { .. } => AuditReasonCode::ProcessExited,
+            TerminationOutcome::TerminatedBySignal { .. }
+            | TerminationOutcome::KilledAfterTimeout { .. } => AuditReasonCode::ProcessTerminated,
+            TerminationOutcome::OrphanedUnknown { .. } | TerminationOutcome::Failed { .. } => {
+                return AuditObservationStatus::NotRequired;
+            }
+        };
+        let record = plain_terminal_record(
+            project_id,
+            terminal_id,
+            AuditOutcome::Terminated,
+            Some(reason_code),
+        );
         self.append_observation(&record)
     }
 }
@@ -555,10 +588,10 @@ fn trust_record(
 
 /// `reason_code` is only ever `Some` for `Failed`/`Terminated` --
 /// `valid_plain_terminal` requires the opposite (`None` for `Started`,
-/// `Some` otherwise); the caller (`record_plain_terminal_started`) never
-/// exercises the other two outcomes today, but this stays general so a
-/// later slice that wires real termination detection has the right
-/// shape to call into, not a `Started`-only helper to generalize later.
+/// `Some` otherwise). `Started` (`record_plain_terminal_started`) and
+/// `Terminated` (`record_plain_terminal_terminated`) both call this;
+/// `Failed` still has no caller (see `record_plain_terminal_started`'s
+/// own doc for why it structurally cannot).
 fn plain_terminal_record(
     project_id: crate::project::ProjectId,
     terminal_id: TerminalId,

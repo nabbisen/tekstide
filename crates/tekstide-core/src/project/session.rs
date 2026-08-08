@@ -236,17 +236,32 @@ impl ProjectSession {
             .expect("trust audit event should be present after push")
     }
 
+    /// Terminal launch UX handoff: `terminal_session_limit` is enforced
+    /// **here**, not by any caller -- a limit enforced at the call site
+    /// is a limit the next caller forgets. Checked after the existing
+    /// ownership/duplicate checks (those are structural invariants;
+    /// the limit is a policy choice, checked last so a caller can always
+    /// tell "this session doesn't belong here" apart from "this session
+    /// would belong here, but there's no room").
     pub fn add_terminal_session(
         &mut self,
         terminal: TerminalSession,
-    ) -> Result<(), OwnershipError> {
-        self.ensure_project_member(&terminal.project_id)?;
+    ) -> Result<(), ProjectTerminalError> {
+        self.ensure_project_member(&terminal.project_id)
+            .map_err(ProjectTerminalError::Ownership)?;
         if self
             .terminal_sessions
             .iter()
             .any(|existing| existing.id == terminal.id)
         {
-            return Err(OwnershipError::DuplicateAttachment);
+            return Err(ProjectTerminalError::Ownership(
+                OwnershipError::DuplicateAttachment,
+            ));
+        }
+        if let Some(limit) = self.resource_limits.terminal_session_limit
+            && self.terminal_sessions.len() as u32 >= limit
+        {
+            return Err(ProjectTerminalError::SessionLimitExceeded { limit });
         }
         self.terminal_sessions.push(terminal);
         self.record_activity();
@@ -1180,6 +1195,14 @@ impl ProjectSession {
 pub enum ProjectTerminalError {
     Ownership(OwnershipError),
     InvalidTransition(TerminalTransitionError),
+    /// Terminal launch UX handoff: `add_terminal_session` refuses once
+    /// `ProjectResourceLimits::terminal_session_limit` is reached --
+    /// enforced here, not at any call site, so no caller can forget the
+    /// check. `limit` is carried through so a renderer can state the
+    /// actual number rather than a generic refusal.
+    SessionLimitExceeded {
+        limit: u32,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

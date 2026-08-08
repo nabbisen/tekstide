@@ -3,6 +3,12 @@ pub enum NavigationAction {
     OpenProjectBoard,
     SwitchActiveProject,
     ToggleProjectMode,
+    /// Terminal launch UX handoff: launches a new terminal in the active
+    /// project. Distinct from `ToggleProjectMode` -- that flips between
+    /// Content and Terminal Immersion with no side effect on session
+    /// state; this always lands in Terminal Immersion and always
+    /// attempts to create a new session, whichever mode was active.
+    LaunchTerminal,
     CycleVisibleTerminalSession,
     OpenCurrentAgentRunDetail,
     OpenPendingApproval,
@@ -61,6 +67,18 @@ impl KeybindingPolicy {
                 KeybindingRule::new(
                     NavigationAction::ToggleProjectMode,
                     Some("Ctrl+Alt+M"),
+                    KeybindingStatus::Candidate,
+                ),
+                // Terminal launch UX handoff: `Ctrl+Alt+T`, following the
+                // existing `Ctrl+Alt+<letter>` shape (`P`, `M` above) --
+                // `T` for Terminal, unused by any other rule here and not
+                // `Ctrl+Shift+P`'s `Reserved` command-palette binding, so
+                // it collides with nothing (checked mechanically by
+                // `linux_mvp_terminal_launch_binding_collides_with_nothing`,
+                // not by inspection alone).
+                KeybindingRule::new(
+                    NavigationAction::LaunchTerminal,
+                    Some("Ctrl+Alt+T"),
                     KeybindingStatus::Candidate,
                 ),
                 KeybindingRule::new(

@@ -169,3 +169,14 @@ session-bar-entry = Terminal { $number } ({ $slot ->
     [terminating] Terminating
    *[unknown] Unknown
 }
+
+# Terminal launch UX handoff: "refusal must be a typed error the shell
+# can render... the user pressed a key and is owed a visible answer."
+# One message, `$reason` a compile-time symbol
+# (`TerminalLaunchRefusal`'s own shape, never the refusal's Rust
+# `Debug` text), matching `session-bar-entry`'s own pattern rather than
+# a hardcoded shell-local string.
+terminal-launch-refused = { $reason ->
+    [limit] Terminal limit reached ({ $limit } open) — close one to open another.
+   *[error] Couldn't start a terminal.
+}

@@ -745,13 +745,13 @@ fn state_with_a_real_terminal_focused(label: &str) -> State {
 
     let mut state = state_with(app_shell);
     state.focus = FocusZone::MainArea;
-    state.terminal_demo = vec![pane];
+    state.terminal_panes = vec![pane];
     state
 }
 
 fn rendered_demo_pane_text(state: &State) -> String {
     state
-        .terminal_demo
+        .terminal_panes
         .first()
         .expect("test precondition: a demo pane must exist")
         .rendered_text()
@@ -759,7 +759,7 @@ fn rendered_demo_pane_text(state: &State) -> String {
 
 fn poll_demo_pane_until(state: &mut State, needle: &str) -> bool {
     for _ in 0..200 {
-        for pane in &mut state.terminal_demo {
+        for pane in &mut state.terminal_panes {
             pane.poll();
         }
         if rendered_demo_pane_text(state).contains(needle) {
@@ -778,7 +778,7 @@ fn poll_demo_pane_until(state: &mut State, needle: &str) -> bool {
 fn active_terminal_focus_requires_both_main_area_and_terminal_mode() {
     let mut state = state_with_a_real_terminal_focused("active-terminal-focus");
     let real_id = state
-        .terminal_demo
+        .terminal_panes
         .first()
         .expect("test precondition")
         .terminal_id()
@@ -813,7 +813,7 @@ fn active_terminal_focus_requires_both_main_area_and_terminal_mode() {
 fn terminal_stream_targets_a_live_terminal_recognizes_the_registered_demo_session() {
     let state = state_with_a_real_terminal_focused("demo-session-now-registered");
     let real_id = state
-        .terminal_demo
+        .terminal_panes
         .first()
         .expect("test precondition")
         .terminal_id()
@@ -844,7 +844,7 @@ fn terminal_stream_targets_a_live_terminal_recognizes_the_registered_demo_sessio
 fn a_text_stream_targeting_the_real_pane_writes_to_it() {
     let mut state = state_with_a_real_terminal_focused("live-input-accept");
     let real_id = state
-        .terminal_demo
+        .terminal_panes
         .first()
         .expect("test precondition")
         .terminal_id()
@@ -880,7 +880,7 @@ fn a_text_stream_targeting_a_different_id_does_not_write_to_the_pane() {
         Message::Input(crate::input::RoutedInput::Terminal(stream)),
     );
     for _ in 0..20 {
-        for pane in &mut state.terminal_demo {
+        for pane in &mut state.terminal_panes {
             pane.poll();
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -902,7 +902,7 @@ fn a_text_stream_targeting_a_different_id_does_not_write_to_the_pane() {
 fn modal_open_blocks_pty_write_and_closing_it_resumes_delivery() {
     let mut state = state_with_a_real_terminal_focused("live-modal-exclusivity");
     let real_id = state
-        .terminal_demo
+        .terminal_panes
         .first()
         .expect("test precondition")
         .terminal_id()
@@ -916,7 +916,7 @@ fn modal_open_blocks_pty_write_and_closing_it_resumes_delivery() {
         Message::Input(crate::input::RoutedInput::Terminal(blocked_stream)),
     );
     for _ in 0..20 {
-        for pane in &mut state.terminal_demo {
+        for pane in &mut state.terminal_panes {
             pane.poll();
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -949,7 +949,7 @@ fn modal_open_blocks_pty_write_and_closing_it_resumes_delivery() {
 fn tab_cycles_shell_focus_with_a_real_terminal_focused_and_writes_nothing() {
     let mut state = state_with_a_real_terminal_focused("live-tab-escape-hatch");
     let real_id = state
-        .terminal_demo
+        .terminal_panes
         .first()
         .expect("test precondition")
         .terminal_id()
@@ -978,7 +978,7 @@ fn tab_cycles_shell_focus_with_a_real_terminal_focused_and_writes_nothing() {
     );
 
     for _ in 0..20 {
-        for pane in &mut state.terminal_demo {
+        for pane in &mut state.terminal_panes {
             pane.poll();
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -1039,12 +1039,12 @@ fn state_with_two_visible_and_one_hidden_pane(label: &str) -> State {
 
     let mut state = state_with(app_shell);
     state.focus = FocusZone::MainArea;
-    state.terminal_demo = panes;
+    state.terminal_panes = panes;
     state
 }
 
 fn poll_all_via_real_update(state: &mut State) {
-    let _ = super::update(state, Message::TerminalDemoTick);
+    let _ = super::update(state, Message::TerminalPollTick);
 }
 
 /// `active_project_terminal_sessions` must list every registered
@@ -1071,8 +1071,8 @@ fn active_project_terminal_sessions_lists_hidden_sessions_too() {
 }
 
 /// **The hidden-session grid-state decision, demonstrated, not argued.**
-/// A hidden pane is still polled every tick (`Message::TerminalDemoTick`
-/// iterates every pane in `state.terminal_demo`, not only the visible
+/// A hidden pane is still polled every tick (`Message::TerminalPollTick`
+/// iterates every pane in `state.terminal_panes`, not only the visible
 /// ones) and its content is retained across a later slot reassignment --
 /// proving "hidden" means "not currently displayed," not "torn down."
 #[test]
@@ -1085,16 +1085,16 @@ fn a_hidden_pane_keeps_polling_and_retains_its_content_across_a_slot_change() {
         .id
         .clone();
     let hidden_pane_index = state
-        .terminal_demo
+        .terminal_panes
         .iter()
         .position(|pane| pane.terminal_id() == &hidden_session_id)
         .expect("test precondition: the hidden session's pane must be in terminal_demo");
 
-    state.terminal_demo[hidden_pane_index].write_input(b"printf 'HIDDEN_PANE_017E\\n'\n");
+    state.terminal_panes[hidden_pane_index].write_input(b"printf 'HIDDEN_PANE_017E\\n'\n");
     let mut seen = false;
     for _ in 0..200 {
         poll_all_via_real_update(&mut state);
-        if state.terminal_demo[hidden_pane_index]
+        if state.terminal_panes[hidden_pane_index]
             .rendered_text()
             .contains("HIDDEN_PANE_017E")
         {
@@ -1123,7 +1123,7 @@ fn a_hidden_pane_keeps_polling_and_retains_its_content_across_a_slot_change() {
         )
         .expect("reassigning an existing session's slot must succeed");
     assert!(
-        state.terminal_demo[hidden_pane_index]
+        state.terminal_panes[hidden_pane_index]
             .rendered_text()
             .contains("HIDDEN_PANE_017E"),
         "content produced while hidden must survive becoming visible again -- the whole point \
@@ -1131,7 +1131,7 @@ fn a_hidden_pane_keeps_polling_and_retains_its_content_across_a_slot_change() {
     );
 }
 
-/// **Ablated**: if `Message::TerminalDemoTick` only polled visible
+/// **Ablated**: if `Message::TerminalPollTick` only polled visible
 /// panes (the alternative to the decision this slice made), the hidden
 /// pane's content would never appear. Simulated here by polling only
 /// the non-hidden panes directly, confirming the hidden pane's own
@@ -1147,12 +1147,12 @@ fn ablation_polling_only_visible_panes_would_miss_the_hidden_ones_output() {
         .id
         .clone();
     let hidden_pane_index = state
-        .terminal_demo
+        .terminal_panes
         .iter()
         .position(|pane| pane.terminal_id() == &hidden_session_id)
         .expect("test precondition");
 
-    state.terminal_demo[hidden_pane_index].write_input(b"printf 'SHOULD_NOT_APPEAR_017E\\n'\n");
+    state.terminal_panes[hidden_pane_index].write_input(b"printf 'SHOULD_NOT_APPEAR_017E\\n'\n");
 
     for _ in 0..20 {
         let visible_ids: Vec<tekstide_core::domain::TerminalId> =
@@ -1163,7 +1163,7 @@ fn ablation_polling_only_visible_panes_would_miss_the_hidden_ones_output() {
                 })
                 .map(|session| session.id.clone())
                 .collect();
-        for pane in &mut state.terminal_demo {
+        for pane in &mut state.terminal_panes {
             if visible_ids.contains(pane.terminal_id()) {
                 pane.poll();
             }
@@ -1172,7 +1172,7 @@ fn ablation_polling_only_visible_panes_would_miss_the_hidden_ones_output() {
     }
 
     assert!(
-        !state.terminal_demo[hidden_pane_index]
+        !state.terminal_panes[hidden_pane_index]
             .rendered_text()
             .contains("SHOULD_NOT_APPEAR_017E"),
         "polling only visible panes must miss the hidden pane's real output -- confirming the \
@@ -1440,5 +1440,366 @@ fn terminal_poll_handler_cost_under_a_real_flood_headless_benchmark() {
          max={max_micros}us against a {}us tick period -- this is a real regression, not \
          measurement noise, since the bound is 10x the period it is meant to fit inside",
         tick_period.as_micros()
+    );
+}
+
+// --- Terminal launch UX handoff ----------------------------------------
+
+/// **The review gate's own first item**: "a user can open a terminal,
+/// type in it, and see output." A real `Ctrl+Alt+T` press through the
+/// real `update` dispatch must switch to `TerminalImmersion`, launch
+/// exactly one real pane rooted in the **real project directory** (not
+/// a scratch temp dir, unlike the diagnostic demo/measurement paths --
+/// a terminal a user asked for must open where their project is), leave
+/// no refusal notice, and the session must already be `Running` with
+/// `Primary`'s slot -- not stuck at `Starting` the way every launch path
+/// before this handoff left it.
+#[test]
+fn launch_terminal_shell_input_switches_to_terminal_immersion_and_launches_a_real_session() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("launch-terminal-dispatch");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    assert_eq!(
+        app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::Content),
+        "test precondition: a freshly opened project starts in Content Mode"
+    );
+
+    let mut state = state_with(app_shell);
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::LaunchTerminal,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "launching a terminal must switch into Terminal Immersion, or the user presses a key \
+         and nothing appears to happen"
+    );
+    assert_eq!(
+        state.terminal_panes.len(),
+        1,
+        "exactly one real pane must be launched"
+    );
+    assert!(
+        state.terminal_launch_notice.is_none(),
+        "a successful launch must not leave a stale refusal notice"
+    );
+
+    let sessions = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .terminal_sessions();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(
+        sessions[0].status(),
+        tekstide_core::domain::TerminalStatus::Running,
+        "a freshly launched session must already be Running, not left at Starting forever"
+    );
+    assert_eq!(
+        sessions[0].visible_slot(),
+        tekstide_core::domain::VisibleSlot::Primary,
+        "a fresh launch must become Primary so the user can type into it immediately"
+    );
+    assert_eq!(
+        sessions[0].cwd, project_dir,
+        "the pane must be rooted in the real project directory, not a scratch temp dir"
+    );
+}
+
+/// **Review gate**: "the session limit is enforced in core and
+/// demonstrated, including what the user sees on refusal." Runs the
+/// default limit (`ProjectResourceLimits::default`, 8) to exhaustion
+/// with real launches, confirms the typed refusal names the real
+/// number, and confirms the refusal notice a user would actually see
+/// states that number too -- not a generic message that could pass
+/// whether or not the real limit made it through.
+#[test]
+fn terminal_session_limit_is_enforced_end_to_end_with_a_visible_notice() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("terminal-session-limit"))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    for index in 0..8 {
+        super::attempt_terminal_launch(&mut state).unwrap_or_else(|error| {
+            panic!("launch {index} must succeed, under the limit: {error:?}")
+        });
+    }
+    assert_eq!(state.terminal_panes.len(), 8);
+
+    let refusal = super::attempt_terminal_launch(&mut state)
+        .expect_err("the 9th launch must be refused once the default limit of 8 is reached");
+    assert_eq!(
+        refusal,
+        super::TerminalLaunchRefusal::SessionLimitExceeded { limit: 8 }
+    );
+    assert_eq!(
+        state.terminal_panes.len(),
+        8,
+        "a refused launch must not add a pane"
+    );
+
+    let notice_text = super::terminal_launch_refusal_text(&state.catalog, &refusal);
+    assert!(
+        notice_text.contains('8'),
+        "the refusal notice a user sees must state the real limit, not a generic message: \
+         {notice_text:?}"
+    );
+}
+
+/// **Ablation** for the limit above: with the pre-check and the
+/// `add_terminal_session` refusal both bypassed, a 9th real process
+/// would be spawned -- confirming the assertions above are load-bearing,
+/// not passing for an unrelated reason. Simulated here by calling the
+/// real spawn machinery directly past where `attempt_terminal_launch`
+/// would have stopped, rather than editing production source for this
+/// run (`tekstide-core`'s own `terminal_session_limit_is_enforced_with_a_typed_refusal`
+/// ablates the enforcement itself at its real call site).
+#[test]
+fn ablation_a_ninth_real_process_would_spawn_without_the_limit_check() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("terminal-session-limit-ablation"))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    for index in 0..8 {
+        super::attempt_terminal_launch(&mut state).unwrap_or_else(|error| {
+            panic!("launch {index} must succeed, under the limit: {error:?}")
+        });
+    }
+
+    // The real project-level check tekstide-core::project::tests::collections
+    // ablates directly; this proves the *consequence* would be a real,
+    // ninth spawned process if that check were absent, by launching one
+    // through the same TerminalPane::launch the production path uses,
+    // bypassing only the registration (which would itself refuse).
+    let root = fresh_project_dir("terminal-session-limit-ablation-9th");
+    let (pane, _session) = crate::surface::terminal::TerminalPane::launch(
+        tekstide_core::project::ProjectId::new_uuid(),
+        "ablation 9th",
+        root,
+        PathBuf::from("/bin/sh"),
+    )
+    .expect(
+        "a 9th real shell can always be spawned -- nothing in the OS stops it, which is \
+             exactly why the application-level limit above is the only thing that does",
+    );
+    assert!(
+        pane.terminal_id().as_str().starts_with("terminal-"),
+        "a real, live process was spawned -- the scenario the limit exists to prevent"
+    );
+}
+
+/// **Review gate**: "exit detection demonstrated: type exit, session
+/// bar shows Exited, slot is freed and reusable by a new launch."
+/// Drives the real `TerminalPollTick` handler against a real,
+/// just-launched shell, sending it a real `exit` command through the
+/// same `write_input` a routed keystroke would use.
+#[test]
+fn a_real_session_exit_updates_status_frees_the_slot_and_is_reusable() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("terminal-exit-detection"))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    super::attempt_terminal_launch(&mut state).expect("the first launch must succeed");
+    let terminal_id = state.terminal_panes[0].terminal_id().clone();
+    let status_of = |state: &State| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .terminal_session(&terminal_id)
+            .unwrap()
+            .status()
+    };
+    let slot_of = |state: &State| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .terminal_session(&terminal_id)
+            .unwrap()
+            .visible_slot()
+    };
+    assert_eq!(
+        status_of(&state),
+        tekstide_core::domain::TerminalStatus::Running
+    );
+    assert_eq!(slot_of(&state), tekstide_core::domain::VisibleSlot::Primary);
+
+    state.terminal_panes[0].write_input(b"exit\n");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while std::time::Instant::now() < deadline
+        && status_of(&state) != tekstide_core::domain::TerminalStatus::Exited
+    {
+        let _ = super::update(&mut state, Message::TerminalPollTick);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    assert_eq!(
+        status_of(&state),
+        tekstide_core::domain::TerminalStatus::Exited,
+        "typing exit must be reflected as Exited within a few real ticks, not left at Running"
+    );
+    assert_eq!(
+        slot_of(&state),
+        tekstide_core::domain::VisibleSlot::Hidden,
+        "the visible slot must be freed once the session exits"
+    );
+
+    super::attempt_terminal_launch(&mut state).expect("a launch after exit must succeed");
+    assert_eq!(state.terminal_panes.len(), 2);
+    let new_terminal_id = state.terminal_panes[1].terminal_id().clone();
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .terminal_session(&new_terminal_id)
+            .unwrap()
+            .visible_slot(),
+        tekstide_core::domain::VisibleSlot::Primary,
+        "the freed Primary slot must be reusable by a new launch"
+    );
+}
+
+/// **Ablation** for the test above: with `check_exit` never called (the
+/// pre-handoff `poll()`-only behaviour), the session must stay
+/// `Running` forever even after the real shell has exited -- "a test
+/// that passes with the detection removed is the failure mode this
+/// project has hit repeatedly," so this proves the removal is
+/// observable, not merely that the addition compiles.
+#[test]
+fn ablation_without_check_exit_a_dead_shell_still_reports_running() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("terminal-exit-detection-ablation"))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    super::attempt_terminal_launch(&mut state).expect("the first launch must succeed");
+    let terminal_id = state.terminal_panes[0].terminal_id().clone();
+    state.terminal_panes[0].write_input(b"exit\n");
+    // Give the real shell time to actually exit at the OS level, same
+    // real wait the non-ablated test above uses -- only the detection
+    // call (`check_exit`, simulated absent below by only calling
+    // `poll()`) is what's missing here.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    for pane in &mut state.terminal_panes {
+        pane.poll();
+    }
+
+    let status = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .terminal_session(&terminal_id)
+        .unwrap()
+        .status();
+    assert_eq!(
+        status,
+        tekstide_core::domain::TerminalStatus::Running,
+        "without check_exit, a dead shell must still (wrongly) report Running -- this is the \
+         exact lie the real TerminalPollTick handler exists to prevent"
+    );
+}
+
+/// **Review gate**: "one creation path -- the demo and the keybinding
+/// go through the same function, shown by enumeration rather than
+/// asserted." Enumerated the same way P1's single-ingress claim is:
+/// `TerminalPane::launch` (the one real spawn call) has exactly **two**
+/// production callers, named and justified, not an unbounded or
+/// undocumented set:
+///
+/// - `launch_terminal` -- the one ingress this handoff establishes;
+///   both `launch_terminal_demo_panes` (`TEKSTIDE_TERMINAL_DEMO`) and
+///   `attempt_terminal_launch` (the real `Ctrl+Alt+T` path) call
+///   *this*, not `TerminalPane::launch` directly, which is what makes
+///   "the demo and the keybinding go through the same function" true
+///   rather than asserted.
+/// - `launch_measurement_terminal_pane` -- deliberately **not** folded
+///   in, reviewed and approved under RFC-017 PR-017-G: it must not open
+///   the real audit store `launch_terminal` does, the same
+///   non-contamination principle every other measurement criterion
+///   follows. A second call site here is the reviewed exception, not a
+///   regression to the parallel-construction shape PR-017-B/C spent two
+///   slices proving absent.
+#[test]
+fn terminal_pane_launch_has_exactly_two_named_production_callers() {
+    let shell_rs_path = format!("{}/src/shell.rs", env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(&shell_rs_path).expect("shell.rs must be readable");
+    let lines: Vec<&str> = source.lines().collect();
+
+    // The enclosing function name for each call site, found by scanning
+    // upward for the nearest preceding `fn ` -- robust to this file's
+    // own line numbers shifting (an unrelated edit elsewhere in the
+    // file must not fail this test), unlike asserting exact line
+    // numbers would be.
+    let mut enclosing_functions: Vec<String> = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if !line.contains("TerminalPane::launch(") {
+            continue;
+        }
+        let enclosing = lines[..=index]
+            .iter()
+            .rev()
+            .find_map(|candidate| {
+                let trimmed = candidate.trim_start();
+                trimmed.strip_prefix("fn ").or_else(|| {
+                    trimmed
+                        .strip_prefix("async fn ")
+                        .or_else(|| trimmed.strip_prefix("pub fn "))
+                })
+            })
+            .and_then(|rest| rest.split(['(', '<', ' ']).next())
+            .unwrap_or("<unknown>")
+            .to_string();
+        enclosing_functions.push(enclosing);
+    }
+
+    assert_eq!(
+        enclosing_functions.len(),
+        2,
+        "TerminalPane::launch must have exactly the two named, justified production callers \
+         below -- any other count is either a regressed parallel construction path or a \
+         caller this test doesn't yet know to name: {enclosing_functions:?}"
+    );
+    assert!(
+        enclosing_functions
+            .iter()
+            .any(|name| name == "launch_terminal"),
+        "launch_terminal's own call site must still exist -- losing it would mean the \
+         one-ingress function no longer spawns anything: {enclosing_functions:?}"
+    );
+    assert!(
+        enclosing_functions
+            .iter()
+            .any(|name| name == "launch_measurement_terminal_pane"),
+        "launch_measurement_terminal_pane's own, separately-justified call site must still \
+         exist: {enclosing_functions:?}"
     );
 }

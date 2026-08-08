@@ -499,7 +499,9 @@ fn attach_terminal_session_fails_closed_with_no_active_project() {
 
     assert_eq!(
         state.attach_terminal_session(terminal),
-        Err(crate::domain::OwnershipError::MissingProject),
+        Err(crate::project::ProjectTerminalError::Ownership(
+            crate::domain::OwnershipError::MissingProject
+        )),
         "no active project must be a real, distinguishable error, not a silent no-op"
     );
 }

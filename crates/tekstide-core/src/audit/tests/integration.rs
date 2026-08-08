@@ -205,6 +205,102 @@ fn plain_terminal_started_persists_a_valid_record() {
         .expect("a real producer's record must satisfy the frozen family's own predicate");
 }
 
+/// Terminal launch UX handoff: `plain_terminal_observation`'s second
+/// producer, closing the PR-017-F known limitation that only `Started`
+/// was ever reachable. Proves the `TerminationOutcome::Exited` ->
+/// `AuditReasonCode::ProcessExited` mapping (the review gate's own named
+/// case: "conforming to the frozen family, with the `reason_code` the
+/// schema requires for non-`Started` outcomes") against a real store,
+/// the same way `plain_terminal_started_persists_a_valid_record` does
+/// for `Started`.
+#[test]
+fn plain_terminal_terminated_persists_a_valid_record_with_the_real_exit_reason() {
+    let dirs = TestAuditDirs::new("plain-terminal-terminated");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let project_id = ProjectId::new_uuid();
+    let terminal_id = TerminalId::new_uuid();
+
+    let status = AuditCoordinator::new(&mut store, &mut health).record_plain_terminal_terminated(
+        project_id.clone(),
+        terminal_id.clone(),
+        &TerminationOutcome::Exited { exit_status: 0 },
+    );
+
+    assert_eq!(status, AuditObservationStatus::Persisted);
+
+    let records = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    let record = &records[0];
+    assert_eq!(record.family, AuditEventFamily::PlainTerminalObservation);
+    assert_eq!(record.outcome, AuditOutcome::Terminated);
+    assert_eq!(record.project_id, Some(project_id));
+    assert_eq!(record.terminal_id, Some(terminal_id));
+    assert_eq!(record.reason_code, Some(AuditReasonCode::ProcessExited));
+    record
+        .validate()
+        .expect("a real producer's record must satisfy the frozen family's own predicate");
+}
+
+/// The signalled/killed-after-timeout side of the same mapping --
+/// `ManagedProcessLifecycle`'s own established `TerminationOutcome`-to-
+/// `AuditReasonCode` precedent, reused rather than re-decided.
+#[test]
+fn plain_terminal_terminated_maps_a_signal_outcome_to_process_terminated() {
+    let dirs = TestAuditDirs::new("plain-terminal-terminated-signal");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+
+    let status = AuditCoordinator::new(&mut store, &mut health).record_plain_terminal_terminated(
+        ProjectId::new_uuid(),
+        TerminalId::new_uuid(),
+        &TerminationOutcome::TerminatedBySignal {
+            signal: crate::runtime::terminal::TerminationSignal::Sigterm,
+        },
+    );
+
+    assert_eq!(status, AuditObservationStatus::Persisted);
+    let records = store.query(&AuditQuery::latest(10)).unwrap().records;
+    assert_eq!(
+        records[0].record.reason_code,
+        Some(AuditReasonCode::ProcessTerminated)
+    );
+}
+
+/// `Failed`/`OrphanedUnknown` are ambiguous outcomes a plain, non-blocking
+/// exit check cannot itself resolve into a confident reason -- matching
+/// `ManagedProcessLifecycle`'s own precedent, nothing is written rather
+/// than guessing a reason code.
+#[test]
+fn plain_terminal_terminated_is_not_required_for_an_ambiguous_outcome() {
+    let dirs = TestAuditDirs::new("plain-terminal-terminated-ambiguous");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+
+    let status = AuditCoordinator::new(&mut store, &mut health).record_plain_terminal_terminated(
+        ProjectId::new_uuid(),
+        TerminalId::new_uuid(),
+        &TerminationOutcome::Failed {
+            summary: BoundedRuntimeSummary::new("exited without exit code or signal"),
+        },
+    );
+
+    assert_eq!(status, AuditObservationStatus::NotRequired);
+    assert!(
+        store
+            .query(&AuditQuery::latest(10))
+            .unwrap()
+            .records
+            .is_empty()
+    );
+}
+
 #[test]
 fn managed_launch_failure_is_recorded_after_authorization_without_process_attachment() {
     let dirs = TestAuditDirs::new("integration-managed-failure");

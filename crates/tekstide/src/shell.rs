@@ -142,12 +142,23 @@ pub struct State {
     /// RFC-015 PR-015-F: the typing-measurement surface's live content.
     /// Empty unless actually measuring `Typing`.
     typing_doc: String,
-    /// RFC-017 PR-017-E: empty unless `TEKSTIDE_TERMINAL_DEMO` is set --
-    /// see [`launch_terminal_demo_panes`]. Rendering state only; *which*
-    /// slot each pane's session occupies is asked of `tekstide-core`
-    /// fresh each time (`active_project_terminal_sessions`), not cached
-    /// alongside these panes.
-    terminal_demo: Vec<crate::surface::terminal::TerminalPane>,
+    /// RFC-017 PR-017-E, renamed by the terminal-launch-UX handoff (was
+    /// `terminal_demo` -- misleading once `Ctrl+Alt+T` populates it too,
+    /// not only `TEKSTIDE_TERMINAL_DEMO`). Every live `TerminalPane` this
+    /// GUI is currently tracking, whichever of [`launch_terminal`]'s
+    /// callers put it here. Rendering state only; *which* slot each
+    /// pane's session occupies is asked of `tekstide-core` fresh each
+    /// time (`active_project_terminal_sessions`), not cached alongside
+    /// these panes.
+    terminal_panes: Vec<crate::surface::terminal::TerminalPane>,
+    /// Terminal launch UX handoff: the most recent launch refusal, if
+    /// any -- shell-local, transient UI feedback (like `modal`), not
+    /// core state; the underlying fact (how many sessions exist, what
+    /// the limit is) is read fresh from `tekstide-core` each time a
+    /// launch is attempted, never cached here. Cleared at the start of
+    /// every new launch attempt, so it never outlives the situation that
+    /// produced it.
+    terminal_launch_notice: Option<TerminalLaunchRefusal>,
 }
 
 impl State {
@@ -191,7 +202,7 @@ impl State {
         // cannot separate the two. Same disclosed, checked-but-usually-
         // absent shape every other demo/measurement env var here uses.
         let mut audit_health = tekstide_core::audit::AuditHealth::default();
-        let terminal_demo = if measurement.as_ref().map(Measurement::criterion)
+        let terminal_panes = if measurement.as_ref().map(Measurement::criterion)
             == Some(measurement::Criterion::TerminalFlood)
             || std::env::var("TEKSTIDE_TERMINAL_FLOOD_DEMO").is_ok()
         {
@@ -208,7 +219,8 @@ impl State {
             modal,
             measurement,
             typing_doc,
-            terminal_demo,
+            terminal_panes,
+            terminal_launch_notice: None,
         }
     }
 
@@ -271,18 +283,36 @@ pub enum Message {
     /// flood -- see `measurement`'s module doc for why this one skips
     /// the view-build half of the decomposition.
     MeasuredTerminalInput(std::time::Instant),
-    /// RFC-017 PR-017-C/E: periodic poll for every pane in
-    /// `state.terminal_demo` -- see [`launch_terminal_demo_panes`] and
-    /// [`terminal_demo_subscription`]. Every pane is polled every tick
-    /// regardless of its session's visible slot (the hidden-session
-    /// decision, `surface::terminal`'s module doc).
-    TerminalDemoTick,
+    /// RFC-017 PR-017-C/E, renamed by the terminal-launch-UX handoff
+    /// (was `TerminalDemoTick`): periodic poll for every pane in
+    /// `state.terminal_panes` -- see [`launch_terminal_demo_panes`] and
+    /// [`terminal_poll_subscription`]. Every pane still tracked is
+    /// polled every tick regardless of its session's visible slot (the
+    /// hidden-session decision, `surface::terminal`'s module doc) --
+    /// *tracked*, not merely visible, is also what makes exit detection
+    /// (this handler's other job now) reach hidden sessions too.
+    TerminalPollTick,
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
         Message::Input(RoutedInput::Shell(shell_input)) => {
             if let Some(command) = app_command_for(shell_input.action()) {
+                // Terminal launch UX handoff: `LaunchTerminal` is the one
+                // command needing real I/O (spawning a process) alongside
+                // the route/mode change `dispatch` itself performs --
+                // `tekstide-core` has no I/O to do that with, so this is
+                // the one place `update` acts before, not only through,
+                // `dispatch`. Attempted regardless of what `dispatch`
+                // will do next; the mode switch always happens, so a
+                // refused launch still lands the user where they can see
+                // the notice (`terminal_workspace_view`) explaining why.
+                if command == AppCommand::LaunchTerminal {
+                    state.terminal_launch_notice = None;
+                    if let Err(refusal) = attempt_terminal_launch(state) {
+                        state.terminal_launch_notice = Some(refusal);
+                    }
+                }
                 state.app_shell.dispatch(command);
             }
         }
@@ -309,7 +339,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 && terminal_stream_targets_a_live_terminal(&state.app_shell, &text_stream)
                 && let Some(bytes) = text_stream.to_pty_bytes()
                 && let Some(pane) = state
-                    .terminal_demo
+                    .terminal_panes
                     .iter_mut()
                     .find(|pane| pane.terminal_id() == text_stream.target())
             {
@@ -354,7 +384,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 // throughput -- if far lower, the flood never reached
                 // rate inside the application and the run is void.
                 if let (Some(pane), Some(measurement)) =
-                    (state.terminal_demo.first(), state.measurement.as_ref())
+                    (state.terminal_panes.first(), state.measurement.as_ref())
                 {
                     eprintln!(
                         "terminal_flood dropped_bytes_total {} bytes_read_total {} elapsed_secs {:.3}",
@@ -404,15 +434,53 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // uninformative, samples against nothing rather than
             // panicking, matching `MeasuredModeSwitch`'s own "no active
             // project" fallback.
-            if let Some(pane) = state.terminal_demo.first_mut() {
+            if let Some(pane) = state.terminal_panes.first_mut() {
                 pane.write_input(measurement::MEASURED_KEY_CHARACTER.as_bytes());
             }
             if let Some(measurement) = state.measurement.as_mut() {
                 measurement.record_input(sent_at);
             }
         }
-        Message::TerminalDemoTick => {
-            for pane in &mut state.terminal_demo {
+        Message::TerminalPollTick => {
+            // Terminal launch UX handoff: exit detection folded into the
+            // existing poll loop, not a second periodic tick -- "wire it
+            // into the existing poll path... which is where a
+            // non-blocking exit check belongs."
+            //
+            // Two passes, not one, and deliberately so: pass 1 only
+            // touches `state.terminal_panes` (a `check_exit`/`poll` per
+            // pane, no `tekstide-core` access), pass 2 only touches
+            // `state.app_shell` (the status transition, slot release,
+            // audit write) -- avoiding a simultaneous `&state.app_shell`
+            // (to skip already-exited panes) and `&mut state.terminal_panes`
+            // borrow the loop would otherwise need.
+            let exited_ids: std::collections::HashSet<_> = active_project_terminal_sessions(state)
+                .iter()
+                .filter(|session| {
+                    matches!(
+                        session.status(),
+                        tekstide_core::domain::TerminalStatus::Exited
+                            | tekstide_core::domain::TerminalStatus::Failed
+                    )
+                })
+                .map(|session| session.id.clone())
+                .collect();
+
+            let mut newly_exited: Vec<(
+                tekstide_core::domain::TerminalId,
+                tekstide_core::runtime::terminal::TerminationOutcome,
+            )> = Vec::new();
+            for pane in &mut state.terminal_panes {
+                let terminal_id = pane.terminal_id().clone();
+                if exited_ids.contains(&terminal_id) {
+                    // Already reflected in core -- "stop polling that
+                    // pane's PTY."
+                    continue;
+                }
+                if let Some(outcome) = pane.check_exit() {
+                    newly_exited.push((terminal_id, outcome));
+                    continue;
+                }
                 // Response 156's discriminator: this handler's own wall
                 // time (the PTY read plus VTE parse), reported relative
                 // to the 50ms tick period regardless of machine load --
@@ -424,9 +492,196 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     measurement.record_tick_handler(started.elapsed(), pane.bytes_read_total());
                 }
             }
+
+            if !newly_exited.is_empty()
+                && let Some(project_id) = state.app_shell.state().active_project_id().cloned()
+            {
+                let mut audit_store = open_real_audit_store(&state.app_shell);
+                let mut audit_health = tekstide_core::audit::AuditHealth::default();
+                for (terminal_id, outcome) in newly_exited {
+                    // `mark_terminal_exited` always transitions to
+                    // `Exited` and records the real exit code; any other
+                    // outcome (signalled, or an ambiguous `Failed`/
+                    // `OrphanedUnknown` shape `try_wait` cannot itself
+                    // produce here) transitions to `Failed` via the more
+                    // general status API instead -- "the session bar
+                    // stops lying" either way, best-effort past this
+                    // point for the same reason `launch_terminal`'s own
+                    // post-registration steps are.
+                    let _ = match &outcome {
+                        tekstide_core::runtime::terminal::TerminationOutcome::Exited {
+                            exit_status,
+                        } => state
+                            .app_shell
+                            .state_mut()
+                            .mark_terminal_exited(&terminal_id, Some(*exit_status)),
+                        _ => state.app_shell.state_mut().transition_terminal_status(
+                            &terminal_id,
+                            tekstide_core::domain::TerminalStatus::Failed,
+                        ),
+                    };
+                    let _ = state.app_shell.state_mut().assign_terminal_visible_slot(
+                        &terminal_id,
+                        tekstide_core::domain::VisibleSlot::Hidden,
+                    );
+                    if let Some(store) = audit_store.as_mut() {
+                        let _ =
+                            tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
+                                .record_plain_terminal_terminated(
+                                    project_id.clone(),
+                                    terminal_id,
+                                    &outcome,
+                                );
+                    }
+                }
+            }
         }
     }
     Task::none()
+}
+
+/// Terminal launch UX handoff: why a real launch was refused -- a typed
+/// answer the shell can render, never a panic and never a silent no-op.
+/// `SessionLimitExceeded` is the one the review gate names explicitly;
+/// `Launch`/`Registration` cover the rarer, more mechanical failure
+/// paths (the shell couldn't be spawned at all; registration failed for
+/// a reason other than the limit -- structurally near-impossible today,
+/// since [`launch_terminal`] only calls `attach_terminal_session` after
+/// confirming there is an active project to own the session).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TerminalLaunchRefusal {
+    SessionLimitExceeded { limit: u32 },
+    Launch(tekstide_core::runtime::terminal::TerminalLaunchError),
+    Registration(tekstide_core::project::ProjectTerminalError),
+}
+
+/// A compile-time literal symbol, not the displayed word -- the words
+/// live in `en.ftl`'s `terminal-launch-refused` select expression, the
+/// same division of labour `session_bar::slot_symbol`/`route_symbol`
+/// already use.
+fn terminal_launch_refusal_symbol(refusal: &TerminalLaunchRefusal) -> &'static str {
+    match refusal {
+        TerminalLaunchRefusal::SessionLimitExceeded { .. } => "limit",
+        TerminalLaunchRefusal::Launch(_) | TerminalLaunchRefusal::Registration(_) => "error",
+    }
+}
+
+/// The one catalog lookup a refusal's full text takes -- factored out,
+/// same reason `session_bar::entry_text` is, so a test can assert over
+/// what actually renders rather than over the symbol name alone.
+fn terminal_launch_refusal_text(catalog: &Catalog, refusal: &TerminalLaunchRefusal) -> String {
+    let mut args =
+        CatalogArgs::new().trusted_symbol("reason", terminal_launch_refusal_symbol(refusal));
+    if let TerminalLaunchRefusal::SessionLimitExceeded { limit } = refusal {
+        args = args.number("limit", *limit);
+    }
+    catalog.get_with_args("terminal-launch-refused", &args)
+}
+
+/// The **one ingress** for creating and registering a real, PTY-backed
+/// terminal session (RFC-017 PR-017-B/C's "no parallel construction
+/// path" requirement, extended by the terminal-launch-UX handoff from
+/// the filter/pane to session *creation* itself): [`launch_terminal_demo_panes`]'s
+/// env-gated bootstrap and a real `Ctrl+Alt+T` press both call this same
+/// function, never a second copy.
+///
+/// **`terminal_session_limit` is enforced in `tekstide-core`**
+/// (`add_terminal_session`), not here -- this function's own pre-check
+/// (below) exists only to avoid spawning a real process we already know
+/// will be refused, not as the actual enforcement; `attach_terminal_session`'s
+/// own check is what a caller cannot bypass by skipping this one.
+///
+/// On success: registers the session, transitions it `Starting` ->
+/// `Running` (immediately -- a `TerminalPane::launch` success means the
+/// shell has been spawned; leaving sessions at `Starting` forever, as
+/// every launch path did before this handoff, is the same "session bar
+/// stops lying" truthfulness gap `Exited` detection closes, just the
+/// other end of it), assigns `target_slot`, and records a `Started`
+/// `plain_terminal_observation` (best-effort, matching every other
+/// producer call in this crate: an audit write failing must never fail
+/// the terminal launch it observes).
+fn launch_terminal(
+    app_shell: &mut ApplicationShell,
+    project_id: tekstide_core::project::ProjectId,
+    title: impl Into<String>,
+    root: std::path::PathBuf,
+    target_slot: tekstide_core::domain::VisibleSlot,
+    audit_store: Option<&mut tekstide_core::audit::AuditStore>,
+    audit_health: &mut tekstide_core::audit::AuditHealth,
+) -> Result<crate::surface::terminal::TerminalPane, TerminalLaunchRefusal> {
+    if let Some(project) = app_shell.state().active_project()
+        && let Some(limit) = project.resource_limits().terminal_session_limit
+        && project.terminal_sessions().len() as u32 >= limit
+    {
+        return Err(TerminalLaunchRefusal::SessionLimitExceeded { limit });
+    }
+
+    let (pane, session) = crate::surface::terminal::TerminalPane::launch(
+        project_id.clone(),
+        title,
+        root,
+        std::path::PathBuf::from("/bin/sh"),
+    )
+    .map_err(TerminalLaunchRefusal::Launch)?;
+    let terminal_id = session.id.clone();
+    app_shell
+        .state_mut()
+        .attach_terminal_session(session)
+        .map_err(TerminalLaunchRefusal::Registration)?;
+    // Best-effort past this point: the session is already attached and
+    // real, so a `Running`/slot-assignment failure would be a
+    // `tekstide-core` invariant this function cannot itself repair --
+    // the pane is still returned, rendering something real rather than
+    // discarding a live process over a bookkeeping mismatch.
+    let _ = app_shell
+        .state_mut()
+        .transition_terminal_status(&terminal_id, tekstide_core::domain::TerminalStatus::Running);
+    let _ = app_shell
+        .state_mut()
+        .assign_terminal_visible_slot(&terminal_id, target_slot);
+
+    if let Some(store) = audit_store {
+        let _ = tekstide_core::audit::AuditCoordinator::new(store, audit_health)
+            .record_plain_terminal_started(project_id, terminal_id);
+    }
+
+    Ok(pane)
+}
+
+/// Terminal launch UX handoff: the real `Ctrl+Alt+T` path, calling
+/// [`launch_terminal`] once for `VisibleSlot::Primary` -- a fresh launch
+/// always becomes the new `Primary` (bumping whichever session held it
+/// to `Hidden`, `assign_terminal_visible_slot`'s own existing behaviour)
+/// so the user can type into it immediately, matching
+/// [`active_terminal_focus`]'s "only `Primary` receives keystrokes"
+/// rule. Rooted in the **real project directory**, not a scratch temp
+/// dir -- unlike the diagnostic demo/measurement paths, a terminal a
+/// user actually asked for must open where their project is.
+///
+/// No active project is a silent no-op (`Ok(())`, nothing pushed),
+/// matching every other `AppCommand`'s existing precedent
+/// (`OpenActiveProjectWorkspace`, `ToggleActiveProjectMode`) -- not a
+/// refusal worth a typed notice, since there is nothing yet to refuse.
+fn attempt_terminal_launch(state: &mut State) -> Result<(), TerminalLaunchRefusal> {
+    let Some(project) = state.app_shell.state().active_project() else {
+        return Ok(());
+    };
+    let project_id = project.id().clone();
+    let root = project.canonical_root_path().clone();
+
+    let mut audit_store = open_real_audit_store(&state.app_shell);
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    let pane = launch_terminal(
+        &mut state.app_shell,
+        project_id,
+        "terminal",
+        root,
+        tekstide_core::domain::VisibleSlot::Primary,
+        audit_store.as_mut(),
+        &mut audit_health,
+    )?;
+    state.terminal_panes.push(pane);
+    Ok(())
 }
 
 /// RFC-017 PR-017-E: launches real, filtered PTY sessions for Terminal
@@ -438,31 +693,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 /// own `max_visible_panes`), and one deliberately assigned `Hidden` from
 /// the start so the hidden-session decision this slice makes
 /// (`surface::terminal`'s module doc: retained in memory, still polled)
-/// has something real to demonstrate -- and each is registered on the
-/// real active project via `AppState::attach_terminal_session`/
-/// `assign_terminal_visible_slot`.
+/// has something real to demonstrate.
 ///
-/// **Registering for real is a change from PR-017-D**, disclosed rather
-/// than silent: that slice's demo pane stayed deliberately unregistered
-/// because nothing needed the real session model yet. This slice's job
-/// *is* that model's layout/chrome ("no parallel layout model" applies
-/// to session bookkeeping as much as to `TerminalPanePolicy` itself), so
-/// registering is what discharges that requirement rather than
-/// violating it.
+/// **Terminal launch UX handoff: now a thin caller of [`launch_terminal`]**,
+/// the same function `attempt_terminal_launch`'s real `Ctrl+Alt+T` path
+/// calls -- "the demo becomes a caller that launches N terminals through
+/// the same function a keybinding calls," not a second construction
+/// path for PTY-backed sessions (the exact shape PR-017-B/C spent two
+/// slices proving absent).
 ///
 /// Requires an active project (a CLI project-path argument); returns an
 /// empty `Vec` (silently -- this is a diagnostic path, not a
-/// user-facing feature yet) otherwise, if the env var is unset, or if a
-/// given pane's launch/registration fails.
+/// user-facing feature) otherwise, if the env var is unset, or if a
+/// given pane's launch/registration is refused.
 ///
-/// **RFC-017 PR-017-F**: each successful launch also records a
-/// `plain_terminal_observation` `Started` event via `AuditCoordinator`
-/// (never directly to `audit_store`) -- best-effort
-/// (`.record_plain_terminal_started`'s own `AuditObservationStatus` is
-/// discarded here, matching every other producer call in this crate: an
-/// audit write failing must never fail the terminal launch it
-/// observes). The store itself is opened here, after both early-return
-/// gates, rather than unconditionally in `State::new` -- response 152
+/// The store itself is opened here, after both early-return gates,
+/// rather than unconditionally in `State::new` -- response 152
 /// Required 1: an unconditional open creates the database file (schema
 /// and all) on every launch regardless of this env var, which is
 /// exactly the claim the README's privacy section exists to get right.
@@ -497,35 +743,17 @@ fn launch_terminal_demo_panes(
         if std::fs::create_dir_all(&root).is_err() {
             continue;
         }
-        let Ok((pane, session)) = crate::surface::terminal::TerminalPane::launch(
+        let Ok(pane) = launch_terminal(
+            app_shell,
             project_id.clone(),
             format!("terminal demo {}", index + 1),
             root,
-            std::path::PathBuf::from("/bin/sh"),
+            slot,
+            audit_store.as_mut(),
+            audit_health,
         ) else {
             continue;
         };
-        let terminal_id = session.id.clone();
-        if app_shell
-            .state_mut()
-            .attach_terminal_session(session)
-            .is_err()
-        {
-            continue;
-        }
-        if app_shell
-            .state_mut()
-            .assign_terminal_visible_slot(&terminal_id, slot)
-            .is_err()
-        {
-            continue;
-        }
-
-        if let Some(store) = audit_store.as_mut() {
-            let _ = tekstide_core::audit::AuditCoordinator::new(store, audit_health)
-                .record_plain_terminal_started(project_id.clone(), terminal_id);
-        }
-
         panes.push(pane);
     }
     panes
@@ -669,20 +897,26 @@ fn open_audit_store(
 /// the real subscription tree when a demo pane exists (see
 /// [`subscription`]), so this changes nothing about `subscription`'s
 /// reviewed non-modal/modal routing for any normal run.
-fn terminal_demo_subscription() -> Subscription<Message> {
-    iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::TerminalDemoTick)
+fn terminal_poll_subscription() -> Subscription<Message> {
+    iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::TerminalPollTick)
 }
 
 /// `OpenProjectBoard` and, since PR-015-E, `ToggleProjectMode` map to
-/// existing `AppCommand`s. `OpenCommandPalette` has a real, reserved
-/// binding (`KeybindingPolicy::linux_mvp()`) but no command palette
-/// feature exists yet to dispatch to; every other `NavigationAction` has
-/// no default binding at all until RFC-023 supplies one. Not a
-/// placeholder -- an honest reflection of what is real right now.
+/// existing `AppCommand`s. `LaunchTerminal` is the terminal-launch-UX
+/// handoff's addition -- its `AppCommand` arm only handles the
+/// route/mode half; `update`'s `Shell(shell_input)` handler special-
+/// cases this one action to also perform the real spawn (I/O
+/// `tekstide-core::shell::dispatch` cannot do). `OpenCommandPalette` has
+/// a real, reserved binding (`KeybindingPolicy::linux_mvp()`) but no
+/// command palette feature exists yet to dispatch to; every other
+/// `NavigationAction` has no default binding at all until RFC-023
+/// supplies one. Not a placeholder -- an honest reflection of what is
+/// real right now.
 fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
     match action {
         NavigationAction::OpenProjectBoard => Some(AppCommand::OpenProjectBoard),
         NavigationAction::ToggleProjectMode => Some(AppCommand::ToggleActiveProjectMode),
+        NavigationAction::LaunchTerminal => Some(AppCommand::LaunchTerminal),
         NavigationAction::OpenCommandPalette
         | NavigationAction::SwitchActiveProject
         | NavigationAction::CycleVisibleTerminalSession
@@ -762,14 +996,14 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     // criterion exists to measure (poll's PTY-read/VTE-processing cost
     // competing with input handling on the same executor) would never
     // happen. Batched in exactly like the non-measurement path below
-    // does for `state.terminal_demo`, rather than a second copy of that
+    // does for `state.terminal_panes`, rather than a second copy of that
     // condition living only inside `measurement_subscription`.
     if let Some(measurement) = &state.measurement {
         let measurement_routing = measurement_subscription(measurement.criterion());
-        return if state.terminal_demo.is_empty() {
+        return if state.terminal_panes.is_empty() {
             measurement_routing
         } else {
-            Subscription::batch([measurement_routing, terminal_demo_subscription()])
+            Subscription::batch([measurement_routing, terminal_poll_subscription()])
         };
     }
 
@@ -785,8 +1019,8 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     // was set), so this changes nothing about the routing above for any
     // normal run -- the same "checked but usually absent" shape the
     // measurement branch above already uses.
-    if !state.terminal_demo.is_empty() {
-        Subscription::batch([routing, terminal_demo_subscription()])
+    if !state.terminal_panes.is_empty() {
+        Subscription::batch([routing, terminal_poll_subscription()])
     } else {
         routing
     }
@@ -814,7 +1048,7 @@ fn measurement_subscription(criterion: measurement::Criterion) -> Subscription<M
             Message::MeasuredModeSwitch as fn(std::time::Instant) -> Message,
         ),
         // RFC-017 PR-017-G: same shape again; `subscription` additionally
-        // batches in `terminal_demo_subscription()` for this criterion
+        // batches in `terminal_poll_subscription()` for this criterion
         // (see `subscription`'s own doc) so the concurrent flood this
         // criterion's one pane is running actually gets polled during
         // the run, not just written into and left unread.
@@ -1167,7 +1401,7 @@ fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Messa
     // real chrome (RFC-016's boundary becomes live here for the first
     // time) and proves nothing about trusted-UI separation (RFC-018's
     // job).
-    let content: Element<'_, Message> = match (mode, state.terminal_demo.is_empty()) {
+    let content: Element<'_, Message> = match (mode, state.terminal_panes.is_empty()) {
         (Some(ProjectMode::TerminalImmersion), false) => terminal_workspace_view(state),
         _ => column![text(main_area_label(state, mode)).size(state.theme.font_size_body())]
             .spacing(6)
@@ -1195,6 +1429,18 @@ fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
     let theme = state.theme;
     let sessions = active_project_terminal_sessions(state);
 
+    // Terminal launch UX handoff: "the user pressed a key and is owed a
+    // visible answer" -- rendered above the session bar so it's the
+    // first thing seen, and only ever present right after a refused
+    // attempt (`terminal_launch_notice` is cleared at the start of every
+    // new one).
+    let notice: Option<Element<'_, Message>> =
+        state.terminal_launch_notice.as_ref().map(|refusal| {
+            text(terminal_launch_refusal_text(&state.catalog, refusal))
+                .size(state.theme.font_size_body())
+                .into()
+        });
+
     let entries: Vec<crate::surface::terminal::session_bar::SessionBarEntry> = sessions
         .iter()
         .enumerate()
@@ -1221,7 +1467,7 @@ fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
         .into_iter()
         .filter_map(|session| {
             state
-                .terminal_demo
+                .terminal_panes
                 .iter()
                 .find(|pane| pane.terminal_id() == &session.id)
         })
@@ -1248,7 +1494,13 @@ fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
         .into()
     };
 
-    column![bar, panes_view].spacing(8).into()
+    let mut rows: Vec<Element<'_, Message>> = Vec::new();
+    if let Some(notice) = notice {
+        rows.push(notice);
+    }
+    rows.push(bar);
+    rows.push(panes_view);
+    column(rows).spacing(8).into()
 }
 
 /// RFC-015 PR-015-F: renders the tail of `state.typing_doc` in a

@@ -295,7 +295,9 @@ fn project_collections_reject_cross_project_entities() {
 
     assert_eq!(
         project.add_terminal_session(terminal),
-        Err(OwnershipError::CrossProject)
+        Err(ProjectTerminalError::Ownership(
+            OwnershipError::CrossProject
+        ))
     );
     assert_eq!(
         project.add_agent_run(run),
@@ -335,9 +337,56 @@ fn project_collections_reject_duplicate_entity_ids() {
 
     assert_eq!(
         project.add_terminal_session(terminal),
-        Err(OwnershipError::DuplicateAttachment)
+        Err(ProjectTerminalError::Ownership(
+            OwnershipError::DuplicateAttachment
+        ))
     );
     assert_eq!(project.terminal_sessions().len(), 1);
+}
+
+/// Terminal launch UX handoff: `terminal_session_limit` is refused with
+/// a typed error naming the real limit, not a panic and not a silent
+/// no-op -- enforced in `add_terminal_session` itself, not by a caller
+/// that could forget to check.
+#[test]
+fn terminal_session_limit_is_enforced_with_a_typed_refusal() {
+    let mut project = project_session(1);
+    project.set_resource_limits(crate::project::ProjectResourceLimits {
+        visible_terminal_limit: Some(2),
+        terminal_session_limit: Some(2),
+        agent_run_limit: None,
+        approval_request_limit: None,
+    });
+
+    for index in 0..2 {
+        let terminal = TerminalSession::new(
+            project.id().clone(),
+            TerminalKind::Plain,
+            format!("Shell {index}"),
+            "/workspace/project-1",
+            "bash",
+        );
+        project
+            .add_terminal_session(terminal)
+            .expect("the first two sessions must be accepted, under the limit");
+    }
+
+    let third = TerminalSession::new(
+        project.id().clone(),
+        TerminalKind::Plain,
+        "Shell 3",
+        "/workspace/project-1",
+        "bash",
+    );
+    assert_eq!(
+        project.add_terminal_session(third),
+        Err(ProjectTerminalError::SessionLimitExceeded { limit: 2 })
+    );
+    assert_eq!(
+        project.terminal_sessions().len(),
+        2,
+        "a refused session must not be added"
+    );
 }
 
 #[test]

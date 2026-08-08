@@ -39,24 +39,27 @@ also a real desktop GUI application shell with mode switching. It includes:
   indicator, i18n-backed text and a compiled theme, and a Project Board surface
   rendering live `ApplicationShell` state with untrusted project names and paths
   escaped, never trusted;
-- Content ↔ Terminal mode switching for an active project, with sidebar and
-  main-area scaffolding that RFC-017 (terminal) and RFC-019 (editor/explorer) render
-  real content into.
+- Content ↔ Terminal mode switching for an active project, with a real,
+  user-reachable terminal (`Ctrl+Alt+T`): a security-filtered PTY session
+  rendering real output, with a bounded terminal-count limit and exit
+  detection so the session bar reflects what is actually running rather than
+  what was last launched. RFC-019 still owns the editor/explorer main-area
+  content.
 
-It is not yet the full AI CLI workbench. There is no rendered terminal surface, no
-editor, no rendered paste/approval/trust dialogs, no adapter-spawn pathway that would
-make command approval reachable, no Git-based change detection, file watcher, or
+It is not yet the full AI CLI workbench. There is no editor, no rendered
+paste/approval/trust dialogs, no adapter-spawn pathway that would make command
+approval reachable, no Git-based change detection, file watcher, or
 overwrite-confirmation UI, and no cross-platform evidence beyond Linux. There is
 **no screen-reader support** — not limited, not planned, absent for the life of the
 `iced` substrate decision (RFC-014). Command approval (below) remains implemented but
 unreachable.
 
 Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked
-root/symlink access, and audit-store recovery outcomes. Paste, restricted-feature,
-safe-close, configuration-change, transcript-purge, project-added, and plain-terminal
-producers are defined in the audit schema but not yet wired. The command-approval
-producers are wired and tested but produce nothing, because nothing calls them — see
-below.
+root/symlink access, audit-store recovery outcomes, and plain-terminal session starts
+and terminations. Paste, restricted-feature, safe-close, configuration-change,
+transcript-purge, and project-added producers are defined in the audit schema but not
+yet wired. The command-approval producers are wired and tested but produce nothing,
+because nothing calls them — see below.
 
 ### Command approval
 
@@ -106,6 +109,7 @@ The shell is keyboard-navigable by design. These bindings exist today
 | --- | --- |
 | `Ctrl+Alt+P` | Open the Project Board |
 | `Ctrl+Alt+M` | Toggle Content / Terminal mode for the active project |
+| `Ctrl+Alt+T` | Launch a real terminal in the active project (switches to Terminal mode) |
 | `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |
 
 `Ctrl+Shift+P` is reserved for a command palette that does not exist yet — it is
@@ -118,26 +122,30 @@ arrive with RFC-022; these bindings currently do nothing a user can reach.
 
 ## Local Data and Privacy
 
-Tekstide is local-first: it does not send project data anywhere. Today, the only
-local state the desktop application creates is the **recent-projects list**, at
+Tekstide is local-first: it does not send project data anywhere. On every launch,
+the desktop application creates the **recent-projects list**, at
 `$XDG_STATE_HOME/tekstide/recent-projects.json`
 (`~/.local/state/tekstide/recent-projects.json` if `XDG_STATE_HOME` is unset) —
 the paths of projects you have opened, used to restore the Project Board across
 sessions. There is no in-app command to clear it yet; delete the file to reset it.
+The only other local state it creates is the audit store described next, and only
+once you actually open a terminal.
 
-RFC-013's durable audit store is implemented, tested, and now has its first real
-producer (RFC-017): opening or launching a terminal records a
-`plain_terminal_observation` event — that a plain terminal session started, and
-nothing else. This family's schema has no field for command text, output, or a
-path at all, so none can ever be recorded in it. The store lives at
+RFC-013's durable audit store is implemented, tested, and has a real producer
+(RFC-017, wired end to end as of the terminal-launch-UX handoff):
+**pressing `Ctrl+Alt+T` to open a terminal creates this database**, the first
+time you do it. Each launch records a `plain_terminal_observation` `Started`
+event; if that session later exits (typing `exit`, or the shell dying on its
+own), a matching `Terminated` event is recorded too, naming only whether the
+process exited or was signalled — never a command, its output, or a path.
+This family's schema has no field for any of those at all, so none can ever be
+recorded in it, launch or exit. The store lives at
 `$XDG_STATE_HOME/tekstide/audit/audit.sqlite3`
 (`~/.local/state/tekstide/audit/audit.sqlite3` if `XDG_STATE_HOME` is unset).
-**As shipped today, the store is opened — and the file created — only under
-the developer-only `TEKSTIDE_TERMINAL_DEMO` diagnostic flag**, which is also
-what gates the terminal session that produces the event: no in-app feature
-launches a real terminal session yet, and nothing opens this database without
-one to record, so ordinary use of `tekstide` still does not create this file.
-There is no in-app command to purge it yet; delete the `audit/` directory
+**This is no longer gated behind a developer-only flag** — `TEKSTIDE_TERMINAL_DEMO`
+still exists for diagnostic use, but the real `Ctrl+Alt+T` binding is what
+ordinary use reaches, and it opens the same store. There is no in-app command
+to purge it yet; delete the `audit/` directory
 to reset it, or see
 [`rfcs/done/013-durable-audit-store-and-local-data-policy.md`](rfcs/done/013-durable-audit-store-and-local-data-policy.md)
 for the store's full retention and purge policy.

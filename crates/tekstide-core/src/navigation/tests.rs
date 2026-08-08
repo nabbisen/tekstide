@@ -44,6 +44,35 @@ fn toggle_project_mode_shortcut_is_configurable_candidate() {
     );
 }
 
+/// Terminal launch UX handoff: "do not silently collide with a
+/// `Reserved` binding -- check it mechanically rather than by reading."
+/// Enumerates every *other* rule's binding, not just the one reserved
+/// command-palette binding this file already happens to test against --
+/// a future `Reserved` addition would be caught here too, not only a
+/// hand-picked one.
+#[test]
+fn launch_terminal_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::LaunchTerminal)
+        .expect("Launch Terminal should have a keyboard policy");
+
+    assert_eq!(rule.default_binding, Some("Ctrl+Alt+T"));
+    assert_eq!(rule.status, KeybindingStatus::Candidate);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::LaunchTerminal)
+        .filter(|other| other.default_binding == rule.default_binding)
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Alt+T must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
 #[test]
 fn primary_navigation_workflows_have_keyboard_policy_entries() {
     let policy = KeybindingPolicy::linux_mvp();

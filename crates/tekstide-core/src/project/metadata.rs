@@ -78,7 +78,16 @@ impl Default for ProjectResourceLimits {
     fn default() -> Self {
         Self {
             visible_terminal_limit: Some(2),
-            terminal_session_limit: None,
+            // Terminal launch UX handoff: previously `None`, i.e.
+            // unenforced -- harmless while the only launch path was an
+            // env-gated demo that always stopped at three, but a real
+            // keybinding a user can hold down would spawn unbounded real
+            // shell processes without this. 8 is generous for genuine
+            // multi-tasking (more hidden sessions than any one person
+            // realistically juggles at once) while still bounding what a
+            // held-down key can do -- small enough that hitting it is a
+            // deliberate act, not an accident of normal use.
+            terminal_session_limit: Some(8),
             agent_run_limit: None,
             approval_request_limit: None,
         }

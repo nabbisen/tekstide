@@ -81,7 +81,7 @@ use tekstide_core::domain::TerminalSession;
 use tekstide_core::project::{ProjectId, ProjectSession};
 use tekstide_core::runtime::terminal::{
     LinuxTerminalRuntime, TerminalDimensions, TerminalLaunchError, TerminalLaunchSpec,
-    TerminalRuntimeEvent, TerminalRuntimeHandle,
+    TerminalRuntimeEvent, TerminalRuntimeHandle, TerminationOutcome,
 };
 
 use filter::SecurityFilter;
@@ -245,6 +245,29 @@ impl TerminalPane {
     /// evidence-gathering only; no production caller.
     pub fn bytes_read_total(&self) -> u64 {
         self.bytes_read_total
+    }
+
+    /// Terminal launch UX handoff: a **non-blocking** check for whether
+    /// this pane's shell has already exited -- `Some` the first (and
+    /// only) time it has. Built on `wait_for_exit(handle, Duration::ZERO)`
+    /// rather than a new runtime method, because tracing its own loop
+    /// shows it already degrades to a single, non-blocking `try_wait()`
+    /// at a zero timeout: the loop's only blocking `sleep` happens when
+    /// it is about to retry, gated on `elapsed() > timeout`, and with
+    /// `timeout` zero that comparison is true as soon as any
+    /// (non-zero-resolution) time has passed since the loop started --
+    /// which real monotonic clocks always show between two sequential
+    /// reads. Callers must not call this from a context where blocking
+    /// would be acceptable and then rely on that margin; it is a real
+    /// property of the existing loop, not a documented contract of it,
+    /// and is exactly why `terminal_poll_handler_cost_under_a_real_flood_headless_benchmark`
+    /// (response 158) exists as a standing, real-timing check on this
+    /// same code path rather than a one-time argument.
+    pub fn check_exit(&mut self) -> Option<TerminationOutcome> {
+        self.runtime
+            .wait_for_exit(&self.handle, Duration::ZERO)
+            .ok()
+            .flatten()
     }
 
     /// This pane's real, live `TerminalId` -- what a caller compares a

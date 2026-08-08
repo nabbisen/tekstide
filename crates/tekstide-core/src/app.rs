@@ -203,6 +203,20 @@ impl AppState {
         true
     }
 
+    /// Terminal launch UX handoff: sets the mode directly to
+    /// `TerminalImmersion`, unlike `toggle_active_project_mode` --
+    /// launching a terminal must land the user in the terminal
+    /// workspace regardless of which mode they were already in, not
+    /// flip them out of it if they happened to already be there.
+    pub fn open_active_project_terminal_workspace(&mut self) -> bool {
+        let Some(project) = self.active_project_mut() else {
+            return false;
+        };
+
+        project.set_mode(ProjectMode::TerminalImmersion);
+        true
+    }
+
     /// RFC-017 PR-017-E: the missing lifecycle glue identified while
     /// implementing PR-017-D -- a caller outside `tekstide-core` had no
     /// way to attach a real, already-launched `TerminalSession` to the
@@ -213,10 +227,12 @@ impl AppState {
     pub fn attach_terminal_session(
         &mut self,
         terminal: TerminalSession,
-    ) -> Result<(), OwnershipError> {
+    ) -> Result<(), ProjectTerminalError> {
         let project = self
             .active_project_mut()
-            .ok_or(OwnershipError::MissingProject)?;
+            .ok_or(ProjectTerminalError::Ownership(
+                OwnershipError::MissingProject,
+            ))?;
         project.add_terminal_session(terminal)
     }
 
@@ -234,6 +250,40 @@ impl AppState {
                 OwnershipError::MissingProject,
             ))?;
         project.assign_terminal_visible_slot(terminal_id, visible_slot)
+    }
+
+    /// Terminal launch UX handoff: the same "missing lifecycle glue"
+    /// gap `attach_terminal_session`/`assign_terminal_visible_slot`
+    /// closed for registration -- `ProjectSession::transition_terminal_status`
+    /// existed with no caller outside `tekstide-core` itself.
+    pub fn transition_terminal_status(
+        &mut self,
+        terminal_id: &TerminalId,
+        status: crate::domain::TerminalStatus,
+    ) -> Result<(), ProjectTerminalError> {
+        let project = self
+            .active_project_mut()
+            .ok_or(ProjectTerminalError::Ownership(
+                OwnershipError::MissingProject,
+            ))?;
+        project.transition_terminal_status(terminal_id, status)
+    }
+
+    /// The other half of exit detection: `mark_terminal_exited` also
+    /// records the real exit code, which a generic `transition_terminal_status`
+    /// call cannot (`TerminalSession::exit_status` has no setter of its
+    /// own).
+    pub fn mark_terminal_exited(
+        &mut self,
+        terminal_id: &TerminalId,
+        exit_status: Option<i32>,
+    ) -> Result<(), ProjectTerminalError> {
+        let project = self
+            .active_project_mut()
+            .ok_or(ProjectTerminalError::Ownership(
+                OwnershipError::MissingProject,
+            ))?;
+        project.mark_terminal_exited(terminal_id, exit_status)
     }
 
     pub fn open_active_project_text_document(

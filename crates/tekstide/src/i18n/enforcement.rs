@@ -481,6 +481,8 @@ fn generic_args() -> CatalogArgs<'static> {
         .trusted_symbol("attention", "calm")
         .number("number", 1u32)
         .trusted_symbol("slot", "hidden")
+        .trusted_symbol("reason", "limit")
+        .number("limit", 1u32)
 }
 
 fn shipped_additional_locales() -> Vec<String> {

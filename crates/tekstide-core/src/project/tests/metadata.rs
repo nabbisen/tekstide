@@ -36,7 +36,10 @@ fn new_project_initializes_rfc002_session_metadata_with_inert_provider_defaults(
         project.resource_limits(),
         ProjectResourceLimits {
             visible_terminal_limit: Some(2),
-            terminal_session_limit: None,
+            // Terminal launch UX handoff: was `None` (unenforced) --
+            // see `ProjectResourceLimits::default`'s own doc comment for
+            // why 8.
+            terminal_session_limit: Some(8),
             agent_run_limit: None,
             approval_request_limit: None,
         }
