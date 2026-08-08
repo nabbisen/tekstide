@@ -1,7 +1,7 @@
 ---
 title: "Terminal launch UX: implementation handoff"
 owning_rfcs: "RFC-008 (lifecycle), RFC-015 (input/shell), RFC-017 (surface)"
-status: "Implemented 2026-08-08 (da09009, c56408c) — screenshot evidence captured, recent-projects remediation pending owner decision (review request 165)"
+status: "Complete 2026-08-08 (da09009, c56408c, a9ed3bb, 1b8a496) — reviewed and closed, review request/response 165"
 created: "2026-08-08"
 ---
 
