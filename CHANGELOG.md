@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.5.0 - Terminal Renderer, and a Terminal You Can Open
+
+Status: release candidate, prepared 2026-08-08, pending review and the owner's signed tag.
+
+Tekstide `0.5.0` delivers the first half of milestone M9: RFC-017's terminal renderer,
+plus the launch UX that makes it reachable. **RFC-017 is closed** (`rfcs/done/`), accepted
+with `NFR-PERF-004` recorded as **not met** — see Deferred. RFC-018 (rendered paste
+protection and adversarial spoofing evidence) is M9's second half and is not in this
+release.
+
+Press **`Ctrl+Alt+T`** in an open project and you get a real, PTY-backed terminal with
+RFC-009's accepted-sequence policy enforced in front of the emulator.
+
+### Implemented
+
+- **Terminal surface (RFC-017).** A real `alacritty_terminal` grid behind RFC-009's
+  security filter, rendered as a surface under RFC-015's contract. The filter's four
+  properties — single ingress, no side channels, classification parity, and
+  stream-position independence under adversarially chunked input — were re-proven
+  against product code rather than inherited from the RFC-014 spike, each independently
+  ablated.
+- **Terminal launch UX.** `Ctrl+Alt+T` launches a terminal in the active project and
+  switches to Terminal Mode. Typing `exit` really closes it: exit detection transitions
+  the session, frees its visible slot, and makes the slot reusable.
+- **Immersion mode, split, and session bar.** At most two visible panes, with the split
+  decided from real measured font metrics — a split that cannot give each pane a full
+  grid width is refused rather than rendered clipped. Session state is distinguishable
+  without colour (`NFR-UX-002`).
+- **Audit: `plain_terminal_observation` has a producer.** The first audit write the
+  desktop application has ever performed. Opening a terminal records that a session
+  started; exiting records that it terminated. A sentinel test proves no command text,
+  output, or path reaches the durable store, checked against raw on-disk bytes.
+- **Bounded scrollback** at 2,000 lines, ablation-verified under sustained output.
+- The RFC-014 and RFC-007 spike crates were deleted, their properties having product-code
+  equivalents with their own tests.
+
+### Local data
+
+**Opening a terminal now creates an audit database** at
+`$XDG_STATE_HOME/tekstide/audit/audit.sqlite3`. This is a behaviour change from `0.4.1`,
+which created no such file. It records that a terminal session started and stopped, and
+nothing else — the schema has no field for command text, output, or paths. Delete the
+`audit/` directory to reset it; there is no in-app purge command yet.
+
+### Dependencies
+
+No new dependencies. Two workspace crates were removed (`tekstide-gui-spike`,
+`tekstide-pty-spike`), both `publish = false` and neither reachable from a shipped crate.
+
+### Deferred
+
+- **`NFR-PERF-004` (terminal input latency p95 ≤ 16 ms) is NOT met**, and is recorded as
+  such rather than redefined until it passed. PTY bytes reach the grid only on a 50 ms
+  poll tick, so poll-wait alone contributes a p95 near 47.5 ms. The fix is readiness-driven
+  terminal I/O, scheduled as follow-up (`rfcs/future-work.md`).
+- **At most three concurrent terminals per project.** This is a consequence of the same
+  poll defect, not a product decision: every live pane is polled sequentially each tick at
+  roughly 10 ms per pane, and five panes would saturate the tick. The limit is expected to
+  rise once readiness-driven I/O lands.
+- **Terminal output throughput is capped near 374 KB/s**, again by the same defect.
+- **No trusted-UI separation or spoofing-resistance claim.** Nothing in this release
+  demonstrates that terminal content cannot imitate Tekstide's own chrome. That is RFC-018.
+- **No paste path exists** — the terminal accepts keystrokes only, so RFC-009's paste
+  policy has nothing to protect yet. Rendered paste protection is RFC-018.
+- **No terminate-from-UI and no pane selection.** Close a terminal by typing `exit`; input
+  goes to the `Primary` pane.
+- `TextStream::to_pty_bytes` is a defined subset, not a complete VT100/xterm encoder.
+- **No screen-reader support.** `iced` offers no accessibility bridge; checked again this
+  release (`cargo tree -p tekstide | grep -i accesskit`, empty).
+- Linux only. No macOS or Windows terminal runtime evidence exists.
+
 ## 0.4.1 - Mode Switching, Focus Indicator, and RFC-015 Closure
 
 Status: release candidate, prepared 2026-08-01, pending review and the owner's signed tag.
