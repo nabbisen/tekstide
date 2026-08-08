@@ -223,6 +223,31 @@ Response 115 Required A directed a full `Cc`+`Cf` category escaping implementati
 
 **A cycle may not consist entirely of headless work.** Headless parallel tracks exist to de-risk later milestones (ROADMAP §Parallel Tracks), not to become the only track. When a cycle's work is entirely unreachable by a user, either the release-bearing milestone gets capacity in the same cycle or the cadence commitment is explicitly suspended with the owner's agreement.
 
+### Cycle review: `0.4.1` → present, measured 2026-08-08
+
+**Cadence is healthy. Composition has the same failure as the `0.3.0` cycle, for a different reason.**
+
+45 commits in 6 days since `0.4.1`. **Releasable user-visible surface in them: zero.**
+
+RFC-017 delivered a real, filtered, PTY-backed terminal renderer — grid, split policy, session bar, input, audit producer — and **every part of it is behind `TEKSTIDE_TERMINAL_DEMO`**. No keybinding, command, or UI affordance launches a terminal. A user running HEAD sees exactly what `0.4.1` gave them. PR-017-E disclosed this honestly at the time ("no real terminal-creation UX"), and it was correct not to absorb that into a rendering slice; the gap is that nothing scheduled it afterwards.
+
+Against the four metrics:
+
+1. **Releasable-surface ratio: 0/45.** Same figure as the `0.3.0` cycle's 0/33, and this time it is not headless work — it is *reachable-by-nobody* work, which the standing rule covers in spirit but names less precisely. **Amend the rule's wording accordingly**: the test is whether a user can reach it, not whether it has a GUI.
+2. **Milestone/version alignment: good, and improved.** M9 bears `0.5.x` and M9 is what was worked. The `0.3.0` cycle failed this (M11 worked, M8 bore `0.4.x`); this cycle does not.
+3. **Review rounds per slice: 2.3** (16 requests ÷ 7 slices), against RFC-021's 1.6. **PR-017-G alone consumed 6** (requests 154–159). Excluding it: 10 ÷ 6 = **1.67**, on the established baseline. The process is not degrading — one measurement slice on a shared, heavily loaded machine (swap exhaustion, then a dual-GPU EGL failure) absorbed the entire overrun, and produced real findings while doing it.
+4. **Next-release contents: not named before the cycle.** Nobody stated what `0.5.0` contains. That is the metric that would have caught items 1 and 3 early, and it is the one still not being run.
+
+**Recommendation: terminal-launch UX before RFC-018.**
+
+`rfcs/future-work.md` §Terminal / PTY Runtime already lists *"Add app/UI commands for launching, selecting, and closing terminals"* — known, unscheduled. Three reasons to schedule it now rather than after RFC-018:
+
+- **`0.5.0` cannot honestly claim terminal support while no user can open a terminal.** Standing Constraint 3 (honesty over completeness) makes that a release-notes problem, not just a product one.
+- **RFC-018's evidence inherits the gate.** Spoofing resistance proven against a demo-gated terminal is weaker evidence than against one a user opened, and RFC-018's whole purpose is adversarial proof.
+- **Two consecutive M9 RFCs of terminal work with nothing reachable** is the trajectory the standing rule exists to interrupt, and it would be the third such cycle in the project's history.
+
+Small slice, plausibly one PR against RFC-008's existing lifecycle API — `AppState::attach_terminal_session` and `assign_terminal_visible_slot` already exist and are exercised, so this is wiring a command to reviewed code rather than new runtime work.
+
 ## Standing Constraints
 
 Every RFC in this queue inherits these. They are not restated in each document.
