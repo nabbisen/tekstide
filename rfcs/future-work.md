@@ -40,6 +40,8 @@ Recorded 2026-08-04 at RFC-017's closeout, because everything below otherwise li
 
 So the cap needs a real decision — block, grow, or drop-with-a-reported-count — not the current silent truncation with the event discarded. **Fixing the sleep in isolation trades a throughput cap for a stream-corruption bug.**
 
+**A third motivation, added 2026-08-08 by the terminal-launch-UX handoff, and the most user-facing of the three.** `ProjectResourceLimits::default().terminal_session_limit` is `Some(3)` — not chosen for genuine multi-tasking headroom, but because `Message::TerminalPollTick` polls every live pane sequentially and each `poll()` carries the same 10 ms sleep: measured linear at ~10.1 ms/pane against the 50 ms tick, saturating at 5 panes, leaving 3 as the largest count with real headroom (~20 ms) today. The other two motivations are invisible to a user — a latency number nobody sees, a throughput ceiling only heavy output hits. **This one is not**: a user with a build running, a log tailing, and a shell open is already at the limit, and a fourth terminal is refused, by design, because of this same sleep. **The limit is expected to rise once readiness-driven I/O removes the per-poll sleep it is currently a function of** — raising it without that fix would reopen the saturation risk this default exists to prevent.
+
 ### AgentRun And AI CLI Execution
 
 Status: partially implemented by RFC-010; GUI launch/review surfaces and command approval remain.
