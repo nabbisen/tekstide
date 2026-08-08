@@ -1,7 +1,7 @@
 ---
 title: "Terminal launch UX: implementation handoff"
 owning_rfcs: "RFC-008 (lifecycle), RFC-015 (input/shell), RFC-017 (surface)"
-status: "Ready for implementation — approved by the owner 2026-08-08"
+status: "Implemented 2026-08-08 (da09009) — screenshot evidence pending, review requested"
 created: "2026-08-08"
 ---
 
@@ -92,3 +92,18 @@ The panes themselves (emulator grids) are legitimately shell-local. The **sessio
 ## What this unblocks
 
 `0.5.0` becomes releasable with a claim that is actually true: a user can open a real, security-filtered terminal in a project. And RFC-018's adversarial evidence stops inheriting a developer env var — spoofing resistance proven against a terminal a user opened is materially stronger than against one only a flag can reach.
+
+## Outcome, 2026-08-08
+
+Implemented in `da09009`. Against the review gate above:
+
+- **A user can open a terminal, type in it, and see output.** Real, tested end to end (`launch_terminal_shell_input_switches_to_terminal_immersion_and_launches_a_real_session`): a `Ctrl+Alt+T` `ShellInput` dispatched through the real `update` switches to `TerminalImmersion`, launches exactly one real pane rooted in the **actual project directory** (not a scratch temp dir, unlike the diagnostic demo/measurement paths), and the session is already `Running`/`Primary` by the time it returns — not left at `Starting` the way every launch path did before this handoff. **The screenshot itself is not yet taken** — a real GUI launch and synthetic `xdotool` input, which this session's standing convention asks to be confirmed before running rather than assumed carried over from RFC-017 PR-017-G's separate authorization. Raised in the accompanying review request.
+- **The session limit is enforced in core and demonstrated, with what the user sees on refusal.** `ProjectSession::add_terminal_session` refuses at `terminal_session_limit` (now `Some(8)`, was `None`) with `ProjectTerminalError::SessionLimitExceeded { limit }`; `terminal_session_limit_is_enforced_end_to_end_with_a_visible_notice` runs 8 real launches to the limit, confirms the 9th typed refusal, and confirms the catalog-driven notice text (`terminal-launch-refused`, `en.ftl`) names the real number. Ablated (`ablation_a_ninth_real_process_would_spawn_without_the_limit_check`): a 9th real shell spawns just fine at the OS level, confirming the application-level check is the only thing that stops it.
+- **Exit detection demonstrated, ablated.** `a_real_session_exit_updates_status_frees_the_slot_and_is_reusable`: writes a real `exit\n` to a real pane, drives the real `TerminalPollTick` handler until the session reports `Exited`, confirms the slot is freed to `Hidden`, and confirms a subsequent launch reuses `Primary`. Ablated (`ablation_without_check_exit_a_dead_shell_still_reports_running`): with only `poll()` called (the pre-handoff behaviour), a shell that has genuinely exited at the OS level still reports `Running` — the exact lie the review gate named.
+- **`Terminated` audit observation produced, conforming to the frozen family.** `AuditCoordinator::record_plain_terminal_terminated`, three new `tekstide-core` tests proving the real mapping (`Exited` → `ProcessExited`, a signal → `ProcessTerminated`, `Failed`/`OrphanedUnknown` → `NotRequired`, matching `ManagedProcessLifecycle`'s own established precedent rather than inventing a new one) and `record.validate()` against a real store. No schema amendment.
+- **One creation path, shown by enumeration.** `terminal_pane_launch_has_exactly_two_named_production_callers` walks `shell.rs` for every `TerminalPane::launch(` call site and its enclosing function by name: `launch_terminal` (the one ingress `launch_terminal_demo_panes` and the real keybinding path both call) and `launch_measurement_terminal_pane` (deliberately separate, PR-017-G's own already-reviewed non-contamination reasoning) — any other count or name fails the test.
+- **README privacy section updated in the same commit**, along with the feature-status paragraph and keybinding table that would otherwise have gone stale alongside it (found while fixing the one the gate named).
+- **No new blocking call in the tick handler.** `TerminalPane::check_exit` is `wait_for_exit(handle, Duration::ZERO)`, traced against its own retry loop (documented on the method itself) to confirm it degrades to one non-blocking `try_wait()` rather than assumed.
+- **Gates**: `fmt`, `clippy -D warnings` (workspace), full test suite (502 `tekstide-core` + 126 `tekstide`, 0 failures — 3 + 6 net new respectively), `git diff --check`. All passed.
+
+**Not yet done**: the screenshot itself, and the non-contamination/GUI-only items that were never this handoff's to begin with. Everything else in the review gate is real, tested, and ablated where the gate asked for ablation.
