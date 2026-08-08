@@ -14,8 +14,8 @@ Everything from M8 onward builds the product surface. This roadmap is milestone-
 | M5 | `0.3.0` (released 2026-07-28) | AgentRun Launch + Active File Safety | Executable AI CLI profiles, AgentRun launch, active-document external-change detection. |
 | M6 | `0.3.0` (released 2026-07-28) | Transcript And Review Foundations | Bounded transcript capture, retention controls, generated-change review models. |
 | M7 | `0.3.0` (released 2026-07-28) | Durable Audit | Local durable audit storage for trust decisions, managed process launches, blocked root/symlink access, and recovery outcomes. |
-| M8 | `0.4.0` (released 2026-08-01) + `0.4.1` (release candidate) | GUI Foundation | Substrate decision, application shell, layout and focus model, i18n scaffolding, Project Board surface, mode switching, focus indicator. |
-| M9 | `0.5.x` | Terminal Surface | Terminal renderer honoring the RFC-009 boundary, immersion mode, split policy, rendered paste protection, trusted-UI evidence. |
+| M8 | `0.4.0` (released 2026-08-01) + `0.4.1` (released 2026-08-01) | GUI Foundation | Substrate decision, application shell, layout and focus model, i18n scaffolding, Project Board surface, mode switching, focus indicator. |
+| M9 | `0.5.0` (release candidate) | Terminal Surface | Terminal renderer honoring the RFC-009 boundary, immersion mode, split policy, rendered paste protection, trusted-UI evidence. |
 | M10 | `0.6.x` | Content Surfaces | Editor, file explorer tree, diff/review surface, AgentRun report surface. |
 | M11 | `0.7.x` | Approval And Safety Dialogs | Command approval model and dialog, trust/safe-close/destructive dialogs, remaining security audit producers. |
 | M12 | `0.8.x` | Configuration And Integrations | Configuration system, keybindings/theme/profiles, Git integration, notifications. |
@@ -104,6 +104,16 @@ Review gates:
 - Security review for the rendered escape-sequence boundary and spoofing resistance.
 - NFR evidence for terminal input latency under output flood (`NFR-PERF-004`).
 - Screenshot-backed spoofing evidence, closing the RFC-009 deferral.
+
+`0.5.0` ships the terminal renderer, immersion mode, split policy, session bar, and
+the launch UX that makes the terminal reachable by a real keybinding rather than an
+env-gated demo (RFC-017, closed as of this release). `NFR-PERF-004` is recorded as
+**not met**, stated rather than redefined until it passed — the fix is
+readiness-driven terminal I/O, tracked in `rfcs/future-work.md`
+§Readiness-driven terminal I/O, which now also names the terminal-count limit as a
+third, user-visible consequence of the same defect. **Rendered paste protection and
+trusted-UI/spoofing-resistance evidence (RFC-018) remain open within M9** and are not
+in this release — explicitly deferred, not silently dropped.
 
 ## M10: Content Surfaces
 
