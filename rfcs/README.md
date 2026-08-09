@@ -18,6 +18,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 018 | [Rendered Paste Protection and Trusted-UI Evidence](./proposed/018-paste-protection-and-trusted-ui-evidence.md) | Proposed 2026-08-08 — M9 second half; awaiting owner acceptance |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ## Handoffs
