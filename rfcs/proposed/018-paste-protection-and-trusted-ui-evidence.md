@@ -1,6 +1,6 @@
 # RFC-018: Rendered Paste Protection and Trusted-UI Evidence
 
-Status: Proposed — awaiting the human owner's acceptance
+Status: Accepted by the human owner 2026-08-08 — ready for implementation
 Target milestone: M9 (`0.5.x`), second half
 Date: 2026-08-08
 

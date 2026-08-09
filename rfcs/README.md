@@ -18,7 +18,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 018 | [Rendered Paste Protection and Trusted-UI Evidence](./proposed/018-paste-protection-and-trusted-ui-evidence.md) | Proposed 2026-08-08 — M9 second half; awaiting owner acceptance |
+| 018 | [Rendered Paste Protection and Trusted-UI Evidence](./proposed/018-paste-protection-and-trusted-ui-evidence.md) | **Accepted 2026-08-08** — M9 second half; ready for implementation |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ## Handoffs
@@ -42,6 +42,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 015 | [Application Shell and Rendered Surface Model](./handoffs/015-application-shell-and-rendered-surface-model/README.md) |
 | 016 | [Internationalization and Localization](./handoffs/016-internationalization-and-localization/README.md) |
 | 017 | [Terminal Renderer and Immersion Mode](./handoffs/017-terminal-renderer-and-immersion-mode/README.md) |
+| 018 | [Rendered Paste Protection and Trusted-UI Evidence](./handoffs/018-paste-protection-and-trusted-ui-evidence/README.md) |
 | — | [Minimal user documentation](./handoffs/minimal-user-documentation.md) — no RFC; pulled forward from RFC-029 to M9 |
 | 021 | [Command Approval Model and Adapter Capability](./handoffs/021-command-approval-model-and-adapter-capability/README.md) |
 | 023 | [Configuration System](./handoffs/023-configuration-system/README.md) |
