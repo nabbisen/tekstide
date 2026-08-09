@@ -190,5 +190,6 @@ terminal-paste-refused = { $reason ->
     [multiline] Multi-line paste needs confirmation, which isn't available yet — paste blocked.
     [control] Paste blocked: it contains control characters.
     [wrong-target] Paste blocked: the target terminal changed.
+    [too-large] Paste blocked: larger than 256 KiB.
    *[trusted-ui] Paste blocked while a dialog is open.
 }

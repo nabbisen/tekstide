@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use tekstide_core::shell::ApplicationShell;
 
 use super::{
-    Message, ModalButton, ModalContent, State, TerminalPasteRefusal, bounded_paste_bytes,
-    focus_marker, main_area_key, main_area_label, sidebar_label, status_bar_summary,
+    Message, ModalButton, ModalContent, State, TerminalPasteRefusal, focus_marker, main_area_key,
+    main_area_label, paste_bytes_within_bound, sidebar_label, status_bar_summary,
     terminal_paste_refusal_text, trusted_ui_state, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
@@ -2158,48 +2158,73 @@ fn trusted_ui_state_is_active_with_a_modal_open() {
 }
 
 /// **Review gate**: "clipboard read is bounded; a very large clipboard
-/// cannot become an unbounded write or render."
+/// cannot become an unbounded write or render." **Response 169
+/// Required**: bounded by refusal, not truncation -- an over-cap paste
+/// must never reach `evaluate` at all, since classifying a truncated
+/// prefix can change the classification itself and would silently
+/// write a prefix of what the user actually copied.
 #[test]
-fn bounded_paste_bytes_passes_short_content_through_unchanged() {
+fn paste_bytes_within_bound_passes_short_content_through_unchanged() {
     assert_eq!(
-        bounded_paste_bytes(Some("hello".to_string())),
-        b"hello".to_vec()
+        paste_bytes_within_bound(Some("hello".to_string())),
+        Some(b"hello".to_vec())
     );
 }
 
 #[test]
-fn bounded_paste_bytes_treats_a_missing_clipboard_as_empty() {
-    assert_eq!(bounded_paste_bytes(None), Vec::<u8>::new());
+fn paste_bytes_within_bound_treats_a_missing_clipboard_as_empty() {
+    assert_eq!(paste_bytes_within_bound(None), Some(Vec::new()));
 }
 
 #[test]
-fn bounded_paste_bytes_truncates_oversized_content_to_the_cap() {
-    let oversized = "a".repeat(200 * 1024);
-    let bytes = bounded_paste_bytes(Some(oversized));
+fn paste_bytes_within_bound_accepts_content_exactly_at_the_cap() {
+    let exact = "a".repeat(256 * 1024);
     assert_eq!(
-        bytes.len(),
-        64 * 1024,
-        "a 200KiB single-byte-character clipboard must be truncated to the 64KiB cap exactly"
+        paste_bytes_within_bound(Some(exact)).map(|bytes| bytes.len()),
+        Some(256 * 1024)
     );
 }
 
 #[test]
-fn bounded_paste_bytes_truncation_never_splits_a_multibyte_character() {
-    // Every character is the 3-byte '€' (U+20AC), placed so the cap
-    // (64KiB) falls in the middle of one repeat -- the boundary case
-    // that would panic (or corrupt UTF-8) if truncation used a raw byte
-    // index instead of `str::is_char_boundary`.
-    let content = "€".repeat(64 * 1024);
-    let bytes = bounded_paste_bytes(Some(content));
-    assert!(
-        bytes.len() < 64 * 1024,
-        "truncation must back off from the cap to the nearest character boundary, not cut a \
-         multi-byte character in half: got {} bytes",
-        bytes.len()
+fn paste_bytes_within_bound_refuses_content_over_the_cap() {
+    let oversized = "a".repeat(256 * 1024 + 1);
+    assert_eq!(
+        paste_bytes_within_bound(Some(oversized)),
+        None,
+        "content one byte over the cap must be refused whole, not truncated to the cap"
     );
+}
+
+/// The end-to-end proof the unit test above cannot give alone: a real,
+/// over-cap paste resolved against a real pane never reaches
+/// `evaluate` and never writes a byte -- refused, not truncated and
+/// classified.
+#[test]
+fn an_oversized_paste_is_refused_whole_and_reaches_neither_evaluate_nor_the_pty() {
+    let mut state = state_with_a_real_terminal_focused("paste-too-large");
+    let target = state.terminal_panes[0].terminal_id().clone();
+    let oversized = "echo ".to_string() + &"a".repeat(256 * 1024 + 1);
+
+    let _ = super::update(
+        &mut state,
+        Message::TerminalPasteResolved {
+            target,
+            content: Some(oversized),
+        },
+    );
+    for _ in 0..20 {
+        for pane in &mut state.terminal_panes {
+            pane.poll();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     assert!(
-        std::str::from_utf8(&bytes).is_ok(),
-        "truncated bytes must still be valid UTF-8"
+        !rendered_demo_pane_text(&state).contains("echo"),
+        "an over-cap paste must write nothing at all, not a truncated prefix"
+    );
+    assert_eq!(
+        state.terminal_paste_notice,
+        Some(TerminalPasteRefusal::TooLarge)
     );
 }
 

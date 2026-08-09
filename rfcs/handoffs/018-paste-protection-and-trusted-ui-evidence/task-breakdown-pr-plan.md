@@ -43,10 +43,11 @@ Review gate:
 - `NFR-UX-002`: the accept/reject distinction is not colour-only.
 - **RFC-018 §Open questions 2 answered**: preview the pasted content, or only describe it. Decide with the escaping already in place, so the decision is about usefulness rather than risk, and record which and why.
 
-**Two things PR-018-B leaves for this slice, carried forward from `qa-evidence.md`:**
+**One thing PR-018-B leaves for this slice, carried forward from `qa-evidence.md`:**
 
 1. **`trusted_ui_state` (`shell.rs`) needs a real `PasteConfirmationActive` mapping.** Today it maps *any* open modal to `SecurityDialogActive`, provisionally, because only the `TEKSTIDE_LAYER_DEMO` placeholder modal exists. Once this slice's real dialog exists, opening it should map to `TerminalTrustedUiState::PasteConfirmationActive` specifically — not the generic placeholder value — so a paste attempted while *this* dialog is open is recorded and evaluated as what it actually is.
-2. **The dialog must not imply it previews the full, original clipboard.** `bounded_paste_bytes` (`shell.rs`) truncates clipboard content at 64 KiB before `evaluate` ever sees it. If this slice's answer to Open Questions 2 is "preview," the preview is of the (possibly already-truncated) bytes `TerminalPasteResolved` received, not necessarily the user's real, full clipboard — decide whether that needs disclosing to the user (e.g. "showing the first 64 KiB") or is acceptable unstated, and record which.
+
+**A second item, originally carried forward, is now resolved rather than open**: response 169 required PR-018-B to refuse over-cap pastes whole rather than truncate them before classification. A consequence worth recording here so it isn't rediscovered: `RequiresConfirmation` (the only decision this dialog renders into) is now unreachable for anything over 256 KiB — that content is refused as `TooLarge` before `evaluate` ever runs. So whatever this slice previews for a `Multiline` paste is always the user's real, complete content, never a truncated prefix; no disclosure about partial previews is needed.
 
 ## PR-018-D — The `paste_blocked` audit producer
 

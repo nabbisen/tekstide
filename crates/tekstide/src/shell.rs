@@ -387,8 +387,19 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let Some(project) = state.app_shell.state().active_project() else {
                 return Task::none();
             };
+            // Response 169 Required: refuses rather than truncates, and
+            // does so *before* `evaluate` is ever called. Truncating
+            // first let truncation change the classification itself (a
+            // paste whose only newline sits past the cap truncated to
+            // `SingleLine` and `Allow`ed) and, worse, would silently
+            // write a prefix of what the user actually copied. `evaluate`
+            // always sees the paste's real, complete bytes now, or the
+            // paste is refused before it is ever called.
+            let Some(bytes) = paste_bytes_within_bound(content) else {
+                state.terminal_paste_notice = Some(TerminalPasteRefusal::TooLarge);
+                return Task::none();
+            };
             let project_id = project.id().clone();
-            let bytes = bounded_paste_bytes(content);
             let target_handle = TerminalRuntimeHandle::new(target.clone(), project_id.clone());
             let active_handle =
                 active_terminal_focus(state).map(|id| TerminalRuntimeHandle::new(id, project_id));
@@ -813,24 +824,38 @@ fn attempt_paste_into_terminal(state: &mut State) -> Task<Message> {
 /// will bite") -- bounded here, before `TerminalInputPolicy::evaluate`
 /// ever sees it, so a multi-megabyte clipboard cannot become an
 /// unbounded PTY write. Not a classification decision (that stays
-/// `evaluate`'s alone): a raw resource bound on what gets read at all,
-/// the same shape `read_available_bounded_for`'s 64KiB cap already
-/// applies to this terminal's *output* direction -- reused rather than
-/// invented, so both directions share one reasoned number. Truncates at
-/// the last valid UTF-8 boundary at or before the cap, never splitting
-/// a multi-byte character.
-const MAX_PASTE_BYTES: usize = 64 * 1024;
+/// `evaluate`'s alone): a raw resource bound on what gets read at all.
+///
+/// **256 KiB, reasoned on paste's own terms (response 169 non-blocking:
+/// the previous version reused `read_available_bounded_for`'s 64 KiB
+/// cap, which is not itself a settled number -- `future-work.md` names
+/// it as needing a real block/grow/drop-and-report decision -- so
+/// borrowing it tied paste sizing to a number already slated to
+/// change).** A paste into an interactive shell is a command, a
+/// heredoc, a short script, or a config snippet a user is inspecting or
+/// editing -- not a document or a log file, which belong in an editor,
+/// not a PTY. 256 KiB is generous for any of those (many multiples of a
+/// realistic shell script) while still bounding what a single keypress
+/// can commit to writing.
+///
+/// **Refuses rather than truncates (response 169 Required).** A cap
+/// applied by truncating before classification lets truncation change
+/// the classification itself, and silently writes a prefix of what the
+/// user actually copied -- see `Message::TerminalPasteResolved`'s
+/// handler for the full reasoning. `evaluate` must see the paste's
+/// real, complete bytes, never a prefix, so content over the cap is
+/// refused whole rather than shortened.
+const MAX_PASTE_BYTES: usize = 256 * 1024;
 
-fn bounded_paste_bytes(content: Option<String>) -> Vec<u8> {
-    let mut content = content.unwrap_or_default();
+/// `None` if `content` exceeds [`MAX_PASTE_BYTES`] -- the caller must
+/// refuse the whole paste, not write a truncated prefix of it.
+fn paste_bytes_within_bound(content: Option<String>) -> Option<Vec<u8>> {
+    let content = content.unwrap_or_default();
     if content.len() > MAX_PASTE_BYTES {
-        let mut boundary = MAX_PASTE_BYTES;
-        while boundary > 0 && !content.is_char_boundary(boundary) {
-            boundary -= 1;
-        }
-        content.truncate(boundary);
+        None
+    } else {
+        Some(content.into_bytes())
     }
-    content.into_bytes()
 }
 
 /// RFC-018 PR-018-B: the one place `state.modal` becomes a
@@ -875,6 +900,11 @@ enum TerminalPasteRefusal {
     /// until then it blocks rather than renders anything.
     RequiresConfirmation,
     Blocked(TerminalInputDecisionReason),
+    /// Response 169 Required: content over [`MAX_PASTE_BYTES`] is
+    /// refused whole, before `evaluate` is ever called -- never
+    /// constructed by [`Self::from_decision`], since it isn't a
+    /// `TerminalInputDecision` at all.
+    TooLarge,
 }
 
 impl TerminalPasteRefusal {
@@ -893,6 +923,7 @@ impl TerminalPasteRefusal {
 /// uses.
 fn terminal_paste_refusal_symbol(refusal: &TerminalPasteRefusal) -> &'static str {
     match refusal {
+        TerminalPasteRefusal::TooLarge => "too-large",
         TerminalPasteRefusal::RequiresConfirmation => "multiline",
         TerminalPasteRefusal::Blocked(reason) => match reason {
             TerminalInputDecisionReason::ControlContainingPasteBlocked => "control",

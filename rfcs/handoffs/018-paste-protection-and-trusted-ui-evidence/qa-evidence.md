@@ -2,7 +2,7 @@
 title: "RFC-018: Rendered Paste Protection and Trusted-UI Evidence - QA Evidence"
 rfc: "RFC-018"
 rfc_file: "../../proposed/018-paste-protection-and-trusted-ui-evidence.md"
-status: "PR-018-B implemented 2026-08-10, not yet reviewed — PR-018-C next"
+status: "PR-018-B: response 169's required fix applied 2026-08-10, awaiting confirmation"
 target_milestone: "M9"
 created: "2026-08-08"
 ---
@@ -43,9 +43,11 @@ Implemented 2026-08-10, not yet reviewed. Against `pr-018-b-paste-ingress.md`'s 
 
 **`RequiresConfirmation` blocks, visibly, and the temporary state is recorded here.** PR-018-C does not exist yet. A multiline paste is refused with a real, catalog-driven notice (`terminal-paste-refused`, `$reason = multiline`) rather than silently discarded — proven by `multiline_paste_requires_confirmation_and_blocks_visibly`. This is a deliberate, temporary conservative state, not a permanent design: once PR-018-C's dialog exists, `RequiresConfirmation` should render into it instead of blocking outright.
 
-**Clipboard read is bounded.** `bounded_paste_bytes` caps clipboard content at 64 KiB — reusing `read_available_bounded_for`'s already-established terminal-output cap rather than inventing a new number, so both I/O directions share one reasoned bound — truncating at the last valid UTF-8 character boundary at or before the cap (`bounded_paste_bytes_truncates_oversized_content_to_the_cap`, `bounded_paste_bytes_truncation_never_splits_a_multibyte_character`). This is a raw resource bound applied before `evaluate` ever sees the bytes, not a classification decision; `evaluate` still makes the real `Allow`/`Block`/`RequiresConfirmation` call on whatever (possibly truncated) bytes it receives.
+**Clipboard read is bounded.** `paste_bytes_within_bound` caps clipboard content at 256 KiB, reasoned on paste's own terms (a command, heredoc, or short script/config snippet — not a document, which belongs in an editor, not a PTY), not borrowed from `read_available_bounded_for`'s output-direction cap.
 
-**Gates**: `fmt --check`, `clippy --workspace --all-targets --all-features -D warnings`, full test suite (503 `tekstide-core` — 1 net new — + 142 `tekstide` — 15 net new), `git diff --check`. All passed.
+**Response 169 Required, applied**: over-cap content is refused whole, before `evaluate` is ever called, not truncated and then classified. The initial version truncated first, which had two consequences the reviewer named: (1) truncation could change the classification itself — a paste whose only newline sat past the cap truncated to `SingleLine` and was `Allow`ed, bypassing the `RequiresConfirmation` RFC-009 exists to enforce; (2) the concrete harm, a silent partial write — a user believing they pasted a full command while only a truncated prefix reached the shell. Fixed by failing closed: `paste_bytes_within_bound` returns `None` for anything over the cap, and the caller refuses with a new `TerminalPasteRefusal::TooLarge` (`terminal-paste-refused`, `$reason = too-large`) before constructing a `TerminalRuntimeHandle` or calling `evaluate` at all — `evaluate` now always sees a paste's real, complete bytes, never a prefix. `an_oversized_paste_is_refused_whole_and_reaches_neither_evaluate_nor_the_pty` proves both halves in one test: nothing is written, and the refusal is the `TooLarge` notice, not a `Block`/`RequiresConfirmation` from a classifier that never ran.
+
+**Gates**: `fmt --check`, `clippy --workspace --all-targets --all-features -D warnings`, full test suite (503 `tekstide-core` — 1 net new — + 143 `tekstide` — 16 net new, after response 169's fix), `git diff --check`. All passed.
 
 **Not done, correctly**: no dialog (PR-018-C's job — `RequiresConfirmation` blocks conservatively as required). No `paste_blocked` audit producer (PR-018-D's job — no audit rows written for blocks in this slice). No trusted-UI evidence (PR-018-E's job). README's privacy section was checked and needs no change this slice — it already states there is no rendered paste dialog and describes only the existing `plain_terminal_observation` producer; PR-018-D is where a real check against a new producer becomes necessary.
 
