@@ -180,3 +180,15 @@ terminal-launch-refused = { $reason ->
     [limit] Terminal limit reached ({ $limit } open) — close one to open another.
    *[error] Couldn't start a terminal.
 }
+
+# RFC-018 PR-018-B: same shape as `terminal-launch-refused` above --
+# `$reason` a compile-time symbol (`TerminalPasteRefusal`'s own shape),
+# never the refusal's Rust `Debug` text or the pasted content itself.
+# `multiline` covers `RequiresConfirmation` too: PR-018-C's dialog does
+# not exist yet, so a multi-line paste is refused rather than confirmed.
+terminal-paste-refused = { $reason ->
+    [multiline] Multi-line paste needs confirmation, which isn't available yet — paste blocked.
+    [control] Paste blocked: it contains control characters.
+    [wrong-target] Paste blocked: the target terminal changed.
+   *[trusted-ui] Paste blocked while a dialog is open.
+}

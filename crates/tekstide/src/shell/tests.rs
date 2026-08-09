@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use tekstide_core::shell::ApplicationShell;
 
 use super::{
-    Message, ModalButton, ModalContent, State, focus_marker, main_area_key, main_area_label,
-    sidebar_label, status_bar_summary, zone_style,
+    Message, ModalButton, ModalContent, State, TerminalPasteRefusal, bounded_paste_bytes,
+    focus_marker, main_area_key, main_area_label, sidebar_label, status_bar_summary,
+    terminal_paste_refusal_text, trusted_ui_state, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -1840,4 +1841,383 @@ fn terminal_pane_launch_has_exactly_two_named_production_callers() {
         "launch_measurement_terminal_pane's own, separately-justified call site must still \
          exist: {enclosing_functions:?}"
     );
+}
+
+// RFC-018 PR-018-B: paste ingress. `pr-018-b-paste-ingress.md`'s own
+// review gate, worked through below in the order it lists them.
+
+/// Shared by the two enumeration tests below so their scanning logic
+/// cannot drift apart from each other -- the exact failure mode
+/// `pr-018-b-paste-ingress.md` warns against for the write-site guard
+/// itself ("two arms, two guards, and the second one drifts") applies
+/// just as well to two copies of the same test helper.
+fn enclosing_functions_for_call_site(source: &str, needle: &str) -> Vec<String> {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut enclosing_functions = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if !line.contains(needle) {
+            continue;
+        }
+        let enclosing = lines[..=index]
+            .iter()
+            .rev()
+            .find_map(|candidate| {
+                let trimmed = candidate.trim_start();
+                trimmed.strip_prefix("fn ").or_else(|| {
+                    trimmed
+                        .strip_prefix("async fn ")
+                        .or_else(|| trimmed.strip_prefix("pub fn "))
+                })
+            })
+            .and_then(|rest| rest.split(['(', '<', ' ']).next())
+            .unwrap_or("<unknown>")
+            .to_string();
+        enclosing_functions.push(enclosing);
+    }
+    enclosing_functions
+}
+
+/// **Review gate**: "the starting state confirmed: `TerminalInputPolicy`
+/// had no production caller before this slice, shown by enumeration."
+/// Before this slice, `grep -rn "TerminalInputPolicy" crates/tekstide/src`
+/// matched nothing outside this file's own new code -- not testable
+/// after the fact, so what this test pins instead is the state that
+/// claim left behind: **exactly one** production `.evaluate(` call
+/// site, inside the one function that now owns the policy decision. A
+/// second real call site -- a classifier growing anywhere else in this
+/// crate -- fails this test by name, not by inspection.
+#[test]
+fn terminal_input_policy_evaluate_has_exactly_one_production_call_site() {
+    let shell_rs_path = format!("{}/src/shell.rs", env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(&shell_rs_path).expect("shell.rs must be readable");
+    let enclosing_functions = enclosing_functions_for_call_site(&source, ".evaluate(");
+
+    assert_eq!(
+        enclosing_functions,
+        vec!["update"],
+        "TerminalInputPolicy::evaluate must have exactly one production call site, inside \
+         `update` -- any other count or location is a second classifier this crate must not \
+         grow: {enclosing_functions:?}"
+    );
+}
+
+/// **Review gate**: "one PTY ingress, enumerated mechanically and
+/// ablated -- a synthetic second call site fails the test." Typed
+/// keystrokes and a resolved, `Allow`ed paste both write through
+/// `write_terminal_input`, the one function real, modal-gated user
+/// input reaches a PTY from. Two more call sites already existed before
+/// this slice, reviewed under RFC-017 PR-017-G, and are named here so
+/// they cannot be mistaken for a second real ingress: `update`'s
+/// `MeasuredTerminalInput` arm and `launch_measurement_terminal_pane`'s
+/// `FLOOD_SCRIPT` write, both synthetic-measurement paths that
+/// deliberately bypass `TextStream`/routing entirely (their own doc
+/// comments say so) and were never in scope for this slice to fold in.
+/// A parallel `write_paste` on `TerminalPane`, or a second inline
+/// `.write_input(` call in a new message arm -- the two traps
+/// `pr-018-b-paste-ingress.md` names by name -- would each add a
+/// fourth entry here and fail this assertion.
+#[test]
+fn write_terminal_input_has_exactly_the_three_named_production_call_sites() {
+    let shell_rs_path = format!("{}/src/shell.rs", env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(&shell_rs_path).expect("shell.rs must be readable");
+    let enclosing_functions = enclosing_functions_for_call_site(&source, ".write_input(");
+
+    assert_eq!(
+        enclosing_functions.len(),
+        3,
+        "TerminalPane::write_input must have exactly the three named production call sites \
+         below -- any other count is either a regressed second real ingress or a caller this \
+         test doesn't yet know to name: {enclosing_functions:?}"
+    );
+    for expected in [
+        "write_terminal_input",
+        "update",
+        "launch_measurement_terminal_pane",
+    ] {
+        assert!(
+            enclosing_functions.iter().any(|name| name == expected),
+            "{expected}'s own call site must still exist: {enclosing_functions:?}"
+        );
+    }
+}
+
+/// **Review gate**: "modal exclusivity re-proven with a real paste
+/// against a real `TerminalPane`, not headless." Mirrors
+/// `modal_open_blocks_pty_write_and_closing_it_resumes_delivery` exactly
+/// -- same real pane, same "resumes afterward" second half ruling out
+/// "the pane was simply broken" as the reason nothing appeared -- but
+/// driving the paste path (`Message::TerminalPasteResolved`) instead of
+/// a keystroke.
+#[test]
+fn modal_open_blocks_paste_write_and_closing_it_resumes_delivery() {
+    let mut state = state_with_a_real_terminal_focused("live-paste-modal-exclusivity");
+    let real_id = state
+        .terminal_panes
+        .first()
+        .expect("test precondition")
+        .terminal_id()
+        .clone();
+    state.modal = Some(ModalContent::default());
+
+    let _ = super::update(
+        &mut state,
+        Message::TerminalPasteResolved {
+            target: real_id.clone(),
+            content: Some("paste-while-modal-open".to_string()),
+        },
+    );
+    for _ in 0..20 {
+        for pane in &mut state.terminal_panes {
+            pane.poll();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        !rendered_demo_pane_text(&state).contains("paste-while-modal-open"),
+        "a paste resolved while a modal is open must never reach the PTY"
+    );
+
+    state.modal = None;
+    let _ = super::update(
+        &mut state,
+        Message::TerminalPasteResolved {
+            target: real_id,
+            content: Some("paste-after-modal-closed".to_string()),
+        },
+    );
+    assert!(
+        poll_demo_pane_until(&mut state, "paste-after-modal-closed"),
+        "the same target, resolved after the modal closes, must reach the PTY -- proving the \
+         pane itself was never broken and the earlier silence was the modal check, not a fluke"
+    );
+}
+
+/// **Review gate**: "no paste classification anywhere in
+/// `crates/tekstide`; every decision originates from `evaluate`" and
+/// "each `TerminalPasteClass` exercised against real bytes." All four
+/// classes, driven through the real `update` handler against a real
+/// pane -- `Allow`-class content lands in the PTY, `RequiresConfirmation`
+/// and `Block` do not, and each records the visible notice the review
+/// gate requires.
+#[test]
+fn single_line_paste_is_allowed_and_reaches_the_pty() {
+    let mut state = state_with_a_real_terminal_focused("paste-class-single-line");
+    let target = state.terminal_panes[0].terminal_id().clone();
+
+    let _ = super::update(
+        &mut state,
+        Message::TerminalPasteResolved {
+            target,
+            content: Some("echo single-line-paste".to_string()),
+        },
+    );
+    assert!(
+        poll_demo_pane_until(&mut state, "single-line-paste"),
+        "a single-line paste must be Allowed and reach the real PTY"
+    );
+    assert_eq!(
+        state.terminal_paste_notice, None,
+        "an Allowed paste must never leave a refusal notice behind"
+    );
+}
+
+#[test]
+fn empty_paste_is_allowed_and_is_a_harmless_no_op() {
+    let mut state = state_with_a_real_terminal_focused("paste-class-empty");
+    let target = state.terminal_panes[0].terminal_id().clone();
+
+    let _ = super::update(
+        &mut state,
+        Message::TerminalPasteResolved {
+            target,
+            content: None,
+        },
+    );
+    assert_eq!(
+        state.terminal_paste_notice, None,
+        "an empty clipboard must classify Empty -> Allow, not a refusal"
+    );
+}
+
+#[test]
+fn multiline_paste_requires_confirmation_and_blocks_visibly() {
+    let mut state = state_with_a_real_terminal_focused("paste-class-multiline");
+    let target = state.terminal_panes[0].terminal_id().clone();
+
+    let _ = super::update(
+        &mut state,
+        Message::TerminalPasteResolved {
+            target,
+            content: Some("first-line\nsecond-line".to_string()),
+        },
+    );
+    for _ in 0..20 {
+        for pane in &mut state.terminal_panes {
+            pane.poll();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        !rendered_demo_pane_text(&state).contains("first-line"),
+        "PR-018-C's dialog does not exist yet -- RequiresConfirmation must block, not write"
+    );
+    assert_eq!(
+        state.terminal_paste_notice,
+        Some(TerminalPasteRefusal::RequiresConfirmation),
+        "the temporary RequiresConfirmation-blocks state must be recorded, not silent"
+    );
+    assert!(
+        !terminal_paste_refusal_text(&state.catalog, &TerminalPasteRefusal::RequiresConfirmation)
+            .is_empty(),
+        "the user pressed a key and is owed a visible answer, not an empty string"
+    );
+}
+
+#[test]
+fn control_containing_paste_is_blocked_outright() {
+    let mut state = state_with_a_real_terminal_focused("paste-class-control");
+    let target = state.terminal_panes[0].terminal_id().clone();
+
+    let _ = super::update(
+        &mut state,
+        Message::TerminalPasteResolved {
+            target,
+            content: Some("echo \x1b[31mred\x1b[0m".to_string()),
+        },
+    );
+    for _ in 0..20 {
+        for pane in &mut state.terminal_panes {
+            pane.poll();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        !rendered_demo_pane_text(&state).contains("red"),
+        "a control-containing paste must block outright, never confirm"
+    );
+    assert_eq!(
+        state.terminal_paste_notice,
+        Some(TerminalPasteRefusal::Blocked(
+            tekstide_core::runtime::terminal::TerminalInputDecisionReason::ControlContainingPasteBlocked
+        ))
+    );
+}
+
+/// **Review gate**: "the real `TerminalTrustedUiState` is passed,
+/// derived in one place, never hardcoded `Inactive`." A paste whose
+/// `target` names a real, live pane but does **not** match the
+/// terminal `active_terminal_focus` resolves to right now must be
+/// blocked by `evaluate`'s own cross-terminal check -- proving the
+/// value passed is a real, freshly-derived handle, not a constant that
+/// would trivially agree with itself.
+#[test]
+fn a_paste_targeting_a_different_terminal_than_the_one_focused_now_is_blocked() {
+    let mut state = state_with_a_real_terminal_focused("paste-wrong-terminal");
+    let stale_target = tekstide_core::domain::TerminalId::new_uuid();
+
+    let _ = super::update(
+        &mut state,
+        Message::TerminalPasteResolved {
+            target: stale_target,
+            content: Some("should-not-appear".to_string()),
+        },
+    );
+    for _ in 0..20 {
+        for pane in &mut state.terminal_panes {
+            pane.poll();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(!rendered_demo_pane_text(&state).contains("should-not-appear"));
+    assert_eq!(
+        state.terminal_paste_notice,
+        Some(TerminalPasteRefusal::Blocked(
+            tekstide_core::runtime::terminal::TerminalInputDecisionReason::WrongTerminal
+        ))
+    );
+}
+
+#[test]
+fn trusted_ui_state_is_inactive_without_a_modal() {
+    let state = state_with(ApplicationShell::new());
+    assert_eq!(
+        trusted_ui_state(&state),
+        tekstide_core::runtime::terminal::TerminalTrustedUiState::Inactive
+    );
+}
+
+#[test]
+fn trusted_ui_state_is_active_with_a_modal_open() {
+    let mut state = state_with(ApplicationShell::new());
+    state.modal = Some(ModalContent::default());
+    assert_ne!(
+        trusted_ui_state(&state),
+        tekstide_core::runtime::terminal::TerminalTrustedUiState::Inactive,
+        "any open modal must produce an active TerminalTrustedUiState, never Inactive"
+    );
+}
+
+/// **Review gate**: "clipboard read is bounded; a very large clipboard
+/// cannot become an unbounded write or render."
+#[test]
+fn bounded_paste_bytes_passes_short_content_through_unchanged() {
+    assert_eq!(
+        bounded_paste_bytes(Some("hello".to_string())),
+        b"hello".to_vec()
+    );
+}
+
+#[test]
+fn bounded_paste_bytes_treats_a_missing_clipboard_as_empty() {
+    assert_eq!(bounded_paste_bytes(None), Vec::<u8>::new());
+}
+
+#[test]
+fn bounded_paste_bytes_truncates_oversized_content_to_the_cap() {
+    let oversized = "a".repeat(200 * 1024);
+    let bytes = bounded_paste_bytes(Some(oversized));
+    assert_eq!(
+        bytes.len(),
+        64 * 1024,
+        "a 200KiB single-byte-character clipboard must be truncated to the 64KiB cap exactly"
+    );
+}
+
+#[test]
+fn bounded_paste_bytes_truncation_never_splits_a_multibyte_character() {
+    // Every character is the 3-byte '€' (U+20AC), placed so the cap
+    // (64KiB) falls in the middle of one repeat -- the boundary case
+    // that would panic (or corrupt UTF-8) if truncation used a raw byte
+    // index instead of `str::is_char_boundary`.
+    let content = "€".repeat(64 * 1024);
+    let bytes = bounded_paste_bytes(Some(content));
+    assert!(
+        bytes.len() < 64 * 1024,
+        "truncation must back off from the cap to the nearest character boundary, not cut a \
+         multi-byte character in half: got {} bytes",
+        bytes.len()
+    );
+    assert!(
+        std::str::from_utf8(&bytes).is_ok(),
+        "truncated bytes must still be valid UTF-8"
+    );
+}
+
+/// **Review gate**: "the paste keybinding collides with nothing" is
+/// `navigation::tests`'s job (mechanical, against the whole table); this
+/// proves the *shell* side of the same binding does nothing destructive
+/// when there is nowhere to paste -- no active project, so no terminal
+/// can possibly be focused.
+#[test]
+fn paste_keybinding_with_no_terminal_focused_is_a_silent_noop() {
+    let mut state = state_with(ApplicationShell::new());
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(
+            crate::input::shell_input_for_test(
+                tekstide_core::navigation::NavigationAction::PasteIntoTerminal,
+            ),
+        )),
+    );
+    assert_eq!(state.terminal_paste_notice, None);
 }

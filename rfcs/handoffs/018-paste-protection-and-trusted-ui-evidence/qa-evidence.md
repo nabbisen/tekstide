@@ -2,7 +2,7 @@
 title: "RFC-018: Rendered Paste Protection and Trusted-UI Evidence - QA Evidence"
 rfc: "RFC-018"
 rfc_file: "../../proposed/018-paste-protection-and-trusted-ui-evidence.md"
-status: "Accepted 2026-08-08 — not started"
+status: "PR-018-B implemented 2026-08-10, not yet reviewed — PR-018-C next"
 target_milestone: "M9"
 created: "2026-08-08"
 ---
@@ -27,7 +27,27 @@ Granted by the human owner 2026-08-08 with RFC-018. Handoff pack authored the sa
 
 ## PR-018-B — Paste ingress
 
-Pending implementation.
+Implemented 2026-08-10, not yet reviewed. Against `pr-018-b-paste-ingress.md`'s review gate:
+
+**Starting state, confirmed by enumeration.** Before this slice, `TerminalInputPolicy`/`evaluate` had no production caller anywhere in `crates/tekstide` (confirmed by `grep` before writing any code, per the handoff's own instruction). `terminal_input_policy_evaluate_has_exactly_one_production_call_site` now pins the *current* state mechanically — exactly one `.evaluate(` call site, inside `update`'s `TerminalPasteResolved` handler — so a second classifier growing anywhere else in this crate fails the test by name rather than needing to be caught by review.
+
+**One PTY ingress, enumerated and ablated.** `write_terminal_input` is the one function that calls `TerminalPane::write_input` for real, modal-gated user input; both the pre-existing keystroke arm (`RoutedInput::Terminal`) and the new paste path (`TerminalPasteResolved`, once `evaluate` returns `Allow`) call it rather than writing directly — the shared guard `pr-018-b-paste-ingress.md` asked for ("two arms, two guards, and the second one drifts"). `write_terminal_input_has_exactly_the_three_named_production_call_sites` enumerates every `.write_input(` call site in `shell.rs` and asserts the exact set by name: `write_terminal_input` (the real ingress), plus two pre-existing, already-reviewed synthetic-measurement bypasses this slice did not touch — `update`'s `MeasuredTerminalInput` arm and `launch_measurement_terminal_pane`'s `FLOOD_SCRIPT` write (both RFC-017 PR-017-G, both documented as deliberately bypassing `TextStream`/routing). A fourth call site — a parallel `write_paste`, or a second inline write in a new arm — fails this test.
+
+**Modal exclusivity re-proven with a real paste.** `modal_open_blocks_paste_write_and_closing_it_resumes_delivery` mirrors the existing keystroke test exactly: a real `TerminalPane`, a real modal, a resolved paste that produces zero bytes while the modal is open, then the same target resolved again after the modal closes reaching the PTY — the "resumes afterward" half ruling out "the pane was simply broken" as the explanation for the earlier silence.
+
+**No classification in `crates/tekstide`; every `TerminalPasteClass` exercised against real bytes.** Four tests drive real content through the real `update` handler against a real pane: `single_line_paste_is_allowed_and_reaches_the_pty` and `empty_paste_is_allowed_and_is_a_harmless_no_op` (`Allow`), `multiline_paste_requires_confirmation_and_blocks_visibly` (`RequiresConfirmation`, blocks, notice recorded and non-empty), `control_containing_paste_is_blocked_outright` (`Block`, blocks outright). `a_paste_targeting_a_different_terminal_than_the_one_focused_now_is_blocked` proves the fifth path — `WrongTerminal` — by naming a target that does not match `active_terminal_focus`'s current answer.
+
+**The real `TerminalTrustedUiState` is passed, derived in one place.** `trusted_ui_state` is the sole conversion from `state.modal` to the core type (`trusted_ui_state_is_inactive_without_a_modal`/`_is_active_with_a_modal_open`), and the wrong-terminal/modal-exclusivity tests above prove it is actually wired into `evaluate`'s call, not hardcoded `Inactive`. **Provisional and disclosed**: today there is exactly one modal kind (the `TEKSTIDE_LAYER_DEMO` placeholder), so any open modal maps to `TerminalTrustedUiState::SecurityDialogActive` — the most generic of the five variants, chosen so it does not collide with `PasteConfirmationActive`, which PR-018-C's real dialog will need for itself. The specific variant is cosmetic today (`is_active_or_modal()` treats all four active variants identically); revisit once PR-018-C and RFC-022 give this function real, distinguishable dialog kinds to map.
+
+**The keybinding collides with nothing.** `Ctrl+Shift+V`, checked mechanically against the whole `KeybindingPolicy::linux_mvp()` table (`paste_into_terminal_shortcut_is_a_candidate_that_collides_with_no_other_rule`, `tekstide-core`), the same shape `LaunchTerminal`'s own collision test uses.
+
+**`RequiresConfirmation` blocks, visibly, and the temporary state is recorded here.** PR-018-C does not exist yet. A multiline paste is refused with a real, catalog-driven notice (`terminal-paste-refused`, `$reason = multiline`) rather than silently discarded — proven by `multiline_paste_requires_confirmation_and_blocks_visibly`. This is a deliberate, temporary conservative state, not a permanent design: once PR-018-C's dialog exists, `RequiresConfirmation` should render into it instead of blocking outright.
+
+**Clipboard read is bounded.** `bounded_paste_bytes` caps clipboard content at 64 KiB — reusing `read_available_bounded_for`'s already-established terminal-output cap rather than inventing a new number, so both I/O directions share one reasoned bound — truncating at the last valid UTF-8 character boundary at or before the cap (`bounded_paste_bytes_truncates_oversized_content_to_the_cap`, `bounded_paste_bytes_truncation_never_splits_a_multibyte_character`). This is a raw resource bound applied before `evaluate` ever sees the bytes, not a classification decision; `evaluate` still makes the real `Allow`/`Block`/`RequiresConfirmation` call on whatever (possibly truncated) bytes it receives.
+
+**Gates**: `fmt --check`, `clippy --workspace --all-targets --all-features -D warnings`, full test suite (503 `tekstide-core` — 1 net new — + 142 `tekstide` — 15 net new), `git diff --check`. All passed.
+
+**Not done, correctly**: no dialog (PR-018-C's job — `RequiresConfirmation` blocks conservatively as required). No `paste_blocked` audit producer (PR-018-D's job — no audit rows written for blocks in this slice). No trusted-UI evidence (PR-018-E's job). README's privacy section was checked and needs no change this slice — it already states there is no rendered paste dialog and describes only the existing `plain_terminal_observation` producer; PR-018-D is where a real check against a new producer becomes necessary.
 
 ## PR-018-C — The confirmation dialog
 

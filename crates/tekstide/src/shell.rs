@@ -39,9 +39,14 @@ use iced::widget::{center, column, container, opaque, row, stack, text};
 use iced::{Background, Border, Element, Length, Subscription, Task, keyboard};
 
 use tekstide_core::command::AppCommand;
+use tekstide_core::domain::TerminalId;
 use tekstide_core::navigation::{KeybindingPolicy, NavigationAction};
 use tekstide_core::project::ProjectMode;
 use tekstide_core::route::AppRoute;
+use tekstide_core::runtime::terminal::{
+    TerminalInputDecision, TerminalInputDecisionReason, TerminalInputPolicy, TerminalInputSource,
+    TerminalRuntimeHandle, TerminalTrustedUiState,
+};
 use tekstide_core::shell::ApplicationShell;
 
 use crate::i18n::{Catalog, CatalogArgs};
@@ -159,6 +164,12 @@ pub struct State {
     /// every new launch attempt, so it never outlives the situation that
     /// produced it.
     terminal_launch_notice: Option<TerminalLaunchRefusal>,
+    /// RFC-018 PR-018-B: the most recent paste refusal, if any -- same
+    /// shell-local, transient shape as `terminal_launch_notice`. Never
+    /// holds a successful paste (`TerminalPasteRefusal` cannot represent
+    /// `Allow` -- see its own doc comment), and is cleared at the start
+    /// of every new paste attempt.
+    terminal_paste_notice: Option<TerminalPasteRefusal>,
 }
 
 impl State {
@@ -221,6 +232,7 @@ impl State {
             typing_doc,
             terminal_panes,
             terminal_launch_notice: None,
+            terminal_paste_notice: None,
         }
     }
 
@@ -292,12 +304,26 @@ pub enum Message {
     /// *tracked*, not merely visible, is also what makes exit detection
     /// (this handler's other job now) reach hidden sessions too.
     TerminalPollTick,
+    /// RFC-018 PR-018-B: a real clipboard read, triggered by
+    /// `Ctrl+Shift+V`, has resolved. `target` is the terminal that was
+    /// keyboard-focused when the key was pressed, captured then rather
+    /// than looked up now -- `content` is `None` if the clipboard was
+    /// empty or unreadable. Deliberately carries no policy decision:
+    /// `TerminalInputPolicy::evaluate` is called fresh in this message's
+    /// own handler, against state as it stands *now*, so a modal opening
+    /// or focus moving during the async round trip is judged against
+    /// reality rather than a stale snapshot from before the read.
+    TerminalPasteResolved {
+        target: TerminalId,
+        content: Option<String>,
+    },
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
         Message::Input(RoutedInput::Shell(shell_input)) => {
-            if let Some(command) = app_command_for(shell_input.action()) {
+            let action = shell_input.action();
+            if let Some(command) = app_command_for(action) {
                 // Terminal launch UX handoff: `LaunchTerminal` is the one
                 // command needing real I/O (spawning a process) alongside
                 // the route/mode change `dispatch` itself performs --
@@ -315,6 +341,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
                 state.app_shell.dispatch(command);
             }
+            // RFC-018 PR-018-B: `PasteIntoTerminal` maps to no
+            // `AppCommand` (there is no core route/mode change), so it
+            // is handled here, the same way `LaunchTerminal`'s real I/O
+            // half is -- but unlike that command, this one needs a real
+            // `Task` (the clipboard read), so it returns early rather
+            // than falling through to the function's own `Task::none()`.
+            if action == NavigationAction::PasteIntoTerminal {
+                return attempt_paste_into_terminal(state);
+            }
         }
         Message::Input(RoutedInput::Surface(_surface_input)) => {
             // No surface exists yet to receive this (PR-015-D). The
@@ -322,28 +357,67 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // `input::tests`; there is nothing to consume here yet.
         }
         Message::Input(RoutedInput::Terminal(text_stream)) => {
-            // Defense in depth, not the modal-exclusivity boundary
-            // itself: `non_modal_subscription` structurally cannot
-            // produce this message while a modal is open (see `input`'s
-            // module doc), so `state.modal.is_none()` here should always
-            // already be true. Checked anyway, at the one place bytes
-            // would actually reach a PTY, rather than trusting that
-            // upstream property alone -- ablated in `shell::tests`.
-            //
             // `terminal_stream_targets_a_live_terminal` gets its first
             // real caller this slice: the demo panes are now registered
             // `TerminalSession`s on the real active project (RFC-017
             // PR-017-E), so the check RFC-015 wrote against the real
             // project model finally has something real to check.
-            if state.modal.is_none()
-                && terminal_stream_targets_a_live_terminal(&state.app_shell, &text_stream)
+            //
+            // The modal-exclusivity gate itself now lives in
+            // `write_terminal_input` (RFC-018 PR-018-B), the one place
+            // both this arm and the paste path actually write -- see
+            // that function's doc comment for why it is checked there
+            // and not here.
+            if terminal_stream_targets_a_live_terminal(&state.app_shell, &text_stream)
                 && let Some(bytes) = text_stream.to_pty_bytes()
-                && let Some(pane) = state
-                    .terminal_panes
-                    .iter_mut()
-                    .find(|pane| pane.terminal_id() == text_stream.target())
             {
-                pane.write_input(&bytes);
+                write_terminal_input(state, text_stream.target(), &bytes);
+            }
+        }
+        Message::TerminalPasteResolved { target, content } => {
+            // RFC-018 PR-018-B: the policy decision cannot be made until
+            // now -- `evaluate` needs real, current state (the active
+            // project's id, whichever terminal is *now* focused, whether
+            // a modal has opened since the key was pressed), none of
+            // which existed synchronously at the moment `Ctrl+Shift+V`
+            // fired. No active project is a silent no-op, the same
+            // precedent `attempt_terminal_launch` already sets: state
+            // changed enough during the round trip that there is nothing
+            // left to address the paste to.
+            let Some(project) = state.app_shell.state().active_project() else {
+                return Task::none();
+            };
+            let project_id = project.id().clone();
+            let bytes = bounded_paste_bytes(content);
+            let target_handle = TerminalRuntimeHandle::new(target.clone(), project_id.clone());
+            let active_handle =
+                active_terminal_focus(state).map(|id| TerminalRuntimeHandle::new(id, project_id));
+
+            // No classification here -- every `Allow`/`Block`/
+            // `RequiresConfirmation` originates from `evaluate`, exactly
+            // as it does for the RFC-009 boundary this renders.
+            let decision = TerminalInputPolicy.evaluate(
+                &target_handle,
+                active_handle.as_ref(),
+                TerminalInputSource::Paste,
+                &bytes,
+                trusted_ui_state(state),
+            );
+
+            match TerminalPasteRefusal::from_decision(&decision) {
+                None => {
+                    write_terminal_input(state, &target, &bytes);
+                }
+                Some(refusal) => {
+                    // PR-018-C builds the dialog; until it exists,
+                    // `RequiresConfirmation` blocks conservatively rather
+                    // than writing anything -- "a multiline paste
+                    // silently doing nothing is worse than a multiline
+                    // paste refused with a reason," so the refusal is
+                    // recorded for `terminal_workspace_view` to render,
+                    // never left as a silent no-op.
+                    state.terminal_paste_notice = Some(refusal);
+                }
             }
         }
         Message::Input(RoutedInput::FocusNext) => state.focus = state.focus.next(),
@@ -684,6 +758,165 @@ fn attempt_terminal_launch(state: &mut State) -> Result<(), TerminalLaunchRefusa
     Ok(())
 }
 
+/// RFC-018 PR-018-B: the one production call site for
+/// `TerminalPane::write_input`. Both `RoutedInput::Terminal` (typed
+/// keystrokes) and `Message::TerminalPasteResolved` (paste, once
+/// `evaluate` has decided `Allow`) call this rather than writing
+/// directly, so `state.modal.is_none()` is checked in exactly one
+/// place -- `pr-018-b-paste-ingress.md`'s own warning against the
+/// alternative: "two arms, two guards, and the second one drifts."
+///
+/// Defense in depth, not the modal-exclusivity boundary itself:
+/// `non_modal_subscription` structurally cannot produce
+/// `RoutedInput::Terminal` while a modal is open (see `input`'s module
+/// doc), and the paste path re-derives `TerminalTrustedUiState` from
+/// `state.modal` fresh before `evaluate` is ever called. Checked here
+/// anyway, at the one place bytes would actually reach a PTY, rather
+/// than trusting either upstream property alone -- ablated in
+/// `shell::tests`.
+fn write_terminal_input(state: &mut State, target: &TerminalId, bytes: &[u8]) -> bool {
+    if state.modal.is_some() {
+        return false;
+    }
+    let Some(pane) = state
+        .terminal_panes
+        .iter_mut()
+        .find(|pane| pane.terminal_id() == target)
+    else {
+        return false;
+    };
+    pane.write_input(bytes);
+    true
+}
+
+/// RFC-018 PR-018-B: `Ctrl+Shift+V`'s handler. `iced` has no synchronous
+/// clipboard access, so the policy decision cannot be made here -- this
+/// function's only job is identifying *which* terminal the paste
+/// targets before the async round trip starts. No active project or no
+/// terminal currently focused is a silent no-op: there is nothing to
+/// address a paste to, the same "no active project" precedent
+/// `attempt_terminal_launch` already sets, and reading the clipboard at
+/// all when there is nowhere to paste would be pointless I/O.
+fn attempt_paste_into_terminal(state: &mut State) -> Task<Message> {
+    state.terminal_paste_notice = None;
+    let Some(target) = active_terminal_focus(state) else {
+        return Task::none();
+    };
+    iced::clipboard::read().map(move |content| Message::TerminalPasteResolved {
+        target: target.clone(),
+        content,
+    })
+}
+
+/// RFC-018 PR-018-B: clipboard content is untrusted, arbitrary-length,
+/// and attacker-influenced (`implementation-handoff.md` "things that
+/// will bite") -- bounded here, before `TerminalInputPolicy::evaluate`
+/// ever sees it, so a multi-megabyte clipboard cannot become an
+/// unbounded PTY write. Not a classification decision (that stays
+/// `evaluate`'s alone): a raw resource bound on what gets read at all,
+/// the same shape `read_available_bounded_for`'s 64KiB cap already
+/// applies to this terminal's *output* direction -- reused rather than
+/// invented, so both directions share one reasoned number. Truncates at
+/// the last valid UTF-8 boundary at or before the cap, never splitting
+/// a multi-byte character.
+const MAX_PASTE_BYTES: usize = 64 * 1024;
+
+fn bounded_paste_bytes(content: Option<String>) -> Vec<u8> {
+    let mut content = content.unwrap_or_default();
+    if content.len() > MAX_PASTE_BYTES {
+        let mut boundary = MAX_PASTE_BYTES;
+        while boundary > 0 && !content.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        content.truncate(boundary);
+    }
+    content.into_bytes()
+}
+
+/// RFC-018 PR-018-B: the one place `state.modal` becomes a
+/// `TerminalTrustedUiState` -- kept singular per
+/// `pr-018-b-paste-ingress.md` ("keep that derivation in one
+/// function... when RFC-022's approval dialog arrives it becomes a
+/// second contributor to the same state").
+///
+/// **Provisional mapping, disclosed rather than treated as settled.**
+/// Today there is exactly one kind of modal (`ModalContent`, the
+/// layer-composition placeholder, `TEKSTIDE_LAYER_DEMO`-gated -- no real
+/// user-triggered dialog exists yet), so any open modal maps to
+/// `SecurityDialogActive`, the most generic of the five variants.
+/// Deliberately not `PasteConfirmationActive`: that variant is reserved
+/// for PR-018-C's real paste dialog and must not also mean "some other
+/// modal happens to be open." The exact variant chosen is cosmetic
+/// today -- `is_active_or_modal()` treats all four non-`Inactive`
+/// variants identically, so this choice changes no decision `evaluate`
+/// makes, only what a future, more specific caller would see if it
+/// inspected the variant itself. Revisit when PR-018-C and RFC-022 give
+/// this real, distinguishable dialog kinds to map.
+fn trusted_ui_state(state: &State) -> TerminalTrustedUiState {
+    if state.modal.is_some() {
+        TerminalTrustedUiState::SecurityDialogActive
+    } else {
+        TerminalTrustedUiState::Inactive
+    }
+}
+
+/// RFC-018 PR-018-B: a paste that did not reach the PTY, and why -- a
+/// typed answer the shell can render, matching `TerminalLaunchRefusal`'s
+/// own "the user pressed a key and is owed a visible answer" shape.
+/// Deliberately cannot represent `Allow`: the conversion from a real
+/// `TerminalInputDecision` happens once, at the only call site that
+/// produces one (`update`'s `TerminalPasteResolved` handler), so a
+/// successful paste can never accidentally be stored as a notice --
+/// the same "make the invalid state unrepresentable" shape `ModalAbsent`
+/// and `VerifiedCwd` already use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TerminalPasteRefusal {
+    /// PR-018-C builds the dialog this decision is actually meant for;
+    /// until then it blocks rather than renders anything.
+    RequiresConfirmation,
+    Blocked(TerminalInputDecisionReason),
+}
+
+impl TerminalPasteRefusal {
+    fn from_decision(decision: &TerminalInputDecision) -> Option<Self> {
+        match decision {
+            TerminalInputDecision::Allow { .. } => None,
+            TerminalInputDecision::RequiresConfirmation { .. } => Some(Self::RequiresConfirmation),
+            TerminalInputDecision::Block { reason, .. } => Some(Self::Blocked(*reason)),
+        }
+    }
+}
+
+/// A compile-time literal symbol, not the displayed word -- the words
+/// live in `en.ftl`'s `terminal-paste-refused` select expression, the
+/// same division of labour `terminal_launch_refusal_symbol` already
+/// uses.
+fn terminal_paste_refusal_symbol(refusal: &TerminalPasteRefusal) -> &'static str {
+    match refusal {
+        TerminalPasteRefusal::RequiresConfirmation => "multiline",
+        TerminalPasteRefusal::Blocked(reason) => match reason {
+            TerminalInputDecisionReason::ControlContainingPasteBlocked => "control",
+            TerminalInputDecisionReason::WrongProject
+            | TerminalInputDecisionReason::WrongTerminal => "wrong-target",
+            TerminalInputDecisionReason::PasteBlockedByTrustedUi(_) => "trusted-ui",
+            // Structurally unreachable through `evaluate` today -- this
+            // reason is only ever attached to `RequiresConfirmation`,
+            // never `Block`. Kept as an explicit arm rather than a
+            // wildcard so a future change to `evaluate` that did pair
+            // it with `Block` would force a deliberate choice here,
+            // not inherit one silently.
+            TerminalInputDecisionReason::MultilinePasteRequiresConfirmation => "multiline",
+        },
+    }
+}
+
+fn terminal_paste_refusal_text(catalog: &Catalog, refusal: &TerminalPasteRefusal) -> String {
+    catalog.get_with_args(
+        "terminal-paste-refused",
+        &CatalogArgs::new().trusted_symbol("reason", terminal_paste_refusal_symbol(refusal)),
+    )
+}
+
 /// RFC-017 PR-017-E: launches real, filtered PTY sessions for Terminal
 /// Mode's main area to render, gated behind `TEKSTIDE_TERMINAL_DEMO` --
 /// the same env-gated-demo convention as `TEKSTIDE_LAYER_DEMO`/
@@ -917,7 +1150,12 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         NavigationAction::OpenProjectBoard => Some(AppCommand::OpenProjectBoard),
         NavigationAction::ToggleProjectMode => Some(AppCommand::ToggleActiveProjectMode),
         NavigationAction::LaunchTerminal => Some(AppCommand::LaunchTerminal),
-        NavigationAction::OpenCommandPalette
+        // RFC-018 PR-018-B: paste needs no core route/mode change --
+        // `update`'s `Shell` arm special-cases it directly, the same
+        // shape `LaunchTerminal` uses for the half of its own work that
+        // isn't a `dispatch`-able command either.
+        NavigationAction::PasteIntoTerminal
+        | NavigationAction::OpenCommandPalette
         | NavigationAction::SwitchActiveProject
         | NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenCurrentAgentRunDetail
@@ -1441,6 +1679,20 @@ fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
                 .into()
         });
 
+    // RFC-018 PR-018-B: same "owed a visible answer" shape, for a
+    // refused paste rather than a refused launch. Independent of
+    // `notice` above -- a launch notice and a paste notice can never
+    // both be relevant to the same keypress, but nothing prevents a
+    // paste notice surviving from an earlier attempt while a later,
+    // unrelated launch notice also exists, so both render rather than
+    // one silently winning.
+    let paste_notice: Option<Element<'_, Message>> =
+        state.terminal_paste_notice.as_ref().map(|refusal| {
+            text(terminal_paste_refusal_text(&state.catalog, refusal))
+                .size(state.theme.font_size_body())
+                .into()
+        });
+
     let entries: Vec<crate::surface::terminal::session_bar::SessionBarEntry> = sessions
         .iter()
         .enumerate()
@@ -1497,6 +1749,9 @@ fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
     let mut rows: Vec<Element<'_, Message>> = Vec::new();
     if let Some(notice) = notice {
         rows.push(notice);
+    }
+    if let Some(paste_notice) = paste_notice {
+        rows.push(paste_notice);
     }
     rows.push(bar);
     rows.push(panes_view);

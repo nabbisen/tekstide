@@ -9,6 +9,14 @@ pub enum NavigationAction {
     /// state; this always lands in Terminal Immersion and always
     /// attempts to create a new session, whichever mode was active.
     LaunchTerminal,
+    /// RFC-018 PR-018-B: pastes real clipboard content into the
+    /// currently keyboard-focused terminal, gated through
+    /// `TerminalInputPolicy::evaluate` before any byte reaches a PTY.
+    /// Distinct from typed keystrokes (`RoutedInput::Terminal`): this is
+    /// a global keybinding rather than terminal-focus-routed input,
+    /// since reading the clipboard is real I/O the shell crate performs
+    /// once per press, not a per-keystroke encoding.
+    PasteIntoTerminal,
     CycleVisibleTerminalSession,
     OpenCurrentAgentRunDetail,
     OpenPendingApproval,
@@ -79,6 +87,19 @@ impl KeybindingPolicy {
                 KeybindingRule::new(
                     NavigationAction::LaunchTerminal,
                     Some("Ctrl+Alt+T"),
+                    KeybindingStatus::Candidate,
+                ),
+                // RFC-018 PR-018-B: `Ctrl+Shift+V`, the terminal-emulator
+                // convention (distinct from `Ctrl+V`, which most
+                // terminals leave to the shell's own line editing). Does
+                // not collide with `Ctrl+Shift+P` (`Reserved`, command
+                // palette) or any `Ctrl+Alt+<letter>` rule -- checked
+                // mechanically by
+                // `paste_into_terminal_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone.
+                KeybindingRule::new(
+                    NavigationAction::PasteIntoTerminal,
+                    Some("Ctrl+Shift+V"),
                     KeybindingStatus::Candidate,
                 ),
                 KeybindingRule::new(
