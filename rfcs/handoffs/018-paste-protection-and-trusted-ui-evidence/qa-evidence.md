@@ -1,7 +1,7 @@
 ---
 title: "RFC-018: Rendered Paste Protection and Trusted-UI Evidence - QA Evidence"
 rfc: "RFC-018"
-rfc_file: "../../proposed/018-paste-protection-and-trusted-ui-evidence.md"
+rfc_file: "../../done/018-paste-protection-and-trusted-ui-evidence.md"
 status: "PR-018-A through PR-018-F all accepted (responses 170, 171, 172, 175, 177) — RFC-018 closed 2026-08-10, moved to rfcs/done/"
 target_milestone: "M9"
 created: "2026-08-08"

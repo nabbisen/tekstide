@@ -1,7 +1,7 @@
 ---
 title: "RFC-018 PR-018-B — Paste ingress: implementation handoff"
 rfc: "RFC-018"
-rfc_file: "../../proposed/018-paste-protection-and-trusted-ui-evidence.md"
+rfc_file: "../../done/018-paste-protection-and-trusted-ui-evidence.md"
 slice: "PR-018-B"
 status: "Ready for implementation — accepted 2026-08-08 with the RFC"
 created: "2026-08-08"

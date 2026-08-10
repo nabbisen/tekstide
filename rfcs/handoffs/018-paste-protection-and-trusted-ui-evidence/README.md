@@ -1,6 +1,6 @@
 # RFC-018: Rendered Paste Protection and Trusted-UI Evidence - Developer Handoff Pack
 
-Source RFC: [RFC-018](../../proposed/018-paste-protection-and-trusted-ui-evidence.md)
+Source RFC: [RFC-018](../../done/018-paste-protection-and-trusted-ui-evidence.md)
 Target milestone: **M9** (`0.5.x`), second half
 Source RFC status: **Accepted by the human owner 2026-08-08**
 
@@ -10,7 +10,7 @@ Source RFC status: **Accepted by the human owner 2026-08-08**
 
 | # | Document | Purpose |
 | --- | --- | --- |
-| 1 | [RFC-018](../../proposed/018-paste-protection-and-trusted-ui-evidence.md) | The policy being rendered, the dialog decision, and the evidence obligation. **Read "The security core" before anything else.** |
+| 1 | [RFC-018](../../done/018-paste-protection-and-trusted-ui-evidence.md) | The policy being rendered, the dialog decision, and the evidence obligation. **Read "The security core" before anything else.** |
 | 2 | This file | Orientation and what is binding. |
 | 3 | [`pr-018-b-paste-ingress.md`](./pr-018-b-paste-ingress.md) | **Detailed instructions for PR-018-B, the security-critical slice.** Read before writing any code. |
 | 4 | [`implementation-handoff.md`](./implementation-handoff.md) | What already exists, the seams, and what is genuinely missing. |

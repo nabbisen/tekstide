@@ -18,7 +18,6 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 018 | [Rendered Paste Protection and Trusted-UI Evidence](./proposed/018-paste-protection-and-trusted-ui-evidence.md) | **Accepted 2026-08-08** — M9 second half; ready for implementation |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ## Handoffs
@@ -69,6 +68,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 015 | [Application Shell and Rendered Surface Model](./done/015-application-shell-and-rendered-surface-model.md) | Implemented with documented limitations — `0.4.0` + `0.4.1`; RFC-014 R1 and R6 discharged |
 | 016 | [Internationalization and Localization](./done/016-internationalization-and-localization.md) | Implemented with documented limitations — catalog, fallback, text safety, pluralization, enforcement; translation content and runtime locale switching out of scope |
 | 017 | [Terminal Renderer and Immersion Mode](./done/017-terminal-renderer-and-immersion-mode.md) | Implemented with documented limitations — filtered terminal surface, input with modal exclusivity, first audit producer; **`NFR-PERF-004` not met** (readiness-driven I/O scheduled as follow-up), trusted-UI separation deferred to RFC-018 |
+| 018 | [Rendered Paste Protection and Trusted-UI Evidence](./done/018-paste-protection-and-trusted-ui-evidence.md) | Implemented with documented limitations — paste ingress, real confirmation dialog, `paste_blocked` producer; dialog **distinguishable by a test the user can perform** (keystroke suppression, positive-control proven); occupying chrome is content-dependent and not relied on as a tell; pastes over 256 KiB refused whole; frozen-schema audit gaps recorded, not amended |
 | 021 | [Command Approval Model and Adapter Capability](./done/021-command-approval-model-and-adapter-capability.md) | Implemented **headless** with documented limitations — not reachable by any user; cooperative, not enforced. Fully closed 2026-07-30 |
 
 ## Archive

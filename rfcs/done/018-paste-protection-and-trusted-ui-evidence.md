@@ -1,6 +1,6 @@
 # RFC-018: Rendered Paste Protection and Trusted-UI Evidence
 
-Status: Accepted by the human owner 2026-08-08 — ready for implementation
+Status: Implemented — closed 2026-08-10 by PR-018-F, all six slices accepted with no unmet requirement. RFC-009's paste policy is wired to real clipboard input through the single ingress PR-017-B/C proved for output; `RequiresConfirmation` renders as a real dialog on RFC-015's modal layer; the `paste_blocked` audit producer conforms to RFC-013's frozen schema, sentinel-proven not to leak pasted content. **The dialog is distinguishable by a test the user can perform**: keystrokes typed while it is open never reach the terminal, demonstrated live with a positive control. **Not claimed:** that the genuine dialog visibly occupies chrome an imitation cannot — that property is content-dependent (an attacker who keeps a paste short suppresses it) and is disclosed as such rather than relied on; that an untrained user would notice either distinguishing property unprompted. **Known limitations, not defects:** pastes over 256 KiB are refused whole, not truncated; the frozen v1 schema records paste refusals only, and a second, related gap (an over-cap refusal leaves no durable record at all) shares that root cause — both left unamended per the owner's standing instruction. See `../handoffs/018-paste-protection-and-trusted-ui-evidence/qa-evidence.md` §PR-018-F.
 Target milestone: M9 (`0.5.x`), second half
 Date: 2026-08-08
 
