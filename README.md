@@ -61,11 +61,15 @@ detection, file watcher, or overwrite-confirmation UI, and no cross-platform
 evidence beyond Linux. There is **no screen-reader support** — not limited,
 not planned, absent for the life of the `iced` substrate decision (RFC-014).
 Command approval (below) remains implemented but unreachable. RFC-018's
-trusted-UI evidence shows two checkable properties distinguishing the real
-paste dialog from terminal output imitating it — keystrokes typed while it
-is open never reach the terminal, and its rendered region can cross into
-chrome the terminal grid can never draw into — without claiming an
-untrained user would notice either unprompted.
+trusted-UI evidence shows one checkable property distinguishing the real
+paste dialog from terminal output imitating it: keystrokes typed while it
+is open never reach the terminal, verified with a positive control proving
+they were reaching the app. The terminal grid can never draw outside its
+own pane, which is architecturally sound but does not mean the dialog
+visibly uses that headroom — whether it does depends on pasted-content
+width, which is attacker-influenced, so it is not claimed as something a
+user can rely on. Nothing here claims an untrained user would notice
+either property unprompted.
 
 Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked
 root/symlink access, audit-store recovery outcomes, plain-terminal session starts and
