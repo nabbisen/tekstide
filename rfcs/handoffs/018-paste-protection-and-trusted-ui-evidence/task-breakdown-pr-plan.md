@@ -43,11 +43,10 @@ Review gate:
 - `NFR-UX-002`: the accept/reject distinction is not colour-only.
 - **RFC-018 §Open questions 2 answered**: preview the pasted content, or only describe it. Decide with the escaping already in place, so the decision is about usefulness rather than risk, and record which and why.
 
-**One thing PR-018-B leaves for this slice, carried forward from `qa-evidence.md`:**
+**Both items carried forward into this slice are discharged, implemented 2026-08-10 -- neither is open work for PR-018-C's reviewer to re-raise:**
 
-1. **`trusted_ui_state` (`shell.rs`) needs a real `PasteConfirmationActive` mapping.** Today it maps *any* open modal to `SecurityDialogActive`, provisionally, because only the `TEKSTIDE_LAYER_DEMO` placeholder modal exists. Once this slice's real dialog exists, opening it should map to `TerminalTrustedUiState::PasteConfirmationActive` specifically — not the generic placeholder value — so a paste attempted while *this* dialog is open is recorded and evaluated as what it actually is.
-
-**A second item, originally carried forward, is now resolved rather than open**: response 169 required PR-018-B to refuse over-cap pastes whole rather than truncate them before classification. A consequence worth recording here so it isn't rediscovered: `RequiresConfirmation` (the only decision this dialog renders into) is now unreachable for anything over 256 KiB — that content is refused as `TooLarge` before `evaluate` ever runs. So whatever this slice previews for a `Multiline` paste is always the user's real, complete content, never a truncated prefix; no disclosure about partial previews is needed.
+1. **`trusted_ui_state` (`shell.rs`) now maps the real dialog to `PasteConfirmationActive` specifically.** `trusted_ui_state`'s match is on the `ModalContent` variant directly: `PasteConfirmation(_) => PasteConfirmationActive`, `LayerDemo { .. } => SecurityDialogActive` (the placeholder keeps the generic mapping, since it represents no real dialog kind of its own).
+2. **The "possibly-truncated preview" concern turned out to be moot**, as the note itself predicted: `RequiresConfirmation` is unreachable for anything over 256 KiB (refused as `TooLarge` before `evaluate` ever runs), so the dialog's content is always the user's real, complete paste. No disclosure about partial previews was needed.
 
 ## PR-018-D — The `paste_blocked` audit producer
 

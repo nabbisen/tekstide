@@ -99,8 +99,62 @@ impl ModalButton {
     }
 }
 
-pub(crate) struct ModalContent {
-    focus: ModalButton,
+/// RFC-018 PR-018-C: the accept/reject targets of the real paste
+/// confirmation dialog -- a distinct type from `ModalButton` even
+/// though the two-item cycle shape is identical, since "Acknowledge"/
+/// "Dismiss" do not describe what this dialog's buttons decide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PasteConfirmButton {
+    Accept,
+    Reject,
+}
+
+impl PasteConfirmButton {
+    const ORDER: [PasteConfirmButton; 2] = [PasteConfirmButton::Accept, PasteConfirmButton::Reject];
+
+    fn next(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + 1) % Self::ORDER.len()]
+    }
+
+    fn previous(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + Self::ORDER.len() - 1) % Self::ORDER.len()]
+    }
+}
+
+/// RFC-018 PR-018-C: the pasted content a confirmation dialog is
+/// deciding about. `content` is the exact `String` `TerminalPasteResolved`
+/// received -- already within `paste_bytes_within_bound`'s cap, since a
+/// paste this large was already evaluated against that bound before
+/// `RequiresConfirmation` could be reached -- so `content.as_bytes()`
+/// is exactly what Accept writes. No second, possibly-diverged copy of
+/// "what will be pasted" exists.
+#[derive(Debug)]
+pub(crate) struct PasteConfirmationModal {
+    target: TerminalId,
+    content: String,
+    line_count: usize,
+    focus: PasteConfirmButton,
+}
+
+/// RFC-018 PR-018-C: `state.modal` must remain the *one* value
+/// `input::ModalAbsent`/`SubscriptionMode::for_modal` gate on, so a
+/// second real modal kind has to live inside this same type rather than
+/// a second `Option` field on `State` -- a parallel field would not be
+/// covered by that structural exclusivity at all, the same reasoning
+/// that keeps `terminal_launch_notice`/`terminal_paste_notice` as
+/// presentational state distinct from anything `ModalAbsent` gates.
+#[derive(Debug)]
+pub(crate) enum ModalContent {
+    LayerDemo { focus: ModalButton },
+    PasteConfirmation(PasteConfirmationModal),
 }
 
 impl Default for ModalContent {
@@ -109,7 +163,7 @@ impl Default for ModalContent {
         // reasoning the RFC-014 spike's `DialogButton::Deny` default
         // used -- this modal has no real consequence either way, but the
         // convention is cheap to keep consistent.
-        Self {
+        Self::LayerDemo {
             focus: ModalButton::Dismiss,
         }
     }
@@ -393,9 +447,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // paste whose only newline sits past the cap truncated to
             // `SingleLine` and `Allow`ed) and, worse, would silently
             // write a prefix of what the user actually copied. `evaluate`
-            // always sees the paste's real, complete bytes now, or the
+            // always sees the paste's real, complete content now, or the
             // paste is refused before it is ever called.
-            let Some(bytes) = paste_bytes_within_bound(content) else {
+            let Some(content) = content_within_bound(content) else {
                 state.terminal_paste_notice = Some(TerminalPasteRefusal::TooLarge);
                 return Task::none();
             };
@@ -411,64 +465,85 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 &target_handle,
                 active_handle.as_ref(),
                 TerminalInputSource::Paste,
-                &bytes,
+                content.as_bytes(),
                 trusted_ui_state(state),
             );
 
-            match TerminalPasteRefusal::from_decision(&decision) {
-                None => {
-                    write_terminal_input(state, &target, &bytes);
+            match decision {
+                TerminalInputDecision::Allow { .. } => {
+                    write_terminal_input(state, &target, content.as_bytes());
                 }
-                Some(refusal) => {
-                    // RFC-018 PR-018-D: only a real `evaluate`-produced
+                // RFC-018 PR-018-C: renders the real confirmation dialog
+                // rather than blocking -- `evaluate`'s own classification
+                // (`classify_paste`) only ever reaches `RequiresConfirmation`
+                // via `TerminalPasteClass::Multiline`, so `line_count` is
+                // always a real, positive count here. `content` moves into
+                // the modal unchanged: it is exactly what `ModalActivate`'s
+                // `Accept` path writes, not a second copy that could
+                // diverge from what the dialog actually showed.
+                TerminalInputDecision::RequiresConfirmation { .. } => {
+                    let line_count = content.lines().count().max(1);
+                    state.modal = Some(ModalContent::PasteConfirmation(PasteConfirmationModal {
+                        target,
+                        content,
+                        line_count,
+                        focus: PasteConfirmButton::Reject,
+                    }));
+                }
+                TerminalInputDecision::Block { reason, .. } => {
+                    // RFC-018 PR-018-D: only a real, `evaluate`-produced
                     // `Block` is `paste_blocked` -- `valid_paste_blocked`
                     // requires `outcome == Blocked`, and neither
-                    // `RequiresConfirmation` (a deferred decision this
-                    // slice forces into blocking only because PR-018-C's
-                    // dialog does not exist yet, not a real policy
-                    // refusal) nor `TooLarge` (a shell-level resource
-                    // bound that never reached `evaluate` at all, so it
-                    // has no `TerminalInputDecisionReason` to report) is
-                    // one. Auditing either would misrepresent *why*
-                    // nothing was written.
-                    if let TerminalPasteRefusal::Blocked(_) = &refusal {
-                        let mut audit_store = open_real_audit_store(&state.app_shell);
-                        let mut audit_health = tekstide_core::audit::AuditHealth::default();
-                        if let Some(store) = audit_store.as_mut() {
-                            let _ = tekstide_core::audit::AuditCoordinator::new(
-                                store,
-                                &mut audit_health,
-                            )
-                            .record_paste_blocked(project_id, target.clone());
-                        }
+                    // `RequiresConfirmation` (a real, deferred decision,
+                    // now rendered into the dialog above rather than
+                    // forced into blocking) nor `TooLarge` (a shell-level
+                    // resource bound that never reached `evaluate` at
+                    // all, so it has no `TerminalInputDecisionReason` to
+                    // report) is one. Auditing either would misrepresent
+                    // *why* nothing was written.
+                    let mut audit_store = open_real_audit_store(&state.app_shell);
+                    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+                    if let Some(store) = audit_store.as_mut() {
+                        let _ =
+                            tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
+                                .record_paste_blocked(project_id, target.clone());
                     }
-                    // PR-018-C builds the dialog; until it exists,
-                    // `RequiresConfirmation` blocks conservatively rather
-                    // than writing anything -- "a multiline paste
-                    // silently doing nothing is worse than a multiline
-                    // paste refused with a reason," so the refusal is
-                    // recorded for `terminal_workspace_view` to render,
-                    // never left as a silent no-op.
-                    state.terminal_paste_notice = Some(refusal);
+                    state.terminal_paste_notice = Some(TerminalPasteRefusal::Blocked(reason));
                 }
             }
         }
         Message::Input(RoutedInput::FocusNext) => state.focus = state.focus.next(),
         Message::Input(RoutedInput::FocusPrevious) => state.focus = state.focus.previous(),
-        Message::ModalFocusNext => {
-            if let Some(modal) = state.modal.as_mut() {
-                modal.focus = modal.focus.next();
+        Message::ModalFocusNext => match state.modal.as_mut() {
+            Some(ModalContent::LayerDemo { focus }) => *focus = focus.next(),
+            Some(ModalContent::PasteConfirmation(modal)) => modal.focus = modal.focus.next(),
+            None => {}
+        },
+        Message::ModalFocusPrevious => match state.modal.as_mut() {
+            Some(ModalContent::LayerDemo { focus }) => *focus = focus.previous(),
+            Some(ModalContent::PasteConfirmation(modal)) => modal.focus = modal.focus.previous(),
+            None => {}
+        },
+        // RFC-018 PR-018-C: the layer-demo placeholder still has no
+        // decision to record (RFC-022's real dialogs own that). The
+        // paste dialog does: `ModalActivate` writes real bytes through
+        // `write_terminal_input` -- PR-018-B's one ingress, not a new
+        // one -- only when focus is on `Accept`; any other focus, or
+        // `ModalDismiss` (Escape) regardless of focus, closes the modal
+        // without writing anything. Escape defaulting to "not pasting"
+        // holds structurally: `ModalDismiss`'s arm never touches the
+        // write path at all, for either modal kind.
+        Message::ModalActivate => match state.modal.take() {
+            Some(ModalContent::PasteConfirmation(modal))
+                if modal.focus == PasteConfirmButton::Accept =>
+            {
+                write_terminal_input(state, &modal.target, modal.content.as_bytes());
             }
-        }
-        Message::ModalFocusPrevious => {
-            if let Some(modal) = state.modal.as_mut() {
-                modal.focus = modal.focus.previous();
-            }
-        }
-        // Both dismiss. Real distinct outcomes (e.g. an actual
-        // accept/reject decision) belong to RFC-022's real dialogs; this
-        // placeholder has no decision to record.
-        Message::ModalActivate | Message::ModalDismiss => {
+            Some(ModalContent::LayerDemo { .. })
+            | Some(ModalContent::PasteConfirmation(_))
+            | None => {}
+        },
+        Message::ModalDismiss => {
             state.modal = None;
         }
         Message::MeasuredKey(sent_at) => {
@@ -870,73 +945,71 @@ fn attempt_paste_into_terminal(state: &mut State) -> Task<Message> {
 const MAX_PASTE_BYTES: usize = 256 * 1024;
 
 /// `None` if `content` exceeds [`MAX_PASTE_BYTES`] -- the caller must
-/// refuse the whole paste, not write a truncated prefix of it.
-fn paste_bytes_within_bound(content: Option<String>) -> Option<Vec<u8>> {
+/// refuse the whole paste, not write (or preview) a truncated prefix of
+/// it. Returns the real `String`, not bytes: `evaluate` takes `&[u8]`
+/// via `.as_bytes()`, but PR-018-C's confirmation dialog needs the
+/// `String` itself (for its preview and, on Accept, for the exact bytes
+/// it writes), and keeping one owned value rather than converting back
+/// and forth avoids a second, possibly-diverging copy of "what the user
+/// pasted."
+fn content_within_bound(content: Option<String>) -> Option<String> {
     let content = content.unwrap_or_default();
     if content.len() > MAX_PASTE_BYTES {
         None
     } else {
-        Some(content.into_bytes())
+        Some(content)
     }
 }
 
-/// RFC-018 PR-018-B: the one place `state.modal` becomes a
+/// RFC-018 PR-018-C, Open Question 2 answered: **preview**, not only
+/// describe. RFC-018 itself frames preview as "more useful," to be
+/// decided once escaping is in place -- it now is
+/// (`text_safety::quote_untrusted`), so the choice is about usefulness
+/// rather than risk, as the RFC asked. Bounded to 500 characters
+/// (`str::chars`, never a raw byte index -- see
+/// `paste_confirmation_modal_view`'s doc comment for why truncation
+/// happens on the raw content, before escaping) -- enough to recognise
+/// a real command, heredoc, or config snippet at a glance without
+/// rendering a fixed-size dialog around up to 256 KiB of content.
+const PASTE_PREVIEW_CHAR_LIMIT: usize = 500;
+
+/// RFC-018 PR-018-B/PR-018-C: the one place `state.modal` becomes a
 /// `TerminalTrustedUiState` -- kept singular per
 /// `pr-018-b-paste-ingress.md` ("keep that derivation in one
 /// function... when RFC-022's approval dialog arrives it becomes a
-/// second contributor to the same state").
-///
-/// **Provisional mapping, disclosed rather than treated as settled.**
-/// Today there is exactly one kind of modal (`ModalContent`, the
-/// layer-composition placeholder, `TEKSTIDE_LAYER_DEMO`-gated -- no real
-/// user-triggered dialog exists yet), so any open modal maps to
-/// `SecurityDialogActive`, the most generic of the five variants.
-/// Deliberately not `PasteConfirmationActive`: that variant is reserved
-/// for PR-018-C's real paste dialog and must not also mean "some other
-/// modal happens to be open." The exact variant chosen is cosmetic
-/// today -- `is_active_or_modal()` treats all four non-`Inactive`
-/// variants identically, so this choice changes no decision `evaluate`
-/// makes, only what a future, more specific caller would see if it
-/// inspected the variant itself. Revisit when PR-018-C and RFC-022 give
-/// this real, distinguishable dialog kinds to map.
+/// second contributor to the same state"). Now that PR-018-C's real
+/// paste dialog exists, it maps to `PasteConfirmationActive` --
+/// distinguished from the `TEKSTIDE_LAYER_DEMO` placeholder, which still
+/// maps to `SecurityDialogActive`, the most generic of the five
+/// variants, since it represents no real dialog kind of its own.
+/// Revisit again when RFC-022's approval dialog becomes a third
+/// contributor.
 fn trusted_ui_state(state: &State) -> TerminalTrustedUiState {
-    if state.modal.is_some() {
-        TerminalTrustedUiState::SecurityDialogActive
-    } else {
-        TerminalTrustedUiState::Inactive
+    match &state.modal {
+        None => TerminalTrustedUiState::Inactive,
+        Some(ModalContent::PasteConfirmation(_)) => TerminalTrustedUiState::PasteConfirmationActive,
+        Some(ModalContent::LayerDemo { .. }) => TerminalTrustedUiState::SecurityDialogActive,
     }
 }
 
 /// RFC-018 PR-018-B: a paste that did not reach the PTY, and why -- a
 /// typed answer the shell can render, matching `TerminalLaunchRefusal`'s
 /// own "the user pressed a key and is owed a visible answer" shape.
-/// Deliberately cannot represent `Allow`: the conversion from a real
-/// `TerminalInputDecision` happens once, at the only call site that
-/// produces one (`update`'s `TerminalPasteResolved` handler), so a
-/// successful paste can never accidentally be stored as a notice --
-/// the same "make the invalid state unrepresentable" shape `ModalAbsent`
-/// and `VerifiedCwd` already use.
+/// Deliberately cannot represent `Allow`: constructed only at the two
+/// call sites that produce one (`update`'s `TerminalPasteResolved`
+/// handler), so a successful paste can never accidentally be stored as
+/// a notice -- the same "make the invalid state unrepresentable" shape
+/// `ModalAbsent` and `VerifiedCwd` already use. **No longer represents
+/// `RequiresConfirmation`** (PR-018-C): that decision now opens the real
+/// dialog instead of being forced into a block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TerminalPasteRefusal {
-    /// PR-018-C builds the dialog this decision is actually meant for;
-    /// until then it blocks rather than renders anything.
-    RequiresConfirmation,
     Blocked(TerminalInputDecisionReason),
     /// Response 169 Required: content over [`MAX_PASTE_BYTES`] is
-    /// refused whole, before `evaluate` is ever called -- never
-    /// constructed by [`Self::from_decision`], since it isn't a
-    /// `TerminalInputDecision` at all.
+    /// refused whole, before `evaluate` is ever called -- not a
+    /// `TerminalInputDecision` at all, so it has no reason code this
+    /// variant could carry.
     TooLarge,
-}
-
-impl TerminalPasteRefusal {
-    fn from_decision(decision: &TerminalInputDecision) -> Option<Self> {
-        match decision {
-            TerminalInputDecision::Allow { .. } => None,
-            TerminalInputDecision::RequiresConfirmation { .. } => Some(Self::RequiresConfirmation),
-            TerminalInputDecision::Block { reason, .. } => Some(Self::Blocked(*reason)),
-        }
-    }
 }
 
 /// A compile-time literal symbol, not the displayed word -- the words
@@ -946,7 +1019,6 @@ impl TerminalPasteRefusal {
 fn terminal_paste_refusal_symbol(refusal: &TerminalPasteRefusal) -> &'static str {
     match refusal {
         TerminalPasteRefusal::TooLarge => "too-large",
-        TerminalPasteRefusal::RequiresConfirmation => "multiline",
         TerminalPasteRefusal::Blocked(reason) => match reason {
             TerminalInputDecisionReason::ControlContainingPasteBlocked => "control",
             TerminalInputDecisionReason::WrongProject
@@ -1246,11 +1318,13 @@ pub fn view(state: &State) -> Element<'_, Message> {
             .into();
 
     if let Some(modal) = &state.modal {
-        stack![
-            base,
-            opaque(center(layer_composition_demo_modal(state, modal)))
-        ]
-        .into()
+        let modal_view = match modal {
+            ModalContent::LayerDemo { focus } => layer_composition_demo_modal(state, *focus),
+            ModalContent::PasteConfirmation(paste_modal) => {
+                paste_confirmation_modal_view(state, paste_modal)
+            }
+        };
+        stack![base, opaque(center(modal_view))].into()
     } else {
         base
     }
@@ -1845,16 +1919,36 @@ pub(crate) fn tail_lines(doc: &str, count: usize) -> String {
     lines[start..].join("\n")
 }
 
-fn layer_composition_demo_modal<'a>(
-    state: &'a State,
-    modal: &ModalContent,
-) -> Element<'a, Message> {
+/// The trusted-chrome dialog box both modal kinds render inside --
+/// factored out (RFC-018 PR-018-C) so the paste confirmation dialog and
+/// the layer-composition placeholder share one styling definition
+/// rather than two copies that could drift apart. `NFR-UX-002`-relevant
+/// distinctions (focus, accept/reject) are the caller's job via the
+/// content passed in, never colour alone here.
+fn modal_dialog_box<'a>(state: &'a State, content: Element<'a, Message>) -> Element<'a, Message> {
+    container(content)
+        .padding(20)
+        .style(move |_base_theme: &iced::Theme| container::Style {
+            background: Some(Background::Color(state.theme.surface_elevated())),
+            text_color: Some(state.theme.foreground()),
+            border: Border {
+                color: state.theme.accent(),
+                width: 2.0,
+                radius: 4.0.into(),
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
+fn layer_composition_demo_modal(state: &State, focus: ModalButton) -> Element<'_, Message> {
     let button_line = |target: ModalButton, label_key: &str| {
-        let marker = if modal.focus == target { "> " } else { "  " };
+        let marker = if focus == target { "> " } else { "  " };
         text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
     };
 
-    container(
+    modal_dialog_box(
+        state,
         column![
             text(state.catalog.get("layer-demo-modal-title")).size(state.theme.font_size_heading()),
             text(state.catalog.get("layer-demo-modal-body")).size(state.theme.font_size_body()),
@@ -1863,20 +1957,74 @@ fn layer_composition_demo_modal<'a>(
             text(state.catalog.get("layer-demo-modal-dismiss-hint"))
                 .size(state.theme.font_size_status()),
         ]
-        .spacing(10),
+        .spacing(10)
+        .into(),
     )
-    .padding(20)
-    .style(move |_base_theme: &iced::Theme| container::Style {
-        background: Some(Background::Color(state.theme.surface_elevated())),
-        text_color: Some(state.theme.foreground()),
-        border: Border {
-            color: state.theme.accent(),
-            width: 2.0,
-            radius: 4.0.into(),
-        },
-        ..container::Style::default()
-    })
-    .into()
+}
+
+/// RFC-018 PR-018-C: the real paste confirmation dialog. The preview is
+/// untrusted text in trusted chrome -- RFC-016's grid exception does
+/// not reach it -- so it goes through `text_safety::quote_untrusted`
+/// exactly like `surface::board::row_lines`'s project-name rendering,
+/// truncated to [`PASTE_PREVIEW_CHAR_LIMIT`] *characters before*
+/// escaping (never after: slicing an already-escaped, isolate-wrapped
+/// string could separate the isolate marks from the content they wrap,
+/// which `text_safety`'s own `DisplayText` doc comment warns against).
+/// The escaped preview text and whether it was truncated -- factored
+/// out from [`paste_confirmation_modal_view`] so both are directly
+/// testable without going through `iced`'s `Element` tree, the same
+/// shape `surface::board::row_lines` and `shell::status_bar_summary`
+/// already use. Truncates the **raw** content to
+/// [`PASTE_PREVIEW_CHAR_LIMIT`] characters before escaping, never
+/// after: slicing an already-escaped, isolate-wrapped `DisplayText`
+/// could separate the isolate marks from the content they wrap, which
+/// that type's own doc comment warns against.
+pub(crate) fn paste_preview(content: &str) -> (String, bool) {
+    let preview_source: String = content.chars().take(PASTE_PREVIEW_CHAR_LIMIT).collect();
+    let truncated = preview_source.chars().count() < content.chars().count();
+    let preview = tekstide_core::text_safety::quote_untrusted(&preview_source);
+    (preview.as_str().to_string(), truncated)
+}
+
+fn paste_confirmation_modal_view<'a>(
+    state: &'a State,
+    modal: &'a PasteConfirmationModal,
+) -> Element<'a, Message> {
+    let button_line = |target: PasteConfirmButton, label_key: &str| {
+        let marker = if modal.focus == target { "> " } else { "  " };
+        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+    };
+
+    let (preview, truncated) = paste_preview(&modal.content);
+
+    let mut lines: Vec<Element<'_, Message>> = vec![
+        text(state.catalog.get("paste-confirm-dialog-title"))
+            .size(state.theme.font_size_heading())
+            .into(),
+        text(state.catalog.get_with_args(
+            "paste-confirm-dialog-body",
+            &CatalogArgs::new().number("line_count", modal.line_count as u32),
+        ))
+        .size(state.theme.font_size_body())
+        .into(),
+        text(preview).size(state.theme.font_size_body()).into(),
+    ];
+    if truncated {
+        lines.push(
+            text(state.catalog.get("paste-confirm-dialog-preview-truncated"))
+                .size(state.theme.font_size_status())
+                .into(),
+        );
+    }
+    lines.push(button_line(PasteConfirmButton::Accept, "paste-confirm-dialog-accept").into());
+    lines.push(button_line(PasteConfirmButton::Reject, "paste-confirm-dialog-reject").into());
+    lines.push(
+        text(state.catalog.get("paste-confirm-dialog-hint"))
+            .size(state.theme.font_size_status())
+            .into(),
+    );
+
+    modal_dialog_box(state, column(lines).spacing(10).into())
 }
 
 #[cfg(test)]

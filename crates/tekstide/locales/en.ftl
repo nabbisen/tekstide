@@ -74,6 +74,25 @@ layer-demo-modal-acknowledge = Acknowledge
 layer-demo-modal-dismiss = Dismiss
 layer-demo-modal-dismiss-hint = Tab/Shift+Tab moves focus; Enter or Escape dismisses.
 
+# RFC-018 PR-018-C: the real paste confirmation dialog. Rendered for
+# every `RequiresConfirmation` decision -- today that is always a
+# multi-line paste (`classify_paste`'s only path to this decision), so
+# the body names line count, not paste class. `$line_count` pluralizes
+# the same way `project-board-terminal-count` does. The dialog's own
+# preview of the pasted content is untrusted text in trusted chrome
+# (`text_safety::quote_untrusted`), rendered directly rather than
+# through a catalog message -- the same division `surface::board::row_lines`
+# already uses for untrusted project names.
+paste-confirm-dialog-title = Confirm Paste
+paste-confirm-dialog-body = { $line_count ->
+    [one] This paste contains {$line_count} line. Allow it to reach the terminal?
+   *[other] This paste contains {$line_count} lines. Allow it to reach the terminal?
+}
+paste-confirm-dialog-preview-truncated = (preview truncated)
+paste-confirm-dialog-accept = Paste
+paste-confirm-dialog-reject = Cancel
+paste-confirm-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.
+
 # RFC-015 PR-015-D: the Project Board surface. Empty-state keys are
 # catalog-driven purely from `Option::is_some()` -- no core change
 # needed, unlike the CountDisplay/attention keys below, which select on
@@ -184,10 +203,13 @@ terminal-launch-refused = { $reason ->
 # RFC-018 PR-018-B: same shape as `terminal-launch-refused` above --
 # `$reason` a compile-time symbol (`TerminalPasteRefusal`'s own shape),
 # never the refusal's Rust `Debug` text or the pasted content itself.
-# `multiline` covers `RequiresConfirmation` too: PR-018-C's dialog does
-# not exist yet, so a multi-line paste is refused rather than confirmed.
+# `multiline` is structurally unreachable as of PR-018-C (a multi-line
+# paste now opens the confirmation dialog instead of being refused) --
+# kept only because `TerminalInputDecisionReason` is matched
+# exhaustively; the text stays generic rather than naming a state that
+# can no longer occur.
 terminal-paste-refused = { $reason ->
-    [multiline] Multi-line paste needs confirmation, which isn't available yet — paste blocked.
+    [multiline] Multi-line paste blocked.
     [control] Paste blocked: it contains control characters.
     [wrong-target] Paste blocked: the target terminal changed.
     [too-large] Paste blocked: larger than 256 KiB.

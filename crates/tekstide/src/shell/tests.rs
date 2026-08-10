@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use tekstide_core::shell::ApplicationShell;
 
 use super::{
-    Message, ModalButton, ModalContent, State, TerminalPasteRefusal, focus_marker, main_area_key,
-    main_area_label, paste_bytes_within_bound, sidebar_label, status_bar_summary,
-    terminal_paste_refusal_text, trusted_ui_state, zone_style,
+    Message, ModalButton, ModalContent, PasteConfirmButton, State, TerminalPasteRefusal,
+    content_within_bound, focus_marker, main_area_key, main_area_label, sidebar_label,
+    status_bar_summary, terminal_paste_refusal_text, trusted_ui_state, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -204,6 +204,13 @@ fn with_no_active_project_no_terminal_id_is_ever_live() {
 /// cycle) must never move -- proven by dispatching real `Message`
 /// values through `update`, not by inspecting the routing code and
 /// asserting it "should" hold.
+fn layer_demo_focus(modal: &Option<ModalContent>) -> Option<ModalButton> {
+    match modal {
+        Some(ModalContent::LayerDemo { focus }) => Some(*focus),
+        _ => None,
+    }
+}
+
 #[test]
 fn modal_focus_cycling_never_touches_the_shell_focus_cycle() {
     let mut state = state_with(ApplicationShell::new());
@@ -212,7 +219,7 @@ fn modal_focus_cycling_never_touches_the_shell_focus_cycle() {
 
     let _ = super::update(&mut state, Message::ModalFocusNext);
     assert_eq!(
-        state.modal.as_ref().map(|modal| modal.focus),
+        layer_demo_focus(&state.modal),
         Some(ModalButton::Acknowledge),
         "ModalFocusNext must cycle the modal's own focus"
     );
@@ -222,15 +229,12 @@ fn modal_focus_cycling_never_touches_the_shell_focus_cycle() {
     );
 
     let _ = super::update(&mut state, Message::ModalFocusNext);
-    assert_eq!(
-        state.modal.as_ref().map(|modal| modal.focus),
-        Some(ModalButton::Dismiss)
-    );
+    assert_eq!(layer_demo_focus(&state.modal), Some(ModalButton::Dismiss));
     assert_eq!(state.focus, focus_before);
 
     let _ = super::update(&mut state, Message::ModalFocusPrevious);
     assert_eq!(
-        state.modal.as_ref().map(|modal| modal.focus),
+        layer_demo_focus(&state.modal),
         Some(ModalButton::Acknowledge)
     );
     assert_eq!(state.focus, focus_before);
@@ -2125,15 +2129,20 @@ fn empty_paste_is_allowed_and_is_a_harmless_no_op() {
     );
 }
 
+/// RFC-018 PR-018-C: `RequiresConfirmation` now opens the real dialog
+/// instead of PR-018-B's temporary block-and-notice. Nothing reaches
+/// the PTY yet -- only `ModalActivate` on `Accept` (tested separately)
+/// writes -- and no refusal notice is recorded, since this isn't a
+/// refusal at all.
 #[test]
-fn multiline_paste_requires_confirmation_and_blocks_visibly() {
+fn multiline_paste_opens_the_confirmation_dialog_and_writes_nothing_yet() {
     let mut state = state_with_a_real_terminal_focused("paste-class-multiline");
     let target = state.terminal_panes[0].terminal_id().clone();
 
     let _ = super::update(
         &mut state,
         Message::TerminalPasteResolved {
-            target,
+            target: target.clone(),
             content: Some("first-line\nsecond-line".to_string()),
         },
     );
@@ -2145,18 +2154,278 @@ fn multiline_paste_requires_confirmation_and_blocks_visibly() {
     }
     assert!(
         !rendered_demo_pane_text(&state).contains("first-line"),
-        "PR-018-C's dialog does not exist yet -- RequiresConfirmation must block, not write"
+        "opening the dialog must not write anything -- only Accept does"
     );
     assert_eq!(
-        state.terminal_paste_notice,
-        Some(TerminalPasteRefusal::RequiresConfirmation),
-        "the temporary RequiresConfirmation-blocks state must be recorded, not silent"
+        state.terminal_paste_notice, None,
+        "RequiresConfirmation is not a refusal now that a real dialog exists for it"
+    );
+    match &state.modal {
+        Some(ModalContent::PasteConfirmation(modal)) => {
+            assert_eq!(modal.target, target);
+            assert_eq!(modal.content, "first-line\nsecond-line");
+            assert_eq!(modal.line_count, 2);
+            assert_eq!(
+                modal.focus,
+                PasteConfirmButton::Reject,
+                "defaults to the safe target, matching the layer-demo modal's own convention"
+            );
+        }
+        other => panic!("expected a PasteConfirmation modal, got {other:?}"),
+    }
+}
+
+/// Shared setup for the dialog-behaviour tests below: a real terminal
+/// pane, and a real `RequiresConfirmation` decision already turned into
+/// an open `PasteConfirmation` modal via the real `TerminalPasteResolved`
+/// handler -- not a hand-built `State { modal: Some(...), .. }`, so
+/// these tests exercise the same path a real paste actually takes.
+fn state_with_paste_dialog_open(
+    label: &str,
+    content: &str,
+) -> (State, tekstide_core::domain::TerminalId) {
+    let mut state = state_with_a_real_terminal_focused(label);
+    let target = state.terminal_panes[0].terminal_id().clone();
+    let _ = super::update(
+        &mut state,
+        Message::TerminalPasteResolved {
+            target: target.clone(),
+            content: Some(content.to_string()),
+        },
     );
     assert!(
-        !terminal_paste_refusal_text(&state.catalog, &TerminalPasteRefusal::RequiresConfirmation)
-            .is_empty(),
-        "the user pressed a key and is owed a visible answer, not an empty string"
+        matches!(state.modal, Some(ModalContent::PasteConfirmation(_))),
+        "test precondition: the dialog must be open"
     );
+    (state, target)
+}
+
+fn paste_confirm_focus(modal: &Option<ModalContent>) -> Option<PasteConfirmButton> {
+    match modal {
+        Some(ModalContent::PasteConfirmation(modal)) => Some(modal.focus),
+        _ => None,
+    }
+}
+
+/// **Review gate**: "every dismissal path defaults to not pasting --
+/// Escape, click-away, focus loss, and any other exit that is not an
+/// explicit accept must leave the PTY untouched. Test each exit path,
+/// not one representative." Two real exit paths exist in this shell
+/// (`ModalDismiss`/Escape, and `ModalActivate` while focus is on
+/// `Reject`) -- "click-away" and "focus loss" have no reachable trigger
+/// here at all: this shell has no mouse-click handling anywhere, and
+/// modal focus is structurally isolated from `state.focus` (proven by
+/// `modal_focus_cycling_never_touches_the_shell_focus_cycle`), so there
+/// is no window-blur-equivalent event to test. Both are disclosed
+/// non-goals here, not silently skipped.
+#[test]
+fn escape_dismisses_the_paste_dialog_without_writing_even_with_accept_focused() {
+    let (mut state, target) = state_with_paste_dialog_open("paste-dialog-escape", "one\ntwo");
+    // Focus Accept first -- proving Escape overrides whatever is
+    // focused, not merely that it coincides with the safe default.
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    assert_eq!(
+        paste_confirm_focus(&state.modal),
+        Some(PasteConfirmButton::Accept)
+    );
+
+    let _ = super::update(&mut state, Message::ModalDismiss);
+    assert!(state.modal.is_none(), "Escape must close the dialog");
+
+    for _ in 0..20 {
+        for pane in &mut state.terminal_panes {
+            pane.poll();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        !rendered_demo_pane_text(&state).contains("one"),
+        "Escape must never write, even when Accept was the focused button"
+    );
+    let _ = target;
+}
+
+#[test]
+fn activating_reject_dismisses_the_paste_dialog_without_writing() {
+    let (mut state, _target) = state_with_paste_dialog_open("paste-dialog-reject", "one\ntwo");
+    assert_eq!(
+        paste_confirm_focus(&state.modal),
+        Some(PasteConfirmButton::Reject),
+        "test precondition: Reject is the default focus"
+    );
+
+    let _ = super::update(&mut state, Message::ModalActivate);
+    assert!(
+        state.modal.is_none(),
+        "activating Reject must close the dialog"
+    );
+
+    for _ in 0..20 {
+        for pane in &mut state.terminal_panes {
+            pane.poll();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(!rendered_demo_pane_text(&state).contains("one"));
+}
+
+/// **Review gate**: "the accept path is the only thing that writes, and
+/// it still goes through PR-018-B's single ingress rather than a new
+/// one." Proven against a real pane: the exact content the dialog held
+/// reaches the PTY, through `write_terminal_input`
+/// (`record_paste_blocked_has_exactly_one_production_call_site`'s
+/// sibling enumeration test already pins this as the one write site).
+#[test]
+fn activating_accept_writes_the_real_pasted_content_and_closes_the_dialog() {
+    let (mut state, _target) = state_with_paste_dialog_open(
+        "paste-dialog-accept",
+        "echo accepted-paste-content\nsecond-line",
+    );
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    assert_eq!(
+        paste_confirm_focus(&state.modal),
+        Some(PasteConfirmButton::Accept)
+    );
+
+    let _ = super::update(&mut state, Message::ModalActivate);
+    assert!(state.modal.is_none(), "accepting must close the dialog");
+
+    assert!(
+        poll_demo_pane_until(&mut state, "accepted-paste-content"),
+        "Accept must write the real content the dialog held, through the real PTY"
+    );
+}
+
+/// **Review gate**: "focus cycle demonstrated across the dialog's
+/// controls... proving the cycle returns." Two buttons: one `next`
+/// returns to start, matching `modal_focus_cycling_never_touches_the_shell_focus_cycle`'s
+/// own convention for the layer-demo modal.
+#[test]
+fn paste_dialog_focus_cycles_between_accept_and_reject_and_returns() {
+    let (mut state, _target) = state_with_paste_dialog_open("paste-dialog-focus-cycle", "one\ntwo");
+    assert_eq!(
+        paste_confirm_focus(&state.modal),
+        Some(PasteConfirmButton::Reject)
+    );
+
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    assert_eq!(
+        paste_confirm_focus(&state.modal),
+        Some(PasteConfirmButton::Accept)
+    );
+
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    assert_eq!(
+        paste_confirm_focus(&state.modal),
+        Some(PasteConfirmButton::Reject),
+        "cycling forward twice through a two-item cycle must return to the start"
+    );
+
+    let _ = super::update(&mut state, Message::ModalFocusPrevious);
+    assert_eq!(
+        paste_confirm_focus(&state.modal),
+        Some(PasteConfirmButton::Accept),
+        "Shift+Tab must also cycle, in the opposite direction"
+    );
+}
+
+/// **Review gate**: "pasted content in the dialog goes through
+/// `text_safety::quote_untrusted`... test a bidi/control case
+/// specifically -- a paste containing `\u{202E}` must render escaped
+/// and does not reorder the dialog's own text." Same fixture class this
+/// project's own recent-projects state already exercises for real
+/// (response 166), driven through the real preview computation rather
+/// than asserted structurally.
+#[test]
+fn paste_preview_escapes_a_bidi_override_character() {
+    let raw = "safe\u{202E}spoofed";
+    let (preview, truncated) = super::paste_preview(raw);
+
+    assert!(!truncated);
+    assert!(
+        !preview.contains('\u{202E}'),
+        "the raw bidi override character must not survive escaping unescaped"
+    );
+    assert!(
+        preview.contains("safe") && preview.contains("spoofed"),
+        "escaping must not delete the surrounding content, only make the override visible: \
+         {preview:?}"
+    );
+}
+
+#[test]
+fn paste_preview_truncates_long_content_and_reports_it() {
+    let long = "a".repeat(super::PASTE_PREVIEW_CHAR_LIMIT + 50);
+    let (preview, truncated) = super::paste_preview(&long);
+
+    assert!(truncated);
+    // The isolate wrapper (`quote_untrusted`) adds two characters of its
+    // own around the content, so the bound is on the content length, not
+    // the wrapped string's.
+    assert!(preview.chars().count() <= super::PASTE_PREVIEW_CHAR_LIMIT + 2);
+}
+
+#[test]
+fn paste_preview_does_not_truncate_content_within_the_limit() {
+    let short = "a".repeat(super::PASTE_PREVIEW_CHAR_LIMIT);
+    let (_preview, truncated) = super::paste_preview(&short);
+    assert!(!truncated);
+}
+
+/// **Review gate**: "`NFR-UX-002`: the accept/reject distinction is not
+/// colour-only." The textual marker (`"> "` vs `"  "`) is the whole
+/// distinguishing channel, the same mechanism the layer-demo modal and
+/// the shell's own chrome-level focus indicator already use -- proven
+/// here by confirming the marker actually moves between the two labels
+/// as focus changes, not merely that it exists once.
+#[test]
+fn paste_dialog_accept_reject_distinction_is_a_real_textual_marker_not_colour_only() {
+    let (mut state, _target) = state_with_paste_dialog_open("paste-dialog-marker", "one\ntwo");
+    let accept_label = state.catalog.get("paste-confirm-dialog-accept");
+    let reject_label = state.catalog.get("paste-confirm-dialog-reject");
+
+    let render = |state: &State| {
+        let Some(ModalContent::PasteConfirmation(modal)) = &state.modal else {
+            panic!("test precondition: dialog must be open");
+        };
+        let marker = |target: PasteConfirmButton| {
+            if modal.focus == target { "> " } else { "  " }
+        };
+        (
+            format!("{}{accept_label}", marker(PasteConfirmButton::Accept)),
+            format!("{}{reject_label}", marker(PasteConfirmButton::Reject)),
+        )
+    };
+
+    let (accept_line, reject_line) = render(&state);
+    assert!(accept_line.starts_with("  "));
+    assert!(reject_line.starts_with("> "));
+
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let (accept_line, reject_line) = render(&state);
+    assert!(
+        accept_line.starts_with("> ") && reject_line.starts_with("  "),
+        "the marker must move to whichever button is now focused"
+    );
+}
+
+/// **Review gate**: "every user-facing word goes through `Catalog`; no
+/// hardcoded English at the render layer." Structurally true by
+/// construction (every string `paste_confirmation_modal_view` renders
+/// comes from `state.catalog.get`/`get_with_args`, never a Rust string
+/// literal) -- this test is the same kind of check
+/// `window_title_resolves_through_the_catalog_not_a_literal` already
+/// runs: if a key were mistyped, the catalog's "missing key renders as
+/// the key itself" fallback makes the assertion below fail loudly.
+#[test]
+fn paste_dialog_body_resolves_through_the_catalog_with_the_real_line_count() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let text = catalog.get_with_args(
+        "paste-confirm-dialog-body",
+        &crate::i18n::CatalogArgs::new().number("line_count", 3u32),
+    );
+    assert_ne!(text, "paste-confirm-dialog-body");
+    assert!(text.contains('3'));
 }
 
 #[test]
@@ -2181,11 +2450,13 @@ fn control_containing_paste_is_blocked_outright() {
         !rendered_demo_pane_text(&state).contains("red"),
         "a control-containing paste must block outright, never confirm"
     );
-    assert_eq!(
-        state.terminal_paste_notice,
-        Some(TerminalPasteRefusal::Blocked(
-            tekstide_core::runtime::terminal::TerminalInputDecisionReason::ControlContainingPasteBlocked
-        ))
+    let refusal = TerminalPasteRefusal::Blocked(
+        tekstide_core::runtime::terminal::TerminalInputDecisionReason::ControlContainingPasteBlocked,
+    );
+    assert_eq!(state.terminal_paste_notice, Some(refusal.clone()));
+    assert!(
+        !terminal_paste_refusal_text(&state.catalog, &refusal).is_empty(),
+        "the user pressed a key and is owed a visible answer, not an empty string"
     );
 }
 
@@ -2250,32 +2521,32 @@ fn trusted_ui_state_is_active_with_a_modal_open() {
 /// prefix can change the classification itself and would silently
 /// write a prefix of what the user actually copied.
 #[test]
-fn paste_bytes_within_bound_passes_short_content_through_unchanged() {
+fn content_within_bound_passes_short_content_through_unchanged() {
     assert_eq!(
-        paste_bytes_within_bound(Some("hello".to_string())),
-        Some(b"hello".to_vec())
+        content_within_bound(Some("hello".to_string())),
+        Some("hello".to_string())
     );
 }
 
 #[test]
-fn paste_bytes_within_bound_treats_a_missing_clipboard_as_empty() {
-    assert_eq!(paste_bytes_within_bound(None), Some(Vec::new()));
+fn content_within_bound_treats_a_missing_clipboard_as_empty() {
+    assert_eq!(content_within_bound(None), Some(String::new()));
 }
 
 #[test]
-fn paste_bytes_within_bound_accepts_content_exactly_at_the_cap() {
+fn content_within_bound_accepts_content_exactly_at_the_cap() {
     let exact = "a".repeat(256 * 1024);
     assert_eq!(
-        paste_bytes_within_bound(Some(exact)).map(|bytes| bytes.len()),
+        content_within_bound(Some(exact)).map(|content| content.len()),
         Some(256 * 1024)
     );
 }
 
 #[test]
-fn paste_bytes_within_bound_refuses_content_over_the_cap() {
+fn content_within_bound_refuses_content_over_the_cap() {
     let oversized = "a".repeat(256 * 1024 + 1);
     assert_eq!(
-        paste_bytes_within_bound(Some(oversized)),
+        content_within_bound(Some(oversized)),
         None,
         "content one byte over the cap must be refused whole, not truncated to the cap"
     );

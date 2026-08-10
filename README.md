@@ -47,18 +47,23 @@ also a real desktop GUI application shell with mode switching. It includes:
   content.
 - Real clipboard paste into a focused terminal (`Ctrl+Shift+V`, RFC-018),
   routed through the same RFC-009 policy as everything else that reaches a
-  PTY: single-line and empty pastes go through, control-containing pastes
-  are blocked outright, and multi-line pastes are blocked too — a rendered
-  confirmation dialog is not built yet, so a paste that would need one is
-  refused conservatively rather than silently allowed.
+  PTY: single-line and empty pastes go through and control-containing pastes
+  are blocked outright, both without a dialog. A multi-line paste opens a
+  real, rendered confirmation dialog — the first trusted dialog this product
+  has — showing an escaped preview of the pasted content; accepting is the
+  only thing that writes it, and every other way to leave the dialog
+  (Escape, or activating Cancel) leaves the terminal untouched.
 
 It is not yet the full AI CLI workbench. There is no editor, no rendered
-paste/approval/trust dialogs, no adapter-spawn pathway that would make command
-approval reachable, no Git-based change detection, file watcher, or
-overwrite-confirmation UI, and no cross-platform evidence beyond Linux. There is
-**no screen-reader support** — not limited, not planned, absent for the life of the
-`iced` substrate decision (RFC-014). Command approval (below) remains implemented but
-unreachable.
+approval/trust dialogs beyond the paste confirmation above, no adapter-spawn
+pathway that would make command approval reachable, no Git-based change
+detection, file watcher, or overwrite-confirmation UI, and no cross-platform
+evidence beyond Linux. There is **no screen-reader support** — not limited,
+not planned, absent for the life of the `iced` substrate decision (RFC-014).
+Command approval (below) remains implemented but unreachable. Nothing here
+claims the paste dialog is distinguishable from terminal content trying to
+imitate it — that is RFC-018's own trusted-UI evidence obligation, not yet
+discharged.
 
 Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked
 root/symlink access, audit-store recovery outcomes, plain-terminal session starts and

@@ -2,7 +2,7 @@
 title: "RFC-018: Rendered Paste Protection and Trusted-UI Evidence - QA Evidence"
 rfc: "RFC-018"
 rfc_file: "../../proposed/018-paste-protection-and-trusted-ui-evidence.md"
-status: "PR-018-B and PR-018-D accepted (responses 170, 171) — PR-018-C next"
+status: "PR-018-B/D accepted (responses 170, 171) — PR-018-C implemented 2026-08-10, not yet reviewed"
 target_milestone: "M9"
 created: "2026-08-08"
 ---
@@ -55,7 +55,38 @@ Implemented 2026-08-10, not yet reviewed. Against `pr-018-b-paste-ingress.md`'s 
 
 ## PR-018-C — The confirmation dialog
 
-Pending implementation. Not blocked by PR-018-D (both need only B, per response 169/170).
+Implemented 2026-08-10, not yet reviewed. Against `task-breakdown-pr-plan.md`'s review gate:
+
+**Built on RFC-015's existing modal layer; no dialog framework introduced.** `ModalContent` (previously a single struct, only ever the layer-composition placeholder) becomes an enum: `LayerDemo { focus: ModalButton }` and `PasteConfirmation(PasteConfirmationModal)`. This was the one structural decision the slice required: `state.modal: Option<ModalContent>` is the single value `input::ModalAbsent`/`SubscriptionMode::for_modal` gate on, so a second real modal kind has to live inside that same type — a second `Option` field on `State` would not be covered by that structural exclusivity at all. `ModalFocusNext`/`Previous`/`Activate` now match on the active variant; `ModalDismiss` is unchanged (always clears `state.modal`, for either kind).
+
+**`RequiresConfirmation` opens the dialog instead of PR-018-B's temporary block.** `Message::TerminalPasteResolved`'s handler now matches `decision` three ways directly (`Allow`/`RequiresConfirmation`/`Block`) rather than going through `TerminalPasteRefusal::from_decision` first; `TerminalPasteRefusal` itself drops its `RequiresConfirmation` variant entirely (removed, not just unused — a real dialog exists for it now). `multiline_paste_opens_the_confirmation_dialog_and_writes_nothing_yet` proves the switch: the same multiline content that PR-018-B blocked with a notice now opens a real `PasteConfirmation` modal carrying the exact target, content, and line count, with no refusal notice recorded (this isn't a refusal).
+
+**Every dismissal path defaults to not pasting, tested individually, not by one representative.** Two real exit paths exist in this shell: `ModalDismiss` (Escape) and `ModalActivate` while focus is on `Reject`. `escape_dismisses_the_paste_dialog_without_writing_even_with_accept_focused` focuses `Accept` first, specifically to prove Escape overrides whatever is focused rather than merely coinciding with the safe default. `activating_reject_dismisses_the_paste_dialog_without_writing` covers the other path. **"Click-away" and "focus loss," named in the RFC and the review gate, have no reachable trigger in this shell and are disclosed as such rather than silently skipped**: there is no mouse-click handling anywhere in this codebase, and modal focus is structurally isolated from `state.focus` (proven by the pre-existing `modal_focus_cycling_never_touches_the_shell_focus_cycle`), so there is no window-blur-equivalent event this shell can produce to test against.
+
+**The accept path is the only thing that writes, through PR-018-B's single ingress.** `ModalActivate`'s `PasteConfirmation` arm (guarded on `focus == Accept`) calls `write_terminal_input` — the same function the keystroke path and PR-018-B's `Allow` path already call, not a new one. `activating_accept_writes_the_real_pasted_content_and_closes_the_dialog` proves the exact content the dialog held reaches a real PTY.
+
+**Pasted content in the dialog goes through `text_safety::quote_untrusted`; a bidi/control case tested specifically.** `paste_preview` (factored out of the view function so it's directly testable, the same shape `surface::board::row_lines` uses for untrusted project names) truncates the **raw** content to 500 characters *before* escaping — never after, since slicing an already-escaped, isolate-wrapped `DisplayText` could separate the isolate marks from the content they wrap, per that type's own doc comment. `paste_preview_escapes_a_bidi_override_character` pastes a real `\u{202E}` and confirms it does not survive unescaped while the surrounding text is preserved — the same fixture class response 166 found live in this project's own recent-projects state.
+
+**Focus cycle demonstrated, proven to return.** `paste_dialog_focus_cycles_between_accept_and_reject_and_returns`: `Reject` (default) → `Next` → `Accept` → `Next` → `Reject` again, then `Previous` the other direction. Two buttons, matching `modal_focus_cycling_never_touches_the_shell_focus_cycle`'s own convention for the layer-demo modal — the review gate's "byte-identical third screenshot" is interpreted here as the equivalent state-level proof (a real GUI screenshot is PR-018-E's job, not this one's), flagged as a judgment call rather than assumed.
+
+**`NFR-UX-002`: the accept/reject distinction is not colour-only.** The same textual marker (`"> "`/`"  "`) the layer-demo modal and the shell's chrome-level focus indicator already use — `paste_dialog_accept_reject_distinction_is_a_real_textual_marker_not_colour_only` confirms the marker actually moves between labels as focus changes, not merely that it exists once.
+
+**Every user-facing word goes through `Catalog`; no hardcoded English at the render layer.** Structurally true by construction (every string `paste_confirmation_modal_view` renders comes from `state.catalog.get`/`get_with_args`); `paste_dialog_body_resolves_through_the_catalog_with_the_real_line_count` is the same class of check `window_title_resolves_through_the_catalog_not_a_literal` already runs — a mistyped key fails loudly via the catalog's "missing key renders as the key itself" fallback.
+
+**RFC-018 §Open Questions 2 answered: preview, not only describe.** Decided with the escaping already in place, as the RFC asked, so the decision was about usefulness rather than risk. 500 characters (`PASTE_PREVIEW_CHAR_LIMIT`) is enough to recognise a real command, heredoc, or config snippet at a glance without rendering a fixed-size dialog around up to 256 KiB of content; `paste_preview_truncates_long_content_and_reports_it`/`_does_not_truncate_content_within_the_limit` cover both sides of the bound.
+
+**Two obligations PR-018-B/D carried forward, both discharged here:**
+
+1. **`trusted_ui_state` now maps the real dialog to `PasteConfirmationActive` specifically**, not the generic `SecurityDialogActive` placeholder — `trusted_ui_state`'s match is on the `ModalContent` variant directly, so a paste attempted while *this* dialog is open (structurally unreachable today, since opening the dialog requires the keybinding to have routed in the first place, which requires no modal was already open — but a defended case nonetheless, per RFC-018's own "the policy already handles this") is evaluated as what it actually is.
+2. **The "possibly-truncated preview" concern is moot**, as PR-018-B's own carried-forward note predicted: `RequiresConfirmation` is unreachable for anything over the cap (refused as `TooLarge` first), so the dialog's content is always the user's real, complete paste.
+
+**Renamed again**: `paste_bytes_within_bound` (PR-018-B/response 169, returned `Vec<u8>`) is now `content_within_bound` (returns `String`) — the dialog needs the `String` for its preview and, on Accept, for the exact bytes it writes (`.as_bytes()`), and keeping one owned value avoids a second, possibly-diverging copy of "what the user pasted." A reader grepping for the old name after this commit will not find it; noted here so that isn't mistaken for a regression.
+
+**README, checked again rather than assumed still accurate.** "No rendered paste/approval/trust dialogs" and "a rendered confirmation dialog is not built yet" were both true when written and are false now — a real paste dialog exists. Fixed in the same commit, with an explicit statement that nothing here claims the dialog is distinguishable from terminal content trying to imitate it (RFC-018's own trusted-UI evidence obligation, PR-018-E's, not yet discharged).
+
+**Gates**: `fmt --check`, `clippy --workspace --all-targets --all-features -D warnings`, full test suite (505 `tekstide-core`, unchanged — PR-018-C touches only `crates/tekstide` — + 154 `tekstide` — 9 net new), `git diff --check`. All passed.
+
+**Not done, correctly**: no trusted-UI evidence (PR-018-E's job — screenshots, adversarial imitation, the distinguishing-property claim). The accept path still produces no audit record (RFC-018's own frozen-schema gap, restated in Known Limitations, not this slice's to fix).
 
 ## PR-018-D — The `paste_blocked` audit producer
 
