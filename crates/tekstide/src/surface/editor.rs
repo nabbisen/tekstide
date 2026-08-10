@@ -95,6 +95,54 @@ pub(crate) fn body_text(document: &TextDocument) -> String {
     document.text().to_string()
 }
 
+/// RFC-019 PR-019-D: turns a keypress into the document's next full text,
+/// or `None` if the key is not an edit key -- the shape `replace_active_text`
+/// needs, since it takes the whole new text rather than a cursor-relative
+/// splice.
+///
+/// **Append-only, and disclosed as such rather than worked around.**
+/// `ProjectContentWorkspace` exposes `active_document() -> Option<&TextDocument>`
+/// only -- no mutable accessor, and no way to reach `TextDocument::set_cursor`
+/// from this crate. Per this RFC's own instruction ("if core's edit
+/// surface turns out insufficient for real editing, stop and raise it as
+/// an RFC-006 question. Do not work around it in the shell"), this does
+/// not invent shell-local cursor state to fake cursor-aware insertion --
+/// every typed character is appended to the end of the document, Enter
+/// appends a newline, Backspace removes the last character. `document.cursor()`
+/// still reads a real value (always `(0, 0)`, since nothing here ever
+/// calls `set_cursor`); rendering that position and wiring real cursor
+/// movement needs the mutable path this slice found missing, raised in
+/// this slice's own review request rather than guessed at here.
+pub(crate) fn apply_edit_key(text: &str, key: &iced::keyboard::Key) -> Option<String> {
+    match key {
+        iced::keyboard::Key::Character(typed) => {
+            let mut new_text = text.to_string();
+            new_text.push_str(typed);
+            Some(new_text)
+        }
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
+            let mut new_text = text.to_string();
+            new_text.push('\n');
+            Some(new_text)
+        }
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Space) => {
+            let mut new_text = text.to_string();
+            new_text.push(' ');
+            Some(new_text)
+        }
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
+            if text.is_empty() {
+                None
+            } else {
+                let mut new_text = text.to_string();
+                new_text.pop();
+                Some(new_text)
+            }
+        }
+        _ => None,
+    }
+}
+
 /// No `Message` interest of its own, the same shape `board::view` and
 /// `explorer::view` use -- this function only ever reads state.
 pub fn view<'a, Message: 'a>(

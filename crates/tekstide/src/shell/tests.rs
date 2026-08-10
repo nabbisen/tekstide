@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use tekstide_core::shell::ApplicationShell;
 
 use super::{
-    Message, ModalButton, ModalContent, PasteConfirmButton, State, TerminalPasteRefusal,
-    content_within_bound, focus_marker, main_area_key, main_area_label, sidebar_label,
-    status_bar_summary, terminal_paste_refusal_text, trusted_ui_state, zone_style,
+    ExternalChangeButton, Message, ModalButton, ModalContent, PasteConfirmButton, State,
+    TerminalPasteRefusal, content_within_bound, focus_marker, main_area_key, main_area_label,
+    sidebar_label, status_bar_summary, terminal_paste_refusal_text, trusted_ui_state, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -2636,4 +2636,223 @@ fn paste_keybinding_with_no_terminal_focused_is_a_silent_noop() {
         )),
     );
     assert_eq!(state.terminal_paste_notice, None);
+}
+
+// --- RFC-019 PR-019-D: editing and save ---
+
+fn state_with_an_open_document(label: &str, contents: &str) -> (State, PathBuf) {
+    let dir = fresh_project_dir(label);
+    std::fs::write(dir.join("file.txt"), contents).unwrap();
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(&dir)
+        .expect("a freshly created directory is a valid project root");
+    app_shell
+        .open_active_project_text_document("file.txt")
+        .expect("the fixture file must open");
+    let mut state = state_with(app_shell);
+    state.focus = FocusZone::MainArea;
+    (state, dir)
+}
+
+fn active_document_text(state: &State) -> String {
+    state
+        .app_shell
+        .state()
+        .active_project()
+        .and_then(|project| project.content_workspace().active_document())
+        .expect("an active document must exist")
+        .text()
+        .to_string()
+}
+
+/// A real key, routed by the real router (not `apply_edit_key` called
+/// directly, and not a hand-built `SurfaceInput` -- that type has no
+/// test constructor, deliberately, per `input`'s own module doc) reaches
+/// the active document through `handle_editor_key`. Proves the
+/// `FocusZone::MainArea` wiring this slice added, the same shape
+/// `tab_cycles_shell_focus_with_a_real_terminal_focused_and_writes_nothing`
+/// already uses for its own zone.
+#[test]
+fn a_typed_key_edits_the_real_active_document_through_real_routing() {
+    let (mut state, _dir) = state_with_an_open_document("editor-real-typed-key", "hello");
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("!".into()),
+        modifiers: iced::keyboard::Modifiers::empty(),
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed =
+        crate::input::route_non_modal_input(proof, &policy, state.focus, None, press.clone());
+    assert_eq!(
+        routed,
+        crate::input::RoutedInput::Surface(crate::input::surface_input_for_test(
+            FocusZone::MainArea,
+            press
+        )),
+        "an ordinary character with MainArea focused and no terminal focus must route to Surface"
+    );
+
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert_eq!(active_document_text(&state), "hello!");
+}
+
+/// `Ctrl+S` is a real global keybinding (`navigation::linux_mvp`), reaches
+/// `attempt_save_active_document`, and the bytes actually land on disk --
+/// not merely that `ProjectContentStatus` reports success.
+#[test]
+fn ctrl_s_saves_the_real_edited_document_to_disk() {
+    let (mut state, dir) = state_with_an_open_document("editor-real-ctrl-s-save", "hello");
+    let _ = state.app_shell.replace_active_project_text("hello!");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("file.txt")).unwrap(),
+        "hello",
+        "test precondition: the edit must not have reached disk yet"
+    );
+
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("s".into()),
+        modifiers: iced::keyboard::Modifiers::CTRL,
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, press);
+    assert!(
+        matches!(routed, crate::input::RoutedInput::Shell(_)),
+        "Ctrl+S must be a real global keybinding, not fall through to Surface: {routed:?}"
+    );
+
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert_eq!(
+        std::fs::read_to_string(dir.join("file.txt")).unwrap(),
+        "hello!"
+    );
+    assert!(
+        state.modal.is_none(),
+        "an ordinary save must never open the conflict modal"
+    );
+}
+
+fn external_change_focus(modal: &Option<ModalContent>) -> Option<ExternalChangeButton> {
+    match modal {
+        Some(ModalContent::ExternalChange(external_change)) => Some(external_change.focus),
+        _ => None,
+    }
+}
+
+/// **The review gate's own required proof**: a real file changed
+/// underneath a real open buffer -- not a synthesised `SaveDecision` --
+/// triggers the conflict modal, and Reload discards the local edit in
+/// favour of what is actually on disk. `TextDocument::save()` has no
+/// force-overwrite bypass (`content::document`'s own module doc);
+/// this is the *only* path back from a conflict, and it is exercised
+/// here against a real save that really failed.
+#[test]
+fn saving_over_a_real_external_change_opens_the_conflict_modal_and_reload_takes_the_disk_content() {
+    let (mut state, dir) = state_with_an_open_document("editor-real-conflict-reload", "original");
+    let _ = state.app_shell.replace_active_project_text("tekstide edit");
+    std::fs::write(dir.join("file.txt"), "external edit").unwrap();
+
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("s".into()),
+        modifiers: iced::keyboard::Modifiers::CTRL,
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, press);
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert_eq!(
+        external_change_focus(&state.modal),
+        Some(ExternalChangeButton::Dismiss),
+        "a refused save must open the real conflict modal, defaulting to the non-destructive button"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("file.txt")).unwrap(),
+        "external edit",
+        "a refused save must never have written the local edit to disk"
+    );
+
+    let _ = super::update(
+        &mut state,
+        Message::ModalFocusNext, // Dismiss -> Reload (two-item cycle)
+    );
+    assert_eq!(
+        external_change_focus(&state.modal),
+        Some(ExternalChangeButton::Reload)
+    );
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert!(state.modal.is_none(), "Reload must close the modal");
+    assert_eq!(
+        active_document_text(&state),
+        "external edit",
+        "Reload must take disk's real current content, discarding the local edit"
+    );
+}
+
+/// **Every dismissal path defaults to not overwriting** (PR-018-C's own
+/// convention, tested per-path there too): Escape on the conflict
+/// dialog must leave the externally-written file exactly as the "other
+/// process" left it -- proving Dismiss never writes, not merely that it
+/// closes the modal.
+#[test]
+fn dismissing_the_conflict_modal_never_writes_the_local_edit_to_disk() {
+    let (mut state, dir) = state_with_an_open_document("editor-real-conflict-dismiss", "original");
+    let _ = state.app_shell.replace_active_project_text("tekstide edit");
+    std::fs::write(dir.join("file.txt"), "external edit").unwrap();
+
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("s".into()),
+        modifiers: iced::keyboard::Modifiers::CTRL,
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, press);
+    let _ = super::update(&mut state, Message::Input(routed));
+    assert!(
+        state.modal.is_some(),
+        "test precondition: the conflict modal must be open"
+    );
+
+    let _ = super::update(&mut state, Message::ModalDismiss);
+
+    assert!(state.modal.is_none());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("file.txt")).unwrap(),
+        "external edit",
+        "Escape must leave the file exactly as the external process wrote it"
+    );
+}
+
+/// **The bidi-override case for the conflict dialog, tested specifically**
+/// -- `relative_path` is the same attacker-influenced class as
+/// `chrome_line`'s own path (a real file's own name), escaped the same
+/// way before it reaches the catalog. Ablated by temporarily replacing
+/// `external_change_dialog_body`'s escaping call with a raw
+/// `format!("{} changed...", relative_path.display())` during review:
+/// this assertion failed with the raw override character present in the
+/// panic's own printed value, confirming the test actually exercises the
+/// escaping path rather than passing vacuously; reverted before commit.
+#[test]
+fn external_change_dialog_body_escapes_a_bidi_override_in_the_path() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let relative_path = Path::new("proj\u{202E}gpj.exe");
+
+    let body = super::external_change_dialog_body(&catalog, relative_path);
+
+    assert!(
+        body.contains("<U+202E>"),
+        "expected the escaped marker in {body:?}"
+    );
+    assert!(
+        !body.contains('\u{202E}'),
+        "the raw override character must never reach the conflict dialog, got {body:?}"
+    );
 }

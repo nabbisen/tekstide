@@ -505,6 +505,8 @@ fn generic_args() -> CatalogArgs<'static> {
         // that message's `*[clean]` default, which is exactly what a
         // completeness check needs (some resolvable string), not a
         // property this fixture asserts a specific value for.
+        // RFC-019 PR-019-D: `external-change-dialog-body`'s untrusted
+        // path reuses this same `path` arg -- no new entry needed.
         .untrusted(
             "path",
             &tekstide_core::text_safety::quote_untrusted("fixture.txt"),

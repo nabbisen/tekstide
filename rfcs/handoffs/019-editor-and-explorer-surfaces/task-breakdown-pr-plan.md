@@ -83,6 +83,34 @@ Review gate:
 - If core's edit surface proves insufficient for real editing, **stop and raise it** as an
   RFC-006 question rather than working around it in the shell.
 
+**Discharged, implemented 2026-08-11 — full detail in `qa-evidence.md`.** The last item
+fired for real: `ProjectContentWorkspace` has no mutable/cursor-write accessor at all, so
+`set_cursor()` is unreachable from this crate. Per the gate's own instruction, this is
+**raised, not worked around** — the primary open question this slice hands to review.
+What shipped instead is disclosed as a real, honest limitation rather than hidden behind
+it: append-only editing (`apply_edit_key`, built only on `replace_active_text`'s
+whole-buffer-replace API, no shell-local cursor state invented). The external-change
+decision gate is met against a **real** conflict (a real file overwritten on disk while a
+real buffer is open, real `Ctrl+S`, real refusal), not a synthesised `SaveDecision` — both
+in the headless test suite and live on screen (`evidence/pr-019-d-04`, `-05`). Every
+dismissal path is tested individually, PR-018-C's own convention: Reload
+(`saving_over_a_real_external_change_...`) and Dismiss
+(`dismissing_the_conflict_modal_never_writes_the_local_edit_to_disk`) are two separate
+tests, not one test with two assertions. The prompt is `ModalContent::ExternalChange`, a
+variant, not a second field. Dirty state is `TextDocumentState::Dirty`/
+`ProjectContentStatus::Edited`, read from core, never shadowed by a shell-local flag. The
+`Display`-interpolates-a-path generalisation carried forward from PR-019-C applied
+cleanly this time — checked before writing `external-change-dialog-body`'s `.ftl` comment,
+not after, and confirmed by a real ablation with the exact wrong value recorded.
+
+**Carried forward into PR-019-E**: whether the core cursor-API gap needs an RFC-006
+amendment before this RFC can claim more than append-only editing, or whether that is an
+acceptable disclosed `0.6.0` limitation; whether a non-conflicting external change
+(`ProjectContentStatus::ExternalChanged`, distinct from `Conflict`) deserves its own
+notice beyond the existing passive chrome indicator; the still-unaddressed
+`OpenActiveProjectWorkspace` navigation gap (recorded in `rfcs/future-work.md` already,
+not this RFC's obligation to fix).
+
 ## PR-019-E — Closeout
 
 Scope: checklist, QA evidence, known limitations, answers to the three open questions,

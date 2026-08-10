@@ -17,6 +17,13 @@ pub enum NavigationAction {
     /// since reading the clipboard is real I/O the shell crate performs
     /// once per press, not a per-keystroke encoding.
     PasteIntoTerminal,
+    /// RFC-019 PR-019-D: saves the active project's open document through
+    /// `save_active_document`. Global keybinding rather than a
+    /// content-surface-routed key for the same reason `PasteIntoTerminal`
+    /// is: it needs real I/O (the file write, plus the on-disk conflict
+    /// check) and reads whichever document is open at press time, not a
+    /// per-keystroke encoding.
+    SaveActiveDocument,
     CycleVisibleTerminalSession,
     OpenCurrentAgentRunDetail,
     OpenPendingApproval,
@@ -100,6 +107,17 @@ impl KeybindingPolicy {
                 KeybindingRule::new(
                     NavigationAction::PasteIntoTerminal,
                     Some("Ctrl+Shift+V"),
+                    KeybindingStatus::Candidate,
+                ),
+                // RFC-019 PR-019-D: `Ctrl+S`, the universal save
+                // convention across editors and terminal-adjacent tools.
+                // Does not collide with any `Ctrl+Alt+<letter>` rule or
+                // `Ctrl+Shift+<letter>` rule above -- checked mechanically
+                // by `save_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone.
+                KeybindingRule::new(
+                    NavigationAction::SaveActiveDocument,
+                    Some("Ctrl+S"),
                     KeybindingStatus::Candidate,
                 ),
                 KeybindingRule::new(

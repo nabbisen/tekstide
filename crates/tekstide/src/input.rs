@@ -335,4 +335,9 @@ pub(crate) fn terminal_stream_for_test(
 }
 
 #[cfg(test)]
+pub(crate) fn surface_input_for_test(target: FocusZone, key: KeyPress) -> SurfaceInput {
+    SurfaceInput { target, key }
+}
+
+#[cfg(test)]
 mod tests;

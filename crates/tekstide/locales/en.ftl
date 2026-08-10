@@ -278,3 +278,17 @@ editor-empty = No file is open. Select a file in the explorer and press Enter.
 # for `explorer-status-error` applied here before it needed catching in
 # review a second time.
 editor-open-error = Could not open file: { $message }
+
+# RFC-019 PR-019-D: the conflict dialog `TextDocument::save()`'s
+# unconditional `BlockedExternalChange` refusal renders into --
+# `save()` has no force-overwrite bypass, so this dialog is the only way
+# past a conflict. `$path` is the same attacker-influenced, escaped path
+# `editor-chrome`'s header already shows. Reload re-opens the file fresh
+# (discarding local edits, taking disk's current content); Dismiss/
+# Escape leaves the file untouched -- mirrors `paste-confirm-dialog-*`'s
+# shape exactly.
+external-change-dialog-title = File Changed On Disk
+external-change-dialog-body = { $path } changed on disk since it was opened. Reload to see the new content (your local changes will be discarded), or dismiss to keep editing without saving.
+external-change-dialog-reload = Reload
+external-change-dialog-dismiss = Dismiss
+external-change-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always dismisses.

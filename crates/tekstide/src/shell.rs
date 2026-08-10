@@ -144,6 +144,47 @@ pub(crate) struct PasteConfirmationModal {
     focus: PasteConfirmButton,
 }
 
+/// RFC-019 PR-019-D: the reload/dismiss targets of the real external-
+/// change conflict dialog -- the same two-item cycle shape as
+/// `PasteConfirmButton`, a distinct type for the same reason: "Reload"/
+/// "Dismiss" do not describe what the paste dialog's buttons decide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExternalChangeButton {
+    Reload,
+    Dismiss,
+}
+
+impl ExternalChangeButton {
+    const ORDER: [ExternalChangeButton; 2] =
+        [ExternalChangeButton::Reload, ExternalChangeButton::Dismiss];
+
+    fn next(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + 1) % Self::ORDER.len()]
+    }
+
+    fn previous(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + Self::ORDER.len() - 1) % Self::ORDER.len()]
+    }
+}
+
+/// RFC-019 PR-019-D: which document a save was refused for -- captured
+/// from `active_document()`'s path at the moment `save_active_document`
+/// returned `BlockedExternalChange`, not re-read later, since "Reload"
+/// re-opens exactly this path.
+#[derive(Debug)]
+pub(crate) struct ExternalChangeModal {
+    relative_path: std::path::PathBuf,
+    focus: ExternalChangeButton,
+}
+
 /// RFC-018 PR-018-C: `state.modal` must remain the *one* value
 /// `input::ModalAbsent`/`SubscriptionMode::for_modal` gate on, so a
 /// second real modal kind has to live inside this same type rather than
@@ -153,8 +194,17 @@ pub(crate) struct PasteConfirmationModal {
 /// presentational state distinct from anything `ModalAbsent` gates.
 #[derive(Debug)]
 pub(crate) enum ModalContent {
-    LayerDemo { focus: ModalButton },
+    LayerDemo {
+        focus: ModalButton,
+    },
     PasteConfirmation(PasteConfirmationModal),
+    /// RFC-019 PR-019-D: `TextDocument::save()` has no force-overwrite
+    /// bypass -- `BlockedExternalChange` is unconditional once the disk
+    /// snapshot has diverged from `last_known_snapshot`, regardless of
+    /// local dirty state. This modal is the only way past it: Reload
+    /// re-opens (discarding local edits), Dismiss/Escape leaves the file
+    /// untouched.
+    ExternalChange(ExternalChangeModal),
 }
 
 impl Default for ModalContent {
@@ -422,6 +472,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if action == NavigationAction::PasteIntoTerminal {
                 return attempt_paste_into_terminal(state);
             }
+            // RFC-019 PR-019-D: `SaveActiveDocument` needs the same real
+            // I/O `LaunchTerminal` needs, but no `Task` round trip --
+            // `save_active_document` is bounded, synchronous local disk
+            // I/O, the same shape `ensure_explorer_scanned`'s scan
+            // already is.
+            if action == NavigationAction::SaveActiveDocument {
+                attempt_save_active_document(state);
+            }
         }
         Message::Input(RoutedInput::Surface(surface_input)) => {
             // RFC-019 PR-019-B: the explorer tree is the first real
@@ -431,6 +489,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // to consume it.
             if surface_input.target() == FocusZone::Sidebar {
                 handle_explorer_key(state, surface_input.key());
+            }
+            // RFC-019 PR-019-D: the editor is the second real consumer --
+            // a key routed to `MainArea` while in Content mode with an
+            // active document edits it. `apply_edit_key` decides *what*
+            // the next text is (append-only, see its own doc comment for
+            // why); this arm only decides *whether* a key reaches it at
+            // all.
+            if surface_input.target() == FocusZone::MainArea {
+                handle_editor_key(state, surface_input.key());
             }
         }
         Message::Input(RoutedInput::Terminal(text_stream)) => {
@@ -540,11 +607,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::ModalFocusNext => match state.modal.as_mut() {
             Some(ModalContent::LayerDemo { focus }) => *focus = focus.next(),
             Some(ModalContent::PasteConfirmation(modal)) => modal.focus = modal.focus.next(),
+            Some(ModalContent::ExternalChange(modal)) => modal.focus = modal.focus.next(),
             None => {}
         },
         Message::ModalFocusPrevious => match state.modal.as_mut() {
             Some(ModalContent::LayerDemo { focus }) => *focus = focus.previous(),
             Some(ModalContent::PasteConfirmation(modal)) => modal.focus = modal.focus.previous(),
+            Some(ModalContent::ExternalChange(modal)) => modal.focus = modal.focus.previous(),
             None => {}
         },
         // RFC-018 PR-018-C: the layer-demo placeholder still has no
@@ -562,8 +631,24 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             {
                 write_terminal_input(state, &modal.target, modal.content.as_bytes());
             }
+            // RFC-019 PR-019-D: Reload re-opens the document fresh --
+            // `open_active_project_text_document` takes disk's current
+            // content and drops local edits, the only way past a
+            // conflict `TextDocument::save()` itself provides. Any other
+            // focus (Dismiss), or `ModalDismiss` (Escape) below, closes
+            // the modal without touching the file at all -- the same
+            // "every dismissal path defaults to not overwriting" shape
+            // the paste dialog's own Reject/Escape arms already hold.
+            Some(ModalContent::ExternalChange(modal))
+                if modal.focus == ExternalChangeButton::Reload =>
+            {
+                let _ = state
+                    .app_shell
+                    .open_active_project_text_document(&modal.relative_path);
+            }
             Some(ModalContent::LayerDemo { .. })
             | Some(ModalContent::PasteConfirmation(_))
+            | Some(ModalContent::ExternalChange(_))
             | None => {}
         },
         Message::ModalDismiss => {
@@ -965,6 +1050,57 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
     }
 }
 
+/// RFC-019 PR-019-D: turns a key routed to `MainArea` into an edit,
+/// applying [`crate::surface::editor::apply_edit_key`]'s decision (or
+/// doing nothing if it returns `None` -- not an edit key, or nothing to
+/// remove). A no-op outside Content mode or without an active document,
+/// the same shape [`handle_explorer_key`] uses for its own zone.
+fn handle_editor_key(state: &mut State, key: &input::KeyPress) {
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    if project.mode() != ProjectMode::Content {
+        return;
+    }
+    let Some(document) = project.content_workspace().active_document() else {
+        return;
+    };
+    let Some(new_text) = crate::surface::editor::apply_edit_key(document.text(), &key.key) else {
+        return;
+    };
+    let _ = state.app_shell.replace_active_project_text(new_text);
+}
+
+/// RFC-019 PR-019-D: `Ctrl+S`'s real handler. `save_active_document`'s
+/// own error-mapping (`project::content`'s `save_active_document`) has
+/// already turned a `BlockedExternalChange` refusal into
+/// `ProjectContentStatus::Conflict` by the time this reads it back --
+/// checked here, not derived from the `Result` itself, since every
+/// other `SaveError` shares the same `Err` shape and only the status
+/// distinguishes them. Any other failure is left to `editor::view`'s own
+/// `chrome_line`/state rendering (`TextDocumentState::SaveError`), the
+/// same "rendered by the surface, not a second notice" shape
+/// `terminal_launch_notice` deliberately does *not* use here.
+fn attempt_save_active_document(state: &mut State) {
+    if state.app_shell.save_active_project_text_document().is_ok() {
+        return;
+    }
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    let workspace = project.content_workspace();
+    if *workspace.status() != tekstide_core::project::ProjectContentStatus::Conflict {
+        return;
+    }
+    let Some(relative_path) = workspace.active_path_hint() else {
+        return;
+    };
+    state.modal = Some(ModalContent::ExternalChange(ExternalChangeModal {
+        relative_path,
+        focus: ExternalChangeButton::Dismiss,
+    }));
+}
+
 /// Terminal launch UX handoff: the real `Ctrl+Alt+T` path, calling
 /// [`launch_terminal`] once for `VisibleSlot::Primary` -- a fresh launch
 /// always becomes the new `Primary` (bumping whichever session held it
@@ -1123,7 +1259,17 @@ fn trusted_ui_state(state: &State) -> TerminalTrustedUiState {
     match &state.modal {
         None => TerminalTrustedUiState::Inactive,
         Some(ModalContent::PasteConfirmation(_)) => TerminalTrustedUiState::PasteConfirmationActive,
-        Some(ModalContent::LayerDemo { .. }) => TerminalTrustedUiState::SecurityDialogActive,
+        // RFC-019 PR-019-D: the external-change conflict dialog is not a
+        // terminal-input concern at all -- it falls into the same
+        // generic bucket `LayerDemo` does, for the same reason: neither
+        // represents a real *terminal-paste* dialog kind of its own. It
+        // still must map to something other than `Inactive`, though --
+        // modal exclusivity (this state's only real consumer today)
+        // needs every open modal to read as active, not just the two
+        // paste-specific ones.
+        Some(ModalContent::LayerDemo { .. }) | Some(ModalContent::ExternalChange(_)) => {
+            TerminalTrustedUiState::SecurityDialogActive
+        }
     }
 }
 
@@ -1415,6 +1561,10 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         // shape `LaunchTerminal` uses for the half of its own work that
         // isn't a `dispatch`-able command either.
         NavigationAction::PasteIntoTerminal
+        // RFC-019 PR-019-D: save needs no core route/mode change either --
+        // `update`'s `Shell` arm special-cases it directly, the same shape
+        // `PasteIntoTerminal` uses above.
+        | NavigationAction::SaveActiveDocument
         | NavigationAction::OpenCommandPalette
         | NavigationAction::SwitchActiveProject
         | NavigationAction::CycleVisibleTerminalSession
@@ -1457,6 +1607,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ModalContent::LayerDemo { focus } => layer_composition_demo_modal(state, *focus),
             ModalContent::PasteConfirmation(paste_modal) => {
                 paste_confirmation_modal_view(state, paste_modal)
+            }
+            ModalContent::ExternalChange(external_change_modal) => {
+                external_change_modal_view(state, external_change_modal)
             }
         };
         stack![base, opaque(center(modal_view))].into()
@@ -2215,6 +2368,63 @@ fn paste_confirmation_modal_view<'a>(
             .size(state.theme.font_size_status())
             .into(),
     );
+
+    modal_dialog_box(state, column(lines).spacing(10).into())
+}
+
+/// RFC-019 PR-019-D: the real external-change conflict dialog. The path
+/// is attacker-influenced chrome, escaped the same way `chrome_line`'s
+/// header path is -- this dialog names the same file that header
+/// already showed escaped, so it must not reintroduce the raw form here.
+/// RFC-019 PR-019-D: `relative_path` is the same attacker-influenced
+/// class as `chrome_line`'s own path -- escaped the same way, before it
+/// reaches the catalog. Factored out so the escaping property is
+/// directly testable without going through `iced`'s `Element` tree, the
+/// same shape `chrome_line`/`paste_preview` already use.
+pub(crate) fn external_change_dialog_body(
+    catalog: &Catalog,
+    relative_path: &std::path::Path,
+) -> String {
+    let path = tekstide_core::text_safety::quote_untrusted(&relative_path.display().to_string());
+    catalog.get_with_args(
+        "external-change-dialog-body",
+        &CatalogArgs::new().untrusted("path", &path),
+    )
+}
+
+fn external_change_modal_view<'a>(
+    state: &'a State,
+    modal: &'a ExternalChangeModal,
+) -> Element<'a, Message> {
+    let button_line = |target: ExternalChangeButton, label_key: &str| {
+        let marker = if modal.focus == target { "> " } else { "  " };
+        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+    };
+
+    let lines: Vec<Element<'_, Message>> = vec![
+        text(state.catalog.get("external-change-dialog-title"))
+            .size(state.theme.font_size_heading())
+            .into(),
+        text(external_change_dialog_body(
+            &state.catalog,
+            &modal.relative_path,
+        ))
+        .size(state.theme.font_size_body())
+        .into(),
+        button_line(
+            ExternalChangeButton::Reload,
+            "external-change-dialog-reload",
+        )
+        .into(),
+        button_line(
+            ExternalChangeButton::Dismiss,
+            "external-change-dialog-dismiss",
+        )
+        .into(),
+        text(state.catalog.get("external-change-dialog-hint"))
+            .size(state.theme.font_size_status())
+            .into(),
+    ];
 
     modal_dialog_box(state, column(lines).spacing(10).into())
 }

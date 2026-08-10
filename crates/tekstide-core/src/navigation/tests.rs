@@ -97,6 +97,29 @@ fn paste_into_terminal_shortcut_is_a_candidate_that_collides_with_no_other_rule(
 }
 
 #[test]
+fn save_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::SaveActiveDocument)
+        .expect("Save Active Document should have a keyboard policy");
+
+    assert_eq!(rule.default_binding, Some("Ctrl+S"));
+    assert_eq!(rule.status, KeybindingStatus::Candidate);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::SaveActiveDocument)
+        .filter(|other| other.default_binding == rule.default_binding)
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+S must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
+#[test]
 fn primary_navigation_workflows_have_keyboard_policy_entries() {
     let policy = KeybindingPolicy::linux_mvp();
 

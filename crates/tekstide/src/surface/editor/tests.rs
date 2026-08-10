@@ -8,7 +8,9 @@ use tekstide_core::project::root::{
 };
 use tekstide_core::project::{ProjectContentStatus, ProjectId, ProjectSession};
 
-use super::{body_text, chrome_line, document_state_symbol, empty_lines, open_error_line};
+use super::{
+    apply_edit_key, body_text, chrome_line, document_state_symbol, empty_lines, open_error_line,
+};
 use crate::i18n::{Catalog, LocalePreference};
 
 fn real_locales_dir() -> PathBuf {
@@ -262,4 +264,69 @@ fn no_hardcoded_english_label_function_is_called_in_this_module() {
         "text_document_state_label must not be called in surface/editor.rs -- route through \
          Catalog instead"
     );
+}
+
+fn character_key(c: &str) -> iced::keyboard::Key {
+    iced::keyboard::Key::Character(c.into())
+}
+
+fn named_key(named: iced::keyboard::key::Named) -> iced::keyboard::Key {
+    iced::keyboard::Key::Named(named)
+}
+
+/// A typed character appends to the end of the document -- the
+/// deliberate, disclosed append-only model (see [`apply_edit_key`]'s own
+/// doc comment for why nothing here is cursor-aware).
+#[test]
+fn a_typed_character_appends_to_the_end() {
+    let result = apply_edit_key("hello", &character_key("!"));
+    assert_eq!(result, Some("hello!".to_string()));
+}
+
+/// Enter appends a real newline, not an escaped or literal `\n` pair --
+/// this is text-area content, not chrome, so it must be the raw
+/// character `document.text()` will actually hold.
+#[test]
+fn enter_appends_a_real_newline() {
+    let result = apply_edit_key("line one", &named_key(iced::keyboard::key::Named::Enter));
+    assert_eq!(result, Some("line one\n".to_string()));
+}
+
+/// Backspace removes exactly one character, by `char`, not by byte --
+/// checked against a multi-byte character so a naive `str` truncation
+/// would corrupt it instead of removing it cleanly.
+#[test]
+fn backspace_removes_the_last_character_by_char_not_by_byte() {
+    let result = apply_edit_key(
+        "caf\u{e9}",
+        &named_key(iced::keyboard::key::Named::Backspace),
+    );
+    assert_eq!(result, Some("caf".to_string()));
+}
+
+/// Backspace on empty content is a no-op, not a panic and not `Some("")`
+/// again -- `None` means "this key produced no edit," and an
+/// already-empty document has nothing left to remove.
+#[test]
+fn backspace_on_empty_content_is_a_no_op() {
+    let result = apply_edit_key("", &named_key(iced::keyboard::key::Named::Backspace));
+    assert_eq!(result, None);
+}
+
+/// A non-edit key (an arrow key, say) produces no edit at all -- `None`,
+/// not an unchanged-text `Some`, so a caller can distinguish "nothing to
+/// write" from "wrote back what was already there."
+#[test]
+fn a_non_edit_key_produces_no_edit() {
+    let result = apply_edit_key("hello", &named_key(iced::keyboard::key::Named::ArrowLeft));
+    assert_eq!(result, None);
+}
+
+/// A multi-byte character typed as one keystroke (as a real IME or
+/// non-ASCII layout would deliver it) appends whole, not split into
+/// invalid partial bytes.
+#[test]
+fn a_multi_byte_typed_character_appends_whole() {
+    let result = apply_edit_key("caf", &character_key("\u{e9}"));
+    assert_eq!(result, Some("caf\u{e9}".to_string()));
 }
