@@ -2,7 +2,7 @@
 title: "RFC-018: Rendered Paste Protection and Trusted-UI Evidence - QA Evidence"
 rfc: "RFC-018"
 rfc_file: "../../proposed/018-paste-protection-and-trusted-ui-evidence.md"
-status: "PR-018-B/C/D/E accepted (responses 170, 171, 172, 175) — PR-018-F closeout not yet started"
+status: "PR-018-B/C/D/E accepted (responses 170, 171, 172, 175) — PR-018-F closeout drafted 2026-08-10, not yet reviewed"
 target_milestone: "M9"
 created: "2026-08-08"
 ---
@@ -142,13 +142,60 @@ Captured 2026-08-10 against the rebuilt release binary (`cargo build --release -
 
 ## PR-018-F — Closeout
 
-Pending implementation.
+### Commit list, PR-018-B through PR-018-E
+
+`297a839` paste ingress; `c6e4a0c` response 169 required fix (refuse over-cap, don't truncate); `7dd5534` `paste_blocked` audit producer; `115f84d` response 171 approval, second observability gap recorded; `9b06591` the confirmation dialog; (response 172 approval recorded in this file, no separate commit); `ab38033` trusted-UI evidence; `bad9c7d` response 175 required fix (spatial claim corrected, no recapture).
+
+### Gate command output
+
+Every slice above passed the same four gates before its commit: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets --all-features`, `git diff --check`. Final state: 505 `tekstide-core` + 154 `tekstide`, 0 failures — unchanged since PR-018-D, since C touched only `crates/tekstide` and E/the response-175 fix touched no code.
+
+### Known Limitations
+
+- **The frozen schema records paste refusals only.** `valid_paste_blocked` requires `outcome == Blocked`, so a paste the user approves has no valid encoding in the family (RFC-018's own §The audit producer, open question 3). Not a defect in this RFC; a constraint of RFC-013's frozen v1 schema, and amending it needs the owner.
+- **A second, related gap, created by PR-018-D (response 171): an over-cap paste refusal (`TooLarge`) leaves no durable record at all.** It never reaches `evaluate`, so it has no `TerminalInputDecisionReason` this family's fixed `reason_code` (`PastePolicy`) could honestly attach to it — recording it anyway would put a false statement in a durable store. Both gaps share the same root: `paste_blocked` fixes a single `reason_code`, so it can only describe a real policy refusal, not a confirmed paste or a paste that never reached the policy at all. One coherent question for the owner — should paste observability be widened — not two unrelated footnotes. Still no amendment without them.
+- **`trusted_ui_state`'s mapping history is worth keeping, not just its current state.** PR-018-B introduced it mapping any open modal to the generic `SecurityDialogActive`, disclosed as provisional because only one modal kind (the layer-demo placeholder) existed. PR-018-C discharged that provisionality once a second, real dialog kind existed to distinguish: `PasteConfirmation(_) => PasteConfirmationActive`, `LayerDemo { .. } => SecurityDialogActive` unchanged. Not a limitation today — the point is that the same shape (a blanket mapping with only one real case) will recur if RFC-022 adds a third dialog kind without revisiting this match.
+- **The genuine dialog's visible use of chrome is content-dependent and is not a reliable tell.** Found during PR-018-E's evidence work (response 175): the dialog's width follows its preview, and the preview is the pasted content, which is attacker-influenced. A short paste's dialog stays entirely inside the terminal's own pane; a longer one can cross into the sidebar. The RFC's distinguishing claim does not rely on this — it rests on keystroke suppression instead — but a reader should not assume "the dialog looks like it's spilling into chrome" is something they can count on seeing.
+- **No semantic detection of dangerous pasted commands.** RFC-009 excludes it by design. A classifier that catches some dangerous pastes invites the belief that it catches all of them.
+- **Nothing here improves terminal performance.** `NFR-PERF-004`, the three-terminal limit, and the ~374 KB/s output ceiling are downstream of the poll defect and owned by readiness-driven terminal I/O (RFC-018 explicitly does not close this — §What this closes, and what it does not).
+
+### Answers to the RFC's open questions
+
+1. **What triggers a paste?** `Ctrl+Shift+V` — decided in PR-018-B, checked mechanically against the whole `KeybindingPolicy::linux_mvp()` table rather than by eye (`paste_into_terminal_shortcut_is_a_candidate_that_collides_with_no_other_rule`). Collides with nothing, including the reserved `Ctrl+Shift+P` command-palette binding the RFC named as the risk.
+2. **Does the dialog preview the pasted content, or only describe it?** Preview — decided in PR-018-C, with the escaping (`text_safety::quote_untrusted`) already in place first, so the decision was about usefulness rather than risk, per the RFC's own instruction. 500 characters (`PASTE_PREVIEW_CHAR_LIMIT`), truncated flag surfaced so a shortened preview never silently implies the paste ends there.
+3. **Should a confirmed paste be audited?** Not answerable within the frozen v1 schema, exactly as the RFC anticipated. Recorded above and in RFC-013's territory; not amended here.
+
+### Risks (from the RFC), mitigation status
+
+- **The dialog becomes the spoofing target it exists to defeat.** Mitigated, with one correction along the way: the original evidence plan leaned on a spatial "occludes chrome" claim that turned out to be content-dependent (response 175) — an attacker who controls the pasted content can suppress it by keeping the paste short. The claim that actually holds is behavioural: keystrokes typed while the dialog is open never reach the terminal, proven with a positive control (PR-018-E, `02`). An imitation cannot suppress input because it is pixels in a grid; it can, sometimes, occupy the same screen area as the genuine dialog.
+- **Paste becomes a second PTY ingress.** Mitigated: `write_terminal_input` is the one write path for real, modal-gated user input, enumerated and ablated (`write_terminal_input_has_exactly_the_three_named_production_call_sites`), the same shape `terminal_pane_launch_has_exactly_two_named_production_callers` uses for launches (PR-018-B).
+- **Pasted content leaks into the audit store.** Mitigated: `sentinel_pasted_content_never_reaches_the_durable_audit_store` scans raw on-disk bytes after dropping the store, with a positive control, following PR-017-F's response-152 fix rather than repeating its original blind spot (PR-018-D).
+- **`RequiresConfirmation` gets treated as `Allow` because a dialog is inconvenient to build.** Did not happen: PR-018-B blocked it conservatively and disclosed the temporary state in this file rather than silently permitting it; PR-018-C replaced the block with the real dialog in the next slice, not an indefinite deferral.
+- **The evidence is taken against a demo-gated terminal out of habit.** Did not happen: PR-018-E used a real `Ctrl+Alt+T` terminal running real, live, updating output throughout every capture, never an env-gated demo pane.
+
+### The claim statement, checked against RFC-018's own text
+
+**What RFC-018 may claim**: RFC-009's paste policy is wired to real clipboard input end to end — `Allow`/`Block` write or refuse through the single ingress PR-017-B/C already proved for output, and `RequiresConfirmation` renders as a real, rendered dialog on RFC-015's existing modal layer rather than a new compositing path. The dialog's untrusted preview goes through `text_safety::quote_untrusted`, tested specifically against a bidi-override character. The `paste_blocked` audit family has a real producer, sentinel-proven not to leak pasted content, conforming to RFC-013's frozen schema with no amendment. **The dialog is distinguishable from terminal output imitating it**: while it is open, keystrokes typed by the user never reach the terminal — demonstrated live, with a positive control proving those keystrokes were reaching the application, not merely asserted from the modal-exclusivity source. This satisfies RFC-018's own requirement (§The confirmation dialog is itself a security surface) that the dialog "must be distinguishable from terminal content," and its evidence requirement (§Trusted-UI evidence, item 3) that the distinguishing property be "stated as a claim that could be false" — it is: an imitation that reached real input delivery would refute it, and none has been found.
+
+**What RFC-018 may not claim, and does not:**
+
+- **That the genuine dialog visibly occupies chrome an imitation cannot.** It sometimes does and sometimes does not, depending on pasted-content width — an attacker-controlled variable (response 175). This was the RFC's original evidence angle; it is retained as an architectural fact (the terminal grid cannot render outside its own pane, `04` alone) but not as the user-facing distinguishing claim, which rests on suppression instead.
+- **That an untrained user would notice either property unprompted.** Quoted verbatim from response 175, per response 176's instruction not to paraphrase it: *"This evidence shows an imitation cannot occupy chrome and cannot suppress input. It does not show that a user would notice one that tries."*
+- **Any improvement to terminal performance.** `NFR-PERF-004`, the three-terminal limit, and the output ceiling are unchanged and explicitly out of this RFC's scope.
+- **RFC-014 PR-014-D's spike screenshot is not cited anywhere in this RFC's evidence** — eight slices across RFC-017 and RFC-018, and this closeout does not break the streak.
+
+### Note to RFC-022, per RFC-018's §The dialog
+
+What was **paste-specific**, and should not be assumed to transfer: `PasteConfirmationModal`'s fields (`target: TerminalId`, `content: String`, `line_count: usize`) are shaped around a paste's own data — a target terminal, byte content, and a count derived from it; a different dialog kind will have its own fields, not these. `content_within_bound`'s 256 KiB cap and `paste_preview`'s 500-character/truncate-then-escape ordering are reasoned specifically on "a paste is a command, heredoc, or short script," not on dialogs in general. The write-on-accept path (`write_terminal_input(state, &modal.target, modal.content.as_bytes())`) is paste-specific by construction — a different dialog's accept action will do something else entirely.
+
+What **looked general**, and is a real candidate for a shared shape if RFC-022 needs one: the `ModalContent` enum-of-variants pattern itself (rather than a second `Option` field on `State`) is how any second real modal kind should be added, because `ModalAbsent`/`for_modal` are generic over content type and only the enum keeps the single gated value RFC-015 built. The `"> "`/`"  "` textual focus marker, Tab/Shift-Tab cycling between exactly two buttons, and "Escape always cancels regardless of focus" are all conventions this dialog reused from the pre-existing layer-demo modal rather than invented — RFC-022's dialog should very likely reuse them too, for consistency a user can learn once. `modal_dialog_box` (the shared container styling factored out in PR-018-C) is already shaped as a two-implementor abstraction waiting for its second caller. None of this is a recommendation to build a dialog framework now — RFC-018's own reasoning for not generalising early still holds — only a record of which parts would generalise cleanly if RFC-022 chooses to.
+
+### Final Acceptance Decision
+
+**RFC-018's scope is fully delivered**: paste ingress, the confirmation dialog, the `paste_blocked` producer, and trusted-UI evidence with a corrected, defensible distinguishing claim. Unlike RFC-017's closeout, there is no unmet RFC-stated requirement analogous to `NFR-PERF-004` — every §Slices gate item and every open question has a real answer, not a deferral. The known limitations above (both audit-observability gaps, the content-dependent spatial property) were anticipated by the RFC's own text as things to record rather than fix in this RFC, not discovered as shortfalls against it.
+
+Recommended: **Accepted.** The one item this closeout surfaces rather than resolves on its own is whether RFC-017's precedent — the implementer moves the RFC folder from `proposed/` to `done/` in the same commit series once closeout is reviewed — applies here the same way, given RFC-017's move followed an explicit owner-level acceptance of a named unmet requirement that RFC-018 has no equivalent of. Filed as a question in the accompanying review request rather than assumed.
 
 ## Known Limitations
 
-Consolidated at closeout. Carried in from RFC-018's own text, to be restated with evidence:
-
-- **The frozen schema records paste refusals only.** `valid_paste_blocked` requires `outcome == Blocked`, so a paste the user approves has no valid encoding in the family. Not a defect in this RFC; a constraint of RFC-013's frozen v1 schema, and amending it needs the owner.
-- **A second, related gap, created by PR-018-D (response 171): an over-cap paste refusal (`TooLarge`) leaves no durable record at all.** It never reaches `evaluate`, so it has no `TerminalInputDecisionReason` this family's fixed `reason_code` (`PastePolicy`) could honestly attach to it — recording it anyway would put a false statement in a durable store. Both gaps share the same root: `paste_blocked` fixes a single `reason_code`, so it can only describe a real policy refusal, not a confirmed paste or a paste that never reached the policy at all. One coherent question for the owner — should paste observability be widened — not two unrelated footnotes. Still no amendment without them.
-- **No semantic detection of dangerous pasted commands.** RFC-009 excludes it by design. A classifier that catches some dangerous pastes invites the belief that it catches all of them.
-- **Nothing here improves terminal performance.** `NFR-PERF-004`, the three-terminal limit, and the ~374 KB/s output ceiling are downstream of the poll defect and owned by readiness-driven terminal I/O.
+Consolidated above, in PR-018-F's own section, per this file's own convention that a slice's findings belong in that slice's entry.
