@@ -2,7 +2,7 @@
 title: "RFC-018: Rendered Paste Protection and Trusted-UI Evidence - QA Evidence"
 rfc: "RFC-018"
 rfc_file: "../../proposed/018-paste-protection-and-trusted-ui-evidence.md"
-status: "PR-018-B accepted (response 170) — PR-018-D implemented 2026-08-10, not yet reviewed"
+status: "PR-018-B and PR-018-D accepted (responses 170, 171) — PR-018-C next"
 target_milestone: "M9"
 created: "2026-08-08"
 ---
@@ -77,6 +77,8 @@ Implemented 2026-08-10, not yet reviewed. Against `task-breakdown-pr-plan.md`'s 
 
 **Not done, correctly**: no dialog (PR-018-C's job). No trusted-UI evidence (PR-018-E's job).
 
+**Approved 2026-08-10 (response 171).** No required items. Two things the reviewer added, both carried into PR-018-F's task-breakdown entry rather than left only here: the sentinel's control-containing wrapper is what makes it a sentinel test rather than a sentinel-*shaped* one (plain single-line content would have classified `Allow` and never reached the audited path at all); and this slice creates a **second** audit-observability gap alongside RFC-018's own (below).
+
 ## PR-018-E — Trusted-UI evidence
 
 Pending implementation.
@@ -90,5 +92,6 @@ Pending implementation.
 Consolidated at closeout. Carried in from RFC-018's own text, to be restated with evidence:
 
 - **The frozen schema records paste refusals only.** `valid_paste_blocked` requires `outcome == Blocked`, so a paste the user approves has no valid encoding in the family. Not a defect in this RFC; a constraint of RFC-013's frozen v1 schema, and amending it needs the owner.
+- **A second, related gap, created by PR-018-D (response 171): an over-cap paste refusal (`TooLarge`) leaves no durable record at all.** It never reaches `evaluate`, so it has no `TerminalInputDecisionReason` this family's fixed `reason_code` (`PastePolicy`) could honestly attach to it — recording it anyway would put a false statement in a durable store. Both gaps share the same root: `paste_blocked` fixes a single `reason_code`, so it can only describe a real policy refusal, not a confirmed paste or a paste that never reached the policy at all. One coherent question for the owner — should paste observability be widened — not two unrelated footnotes. Still no amendment without them.
 - **No semantic detection of dangerous pasted commands.** RFC-009 excludes it by design. A classifier that catches some dangerous pastes invites the belief that it catches all of them.
 - **Nothing here improves terminal performance.** `NFR-PERF-004`, the three-terminal limit, and the ~374 KB/s output ceiling are downstream of the poll defect and owned by readiness-driven terminal I/O.

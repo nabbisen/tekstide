@@ -85,6 +85,8 @@ Review gate:
 - **The note to RFC-022**: which parts of the paste dialog were paste-specific and which looked general. RFC-022 should start from evidence rather than a guess, and this is the only slice positioned to say.
 - Known limitations consolidated, including the confirmed-paste audit gap and anything PR-018-B recorded as temporary.
 
+**Carried forward from PR-018-D (response 171): there are two audit-observability gaps, not one, and they share a root cause.** RFC-018 named the first — `outcome == Blocked` means a paste the user later *approves* has no valid encoding. PR-018-D creates a second: an over-cap paste (`TooLarge`) leaves **no durable record at all**, because it never reaches `evaluate` and so has no real `TerminalInputDecisionReason` this family's fixed `reason_code` could honestly attach to it. Both gaps trace to the same cause — `paste_blocked` fixes a single `reason_code`, so it can only describe policy refusals, not the surrounding decisions (a confirmed paste, or a paste that never reached the policy at all). Record them together, with the shared cause named, so the owner sees one coherent question — *should paste observability be widened?* — rather than two unrelated footnotes. Still no schema amendment without the owner.
+
 ## Sequencing
 
 **B → C is strict** — a dialog with no ingress renders nothing, and an ingress that treats `RequiresConfirmation` as `Allow` is the unsafe state this ordering exists to prevent. D needs B. E needs C. F needs all.
