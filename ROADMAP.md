@@ -15,7 +15,7 @@ Everything from M8 onward builds the product surface. This roadmap is milestone-
 | M6 | `0.3.0` (released 2026-07-28) | Transcript And Review Foundations | Bounded transcript capture, retention controls, generated-change review models. |
 | M7 | `0.3.0` (released 2026-07-28) | Durable Audit | Local durable audit storage for trust decisions, managed process launches, blocked root/symlink access, and recovery outcomes. |
 | M8 | `0.4.0` (released 2026-08-01) + `0.4.1` (released 2026-08-01) | GUI Foundation | Substrate decision, application shell, layout and focus model, i18n scaffolding, Project Board surface, mode switching, focus indicator. |
-| M9 | `0.5.0` (release candidate) | Terminal Surface | Terminal renderer honoring the RFC-009 boundary, immersion mode, split policy, rendered paste protection, trusted-UI evidence. |
+| M9 | `0.5.0` (released 2026-08-08) + `0.5.1` (release candidate) | Terminal Surface | Terminal renderer honoring the RFC-009 boundary, immersion mode, split policy, rendered paste protection, trusted-UI evidence. |
 | M10 | `0.6.x` | Content Surfaces | Editor, file explorer tree, diff/review surface, AgentRun report surface. |
 | M11 | `0.7.x` | Approval And Safety Dialogs | Command approval model and dialog, trust/safe-close/destructive dialogs, remaining security audit producers. |
 | M12 | `0.8.x` | Configuration And Integrations | Configuration system, keybindings/theme/profiles, Git integration, notifications. |
@@ -111,9 +111,18 @@ env-gated demo (RFC-017, closed as of this release). `NFR-PERF-004` is recorded 
 **not met**, stated rather than redefined until it passed — the fix is
 readiness-driven terminal I/O, tracked in `rfcs/future-work.md`
 §Readiness-driven terminal I/O, which now also names the terminal-count limit as a
-third, user-visible consequence of the same defect. **Rendered paste protection and
-trusted-UI/spoofing-resistance evidence (RFC-018) remain open within M9** and are not
-in this release — explicitly deferred, not silently dropped.
+third, user-visible consequence of the same defect. Rendered paste protection and
+trusted-UI evidence were explicitly deferred out of `0.5.0`, not silently dropped.
+
+`0.5.1` ships them: real clipboard paste wired to RFC-009's policy, a rendered
+confirmation dialog on RFC-015's modal layer, the `paste_blocked` audit producer, and
+trusted-UI evidence (RFC-018, closed as of this release). The dialog is
+distinguishable from terminal output imitating it by one property — keystrokes typed
+while it is open never reach the terminal, demonstrated live with a positive control —
+not by whether it visibly occupies chrome, which turned out to be content-dependent
+and is disclosed rather than relied on. **M9 is complete across `0.5.0` + `0.5.1`.**
+`NFR-PERF-004` remains not met, unchanged by this release; it belongs to
+readiness-driven terminal I/O, not to RFC-018's scope.
 
 ## M10: Content Surfaces
 

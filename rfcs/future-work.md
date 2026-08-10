@@ -6,7 +6,7 @@ This file tracks deferred themes after the `0.1.0` foundation release scope. It 
 
 ### Terminal / PTY Runtime
 
-Status: partially implemented by RFC-007/RFC-008/RFC-009; product UI and GUI evidence remain.
+Status: implemented by RFC-007/RFC-008/RFC-009/RFC-017/RFC-018 with documented limitations; remaining items below are launch/close UX polish, not product UI or GUI evidence gaps.
 
 - Linux project-owned PTY shell lifecycle foundation is implemented by RFC-008 with documented limitations.
 - Background terminal sessions, mode-switch preservation, visible-slot policy, and project-close assessment are implemented at the core/project layer.
@@ -14,8 +14,13 @@ Status: partially implemented by RFC-007/RFC-008/RFC-009; product UI and GUI evi
 - Add app/UI commands for launching, selecting, and closing terminals.
 - Add app-wide close aggregation for running terminals.
 - Add terminate/keep confirmation actions and visible terminal consequence text.
-- Wire paste protection into real app/UI paste events and rendered confirmation dialogs.
-- Implement safe GUI terminal rendering and screenshot-backed spoofing evidence in the GUI milestone.
+- Real clipboard paste is wired to app/UI paste events with a rendered confirmation
+  dialog, implemented by RFC-018 with documented limitations (`0.5.1`).
+- Safe GUI terminal rendering and trusted-UI evidence are implemented by RFC-017/RFC-018
+  with documented limitations (`0.5.0`/`0.5.1`) — the dialog is distinguishable from
+  terminal-output imitation by keystroke suppression under a live positive control, not
+  by whether it visibly occupies chrome, which is content-dependent and disclosed rather
+  than relied on.
 - Add macOS/Windows terminal runtime evidence before claiming cross-platform terminal support.
 
 #### Readiness-driven terminal I/O ("Option B") — owns `NFR-PERF-004`
