@@ -5,7 +5,13 @@ This checklist applies before creating a tag or package for a Tekstide release.
 ## Scope
 
 - [ ] Confirm the intended release scope in RFCs or a release-scope decision record.
-- [ ] Confirm README and changelog describe the same implemented and deferred scope.
+- [ ] Confirm README and changelog describe the same implemented and deferred scope —
+      check **every** `readme` target named by a published crate's manifest, not only
+      the workspace root. For this workspace that means `README.md` (`tekstide`, via
+      `readme = "../../README.md"`) **and** `crates/tekstide-core/README.md`
+      (`tekstide-core`, via its own `readme = "README.md"`). The per-crate page went
+      two releases (`0.4.x`, `0.5.0`) without a check because this item didn't say
+      which README, and it is the page crates.io actually renders for that crate.
 - [ ] Confirm crate versions match the intended tag.
 - [ ] Confirm future-work themes are preserved in the changelog or follow-up tracking.
 
