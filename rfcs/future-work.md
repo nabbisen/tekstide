@@ -79,7 +79,18 @@ Status: substrate decided, application shell, and mode switching implemented by 
 
 - Desktop GUI substrate selected (`iced`, RFC-014) and application shell implemented: window/chrome/content/modal layer composition, keyboard focus and input routing, i18n-backed text, a compiled theme, and a Project Board surface rendering real `ApplicationShell` state with untrusted names and paths escaped (RFC-015 `0.4.0`).
 - Content ↔ Terminal mode switching, a visible chrome-level focus indicator, and the `NFR-PERF-002` mode-switch latency measurement all implemented in `0.4.1` (RFC-015 PR-015-E) — both against Content/Terminal-mode placeholders, since neither RFC-017's terminal grid nor RFC-019's editor exists yet. `NFR-PERF-002` needs re-checking once either does (RFC-017's own handoff carries this obligation).
-- Replace the sidebar/main-area scaffolding and Project Board placeholder content with real file tree and editor surfaces (later GUI milestones, M9/M10).
+- The sidebar/main-area scaffolding is real for Content mode as of RFC-019 PR-019-B/C
+  (`0.6.x`): a real explorer tree (untrusted names/status escaped) in the sidebar, a
+  read-only editor (text area raw, chrome escaped) in the main area. Editing, save, and
+  `ExternalChangeDecision` are PR-019-D's; diff/review is RFC-020.
+- **No `NavigationAction` reaches `AppCommand::OpenActiveProjectWorkspace` directly.**
+  Found during RFC-019 PR-019-C's GUI evidence work (response 181, 2026-08-11):
+  `SwitchActiveProject`'s own keybinding is `None`/`Configurable`, already disclosed as
+  such in `navigation.rs`. The `ActiveProjectWorkspace` route is only reached as a side
+  effect of `Ctrl+Alt+M` (`ToggleActiveProjectMode`) or `Ctrl+Alt+T` (`LaunchTerminal`)
+  succeeding — a real gap, not a documented non-goal, and one a future keybinding pass
+  (RFC-023) should close directly rather than leaving every workspace entry point to
+  borrow a side effect from an unrelated command.
 - Add dialog and confirmation flows (trust, safe-close, destructive, configuration change) — M11.
 - Validate responsive layout and visual polish beyond the Project Board's current row-based rendering.
 - **The adapter-spawn pathway — what makes command approval reachable.** Named as a standing theme 2026-08-01, deliberately not scheduled: the owner's model is to resolve themes and issues as they come, not to fix a milestone for this.
