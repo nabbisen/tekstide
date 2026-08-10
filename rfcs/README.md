@@ -18,7 +18,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 019 | [Editor and Explorer Surfaces](./proposed/019-editor-and-explorer-surfaces.md) | Proposed 2026-08-10 — M10; awaiting owner acceptance |
+| 019 | [Editor and Explorer Surfaces](./proposed/019-editor-and-explorer-surfaces.md) | **Accepted 2026-08-10** — M10; ready for implementation |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ## Handoffs
@@ -43,6 +43,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 016 | [Internationalization and Localization](./handoffs/016-internationalization-and-localization/README.md) |
 | 017 | [Terminal Renderer and Immersion Mode](./handoffs/017-terminal-renderer-and-immersion-mode/README.md) |
 | 018 | [Rendered Paste Protection and Trusted-UI Evidence](./handoffs/018-paste-protection-and-trusted-ui-evidence/README.md) |
+| 019 | [Editor and Explorer Surfaces](./handoffs/019-editor-and-explorer-surfaces/README.md) |
 | — | [Minimal user documentation](./handoffs/minimal-user-documentation.md) — no RFC; pulled forward from RFC-029 to M9 |
 | 021 | [Command Approval Model and Adapter Capability](./handoffs/021-command-approval-model-and-adapter-capability/README.md) |
 | 023 | [Configuration System](./handoffs/023-configuration-system/README.md) |

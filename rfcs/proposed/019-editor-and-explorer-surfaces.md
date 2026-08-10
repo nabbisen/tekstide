@@ -1,6 +1,6 @@
 # RFC-019: Editor and Explorer Surfaces
 
-Status: Proposed — awaiting the human owner's acceptance
+Status: Accepted by the human owner 2026-08-10 — ready for implementation
 Target milestone: M10 (`0.6.x`)
 Date: 2026-08-10
 
