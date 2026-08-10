@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.5.1 - Paste Protection and Trusted-UI Evidence
+
+Status: release candidate, prepared 2026-08-10, pending review and the owner's signed tag.
+
+Tekstide `0.5.1` completes milestone M9 with RFC-018, the second half of the terminal
+work `0.5.0` began. **RFC-018 is closed** (`rfcs/done/`). The `0.5.0`/`0.5.1` split
+follows the same shape as `0.4.0`/`0.4.1`: one milestone, two releases, because the
+scope was too large for one.
+
+Press **`Ctrl+Shift+V`** to paste into a focused terminal. What happens next is decided
+by RFC-009's policy, not by the paste widget.
+
+### Implemented
+
+- **Real clipboard paste, classified before it reaches the shell (RFC-018).** Pasted
+  bytes go through `TerminalInputPolicy::evaluate` before any PTY write. A single-line
+  paste is allowed; a multi-line paste opens a confirmation dialog; a paste containing
+  control characters is refused outright. Paste reaches the PTY through the same single,
+  modal-gated ingress keystrokes already used — it did not get its own.
+- **A real confirmation dialog**, built on the existing modal layer. Every dismissal path
+  defaults to **not** pasting: Escape cancels regardless of which button is focused, and
+  only an explicit accept writes anything.
+- **The pasted content is shown, escaped.** The preview runs through the same
+  untrusted-text path the Project Board uses, so a paste containing bidi-override or
+  control characters renders as `<U+XXXX>` markers rather than reordering the dialog's
+  own text. Newlines are escaped too, so pasted content cannot fabricate extra rows that
+  imitate the dialog's controls.
+- **Audit: `paste_blocked` has a producer.** A policy-refused paste is recorded. A
+  sentinel test proves no pasted content, clipboard text, or command text reaches the
+  durable store, checked against raw on-disk bytes.
+- **Trusted-UI evidence**, nine screenshots against a real terminal running live output.
+
+### What the trusted-UI evidence shows, and does not
+
+One property distinguishes the genuine paste dialog from terminal output imitating it:
+**while the dialog is open, keystrokes never reach the terminal.** That was demonstrated
+live, with a positive control proving the keystrokes were reaching the application at the
+time — so their absence is suppression, not non-delivery. An imitation drawn by terminal
+output cannot suppress input.
+
+The terminal grid can never render outside its own pane, so chrome is always authentic.
+But whether the genuine dialog *visibly* uses that headroom depends on how wide its
+preview is — which depends on the pasted content, which an attacker may influence. It is
+therefore recorded as an architectural fact and **not** offered as something a user can
+rely on seeing.
+
+**This evidence shows an imitation cannot occupy chrome and cannot suppress input. It
+does not show that a user would notice one that tries.**
+
+### Dependencies
+
+No new dependencies.
+
+### Deferred
+
+- **Pastes larger than 256 KiB are refused whole**, not truncated. Truncating before
+  classification would let truncation change the classification and would silently write
+  a prefix of what was copied.
+- **The audit family records paste refusals only.** A paste the user *approves* has no
+  valid encoding in the frozen v1 schema, and an over-cap refusal has none either. Both
+  are recorded as known limitations rather than fixed by amending a frozen schema.
+- **No semantic detection of dangerous pasted commands.** RFC-009 excludes it by design;
+  a classifier that catches some dangerous pastes invites the belief that it catches all.
+- **Nothing here improves terminal performance.** `NFR-PERF-004` remains not met, the
+  three-terminal limit and the ~374 KB/s output ceiling are unchanged. All are downstream
+  of the same poll defect and owned by readiness-driven terminal I/O
+  (`rfcs/future-work.md`).
+- **No screen-reader support.** Checked again this release
+  (`cargo tree -p tekstide | grep -i accesskit`, empty).
+- Linux only. No macOS or Windows terminal runtime evidence exists.
+
 ## 0.5.0 - Terminal Renderer, and a Terminal You Can Open
 
 Status: release candidate, prepared 2026-08-08, pending review and the owner's signed tag.
