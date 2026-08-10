@@ -18,6 +18,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 019 | [Editor and Explorer Surfaces](./proposed/019-editor-and-explorer-surfaces.md) | Proposed 2026-08-10 — M10; awaiting owner acceptance |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ## Handoffs
