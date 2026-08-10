@@ -1355,6 +1355,70 @@ fn sentinel_terminal_derived_text_never_reaches_the_durable_audit_store() {
     );
 }
 
+/// **RFC-018 PR-018-D's required sentinel test**, same shape as
+/// PR-017-F's above: a sentinel string checked against **raw on-disk
+/// bytes** after the store is dropped (response 152's fix, reused
+/// rather than rediscovered -- see that test's own doc comment for why
+/// an open, WAL-mode store's `database_file()` alone is not
+/// sufficient), with a positive control proving the scan reaches real,
+/// persisted content.
+///
+/// The sentinel is driven through a **real** `TerminalInputPolicy::evaluate`
+/// call first, so it genuinely exists as real, classified paste content
+/// in scope -- not a decorative local never touched by anything real --
+/// before `record_paste_blocked` is called. `record_paste_blocked`'s own
+/// signature has no parameter a sentinel could be passed through at all
+/// (`project_id`/`terminal_id` only), so this test proves that
+/// structural absence holds in practice, the response 152 lesson: do
+/// not trust that a type looks safe on paper.
+#[test]
+fn sentinel_pasted_content_never_reaches_the_durable_audit_store() {
+    const SENTINEL_PASTE_CONTENT: &str = "SENTINEL-PASTE-9c4e2a71-blocked-paste-content";
+
+    let target = tekstide_core::domain::TerminalId::new_uuid();
+    let project_id = tekstide_core::project::ProjectId::new_uuid();
+    let handle =
+        tekstide_core::runtime::terminal::TerminalRuntimeHandle::new(target.clone(), project_id);
+
+    // A real, control-containing paste carrying the sentinel -- the
+    // real class this producer exists for -- classified by the real
+    // `evaluate`, exactly as `Message::TerminalPasteResolved`'s handler
+    // does, so the sentinel is genuinely real content in scope at the
+    // point the producer is called, not a value never touched by
+    // anything.
+    let decision = tekstide_core::runtime::terminal::TerminalInputPolicy.evaluate(
+        &handle,
+        Some(&handle),
+        tekstide_core::runtime::terminal::TerminalInputSource::Paste,
+        format!("echo \x1b[31m{SENTINEL_PASTE_CONTENT}\x1b[0m").as_bytes(),
+        tekstide_core::runtime::terminal::TerminalTrustedUiState::Inactive,
+    );
+    assert!(
+        !format!("{decision:?}").contains(SENTINEL_PASTE_CONTENT),
+        "the decision itself must not carry the paste's raw content (paste.rs's own precedent)"
+    );
+
+    let mut store = super::open_audit_store(&temp_audit_state_dir("paste-sentinel"), Vec::new())
+        .expect("open a real, temp-dir-backed audit store");
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    tekstide_core::audit::AuditCoordinator::new(&mut store, &mut health)
+        .record_paste_blocked(handle.project_id.clone(), target.clone());
+
+    let audit_dir = store.storage_path().audit_dir().to_path_buf();
+    drop(store);
+
+    let raw_text = read_every_file_in_dir(&audit_dir);
+    assert!(
+        raw_text.contains(target.as_str()),
+        "the scan must reach the real record this test just wrote -- otherwise the sentinel \
+         assertion below passes merely because nothing was read at all"
+    );
+    assert!(
+        !raw_text.contains(SENTINEL_PASTE_CONTENT),
+        "pasted content must never reach the raw on-disk audit store"
+    );
+}
+
 /// RFC-017 PR-017-G response 158: a **headless** benchmark answering the
 /// discriminator question response 156 raised, without a GUI or GPU at
 /// all -- `poll()`'s own cost (a real PTY read plus `Processor::advance`
@@ -1898,6 +1962,28 @@ fn terminal_input_policy_evaluate_has_exactly_one_production_call_site() {
         "TerminalInputPolicy::evaluate must have exactly one production call site, inside \
          `update` -- any other count or location is a second classifier this crate must not \
          grow: {enclosing_functions:?}"
+    );
+}
+
+/// RFC-018 PR-018-D: mirrors the two enumeration tests above for the
+/// audit producer. Exactly one `.record_paste_blocked(` call site,
+/// inside `update`, guarded by the `TerminalPasteRefusal::Blocked`
+/// match arm -- never called for `RequiresConfirmation` (not a real
+/// policy refusal, just this slice's temporary conservative block) or
+/// `TooLarge` (a shell-level bound that never reached `evaluate`, so it
+/// has no `TerminalInputDecisionReason` this family's fixed
+/// `reason_code` could honestly represent).
+#[test]
+fn record_paste_blocked_has_exactly_one_production_call_site() {
+    let shell_rs_path = format!("{}/src/shell.rs", env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(&shell_rs_path).expect("shell.rs must be readable");
+    let enclosing_functions = enclosing_functions_for_call_site(&source, ".record_paste_blocked(");
+
+    assert_eq!(
+        enclosing_functions,
+        vec!["update"],
+        "record_paste_blocked must have exactly one production call site, inside `update`: \
+         {enclosing_functions:?}"
     );
 }
 

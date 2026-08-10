@@ -2,7 +2,7 @@
 title: "RFC-018: Rendered Paste Protection and Trusted-UI Evidence - QA Evidence"
 rfc: "RFC-018"
 rfc_file: "../../proposed/018-paste-protection-and-trusted-ui-evidence.md"
-status: "PR-018-B: response 169's required fix applied 2026-08-10, awaiting confirmation"
+status: "PR-018-B accepted (response 170) — PR-018-D implemented 2026-08-10, not yet reviewed"
 target_milestone: "M9"
 created: "2026-08-08"
 ---
@@ -51,13 +51,31 @@ Implemented 2026-08-10, not yet reviewed. Against `pr-018-b-paste-ingress.md`'s 
 
 **Not done, correctly**: no dialog (PR-018-C's job — `RequiresConfirmation` blocks conservatively as required). No `paste_blocked` audit producer (PR-018-D's job — no audit rows written for blocks in this slice). No trusted-UI evidence (PR-018-E's job). README's privacy section was checked and needs no change this slice — it already states there is no rendered paste dialog and describes only the existing `plain_terminal_observation` producer; PR-018-D is where a real check against a new producer becomes necessary.
 
+**Approved 2026-08-10 (response 169), the truncation-ordering fix confirmed (response 170).** PR-018-B is done.
+
 ## PR-018-C — The confirmation dialog
 
-Pending implementation.
+Pending implementation. Not blocked by PR-018-D (both need only B, per response 169/170).
 
 ## PR-018-D — The `paste_blocked` audit producer
 
-Pending implementation.
+Implemented 2026-08-10, not yet reviewed. Against `task-breakdown-pr-plan.md`'s review gate:
+
+**Conforms to the frozen family, no schema amendment.** `record_paste_blocked` (`tekstide-core::audit::AuditCoordinator`) takes only `project_id`/`terminal_id` — no parameter for `reason_code`, `outcome`, `action_kind`, `actor_kind`, or `action_source` exists, because `valid_paste_blocked` fixes all five to one combination; there is nothing for a caller to get wrong. `paste_blocked_persists_a_valid_record_conforming_to_the_frozen_family` checks every fixed field explicitly (not only `record.validate()`) against a real, file-backed store. `paste_blocked_schema_rejects_any_outcome_other_than_blocked` ablates the `outcome == Blocked` constraint directly: the same record shape with `outcome` swapped to `Applied` fails `validate()`, proving the schema itself is what enforces "refusals only," not an assumption about what the producer happens to pass.
+
+**Written via `AuditCoordinator`, never `AuditStore` directly**, matching every other producer in this file (`open_real_audit_store` → `AuditCoordinator::new` → `record_paste_blocked`, best-effort, an audit-write failure never fails the paste refusal it observes).
+
+**Only a real `evaluate`-produced `Block` is audited — `RequiresConfirmation` and `TooLarge` are not, deliberately.** `valid_paste_blocked` requires `outcome == Blocked`; `RequiresConfirmation` is a *deferred* decision this slice forces into blocking only because PR-018-C's dialog doesn't exist yet, not a real policy refusal, and `TooLarge` is a shell-level resource bound that never reaches `evaluate` at all, so it has no `TerminalInputDecisionReason` to report. Auditing either would misrepresent *why* nothing was written. `record_paste_blocked_has_exactly_one_production_call_site` enumerates the one `.record_paste_blocked(` call site in `shell.rs`, inside `update`, guarded by the `TerminalPasteRefusal::Blocked` match arm specifically.
+
+**Sentinel test, matching PR-017-F's own shape rather than rediscovering it.** `sentinel_pasted_content_never_reaches_the_durable_audit_store` drives a sentinel string through a real `TerminalInputPolicy::evaluate` call first (so it is genuine, classified paste content in scope, not a decorative unused local), confirms the resulting `TerminalInputDecision`'s `Debug` output doesn't carry it (`paste.rs`'s own precedent), then calls `record_paste_blocked` against a real, temp-dir-backed store, **drops the store** before scanning (response 152's WAL-mode fix — the record a still-open store's connection has just written lives in the `-wal` sidecar, not the main database file, until the connection closes and SQLite checkpoints it), scans **every file** under the audit directory, and carries a **positive control** (the real terminal id is found) proving the scan reaches real content rather than passing because nothing was read at all.
+
+**The confirmed-paste recording gap, stated.** `outcome == Blocked` means a paste the user later *approves* (once PR-018-C exists) has no valid encoding in this family — the store records refusals only. Not a defect in this slice; a constraint of RFC-013's frozen v1 schema. Already carried in `qa-evidence.md`'s Known Limitations below; restated here because this is the slice that makes it concrete rather than hypothetical.
+
+**README's privacy section, re-checked and fixed in this commit** (not deferred, per the review gate's explicit instruction). It was stale: the "producers not yet wired" list still named "Paste," and the privacy section described only `plain_terminal_observation`. Fixed: moved "Paste" into the wired-producer sentence, added a paragraph describing `paste_blocked` (blocked-paste events only, naming project/terminal, never content), added a feature-list bullet and a `Ctrl+Shift+V` keyboard-reference row for the ingress itself (PR-018-B shipped it without a README mention).
+
+**Gates**: `fmt --check`, `clippy --workspace --all-targets --all-features -D warnings`, full test suite (505 `tekstide-core` — 2 net new — + 145 `tekstide` — 2 net new), `git diff --check`. All passed.
+
+**Not done, correctly**: no dialog (PR-018-C's job). No trusted-UI evidence (PR-018-E's job).
 
 ## PR-018-E — Trusted-UI evidence
 

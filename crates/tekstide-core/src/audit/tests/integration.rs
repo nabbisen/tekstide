@@ -301,6 +301,80 @@ fn plain_terminal_terminated_is_not_required_for_an_ambiguous_outcome() {
     );
 }
 
+/// RFC-018 PR-018-D: `paste_blocked`'s first producer, persisting a
+/// record `valid_paste_blocked` itself accepts -- every field the
+/// frozen family fixes (`action_kind`, `actor_kind`, `action_source`,
+/// `reason_code`, `outcome`) checked explicitly, not only via
+/// `validate()`, so a future change to `paste_blocked_record` that
+/// drifted from the frozen contract fails here by name.
+#[test]
+fn paste_blocked_persists_a_valid_record_conforming_to_the_frozen_family() {
+    let dirs = TestAuditDirs::new("paste-blocked");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let project_id = ProjectId::new_uuid();
+    let terminal_id = TerminalId::new_uuid();
+
+    let status = AuditCoordinator::new(&mut store, &mut health)
+        .record_paste_blocked(project_id.clone(), terminal_id.clone());
+
+    assert_eq!(status, AuditObservationStatus::Persisted);
+
+    let records = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    let record = &records[0];
+    assert_eq!(record.family, AuditEventFamily::PasteBlocked);
+    assert_eq!(record.outcome, AuditOutcome::Blocked);
+    assert_eq!(
+        record.action_kind,
+        crate::audit::AuditActionKind::TerminalPaste
+    );
+    assert_eq!(record.actor_kind, crate::audit::AuditActorKind::AppPolicy);
+    assert_eq!(
+        record.action_source,
+        crate::audit::AuditActionSource::PolicyEngine
+    );
+    assert_eq!(record.reason_code, Some(AuditReasonCode::PastePolicy));
+    assert_eq!(record.project_id, Some(project_id));
+    assert_eq!(record.terminal_id, Some(terminal_id));
+    record
+        .validate()
+        .expect("a real producer's record must satisfy the frozen family's own predicate");
+}
+
+/// **Ablation**: `valid_paste_blocked` requires `outcome == Blocked`
+/// specifically -- the constraint RFC-018 names as the reason this
+/// family can only ever record refusals, never a paste the user
+/// confirms. Constructing the same record shape with `outcome` swapped
+/// to a value this family does not accept proves the schema's own
+/// validation is what enforces this, not merely that the producer
+/// happens to always pass `Blocked`.
+#[test]
+fn paste_blocked_schema_rejects_any_outcome_other_than_blocked() {
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::PasteBlocked,
+        AuditOutcome::Applied,
+        crate::audit::AuditActionKind::TerminalPaste,
+        crate::audit::AuditActorKind::AppPolicy,
+        crate::audit::AuditActionSource::PolicyEngine,
+    );
+    record.project_id = Some(ProjectId::new_uuid());
+    record.terminal_id = Some(TerminalId::new_uuid());
+    record.reason_code = Some(AuditReasonCode::PastePolicy);
+
+    assert!(
+        record.validate().is_err(),
+        "outcome != Blocked must fail valid_paste_blocked -- a paste the user confirms has no \
+         valid encoding in this family, and this is the check that enforces it"
+    );
+}
+
 #[test]
 fn managed_launch_failure_is_recorded_after_authorization_without_process_attachment() {
     let dirs = TestAuditDirs::new("integration-managed-failure");

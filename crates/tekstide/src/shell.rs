@@ -401,8 +401,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             };
             let project_id = project.id().clone();
             let target_handle = TerminalRuntimeHandle::new(target.clone(), project_id.clone());
-            let active_handle =
-                active_terminal_focus(state).map(|id| TerminalRuntimeHandle::new(id, project_id));
+            let active_handle = active_terminal_focus(state)
+                .map(|id| TerminalRuntimeHandle::new(id, project_id.clone()));
 
             // No classification here -- every `Allow`/`Block`/
             // `RequiresConfirmation` originates from `evaluate`, exactly
@@ -420,6 +420,28 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     write_terminal_input(state, &target, &bytes);
                 }
                 Some(refusal) => {
+                    // RFC-018 PR-018-D: only a real `evaluate`-produced
+                    // `Block` is `paste_blocked` -- `valid_paste_blocked`
+                    // requires `outcome == Blocked`, and neither
+                    // `RequiresConfirmation` (a deferred decision this
+                    // slice forces into blocking only because PR-018-C's
+                    // dialog does not exist yet, not a real policy
+                    // refusal) nor `TooLarge` (a shell-level resource
+                    // bound that never reached `evaluate` at all, so it
+                    // has no `TerminalInputDecisionReason` to report) is
+                    // one. Auditing either would misrepresent *why*
+                    // nothing was written.
+                    if let TerminalPasteRefusal::Blocked(_) = &refusal {
+                        let mut audit_store = open_real_audit_store(&state.app_shell);
+                        let mut audit_health = tekstide_core::audit::AuditHealth::default();
+                        if let Some(store) = audit_store.as_mut() {
+                            let _ = tekstide_core::audit::AuditCoordinator::new(
+                                store,
+                                &mut audit_health,
+                            )
+                            .record_paste_blocked(project_id, target.clone());
+                        }
+                    }
                     // PR-018-C builds the dialog; until it exists,
                     // `RequiresConfirmation` blocks conservatively rather
                     // than writing anything -- "a multiline paste

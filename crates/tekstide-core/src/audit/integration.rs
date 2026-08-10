@@ -568,6 +568,29 @@ impl<'a> AuditCoordinator<'a> {
         );
         self.append_observation(&record)
     }
+
+    /// RFC-018 PR-018-D: `paste_blocked`'s first and only producer.
+    /// `reason_code` is fixed at `PastePolicy` -- `valid_paste_blocked`
+    /// does not distinguish *which* `TerminalInputDecisionReason`
+    /// `evaluate` returned (control-containing, wrong-project,
+    /// wrong-terminal, or trusted-UI-active all collapse to the same
+    /// `outcome == Blocked` record), so this producer takes no argument
+    /// for it -- there is nothing for a caller to get wrong by passing
+    /// the wrong one. **No pasted content, clipboard text, or command
+    /// text is ever a parameter here**: the frozen schema has no field
+    /// for any of them, so the type signature makes it impossible to
+    /// pass one in, not merely a discipline not to. Best-effort
+    /// (`append_observation`), matching every other producer in this
+    /// file: an audit write failing must never fail the paste
+    /// refusal it observes.
+    pub fn record_paste_blocked(
+        &mut self,
+        project_id: ProjectId,
+        terminal_id: TerminalId,
+    ) -> AuditObservationStatus {
+        let record = paste_blocked_record(project_id, terminal_id);
+        self.append_observation(&record)
+    }
 }
 
 fn trust_record(
@@ -608,6 +631,28 @@ fn plain_terminal_record(
     record.project_id = Some(project_id);
     record.terminal_id = Some(terminal_id);
     record.reason_code = reason_code;
+    record
+}
+
+/// `valid_paste_blocked` fixes `outcome`, `action_kind`, `actor_kind`,
+/// `action_source`, and `reason_code` all to a single combination --
+/// unlike `plain_terminal_record`, there is nothing here for a caller
+/// to choose, so this function takes no outcome/reason parameters at
+/// all.
+fn paste_blocked_record(
+    project_id: crate::project::ProjectId,
+    terminal_id: TerminalId,
+) -> DurableAuditRecordV1 {
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::PasteBlocked,
+        AuditOutcome::Blocked,
+        AuditActionKind::TerminalPaste,
+        AuditActorKind::AppPolicy,
+        AuditActionSource::PolicyEngine,
+    );
+    record.project_id = Some(project_id);
+    record.terminal_id = Some(terminal_id);
+    record.reason_code = Some(AuditReasonCode::PastePolicy);
     record
 }
 

@@ -45,6 +45,12 @@ also a real desktop GUI application shell with mode switching. It includes:
   detection so the session bar reflects what is actually running rather than
   what was last launched. RFC-019 still owns the editor/explorer main-area
   content.
+- Real clipboard paste into a focused terminal (`Ctrl+Shift+V`, RFC-018),
+  routed through the same RFC-009 policy as everything else that reaches a
+  PTY: single-line and empty pastes go through, control-containing pastes
+  are blocked outright, and multi-line pastes are blocked too — a rendered
+  confirmation dialog is not built yet, so a paste that would need one is
+  refused conservatively rather than silently allowed.
 
 It is not yet the full AI CLI workbench. There is no editor, no rendered
 paste/approval/trust dialogs, no adapter-spawn pathway that would make command
@@ -55,8 +61,8 @@ overwrite-confirmation UI, and no cross-platform evidence beyond Linux. There is
 unreachable.
 
 Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked
-root/symlink access, audit-store recovery outcomes, and plain-terminal session starts
-and terminations. Paste, restricted-feature, safe-close, configuration-change,
+root/symlink access, audit-store recovery outcomes, plain-terminal session starts and
+terminations, and paste refusals. Restricted-feature, safe-close, configuration-change,
 transcript-purge, and project-added producers are defined in the audit schema but not
 yet wired. The command-approval producers are wired and tested but produce nothing,
 because nothing calls them — see below.
@@ -110,6 +116,7 @@ The shell is keyboard-navigable by design. These bindings exist today
 | `Ctrl+Alt+P` | Open the Project Board |
 | `Ctrl+Alt+M` | Toggle Content / Terminal mode for the active project |
 | `Ctrl+Alt+T` | Launch a real terminal in the active project (switches to Terminal mode) |
+| `Ctrl+Shift+V` | Paste the clipboard into the focused terminal, subject to RFC-009's policy |
 | `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |
 
 `Ctrl+Shift+P` is reserved for a command palette that does not exist yet — it is
@@ -144,9 +151,18 @@ recorded in it, launch or exit. The store lives at
 (`~/.local/state/tekstide/audit/audit.sqlite3` if `XDG_STATE_HOME` is unset).
 **This is no longer gated behind a developer-only flag** — `TEKSTIDE_TERMINAL_DEMO`
 still exists for diagnostic use, but the real `Ctrl+Alt+T` binding is what
-ordinary use reaches, and it opens the same store. There is no in-app command
-to purge it yet; delete the `audit/` directory
-to reset it, or see
+ordinary use reaches, and it opens the same store.
+
+Pasting into a terminal (`Ctrl+Shift+V`, RFC-018) writes to the same store when the
+paste is refused: a `paste_blocked` event, naming only that a paste was blocked and
+which project/terminal it was aimed at — never the pasted content, the clipboard
+text, or the command it would have produced. This family's schema has no field for
+any of those either. A paste the policy *allows* is not audited at all; only
+refusals are, a known and disclosed limitation of the schema rather than an
+oversight — see the RFC for why.
+
+There is no in-app command to purge the audit store yet; delete the `audit/`
+directory to reset it, or see
 [`rfcs/done/013-durable-audit-store-and-local-data-policy.md`](rfcs/done/013-durable-audit-store-and-local-data-policy.md)
 for the store's full retention and purge policy.
 
