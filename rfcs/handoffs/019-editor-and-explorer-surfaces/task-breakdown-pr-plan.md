@@ -2,7 +2,7 @@
 title: "RFC-019: Editor and Explorer Surfaces - Task Breakdown / PR Plan"
 rfc: "RFC-019"
 rfc_file: "../../proposed/019-editor-and-explorer-surfaces.md"
-status: "Accepted 2026-08-10 — ready for implementation"
+status: "Accepted 2026-08-10 — PR-019-B implemented, not yet reviewed"
 target_milestone: "M10"
 created: "2026-08-10"
 ---
@@ -36,6 +36,10 @@ Review gate:
 - **Open question 2 answered**: does the explorer show a symlink's target? Decide with
   escaping already in place, and record which and why.
 - No filesystem walking in the shell — render what core's scan provides.
+
+**Discharged, implemented 2026-08-10 — full detail in `qa-evidence.md`.** Every gate item above is met: the starting-state enumeration is pinned by a permanent test (`scan_active_project_explorer_directory_has_exactly_the_two_named_production_call_sites`, mirroring RFC-018's own named-call-site tests); the bidi case is tested and ablated (removing `quote_untrusted` from `node_line` makes the test fail with the raw `\u{202e}` character in the panic's own output, then reverted); all four `*_label` functions are confirmed uncalled by a source-text scan; `NFR-UX-002` is checked exhaustively across all 16 state×symlink combinations, not sampled; open question 2 is answered (indicator only, no target shown — see `qa-evidence.md` for the reasoning); no `std::fs` call exists in `surface/explorer.rs`. **One item beyond the gate's own text**: `ProjectExplorerStatus::Error`'s message also needed escaping (embeds an attacker-influenced path via `ExplorerScanError`'s `Display`) — found while writing the catalog message, not named in the RFC's own text, carried here so PR-019-C/D's reviewers know the same check applies to any other core-constructed error message they render.
+
+**Carried forward into PR-019-C**: `SurfaceInput::key()` now exists (`input.rs`, `pub(crate)`) — the first real consumer of routed surface keyboard input. `text_document_state_label` (the fourth named hardcoded-English producer) is still uncalled anywhere; PR-019-C owns discharging it the same way this slice discharged the other three.
 
 ## PR-019-C — The editor, read-only
 

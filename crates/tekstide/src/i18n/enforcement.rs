@@ -484,6 +484,21 @@ fn generic_args() -> CatalogArgs<'static> {
         .trusted_symbol("reason", "limit")
         .number("limit", 1u32)
         .number("line_count", 1u32)
+        // RFC-019 PR-019-B: `explorer-node-entry`'s four selectors and
+        // `explorer-status-error`'s untrusted message. `name`/`message`
+        // go through the real `quote_untrusted` here too, not a plain
+        // string -- `CatalogArgs::untrusted` only accepts a `DisplayText`.
+        .trusted_symbol("kind", "file")
+        .untrusted(
+            "name",
+            &tekstide_core::text_safety::quote_untrusted("fixture.txt"),
+        )
+        .trusted_symbol("state", "available")
+        .trusted_symbol("symlink", "none")
+        .untrusted(
+            "message",
+            &tekstide_core::text_safety::quote_untrusted("fixture error"),
+        )
 }
 
 fn shipped_additional_locales() -> Vec<String> {

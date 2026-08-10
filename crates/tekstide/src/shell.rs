@@ -224,6 +224,16 @@ pub struct State {
     /// `Allow` -- see its own doc comment), and is cleared at the start
     /// of every new paste attempt.
     terminal_paste_notice: Option<TerminalPasteRefusal>,
+    /// RFC-019 PR-019-B: which row of the *currently rendered* explorer
+    /// listing the keyboard cursor is on. Shell-local UI state, not a
+    /// duplicate of core's -- core has no concept of "which row a
+    /// keyboard cursor is over," only `selected_explorer_path` (which
+    /// directory is scanned). The direct analogue of `PasteConfirmButton`/
+    /// `ModalButton`'s focus index: a rendering/interaction concern, not
+    /// part of the document model `TextCursor`/`TextViewport` cover.
+    /// Reset to `0` every time a scan succeeds, so it can never point
+    /// past the end of a freshly-replaced row list.
+    explorer_highlight: usize,
 }
 
 impl State {
@@ -287,6 +297,7 @@ impl State {
             terminal_panes,
             terminal_launch_notice: None,
             terminal_paste_notice: None,
+            explorer_highlight: 0,
         }
     }
 
@@ -394,6 +405,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                 }
                 state.app_shell.dispatch(command);
+                // RFC-019 PR-019-B: any command that could have changed
+                // which project or mode is active is a point where the
+                // explorer tree might now need a scan it has never had --
+                // `scan_active_project_explorer_directory` had no
+                // production caller before this slice (confirmed by
+                // enumeration), so nothing else triggers the first one.
+                ensure_explorer_scanned(state);
             }
             // RFC-018 PR-018-B: `PasteIntoTerminal` maps to no
             // `AppCommand` (there is no core route/mode change), so it
@@ -405,10 +423,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return attempt_paste_into_terminal(state);
             }
         }
-        Message::Input(RoutedInput::Surface(_surface_input)) => {
-            // No surface exists yet to receive this (PR-015-D). The
-            // routing that produced it is proven correct in
-            // `input::tests`; there is nothing to consume here yet.
+        Message::Input(RoutedInput::Surface(surface_input)) => {
+            // RFC-019 PR-019-B: the explorer tree is the first real
+            // consumer of this routed input (PR-015-D's own note above
+            // named this exact arm as where "select a row and open it"
+            // would eventually land). Every other zone still has nothing
+            // to consume it.
+            if surface_input.target() == FocusZone::Sidebar {
+                handle_explorer_key(state, surface_input.key());
+            }
         }
         Message::Input(RoutedInput::Terminal(text_stream)) => {
             // `terminal_stream_targets_a_live_terminal` gets its first
@@ -828,6 +851,105 @@ fn launch_terminal(
     }
 
     Ok(pane)
+}
+
+/// RFC-019 PR-019-B: the explorer tree needs a scan to render, and
+/// `scan_active_project_explorer_directory` had no production caller
+/// anywhere before this slice. A bounded, synchronous, local directory
+/// listing does not need a `Task` round trip the way the clipboard read
+/// in [`attempt_paste_into_terminal`] does -- it is called directly,
+/// after any command that could have changed which project or mode is
+/// active. A scan failure is recorded as `ProjectExplorerStatus::Error`
+/// by `ProjectContentWorkspace` itself and rendered by
+/// `surface::explorer::view`, not silently dropped; the `Result` here is
+/// therefore intentionally not propagated further.
+fn ensure_explorer_scanned(state: &mut State) {
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    if project.mode() != ProjectMode::Content {
+        return;
+    }
+    if project.content_workspace().explorer_scan().is_some() {
+        return;
+    }
+    let _ = state
+        .app_shell
+        .scan_active_project_explorer_directory(std::path::PathBuf::new());
+    state.explorer_highlight = 0;
+}
+
+/// RFC-019 PR-019-B: the explorer tree's own keyboard navigation --
+/// Up/Down move the highlight among the rows [`crate::surface::explorer::view`]
+/// is currently rendering, Enter on a directory (or the synthetic parent
+/// row) re-scans into it. A no-op outside Content mode or without a
+/// scan yet -- there is nothing to navigate. Enter on a file row is
+/// PR-019-C's job (opening a document); nothing here does it.
+///
+/// Every borrow of `state.app_shell` ends before `action` is bound, so
+/// the mutations below (`state.explorer_highlight`, the real rescan
+/// call) do not conflict with it -- computing an owned `Action` first,
+/// then matching on it, is what makes that true rather than merely
+/// hoped for.
+fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
+    enum Action {
+        MoveUp,
+        MoveDown,
+        Navigate(std::path::PathBuf),
+        None,
+    }
+
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    if project.mode() != ProjectMode::Content {
+        return;
+    }
+    let Some(scan) = project.content_workspace().explorer_scan() else {
+        return;
+    };
+    let row_count = crate::surface::explorer::visible_rows(scan).len();
+    if row_count == 0 {
+        return;
+    }
+
+    let action = match &key.key {
+        keyboard::Key::Named(keyboard::key::Named::ArrowDown) => Action::MoveDown,
+        keyboard::Key::Named(keyboard::key::Named::ArrowUp) => Action::MoveUp,
+        keyboard::Key::Named(keyboard::key::Named::Enter) => {
+            let rows = crate::surface::explorer::visible_rows(scan);
+            match rows.get(state.explorer_highlight) {
+                Some(crate::surface::explorer::ExplorerRow::Parent) => Action::Navigate(
+                    scan.directory
+                        .selected_relative_path
+                        .parent()
+                        .map(std::path::Path::to_path_buf)
+                        .unwrap_or_default(),
+                ),
+                Some(crate::surface::explorer::ExplorerRow::Node(node))
+                    if node.kind == tekstide_core::project::root::ExplorerNodeKind::Directory =>
+                {
+                    Action::Navigate(node.relative_path.clone())
+                }
+                _ => Action::None,
+            }
+        }
+        _ => Action::None,
+    };
+
+    match action {
+        Action::MoveDown => {
+            state.explorer_highlight = (state.explorer_highlight + 1).min(row_count - 1);
+        }
+        Action::MoveUp => {
+            state.explorer_highlight = state.explorer_highlight.saturating_sub(1);
+        }
+        Action::Navigate(path) => {
+            let _ = state.app_shell.scan_active_project_explorer_directory(path);
+            state.explorer_highlight = 0;
+        }
+        Action::None => {}
+    }
 }
 
 /// Terminal launch UX handoff: the real `Ctrl+Alt+T` path, calling
@@ -1672,7 +1794,7 @@ fn active_project_workspace_view(state: &State) -> Element<'_, Message> {
         .active_project()
         .map(tekstide_core::project::ProjectSession::mode);
 
-    row![sidebar_view(state), main_area_view(state, mode)]
+    row![sidebar_view(state, mode), main_area_view(state, mode)]
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -1745,9 +1867,36 @@ pub(crate) fn main_area_label(state: &State, mode: Option<ProjectMode>) -> Strin
     )
 }
 
-fn sidebar_view(state: &State) -> Element<'_, Message> {
+/// RFC-019 PR-019-B: `ProjectMode::Content` renders the real explorer
+/// tree, the same shape `main_area_view` already uses to substitute real
+/// content for `TerminalImmersion`'s placeholder. Every other mode (and
+/// no active project) keeps the plain placeholder -- there is no
+/// explorer to show without an active project, and `Content` is the only
+/// mode this slice's scope covers (RFC-019 does not touch
+/// `TerminalImmersion`).
+fn sidebar_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message> {
     let focused = state.focus == FocusZone::Sidebar;
-    container(text(sidebar_label(state)))
+    let content: Element<'_, Message> = match mode {
+        Some(ProjectMode::Content) => {
+            let workspace = state
+                .app_shell
+                .state()
+                .active_project()
+                .map(tekstide_core::project::ProjectSession::content_workspace);
+            match workspace {
+                Some(workspace) => crate::surface::explorer::view(
+                    workspace.explorer_scan(),
+                    workspace.explorer_status(),
+                    state.explorer_highlight,
+                    &state.catalog,
+                    &state.theme,
+                ),
+                None => text(sidebar_label(state)).into(),
+            }
+        }
+        _ => text(sidebar_label(state)).into(),
+    };
+    container(content)
         .width(Length::Fixed(220.0))
         .height(Length::Fill)
         .padding(16)

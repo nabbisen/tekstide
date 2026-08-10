@@ -2,7 +2,7 @@
 title: "RFC-019: Editor and Explorer Surfaces - Acceptance / QA Checklist"
 rfc: "RFC-019"
 rfc_file: "../../proposed/019-editor-and-explorer-surfaces.md"
-status: "Accepted 2026-08-10 — not started"
+status: "Accepted 2026-08-10 — PR-019-B implemented, not yet reviewed"
 target_milestone: "M10"
 created: "2026-08-10"
 ---

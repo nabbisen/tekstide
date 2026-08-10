@@ -215,3 +215,42 @@ terminal-paste-refused = { $reason ->
     [too-large] Paste blocked: larger than 256 KiB.
    *[trusted-ui] Paste blocked while a dialog is open.
 }
+
+# RFC-019 PR-019-B: the explorer tree is trusted chrome, so `$name` is
+# untrusted text -- escaped via `text_safety::quote_untrusted` before it
+# ever reaches `CatalogArgs::untrusted`, never the raw file name. `$kind`,
+# `$state`, and `$symlink` are compile-time symbols from
+# `ExplorerNodeKind`/`ExplorerNodeState`/`FileAccessSymlinkStatus` --
+# never the enum's own `Debug` text or `tekstide-core`'s hardcoded-English
+# label functions (`explorer_node_kind_label` and friends), which is
+# exactly what this one message replaces. One lookup, four selectors,
+# matching `session-bar-entry`'s own shape rather than concatenating
+# separately-resolved strings.
+explorer-node-entry = { $kind ->
+    [directory] [DIR]
+    [other] [OTHER]
+   *[file] [FILE]
+} { $name }{ $state ->
+    [collapsed] {" (collapsed)"}
+    [blocked] {" (blocked)"}
+    [unreadable] {" (unreadable)"}
+   *[available] {""}
+}{ $symlink ->
+    [in-root] {" [symlink]"}
+    [unresolved] {" [broken symlink]"}
+    [escapes-root] {" [symlink escapes root]"}
+   *[none] {""}
+}
+
+explorer-parent-entry = [UP] ..
+
+explorer-empty = This directory is empty.
+
+explorer-truncated-notice = Listing truncated — not all entries are shown.
+
+# `$message` here is `ProjectExplorerStatus::Error`'s own message
+# (`ExplorerScanError`'s `Display`), which embeds the target's relative
+# path -- attacker-influenced, the same class the node names above are.
+# Escaped via `text_safety::quote_untrusted` before it reaches
+# `CatalogArgs::untrusted`, same as `$name`.
+explorer-status-error = Explorer error: { $message }

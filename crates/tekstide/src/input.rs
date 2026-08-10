@@ -148,6 +148,16 @@ impl SurfaceInput {
     pub fn target(&self) -> FocusZone {
         self.target
     }
+
+    /// RFC-019 PR-019-B: the explorer tree is the first real consumer of
+    /// the key itself -- until now `shell.rs`'s `Surface` arm was a
+    /// documented no-op that only ever needed `target()` (see PR-015-D's
+    /// note there). `KeyPress` is `pub` with `pub` fields; returning a
+    /// reference rather than requiring the caller to import
+    /// `iced::keyboard` types through this accessor's own signature.
+    pub(crate) fn key(&self) -> &KeyPress {
+        &self.key
+    }
 }
 
 /// What [`route_non_modal_input`] decided a key press means. Includes

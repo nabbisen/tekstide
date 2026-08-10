@@ -1969,6 +1969,40 @@ fn terminal_input_policy_evaluate_has_exactly_one_production_call_site() {
     );
 }
 
+/// RFC-019 PR-019-B's own review gate: "the starting state confirmed:
+/// the content-model accessors had no production caller, shown by
+/// enumeration." Confirmed before writing any code in this slice --
+/// `grep -rn "scan_active_project_explorer_directory\|open_active_project_text_document\|
+/// replace_active_project_text\|save_active_project_text_document\|refresh_active_project_text_document"
+/// crates/tekstide crates/tekstide-core` matched only `#[cfg(test)]`
+/// call sites and the `AppState`/`ApplicationShell` definitions
+/// themselves. What this test pins is the state that confirmation left
+/// behind, the same shape
+/// [`terminal_input_policy_evaluate_has_exactly_one_production_call_site`]
+/// uses: **exactly two** named, intentional production
+/// `.scan_active_project_explorer_directory(` call sites --
+/// [`ensure_explorer_scanned`] (the first scan, triggered on entering
+/// Content mode with none yet) and [`handle_explorer_key`] (a rescan,
+/// triggered by the user selecting a directory) -- named explicitly
+/// rather than hidden, the same shape
+/// `write_terminal_input_has_exactly_the_three_named_production_call_sites`
+/// uses for a different property. A third call site fails this test by
+/// name.
+#[test]
+fn scan_active_project_explorer_directory_has_exactly_the_two_named_production_call_sites() {
+    let shell_rs_path = format!("{}/src/shell.rs", env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(&shell_rs_path).expect("shell.rs must be readable");
+    let enclosing_functions =
+        enclosing_functions_for_call_site(&source, ".scan_active_project_explorer_directory(");
+
+    assert_eq!(
+        enclosing_functions,
+        vec!["ensure_explorer_scanned", "handle_explorer_key"],
+        "scan_active_project_explorer_directory must have exactly these two named production \
+         call sites: {enclosing_functions:?}"
+    );
+}
+
 /// RFC-018 PR-018-D: mirrors the two enumeration tests above for the
 /// audit producer. Exactly one `.record_paste_blocked(` call site,
 /// inside `update`, guarded by the `TerminalPasteRefusal::Blocked`
