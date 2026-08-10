@@ -74,6 +74,10 @@ Review gate:
 - **RFC-014 PR-014-D's spike screenshot is not cited.** Six slices and counting.
 - Each screenshot states what it proves **and does not**.
 
+**Discharged, implemented and captured 2026-08-10 — nine screenshots against `evidence/pr-018-e/`, detailed in `qa-evidence.md`.** The distinguishing claim is stated in two parts, primary first per the review gate's own instruction: keystroke suppression while the dialog is open (behavioural, user-checkable, backed by a positive control proving keystrokes were reaching the app), and spatial confinement to the pane boundary (structural, measured in pixels from these screenshots, not estimated from a different modal's). A first attempt the same day stopped short after an unexplained dialog-dismissal failure rather than push through it; the retry recorded here completed all nine captures with no recurrence, on a machine confirmed to have no other GUI automation running.
+
+**Carried forward into PR-018-F: the offset a user would need to notice is thin, and measured.** At this session's window size, the genuine dialog's left edge sits roughly 180 px left of the content pane's own left edge — real, but not large, and nothing in this evidence shows an untrained user would register it unprompted. Response 173's suggestion — dimming the background so the grid's inability to dim the sidebar becomes an unmissable rather than a measured difference — was deliberately not implemented in this slice (evidence work should not also change what it evidences). PR-018-F should decide whether to recommend it, with these screenshots as the argument either way.
+
 ## PR-018-F — Closeout
 
 Scope: checklist, QA evidence, known limitations, answers to the RFC's open questions, and an explicit statement of what may be claimed.

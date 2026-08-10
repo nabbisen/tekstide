@@ -60,10 +60,12 @@ pathway that would make command approval reachable, no Git-based change
 detection, file watcher, or overwrite-confirmation UI, and no cross-platform
 evidence beyond Linux. There is **no screen-reader support** — not limited,
 not planned, absent for the life of the `iced` substrate decision (RFC-014).
-Command approval (below) remains implemented but unreachable. Nothing here
-claims the paste dialog is distinguishable from terminal content trying to
-imitate it — that is RFC-018's own trusted-UI evidence obligation, not yet
-discharged.
+Command approval (below) remains implemented but unreachable. RFC-018's
+trusted-UI evidence shows two checkable properties distinguishing the real
+paste dialog from terminal output imitating it — keystrokes typed while it
+is open never reach the terminal, and its rendered region can cross into
+chrome the terminal grid can never draw into — without claiming an
+untrained user would notice either unprompted.
 
 Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked
 root/symlink access, audit-store recovery outcomes, plain-terminal session starts and

@@ -2,7 +2,7 @@
 title: "RFC-018: Rendered Paste Protection and Trusted-UI Evidence - QA Evidence"
 rfc: "RFC-018"
 rfc_file: "../../proposed/018-paste-protection-and-trusted-ui-evidence.md"
-status: "PR-018-B/D accepted (responses 170, 171) — PR-018-C implemented 2026-08-10, not yet reviewed"
+status: "PR-018-B/C/D accepted (responses 170, 171, 172) — PR-018-E captured 2026-08-10, not yet reviewed"
 target_milestone: "M9"
 created: "2026-08-08"
 ---
@@ -88,6 +88,8 @@ Implemented 2026-08-10, not yet reviewed. Against `task-breakdown-pr-plan.md`'s 
 
 **Not done, correctly**: no trusted-UI evidence (PR-018-E's job — screenshots, adversarial imitation, the distinguishing-property claim). The accept path still produces no audit record (RFC-018's own frozen-schema gap, restated in Known Limitations, not this slice's to fix).
 
+**Approved 2026-08-10 (response 172).** No required items. `ModalContent`'s exclusivity, the accept-writes-full-content-not-preview separation, and the truncate-before-escape order were each checked directly rather than accepted on description. Two obligations discharged in this slice (`trusted_ui_state`'s specific mapping, the moot truncated-preview concern) confirmed retired; the focus-cycle images carried forward into PR-018-E, below.
+
 ## PR-018-D — The `paste_blocked` audit producer
 
 Implemented 2026-08-10, not yet reviewed. Against `task-breakdown-pr-plan.md`'s review gate:
@@ -112,7 +114,33 @@ Implemented 2026-08-10, not yet reviewed. Against `task-breakdown-pr-plan.md`'s 
 
 ## PR-018-E — Trusted-UI evidence
 
-Pending implementation.
+Captured 2026-08-10 against the rebuilt release binary (`cargo build --release -p tekstide`), launched via `.git-exclude/tools/launch-scratch-gui.sh` against a scratch project. Real synthetic input (`xdotool windowfocus`, `--clearmodifiers`), real clipboard content (`wl-copy`), screenshots via `niri msg action screenshot-window`. Nine screenshots under `evidence/pr-018-e/`, all 1250×1378, committed alongside this entry.
+
+**A first attempt the same day produced five of nine artifacts, then stopped rather than push through an unexplained dismissal failure** — filed as review request 174. The reviewer found two separate problems, not one: their own correction in the prior response (173) had measured the spatial claim from the wrong artifact (the layer-demo modal, not the paste dialog, which is wider and behaves differently), and the primary behavioral artifact (keystrokes suppressed while the dialog is open) lacked a positive control, so it could not distinguish real suppression from keystrokes never reaching the app during a session where focus was independently observed drifting to an unrelated window. This entry is the retry. `00` and `04` from the first attempt were kept (response 174 judged them sufficient, redoing them risked a worse capture for no gain); `01`–`03` and `05`–`08` are fresh captures from this retry, run only after confirming no other GUI-automation process was running (`ps aux`, none found) — the one new condition response 174 attached.
+
+**`00`/`01` — a real terminal, a real dialog, live output continuing underneath.** `00` shows a bounded, self-terminating counter script (90 ticks, one per second) running in the foreground of a real `Ctrl+Alt+T` terminal. `01` sets real clipboard content via `wl-copy` (`echo hello-from-a-real-paste\necho this-is-line-two`), triggers `Ctrl+Shift+V`, and shows the real `Confirm Paste` dialog open over the still-advancing counter (`tick 1`–`tick 17` visible above and below it). **An unplanned finding, security-relevant**: the preview renders the literal newline between the two lines as `<U+000A>` — `quote_untrusted` escapes `\n` because it is category `Cc`. Pasted content therefore cannot break the preview into multiple visual rows, which is what would let it construct fake lines imitating the dialog's own controls — the mechanism `05` exercises directly.
+
+**`02`/`03` — suppression, now with the positive control response 174 required.** With the dialog open, `xdotool type --delay 80 suppresstest` reaches no visible character in the terminal grid. Before dismissing, `Tab` is sent and the `> ` marker visibly moves from `Cancel` to `Paste` in the same screenshot (`02`) — proving the window held focus and was receiving keystrokes at the moment `suppresstest` was typed, so its absence is suppression, not non-delivery. `Escape` then dismisses the dialog cleanly (`03`); `suppresstest` is absent from the full transcript and the counter (`tick 68`–`tick 90`, then the prompt) shows no interruption. Focus was verified via `xdotool getactivewindow getwindowname` immediately before and after every keystroke in this sequence; plain `windowfocus` held it throughout the whole retry — `windowactivate` was never needed this time — and `Escape` dismissed correctly on every attempt in this session, including the hostile-content and focus-cycle dialogs captured afterward. This is consistent with response 174's diagnosis that the earlier anomaly was a concurrent-automation confound rather than an application defect, though this retry can only show the anomaly did not recur under the condition response 174 named, not rule out every other explanation.
+
+**`04` — spatial confinement, measured, not estimated.** A script draws styled text approximating the real dialog's title, body, and button labels inside the terminal grid, plus an escape attempt via absolute cursor addressing to the grid's own row/column origin (`TOP-LEFT-OF-MY-OWN-GRID`). Pixel measurement (a horizontal scan of `00`, `01`, and `04` at shared y-coordinates, via `magick … txt:-`) gives:
+
+- Sidebar/content-pane boundary (from `00`, no dialog open): a grey divider at x≈438, a blue window-chrome border at x≈440–443, content pane from x≈444.
+- Genuine dialog (`01`, y=650): blue dialog border from x≈264 to x≈890 — starting well left of the pane boundary, inside what would otherwise be sidebar-background pixels.
+- Adversarial imitation (`04`, same y): no pixel left of x≈444 differs from the ordinary sidebar/divider/border colors found in `00` — the imitation's own drawn text starts at x≈472 (inside the pane, at its normal text inset) and never crosses x≈444, including at the row carrying the origin-escape attempt.
+
+The genuine dialog's rendered rectangle spans into the sidebar's x-range; the imitation, even where it deliberately tries to draw at the grid's own (1,1) origin, cannot leave the pane at any x less than the pane's own left edge. That is the Z-layer/clipping property RFC-018 asked to be shown rather than asserted, now with the actual pixel boundary named from this session's own artifacts rather than assumed from a different modal's screenshot.
+
+**Caveat, unchanged from response 173's instruction:** confinement is a real, checkable guarantee — chrome pixels can never be terminal output, in any mode, for any escape sequence the filter accepts. It is not the same claim as "a user will notice." Nothing measured here establishes that an untrained user, mid-task, would register roughly 180 px of horizontal offset (dialog left edge x≈264 vs. this session's pane left edge x≈444) as suspicious rather than as ordinary layout variation. This number describes only the sidebar width captured in these nine screenshots, not every layout the app can render — stating it more generally would repeat the same generalization error response 174 corrected.
+
+**`05` — the vector specific to a paste dialog.** Clipboard content built to imitate the dialog's own chrome: a fake title (`Confirm Paste`), fake body text, and fake control lines (`> Paste` / `  Cancel`) matching this dialog's real labels rather than the RFC's placeholder `Accept`/`Reject` wording, for a closer imitation. Opened via the same `Ctrl+Shift+V` path, the entire four-line hostile string collapses into one escaped preview row — `Confirm Paste<U+000A>This paste contains 2 lines. Allow it to reach the terminal?<U+000A>> Paste<U+000A>  Cancel` — rendered as inert text above the dialog's real, functional `  Paste` / `> Cancel` lines. The fake `> Paste` inside the preview carries no marker semantics (it is one escaped substring among many) and cannot be tabbed to; the real controls beneath it are the only ones focus ever lands on. This is `quote_untrusted` plus the escaped-newline property `01` already showed, now exercised against content deliberately shaped to attack it.
+
+**`06`/`07`/`08` — the focus cycle, as real screenshots, carried in from PR-018-C per response 172.** A fresh dialog opens with `> Cancel` focused (`06`, matching the default `PasteConfirmButton::Reject`), `Tab` moves the marker to `> Paste` (`07`), a second `Tab` returns it to `> Cancel` (`08`) — the same property `paste_dialog_focus_cycles_between_accept_and_reject_and_returns` already proves at the state level, now shown moving in a rendered image rather than only asserted against a struct field.
+
+**The distinguishing claim, stated in the order response 173 required.** Primary: while the genuine dialog is open, keystrokes do not reach the terminal (`02`/`03`, now with the positive control that makes this suppression rather than an artifact of non-delivery). Support: the genuine dialog's rendered region crosses into chrome the terminal grid can structurally never draw into, regardless of cursor-positioning escapes (`01`/`04`, measured). Both are checkable by a real user performing the same two actions — type, then look — not asserted from source alone.
+
+**Scratch instance shut down cleanly** (`kill`, confirmed via `ps aux`, no orphaned shell) after the ninth capture.
+
+**Not done, correctly**: no changes to the dialog itself — this slice is evidence only, per response 173's explicit instruction not to add background-dimming or any other visual change mid-slice. Whether that dimming is worth recommending, given how thin the un-taught spatial distinction measured above actually is, is carried to PR-018-F as a recommendation rather than acted on here.
 
 ## PR-018-F — Closeout
 
