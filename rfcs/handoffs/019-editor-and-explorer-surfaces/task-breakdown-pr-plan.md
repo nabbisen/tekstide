@@ -2,7 +2,7 @@
 title: "RFC-019: Editor and Explorer Surfaces - Task Breakdown / PR Plan"
 rfc: "RFC-019"
 rfc_file: "../../proposed/019-editor-and-explorer-surfaces.md"
-status: "Accepted 2026-08-10 — PR-019-B implemented, not yet reviewed"
+status: "Accepted 2026-08-10 — PR-019-B accepted (response 180); PR-019-C implemented, not yet reviewed"
 target_milestone: "M10"
 created: "2026-08-10"
 ---
@@ -57,6 +57,10 @@ Review gate:
 - **The 4 MiB refusal is rendered**, not silently empty, and uses the existing policy —
   no second bound introduced.
 - Every user-facing word through `Catalog`.
+
+**Discharged, implemented 2026-08-11 — full detail in `qa-evidence.md`.** The bidi ablation runs in the required opposite direction from PR-019-B's own (temporarily escaping `body_text` makes the raw-preservation test fail, not pass) — confirmed once during review, reverted, not kept as a permanently-failing test. `text_document_state_label` (carried forward from PR-019-B as this slice's obligation) is discharged the same way the other three were: a source-scan test, `TextDocumentState` routed through `editor-chrome`'s own selector. **One item beyond this gate's own text, found the same way PR-019-B found `explorer-status-error`'s**: `TextDocumentOpenError`'s `Display` also embeds the target's path in every variant including the 4 MiB refusal this gate names — escaped before it reaches the catalog. **Cursor/viewport rendering deferred, not silently dropped**: this read-only slice has nothing that needs to know a cursor position (no editing happens), so no indicator or movement is wired — carried to PR-019-D below, which is where cursor state first has a reason to be read. **Both surfaces confirmed on screen**, per response 180's non-blocking request — two real screenshots (`evidence/pr-019-c-01`, `-02`), not deferred to PR-019-E: the explorer's live scan (including its own bidi-override entry) and the editor opening two real files, one of them the bidi-named one, confirming the chrome escaping path is real end to end, not only unit-tested.
+
+**Carried forward into PR-019-D**: cursor/viewport rendering and movement, now that editing gives them a reason to exist. A pre-existing navigation gap noted for completeness, not this slice's to fix: no `NavigationAction` maps to `AppCommand::OpenActiveProjectWorkspace` directly; reaching the workspace route requires `Ctrl+Alt+M` or `Ctrl+Alt+T` as a side effect of a mode/terminal change. Unrelated to what either surface renders, but worth naming so a future GUI-evidence session does not rediscover it from scratch.
 
 ## PR-019-D — Editing and save
 

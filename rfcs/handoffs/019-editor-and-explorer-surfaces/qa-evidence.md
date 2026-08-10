@@ -2,7 +2,7 @@
 title: "RFC-019: Editor and Explorer Surfaces - QA Evidence"
 rfc: "RFC-019"
 rfc_file: "../../proposed/019-editor-and-explorer-surfaces.md"
-status: "PR-019-A accepted with the RFC — PR-019-B implemented 2026-08-10, not yet reviewed"
+status: "PR-019-A/B accepted (response 180) — PR-019-C implemented 2026-08-11, not yet reviewed"
 target_milestone: "M10"
 created: "2026-08-10"
 ---
@@ -59,9 +59,34 @@ Implemented 2026-08-10, not yet reviewed. Against `task-breakdown-pr-plan.md`'s 
 
 **Not done, correctly**: no editor (PR-019-C's job — a file row's Enter is a no-op here). No editing or save (PR-019-D). Screenshots deferred to PR-019-E's closeout, matching the RFC's own "Evidence Required" section shape (one shared evidence slice, not one per surface) rather than RFC-018's dedicated evidence slice, since RFC-019 has no PR-019-B-specific evidence gate item beyond the tests above.
 
+**Approved 2026-08-10 (response 180).** No required items. One non-blocking note: nothing yet demonstrated the surface reaches the screen (every test operates on plain functions returning `String`). Not required before PR-019-C, but asked to be confirmed alongside that slice's own GUI work rather than left until PR-019-E with three slices resting on an unverified surface. Discharged in PR-019-C's own entry below — both surfaces confirmed together, since PR-019-C's GUI session answers it for free.
+
 ## PR-019-C — The editor, read-only
 
-Pending implementation.
+Implemented 2026-08-11, not yet reviewed. Against `task-breakdown-pr-plan.md`'s review gate:
+
+**The text area renders raw — the opposite property from every other surface in this crate, and checked in the opposite direction.** `body_text(document: &TextDocument) -> String` is the one function in this crate that must never call `text_safety::quote_untrusted`; `view()` calls only this for the text area, `chrome_line` (below) for everything around it. `body_text_preserves_a_bidi_override_character_raw` opens a real file named with a `U+202E` sequence *in its content* and asserts the raw character survives and no `<U+202E>` marker appears. **Ablated in the opposite direction PR-019-B's own bidi test was**: temporarily wrapped `body_text`'s return in `quote_untrusted` and re-ran the raw-preservation test — it failed with the exact wrong value (`"\u{2068}echo proj<U+202E>gpj.exe\u{2069}"`, isolate marks and escape marker both present), then reverted. `asserting_the_escaped_form_would_fail_because_body_text_never_escapes` records the same property by construction: `body_text` has no code path that could produce an escape marker, so a test asserting one appears cannot pass without the function itself changing — the manual ablation is what demonstrated that, not asserted.
+
+**Chrome around the editor escapes — including a category the RFC's own text did not name.** `chrome_line` escapes the document's own path (`chrome_line_escapes_a_bidi_override_in_the_path`) exactly like an explorer node name. Writing `editor-open-error`'s `.ftl` comment surfaced the same finding PR-019-B's review made: `TextDocumentOpenError`'s `Display` embeds the target's relative path in *every* variant, including the 4 MiB `TooLarge` refusal this RFC explicitly asks to be rendered — escaped via `open_error_line` before it reaches the catalog, checked against a real oversized-file open failure in `opening_a_file_over_the_policy_bound_is_refused_and_rendered`, not only a synthetic message string.
+
+**Cursor and viewport are not duplicated.** `State` gained no cursor field — `body_text`/`chrome_line`/`view` all take `&TextDocument` and read `document.state()` directly; nothing in `crates/tekstide` stores a line/column pair of its own. This slice does not yet render a visible cursor indicator or wire cursor movement (read-only, per the RFC's own scope: no editing means nothing needs to know where an edit would land) — carried forward to PR-019-D, which is where cursor movement first has a reason to exist.
+
+**The 4 MiB refusal is rendered, using the real policy's own bound.** `opening_a_file_over_the_policy_bound_is_refused_and_rendered` writes a file one byte over `TextDocumentOpenPolicy::default().max_editable_bytes`, opens it for real, and asserts the rendered line contains that real bound (`4194304`), not a second one this module could have introduced by accident.
+
+**`text_document_state_label` (RFC-019's fourth and final named producer) is not called anywhere in this module** — checked by source-text scan, the same shape PR-019-B's own check uses for the other three. `TextDocumentState` renders through `editor-chrome`'s `$state` selector instead; `every_document_state_maps_to_a_distinct_symbol` checks all five variants map to distinct compile-time symbols directly (a pure function, no document needed for four of the five states this read-only slice cannot itself reach).
+
+**Every user-facing word through `Catalog`.** `editor-chrome`, `editor-empty`, `editor-open-error` — no hardcoded English in `editor.rs` beyond the catalog keys themselves.
+
+**Wired into the shell for real, and confirmed on screen — not left as untested plumbing.** `main_area_view` gained a `(Some(ProjectMode::Content), _)` arm rendering `surface::editor::view`, the same shape the `TerminalImmersion` arm already established. The explorer's Enter-on-a-file (a deliberate no-op in PR-019-B) now calls `open_active_project_text_document`. Response 180 asked, non-blocking, for confirmation that PR-019-B's explorer actually reaches the screen before PR-019-D builds further on it; since this slice's own GUI work answers that for free, both surfaces are confirmed together:
+
+- `evidence/pr-019-c-01-file-opened-real-content.png` — a real scratch project (`/tmp/pr-019-c-scratch`, not committed), the explorer sidebar showing four real entries including a live `proj<U+202E>gpj.exe` file (escaped to `[FILE] proj<U+202E>gpj.exe`, the same bidi-override class already live elsewhere in this project's own state), and the editor's main area showing `README.md`'s real content (`# demo project`, `some content here.`) after Tab (focus to sidebar) then Enter. Proves: the explorer renders a real scan, the highlight/selection mechanism works, Enter opens a real file, the editor renders real raw content in the main area. Does not prove anything about the 4 MiB refusal or `ExternalChangeDecision` (PR-019-D's).
+- `evidence/pr-019-c-02-bidi-filename-chrome-escaped.png` — the same session, Down then Enter to open the bidi-named file itself. The editor's own chrome header shows `proj<U+202E>gpj.exe`, escaped identically to the explorer's rendering of the same name, while the body renders the file's real content (`fake executable disguised as image`) raw. Proves: the editor's chrome escaping path is real, not only unit-tested, and is consistent with the explorer's. Does not prove the body would stay raw if *that* file's *content* (not name) carried a bidi character — `body_text_preserves_a_bidi_override_character_raw` covers that at the unit level; a third screenshot would have been the same shape as the first with no new information.
+
+**A genuine navigation gap found and worked around, not fixed (out of scope).** There is currently no `NavigationAction` binding that maps to `AppCommand::OpenActiveProjectWorkspace` directly — `SwitchActiveProject`'s own binding is `None`/`Configurable`, disclosed as such in `navigation.rs` already. The route only changes to `ActiveProjectWorkspace` as a side effect of `ToggleActiveProjectMode` (`Ctrl+Alt+M`) or `LaunchTerminal` (`Ctrl+Alt+T`) succeeding. Screenshots above used `Ctrl+Alt+M` twice (Content → TerminalImmersion → Content) to reach the workspace route while landing back on the mode this slice needed. Not a PR-019-C defect — this is pre-existing `0.5.x` navigation shape, unrelated to what this slice renders — noted here so a future reader does not read the double-toggle in the capture method as this slice's own workaround for something broken.
+
+**Gates**: `fmt --check`, `clippy --workspace --all-targets --all-features -D warnings`, full test suite (505 `tekstide-core`, unchanged + 175 `tekstide`, 9 net new in `surface/editor/tests.rs`), `git diff --check`. All passed.
+
+**Not done, correctly**: no editing (`replace_active_text` untouched — PR-019-D). No `ExternalChangeDecision` rendering (PR-019-D). No cursor/viewport indicator or movement (carried forward, see above).
 
 ## PR-019-D — Editing and save
 

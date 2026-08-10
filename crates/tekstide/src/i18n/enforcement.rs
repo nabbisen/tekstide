@@ -499,6 +499,16 @@ fn generic_args() -> CatalogArgs<'static> {
             "message",
             &tekstide_core::text_safety::quote_untrusted("fixture error"),
         )
+        // RFC-019 PR-019-C: `editor-chrome`'s untrusted path. `state`
+        // above is shared with `explorer-node-entry` -- "available" is
+        // not one of `editor-chrome`'s own arms, so it falls through to
+        // that message's `*[clean]` default, which is exactly what a
+        // completeness check needs (some resolvable string), not a
+        // property this fixture asserts a specific value for.
+        .untrusted(
+            "path",
+            &tekstide_core::text_safety::quote_untrusted("fixture.txt"),
+        )
 }
 
 fn shipped_additional_locales() -> Vec<String> {

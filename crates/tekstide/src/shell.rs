@@ -896,6 +896,7 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
         MoveUp,
         MoveDown,
         Navigate(std::path::PathBuf),
+        Open(std::path::PathBuf),
         None,
     }
 
@@ -931,6 +932,15 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
                 {
                     Action::Navigate(node.relative_path.clone())
                 }
+                // RFC-019 PR-019-C: a file row's Enter now opens it --
+                // PR-019-B left this arm absent entirely (a no-op by
+                // omission from the match, not by an explicit `_`),
+                // since there was no editor yet to open it into.
+                Some(crate::surface::explorer::ExplorerRow::Node(node))
+                    if node.kind == tekstide_core::project::root::ExplorerNodeKind::File =>
+                {
+                    Action::Open(node.relative_path.clone())
+                }
                 _ => Action::None,
             }
         }
@@ -947,6 +957,9 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
         Action::Navigate(path) => {
             let _ = state.app_shell.scan_active_project_explorer_directory(path);
             state.explorer_highlight = 0;
+        }
+        Action::Open(path) => {
+            let _ = state.app_shell.open_active_project_text_document(path);
         }
         Action::None => {}
     }
@@ -1917,6 +1930,11 @@ fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Messa
     // job).
     let content: Element<'_, Message> = match (mode, state.terminal_panes.is_empty()) {
         (Some(ProjectMode::TerminalImmersion), false) => terminal_workspace_view(state),
+        // RFC-019 PR-019-C: real content, the same shape the
+        // `TerminalImmersion` arm above already established for its own
+        // mode -- substitute the placeholder with a real surface rather
+        // than adding a third rendering path.
+        (Some(ProjectMode::Content), _) => content_mode_editor_view(state),
         _ => column![text(main_area_label(state, mode)).size(state.theme.font_size_body())]
             .spacing(6)
             .into(),
@@ -1927,6 +1945,31 @@ fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Messa
         .padding(16)
         .style(zone_style(state.theme, focused))
         .into()
+}
+
+/// RFC-019 PR-019-C: `ProjectMode::Content`'s real content, the
+/// analogue of [`terminal_workspace_view`] for the other mode. Always
+/// renders *something* real -- `surface::editor::view` itself handles
+/// "no document open yet" and "the last open attempt failed" -- falling
+/// back to the plain placeholder only when there is no active project at
+/// all to read a content workspace from (should not be reachable while
+/// routed to `ActiveProjectWorkspace`, the same `None` case
+/// `main_area_key` already documents).
+fn content_mode_editor_view(state: &State) -> Element<'_, Message> {
+    let workspace = state
+        .app_shell
+        .state()
+        .active_project()
+        .map(tekstide_core::project::ProjectSession::content_workspace);
+    match workspace {
+        Some(workspace) => crate::surface::editor::view(
+            workspace.active_document(),
+            workspace.status(),
+            &state.catalog,
+            &state.theme,
+        ),
+        None => text(main_area_label(state, Some(ProjectMode::Content))).into(),
+    }
 }
 
 /// RFC-017 PR-017-E: the session bar (real chrome, `theme`-sourced

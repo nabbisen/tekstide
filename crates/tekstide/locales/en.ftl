@@ -254,3 +254,27 @@ explorer-truncated-notice = Listing truncated — not all entries are shown.
 # Escaped via `text_safety::quote_untrusted` before it reaches
 # `CatalogArgs::untrusted`, same as `$name`.
 explorer-status-error = Explorer error: { $message }
+
+# RFC-019 PR-019-C: the editor's chrome header -- everything here is
+# chrome (RFC-016's editor exception applies only to the text area
+# itself), so `$path` is untrusted and escaped the same way an explorer
+# node name is. `$state` replaces `text_document_state_label` (the fourth
+# named hardcoded-English producer) -- a compile-time symbol from
+# `TextDocumentState`, never the label function's own English word.
+editor-chrome = { $path }{ $state ->
+    [dirty] {" (unsaved changes)"}
+    [external-changed] {" (changed on disk)"}
+    [conflict] {" (conflict)"}
+    [save-error] {" (save error)"}
+   *[clean] {""}
+}
+
+editor-empty = No file is open. Select a file in the explorer and press Enter.
+
+# `$message` is `TextDocumentOpenError`'s own `Display`, which -- like
+# `ExplorerScanError`'s -- embeds the target's relative path in every
+# variant, including the 4 MiB `TooLarge` refusal this message renders.
+# Escaped before it reaches the catalog, the same finding PR-019-B made
+# for `explorer-status-error` applied here before it needed catching in
+# review a second time.
+editor-open-error = Could not open file: { $message }

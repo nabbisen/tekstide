@@ -29,5 +29,6 @@
 //! `top_bar`/`status_bar`.
 
 pub mod board;
+pub mod editor;
 pub mod explorer;
 pub mod terminal;
