@@ -977,11 +977,51 @@ fn sentinel_command_text_never_reaches_the_durable_audit_store() {
     // Also check the raw on-disk file, not just the typed query result --
     // the query path re-parses the store's own encoding, so this is an
     // independent check that nothing leaked into the bytes on disk.
-    let raw_bytes = std::fs::read(test_audit.store.storage_path().database_file())
-        .expect("read the raw audit store file");
-    let raw_text = String::from_utf8_lossy(&raw_bytes);
+    //
+    // Post-closeout defect 1 (recorded 2026-08-10): the store is still
+    // open here and runs in WAL mode, so records just written live in
+    // `audit.sqlite3-wal` until the connection closes and SQLite
+    // checkpoints -- reading `database_file()` on an open store scans a
+    // 4 KiB header page holding none of them, the exact blind spot
+    // response 152 found in RFC-017 PR-017-F's first sentinel. Fixed the
+    // same way: capture the directory, drop the store so it checkpoints,
+    // scan every file rather than only the database file, and assert a
+    // positive control so the negative assertions below can't pass
+    // merely because nothing was read.
+    let audit_dir = test_audit.store.storage_path().audit_dir().to_path_buf();
+    drop(test_audit);
+
+    let raw_text = read_every_file_in_dir(&audit_dir);
+    assert!(
+        raw_text.contains(run_approved.as_str()),
+        "the scan must reach a real, persisted field -- otherwise the sentinel assertions \
+         below pass merely because nothing was read at all"
+    );
     assert!(!raw_text.contains(SENTINEL_ARG));
     assert!(!raw_text.contains(SENTINEL_CWD));
+}
+
+/// Recursively reads every file under `dir` into one string, the same
+/// shape RFC-018 PR-018-D's sentinel test uses -- robust to SQLite's
+/// sidecar set (`-wal`, `-shm`) changing, unlike reading a single named
+/// file.
+fn read_every_file_in_dir(dir: &Path) -> String {
+    let mut contents = String::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                contents.push_str(&String::from_utf8_lossy(&bytes));
+            }
+        }
+    }
+    contents
 }
 
 /// Response 116 Required 2: a proposal's claimed `cwd` differing from
