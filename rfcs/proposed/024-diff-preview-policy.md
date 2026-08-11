@@ -30,9 +30,31 @@ RFC-012 declined to read file content and named what would authorise it (§Detec
 
 RFC-020 §"Correction, 2026-08-11" records why this is design work rather than an accessor addition: the decisions below are the ones an amendment-shaped change would skip, and they are the ones that matter in production.
 
+## Correction, 2026-08-11 — this RFC cannot deliver a two-sided diff for a modified file
+
+**Found by the implementer before writing PR-024-C, and the gap is the architect's.** This RFC governs how a diff is read, bounded and invalidated without ever asking whether the *inputs* to a diff exist. Decision 3 is written entirely about a baseline being **stale**; it never asks whether the baseline has content to be stale *about*.
+
+It does not. `ReviewBaselineEntry` holds `relative_path`, `kind`, `len`, `modified_unix_nanos` — **no content, no hash** — and that is deliberate. RFC-012 §Design Principles 2: *"Metadata first. Summaries must not include file contents…"* So for a file the filesystem-snapshot detector reports as **modified**, the before-bytes were never captured, and by diff-request time the run has overwritten them. They are gone, not merely unretained.
+
+**Capturing content at baseline time is rejected**, and not only because it contradicts Decision 1's "never speculatively" and "never retained beyond the request." It contradicts RFC-012's stated principle directly, and would mean speculatively storing the contents of every scanned path for every AgentRun, held until a request that may never come. That is a new retention surface requiring RFC-012 **and** RFC-011 amendments plus the owner's authorisation — not a choice available to an implementation slice.
+
+**What this RFC therefore delivers:**
+
+| Change kind | Available | Delivered |
+| --- | --- | --- |
+| Added | full content is the whole change | content, bounded and gated |
+| Deleted | nothing to read | the fact of deletion, from metadata |
+| **Modified** | **current content only** | current content, **explicitly not a diff** |
+
+**The modified row must be stated on the surface, not only in a closeout.** A user shown a file's current content under a heading implying a diff will believe they have seen what changed. RFC-020 already forbids overclaiming what *detection* can see; this is the same rule applied to what *preview* can see.
+
+**A two-sided diff needs a before-source, and the only one this project has designed is Git-backed detection** — which holds blob history, and is gated behind RFC-012's own unmet safety evidence. So the two-sided case is not cancelled; it is blocked on an existing, already-gated dependency.
+
+The RFC keeps its name: "diff preview policy" is the phrase RFC-012 used to name this document, and changing it would break the link back to the clause that authorises it.
+
 ## Scope
 
-**In:** when generated-change content may be read, how a diff is bounded, when a baseline stops being authoritative, and what a diff is for a non-text change.
+**In:** when generated-change content may be read, how it is bounded, when a baseline stops being authoritative, and what is delivered for a non-text change. **Per the correction above, "a diff" means a two-sided comparison only where a before-source exists.**
 
 **Out:** rendering (RFC-020), any *action* on a change — accept, revert, stage — and Git-backed detection, which RFC-012 already gates behind its own safety evidence.
 

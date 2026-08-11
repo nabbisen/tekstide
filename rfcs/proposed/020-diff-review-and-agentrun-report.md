@@ -85,6 +85,23 @@ So this is not an amendment question at all. RFC-012 deliberately deferred conte
 2. **RFC-011 Amendment** — a bounded transcript reader, reviewed against RFC-011's existing retention and purge constraints.
 3. **RFC-020** — the two rendering surfaces, unblocked once both land.
 
+## Scope correction, 2026-08-11 — the change surface may not promise a diff
+
+RFC-024's own §Correction records that a **two-sided diff for a modified file is
+unavailable** under filesystem-snapshot detection: `ReviewBaselineEntry` captures metadata
+only, by RFC-012's stated principle, so the before-bytes were never stored and the run has
+overwritten them by preview time.
+
+So this surface renders, per change kind: full content for an added file, the fact of
+deletion for a removed one, and **current content only — explicitly not a diff — for a
+modified one**. That last case is the common one, and **the surface must say so where the
+user reads it**, not only in a closeout. A user shown current content under a heading that
+implies a diff will believe they have seen what changed.
+
+A two-sided diff needs a before-source, and the only one designed is Git-backed detection,
+gated behind RFC-012's unmet safety evidence. This RFC must not imply otherwise, and
+PR-020-B's gate carries it.
+
 ## The security core — a third position in the escaping asymmetry
 
 RFC-019 established two positions. This RFC adds the third, and the reasoning is what makes it defensible rather than arbitrary.
