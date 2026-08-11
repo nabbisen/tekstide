@@ -58,6 +58,18 @@ content access and cannot both be built toward.
 
 ## PR-024-C — Content access with a bounded lifetime
 
+**Second prerequisite, added 2026-08-11 (response 189): RFC-012 Amendment 1 must land
+before this slice.** `DetectedChangedPath` could not tell Added from Modified —
+`changed_paths_between` computed the distinction and discarded it — so the corrected
+three-row scope below was unfillable. Amendment 1 adds
+`ChangeLifecycle { Added, Modified, Deleted }` and removes `Deleted` from
+`ChangePathKind`, which is a **breaking** change to `tekstide-core`: the next release
+carrying it is `0.7.0`, not `0.6.1`.
+
+**Added to this slice's gate:** the Added / Modified / Deleted distinction is read from
+`ChangeLifecycle`, **never inferred from `ChangePathKind`** — and the modified case's
+"not a diff" statement reaches the surface, not only the closeout.
+
 **Unblocked 2026-08-11 (response 187), with a scope correction landed in RFC-024's own
 text (`f48d245`) before this slice starts.** This RFC cannot deliver a two-sided diff for
 a modified file under `FilesystemSnapshot` detection — the before-bytes were never
