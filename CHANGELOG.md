@@ -1,5 +1,70 @@
 # Changelog
 
+## 0.6.0 - Editor and File Explorer
+
+Status: release candidate, prepared 2026-08-11, pending review and the owner's signed tag.
+
+Tekstide `0.6.0` opens milestone M10 with RFC-019: Content mode stops being a placeholder
+and becomes a real file explorer and a real text editor. **RFC-019 is closed**
+(`rfcs/done/`). Diff review and the AgentRun report are RFC-020, M10's second half, and
+are not in this release.
+
+### Implemented
+
+- **A file explorer tree.** Renders the project's directory scan, with keyboard
+  navigation; Enter on a directory rescans, Enter on a file opens it. Read-only: no
+  rename, delete, or create.
+- **A text editor with a real cursor.** Open a file, move with the arrow keys, insert and
+  delete at the cursor position across multiple lines, and save with `Ctrl+S`. The cursor
+  position is shown.
+- **External-change handling that asks rather than assumes.** If a file changes on disk
+  while you have it open, saving does not overwrite it — a dialog offers to reload,
+  and every way of dismissing that dialog leaves the disk file untouched. The dialog
+  distinguishes a genuine conflict from a clean file that merely changed underneath, and
+  only claims local changes will be discarded when there are some.
+
+### Text safety — an asymmetry worth understanding
+
+A file's **name** and a file's **contents** are treated oppositely, deliberately.
+
+Names in the explorer and in the editor's header are **escaped**: a file called
+`proj<U+202E>gpj.exe` renders with that override character visible as `<U+202E>` rather
+than silently displaying as `projexe.jpg`. A repository can contain such a name and
+nobody typed it.
+
+File **contents** in the editor are **not** escaped, and bidirectional text reorders
+normally. An editor that rewrote what it displayed would be broken — you would edit
+around a character that is not really there and save something you did not intend.
+
+The consequence is that source containing a bidi override still *reads* differently from
+how it compiles — the Trojan Source class. Tekstide shows you the file as it is; it does
+not currently mark such characters. See `rfcs/done/016-internationalization-and-localization.md`.
+
+### Deferred
+
+- **No undo.** A mid-buffer edit is unrecoverable within the session past what Backspace
+  can still reach.
+- **No syntax highlighting, language server, multi-cursor, or search.**
+- **Files larger than 4 MiB are not editable** — the existing open policy refuses them,
+  and the refusal is shown rather than failing silently.
+- **The explorer never modifies the filesystem** — no rename, delete, or create.
+- **Symlinks show status, not their target.** Whether an entry is a symlink, broken, or
+  points outside the project is shown; the target path is not.
+- **Reaching Content mode needs a mode toggle.** No keybinding opens the project
+  workspace directly; `Ctrl+Alt+M` gets you there as a side effect.
+- **A known `tekstide-core` inaccuracy**: after a blocked save, the project content status
+  reports a conflict even when the open buffer had no local edits. The dialog no longer
+  relies on this, but the status itself is imprecise. Recorded in `rfcs/future-work.md`.
+- **Nothing here changes the terminal.** `NFR-PERF-004` remains not met, the
+  three-terminal limit and the ~374 KB/s output ceiling are unchanged.
+- **No screen-reader support.** Checked again this release
+  (`cargo tree -p tekstide | grep -i accesskit`, empty).
+- Linux only.
+
+### Dependencies
+
+No new dependencies.
+
 ## 0.5.1 - Paste Protection and Trusted-UI Evidence
 
 Status: release candidate, prepared 2026-08-10, pending review and the owner's signed tag.
