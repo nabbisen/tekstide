@@ -1,6 +1,6 @@
 # RFC-024: Diff Preview Policy
 
-Status: Proposed — awaiting the human owner's acceptance
+Status: Accepted by the human owner 2026-08-11 — ready for a handoff pack
 Target milestone: M10 (`0.6.x`), prerequisite for RFC-020
 Date: 2026-08-11
 
