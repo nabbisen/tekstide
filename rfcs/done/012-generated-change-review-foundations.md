@@ -280,3 +280,45 @@ Recommended slices:
 - RFC-012 ships metadata-only filesystem snapshot detection. Git detection remains explicitly unavailable/unsupported pending the RFC-012 Git safety evidence.
 - Per-file review decisions are deferred. `PartiallyAccepted` is ChangeSet-level state vocabulary and does not persist per-file or hunk decisions.
 - Artifact references are currently opaque strings, while bounded summaries expose only their count. Durable reference semantics remain future work.
+
+## Amendment 1: Change Lifecycle on `DetectedChangedPath`
+
+**Status:** Authorised by the human owner 2026-08-11.
+**Amendment type:** Additive (`ChangeLifecycle`, a new field) **plus one breaking removal** (`ChangePathKind::Deleted`). The breaking half was taken deliberately; see §Version consequence.
+
+### What is authorised
+
+1. **`ChangeLifecycle { Added, Modified, Deleted }`**, carried on `DetectedChangedPath` alongside the existing `kind`.
+2. **Removal of `Deleted` from `ChangePathKind`**, leaving `{ File, Directory, Symlink, Other }`.
+
+### Why it is needed
+
+RFC-024 §Correction delivers three different things per change kind: full content for an added file, the fact of deletion for a removed one, and current content **explicitly labelled not a diff** for a modified one. Filling that in requires telling Added from Modified.
+
+`DetectedChangedPath` cannot. `changed_paths_between` branches on exactly this distinction and then discards it — the "present in baseline and current" arm and the "absent from baseline, present in current" arm both produce `{ relative_path, kind: after.kind }`. `DetectedChanges` exposes `baseline_snapshot_ref: Option<String>`, not the baseline entries, so it is not recoverable downstream either.
+
+Neither substitution is acceptable. Treating every `File` change as Modified makes the Added case unreachable and mislabels a genuinely new file as an unresolvable modification. Treating them all as Added ships a real modification without the not-a-diff label — the exact overclaim RFC-024's own correction was written to prevent.
+
+### The underlying defect this corrects
+
+`ChangePathKind` conflated two orthogonal axes. `File`, `Directory`, `Symlink` and `Other` answer *what kind of thing is this*. `Deleted` answers *what happened to it*. Deletion got a variant in the kind enum because it was the easy case to notice, and addition then had nowhere to go — which is why the model could express one lifecycle state and not the others.
+
+Adding `ChangeLifecycle` while leaving `ChangePathKind::Deleted` in place would make `{ kind: Deleted, lifecycle: Added }` representable and meaningless, in a model that decides whether a user is told "this is the whole change" or "this is not a diff." Removing the variant makes each enum mean exactly one thing and the contradiction unconstructable.
+
+### Why no new RFC
+
+**No new detection capability, and no content read.** The distinction is already computed inside `changed_paths_between`; this preserves information already derived rather than deriving anything new. Lifecycle is metadata, so RFC-012 §Design Principles 2 ("Summaries must not include file contents… Metadata first") is unchanged and unweakened.
+
+Same shape as RFC-006 Amendment 1: a narrow exposure of state that already exists transiently. Contrast the diff *content* model, which was correctly **not** an amendment — it read file content, which RFC-012 deliberately deferred to a separate reviewed policy.
+
+### Constraints inherited, unchanged
+
+- Metadata-only detection. Lifecycle carries no content and no hash.
+- Git detection remains unavailable/unsupported pending its own safety evidence.
+- `ReviewBaselineEntry` is untouched — this amendment does not add content capture, and RFC-024 §Correction records why capturing before-content at baseline was rejected.
+
+### Version consequence
+
+Removing a public enum variant is a breaking change to `tekstide-core`, published at `0.6.0`. **The owner authorised it explicitly on the grounds that dead code harms future maintenance and extensibility.** The next release carrying this is therefore `0.7.0`, not `0.6.1`.
+
+Footprint at the time of authorisation: two consumers of `ChangePathKind::Deleted` outside `change_detection.rs`, both in `project/diff/tests.rs`, both written the same week by RFC-024 PR-024-B.
