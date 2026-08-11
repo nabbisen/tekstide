@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - Task Breakdown / PR Plan"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "Accepted 2026-08-11 — ready for implementation"
+status: "PR-024-B implemented 2026-08-11, not yet reviewed — PR-024-C blocked on review request 187"
 target_milestone: "M10"
 created: "2026-08-11"
 ---
@@ -34,7 +34,33 @@ Review gate:
 - Open questions 1 and 3 answered, with the bound **measured**, and the reasoning recorded.
 - Reads are for already-detected paths only; a path not in `DetectedChanges` is refused.
 
+**Discharged, implemented 2026-08-11 — full detail in `qa-evidence.md`.** Every gate item
+met: starting state confirmed by enumeration (grep across both crates, excluding
+`change_detection.rs` itself, found only metadata fields flowing into `ChangeSet`); the
+refusal-before-read and sniff-boundedness properties both proven by real fixtures
+(`chmod 000` + oversized file; a blocking FIFO) and both ablated with the exact wrong
+value each produced; the boundary tested against the real default, not a substituted
+policy; open questions 1 (4 MiB per side, measured via a real `/proc/self/status` RSS
+sweep) and 3 (lazy per-path, required directly by Decision 1's own text) answered with
+reasoning recorded.
+
+**A real architectural question, raised and filed before any code was written, not
+absorbed into this slice's own scope**: where does a diff's "before" content come from
+at all, for the one detection source (`FilesystemSnapshot`) actually reachable in
+production? Traced through `GeneratedChangeDetector`, RFC-012's own text, and
+`ChangeSet::artifact_refs` and found no existing mechanism captures it anywhere — by
+diff-request time an AgentRun has typically already overwritten the file. This slice does
+not depend on the answer (gating/bounds apply symmetrically to either side of a diff), so
+it proceeded; **PR-024-C is blocked on review request 187's answer**, since the two
+plausible resolutions (baseline capture amended to also snapshot content, vs. a
+single-sided view for this detection source) produce structurally different designs for
+content access and cannot both be built toward.
+
 ## PR-024-C — Content access with a bounded lifetime
+
+**Blocked on review request 187** (where does "before" content come from for a
+filesystem-snapshot-sourced modified file) — raised during PR-024-B, full detail in
+`qa-evidence.md`'s PR-024-B entry. Not started until answered.
 
 Scope: reading content for an approved path, with Decision 1's third clause enforced
 structurally.
