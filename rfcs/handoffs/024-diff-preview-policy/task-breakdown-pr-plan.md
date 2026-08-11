@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - Task Breakdown / PR Plan"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "PR-024-B implemented 2026-08-11, not yet reviewed — PR-024-C blocked on review request 187"
+status: "PR-024-B accepted (response 190) — RFC-012 Amendment 1 accepted (response 190) — PR-024-C content access implemented 2026-08-11, not yet reviewed"
 target_milestone: "M10"
 created: "2026-08-11"
 ---
@@ -118,8 +118,29 @@ express it — `changed_paths_between` (RFC-012's own model, `change_detection.r
 computes the distinction and discards it before constructing the value this slice
 receives. Full detail in `qa-evidence.md`'s PR-024-C entry. Recommended a minimal,
 additive amendment (preserve the distinction already computed) rather than implementing
-one unilaterally, since it touches a different closed RFC's model. **Not started** until
-answered.
+one unilaterally, since it touches a different closed RFC's model. *(Superseded below —
+response 189 found a deeper defect than the recommendation above and RFC-012 Amendment 1
+landed to fix it; see the amendment's own entry in `qa-evidence.md`.)*
+
+**Unblocked and implemented 2026-08-11 (response 190 accepted RFC-012 Amendment 1).**
+Every review gate item above met — full detail in `qa-evidence.md`'s "PR-024-C's own
+content access" entry:
+
+- Content-cannot-outlive-the-request made structural via `DiffContent` deriving neither
+  `Clone` nor `Serialize` — a compile error if ever stored in `ProjectSession` (which
+  derives `Clone` uniformly) or passed to `AuditCoordinator::record_*` (which requires
+  `Serialize`), not a documentation promise.
+- Enumeration test (`enumeration_confirms_only_the_closed_list_reads_full_file_content`)
+  scans `tekstide-core` for raw full-file reads against a closed, disclosed allowlist;
+  ablated by removing `project/diff.rs` from it, confirmed the failure names the file.
+- Not pre-escaped: proven against the exact bidi probe `text_safety`'s own tests use,
+  raw bytes survive unaltered.
+- The Added/Modified distinction is two separate `DiffContent` constructors, not a
+  shared shape with a lifecycle flag — satisfying "not left to a doc comment" directly.
+- A design refinement made and disclosed while implementing: `DiffGateDecision`'s
+  `lifecycle` field narrowed from `ChangeLifecycle` to a new two-variant
+  `ContentLifecycle`, closing a smaller instance of the same representable-but-
+  meaningless-state class the amendment itself just fixed one level down.
 
 ## PR-024-D — Baseline authority, and closeout
 

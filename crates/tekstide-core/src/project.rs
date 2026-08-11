@@ -20,8 +20,9 @@ pub use content::{
     explorer_node_state_label, explorer_symlink_status_label, text_document_state_label,
 };
 pub use diff::{
-    DEFAULT_MAX_DIFF_INPUT_BYTES, DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy,
-    gate_diff_content_read,
+    ContentLifecycle, DEFAULT_MAX_DIFF_INPUT_BYTES, DiffContent, DiffContentError,
+    DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, gate_diff_content_read,
+    read_diff_content,
 };
 pub use identity::ProjectId;
 pub use metadata::{

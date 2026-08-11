@@ -15,8 +15,9 @@ use crate::project::root::{ProjectRootHandle, ProjectRootValidator, SymlinkPolic
 use crate::project::{ProjectId, ProjectSession};
 
 use super::{
-    BINARY_SNIFF_BYTES, DEFAULT_MAX_DIFF_INPUT_BYTES, DiffGateDecision, DiffGateRefusal,
-    DiffPreviewPolicy, gate_diff_content_read, sniff_is_binary,
+    BINARY_SNIFF_BYTES, ContentLifecycle, DEFAULT_MAX_DIFF_INPUT_BYTES, DiffContent,
+    DiffContentError, DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, gate_diff_content_read,
+    read_bounded, read_diff_content, sniff_is_binary,
 };
 
 struct Sandbox {
@@ -233,7 +234,7 @@ fn the_boundary_is_exact_not_greater_than_or_equal() {
             DiffPreviewPolicy::default()
         ),
         Ok(DiffGateDecision::Readable {
-            lifecycle: ChangeLifecycle::Modified
+            lifecycle: ContentLifecycle::Modified
         }),
         "exactly the bound must be accepted"
     );
@@ -316,7 +317,7 @@ fn a_small_text_file_within_bound_is_readable() {
     assert_eq!(
         result,
         Ok(DiffGateDecision::Readable {
-            lifecycle: ChangeLifecycle::Modified
+            lifecycle: ContentLifecycle::Modified
         })
     );
 }
@@ -344,7 +345,7 @@ fn a_nul_byte_in_the_sniff_window_classifies_as_non_text() {
         result,
         Ok(DiffGateDecision::NonTextContent {
             len: real_len,
-            lifecycle: ChangeLifecycle::Added
+            lifecycle: ContentLifecycle::Added
         })
     );
 }
@@ -374,7 +375,7 @@ fn readable_decisions_carry_the_real_lifecycle_through_unaltered() {
     assert_eq!(
         gate_diff_content_read(&changes, &root, "added.txt", DiffPreviewPolicy::default()),
         Ok(DiffGateDecision::Readable {
-            lifecycle: ChangeLifecycle::Added
+            lifecycle: ContentLifecycle::Added
         })
     );
     assert_eq!(
@@ -385,7 +386,7 @@ fn readable_decisions_carry_the_real_lifecycle_through_unaltered() {
             DiffPreviewPolicy::default()
         ),
         Ok(DiffGateDecision::Readable {
-            lifecycle: ChangeLifecycle::Modified
+            lifecycle: ContentLifecycle::Modified
         })
     );
 }
@@ -455,4 +456,318 @@ fn make_fifo(path: &Path) {
         "mkfifo failed: {}",
         std::io::Error::last_os_error()
     );
+}
+
+// ---------------------------------------------------------------------
+// RFC-024 PR-024-C: content access with a bounded lifetime.
+// ---------------------------------------------------------------------
+
+/// RFC-024 §Correction: Added content is the whole change, delivered
+/// bounded and gated -- not a diff, since there is no "before" to compare
+/// against by definition.
+#[test]
+fn added_content_is_delivered_whole_bounded_and_gated() {
+    let sandbox = Sandbox::new("added-content");
+    let bytes = b"brand new file, whole content is the whole change\n".to_vec();
+    sandbox.write_file("new.txt", &bytes);
+    let changes = detected(&[("new.txt", ChangePathKind::File, ChangeLifecycle::Added)]);
+
+    let result = read_diff_content(
+        &changes,
+        &sandbox.root_handle(),
+        "new.txt",
+        DiffPreviewPolicy::default(),
+    );
+
+    assert_eq!(result, Ok(DiffContent::Added { bytes }));
+}
+
+/// RFC-024 §Correction: Modified delivers current content only, and the
+/// variant itself -- not a flag or a doc comment -- is what marks it "not
+/// a diff". Distinguished from `Added` even when the bytes are identical
+/// shape, since the corrected scope table treats the two differently at
+/// the surface (Added: no "not a diff" label; Modified: labelled).
+#[test]
+fn modified_content_is_current_content_explicitly_not_a_diff() {
+    let sandbox = Sandbox::new("modified-content");
+    let bytes = b"current content only -- this RFC cannot produce a before side\n".to_vec();
+    sandbox.write_file("changed.txt", &bytes);
+    let changes = detected(&[(
+        "changed.txt",
+        ChangePathKind::File,
+        ChangeLifecycle::Modified,
+    )]);
+
+    let result = read_diff_content(
+        &changes,
+        &sandbox.root_handle(),
+        "changed.txt",
+        DiffPreviewPolicy::default(),
+    );
+
+    assert_eq!(result, Ok(DiffContent::Modified { bytes }));
+    assert!(
+        !matches!(result, Ok(DiffContent::Added { .. })),
+        "must not be reachable as Added -- the two are separate constructors, not one \
+         shape with a lifecycle tag a caller could misread"
+    );
+}
+
+/// The corrected table's `Deleted` row: the fact of deletion, from
+/// metadata alone -- no bytes exist to read, and none are attempted.
+/// `gone.txt` is never written to disk; if this reached a filesystem
+/// read, it would fail for the wrong reason (missing), not report
+/// `Deleted`.
+#[test]
+fn deleted_reports_the_fact_of_deletion_without_reading_anything() {
+    let sandbox = Sandbox::new("deleted-content");
+    let changes = detected(&[("gone.txt", ChangePathKind::File, ChangeLifecycle::Deleted)]);
+
+    let result = read_diff_content(
+        &changes,
+        &sandbox.root_handle(),
+        "gone.txt",
+        DiffPreviewPolicy::default(),
+    );
+
+    assert_eq!(
+        result,
+        Ok(DiffContent::Deleted {
+            kind: ChangePathKind::File
+        })
+    );
+}
+
+/// `NonTextContent`/`NonFile` pass through from the gate unread -- neither
+/// ever had bytes to deliver, so `read_diff_content` performs no read
+/// beyond what `gate_diff_content_read` already did for either.
+#[test]
+fn non_text_and_non_file_decisions_pass_through_without_a_further_read() {
+    let sandbox = Sandbox::new("passthrough");
+    let mut binary_bytes = vec![0u8];
+    binary_bytes.extend_from_slice(b"binary-looking content");
+    let real_len = binary_bytes.len() as u64;
+    sandbox.write_file("image.png", &binary_bytes);
+    let changes = detected(&[
+        ("image.png", ChangePathKind::File, ChangeLifecycle::Added),
+        (
+            "a-directory",
+            ChangePathKind::Directory,
+            ChangeLifecycle::Modified,
+        ),
+    ]);
+    let root = sandbox.root_handle();
+
+    assert_eq!(
+        read_diff_content(&changes, &root, "image.png", DiffPreviewPolicy::default()),
+        Ok(DiffContent::NonTextContent {
+            len: real_len,
+            lifecycle: ContentLifecycle::Added
+        })
+    );
+    assert_eq!(
+        read_diff_content(&changes, &root, "a-directory", DiffPreviewPolicy::default()),
+        Ok(DiffContent::NonFile {
+            kind: ChangePathKind::Directory
+        })
+    );
+}
+
+/// **The review gate's own required proof**: content is not pre-escaped.
+/// A file containing the exact bidi/format-character probes
+/// `text_safety`'s own tests use (a right-to-left override, the Hangul
+/// filler) must come back byte-for-byte unchanged -- `quote_untrusted`'s
+/// visible-marker wrapping is RFC-020's job at render time, not this
+/// function's. A model that escaped here would hide real file content
+/// from any consumer that is not a renderer.
+#[test]
+fn content_is_not_pre_escaped_raw_bytes_survive_unaltered() {
+    let sandbox = Sandbox::new("not-pre-escaped");
+    let mut bytes = b"before ".to_vec();
+    bytes.extend_from_slice("\u{202E}".as_bytes()); // RIGHT-TO-LEFT OVERRIDE
+    bytes.extend_from_slice("evil.txt".as_bytes());
+    bytes.extend_from_slice("\u{202C}".as_bytes()); // POP DIRECTIONAL FORMATTING
+    bytes.extend_from_slice(" after".as_bytes());
+    sandbox.write_file("bidi.txt", &bytes);
+    let changes = detected(&[("bidi.txt", ChangePathKind::File, ChangeLifecycle::Added)]);
+
+    let result = read_diff_content(
+        &changes,
+        &sandbox.root_handle(),
+        "bidi.txt",
+        DiffPreviewPolicy::default(),
+    );
+
+    match result {
+        Ok(DiffContent::Added { bytes: returned }) => assert_eq!(
+            returned, bytes,
+            "raw bytes must survive exactly, including the bidi override -- \
+             escaping them here would be this function overstepping into RFC-020's job"
+        ),
+        other => panic!("expected Added with the exact original bytes, got {other:?}"),
+    }
+}
+
+/// `read_diff_content` reuses the gate rather than re-deriving its
+/// refusals: a path absent from `detected.changed_paths` refuses via
+/// `DiffContentError::Gate`, carrying the same `DiffGateRefusal` the gate
+/// itself would have returned.
+#[test]
+fn an_undetected_path_refuses_through_the_reused_gate() {
+    let sandbox = Sandbox::new("content-undetected");
+    sandbox.write_file("real.txt", b"hello");
+    let changes = detected(&[]);
+
+    let result = read_diff_content(
+        &changes,
+        &sandbox.root_handle(),
+        "real.txt",
+        DiffPreviewPolicy::default(),
+    );
+
+    assert_eq!(
+        result,
+        Err(DiffContentError::Gate(DiffGateRefusal::PathNotDetected))
+    );
+}
+
+/// A path missing on disk refuses through the reused gate's own
+/// resolution -- `read_diff_content` no longer performs a second,
+/// independent resolve (see `evaluate_gate`), so there is exactly one
+/// place this can fail, and it surfaces as `DiffContentError::Gate`, not
+/// a separate access-error case.
+#[test]
+fn a_file_missing_on_disk_refuses_through_the_single_shared_resolution() {
+    let sandbox = Sandbox::new("content-missing-on-disk");
+    let changes = detected(&[("gone.txt", ChangePathKind::File, ChangeLifecycle::Modified)]);
+
+    let result = read_diff_content(
+        &changes,
+        &sandbox.root_handle(),
+        "gone.txt",
+        DiffPreviewPolicy::default(),
+    );
+
+    assert!(
+        matches!(
+            result,
+            Err(DiffContentError::Gate(DiffGateRefusal::Access(_)))
+        ),
+        "expected Gate(Access(_)), got {result:?}"
+    );
+}
+
+/// Defense in depth: even though `gate_diff_content_read` already checked
+/// size from metadata, the read itself independently refuses rather than
+/// truncating if it observes more than the bound -- calling `read_bounded`
+/// directly (bypassing the gate) against a real over-bound file, the same
+/// way `sniff_is_binary` is tested directly elsewhere in this file.
+#[test]
+fn the_bounded_read_refuses_rather_than_truncates_when_called_directly() {
+    let sandbox = Sandbox::new("bounded-read-direct");
+    let over_bound = vec![b'a'; 101];
+    let path = sandbox.write_file("over.txt", &over_bound);
+
+    let result = read_bounded(&path, 100);
+
+    assert_eq!(
+        result,
+        Err(()),
+        "a file one byte over the bound must refuse, not return a 100-byte truncated prefix"
+    );
+}
+
+/// Enumeration test naming every production call site in `tekstide-core`
+/// that reads a file's full content as raw bytes -- PR-024-C's own review
+/// gate item, using the same recursive-scan-plus-closed-list technique
+/// `i18n::enforcement`'s scans use in `crates/tekstide` for a different
+/// property. A new raw-content-read call site anywhere else fails this
+/// test by file name, rather than being discoverable only by a one-time
+/// grep recorded in prose.
+///
+/// **Closed list, each entry's reason disclosed**: `project/diff.rs`
+/// (this module, PR-024-C's own read) and `content/open.rs`
+/// (`TextDocument`'s pre-existing editor read, a different feature) both
+/// read generated-change/project-file content and are the two paths this
+/// RFC's Decision 1 gates. `project/recent/store.rs` and
+/// `audit/recovery.rs` also read a whole file's bytes, but neither reads
+/// project or generated-change content -- the former is this
+/// application's own small recent-projects state file, the latter an
+/// audit-store recovery manifest. Both pre-date this RFC and are
+/// unrelated to what Decision 1 governs; listed here so the scan's
+/// closed list stays accurate rather than silently widening its own
+/// definition of "content" to cover them.
+const FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT: &[&str] = &[
+    "project/diff.rs",
+    "content/open.rs",
+    "project/recent/store.rs",
+    "audit/recovery.rs",
+];
+
+fn tekstide_core_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+}
+
+fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).expect("src dir must exist") {
+        let path = entry.expect("readable dir entry").path();
+        if path.is_dir() {
+            collect_rs_files(&path, out);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            out.push(path);
+        }
+    }
+}
+
+fn contains_a_raw_full_file_read(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim_start();
+        !trimmed.starts_with("//")
+            && (trimmed.contains("read_to_end(")
+                || trimmed.contains("fs::read(")
+                || trimmed.contains("std::fs::read("))
+    })
+}
+
+/// Ablation-verified (`qa-evidence.md`): add a `fs::read_to_string(...)`
+/// call to an unlisted file, confirm this fails naming it, revert.
+#[test]
+fn enumeration_confirms_only_the_closed_list_reads_full_file_content() {
+    let mut files = Vec::new();
+    collect_rs_files(&tekstide_core_src_dir(), &mut files);
+
+    for path in files {
+        let relative = path
+            .strip_prefix(tekstide_core_src_dir())
+            .expect("file must be under src/")
+            .to_str()
+            .expect("path must be valid UTF-8")
+            .to_string();
+
+        // Test files legitimately read fixtures they created themselves.
+        if relative.contains("/tests/") || relative.ends_with("tests.rs") {
+            continue;
+        }
+
+        let source = fs::read_to_string(&path).expect("scannable file must be readable");
+        let reads_full_content = contains_a_raw_full_file_read(&source);
+        let is_allowed = FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT.contains(&relative.as_str());
+
+        assert!(
+            !reads_full_content || is_allowed,
+            "{relative} reads a file's full content but is not in \
+             FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT -- a new content-read call site outside \
+             the reviewed paths must be added here deliberately, naming what it reads and why, \
+             not left to pass silently"
+        );
+    }
+
+    for &expected in FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT {
+        let path = tekstide_core_src_dir().join(expected);
+        assert!(
+            path.exists(),
+            "FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT names {expected:?} but that file does not \
+             exist -- stale exemption entry"
+        );
+    }
 }

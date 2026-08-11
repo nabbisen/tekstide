@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - QA Evidence"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "PR-024-B implemented 2026-08-11, not yet reviewed; RFC-012 Amendment 1 (ChangeLifecycle) implemented 2026-08-11, not yet reviewed; PR-024-C content-access work not yet started"
+status: "PR-024-B accepted (response 190); RFC-012 Amendment 1 (ChangeLifecycle) accepted (response 190); PR-024-C content access implemented 2026-08-11, not yet reviewed"
 target_milestone: "M10"
 created: "2026-08-11"
 ---
@@ -155,11 +155,118 @@ Full workspace gates after the amendment: `cargo fmt --all --check`,
 `cargo test --workspace --all-targets --all-features` (518 passed, 0 failed), and
 `git diff --check` all clean.
 
-**Still not started**: PR-024-C's own content-access implementation (the bounded read
-itself, the per-change-kind content shape, and the review gate items in
-`task-breakdown-pr-plan.md` beyond the `ChangeLifecycle` gate item this entry covers).
-This entry documents adopting the amendment — a prerequisite the amendment note itself
-names PR-024-C's "second prerequisite" — not PR-024-C's content-access work.
+**Still not started** *(as of the amendment landing; superseded below — the content-access
+work this paragraph described as not-started is now implemented and reviewed via response
+190, which accepted the `ChangeLifecycle` amendment above and cleared PR-024-C to begin)*:
+PR-024-C's own content-access implementation (the bounded read itself, the per-change-kind
+content shape, and the review gate items in `task-breakdown-pr-plan.md` beyond the
+`ChangeLifecycle` gate item this entry covers). This entry documents adopting the
+amendment — a prerequisite the amendment note itself names PR-024-C's "second
+prerequisite" — not PR-024-C's content-access work.
+
+### PR-024-C's own content access — implemented 2026-08-11, not yet reviewed
+
+**Reuses the gate rather than re-deriving its checks.** `read_diff_content`
+(`crates/tekstide-core/src/project/diff.rs`) calls the same evaluation
+`gate_diff_content_read` itself calls (factored into a private `evaluate_gate`, so the two
+public functions share one implementation rather than PR-024-C re-deriving PR-024-B's own
+Added/Modified/Deleted-from-`ChangeLifecycle` property). `evaluate_gate` was also changed
+to carry the already-resolved `FileAccessTarget` alongside its `Readable`/`NonTextContent`
+outcomes internally, so `read_diff_content` performs the bounded read against the exact
+path the gate already resolved — no second, independent `resolve_existing` call, and so no
+TOCTOU-race error case to reason about or (impossibly, without real concurrent file
+mutation) test. `gate_diff_content_read`'s own public signature and observable behaviour
+are unchanged; this is a pure internal refactor for reuse, re-verified by rerunning every
+PR-024-B test afterward (all still pass, including the ordering ablation below).
+
+**A design refinement made while implementing, disclosed rather than silently done**:
+`DiffGateDecision::Readable`/`NonTextContent`'s `lifecycle` field was narrowed from
+`ChangeLifecycle` (three variants) to a new, module-private-in-spirit-but-necessarily-public
+`ContentLifecycle { Added, Modified }` (two variants). Reasoning: a `Deleted` lifecycle is
+always returned as `DiffGateDecision::Deleted` before either field-bearing variant is
+reachable, so carrying the full `ChangeLifecycle` there would let `Readable { lifecycle:
+Deleted }` exist as a representable-but-meaningless value — the identical class of bug
+RFC-012 Amendment 1 just fixed for `ChangePathKind` carrying its own `Deleted`, reproduced
+one level up in this module's own types if not narrowed here too. The conversion from
+`ChangeLifecycle` to `ContentLifecycle` happens once, in `evaluate_gate`'s own exhaustive
+match with the `Deleted` arm returning early — a compile-time-enforced impossibility, not
+an `unreachable!()` covering a runtime assumption. This is local to `diff.rs` (RFC-024's
+own module, not RFC-012's), so it did not need to be raised as a review request the way the
+`ChangeLifecycle` amendment itself did — full latitude for this module's own internal shape
+was already established by PR-024-B's acceptance.
+
+**Corrected scope table, delivered as distinct constructors, not a shared shape**:
+`DiffContent::Added { bytes }` and `DiffContent::Modified { bytes }` are separate enum
+variants carrying the same `Vec<u8>` shape — RFC-024 §Correction's requirement that
+modified content reach the surface "explicitly not a diff" is carried by the variant name
+itself, satisfying the review gate's "not left to a doc comment a renderer could ignore."
+`DiffContent::Deleted { kind }` reports the fact of deletion from metadata alone (`kind`
+from the baseline, RFC-012 Amendment 1); `NonTextContent`/`NonFile` pass through from the
+gate exactly as decided, since neither ever had bytes to read.
+
+**Decision 1's third clause made structural, not conventional — the review gate's own
+required framing.** `DiffContent` derives neither `Clone` nor `Serialize`. `ProjectSession`
+derives `Clone` across all of its fields uniformly (`project/session.rs:35`), so a
+`DiffContent` field there would fail to compile; every `AuditCoordinator::record_*` call
+requires a `Serialize` event (`audit/recovery.rs`'s own persisted-event shapes), so passing
+this type to one would fail to compile too. Both are compile errors available to any future
+change, not promises kept only by not calling an API that remains callable — matching this
+codebase's own established idiom (`DisplayText`, `VerifiedCwd`, `CommandProposal::decode`:
+construction-gated types whose shape itself, not a comment, is what a misuse would run into)
+adapted for a non-retention property rather than those three's validity property. By
+enumeration (grep), nothing in this commit references `DiffContent` outside `diff.rs`/
+`diff/tests.rs` — no wiring into `ProjectSession` or `AuditCoordinator` exists yet, since
+RFC-020 owns that surface, not this slice.
+
+**Not pre-escaped, proven rather than asserted architecturally.**
+`content_is_not_pre_escaped_raw_bytes_survive_unaltered` writes a file containing the exact
+right-to-left-override/pop-directional-formatting probe `text_safety`'s own tests use,
+reads it back through `read_diff_content`, and asserts the returned bytes equal the
+original exactly — no `quote_untrusted` wrapping, no visible-marker substitution. Bytes are
+raw (`Vec<u8>`), not decoded to `String`: RFC-024 Decision 4 deliberately chose a NUL-sniff
+over "a UTF-8-decode-and-handle-failure," so this function does not perform the stricter
+check the sniff exists to avoid.
+
+**Enumeration test, not a one-time grep recorded in prose — PR-024-C's own required review
+gate item.** `enumeration_confirms_only_the_closed_list_reads_full_file_content` recursively
+scans every non-test `.rs` file under `crates/tekstide-core/src` for a raw full-file byte
+read (`read_to_end(`/`fs::read(`), against a closed, disclosed four-entry allowlist:
+`project/diff.rs` (this slice), `content/open.rs` (`TextDocument`'s pre-existing, unrelated
+editor read), `project/recent/store.rs` and `audit/recovery.rs` (both read a whole file's
+bytes but neither reads project/generated-change content — a recent-projects state file and
+an audit recovery manifest, respectively; found by the scan itself while writing this test,
+not assumed). Uses the same recursive-scan-plus-closed-list technique
+`i18n::enforcement`'s scans already use in `crates/tekstide` for a different property.
+**Ablated**: removed `project/diff.rs` from the allowlist, reran — failed correctly, naming
+`project/diff.rs` exactly. Reverted before committing.
+
+**Refuse-never-truncate ablated for the content read itself, independent of the gate's own
+size check.** `read_bounded` mirrors `content::open::read_file_bounded`'s own
+`.take(max + 1)`-then-check idiom (a different module, not shared code, but the same shape)
+as defense in depth: even though the gate already confirmed size from metadata moments
+earlier, this read independently refuses if it observes more than the bound, rather than
+trusting the earlier check alone. **Ablated**: changed the read limit from `max_bytes + 1`
+to `max_bytes` — a 101-byte file against a 100-byte bound then returned `Ok([...100
+bytes...])`, a silently truncated prefix with no signal anything was cut, instead of
+`Err(())`. Reverted before committing; both ablations in this section were diffed against a
+pre-ablation backup of `diff.rs` after reverting, confirming a clean revert (`diff` exit 0,
+no output).
+
+**Gates**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
+--all-features -- -D warnings`, full workspace suite (`tekstide-core` 527 passed, up from
+518 — 9 new tests; `tekstide` 203 passed, unchanged — no `crates/tekstide` changes),
+`git diff --check`. All clean.
+
+**Known limitation, disclosed rather than silently accepted**: `DiffContent` still derives
+`Debug` (needed for `assert_eq!` throughout this crate's existing test style) and `Debug`
+output is not redacted — unlike `TerminalSecurityDiagnostic`, which never stores a raw
+payload field at all specifically so its `Debug`/summary output cannot leak one. This
+module's `Debug` impl, if ever passed to a logging or diagnostic sink, would print raw file
+bytes. No such call site exists today (the enumeration test above would not catch a future
+`format!("{:?}", diff_content)` passed to a log macro, since that is not a raw-file-read
+call site) — a real, narrower gap than the ones this slice's review gate named, worth
+flagging for RFC-020 to keep in mind rather than assuming closed by this slice's other
+protections.
 
 ## PR-024-D — Baseline authority, and closeout
 
