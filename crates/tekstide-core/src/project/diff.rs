@@ -17,7 +17,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use super::change_detection::{ChangePathKind, DetectedChanges};
+use super::change_detection::{ChangeLifecycle, ChangePathKind, DetectedChanges};
 use super::root::{FileAccessError, ProjectFileAccessPolicy, ProjectRootHandle};
 
 /// RFC-024 Decision 2, Open question 1 -- measured, not estimated
@@ -73,27 +73,43 @@ impl Default for DiffPreviewPolicy {
 }
 
 /// What gating a path decided, when it decided anything at all rather
-/// than refusing. `NonFile` and `NonTextContent` are both real, expected
-/// outcomes RFC-024 itself names -- "a non-text change is reported as a
-/// change with its size and kind, and no diff is attempted" -- not
-/// errors; `DiffGateRefusal` is for the cases nothing may be reported at
-/// all.
+/// than refusing. `Deleted`, `NonFile`, and `NonTextContent` are all
+/// real, expected outcomes RFC-024 itself names -- "a non-text change is
+/// reported as a change with its size and kind, and no diff is
+/// attempted" -- not errors; `DiffGateRefusal` is for the cases nothing
+/// may be reported at all.
+///
+/// `lifecycle` (RFC-012 Amendment 1) appears only on `Readable` and
+/// `NonTextContent` -- the two outcomes RFC-024's corrected §Correction
+/// table actually needs it for (Added: no "not a diff" label; Modified:
+/// current content, explicitly labelled). `Deleted` and `NonFile` never
+/// produce diffable content regardless of lifecycle, so nothing here
+/// carries it for them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DiffGateDecision {
-    /// A `File`, within the bound, sniffed as text. Safe to attempt a
-    /// full bounded read (PR-024-C's job, not this function's).
-    Readable,
-    /// A `File`, within the bound, but the first `BINARY_SNIFF_BYTES`
-    /// contain a NUL byte. No diff is attempted; the caller reports a
-    /// non-text change with this length.
-    NonTextContent { len: u64 },
-    /// Not a `File` at detection time -- `Deleted`, `Directory`,
-    /// `Symlink`, or `Other`. None of these have text content to bound,
-    /// sniff, or read; a symlink specifically is never resolved or
-    /// touched by this function at all, matching this project's
-    /// consistently cautious treatment of symlinks elsewhere
-    /// (`FileAccessSymlinkStatus`, the explorer's status-not-target
-    /// decision).
+    /// A `File`, not deleted, within the bound, sniffed as text. Safe to
+    /// attempt a full bounded read (PR-024-C's job, not this function's).
+    Readable { lifecycle: ChangeLifecycle },
+    /// A `File`, not deleted, within the bound, but the first
+    /// `BINARY_SNIFF_BYTES` contain a NUL byte. No diff is attempted; the
+    /// caller reports a non-text change with this length.
+    NonTextContent {
+        len: u64,
+        lifecycle: ChangeLifecycle,
+    },
+    /// This path's lifecycle is `Deleted` -- checked first, before `kind`
+    /// is consulted at all, since a deleted path has nothing on disk to
+    /// resolve, size-check, or sniff regardless of what it used to be.
+    /// `kind` reports what it *was* (RFC-012 Amendment 1: read from the
+    /// baseline, since `ChangePathKind` itself no longer has a `Deleted`
+    /// variant to conflate "what kind" with "what happened").
+    Deleted { kind: ChangePathKind },
+    /// Not deleted, but not a `File` either -- `Directory`, `Symlink`, or
+    /// `Other`. None of these have text content to bound, sniff, or
+    /// read; a symlink specifically is never resolved or touched by this
+    /// function at all, matching this project's consistently cautious
+    /// treatment of symlinks elsewhere (`FileAccessSymlinkStatus`, the
+    /// explorer's status-not-target decision).
     NonFile { kind: ChangePathKind },
 }
 
@@ -124,9 +140,11 @@ pub enum DiffGateRefusal {
     },
 }
 
-/// The gate. Order, matching Decision 2 → Decision 4 exactly: confirm the
-/// path was already detected → resolve it safely (root/symlink) → check
-/// its size against metadata alone → sniff a bounded prefix for binary
+/// The gate. Order, matching Decision 2 → Decision 4 exactly, with
+/// RFC-012 Amendment 1's lifecycle check ahead of both: confirm the path
+/// was already detected → if its lifecycle is `Deleted`, stop -- nothing
+/// on disk to resolve → resolve it safely (root/symlink) → check its
+/// size against metadata alone → sniff a bounded prefix for binary
 /// content. A full read is never attempted by this function; `Readable`
 /// is the furthest it goes.
 pub fn gate_diff_content_read(
@@ -137,20 +155,22 @@ pub fn gate_diff_content_read(
 ) -> Result<DiffGateDecision, DiffGateRefusal> {
     let selected_relative_path = selected_relative_path.as_ref();
 
-    let Some(detected_kind) = detected
+    let Some(changed) = detected
         .changed_paths
         .iter()
         .find(|changed| changed.relative_path == selected_relative_path)
-        .map(|changed| changed.kind)
     else {
         return Err(DiffGateRefusal::PathNotDetected);
     };
 
-    if detected_kind != ChangePathKind::File {
-        return Ok(DiffGateDecision::NonFile {
-            kind: detected_kind,
-        });
+    if changed.lifecycle == ChangeLifecycle::Deleted {
+        return Ok(DiffGateDecision::Deleted { kind: changed.kind });
     }
+
+    if changed.kind != ChangePathKind::File {
+        return Ok(DiffGateDecision::NonFile { kind: changed.kind });
+    }
+    let lifecycle = changed.lifecycle;
 
     let target = ProjectFileAccessPolicy
         .resolve_existing(root, selected_relative_path)
@@ -177,10 +197,10 @@ pub fn gate_diff_content_read(
     })?;
 
     if is_binary {
-        return Ok(DiffGateDecision::NonTextContent { len });
+        return Ok(DiffGateDecision::NonTextContent { len, lifecycle });
     }
 
-    Ok(DiffGateDecision::Readable)
+    Ok(DiffGateDecision::Readable { lifecycle })
 }
 
 /// Reads at most `BINARY_SNIFF_BYTES`, never the whole file regardless of

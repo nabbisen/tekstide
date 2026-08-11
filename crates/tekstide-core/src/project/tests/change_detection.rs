@@ -4,9 +4,9 @@ use crate::domain::{
     ChangeDetectionFailureReason, ChangeDetectionSource, ChangeDetectionStatus,
 };
 use crate::project::{
-    ChangePathKind, ChangedPathValidationErrorReason, DetectedChangedPath, DetectedChanges,
-    GeneratedChangeDetectionPolicy, GeneratedChangeDetector, ProjectChangeSetError, ProjectId,
-    ProjectSession,
+    ChangeLifecycle, ChangePathKind, ChangedPathValidationErrorReason, DetectedChangedPath,
+    DetectedChanges, GeneratedChangeDetectionPolicy, GeneratedChangeDetector,
+    ProjectChangeSetError, ProjectId, ProjectSession,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -51,6 +51,31 @@ fn filesystem_detector_reports_created_modified_deleted_and_renamed_metadata_pat
             PathBuf::from("src/old.rs"),
         ]
     );
+    // RFC-012 Amendment 1: lifecycle (what happened) is now orthogonal to
+    // kind (what kind of thing) -- checked for every case this fixture
+    // already produces, not only the deleted one, since a single test
+    // this cheap to extend is the strongest evidence the two axes are
+    // both real for a single detector run rather than only individually
+    // constructible fixtures.
+    let lifecycle_of = |relative_path: &str| {
+        detected
+            .changed_paths
+            .iter()
+            .find(|path| path.relative_path == Path::new(relative_path))
+            .unwrap_or_else(|| panic!("{relative_path} must be a detected change"))
+            .lifecycle
+    };
+    assert_eq!(lifecycle_of("src/created.rs"), ChangeLifecycle::Added);
+    assert_eq!(lifecycle_of("src/lib.rs"), ChangeLifecycle::Modified);
+    assert_eq!(lifecycle_of("src/delete.rs"), ChangeLifecycle::Deleted);
+    // A rename is untracked by this detector -- it reports as a deletion
+    // at the old path and an addition at the new one, not a rename.
+    assert_eq!(lifecycle_of("src/old.rs"), ChangeLifecycle::Deleted);
+    assert_eq!(lifecycle_of("src/new.rs"), ChangeLifecycle::Added);
+
+    // A deleted path's `kind` reports what it *was* (from the baseline),
+    // not `Deleted` -- that variant no longer exists on `ChangePathKind`
+    // at all, since deletion is a lifecycle, not a kind.
     assert_eq!(
         detected
             .changed_paths
@@ -58,7 +83,7 @@ fn filesystem_detector_reports_created_modified_deleted_and_renamed_metadata_pat
             .find(|path| path.relative_path == Path::new("src/delete.rs"))
             .unwrap()
             .kind,
-        ChangePathKind::Deleted
+        ChangePathKind::File
     );
 }
 
@@ -510,6 +535,7 @@ fn projectsession_revalidates_detector_paths_before_changeset_creation() {
         changed_paths: vec![DetectedChangedPath {
             relative_path: PathBuf::from("../outside.rs"),
             kind: ChangePathKind::File,
+            lifecycle: ChangeLifecycle::Added,
         }],
         status: ChangeDetectionStatus::Complete,
         scanned_entry_count: 1,

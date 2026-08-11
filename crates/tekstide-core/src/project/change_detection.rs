@@ -71,15 +71,32 @@ impl DetectedChanges {
 pub struct DetectedChangedPath {
     pub relative_path: PathBuf,
     pub kind: ChangePathKind,
+    pub lifecycle: ChangeLifecycle,
 }
 
+/// RFC-012 §Detection Sources answers *what kind of thing is this* --
+/// deliberately no longer conflated with *what happened to it*
+/// (`ChangeLifecycle`, below). For a `Deleted` path, `kind` reports what
+/// the entry was in the baseline (`before.kind` in `changed_paths_between`),
+/// not what it currently is, since it no longer exists to classify.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChangePathKind {
     File,
     Directory,
     Symlink,
-    Deleted,
     Other,
+}
+
+/// RFC-012 Amendment 1: *what happened to a path*, orthogonal to
+/// `ChangePathKind`'s *what kind of thing is this*. `changed_paths_between`
+/// already computes this distinction (present in baseline vs. current) one
+/// line before it used to be discarded; this preserves it rather than
+/// deriving anything new.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChangeLifecycle {
+    Added,
+    Modified,
+    Deleted,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -353,14 +370,17 @@ fn changed_paths_between(
                 (Some(_), Some(after)) => Some(DetectedChangedPath {
                     relative_path,
                     kind: after.kind,
+                    lifecycle: ChangeLifecycle::Modified,
                 }),
-                (Some(_), None) => Some(DetectedChangedPath {
+                (Some(before), None) => Some(DetectedChangedPath {
                     relative_path,
-                    kind: ChangePathKind::Deleted,
+                    kind: before.kind,
+                    lifecycle: ChangeLifecycle::Deleted,
                 }),
                 (None, Some(after)) => Some(DetectedChangedPath {
                     relative_path,
                     kind: after.kind,
+                    lifecycle: ChangeLifecycle::Added,
                 }),
                 (None, None) => None,
             }

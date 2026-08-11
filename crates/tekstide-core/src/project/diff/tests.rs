@@ -8,7 +8,9 @@ use std::sync::mpsc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::domain::{ChangeDetectionSource, ChangeDetectionStatus};
-use crate::project::change_detection::{ChangePathKind, DetectedChangedPath, DetectedChanges};
+use crate::project::change_detection::{
+    ChangeLifecycle, ChangePathKind, DetectedChangedPath, DetectedChanges,
+};
 use crate::project::root::{ProjectRootHandle, ProjectRootValidator, SymlinkPolicy};
 use crate::project::{ProjectId, ProjectSession};
 
@@ -64,16 +66,17 @@ impl Drop for Sandbox {
     }
 }
 
-fn detected(entries: &[(&str, ChangePathKind)]) -> DetectedChanges {
+fn detected(entries: &[(&str, ChangePathKind, ChangeLifecycle)]) -> DetectedChanges {
     DetectedChanges {
         project_id: ProjectId::new_uuid(),
         source: ChangeDetectionSource::FilesystemSnapshot,
         baseline_snapshot_ref: Some("fixture-baseline".to_string()),
         changed_paths: entries
             .iter()
-            .map(|(path, kind)| DetectedChangedPath {
+            .map(|(path, kind, lifecycle)| DetectedChangedPath {
                 relative_path: PathBuf::from(path),
                 kind: *kind,
+                lifecycle: *lifecycle,
             })
             .collect(),
         status: ChangeDetectionStatus::Complete,
@@ -101,22 +104,60 @@ fn a_path_absent_from_detected_changes_is_refused_before_any_filesystem_check() 
     assert_eq!(result, Err(DiffGateRefusal::PathNotDetected));
 }
 
-/// The four non-`File` kinds RFC-012's detector can report have no text
-/// content to bound, sniff, or read -- reported as `NonFile`, not routed
-/// through any filesystem check at all.
+/// RFC-012 Amendment 1: a `Deleted` lifecycle is checked *first*, ahead
+/// of `kind` -- a deleted path has nothing on disk to resolve, size-check,
+/// or sniff, whatever kind of thing it used to be. `kind` still reports
+/// what it *was* (from the baseline), since `ChangePathKind` no longer
+/// has a `Deleted` variant of its own to conflate with it.
 #[test]
-fn non_file_kinds_are_reported_without_any_content_check() {
+fn a_deleted_path_is_reported_without_touching_the_filesystem() {
+    let sandbox = Sandbox::new("deleted-lifecycle");
+    // Never written to disk at all -- if this reached a filesystem check,
+    // it would fail for the wrong reason (missing), not report Deleted.
+    let changes = detected(&[("gone.txt", ChangePathKind::File, ChangeLifecycle::Deleted)]);
+
+    let result = gate_diff_content_read(
+        &changes,
+        &sandbox.root_handle(),
+        "gone.txt",
+        DiffPreviewPolicy::default(),
+    );
+
+    assert_eq!(
+        result,
+        Ok(DiffGateDecision::Deleted {
+            kind: ChangePathKind::File
+        })
+    );
+}
+
+/// The three non-`File` kinds still present at detection time have no
+/// text content to bound, sniff, or read -- reported as `NonFile`, not
+/// routed through any filesystem check at all. Distinct from `Deleted`:
+/// these still exist, they are just not a plain file.
+#[test]
+fn non_file_kinds_still_present_are_reported_without_any_content_check() {
     let sandbox = Sandbox::new("non-file-kinds");
     let changes = detected(&[
-        ("deleted.txt", ChangePathKind::Deleted),
-        ("a-directory", ChangePathKind::Directory),
-        ("a-symlink", ChangePathKind::Symlink),
-        ("something-else", ChangePathKind::Other),
+        (
+            "a-directory",
+            ChangePathKind::Directory,
+            ChangeLifecycle::Modified,
+        ),
+        (
+            "a-symlink",
+            ChangePathKind::Symlink,
+            ChangeLifecycle::Modified,
+        ),
+        (
+            "something-else",
+            ChangePathKind::Other,
+            ChangeLifecycle::Modified,
+        ),
     ]);
     let root = sandbox.root_handle();
 
     for (path, kind) in [
-        ("deleted.txt", ChangePathKind::Deleted),
         ("a-directory", ChangePathKind::Directory),
         ("a-symlink", ChangePathKind::Symlink),
         ("something-else", ChangePathKind::Other),
@@ -140,7 +181,10 @@ fn a_detected_file_missing_on_disk_reuses_the_real_access_policy_and_refuses() {
     let sandbox = Sandbox::new("missing-on-disk");
     // Never actually written -- `changed_paths` claims it exists (as a
     // real detector scan would have, at scan time), disk disagrees now.
-    let changes = detected(&[("gone.txt", ChangePathKind::File)]);
+    // Lifecycle `Modified`, not `Deleted`: the detector's own scan really
+    // did see it as a live file at scan time, so gating must still try
+    // to resolve it (and fail there) rather than short-circuit.
+    let changes = detected(&[("gone.txt", ChangePathKind::File, ChangeLifecycle::Modified)]);
 
     let result = gate_diff_content_read(
         &changes,
@@ -168,8 +212,16 @@ fn the_boundary_is_exact_not_greater_than_or_equal() {
     sandbox.write_file("at-bound.txt", &at_bound);
     sandbox.write_file("over-bound.txt", &over_bound);
     let changes = detected(&[
-        ("at-bound.txt", ChangePathKind::File),
-        ("over-bound.txt", ChangePathKind::File),
+        (
+            "at-bound.txt",
+            ChangePathKind::File,
+            ChangeLifecycle::Modified,
+        ),
+        (
+            "over-bound.txt",
+            ChangePathKind::File,
+            ChangeLifecycle::Modified,
+        ),
     ]);
     let root = sandbox.root_handle();
 
@@ -180,7 +232,9 @@ fn the_boundary_is_exact_not_greater_than_or_equal() {
             "at-bound.txt",
             DiffPreviewPolicy::default()
         ),
-        Ok(DiffGateDecision::Readable),
+        Ok(DiffGateDecision::Readable {
+            lifecycle: ChangeLifecycle::Modified
+        }),
         "exactly the bound must be accepted"
     );
     assert_eq!(
@@ -215,7 +269,11 @@ fn refusal_happens_from_metadata_alone_before_any_open_is_attempted() {
     let over_bound = vec![b'a'; DEFAULT_MAX_DIFF_INPUT_BYTES as usize + 1];
     let path = sandbox.write_file("unreadable-and-oversized.txt", &over_bound);
     fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
-    let changes = detected(&[("unreadable-and-oversized.txt", ChangePathKind::File)]);
+    let changes = detected(&[(
+        "unreadable-and-oversized.txt",
+        ChangePathKind::File,
+        ChangeLifecycle::Modified,
+    )]);
 
     let result = gate_diff_content_read(
         &changes,
@@ -246,7 +304,7 @@ fn refusal_happens_from_metadata_alone_before_any_open_is_attempted() {
 fn a_small_text_file_within_bound_is_readable() {
     let sandbox = Sandbox::new("readable-text");
     sandbox.write_file("notes.txt", b"hello world\n");
-    let changes = detected(&[("notes.txt", ChangePathKind::File)]);
+    let changes = detected(&[("notes.txt", ChangePathKind::File, ChangeLifecycle::Modified)]);
 
     let result = gate_diff_content_read(
         &changes,
@@ -255,7 +313,12 @@ fn a_small_text_file_within_bound_is_readable() {
         DiffPreviewPolicy::default(),
     );
 
-    assert_eq!(result, Ok(DiffGateDecision::Readable));
+    assert_eq!(
+        result,
+        Ok(DiffGateDecision::Readable {
+            lifecycle: ChangeLifecycle::Modified
+        })
+    );
 }
 
 /// Decision 4: a NUL byte within the sniff window classifies the file as
@@ -268,7 +331,7 @@ fn a_nul_byte_in_the_sniff_window_classifies_as_non_text() {
     bytes.extend_from_slice(b"more binary-looking bytes");
     let real_len = bytes.len() as u64;
     sandbox.write_file("image.png", &bytes);
-    let changes = detected(&[("image.png", ChangePathKind::File)]);
+    let changes = detected(&[("image.png", ChangePathKind::File, ChangeLifecycle::Added)]);
 
     let result = gate_diff_content_read(
         &changes,
@@ -279,7 +342,51 @@ fn a_nul_byte_in_the_sniff_window_classifies_as_non_text() {
 
     assert_eq!(
         result,
-        Ok(DiffGateDecision::NonTextContent { len: real_len })
+        Ok(DiffGateDecision::NonTextContent {
+            len: real_len,
+            lifecycle: ChangeLifecycle::Added
+        })
+    );
+}
+
+/// **RFC-012 Amendment 1's own point, proven directly**: the real
+/// lifecycle a `DetectedChangedPath` carries reaches the decision
+/// unaltered, for both cases RFC-024's corrected table treats
+/// differently (Added: no "not a diff" label; Modified: labelled).
+/// Checked together so a bug that swapped the two would be caught here,
+/// not only by each half individually happening to use a different
+/// fixture value elsewhere.
+#[test]
+fn readable_decisions_carry_the_real_lifecycle_through_unaltered() {
+    let sandbox = Sandbox::new("lifecycle-passthrough");
+    sandbox.write_file("added.txt", b"brand new content\n");
+    sandbox.write_file("modified.txt", b"changed content\n");
+    let changes = detected(&[
+        ("added.txt", ChangePathKind::File, ChangeLifecycle::Added),
+        (
+            "modified.txt",
+            ChangePathKind::File,
+            ChangeLifecycle::Modified,
+        ),
+    ]);
+    let root = sandbox.root_handle();
+
+    assert_eq!(
+        gate_diff_content_read(&changes, &root, "added.txt", DiffPreviewPolicy::default()),
+        Ok(DiffGateDecision::Readable {
+            lifecycle: ChangeLifecycle::Added
+        })
+    );
+    assert_eq!(
+        gate_diff_content_read(
+            &changes,
+            &root,
+            "modified.txt",
+            DiffPreviewPolicy::default()
+        ),
+        Ok(DiffGateDecision::Readable {
+            lifecycle: ChangeLifecycle::Modified
+        })
     );
 }
 

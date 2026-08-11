@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - Acceptance / QA Checklist"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "PR-024-B implemented 2026-08-11, not yet reviewed — PR-024-C blocked on review request 189 (Added vs. Modified is unrepresentable in DetectedChangedPath)"
+status: "PR-024-B implemented 2026-08-11, not yet reviewed — RFC-012 Amendment 1 (ChangeLifecycle) implemented 2026-08-11, not yet reviewed — PR-024-C content-access work not yet started"
 target_milestone: "M10"
 created: "2026-08-11"
 ---

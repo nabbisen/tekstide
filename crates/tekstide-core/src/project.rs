@@ -9,7 +9,7 @@ mod runtime;
 mod session;
 
 pub use change_detection::{
-    ChangePathKind, ChangedPathValidationError, ChangedPathValidationErrorReason,
+    ChangeLifecycle, ChangePathKind, ChangedPathValidationError, ChangedPathValidationErrorReason,
     DetectedChangedPath, DetectedChanges, GeneratedChangeDetectionPolicy, GeneratedChangeDetector,
     ReviewBaseline, ReviewBaselineEntry,
 };

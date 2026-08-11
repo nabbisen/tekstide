@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - QA Evidence"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "PR-024-B implemented 2026-08-11, not yet reviewed; PR-024-C blocked on review request 189 (Added vs. Modified is unrepresentable in DetectedChangedPath)"
+status: "PR-024-B implemented 2026-08-11, not yet reviewed; RFC-012 Amendment 1 (ChangeLifecycle) implemented 2026-08-11, not yet reviewed; PR-024-C content-access work not yet started"
 target_milestone: "M10"
 created: "2026-08-11"
 ---
@@ -111,6 +111,55 @@ change to make unilaterally inside this slice. Recommended a minimal, additive f
 (preserve the distinction `changed_paths_between` already computes, e.g. a
 `ChangeLifecycle { Added, Modified, Deleted }` field) but did not implement it. **Not
 started**: no PR-024-C implementation code exists yet.
+
+**Response to 189 found a deeper defect than the one recommended above, and RFC-012
+Amendment 1 landed 2026-08-11 to fix it.** The architect's own review of the
+recommendation above found `Deleted` was in the wrong enum from the start:
+`ChangePathKind { File, Directory, Symlink, Deleted, Other }` conflated "what kind of
+thing" with "what happened to it" — two orthogonal axes. Adding `ChangeLifecycle`
+*alongside* the recommendation above, without also removing `Deleted` from
+`ChangePathKind`, would have made `{ kind: Deleted, lifecycle: Added }` representable
+and meaningless — "precisely the mislabelling class response 187 just corrected this RFC
+for" (architect's words). The owner authorised the breaking removal "on the grounds that
+dead code harms future maintenance and extensibility." Full amendment text:
+`rfcs/done/012-generated-change-review-foundations.md` §Amendment 1.
+
+**Implemented 2026-08-11, not yet reviewed.** `ChangeLifecycle { Added, Modified,
+Deleted }` added as a new field on `DetectedChangedPath`
+(`crates/tekstide-core/src/project/change_detection.rs`); `Deleted` removed from
+`ChangePathKind` (now `{ File, Directory, Symlink, Other }`). `changed_paths_between`'s
+four match arms now set `lifecycle` explicitly per case, using the same distinction the
+function already computed and previously discarded (no new detection capability, no
+content read — matching the amendment's own justification for staying amendment-shaped
+rather than a new RFC). `gate_diff_content_read`
+(`crates/tekstide-core/src/project/diff.rs`) updated to check `changed.lifecycle ==
+ChangeLifecycle::Deleted` *before* consulting `kind` at all — `DiffGateDecision` gained a
+`Deleted { kind }` variant (kind reports what the path *was*, from the baseline) and
+`Readable`/`NonTextContent` both gained a `lifecycle` field, satisfying the task-breakdown
+gate item added alongside the amendment: "the Added/Modified/Deleted distinction is read
+from `ChangeLifecycle`, never inferred from `ChangePathKind`."
+
+**Ordering ablated for real.** Moved the `Deleted` check to run *after*
+`ProjectFileAccessPolicy::resolve_existing` instead of before it, then re-ran
+`a_deleted_path_is_reported_without_touching_the_filesystem` (whose fixture path,
+`gone.txt`, is never written to disk). **Ablated result**: `Err(Access(FileAccessError {
+reason: MissingPath, .. }))` instead of `Ok(DiffGateDecision::Deleted { kind: File })` —
+proving the check-before-resolve ordering is load-bearing: without it, a deleted `File`-
+kind path is reported as a filesystem-access failure instead of a deletion, the wrong
+outcome for a caller trying to distinguish "refused" from "nothing to diff, reported."
+Reverted before committing; the restored file was diffed against the pre-ablation backup
+to confirm no other change survived the revert.
+
+Full workspace gates after the amendment: `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`,
+`cargo test --workspace --all-targets --all-features` (518 passed, 0 failed), and
+`git diff --check` all clean.
+
+**Still not started**: PR-024-C's own content-access implementation (the bounded read
+itself, the per-change-kind content shape, and the review gate items in
+`task-breakdown-pr-plan.md` beyond the `ChangeLifecycle` gate item this entry covers).
+This entry documents adopting the amendment — a prerequisite the amendment note itself
+names PR-024-C's "second prerequisite" — not PR-024-C's content-access work.
 
 ## PR-024-D — Baseline authority, and closeout
 
