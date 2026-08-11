@@ -76,6 +76,50 @@ it is a real race, that is a security finding in the bind path and stops being a
 **Do not mark it `#[ignore]` or add a retry.** Either would convert a signal into
 silence, and this is the one path in the codebase where that trade is clearly wrong.
 
+### The mechanism, and the check that confirms or kills it
+
+Recorded here 2026-08-11, from review response 179, because a hypothesis that lives only
+in a review response is one the next investigator re-derives.
+
+**`channel.rs` contains 12 `Command::new`/`spawn` sites.** `fork()` duplicates the
+parent's entire fd table, and **`CLOEXEC` — which Rust sets on every fd it creates —
+closes inherited fds at `exec`, not at `fork`.** So between the two there is a real window
+in which a child holds a live copy of every fd the parent had, including a listening Unix
+socket.
+
+If the parent drops its listener inside that window, the socket is **not** dead: the
+child's inherited copy still listens, `UnixStream::connect` succeeds, and
+`clear_stale_socket` correctly reads that as "a live listener, do not touch it" and
+refuses. That is exactly the traced failure.
+
+It explains the whole reproduction matrix, including the negatives:
+
+| Run | Forks in flight? | Result |
+| --- | --- | --- |
+| 300 solo invocations, up to 32 threads | no | no failure |
+| 300 concurrent *processes* of the isolated test | no — that test does not fork | **no failure** |
+| 20 processes × the whole module | yes, 12 fork sites | ~4 per 200 |
+
+The middle row is the strongest evidence: 300 concurrent processes with no forks produced
+nothing.
+
+**The check, and it needs no `strace`:** run the same stress with the module's
+process-spawning tests filtered out. Concurrency identical, forks gone.
+
+- **Flake disappears** → mechanism confirmed. Record it in `qa-evidence.md` as a
+  diagnosed harness artifact, **with the product analogue named**: launching an
+  `AgentRun` forks and execs an AI CLI while approval sockets exist, so two concurrent
+  launches put a fork window and a bind in the same instant. **The consequence is
+  fail-closed** — a bind fails rather than a stale socket being adopted, which is
+  availability, not a bypass. Do not `#[ignore]` it; a test that reproduces a real fork
+  race is telling the truth.
+- **Flake survives** → the theory is wrong, and this needs the kernel-level tracing
+  correctly declined before. Say so and stop there.
+
+**Do not change `clear_stale_socket` either way.** If a retry-on-transient-live-listener
+turns out warranted, that is a design change to the path where two real defects have
+already been found, and it needs its own RFC-021 amendment and review.
+
 ## What this does not include
 
 No behaviour change to the approval model itself. RFC-021 is closed and remains so; these
