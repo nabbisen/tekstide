@@ -2907,7 +2907,7 @@ fn external_change_dialog_body_escapes_a_bidi_override_in_the_path() {
     let catalog = state_with(ApplicationShell::new()).catalog;
     let relative_path = Path::new("proj\u{202E}gpj.exe");
 
-    let body = super::external_change_dialog_body(&catalog, relative_path);
+    let body = super::external_change_dialog_body(&catalog, relative_path, true);
 
     assert!(
         body.contains("<U+202E>"),
@@ -2916,5 +2916,78 @@ fn external_change_dialog_body_escapes_a_bidi_override_in_the_path() {
     assert!(
         !body.contains('\u{202E}'),
         "the raw override character must never reach the conflict dialog, got {body:?}"
+    );
+}
+
+/// **Found live during PR-019-E closeout, not reasoned about in the
+/// abstract**: `ProjectContentStatus::Conflict` is set for two different
+/// real situations -- a genuinely dirty buffer that would lose local
+/// edits on Reload, and a *clean* document that merely changed on disk
+/// (`content status: conflict | document: external changed | dirty
+/// files: 0`, observed against a real save). The dialog must not claim
+/// "your local changes will be discarded" in the second case, since
+/// there are none.
+#[test]
+fn external_change_dialog_body_does_not_claim_discarded_changes_without_local_edits() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let relative_path = Path::new("notes.txt");
+
+    let with_edits = super::external_change_dialog_body(&catalog, relative_path, true);
+    let without_edits = super::external_change_dialog_body(&catalog, relative_path, false);
+
+    assert!(
+        with_edits.contains("discarded"),
+        "a genuine conflict must still warn that local edits are lost: {with_edits:?}"
+    );
+    assert!(
+        !without_edits.contains("discarded"),
+        "a clean document must never claim changes will be discarded when it has none: \
+         {without_edits:?}"
+    );
+    assert_ne!(
+        with_edits, without_edits,
+        "the two real situations must render distinguishably, not the same text"
+    );
+}
+
+/// **The real, end-to-end proof the unit test above cannot give alone**:
+/// a document with no local edits, changed externally, saved for real
+/// via a real `Ctrl+S` through `update` -- the modal must open with the
+/// non-discarding wording, not the genuine-conflict one. Reproduces
+/// exactly the scenario found live: open, do not edit, external write,
+/// save.
+#[test]
+fn saving_a_clean_document_over_a_real_external_change_does_not_claim_discarded_changes() {
+    let (mut state, dir) =
+        state_with_an_open_document("editor-real-clean-external-change", "original");
+    // No local edit -- the document stays Clean.
+    std::fs::write(dir.join("file.txt"), "external edit").unwrap();
+
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("s".into()),
+        modifiers: iced::keyboard::Modifiers::CTRL,
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, press);
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    let Some(ModalContent::ExternalChange(modal)) = &state.modal else {
+        panic!("a real refused save over a clean document must still open the modal");
+    };
+    assert!(
+        !modal.had_local_edits,
+        "test precondition: the document was never edited"
+    );
+    let rendered_body = super::external_change_dialog_body(
+        &state.catalog,
+        &modal.relative_path,
+        modal.had_local_edits,
+    );
+    assert!(
+        !rendered_body.contains("discarded"),
+        "the real modal must not claim discarded changes when there were none: \
+         {rendered_body:?}"
     );
 }

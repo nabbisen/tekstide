@@ -1,8 +1,8 @@
 ---
 title: "RFC-019: Editor and Explorer Surfaces - QA Evidence"
 rfc: "RFC-019"
-rfc_file: "../../proposed/019-editor-and-explorer-surfaces.md"
-status: "PR-019-A/B/C accepted (responses 180, 181) — PR-019-D save/conflict work accepted (response 182); cursor-aware editing rewrite (RFC-006 Amendment 1) implemented 2026-08-11, not yet reviewed"
+rfc_file: "../../done/019-editor-and-explorer-surfaces.md"
+status: "PR-019-A/B/C/D accepted (responses 180, 181, 182, 183) — PR-019-E closeout implemented 2026-08-11, not yet reviewed"
 target_milestone: "M10"
 created: "2026-08-10"
 ---
@@ -162,20 +162,162 @@ The Dismiss-path property (never overwrites) was not re-captured as a second liv
 
 ## PR-019-E — Closeout
 
-Pending implementation.
+Implemented 2026-08-11. Against `task-breakdown-pr-plan.md`'s review gate.
+
+### Commits
+
+- `2d09d5e` — Accept RFC-019 and author its handoff pack.
+- `ac7106e` — PR-019-B: the explorer tree.
+- `03f685b` — PR-019-C: the editor, read-only.
+- `6293390` — PR-019-C response 181: correct the 02 caption, carry two follow-ups.
+- `90b7e3a` — PR-019-D: editing and save.
+- `23acb30` — PR-019-D response 182: cursor-aware editing (RFC-006 Amendment 1).
+- (this closeout) — PR-019-E: closeout, including the `ExternalChanged` wording fix and
+  the single-frame asymmetry artifact.
+
+### A defect found during closeout, fixed rather than only disclosed
+
+Closing out PR-019-D required answering response 182's deferred question directly:
+**does `ProjectContentStatus::ExternalChanged` need more than the passive chrome
+indicator?** Checked against real code, not reasoned about in the abstract:
+`TextDocument::save()`'s own `block_external_change` sets the document's real state to
+`Conflict` only `if self.is_dirty()`, and to `ExternalChanged` otherwise — but
+`ProjectContentWorkspace::save_active_document`'s error mapping turns *either* case into
+the same `ProjectContentStatus::Conflict`, which is what `attempt_save_active_document`
+gates the conflict modal on. Proven with a real scratch test before writing any fix:
+open a real document, make **no** local edit, overwrite the file externally, save for
+real —
+
+```
+content status: conflict | document: external changed | dirty files: 0
+```
+
+The modal PR-019-D built would have told this user **"your local changes will be
+discarded"** with zero local changes to discard — a real, misleading claim, not a
+hypothetical one. **Fixed, not merely disclosed**: `ExternalChangeModal` gained
+`had_local_edits: bool`, read from `document.state() == TextDocumentState::Conflict`
+(the same real distinction `save()` already computed, not re-derived); `$reason` selects
+between two real messages in `external-change-dialog-body`. Ablated: temporarily forced
+`had_local_edits = true` unconditionally — `saving_a_clean_document_over_a_real_external_change_does_not_claim_discarded_changes`
+(real key routing, real `Ctrl+S`) failed on its own precondition assertion (the document
+was never edited, yet the modal reported edits existed), confirming the test actually
+exercises the real distinction. Reverted before committing.
+
+Confirmed live: `evidence/pr-019-e-02-corrected-non-conflict-wording.png` — a clean
+document, externally overwritten, real `Ctrl+S`; the dialog reads "Reload to see the new
+content, or dismiss to keep your current view without saving," no discard claim, chrome
+correctly reading `clean.txt (changed on disk)` rather than `(conflict)`.
+
+**This is the answer to the deferred `ExternalChanged` question**: yes, it needed more
+than the passive chrome indicator alone — specifically, the *save flow's* own modal
+needed to stop conflating it with a genuine conflict. The chrome indicator itself
+(`editor-chrome`'s `[external-changed]` arm, live since PR-019-C) was already correct
+and needed no change. No new standalone notice was added beyond correcting the one that
+already exists, since the modal only appears at a real trigger point (an attempted save)
+and the chrome is always live regardless of whether one is attempted.
+
+### The single-frame asymmetry artifact, deferred from PR-019-C, produced here
+
+`evidence/pr-019-e-01-single-frame-asymmetry.png` — a fixture whose **name and content**
+both carry `U+202E`: `proj<0x202E>gpj.exe` containing the literal bytes
+`echo proj<0x202E>gpj.exe`. One frame shows both halves of RFC-019's central security
+property at once: the chrome header renders `proj<U+202E>gpj.exe` **escaped** (the
+`<U+202E>` marker, not the raw override), while the body renders the file's real content
+**raw and bidi-reordered** — visually `echo projexe.jpg`, the Trojan Source class RFC-016
+names, reordered correctly by the substrate exactly because this module never escapes it.
+Response 181 called this the strongest single image this RFC could produce; response 183
+carried it forward as a PR-019-E obligation. `evidence/pr-019-e-00-explorer-listing.png`
+shows the same fixture escaped in the explorer tree first, for context.
+
+### Open questions, answered
+
+1. **Should the `.label()` scan be broadened to catch free functions?** **Raised, not
+   absorbed** — recorded in `rfcs/future-work.md` (Desktop GUI Runtime theme) rather than
+   decided here: the scan is `i18n::enforcement`'s territory, and a scan widened under a
+   rendering RFC is a scan nobody owns, exactly as RFC-019's own text anticipated.
+2. **Does the explorer render symlink targets?** Answered in PR-019-B: indicator only
+   (`explorer_symlink_status_label`'s four states — none, in-root, unresolved, escapes
+   root), never the target path itself. A target is attacker-influenced text pointing
+   outside the project; showing the *fact* of an unsafe symlink is useful, showing *where*
+   it points was judged not worth the added escaping surface for a first cut. Restated
+   here since PR-019-B's own qa-evidence entry did not name this as an open-question
+   answer explicitly.
+3. **Syntax highlighting: at all, and if so when?** Answered now, with the editor
+   working, per the gate's own instruction to decide this at closeout rather than before.
+   **No.** It remains RFC-019's own non-goal (large dependency surface, no security
+   content) and nothing in this RFC's implementation changes that calculus — a working,
+   cursor-aware, save-capable editor does not need syntax colour to be correct or safe.
+   If it is ever built, it is its own slice, evaluated on its own merits, not implied by
+   this closeout.
+
+### Claim statement, checked against RFC-019's own text
+
+**What this RFC closes, matching its own "What this closes" section exactly**: RFC-006's
+deferral of rendered content surfaces; Content mode being a placeholder since `0.4.0`.
+Both surfaces (`ExplorerDirectoryScan`, `TextDocument`) render, with real editing, save,
+and conflict handling. **What it does not close, also unchanged from the RFC's own
+text**: diff review and the AgentRun report (RFC-020); anything terminal-related
+(`NFR-PERF-004`, the three-terminal limit, the output ceiling — untouched by this RFC).
+
+**No claim that "show invisibles" is a security control.** Nothing of the kind was
+built — this RFC's editor renders raw text only, with no invisibles-marking affordance
+of any kind. The claim RFC-016 forbade was never at risk of being made because the
+feature it would describe does not exist yet.
+
+**No claim of any terminal performance change.** This RFC touches no terminal code path;
+`NFR-PERF-004` and its measurement remain exactly where RFC-017 left them.
+
+**No claim of syntax highlighting, LSP, multi-cursor, or search-and-replace** — all
+remain non-goals per RFC-019's own text, unchanged by this closeout (see open question 3
+above).
+
+**Editing is real but bounded, and the closeout must not imply otherwise (response 183's
+own instruction)**: cursor-aware insert/delete/navigate at the real position, a real
+save with real, distinguishing conflict handling. **No undo history beyond what RFC-006
+models** — RFC-019 §Non-goals names this explicitly, and RFC-006 itself only ever listed
+undo/redo as "if feasible," never delivered. **A mid-buffer edit is therefore
+unrecoverable within the session**: Backspace removes what was just typed, but there is
+no history to step back through past that. Reload (the conflict dialog's own recovery
+path) discards *all* local edits in favour of disk, not a step-back to an earlier local
+state. This is a real, user-facing limitation, stated plainly rather than left implicit
+in "undo is a non-goal."
+
+### Gates
+
+`fmt --all --check`, `clippy --workspace --all-targets --all-features -D warnings`, full
+test suite (508 `tekstide-core`, unchanged from the PR-019-D response-182 addendum; 203
+`tekstide`, +2 over that addendum's 201 — the two conflict-wording tests above), `git diff
+--check`. All passed.
 
 ## Known Limitations
 
-Consolidated at closeout. Carried in from RFC-019's own text, to be restated with
-evidence:
+Consolidated at closeout, restated with evidence rather than left as the RFC's own
+carried-in text:
 
 - **No syntax highlighting, language servers, multi-cursor, or search** — non-goals, each
-  a product in its own right.
+  a product in its own right. Answered explicitly above (open question 3): no plan to
+  build syntax highlighting, evaluated at closeout with the editor actually working.
+- **No undo history beyond what RFC-006 models.** A mid-buffer edit is unrecoverable
+  within the session once typed past what Backspace can still reach; Reload discards all
+  local edits rather than stepping back to an earlier one. Stated plainly per response
+  183's own instruction, not left implicit.
+- **Editing is cursor-aware but not feature-complete**: no multi-cursor, no
+  search-and-replace, no bracket matching or auto-indent — ordinary editor conveniences,
+  each its own scope, none blocking correctness or safety.
 - **Files above 4 MiB are not editable.** `TextDocumentOpenPolicy`'s existing bound, not a
   new one introduced here.
 - **No file-tree write surface** — no rename, delete, or create.
-- **"Show invisibles", if built, is ordinary functionality and not a security control.**
-  RFC-016 chose that framing deliberately; a marker the user can toggle off is not a
-  boundary.
+- **No symlink target shown in the explorer** — indicator only (open question 2, answered
+  above); a target is attacker-influenced text this first cut chose not to add escaping
+  surface for.
+- **"Show invisibles" was not built at all**, and if it is later, RFC-016's framing
+  applies unchanged: ordinary functionality, not a security control. A marker the user
+  can toggle off is not a boundary.
 - **Nothing here changes terminal performance.** `NFR-PERF-004`, the three-terminal limit
-  and the output ceiling are owned by readiness-driven terminal I/O.
+  and the output ceiling are owned by readiness-driven terminal I/O, untouched by this RFC.
+- **No `NavigationAction` reaches `AppCommand::OpenActiveProjectWorkspace` directly** —
+  found during PR-019-C's GUI evidence work, not this RFC's to fix; recorded in
+  `rfcs/future-work.md` (Desktop GUI Runtime theme) for RFC-023's keybinding pass.
+- **The `.label()` completeness scan cannot catch hardcoded-English free functions** —
+  open question 1, raised to `rfcs/future-work.md` rather than absorbed into this RFC,
+  per its own text's instruction.

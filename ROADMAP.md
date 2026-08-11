@@ -145,6 +145,18 @@ Review gates:
 - NFR evidence for typing latency in a large document (`NFR-PERF-003`).
 - Review that transcript and diff content render as untrusted data.
 
+RFC-019 (editor and explorer surfaces) closed 2026-08-11, PR-019-B through E: a
+trusted-chrome explorer tree, a cursor-aware editor over `TextDocument` with real save
+and conflict handling. RFC-006 Amendment 1 added the one core accessor editing needed
+(a cursor-only forwarding method). **M10's first half is done; RFC-020 (diff/review and
+AgentRun report surfaces) is the second and is not yet started.** `NFR-PERF-003` was not
+separately re-measured against the real editor in RFC-019 — RFC-015 PR-015-F's own C4
+measurement (input-to-state-change p95 42µs + view-build-cost p95 131µs, met by roughly
+two orders of magnitude) was against a synthetic typing-measurement document, not this
+RFC's real one; whether that stands in for this gate or needs re-verification against
+real editor content is for RFC-020's own closeout (or a dedicated follow-up) to decide,
+not asserted here.
+
 ## M11: Approval And Safety Dialogs
 
 Purpose:

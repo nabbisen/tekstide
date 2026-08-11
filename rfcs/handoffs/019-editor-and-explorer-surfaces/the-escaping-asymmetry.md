@@ -1,7 +1,7 @@
 ---
 title: "RFC-019 — The escaping asymmetry: read before PR-019-B or PR-019-C"
 rfc: "RFC-019"
-rfc_file: "../../proposed/019-editor-and-explorer-surfaces.md"
+rfc_file: "../../done/019-editor-and-explorer-surfaces.md"
 status: "Ready for implementation — accepted 2026-08-10 with the RFC"
 created: "2026-08-10"
 ---

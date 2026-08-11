@@ -1,7 +1,7 @@
 ---
 title: "RFC-019: Editor and Explorer Surfaces - Implementation Handoff"
 rfc: "RFC-019"
-rfc_file: "../../proposed/019-editor-and-explorer-surfaces.md"
+rfc_file: "../../done/019-editor-and-explorer-surfaces.md"
 status: "Accepted 2026-08-10 — ready for implementation"
 target_milestone: "M10"
 created: "2026-08-10"

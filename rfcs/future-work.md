@@ -79,10 +79,14 @@ Status: substrate decided, application shell, and mode switching implemented by 
 
 - Desktop GUI substrate selected (`iced`, RFC-014) and application shell implemented: window/chrome/content/modal layer composition, keyboard focus and input routing, i18n-backed text, a compiled theme, and a Project Board surface rendering real `ApplicationShell` state with untrusted names and paths escaped (RFC-015 `0.4.0`).
 - Content ↔ Terminal mode switching, a visible chrome-level focus indicator, and the `NFR-PERF-002` mode-switch latency measurement all implemented in `0.4.1` (RFC-015 PR-015-E) — both against Content/Terminal-mode placeholders, since neither RFC-017's terminal grid nor RFC-019's editor exists yet. `NFR-PERF-002` needs re-checking once either does (RFC-017's own handoff carries this obligation).
-- The sidebar/main-area scaffolding is real for Content mode as of RFC-019 PR-019-B/C
-  (`0.6.x`): a real explorer tree (untrusted names/status escaped) in the sidebar, a
-  read-only editor (text area raw, chrome escaped) in the main area. Editing, save, and
-  `ExternalChangeDecision` are PR-019-D's; diff/review is RFC-020.
+- Content mode is real end to end as of RFC-019 (`0.6.x`, PR-019-B through E): a real
+  explorer tree (untrusted names/status escaped) in the sidebar; a real, cursor-aware
+  editor (text area raw, chrome escaped, `RFC-006 Amendment 1`'s cursor-forwarding
+  accessor wired) in the main area; real save with a real, distinguishing conflict
+  dialog (`ProjectContentStatus::Conflict` covers both a genuine dirty conflict and a
+  clean externally-changed document — the dialog's wording now reads each correctly).
+  Undo history remains out of scope (RFC-019 non-goal, inherited from RFC-006). Diff
+  review and the AgentRun report are RFC-020, M10's second half.
 - **No `NavigationAction` reaches `AppCommand::OpenActiveProjectWorkspace` directly.**
   Found during RFC-019 PR-019-C's GUI evidence work (response 181, 2026-08-11):
   `SwitchActiveProject`'s own keybinding is `None`/`Configurable`, already disclosed as
@@ -91,6 +95,16 @@ Status: substrate decided, application shell, and mode switching implemented by 
   succeeding — a real gap, not a documented non-goal, and one a future keybinding pass
   (RFC-023) should close directly rather than leaving every workspace entry point to
   borrow a side effect from an unrelated command.
+- **The `no_count_display_or_attention_label_is_called_anywhere_in_the_crate` scan matches
+  only the literal substring `.label()`, so it cannot catch a hardcoded-English *free
+  function* (one not called as a method).** Raised at RFC-019's own design stage (its
+  handoff named the four free functions this exact gap would miss, before implementation
+  started, so review caught none of them) and again at PR-019-E closeout (response 182):
+  **raised here, not absorbed into RFC-019** — the scan lives in `i18n::enforcement`,
+  which is nobody's territory to widen under a rendering RFC. Whoever next touches
+  `i18n::enforcement` should decide whether to broaden the scan to match free-function
+  calls generally, or accept that every future producer of this shape needs naming in
+  its own RFC the way RFC-019 named its four.
 - Add dialog and confirmation flows (trust, safe-close, destructive, configuration change) — M11.
 - Validate responsive layout and visual polish beyond the Project Board's current row-based rendering.
 - **The adapter-spawn pathway — what makes command approval reachable.** Named as a standing theme 2026-08-01, deliberately not scheduled: the owner's model is to resolve themes and issues as they come, not to fix a milestone for this.

@@ -511,6 +511,12 @@ fn generic_args() -> CatalogArgs<'static> {
             "path",
             &tekstide_core::text_safety::quote_untrusted("fixture.txt"),
         )
+        // RFC-019 PR-019-E: `external-change-dialog-body`'s `$reason`
+        // reuses this same `reason` arg -- "limit" is not one of its two
+        // arms (`conflict`/`external-changed`), so it falls through to
+        // the message's own `*[external-changed]` default, the same
+        // "some resolvable string, not a specific asserted value" shape
+        // `state`="available" already uses for `editor-chrome` above.
         // RFC-006 Amendment 1: `editor-cursor`'s two trusted numbers.
         .number("line", 1u32)
         .number("column", 1u32)

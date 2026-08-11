@@ -1,7 +1,7 @@
 ---
 title: "RFC-019: Editor and Explorer Surfaces - Task Breakdown / PR Plan"
 rfc: "RFC-019"
-rfc_file: "../../proposed/019-editor-and-explorer-surfaces.md"
+rfc_file: "../../done/019-editor-and-explorer-surfaces.md"
 status: "Accepted 2026-08-10 — PR-019-B accepted (response 180); PR-019-C implemented, not yet reviewed"
 target_milestone: "M10"
 created: "2026-08-10"
@@ -136,6 +136,22 @@ Review gate:
 - Open question 1 — whether to widen the `.label()` scan to catch free functions —
   **raised, not absorbed.**
 - Open question 3 — syntax highlighting — answered with the editor working, not before.
+
+**Discharged, implemented 2026-08-11 — full detail in `qa-evidence.md`.** Closing out the
+`ExternalChanged` question response 182 deferred surfaced a real defect, not merely an
+open design question: the conflict dialog's "your local changes will be discarded"
+wording was showing for a *clean* document that merely changed on disk (no local edits
+to discard) as well as a genuine conflict, because `ProjectContentWorkspace`'s error
+mapping folds both into the same `ProjectContentStatus::Conflict`. Fixed (the dialog now
+reads `document.state()`'s own already-computed dirty/not-dirty distinction and selects
+wording accordingly), ablated (forcing the old unconditional wording makes the new
+real-routing test fail on its own precondition), and confirmed live. Open questions 1
+and 3 answered as the gate specifies — 1 raised to `rfcs/future-work.md`, not absorbed;
+3 answered "no" now that the editor demonstrably works without it. The single-frame
+asymmetry artifact deferred from PR-019-C (response 181) is produced here. Claim
+statement checked line-by-line against RFC-019's own "What this closes" and non-goals
+sections, with the undo-is-unrecoverable-within-session limitation stated plainly per
+response 183's own instruction, not left implicit.
 
 ## Sequencing
 

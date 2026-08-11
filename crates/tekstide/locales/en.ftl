@@ -293,8 +293,22 @@ editor-open-error = Could not open file: { $message }
 # (discarding local edits, taking disk's current content); Dismiss/
 # Escape leaves the file untouched -- mirrors `paste-confirm-dialog-*`'s
 # shape exactly.
+#
+# RFC-019 PR-019-E: `ProjectContentStatus::Conflict` (this modal's own
+# trigger) is set for two different real situations --
+# `TextDocument::save()`'s own `block_external_change` sets the
+# document's state to `Conflict` only when the buffer was actually
+# dirty, and to `ExternalChanged` otherwise (nothing local to lose).
+# `$reason` selects between them so this dialog never claims "your local
+# changes will be discarded" when there were none -- found live during
+# closeout (`content status: conflict | document: external changed |
+# dirty files: 0`, a real save on a real clean-but-externally-changed
+# document), not merely reasoned about.
 external-change-dialog-title = File Changed On Disk
-external-change-dialog-body = { $path } changed on disk since it was opened. Reload to see the new content (your local changes will be discarded), or dismiss to keep editing without saving.
+external-change-dialog-body = { $path } changed on disk since it was opened. { $reason ->
+    [conflict] Reload to see the new content (your local changes will be discarded), or dismiss to keep editing without saving.
+   *[external-changed] Reload to see the new content, or dismiss to keep your current view without saving.
+}
 external-change-dialog-reload = Reload
 external-change-dialog-dismiss = Dismiss
 external-change-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always dismisses.

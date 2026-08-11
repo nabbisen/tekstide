@@ -179,9 +179,21 @@ impl ExternalChangeButton {
 /// from `active_document()`'s path at the moment `save_active_document`
 /// returned `BlockedExternalChange`, not re-read later, since "Reload"
 /// re-opens exactly this path.
+///
+/// RFC-019 PR-019-E: `had_local_edits` disambiguates the two situations
+/// `ProjectContentWorkspace::save_active_document`'s own error mapping
+/// conflates into a single `ProjectContentStatus::Conflict` -- a dirty
+/// buffer really would lose local edits on Reload, but a *clean*
+/// document that merely changed on disk has none to lose.
+/// `TextDocument::save()` itself already distinguishes the two
+/// (`self.state` becomes `Conflict` only `if self.is_dirty()`,
+/// `ExternalChanged` otherwise -- `content::document`'s own
+/// `block_external_change`), so this reads that real, already-computed
+/// distinction rather than inventing a second one.
 #[derive(Debug)]
 pub(crate) struct ExternalChangeModal {
     relative_path: std::path::PathBuf,
+    had_local_edits: bool,
     focus: ExternalChangeButton,
 }
 
@@ -1107,11 +1119,20 @@ fn attempt_save_active_document(state: &mut State) {
     if *workspace.status() != tekstide_core::project::ProjectContentStatus::Conflict {
         return;
     }
-    let Some(relative_path) = workspace.active_path_hint() else {
+    let Some(document) = workspace.active_document() else {
         return;
     };
+    // RFC-019 PR-019-E: `ProjectContentStatus::Conflict` is set for both
+    // a genuine conflict (local edits would be lost) and a clean
+    // document that merely changed on disk (nothing would be lost) --
+    // `TextDocument::save()` already computed which one this is
+    // (`block_external_change`'s own `if self.is_dirty()` branch), so
+    // this reads `document.state()` rather than re-deriving it.
+    let had_local_edits = document.state() == tekstide_core::content::TextDocumentState::Conflict;
+    let relative_path = document.target().selected_relative_path.clone();
     state.modal = Some(ModalContent::ExternalChange(ExternalChangeModal {
         relative_path,
+        had_local_edits,
         focus: ExternalChangeButton::Dismiss,
     }));
 }
@@ -2399,11 +2420,19 @@ fn paste_confirmation_modal_view<'a>(
 pub(crate) fn external_change_dialog_body(
     catalog: &Catalog,
     relative_path: &std::path::Path,
+    had_local_edits: bool,
 ) -> String {
     let path = tekstide_core::text_safety::quote_untrusted(&relative_path.display().to_string());
+    let reason = if had_local_edits {
+        "conflict"
+    } else {
+        "external-changed"
+    };
     catalog.get_with_args(
         "external-change-dialog-body",
-        &CatalogArgs::new().untrusted("path", &path),
+        &CatalogArgs::new()
+            .untrusted("path", &path)
+            .trusted_symbol("reason", reason),
     )
 }
 
@@ -2423,6 +2452,7 @@ fn external_change_modal_view<'a>(
         text(external_change_dialog_body(
             &state.catalog,
             &modal.relative_path,
+            modal.had_local_edits,
         ))
         .size(state.theme.font_size_body())
         .into(),
