@@ -100,6 +100,15 @@ Review gate:
   presented because no before-version exists"** — not two functions returning the same
   type with the difference left to a doc comment.
 
+**Blocked, found on starting this slice, filed as review request 189**: the table above
+needs Added vs. Modified for `File`-kind changes, and `DetectedChangedPath` cannot
+express it — `changed_paths_between` (RFC-012's own model, `change_detection.rs`)
+computes the distinction and discards it before constructing the value this slice
+receives. Full detail in `qa-evidence.md`'s PR-024-C entry. Recommended a minimal,
+additive amendment (preserve the distinction already computed) rather than implementing
+one unilaterally, since it touches a different closed RFC's model. **Not started** until
+answered.
+
 ## PR-024-D — Baseline authority, and closeout
 
 Scope: staleness via the existing snapshot machinery, plus the closeout.

@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - QA Evidence"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "PR-024-B implemented 2026-08-11, not yet reviewed; PR-024-C unblocked (response 187) with a corrected scope (no two-sided diff for a modified file), implementation starting"
+status: "PR-024-B implemented 2026-08-11, not yet reviewed; PR-024-C blocked on review request 189 (Added vs. Modified is unrepresentable in DetectedChangedPath)"
 target_milestone: "M10"
 created: "2026-08-11"
 ---
@@ -95,6 +95,22 @@ authorisation, not an implementation-level choice. Full correction text and reas
 `rfcs/proposed/024-diff-preview-policy.md` §Correction, 2026-08-11;
 `task-breakdown-pr-plan.md`'s own PR-024-C entry carries the corrected per-change-kind
 table forward as this slice's binding scope.
+
+**A second gap, found immediately on starting implementation, filed as review request
+189 rather than guessed at.** The corrected table needs to distinguish **Added** from
+**Modified** for `File`-kind changes (Added: no "not a diff" label, current content is
+the whole change by definition; Modified: current content, explicitly labelled not a
+diff). `DetectedChangedPath { relative_path, kind }` cannot express this —
+`changed_paths_between` (`change_detection.rs`) computes the distinction internally
+(`(Some(_), Some(after))` = Modified vs. `(None, Some(after))` = Added) and discards it,
+since both arms construct the same `{ relative_path, kind: after.kind }` shape.
+`DetectedChanges` carries only an opaque `baseline_snapshot_ref: Option<String>`, not the
+baseline's own entries, so the distinction cannot be recovered from outside
+`change_detection.rs` either. This is RFC-012's own model, a different closed RFC — not a
+change to make unilaterally inside this slice. Recommended a minimal, additive fix
+(preserve the distinction `changed_paths_between` already computes, e.g. a
+`ChangeLifecycle { Added, Modified, Deleted }` field) but did not implement it. **Not
+started**: no PR-024-C implementation code exists yet.
 
 ## PR-024-D — Baseline authority, and closeout
 
