@@ -309,3 +309,78 @@ Evidence:
 
 - Implement root policy before explorer recursion.
 - Keep editor features minimal until PTY/AgentRun features are underway.
+
+## Amendment 1: Cursor-Forwarding Accessor on `ProjectContentWorkspace`
+
+Status: **Authorised by the high-capability model, acting as design authority, 2026-08-11 (RFC-019 review response 182)**
+Amendment type: **Additive** — no existing method's signature, state vocabulary, or invariant changes meaning; one new method is added.
+Requested by: RFC-019 PR-019-D (review response 182), during implementation of real editing on top of this RFC's own read/write text-document model.
+
+### What is authorised
+
+A cursor-only forwarding method threaded through the same three layers every other
+content mutator already crosses:
+
+- `TextDocument::set_cursor` (already existed, unreachable from outside `tekstide-core`) →
+- `ProjectContentWorkspace::set_active_cursor(cursor: TextCursor) -> Result<(), ProjectContentError>` (new)
+- `ProjectSession::set_active_cursor` (new, forwards + `record_activity()`, the same shape `replace_active_text` already uses)
+- `AppState::set_active_project_cursor` / `ApplicationShell::set_active_project_cursor` (new, forward-only, the same shape `replace_active_project_text` already uses)
+
+No new type. `TextCursor { line, column }` already existed (§5 of this RFC lists "cursor
+position" as part of per-project state) and was already read-accessible
+(`ProjectContentWorkspace` has no cursor read gap — `TextDocument::cursor()` was reachable
+indirectly before this amendment too, since nothing hid it; only the *write* path was
+missing).
+
+### Why an amendment was needed
+
+RFC-019 PR-019-D found that `ProjectContentWorkspace` exposes
+`active_document() -> Option<&TextDocument>` only — no mutable accessor of any kind. This
+was deliberate, not an oversight: `replace_active_text` maintains `self.status` on every
+text mutation (`ProjectContentStatus::Edited` when the result is dirty, `EditError` on
+failure), and handing out `&mut TextDocument` directly would let a caller mutate text
+through it and leave `status` stale — the exact defect class this workspace type exists to
+prevent.
+
+Cursor position is different in kind: `TextCursor`/`TextViewport` do not participate in
+`TextDocumentState`, `ProjectContentStatus`, or any dirty/save/conflict computation
+anywhere in `content::document` or `project::content`. Moving the cursor cannot make
+`self.status` stale, because nothing derives `self.status` from cursor position. A
+cursor-only method does not reopen the invariant `active_document()`'s read-only shape
+protects; it closes the one gap that shape left with nothing behind it to protect.
+
+### Why this does not require a new RFC
+
+RFC-019's own text already lists "cursor position" as ProjectSession state (§5) and
+"basic undo/redo if feasible" alongside real editing (§3) — a cursor-write path is
+inside this RFC's original scope, not a new capability being retrofitted. This amendment
+adds one accessor with no behavioural change to any existing method, no new state
+vocabulary, and no migration. The proportionate instrument is a recorded amendment here,
+matching Amendment 1's own precedent in RFC-013 for additive changes below the bar of a
+new proposal.
+
+### Constraints this amendment inherits, unchanged
+
+1. **Dirty/save/conflict state is computed from text and disk snapshots only.** This
+   amendment must not become a second place cursor position leaks into that computation —
+   `set_active_cursor` touches `self.status` nowhere, checked directly by
+   `cursor_move_never_changes_project_content_status`.
+2. **One active text document.** `set_active_cursor` fails the same way every other
+   document-scoped mutator does (`Err(ProjectContentError::NoActiveDocument)`) when there
+   is none — it does not invent a second "no-op success" convention.
+3. **Core has no GUI dependency.** `TextCursor` remains a plain `{ line, column }` value;
+   this amendment adds no rendering concern to `tekstide-core`, only a write accessor.
+
+### Defect this amendment exists to correct
+
+Without a write path, RFC-019 PR-019-D's editing surface could only ever be append-only:
+every typed character landing at the end of the buffer regardless of where the user was
+looking, with no way to represent or move an insertion point. Response 182's review found
+that combination — append-only editing plus a working, reachable save — a real defect: a
+user typing into what looks like the middle of a file has their keystrokes silently land
+elsewhere, and `Ctrl+S` then persists the mismatch with nothing on screen to warn them.
+Disclosing the limitation was considered and rejected as a fix, on the same review: a
+disclosure does not change what the product does when used ordinarily, and the failure
+mode is silent, not merely limited. This accessor is the minimum addition that lets
+PR-019-D render a real cursor position and edit at it, closing the defect at its source
+rather than documenting around it.

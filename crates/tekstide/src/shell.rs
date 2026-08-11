@@ -1065,10 +1065,25 @@ fn handle_editor_key(state: &mut State, key: &input::KeyPress) {
     let Some(document) = project.content_workspace().active_document() else {
         return;
     };
-    let Some(new_text) = crate::surface::editor::apply_edit_key(document.text(), &key.key) else {
+    let text = document.text().to_string();
+    let cursor = document.cursor();
+
+    // RFC-006 Amendment 1: an edit key wins over a navigation key when
+    // both could apply (they never do here -- the two functions'
+    // `Named` arms do not overlap -- but the order states which of the
+    // two this arm treats as primary). `apply_edit_key` writes both
+    // halves together (`replace_active_project_text` then
+    // `set_active_project_cursor`) so the cursor always lands exactly
+    // where the edit left it, never recomputed from a second, possibly
+    // stale read of `document.cursor()` after the text already changed.
+    if let Some(edit) = crate::surface::editor::apply_edit_key(&text, cursor, &key.key) {
+        let _ = state.app_shell.replace_active_project_text(edit.text);
+        let _ = state.app_shell.set_active_project_cursor(edit.cursor);
         return;
-    };
-    let _ = state.app_shell.replace_active_project_text(new_text);
+    }
+    if let Some(new_cursor) = crate::surface::editor::navigate_cursor(&text, cursor, &key.key) {
+        let _ = state.app_shell.set_active_project_cursor(new_cursor);
+    }
 }
 
 /// RFC-019 PR-019-D: `Ctrl+S`'s real handler. `save_active_document`'s

@@ -12,7 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::close::{CloseResourceProviderState, CloseResourceSummary};
-use crate::content::{ExternalChangeDecision, SaveDecision, TextDocumentOpenPolicy};
+use crate::content::{ExternalChangeDecision, SaveDecision, TextCursor, TextDocumentOpenPolicy};
 use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError,
     ApprovalDecision, ApprovalId, ApprovalRequest, AuditEvent, ChangeAssociationConfidence,
@@ -809,6 +809,18 @@ impl ProjectSession {
     ) -> Result<(), ProjectContentError> {
         let result = self.content_workspace.replace_active_text(text);
         self.sync_file_state_from_content_workspace();
+        self.record_activity();
+        result
+    }
+
+    /// RFC-006 Amendment 1: cursor position is not text mutation, so this
+    /// does not call `sync_file_state_from_content_workspace` -- nothing
+    /// in `ProjectFileState` (`open_buffer_count`, `dirty_file_count`,
+    /// `active_path_hint`) derives from cursor position. `record_activity`
+    /// still applies: moving the cursor is real user interaction, the
+    /// same reasoning `set_mode`/`set_open_surface` already record it for.
+    pub fn set_active_cursor(&mut self, cursor: TextCursor) -> Result<(), ProjectContentError> {
+        let result = self.content_workspace.set_active_cursor(cursor);
         self.record_activity();
         result
     }

@@ -269,6 +269,12 @@ editor-chrome = { $path }{ $state ->
    *[clean] {""}
 }
 
+# RFC-006 Amendment 1 / RFC-019 PR-019-D: the cursor's own position,
+# 1-indexed for display -- `TextCursor` itself is 0-indexed internally,
+# matching every other zero-based offset in this crate. Trusted output
+# only (two numbers); nothing here is attacker-influenced.
+editor-cursor = Line {$line}, Column {$column}
+
 editor-empty = No file is open. Select a file in the explorer and press Enter.
 
 # `$message` is `TextDocumentOpenError`'s own `Display`, which -- like

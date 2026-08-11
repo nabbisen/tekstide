@@ -213,6 +213,58 @@ fn text_document_workflow_is_visible_in_active_content_workspace() {
     );
 }
 
+/// RFC-006 Amendment 1's own constraint, checked directly: cursor
+/// position participates in no dirty/save/conflict computation, so
+/// moving it must never change `ProjectContentStatus` or
+/// `TextDocumentState` -- the same rendered fields the workflow test
+/// above already asserts on, unchanged here.
+#[test]
+fn cursor_move_never_changes_project_content_status() {
+    let sandbox = TestSandbox::new("shell-cursor-move");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/notes.txt", b"hello\nworld\n");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+    shell
+        .open_active_project_text_document("notes.txt")
+        .expect("text document should open");
+    let rendered_before = shell.render_text();
+    assert!(rendered_before.contains("content status: open"));
+    assert!(rendered_before.contains("document: clean"));
+
+    shell
+        .set_active_project_cursor(crate::content::TextCursor { line: 1, column: 3 })
+        .expect("a real active document should accept a cursor move");
+
+    let rendered_after = shell.render_text();
+    assert_eq!(
+        rendered_before, rendered_after,
+        "moving the cursor must not change any rendered content status"
+    );
+}
+
+/// The `NoActiveDocument` failure path, proven against a real project
+/// with no document open -- the same defensive shape every other
+/// document-scoped mutator already fails with, not a second convention.
+#[test]
+fn cursor_move_without_an_active_document_fails_without_a_document() {
+    let sandbox = TestSandbox::new("shell-cursor-move-no-document");
+    let project_dir = sandbox.create_dir("project");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+
+    let result = shell.set_active_project_cursor(crate::content::TextCursor { line: 0, column: 0 });
+
+    assert_eq!(
+        result,
+        Err(crate::project::ProjectContentError::NoActiveDocument)
+    );
+}
+
 #[test]
 fn content_workspace_renders_bounded_explorer_scan_without_file_contents() {
     let sandbox = TestSandbox::new("shell-content-explorer");

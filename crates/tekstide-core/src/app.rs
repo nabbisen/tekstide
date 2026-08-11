@@ -1,5 +1,5 @@
 use crate::close::{CloseAssessment, assess_close};
-use crate::content::{ExternalChangeDecision, SaveDecision};
+use crate::content::{ExternalChangeDecision, SaveDecision, TextCursor};
 use crate::domain::{OwnershipError, TerminalId, TerminalSession, VisibleSlot};
 use crate::project::recent::{
     RECENT_PROJECT_STATE_VERSION, RecentProject, RecentProjectAvailability, RecentProjectState,
@@ -317,6 +317,18 @@ impl AppState {
         };
 
         project.replace_active_text(text)
+    }
+
+    /// RFC-006 Amendment 1.
+    pub fn set_active_project_cursor(
+        &mut self,
+        cursor: TextCursor,
+    ) -> Result<(), ProjectContentError> {
+        let Some(project) = self.active_project_mut() else {
+            return Err(ProjectContentError::NoActiveProject);
+        };
+
+        project.set_active_cursor(cursor)
     }
 
     pub fn save_active_project_text_document(

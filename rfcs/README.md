@@ -58,7 +58,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 003 | [Information Architecture and UI Mode Model](./done/003-information-architecture-and-ui-mode-model.md) | Implemented |
 | 004 | [Security Baseline and Restricted Mode](./done/004-security-baseline-and-restricted-mode.md) | Implemented |
 | 005 | [Application Shell and Project Board](./done/005-application-shell-and-project-board.md) | Implemented |
-| 006 | [ProjectSession State and File Explorer / Editor Basics](./done/006-projectsession-state-and-file-explorer-editor-basics.md) | Implemented with documented limitations |
+| 006 | [ProjectSession State and File Explorer / Editor Basics](./done/006-projectsession-state-and-file-explorer-editor-basics.md) | Implemented with documented limitations · **Amendment 1 implemented 2026-08-11** (additive `ProjectContentWorkspace::set_active_cursor` cursor-forwarding accessor, authorised by RFC-019 PR-019-D response 182; enables cursor-aware editing without reopening `active_document()`'s read-only invariant) |
 | 007 | [Runtime Substrate and PTY Feasibility Gate](./done/007-runtime-substrate-pty-feasibility.md) | Implemented feasibility gate |
 | 008 | [TerminalSession and Process Lifecycle](./done/008-terminalsession-process-lifecycle.md) | Implemented with documented limitations |
 | 009 | [Terminal Security Boundary](./done/009-terminal-security-boundary.md) | Implemented with documented limitations |

@@ -2,7 +2,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::content::{
-    ExternalChangeDecision, SaveDecision, TextDocument, TextDocumentEditError,
+    ExternalChangeDecision, SaveDecision, TextCursor, TextDocument, TextDocumentEditError,
     TextDocumentOpenError, TextDocumentOpenPolicy, TextDocumentRefreshError, TextDocumentSaveError,
     TextDocumentState,
 };
@@ -179,6 +179,20 @@ impl ProjectContentWorkspace {
                 Err(ProjectContentError::Save(error))
             }
         }
+    }
+
+    /// RFC-006 Amendment 1: the one write path `active_document()`'s
+    /// read-only shape deliberately left uncovered. Cursor position
+    /// participates in no dirty/save/conflict computation anywhere in
+    /// `content::document` or `project::content` -- unlike text mutation,
+    /// moving the cursor cannot make `self.status` stale, so this never
+    /// touches it, in either the success or the no-document case.
+    pub fn set_active_cursor(&mut self, cursor: TextCursor) -> Result<(), ProjectContentError> {
+        let Some(document) = self.active_document.as_mut() else {
+            return Err(ProjectContentError::NoActiveDocument);
+        };
+        document.set_cursor(cursor);
+        Ok(())
     }
 
     pub fn refresh_active_document(

@@ -20,7 +20,7 @@
 use iced::widget::{column, container, text};
 use iced::{Element, Length};
 
-use tekstide_core::content::{TextDocument, TextDocumentState};
+use tekstide_core::content::{TextCursor, TextDocument, TextDocumentState};
 use tekstide_core::project::ProjectContentStatus;
 use tekstide_core::text_safety;
 
@@ -55,6 +55,22 @@ pub(crate) fn chrome_line(catalog: &Catalog, document: &TextDocument) -> String 
         &CatalogArgs::new()
             .untrusted("path", &path)
             .trusted_symbol("state", document_state_symbol(document.state())),
+    )
+}
+
+/// RFC-006 Amendment 1 / RFC-019 PR-019-D: the cursor's own position,
+/// 1-indexed for display (the editor convention -- `TextCursor` itself
+/// is 0-indexed, the same as every other zero-based offset in this
+/// crate). Trusted, compile-time-shaped output only (two numbers) --
+/// nothing here is attacker-influenced, so no escaping applies, unlike
+/// [`chrome_line`]'s path. Factored out for the same testability reason.
+pub(crate) fn cursor_line(catalog: &Catalog, document: &TextDocument) -> String {
+    let cursor = document.cursor();
+    catalog.get_with_args(
+        "editor-cursor",
+        &CatalogArgs::new()
+            .number("line", (cursor.line + 1) as u32)
+            .number("column", (cursor.column + 1) as u32),
     )
 }
 
@@ -95,48 +111,200 @@ pub(crate) fn body_text(document: &TextDocument) -> String {
     document.text().to_string()
 }
 
-/// RFC-019 PR-019-D: turns a keypress into the document's next full text,
-/// or `None` if the key is not an edit key -- the shape `replace_active_text`
-/// needs, since it takes the whole new text rather than a cursor-relative
-/// splice.
-///
-/// **Append-only, and disclosed as such rather than worked around.**
-/// `ProjectContentWorkspace` exposes `active_document() -> Option<&TextDocument>`
-/// only -- no mutable accessor, and no way to reach `TextDocument::set_cursor`
-/// from this crate. Per this RFC's own instruction ("if core's edit
-/// surface turns out insufficient for real editing, stop and raise it as
-/// an RFC-006 question. Do not work around it in the shell"), this does
-/// not invent shell-local cursor state to fake cursor-aware insertion --
-/// every typed character is appended to the end of the document, Enter
-/// appends a newline, Backspace removes the last character. `document.cursor()`
-/// still reads a real value (always `(0, 0)`, since nothing here ever
-/// calls `set_cursor`); rendering that position and wiring real cursor
-/// movement needs the mutable path this slice found missing, raised in
-/// this slice's own review request rather than guessed at here.
-pub(crate) fn apply_edit_key(text: &str, key: &iced::keyboard::Key) -> Option<String> {
+/// The result of a real edit: both halves `replace_active_text` and
+/// `set_active_cursor` need, computed together so the cursor always
+/// lands exactly where the edit left it -- never recomputed separately
+/// from a stale copy of either.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EditResult {
+    pub text: String,
+    pub cursor: TextCursor,
+}
+
+/// Splits `text` into its lines the way `TextCursor.line` indexes them:
+/// `"a\nb\n"` is three lines (`"a"`, `"b"`, `""`), the trailing empty
+/// line after a final newline included on purpose -- the same
+/// `split('\n')` shape `TextCursor`'s own line index has to agree with,
+/// since nothing else in this crate defines what "line" means for it.
+fn lines_of(text: &str) -> Vec<&str> {
+    text.split('\n').collect()
+}
+
+/// Clamps a cursor to a real position inside `text` -- out-of-range
+/// input (stale after an external reload, or a document shorter than
+/// where the cursor last was) resolves to the nearest real line/column
+/// rather than panicking or silently indexing past the end.
+fn clamp_cursor(text: &str, cursor: TextCursor) -> (usize, usize) {
+    let lines = lines_of(text);
+    let line = cursor.line.min(lines.len().saturating_sub(1));
+    let column = cursor.column.min(lines[line].chars().count());
+    (line, column)
+}
+
+fn insert_at(text: &str, cursor: TextCursor, insert: &str) -> EditResult {
+    let (line, column) = clamp_cursor(text, cursor);
+    let mut lines: Vec<String> = lines_of(text).into_iter().map(str::to_owned).collect();
+    let chars: Vec<char> = lines[line].chars().collect();
+    let mut new_line: Vec<char> = chars[..column].to_vec();
+    new_line.extend(insert.chars());
+    let inserted_count = insert.chars().count();
+    new_line.extend(&chars[column..]);
+    lines[line] = new_line.into_iter().collect();
+    EditResult {
+        text: lines.join("\n"),
+        cursor: TextCursor {
+            line,
+            column: column + inserted_count,
+        },
+    }
+}
+
+fn split_line_at_cursor(text: &str, cursor: TextCursor) -> EditResult {
+    let (line, column) = clamp_cursor(text, cursor);
+    let mut lines: Vec<String> = lines_of(text).into_iter().map(str::to_owned).collect();
+    let chars: Vec<char> = lines[line].chars().collect();
+    let before: String = chars[..column].iter().collect();
+    let after: String = chars[column..].iter().collect();
+    lines[line] = before;
+    lines.insert(line + 1, after);
+    EditResult {
+        text: lines.join("\n"),
+        cursor: TextCursor {
+            line: line + 1,
+            column: 0,
+        },
+    }
+}
+
+/// `None` when there is nothing to remove: the very start of the
+/// document, distinct from every other case (removing a character,
+/// joining the previous line) which always produces `Some`.
+fn backspace_at_cursor(text: &str, cursor: TextCursor) -> Option<EditResult> {
+    let (line, column) = clamp_cursor(text, cursor);
+    let mut lines: Vec<String> = lines_of(text).into_iter().map(str::to_owned).collect();
+    if column > 0 {
+        let mut chars: Vec<char> = lines[line].chars().collect();
+        chars.remove(column - 1);
+        lines[line] = chars.into_iter().collect();
+        Some(EditResult {
+            text: lines.join("\n"),
+            cursor: TextCursor {
+                line,
+                column: column - 1,
+            },
+        })
+    } else if line > 0 {
+        let previous_len = lines[line - 1].chars().count();
+        let current = lines.remove(line);
+        lines[line - 1].push_str(&current);
+        Some(EditResult {
+            text: lines.join("\n"),
+            cursor: TextCursor {
+                line: line - 1,
+                column: previous_len,
+            },
+        })
+    } else {
+        None
+    }
+}
+
+/// RFC-006 Amendment 1: turns a keypress into a real edit at the
+/// document's own cursor position -- inserting, splitting, or removing
+/// exactly where the rendered [`cursor_line`] says it will, replacing
+/// PR-019-D's original append-only behaviour (kept append-only only
+/// because `ProjectContentWorkspace` had no cursor-write path at all;
+/// that gap is closed, so this now inserts and deletes at the real
+/// position rather than always at the end). `None` if the key is not an
+/// edit key, or produces no edit (Backspace at the very start).
+pub(crate) fn apply_edit_key(
+    text: &str,
+    cursor: TextCursor,
+    key: &iced::keyboard::Key,
+) -> Option<EditResult> {
     match key {
-        iced::keyboard::Key::Character(typed) => {
-            let mut new_text = text.to_string();
-            new_text.push_str(typed);
-            Some(new_text)
-        }
+        iced::keyboard::Key::Character(typed) => Some(insert_at(text, cursor, typed)),
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
-            let mut new_text = text.to_string();
-            new_text.push('\n');
-            Some(new_text)
+            Some(split_line_at_cursor(text, cursor))
         }
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Space) => {
-            let mut new_text = text.to_string();
-            new_text.push(' ');
-            Some(new_text)
+            Some(insert_at(text, cursor, " "))
         }
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
-            if text.is_empty() {
-                None
+            backspace_at_cursor(text, cursor)
+        }
+        _ => None,
+    }
+}
+
+/// The cursor's own movement, independent of any text edit -- `None`
+/// leaves both text and cursor untouched (not an edit key, or already at
+/// a boundary the key does not cross). Up/Down clamp the target line's
+/// column the way every plain-text editor does: moving onto a shorter
+/// line clamps to its end rather than preserving an out-of-range column.
+pub(crate) fn navigate_cursor(
+    text: &str,
+    cursor: TextCursor,
+    key: &iced::keyboard::Key,
+) -> Option<TextCursor> {
+    let iced::keyboard::Key::Named(named) = key else {
+        return None;
+    };
+    let (line, column) = clamp_cursor(text, cursor);
+    let lines = lines_of(text);
+    match named {
+        iced::keyboard::key::Named::ArrowLeft => {
+            if column > 0 {
+                Some(TextCursor {
+                    line,
+                    column: column - 1,
+                })
+            } else if line > 0 {
+                let previous_len = lines[line - 1].chars().count();
+                Some(TextCursor {
+                    line: line - 1,
+                    column: previous_len,
+                })
             } else {
-                let mut new_text = text.to_string();
-                new_text.pop();
-                Some(new_text)
+                None
+            }
+        }
+        iced::keyboard::key::Named::ArrowRight => {
+            let line_len = lines[line].chars().count();
+            if column < line_len {
+                Some(TextCursor {
+                    line,
+                    column: column + 1,
+                })
+            } else if line + 1 < lines.len() {
+                Some(TextCursor {
+                    line: line + 1,
+                    column: 0,
+                })
+            } else {
+                None
+            }
+        }
+        iced::keyboard::key::Named::ArrowUp => {
+            if line > 0 {
+                let target_len = lines[line - 1].chars().count();
+                Some(TextCursor {
+                    line: line - 1,
+                    column: column.min(target_len),
+                })
+            } else {
+                None
+            }
+        }
+        iced::keyboard::key::Named::ArrowDown => {
+            if line + 1 < lines.len() {
+                let target_len = lines[line + 1].chars().count();
+                Some(TextCursor {
+                    line: line + 1,
+                    column: column.min(target_len),
+                })
+            } else {
+                None
             }
         }
         _ => None,
@@ -156,6 +324,7 @@ pub fn view<'a, Message: 'a>(
             let body = text(body_text(document)).size(theme.font_size_body());
             column![
                 text(chrome_line(catalog, document)).size(theme.font_size_body()),
+                text(cursor_line(catalog, document)).size(theme.font_size_status()),
                 body,
             ]
             .spacing(6)

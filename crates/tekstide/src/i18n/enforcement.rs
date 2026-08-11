@@ -511,6 +511,9 @@ fn generic_args() -> CatalogArgs<'static> {
             "path",
             &tekstide_core::text_safety::quote_untrusted("fixture.txt"),
         )
+        // RFC-006 Amendment 1: `editor-cursor`'s two trusted numbers.
+        .number("line", 1u32)
+        .number("column", 1u32)
 }
 
 fn shipped_additional_locales() -> Vec<String> {

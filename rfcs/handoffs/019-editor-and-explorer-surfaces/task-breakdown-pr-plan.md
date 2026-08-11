@@ -103,13 +103,22 @@ variant, not a second field. Dirty state is `TextDocumentState::Dirty`/
 cleanly this time — checked before writing `external-change-dialog-body`'s `.ftl` comment,
 not after, and confirmed by a real ablation with the exact wrong value recorded.
 
-**Carried forward into PR-019-E**: whether the core cursor-API gap needs an RFC-006
-amendment before this RFC can claim more than append-only editing, or whether that is an
-acceptable disclosed `0.6.0` limitation; whether a non-conflicting external change
+**Carried forward into PR-019-E**: whether a non-conflicting external change
 (`ProjectContentStatus::ExternalChanged`, distinct from `Conflict`) deserves its own
 notice beyond the existing passive chrome indicator; the still-unaddressed
 `OpenActiveProjectWorkspace` navigation gap (recorded in `rfcs/future-work.md` already,
 not this RFC's obligation to fix).
+
+**Response 182 resolved the cursor-API question, decisively.** The save/conflict work above
+was accepted as-is; append-only editing was rejected as unshippable (a working save plus
+text landing silently wherever the cursor was *not* is a real defect, not a disclosable
+limitation) and the architect authorised a narrow cursor-forwarding method as RFC-006
+Amendment 1, rather than the broader `active_document_mut()` this slice had proposed
+(rejected specifically because it would let a caller bypass `replace_active_text`'s status
+bookkeeping). `apply_edit_key` is rewritten cursor-aware, `navigate_cursor` added for
+arrow-key movement, and a real cursor indicator renders live — full detail, ablation, and
+GUI evidence in `qa-evidence.md`'s PR-019-D addendum. This item is now discharged, not
+carried forward.
 
 ## PR-019-E — Closeout
 

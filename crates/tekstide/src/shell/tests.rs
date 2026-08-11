@@ -2672,7 +2672,10 @@ fn active_document_text(state: &State) -> String {
 /// the active document through `handle_editor_key`. Proves the
 /// `FocusZone::MainArea` wiring this slice added, the same shape
 /// `tab_cycles_shell_focus_with_a_real_terminal_focused_and_writes_nothing`
-/// already uses for its own zone.
+/// already uses for its own zone. A freshly opened document's real
+/// cursor is `(0, 0)` (RFC-006 Amendment 1) -- cursor-aware insertion at
+/// that real position produces `"!hello"`, not `"hello!"`; the append
+/// that append-only editing always produced is gone.
 #[test]
 fn a_typed_key_edits_the_real_active_document_through_real_routing() {
     let (mut state, _dir) = state_with_an_open_document("editor-real-typed-key", "hello");
@@ -2696,7 +2699,66 @@ fn a_typed_key_edits_the_real_active_document_through_real_routing() {
 
     let _ = super::update(&mut state, Message::Input(routed));
 
-    assert_eq!(active_document_text(&state), "hello!");
+    assert_eq!(active_document_text(&state), "!hello");
+}
+
+fn active_document_cursor(state: &State) -> tekstide_core::content::TextCursor {
+    state
+        .app_shell
+        .state()
+        .active_project()
+        .and_then(|project| project.content_workspace().active_document())
+        .expect("an active document must exist")
+        .cursor()
+}
+
+/// **RFC-006 Amendment 1's own point**: real mid-buffer editing, driven
+/// entirely through real keys and the real router -- not the pure
+/// `apply_edit_key`/`navigate_cursor` functions called directly (those
+/// have their own unit tests in `surface/editor/tests.rs`). A real
+/// ArrowRight moves the real cursor via `set_active_project_cursor`;
+/// the real character typed next inserts exactly there, not at the end
+/// -- the property append-only editing structurally could not have.
+#[test]
+fn arrow_navigation_then_typing_inserts_in_the_middle_through_real_routing() {
+    let (mut state, _dir) = state_with_an_open_document("editor-real-mid-insert", "hello");
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+
+    let arrow_right = crate::input::KeyPress {
+        key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight),
+        modifiers: iced::keyboard::Modifiers::empty(),
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed =
+        crate::input::route_non_modal_input(proof, &policy, state.focus, None, arrow_right);
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert_eq!(
+        active_document_cursor(&state),
+        tekstide_core::content::TextCursor { line: 0, column: 1 },
+        "a real ArrowRight must move the real cursor past the first character"
+    );
+    assert_eq!(
+        active_document_text(&state),
+        "hello",
+        "navigation alone must never edit the text"
+    );
+
+    let typed = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("X".into()),
+        modifiers: iced::keyboard::Modifiers::empty(),
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, typed);
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert_eq!(
+        active_document_text(&state),
+        "hXello",
+        "the typed character must insert exactly where the real cursor moved to"
+    );
 }
 
 /// `Ctrl+S` is a real global keybinding (`navigation::linux_mvp`), reaches

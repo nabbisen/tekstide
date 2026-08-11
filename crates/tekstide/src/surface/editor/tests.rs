@@ -8,8 +8,11 @@ use tekstide_core::project::root::{
 };
 use tekstide_core::project::{ProjectContentStatus, ProjectId, ProjectSession};
 
+use tekstide_core::content::TextCursor;
+
 use super::{
-    apply_edit_key, body_text, chrome_line, document_state_symbol, empty_lines, open_error_line,
+    apply_edit_key, body_text, chrome_line, cursor_line, document_state_symbol, empty_lines,
+    navigate_cursor, open_error_line,
 };
 use crate::i18n::{Catalog, LocalePreference};
 
@@ -274,59 +277,293 @@ fn named_key(named: iced::keyboard::key::Named) -> iced::keyboard::Key {
     iced::keyboard::Key::Named(named)
 }
 
-/// A typed character appends to the end of the document -- the
-/// deliberate, disclosed append-only model (see [`apply_edit_key`]'s own
-/// doc comment for why nothing here is cursor-aware).
-#[test]
-fn a_typed_character_appends_to_the_end() {
-    let result = apply_edit_key("hello", &character_key("!"));
-    assert_eq!(result, Some("hello!".to_string()));
+fn cursor(line: usize, column: usize) -> TextCursor {
+    TextCursor { line, column }
 }
 
-/// Enter appends a real newline, not an escaped or literal `\n` pair --
-/// this is text-area content, not chrome, so it must be the raw
-/// character `document.text()` will actually hold.
+// --- RFC-006 Amendment 1: cursor-aware editing, replacing PR-019-D's
+// original append-only model now that `ProjectContentWorkspace` has a
+// real cursor-write path. ---
+
+/// A typed character inserts exactly at the cursor, not at the end --
+/// the property the append-only model could not have (there was nowhere
+/// to insert but the end). `"he|ld"` with the cursor between `e` and `l`
+/// becomes `"he!ld"`, cursor advancing past what was typed.
 #[test]
-fn enter_appends_a_real_newline() {
-    let result = apply_edit_key("line one", &named_key(iced::keyboard::key::Named::Enter));
-    assert_eq!(result, Some("line one\n".to_string()));
+fn a_typed_character_inserts_at_the_cursor() {
+    let result = apply_edit_key("held", cursor(0, 2), &character_key("!"));
+    assert_eq!(
+        result,
+        Some(super::EditResult {
+            text: "he!ld".to_string(),
+            cursor: cursor(0, 3),
+        })
+    );
 }
 
-/// Backspace removes exactly one character, by `char`, not by byte --
-/// checked against a multi-byte character so a naive `str` truncation
-/// would corrupt it instead of removing it cleanly.
+/// Enter splits the current line at the cursor into two real lines, not
+/// merely appending `\n` at the end -- this is text-area content, not
+/// chrome, so the split must produce the raw characters `document.text()`
+/// will actually hold.
 #[test]
-fn backspace_removes_the_last_character_by_char_not_by_byte() {
+fn enter_splits_the_line_at_the_cursor() {
+    let result = apply_edit_key(
+        "hello",
+        cursor(0, 2),
+        &named_key(iced::keyboard::key::Named::Enter),
+    );
+    assert_eq!(
+        result,
+        Some(super::EditResult {
+            text: "he\nllo".to_string(),
+            cursor: cursor(1, 0),
+        })
+    );
+}
+
+/// Backspace removes exactly the character before the cursor, by `char`,
+/// not by byte -- checked against a multi-byte character so a naive
+/// `str` truncation would corrupt it instead of removing it cleanly.
+#[test]
+fn backspace_removes_the_character_before_the_cursor_by_char_not_by_byte() {
     let result = apply_edit_key(
         "caf\u{e9}",
+        cursor(0, 4),
         &named_key(iced::keyboard::key::Named::Backspace),
     );
-    assert_eq!(result, Some("caf".to_string()));
+    assert_eq!(
+        result,
+        Some(super::EditResult {
+            text: "caf".to_string(),
+            cursor: cursor(0, 3),
+        })
+    );
 }
 
-/// Backspace on empty content is a no-op, not a panic and not `Some("")`
-/// again -- `None` means "this key produced no edit," and an
-/// already-empty document has nothing left to remove.
+/// Backspace at the start of a line (but not the start of the document)
+/// joins with the previous line -- the multi-line case append-only
+/// editing had no way to reach at all, since it could only ever remove
+/// from the single point at the very end.
 #[test]
-fn backspace_on_empty_content_is_a_no_op() {
-    let result = apply_edit_key("", &named_key(iced::keyboard::key::Named::Backspace));
+fn backspace_at_the_start_of_a_line_joins_with_the_previous_line() {
+    let result = apply_edit_key(
+        "ab\ncd",
+        cursor(1, 0),
+        &named_key(iced::keyboard::key::Named::Backspace),
+    );
+    assert_eq!(
+        result,
+        Some(super::EditResult {
+            text: "abcd".to_string(),
+            cursor: cursor(0, 2),
+        })
+    );
+}
+
+/// Backspace at the very start of the document is a no-op, not a panic
+/// and not an unchanged-text `Some` -- `None` means "this key produced
+/// no edit," and there is nothing before the cursor to remove or join.
+#[test]
+fn backspace_at_the_very_start_of_the_document_is_a_no_op() {
+    let result = apply_edit_key(
+        "x",
+        cursor(0, 0),
+        &named_key(iced::keyboard::key::Named::Backspace),
+    );
     assert_eq!(result, None);
 }
 
-/// A non-edit key (an arrow key, say) produces no edit at all -- `None`,
-/// not an unchanged-text `Some`, so a caller can distinguish "nothing to
-/// write" from "wrote back what was already there."
+/// An arrow key produces no *edit* at all through `apply_edit_key` --
+/// `None`, not an unchanged-text `Some`. Arrow keys are
+/// [`navigate_cursor`]'s job instead, checked in its own tests below.
 #[test]
-fn a_non_edit_key_produces_no_edit() {
-    let result = apply_edit_key("hello", &named_key(iced::keyboard::key::Named::ArrowLeft));
+fn an_arrow_key_produces_no_edit() {
+    let result = apply_edit_key(
+        "hello",
+        cursor(0, 2),
+        &named_key(iced::keyboard::key::Named::ArrowLeft),
+    );
     assert_eq!(result, None);
 }
 
 /// A multi-byte character typed as one keystroke (as a real IME or
-/// non-ASCII layout would deliver it) appends whole, not split into
+/// non-ASCII layout would deliver it) inserts whole, not split into
 /// invalid partial bytes.
 #[test]
-fn a_multi_byte_typed_character_appends_whole() {
-    let result = apply_edit_key("caf", &character_key("\u{e9}"));
-    assert_eq!(result, Some("caf\u{e9}".to_string()));
+fn a_multi_byte_typed_character_inserts_whole() {
+    let result = apply_edit_key("caf", cursor(0, 3), &character_key("\u{e9}"));
+    assert_eq!(
+        result,
+        Some(super::EditResult {
+            text: "caf\u{e9}".to_string(),
+            cursor: cursor(0, 4),
+        })
+    );
+}
+
+// --- `navigate_cursor`: cursor movement independent of any text edit ---
+
+#[test]
+fn arrow_left_moves_back_one_column() {
+    let result = navigate_cursor(
+        "hello",
+        cursor(0, 2),
+        &named_key(iced::keyboard::key::Named::ArrowLeft),
+    );
+    assert_eq!(result, Some(cursor(0, 1)));
+}
+
+#[test]
+fn arrow_left_at_the_start_of_a_line_moves_to_the_end_of_the_previous_line() {
+    let result = navigate_cursor(
+        "ab\ncd",
+        cursor(1, 0),
+        &named_key(iced::keyboard::key::Named::ArrowLeft),
+    );
+    assert_eq!(result, Some(cursor(0, 2)));
+}
+
+#[test]
+fn arrow_left_at_the_very_start_is_a_no_op() {
+    let result = navigate_cursor(
+        "hello",
+        cursor(0, 0),
+        &named_key(iced::keyboard::key::Named::ArrowLeft),
+    );
+    assert_eq!(result, None);
+}
+
+#[test]
+fn arrow_right_moves_forward_one_column() {
+    let result = navigate_cursor(
+        "hello",
+        cursor(0, 2),
+        &named_key(iced::keyboard::key::Named::ArrowRight),
+    );
+    assert_eq!(result, Some(cursor(0, 3)));
+}
+
+#[test]
+fn arrow_right_at_the_end_of_a_line_moves_to_the_start_of_the_next_line() {
+    let result = navigate_cursor(
+        "ab\ncd",
+        cursor(0, 2),
+        &named_key(iced::keyboard::key::Named::ArrowRight),
+    );
+    assert_eq!(result, Some(cursor(1, 0)));
+}
+
+#[test]
+fn arrow_right_at_the_very_end_is_a_no_op() {
+    let result = navigate_cursor(
+        "hello",
+        cursor(0, 5),
+        &named_key(iced::keyboard::key::Named::ArrowRight),
+    );
+    assert_eq!(result, None);
+}
+
+/// Moving onto a shorter line clamps to its end rather than preserving
+/// an out-of-range column -- the standard plain-text-editor convention,
+/// checked specifically since a naive carry-the-column implementation
+/// would produce a column past the shorter line's real length.
+#[test]
+fn arrow_up_clamps_the_column_to_a_shorter_previous_line() {
+    let result = navigate_cursor(
+        "ab\nlonger line",
+        cursor(1, 8),
+        &named_key(iced::keyboard::key::Named::ArrowUp),
+    );
+    assert_eq!(result, Some(cursor(0, 2)));
+}
+
+#[test]
+fn arrow_up_on_the_first_line_is_a_no_op() {
+    let result = navigate_cursor(
+        "only line",
+        cursor(0, 3),
+        &named_key(iced::keyboard::key::Named::ArrowUp),
+    );
+    assert_eq!(result, None);
+}
+
+#[test]
+fn arrow_down_clamps_the_column_to_a_shorter_next_line() {
+    let result = navigate_cursor(
+        "longer line\nab",
+        cursor(0, 8),
+        &named_key(iced::keyboard::key::Named::ArrowDown),
+    );
+    assert_eq!(result, Some(cursor(1, 2)));
+}
+
+#[test]
+fn arrow_down_on_the_last_line_is_a_no_op() {
+    let result = navigate_cursor(
+        "only line",
+        cursor(0, 3),
+        &named_key(iced::keyboard::key::Named::ArrowDown),
+    );
+    assert_eq!(result, None);
+}
+
+/// A character key (an edit key) produces no *navigation* at all through
+/// `navigate_cursor` -- the two functions' `Named` arms do not overlap,
+/// checked directly rather than only inferred from `apply_edit_key`'s
+/// own `None` case above.
+#[test]
+fn an_edit_key_produces_no_navigation() {
+    let result = navigate_cursor("hello", cursor(0, 2), &character_key("!"));
+    assert_eq!(result, None);
+}
+
+// --- `cursor_line`: the rendered indicator response 182 required ---
+
+/// The rendered position is real and 1-indexed (the editor convention),
+/// not `TextCursor`'s own 0-indexed value passed straight through --
+/// `line: 1, column: 3` (0-indexed) must render as line 2, column 4.
+#[test]
+fn cursor_line_renders_the_real_one_indexed_position() {
+    let sandbox = Sandbox::new("cursor-render");
+    sandbox.write_file("readme.md", "hello\nworld");
+    let mut document = open(&sandbox, "readme.md");
+    document.set_cursor(cursor(1, 3));
+
+    let line = cursor_line(&real_catalog(), &document);
+
+    // Fluent wraps numeric placeables in bidi isolate marks by design
+    // (the same reason `paste-confirm-dialog-body`'s own line-count
+    // assertion checks `.contains` rather than exact equality) -- `2`
+    // and `4` are the real 1-indexed values, isolate marks aside.
+    assert!(
+        line.contains('2'),
+        "expected the 1-indexed line in {line:?}"
+    );
+    assert!(
+        line.contains('4'),
+        "expected the 1-indexed column in {line:?}"
+    );
+    assert!(
+        !line.contains('1'),
+        "must not still show the 0-indexed line/column: {line:?}"
+    );
+}
+
+/// A freshly opened document's cursor is `(0, 0)` -- rendered as line 1,
+/// column 1, not line 0 or column 0.
+#[test]
+fn cursor_line_renders_line_one_column_one_for_a_freshly_opened_document() {
+    let sandbox = Sandbox::new("cursor-render-fresh");
+    sandbox.write_file("readme.md", "hello");
+    let document = open(&sandbox, "readme.md");
+
+    let line = cursor_line(&real_catalog(), &document);
+
+    assert!(line.contains("Line"));
+    assert!(line.contains("Column"));
+    assert!(line.contains('1'));
+    assert!(
+        !line.contains('0'),
+        "must render 1-indexed, not 0-indexed: {line:?}"
+    );
 }
