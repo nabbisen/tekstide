@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - Acceptance / QA Checklist"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "PR-024-B implemented 2026-08-11, not yet reviewed — PR-024-C blocked on review request 187"
+status: "PR-024-B implemented 2026-08-11, not yet reviewed — PR-024-C unblocked (response 187), corrected scope, implementation starting"
 target_milestone: "M10"
 created: "2026-08-11"
 ---

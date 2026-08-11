@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - QA Evidence"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "Accepted 2026-08-11 — PR-024-B implemented 2026-08-11, not yet reviewed; PR-024-C blocked on review request 187 (where does 'before' content come from)"
+status: "PR-024-B implemented 2026-08-11, not yet reviewed; PR-024-C unblocked (response 187) with a corrected scope (no two-sided diff for a modified file), implementation starting"
 target_milestone: "M10"
 created: "2026-08-11"
 ---
@@ -83,7 +83,18 @@ mib=4 before_text_len=4194342 after_text_len=4194379 rss_delta_kb=10248
 
 ## PR-024-C — Content access with a bounded lifetime
 
-Blocked on review request 187's answer — see PR-024-B's own entry above.
+**Unblocked 2026-08-11 (response 187).** The architect confirmed the gap raised in
+PR-024-B's own entry above and landed a scope correction in RFC-024's own text (`f48d245`)
+before this slice starts, rather than leaving the fix to be inferred here: this RFC
+cannot deliver a two-sided diff for a modified file under `FilesystemSnapshot`
+detection — the before-bytes were never captured (deliberately, per RFC-012 §Design
+Principles 2) and are gone by diff-request time, not merely unretained. Capturing
+content at baseline time was rejected as a fix — it contradicts RFC-012's own stated
+principle directly and needs RFC-012 **and** RFC-011 amendments plus owner
+authorisation, not an implementation-level choice. Full correction text and reasoning:
+`rfcs/proposed/024-diff-preview-policy.md` §Correction, 2026-08-11;
+`task-breakdown-pr-plan.md`'s own PR-024-C entry carries the corrected per-change-kind
+table forward as this slice's binding scope.
 
 ## PR-024-D — Baseline authority, and closeout
 

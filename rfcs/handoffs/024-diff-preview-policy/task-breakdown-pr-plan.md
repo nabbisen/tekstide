@@ -58,12 +58,33 @@ content access and cannot both be built toward.
 
 ## PR-024-C — Content access with a bounded lifetime
 
-**Blocked on review request 187** (where does "before" content come from for a
-filesystem-snapshot-sourced modified file) — raised during PR-024-B, full detail in
-`qa-evidence.md`'s PR-024-B entry. Not started until answered.
+**Unblocked 2026-08-11 (response 187), with a scope correction landed in RFC-024's own
+text (`f48d245`) before this slice starts.** This RFC cannot deliver a two-sided diff for
+a modified file under `FilesystemSnapshot` detection — the before-bytes were never
+captured (`ReviewBaselineEntry` is metadata-only, deliberately, per RFC-012 §Design
+Principles 2) and are gone, not merely unretained, by the time a diff is requested.
+Capturing content at baseline time was considered and rejected: it contradicts RFC-012's
+own stated principle directly, not only this RFC's Decision 1, and needs RFC-012 **and**
+RFC-011 amendments plus owner authorisation — not a choice available to this slice.
+
+**Corrected scope, per change kind** (RFC-024 §Correction, 2026-08-11):
+
+| Change kind | Available | Delivered |
+| --- | --- | --- |
+| Added | full content is the whole change | content, bounded and gated |
+| Deleted | nothing to read | the fact of deletion, from metadata |
+| **Modified** | **current content only** | current content, **explicitly not a diff** |
+
+**The modified case must be labelled as not-a-diff in whatever this slice returns**, not
+only disclosed in a closeout — RFC-020's own carried note says the surface must not
+render current content under a heading that implies a two-sided comparison. This slice
+owns making that distinction representable in the type it returns; RFC-020 owns choosing
+the words a user reads.
 
 Scope: reading content for an approved path, with Decision 1's third clause enforced
-structurally.
+structurally. `gate_diff_content_read` (PR-024-B) already tells the caller `Readable`,
+`NonTextContent`, or `NonFile` — this slice reads the approved case and shapes the
+distinction above around it.
 
 Review gate:
 
@@ -75,6 +96,9 @@ Review gate:
 - **Not pre-escaped** — a test asserting the raw bytes survive, since escaping is
   RFC-020's job and a model that escaped would hide file contents from non-rendering
   consumers.
+- **The returned shape distinguishes "this is a diff" from "this is current content,
+  presented because no before-version exists"** — not two functions returning the same
+  type with the difference left to a doc comment.
 
 ## PR-024-D — Baseline authority, and closeout
 
