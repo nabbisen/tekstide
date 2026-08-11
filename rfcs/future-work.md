@@ -21,6 +21,28 @@ Status: implemented by RFC-007/RFC-008/RFC-009/RFC-017/RFC-018 with documented l
   terminal-output imitation by keystroke suppression under a live positive control, not
   by whether it visibly occupies chrome, which is content-dependent and disclosed rather
   than relied on.
+- **A background scrim behind the paste-confirmation dialog — recommended, never actually
+  decided, an owner decision.** RFC-018 PR-018-E found the dialog's original
+  "occludes chrome" evidence angle was content-dependent (an attacker who keeps a paste
+  short can keep the dialog entirely inside the terminal's own pane, response 175), and
+  named a background dimming/scrim as the fix for that specific weakness: unlike the
+  spatial tell, a scrim is **content-independent** — it does not depend on what the
+  attacker pastes. RFC-018's own task breakdown said explicitly, twice (PR-018-E's entry
+  and PR-018-F's own scope), that **PR-018-F should decide whether to recommend it**.
+  **It never did** — `qa-evidence.md`'s PR-018-F section covers every other carried-forward
+  item (both audit-observability gaps, the spatial-property limitation, the RFC-022 note)
+  but contains no mention of dimming or a scrim at all, found by grep while following this
+  handoff after `0.6.0` shipped. Not implemented in RFC-018 (deliberately — response 173
+  explicitly told PR-018-E not to add background-dimming or any other visual change while
+  it was still gathering evidence, so evidence work would not also change what it
+  evidenced) and not decided at closeout either, so the recommendation has been sitting
+  unactioned since 2026-08-10, restated as "the owner's" in every summary since (most
+  recently the `0.6.0` post-publish verification) without ever being packaged into one
+  concrete ask. **The ask**: should the real paste-confirmation dialog (and, by the same
+  reasoning, any future RFC-022 dialog reusing `modal_dialog_box`) render a background
+  scrim behind it, strengthening the distinguishing evidence beyond keystroke suppression
+  alone? If yes, this is a small, additive rendering change to a closed RFC's already-shipped
+  dialog — the same shape RFC-006 Amendment 1 and RFC-013 Amendment 1 used — not a redesign.
 - Add macOS/Windows terminal runtime evidence before claiming cross-platform terminal support.
 
 #### Readiness-driven terminal I/O ("Option B") — owns `NFR-PERF-004`

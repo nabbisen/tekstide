@@ -191,6 +191,19 @@ What was **paste-specific**, and should not be assumed to transfer: `PasteConfir
 
 What **looked general**, and is a real candidate for a shared shape if RFC-022 needs one: the `ModalContent` enum-of-variants pattern itself (rather than a second `Option` field on `State`) is how any second real modal kind should be added, because `ModalAbsent`/`for_modal` are generic over content type and only the enum keeps the single gated value RFC-015 built. The `"> "`/`"  "` textual focus marker, Tab/Shift-Tab cycling between exactly two buttons, and "Escape always cancels regardless of focus" are all conventions this dialog reused from the pre-existing layer-demo modal rather than invented — RFC-022's dialog should very likely reuse them too, for consistency a user can learn once. `modal_dialog_box` (the shared container styling factored out in PR-018-C) is already shaped as a two-implementor abstraction waiting for its second caller. None of this is a recommendation to build a dialog framework now — RFC-018's own reasoning for not generalising early still holds — only a record of which parts would generalise cleanly if RFC-022 chooses to.
 
+### Correction, added 2026-08-11 while following this handoff after `0.6.0` shipped
+
+**PR-018-E's task-breakdown entry said, explicitly, that this slice should decide whether
+to recommend a background scrim behind the paste-confirmation dialog. It did not** — no
+mention of dimming or a scrim exists anywhere above, in the Known Limitations, Risks, or
+claim-statement sections. Not a silent decision to skip it; simply never addressed, found
+by grep rather than by memory of having done it. **Not decided here either** — RFC-018 is
+closed, and deciding a rendering change to its own shipped dialog is not this file's job
+to backfill after the fact. Recorded as a real, still-open, owner-level decision in
+`rfcs/future-work.md` (Terminal / PTY Runtime theme) instead, with the full argument
+(why the recommendation exists, why RFC-018 deliberately did not implement it, and what
+implementing it later would look like) rather than a second bare mention.
+
 ### Final Acceptance Decision
 
 **RFC-018's scope is fully delivered**: paste ingress, the confirmation dialog, the `paste_blocked` producer, and trusted-UI evidence with a corrected, defensible distinguishing claim. Unlike RFC-017's closeout, there is no unmet RFC-stated requirement analogous to `NFR-PERF-004` — every §Slices gate item and every open question has a real answer, not a deferral. The known limitations above (both audit-observability gaps, the content-dependent spatial property) were anticipated by the RFC's own text as things to record rather than fix in this RFC, not discovered as shortfalls against it.

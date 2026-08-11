@@ -92,6 +92,15 @@ Review gate:
 
 **Accepted 2026-08-10 (response 177), one required addition applied — full content in `qa-evidence.md`'s PR-018-F section.** Commit list, gate output (505 + 154 unchanged), known limitations consolidated there (the 256 KiB refusal behaviour added per the required item, both audit gaps with their shared cause, `trusted_ui_state`'s mapping history, the content-dependent spatial property from PR-018-E, plus RFC-018's two explicit non-goals), the three open-question answers, all six named risks with mitigation status, the claim statement checked against RFC-018's own text (headline reworded to "distinguishable by a test the user can perform," per the reviewer's recommendation) with response 175's honest-limitation sentence quoted verbatim per response 176's instruction, and the note to RFC-022 above. The reviewer independently tested the folder-move question rather than accepting the proposed reasoning: RFC-017's move needed owner-level sign-off because a real requirement (`NFR-PERF-004`) was found unmet; RFC-018 has no equivalent, so RFC-000 applies directly and the move is authorized.
 
+**Correction, added 2026-08-11**: the one item this scope named above — the dimming
+recommendation carried forward from PR-018-E — was never actually decided. Not in the
+accepted content just described, not anywhere in `qa-evidence.md`. Found by grep while
+following this handoff after `0.6.0` shipped, annotated in `qa-evidence.md`'s own
+PR-018-F section rather than silently fixed after the fact, and recorded as a real,
+still-open, owner-level decision in `rfcs/future-work.md` (Terminal / PTY Runtime theme)
+with the full argument, since RFC-018 is closed and deciding a rendering change to its
+shipped dialog is not this file's job to backfill.
+
 ## Sequencing
 
 **B → C is strict** — a dialog with no ingress renders nothing, and an ingress that treats `RequiresConfirmation` as `Allow` is the unsafe state this ordering exists to prevent. D needs B. E needs C. F needs all.
