@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - Task Breakdown / PR Plan"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "PR-024-B implemented 2026-08-11, review resubmitted as request 192 (never actually reviewed — see qa-evidence.md) — RFC-012 Amendment 1 accepted (response 190) — PR-024-C content access accepted (response 191) — PR-024-D not yet started"
+status: "PR-024-B implemented 2026-08-11, review resubmitted as request 192 (never actually reviewed — see qa-evidence.md) — RFC-012 Amendment 1 accepted (response 190) — PR-024-C content access accepted (response 191) — PR-024-D baseline authority implemented 2026-08-11, not yet reviewed"
 target_milestone: "M10"
 created: "2026-08-11"
 ---
@@ -158,6 +158,20 @@ Review gate:
   algorithm is not this RFC's contribution.
 - Known limitations consolidated, including anything the three open questions' answers
   constrain for RFC-020.
+
+**Implemented 2026-08-11, not yet reviewed** — full detail in `qa-evidence.md`'s own
+PR-024-D entry. Every gate item met, with one deliberate partial deviation disclosed rather
+than silently claimed as full compliance: **`FileSnapshot` (the type) is reused directly;
+`ExternalChangeDecision` (the 3-variant enum) is not** — its `Conflict` variant answers a
+question that cannot arise in a read-only flow (no local edits exist to conflict with a
+live disk change), so reusing it wholesale would have reintroduced the exact
+representable-but-meaningless-state class RFC-012 Amendment 1 and PR-024-C's own
+`ContentLifecycle` narrowing both already fixed elsewhere in this RFC. A new two-state
+`bool` return replaces it, with the narrowing reasoning recorded in `diff_content_is_stale`'s
+own doc comment and in `qa-evidence.md`. Open question 2 answered directly in
+`024-diff-preview-policy.md` §Open questions, not only in the evidence file. Ablated the
+`MissingPath`-vs-other-refusal distinction for real (removing it silently swallows a real
+symlink-escape refusal as ordinary staleness) — full detail in `qa-evidence.md`.
 
 ## Sequencing
 

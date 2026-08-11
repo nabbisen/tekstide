@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - QA Evidence"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "PR-024-B implemented 2026-08-11, review resubmitted as request 192 (never actually reviewed — see below); RFC-012 Amendment 1 (ChangeLifecycle) accepted (response 190); PR-024-C content access accepted (response 191); PR-024-D not yet started"
+status: "PR-024-B implemented 2026-08-11, review resubmitted as request 192 (never actually reviewed — see below); RFC-012 Amendment 1 (ChangeLifecycle) accepted (response 190); PR-024-C content access accepted (response 191); PR-024-D baseline authority implemented 2026-08-11, not yet reviewed"
 target_milestone: "M10"
 created: "2026-08-11"
 ---
@@ -295,7 +295,79 @@ protections.
 
 ## PR-024-D — Baseline authority, and closeout
 
-Pending implementation.
+**Implemented 2026-08-11, not yet reviewed.**
+
+**Reuses `content::FileSnapshot` — no second staleness mechanism, per Decision 3's own
+requirement.** `DiffContent::Added`/`Modified`/`NonTextContent` each gained a `baseline:
+FileSnapshot` field, captured by a new `capture_baseline_snapshot` helper
+(`crates/tekstide-core/src/project/diff.rs`) at the same moment `read_diff_content` reads
+the content itself — reusing the exact type `TextDocument::refresh_external_state` already
+compares (`content::FileSnapshot`, already crate-public), not a parallel struct. `Deleted`/
+`NonFile` carry no baseline: neither ever resolved a file to snapshot.
+
+**`content_hash` deliberately left `None`.** Hashing would mean either a second full read
+of every `Added`/`Modified` file already read once, or — for `NonTextContent` — a full read
+of binary content Decision 4's own `NonTextContent` outcome exists specifically to avoid
+("no diff is attempted" for a non-text change; hashing it purely for a staleness baseline
+would be exactly that, under a different name). `len` and `modified_at` alone match the
+granularity RFC-012's own `changed_paths_between` already uses to decide whether a path
+changed (`ReviewBaselineEntry`'s `len`/`modified_unix_nanos`, compared by equality) — reused
+here rather than invented at a stricter, inconsistent precision for only some outcomes.
+
+**`diff_content_is_stale(baseline, root, path) -> Result<bool, DiffContentError>`** is the
+new public function. Only two states are meaningful, not `content::ExternalChangeDecision`'s
+three: diff preview is read-only (RFC-024 §Scope: "Out: any *action* on a change"), so there
+is no local-edit state a live disk change could *conflict* with the way an open, dirty
+`TextDocument` can. Reusing the 3-variant type wholesale would have let a `Conflict` outcome
+exist that this read-only flow can never actually produce — the same representable-but-
+meaningless-state class PR-024-C already caught and fixed once for `ContentLifecycle`
+(caught again here, independently, while designing this slice). A `bool` is the correct,
+minimal type for a genuinely binary question, not an enum with a dead arm.
+
+**The review gate's own required proof, against a real file changed on disk, not a
+synthesised value.** `a_stale_baseline_is_reported_as_stale_not_silently_diffed`: reads
+content (capturing its `baseline`), sleeps 10ms (coarse filesystem mtime resolution), writes
+new bytes to the *same real file*, then asks whether that baseline is still current —
+`Ok(true)`. `an_unchanged_baseline_is_reported_as_unchanged` is the negative: no mutation,
+`Ok(false)` — proving this is a real comparison, not a function that always answers "stale".
+`a_file_deleted_since_capture_is_reported_as_stale` covers the file vanishing entirely —
+also `Ok(true)`, mirroring `TextDocument::refresh_external_state`'s own treatment of a
+missing current target as "changed", not an error.
+
+**A real policy violation is not silently folded into "stale", proven and ablated.**
+`a_real_access_violation_surfaces_as_an_error_not_silent_staleness`: a symlink inside the
+sandbox escaping the project root (`FileAccessBlockedReason::SymlinkEscape`, the same
+fixture shape `root::tests::file_access_blocks_symlink_escape` already uses) must surface
+as `Err(DiffContentError::Gate(DiffGateRefusal::Access(_)))`, not `Ok(true)` — mirroring
+`TextDocument::refresh_external_state`'s own narrower distinction, where only
+`FileAccessBlockedReason::MissingPath` folds into a changed-state outcome and every other
+access refusal propagates. **Ablated**: removed the `MissingPath` guard so every `Access`
+error folded into `Ok(true)` — the test then failed exactly as expected, returning `Ok(true)`
+instead of the real `Err`, proving a security-relevant refusal would otherwise be silently
+swallowed as ordinary staleness. Reverted before committing; diffed the restored file
+against a pre-ablation backup (clean, no output).
+
+**Open question 2 answered in RFC-024's own text**, not only here (per this slice's own
+review gate item): per-path, not whole-review. Full reasoning:
+`rfcs/proposed/024-diff-preview-policy.md` §Open questions, item 2. Summary: this RFC's own
+content-access model is already per-path (Decision 1 clause 2, on-demand); whole-review
+staleness would need either a fresh RFC-012 re-scan (out of scope) or a review-level flag
+answering a question no user asked. Real cost weighed as the question requires: one extra
+bounded `fs::metadata` call per check, the same cost class already accepted for the original
+read.
+
+**No claim that this RFC renders anything, and no claim about diff quality** — unchanged
+from PR-024-A through C; PR-024-D adds no rendering code and no diff algorithm.
+
+**Gates**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
+--all-features -- -D warnings`, full workspace suite (`tekstide-core` 531 passed, up from
+527 — 4 new tests; `tekstide` 203 passed, unchanged — no `crates/tekstide` changes),
+`git diff --check`. All clean.
+
+**Not done in this slice**: moving `rfcs/proposed/024-diff-preview-policy.md` to
+`rfcs/done/`, and the index/reference updates that go with it — deferred to after this
+slice's own review, matching this project's established closeout sequencing (RFC-019 was
+moved to `rfcs/done/` only after its own closeout review was accepted, not alongside it).
 
 ## Known Limitations
 
@@ -308,12 +380,51 @@ Consolidated at closeout. Carried in from RFC-024's own text:
   evidence.
 - **The diff algorithm is not this RFC's contribution.** Its value is the policy around a
   solved problem.
+- **No two-sided diff for a modified file.** Only current content, explicitly labelled not
+  a diff (RFC-024 §Correction) — the before-bytes were never captured under
+  `FilesystemSnapshot` detection and are gone by request time.
+
+Found during PR-024-C/D, carried forward per response 191's own instruction:
+
+- **`DiffContent`'s retention protection is narrower than a first reading suggests.**
+  Deriving neither `Clone` nor `Serialize` blocks storing the wrapper in a `Clone` state
+  struct (`ProjectSession`) or passing it to an audit producer — both compile errors. It
+  does **not** prevent a consumer from pattern-matching a variant, moving the `Vec<u8>` out,
+  and retaining the unwrapped bytes indefinitely; general retention is not structurally
+  prevented, only those two specific paths are. See the correction in this file's PR-024-C
+  section and RFC-020's own §Open questions item 4.
+- **`DiffContent` derives `Debug`, unredacted.** Unlike `TerminalSecurityDiagnostic`, which
+  never stores a raw payload field at all so its `Debug` output structurally cannot leak
+  one, `DiffContent`'s `Debug` would print raw file bytes if ever passed to a logging or
+  diagnostic sink. No such call site exists today, and the enumeration test would not catch
+  one if it appeared (`format!("{:?}", ...)` is not a raw-file-read call site).
+- **The owned-vs-lifetime-bound question is now RFC-020's to decide**, against its own real
+  rendering shape (Option A/B, iced's update/view cycle) — recorded as RFC-020's own §Open
+  questions item 4, not decided here, since PR-024-C had no real consumer to weigh the cost
+  against.
 
 ## What this RFC hands to RFC-020
 
-To be filled in at closeout — RFC-020's handoff will be written from this section:
-
-- the produced diff's shape, and that it is unescaped;
-- the refusal's shape, so a surface can render one rather than showing nothing;
-- the stale-baseline signal's shape;
-- the bound, so RFC-020 does not introduce a second one.
+- **The produced diff's shape, and that it is unescaped.** `DiffContent::Added { bytes,
+  baseline }` / `Modified { bytes, baseline }` — raw `Vec<u8>`, not `String`, not escaped.
+  `Modified`'s own variant name is the "not a diff" label; a renderer must not display it
+  under a heading implying a two-sided comparison.
+- **The refusal's shape**, so a surface can render one rather than showing nothing:
+  `DiffGateRefusal` (gating-time) and `DiffContentError` (read-time), both `pub` from
+  `tekstide_core::project`.
+- **The non-text and non-file shapes**: `DiffContent::NonTextContent { len, lifecycle,
+  baseline }` and `DiffContent::NonFile { kind }` — report a change without attempting
+  content.
+- **The deletion shape**: `DiffContent::Deleted { kind }` — the fact of deletion, from
+  metadata, `kind` reporting what the path *was*.
+- **The stale-baseline signal's shape.** `diff_content_is_stale(baseline, root, path) ->
+  Result<bool, DiffContentError>`, per-path (Open question 2). `baseline: FileSnapshot` is
+  carried on every content-bearing `DiffContent` variant; RFC-020 must call this before
+  trusting previously-fetched content is still current, the same way `TextDocument` already
+  re-checks before trusting its own last-known state.
+- **The bound**: `DEFAULT_MAX_DIFF_INPUT_BYTES = 4 MiB` per side, `DiffPreviewPolicy`,
+  `tekstide_core::project` — so RFC-020 does not introduce a second one.
+- **The retention caveat and the `Debug` exposure**, both above under Known Limitations —
+  RFC-020's rendering architecture should account for both, not assume either is closed.
+- **RFC-020's own §Open questions item 4** (owned vs. lifetime-bound `DiffContent`) should
+  be decided before or during whichever slice first calls `read_diff_content`.

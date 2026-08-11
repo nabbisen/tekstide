@@ -21,8 +21,8 @@ pub use content::{
 };
 pub use diff::{
     ContentLifecycle, DEFAULT_MAX_DIFF_INPUT_BYTES, DiffContent, DiffContentError,
-    DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, gate_diff_content_read,
-    read_diff_content,
+    DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, diff_content_is_stale,
+    gate_diff_content_read, read_diff_content,
 };
 pub use identity::ProjectId;
 pub use metadata::{

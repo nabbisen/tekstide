@@ -1,25 +1,31 @@
-//! RFC-024 PR-024-B/PR-024-C: gating, bounds, and bounded content access.
+//! RFC-024 PR-024-B/PR-024-C/PR-024-D: gating, bounds, bounded content
+//! access, and baseline staleness.
 //!
 //! **This module does not compute a diff.** `gate_diff_content_read`
 //! decides whether reading a path's content for diff preview is allowed
 //! at all, and whether that content may be attempted as text; `read_diff_content`
-//! performs the bounded read the gate approved. Neither computes a
-//! two-sided comparison -- the diff algorithm itself is out of this RFC's
-//! scope (Decision 6).
+//! performs the bounded read the gate approved; `diff_content_is_stale`
+//! answers whether the disk state a `DiffContent` was read from still
+//! matches disk now. None of the three compute a two-sided comparison --
+//! the diff algorithm itself is out of this RFC's scope (Decision 6).
 //!
-//! **Nothing here retains anything.** Both public functions borrow, read a
-//! bounded amount, and return by value -- there is no field anywhere in
-//! this module a caller could accidentally hold past the call, and
-//! `DiffContent` (PR-024-C) derives neither `Clone` nor `Serialize`: see
-//! `read_diff_content`'s own doc comment for why that specific omission is
-//! load-bearing, not incidental.
+//! **Nothing here retains anything.** All three public functions borrow,
+//! read a bounded amount, and return by value -- there is no field
+//! anywhere in this module a caller could accidentally hold past the
+//! call, and `DiffContent` (PR-024-C) derives neither `Clone` nor
+//! `Serialize`: see `read_diff_content`'s own doc comment for why that
+//! specific omission is load-bearing, not incidental.
 
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use super::change_detection::{ChangeLifecycle, ChangePathKind, DetectedChanges};
-use super::root::{FileAccessError, FileAccessTarget, ProjectFileAccessPolicy, ProjectRootHandle};
+use super::root::{
+    FileAccessBlockedReason, FileAccessError, FileAccessTarget, ProjectFileAccessPolicy,
+    ProjectRootHandle,
+};
+use crate::content::FileSnapshot;
 
 /// RFC-024 Decision 2, Open question 1 -- measured, not estimated
 /// (2026-08-11). Holding two text buffers at this size costs
@@ -175,6 +181,7 @@ enum GateEvaluation {
     NonTextContent {
         len: u64,
         lifecycle: ContentLifecycle,
+        target: FileAccessTarget,
     },
     Deleted {
         kind: ChangePathKind,
@@ -188,7 +195,7 @@ impl GateEvaluation {
     fn into_decision(self) -> DiffGateDecision {
         match self {
             Self::Readable { lifecycle, .. } => DiffGateDecision::Readable { lifecycle },
-            Self::NonTextContent { len, lifecycle } => {
+            Self::NonTextContent { len, lifecycle, .. } => {
                 DiffGateDecision::NonTextContent { len, lifecycle }
             }
             Self::Deleted { kind } => DiffGateDecision::Deleted { kind },
@@ -258,7 +265,11 @@ fn evaluate_gate(
     })?;
 
     if is_binary {
-        return Ok(GateEvaluation::NonTextContent { len, lifecycle });
+        return Ok(GateEvaluation::NonTextContent {
+            len,
+            lifecycle,
+            target,
+        });
     }
 
     Ok(GateEvaluation::Readable { lifecycle, target })
@@ -303,18 +314,30 @@ fn sniff_is_binary(canonical_path: &Path) -> Result<bool, ()> {
 /// carried by the variant name itself, not a runtime flag a renderer could
 /// fail to check.
 ///
+/// `baseline` (PR-024-D) appears on every variant that resolved a real
+/// file (`Added`, `Modified`, `NonTextContent`) -- the disk state this
+/// content was actually read against, for `diff_content_is_stale` to
+/// later compare against disk again. `Deleted` and `NonFile` carry none:
+/// neither ever resolved a file to snapshot.
+///
 /// Deliberately derives neither `Clone` nor `Serialize`. See
 /// `read_diff_content`'s doc comment for why.
 #[derive(Debug, Eq, PartialEq)]
 pub enum DiffContent {
     /// Whole-file content for a newly added path. Not a diff -- the whole
     /// change, by definition (RFC-024 §Correction).
-    Added { bytes: Vec<u8> },
+    Added {
+        bytes: Vec<u8>,
+        baseline: FileSnapshot,
+    },
     /// Current content for a modified path. Explicitly not a diff: this
     /// RFC cannot produce a "before" side for `FilesystemSnapshot`
     /// detection (response 187) -- the before-bytes were never captured
     /// and are gone by request time, not merely unretained.
-    Modified { bytes: Vec<u8> },
+    Modified {
+        bytes: Vec<u8>,
+        baseline: FileSnapshot,
+    },
     /// The fact of deletion, from metadata alone -- no bytes exist to
     /// read. `kind` reports what the path *was* (RFC-012 Amendment 1).
     Deleted { kind: ChangePathKind },
@@ -323,6 +346,7 @@ pub enum DiffContent {
     NonTextContent {
         len: u64,
         lifecycle: ContentLifecycle,
+        baseline: FileSnapshot,
     },
     /// Present but not a `File` -- `Directory`, `Symlink`, or `Other`.
     NonFile { kind: ChangePathKind },
@@ -388,8 +412,20 @@ pub fn read_diff_content(
     match evaluation {
         GateEvaluation::Deleted { kind } => Ok(DiffContent::Deleted { kind }),
         GateEvaluation::NonFile { kind } => Ok(DiffContent::NonFile { kind }),
-        GateEvaluation::NonTextContent { len, lifecycle } => {
-            Ok(DiffContent::NonTextContent { len, lifecycle })
+        GateEvaluation::NonTextContent {
+            len,
+            lifecycle,
+            target,
+        } => {
+            let baseline =
+                capture_baseline_snapshot(&target).map_err(|()| DiffContentError::ReadFailed {
+                    relative_path: target.selected_relative_path.clone(),
+                })?;
+            Ok(DiffContent::NonTextContent {
+                len,
+                lifecycle,
+                baseline,
+            })
         }
         GateEvaluation::Readable { lifecycle, target } => {
             let bytes =
@@ -398,13 +434,85 @@ pub fn read_diff_content(
                         relative_path: target.selected_relative_path.clone(),
                     }
                 })?;
+            let baseline =
+                capture_baseline_snapshot(&target).map_err(|()| DiffContentError::ReadFailed {
+                    relative_path: target.selected_relative_path.clone(),
+                })?;
 
             match lifecycle {
-                ContentLifecycle::Added => Ok(DiffContent::Added { bytes }),
-                ContentLifecycle::Modified => Ok(DiffContent::Modified { bytes }),
+                ContentLifecycle::Added => Ok(DiffContent::Added { bytes, baseline }),
+                ContentLifecycle::Modified => Ok(DiffContent::Modified { bytes, baseline }),
             }
         }
     }
+}
+
+/// RFC-024 Decision 3, PR-024-D: **reuses `content::FileSnapshot`, the
+/// exact type `TextDocument::refresh_external_state` already compares to
+/// answer "has this changed underneath what I last saw" -- not a second
+/// staleness mechanism.** `content_hash` is deliberately left `None` here
+/// rather than computed: hashing would mean a second full read of every
+/// file this module already read once (`Added`/`Modified`) or, worse, a
+/// read of binary content this module's own `NonTextContent` outcome
+/// exists specifically to avoid (Decision 4: "no diff is attempted" for a
+/// non-text change -- a full read purely to hash it would be exactly
+/// that, under a different name). `len` and `modified_at` alone are the
+/// same granularity RFC-012's own `changed_paths_between` already uses to
+/// decide whether a path changed (`ReviewBaselineEntry`'s `len`/
+/// `modified_unix_nanos`, compared by equality) -- reusing that
+/// established precedent's precision rather than inventing a stricter one
+/// inconsistently only for some outcomes.
+fn capture_baseline_snapshot(target: &FileAccessTarget) -> Result<FileSnapshot, ()> {
+    let metadata = fs::metadata(&target.canonical_path).map_err(|_| ())?;
+    let modified_at = metadata.modified().map_err(|_| ())?;
+
+    Ok(FileSnapshot {
+        canonical_path: target.canonical_path.clone(),
+        modified_at,
+        len: metadata.len(),
+        content_hash: None,
+    })
+}
+
+/// RFC-024 Decision 3: whether the disk state a `DiffContent` was read
+/// against (its `baseline`) still matches disk now. **Only two states are
+/// meaningful here, not `content::ExternalChangeDecision`'s three.** Diff
+/// preview is read-only (RFC-024 §Scope: "Out: any *action* on a change"),
+/// so there is no local-edit state a live disk change could *conflict*
+/// with the way an open, dirty `TextDocument` can -- reusing the
+/// 3-variant type wholesale would let a `Conflict` outcome exist that
+/// this read-only flow can never actually produce, the same
+/// representable-but-meaningless-state class PR-024-C already caught and
+/// fixed once for `ContentLifecycle`. A `bool` is the correct, minimal
+/// type for a genuinely binary question here, not an enum with a dead
+/// arm.
+///
+/// Missing/inaccessible-since-capture folds into `Ok(true)` (stale) for
+/// the same reason `TextDocument::refresh_external_state` treats a
+/// missing current target as `ExternalChanged` rather than an error --
+/// the file being gone *is* the change. Mirrors that function's own
+/// narrower distinction too: only `FileAccessBlockedReason::MissingPath`
+/// folds into "stale"; any other access refusal (root/symlink-escape) is
+/// a real policy violation, surfaced as `Err`, not silently swallowed as
+/// staleness.
+pub fn diff_content_is_stale(
+    baseline: &FileSnapshot,
+    root: &ProjectRootHandle,
+    selected_relative_path: impl AsRef<Path>,
+) -> Result<bool, DiffContentError> {
+    let selected_relative_path = selected_relative_path.as_ref();
+
+    let target = match ProjectFileAccessPolicy.resolve_existing(root, selected_relative_path) {
+        Ok(target) => target,
+        Err(error) if error.reason == FileAccessBlockedReason::MissingPath => return Ok(true),
+        Err(error) => return Err(DiffContentError::Gate(DiffGateRefusal::Access(error))),
+    };
+
+    let Ok(current) = capture_baseline_snapshot(&target) else {
+        return Ok(true);
+    };
+
+    Ok(current != *baseline)
 }
 
 /// Refuses, never truncates -- the same `.take(max + 1)`-then-check shape

@@ -7,17 +7,20 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::content::FileSnapshot;
 use crate::domain::{ChangeDetectionSource, ChangeDetectionStatus};
 use crate::project::change_detection::{
     ChangeLifecycle, ChangePathKind, DetectedChangedPath, DetectedChanges,
 };
-use crate::project::root::{ProjectRootHandle, ProjectRootValidator, SymlinkPolicy};
+use crate::project::root::{
+    FileAccessBlockedReason, ProjectRootHandle, ProjectRootValidator, SymlinkPolicy,
+};
 use crate::project::{ProjectId, ProjectSession};
 
 use super::{
     BINARY_SNIFF_BYTES, ContentLifecycle, DEFAULT_MAX_DIFF_INPUT_BYTES, DiffContent,
-    DiffContentError, DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, gate_diff_content_read,
-    read_bounded, read_diff_content, sniff_is_binary,
+    DiffContentError, DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, diff_content_is_stale,
+    gate_diff_content_read, read_bounded, read_diff_content, sniff_is_binary,
 };
 
 struct Sandbox {
@@ -479,7 +482,16 @@ fn added_content_is_delivered_whole_bounded_and_gated() {
         DiffPreviewPolicy::default(),
     );
 
-    assert_eq!(result, Ok(DiffContent::Added { bytes }));
+    match result {
+        Ok(DiffContent::Added {
+            bytes: returned,
+            baseline,
+        }) => {
+            assert_eq!(returned, bytes);
+            assert_eq!(baseline.len, bytes.len() as u64);
+        }
+        other => panic!("expected Added, got {other:?}"),
+    }
 }
 
 /// RFC-024 §Correction: Modified delivers current content only, and the
@@ -505,7 +517,16 @@ fn modified_content_is_current_content_explicitly_not_a_diff() {
         DiffPreviewPolicy::default(),
     );
 
-    assert_eq!(result, Ok(DiffContent::Modified { bytes }));
+    match &result {
+        Ok(DiffContent::Modified {
+            bytes: returned,
+            baseline,
+        }) => {
+            assert_eq!(*returned, bytes);
+            assert_eq!(baseline.len, bytes.len() as u64);
+        }
+        other => panic!("expected Modified, got {other:?}"),
+    }
     assert!(
         !matches!(result, Ok(DiffContent::Added { .. })),
         "must not be reachable as Added -- the two are separate constructors, not one \
@@ -558,13 +579,18 @@ fn non_text_and_non_file_decisions_pass_through_without_a_further_read() {
     ]);
     let root = sandbox.root_handle();
 
-    assert_eq!(
-        read_diff_content(&changes, &root, "image.png", DiffPreviewPolicy::default()),
+    match read_diff_content(&changes, &root, "image.png", DiffPreviewPolicy::default()) {
         Ok(DiffContent::NonTextContent {
-            len: real_len,
-            lifecycle: ContentLifecycle::Added
-        })
-    );
+            len,
+            lifecycle,
+            baseline,
+        }) => {
+            assert_eq!(len, real_len);
+            assert_eq!(lifecycle, ContentLifecycle::Added);
+            assert_eq!(baseline.len, real_len);
+        }
+        other => panic!("expected NonTextContent, got {other:?}"),
+    }
     assert_eq!(
         read_diff_content(&changes, &root, "a-directory", DiffPreviewPolicy::default()),
         Ok(DiffContent::NonFile {
@@ -599,7 +625,9 @@ fn content_is_not_pre_escaped_raw_bytes_survive_unaltered() {
     );
 
     match result {
-        Ok(DiffContent::Added { bytes: returned }) => assert_eq!(
+        Ok(DiffContent::Added {
+            bytes: returned, ..
+        }) => assert_eq!(
             returned, bytes,
             "raw bytes must survive exactly, including the bidi override -- \
              escaping them here would be this function overstepping into RFC-020's job"
@@ -770,4 +798,153 @@ fn enumeration_confirms_only_the_closed_list_reads_full_file_content() {
              exist -- stale exemption entry"
         );
     }
+}
+
+// ---------------------------------------------------------------------
+// RFC-024 PR-024-D: baseline authority.
+// ---------------------------------------------------------------------
+
+/// **The review gate's own required proof**: a stale baseline is reported
+/// as stale, against a real file changed on disk after capture -- not a
+/// synthesised value. Reads content once (capturing its `baseline`),
+/// mutates the real file afterward, then asks whether that same baseline
+/// is still current.
+#[test]
+fn a_stale_baseline_is_reported_as_stale_not_silently_diffed() {
+    let sandbox = Sandbox::new("stale-baseline");
+    sandbox.write_file("changed.txt", b"original content\n");
+    let changes = detected(&[(
+        "changed.txt",
+        ChangePathKind::File,
+        ChangeLifecycle::Modified,
+    )]);
+    let root = sandbox.root_handle();
+
+    let baseline =
+        match read_diff_content(&changes, &root, "changed.txt", DiffPreviewPolicy::default()) {
+            Ok(DiffContent::Modified { baseline, .. }) => baseline,
+            other => panic!("expected Modified, got {other:?}"),
+        };
+
+    // A real mutation, not a synthesised FileSnapshot -- the same file,
+    // changed on disk, after the baseline above was already captured.
+    // Sleep briefly first: some filesystems have coarse mtime resolution,
+    // and this property must hold on a real change, not rely on a race.
+    std::thread::sleep(Duration::from_millis(10));
+    sandbox.write_file("changed.txt", b"a real external mutation\n");
+
+    let stale = diff_content_is_stale(&baseline, &root, "changed.txt");
+
+    assert_eq!(
+        stale,
+        Ok(true),
+        "a file genuinely changed on disk after the baseline was captured must report stale"
+    );
+}
+
+/// The other half of the same property: a baseline against a file that
+/// has not changed reports unchanged, not stale -- proving this is a real
+/// comparison, not a function that always answers "stale".
+#[test]
+fn an_unchanged_baseline_is_reported_as_unchanged() {
+    let sandbox = Sandbox::new("unchanged-baseline");
+    sandbox.write_file("stable.txt", b"never touched again\n");
+    let changes = detected(&[("stable.txt", ChangePathKind::File, ChangeLifecycle::Added)]);
+    let root = sandbox.root_handle();
+
+    let baseline =
+        match read_diff_content(&changes, &root, "stable.txt", DiffPreviewPolicy::default()) {
+            Ok(DiffContent::Added { baseline, .. }) => baseline,
+            other => panic!("expected Added, got {other:?}"),
+        };
+
+    let stale = diff_content_is_stale(&baseline, &root, "stable.txt");
+
+    assert_eq!(stale, Ok(false));
+}
+
+/// A file deleted since the baseline was captured is stale -- the same
+/// "the file being gone is itself the change" reasoning
+/// `TextDocument::refresh_external_state` already applies to a missing
+/// current target, reused here rather than surfaced as an error.
+#[test]
+fn a_file_deleted_since_capture_is_reported_as_stale() {
+    let sandbox = Sandbox::new("deleted-since-capture");
+    let path = sandbox.write_file("goes-away.txt", b"here for now\n");
+    let changes = detected(&[(
+        "goes-away.txt",
+        ChangePathKind::File,
+        ChangeLifecycle::Modified,
+    )]);
+    let root = sandbox.root_handle();
+
+    let baseline = match read_diff_content(
+        &changes,
+        &root,
+        "goes-away.txt",
+        DiffPreviewPolicy::default(),
+    ) {
+        Ok(DiffContent::Modified { baseline, .. }) => baseline,
+        other => panic!("expected Modified, got {other:?}"),
+    };
+
+    fs::remove_file(&path).unwrap();
+
+    let stale = diff_content_is_stale(&baseline, &root, "goes-away.txt");
+
+    assert_eq!(stale, Ok(true));
+}
+
+/// **A real policy violation is not silently folded into "stale".** A
+/// symlink escaping the project root is a security-relevant refusal
+/// (`FileAccessBlockedReason::SymlinkEscape`), not evidence the file
+/// "changed" -- it must surface as `Err`, mirroring
+/// `TextDocument::refresh_external_state`'s own narrower distinction
+/// (only `MissingPath` folds into a changed-state outcome; every other
+/// access refusal propagates). **Ablated**: removed the `MissingPath`
+/// guard so every `Access` error folded into `Ok(true)` -- this test then
+/// failed by returning `Ok(true)` instead of the expected `Err`, proving
+/// a real security refusal would otherwise be silently swallowed as
+/// ordinary staleness. Reverted before committing.
+#[test]
+fn a_real_access_violation_surfaces_as_an_error_not_silent_staleness() {
+    let sandbox = Sandbox::new("symlink-escape-staleness");
+    let outside_file = {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "tekstide-diff-staleness-outside-{}-{nonce}.txt",
+            std::process::id()
+        ));
+        fs::write(&path, b"outside the project root\n").unwrap();
+        path
+    };
+    std::os::unix::fs::symlink(&outside_file, sandbox.root.join("escape-link.txt")).unwrap();
+    let root = sandbox.root_handle();
+
+    // Any baseline value works here -- resolution fails before it would
+    // ever be compared against one.
+    let placeholder_baseline = FileSnapshot {
+        canonical_path: outside_file.clone(),
+        modified_at: SystemTime::now(),
+        len: 0,
+        content_hash: None,
+    };
+
+    let result = diff_content_is_stale(&placeholder_baseline, &root, "escape-link.txt");
+
+    assert!(
+        matches!(
+            result,
+            Err(DiffContentError::Gate(DiffGateRefusal::Access(_)))
+        ),
+        "expected a real Access error, got {result:?}"
+    );
+    if let Err(DiffContentError::Gate(DiffGateRefusal::Access(error))) = result {
+        assert_eq!(error.reason, FileAccessBlockedReason::SymlinkEscape);
+    }
+
+    let _ = fs::remove_file(&outside_file);
 }
