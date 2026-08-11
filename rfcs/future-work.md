@@ -87,6 +87,24 @@ Status: substrate decided, application shell, and mode switching implemented by 
   clean externally-changed document — the dialog's wording now reads each correctly).
   Undo history remains out of scope (RFC-019 non-goal, inherited from RFC-006). Diff
   review and the AgentRun report are RFC-020, M10's second half.
+- **`ProjectContentWorkspace::save_active_document`'s error mapping does not distinguish
+  a genuine conflict from a clean, externally-changed document — a real `tekstide-core`
+  defect, found during RFC-019 PR-019-E closeout (response 184), not RFC-019's to fix
+  since it renders core state rather than owning it.** `project/content.rs:174` maps
+  `SaveDecision::BlockedExternalChange` to `ProjectContentStatus::Conflict`
+  unconditionally, regardless of whether the buffer was actually dirty. This disagrees
+  with `refresh_active_document` in the same file (lines ~224–227), which correctly
+  distinguishes `ExternalChangeDecision::ExternalChanged` from `::Conflict`. The two
+  variants `ProjectContentStatus` already has prove the coarseness at line 174 is a
+  defect, not a deliberate simplification. **Consequence**: `workspace.status()` reports
+  `Conflict` for a clean external change, so any future consumer of `status()` — not only
+  the shell's own conflict modal, which now reads the more authoritative
+  `document.state()` instead and no longer depends on this mapping — gets the wrong
+  answer; `render_text()` also renders this status, so `tekstide-core`'s own pre-GUI
+  harness reports "conflict" for a save that lost nothing. Fix belongs in
+  `project::content::save_active_document`: read `document.state()` (or the document's
+  own dirty flag at the point of the error) the same way the shell-side fix now does,
+  rather than collapsing both cases before the caller ever sees them.
 - **No `NavigationAction` reaches `AppCommand::OpenActiveProjectWorkspace` directly.**
   Found during RFC-019 PR-019-C's GUI evidence work (response 181, 2026-08-11):
   `SwitchActiveProject`'s own keybinding is `None`/`Configurable`, already disclosed as
