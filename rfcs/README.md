@@ -18,6 +18,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 024 | [Diff Preview Policy](./proposed/024-diff-preview-policy.md) | Proposed 2026-08-11 — M10; **prerequisite for RFC-020**, the policy RFC-012 named |
 | 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | Proposed 2026-08-11 — M10 second half; **blocked on prerequisite model work** (RFC-011 reader amendment + a diff-content model designed on its own terms), see the RFC |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
