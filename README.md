@@ -43,8 +43,21 @@ also a real desktop GUI application shell with mode switching. It includes:
   user-reachable terminal (`Ctrl+Alt+T`): a security-filtered PTY session
   rendering real output, with a bounded terminal-count limit and exit
   detection so the session bar reflects what is actually running rather than
-  what was last launched. RFC-019 still owns the editor/explorer main-area
-  content.
+  what was last launched.
+- A real file explorer and text editor in Content mode (RFC-019, closed as
+  of `0.6.0`): a keyboard-navigable explorer tree over the project's
+  directory scan (Enter on a directory rescans, Enter on a file opens it;
+  read-only — no rename, delete, or create), and a cursor-aware editor —
+  open a file, move the cursor with the arrow keys, insert and delete at
+  the cursor position across multiple lines, save with `Ctrl+S`. Saving
+  never silently overwrites a file that changed on disk: a dialog offers
+  to reload, every dismissal leaves the disk file untouched, and the
+  dialog only claims local changes will be lost when there are some. File
+  **names** shown in the explorer and the editor's header are escaped
+  (untrusted, attacker-influenced text); file **contents** in the editor
+  are deliberately not — the editor shows a file as it is, which means
+  source containing a bidi-override character still *reads* differently
+  from how it compiles.
 - Real clipboard paste into a focused terminal (`Ctrl+Shift+V`, RFC-018),
   routed through the same RFC-009 policy as everything else that reaches a
   PTY: single-line and empty pastes go through and control-containing pastes
@@ -54,7 +67,11 @@ also a real desktop GUI application shell with mode switching. It includes:
   only thing that writes it, and every other way to leave the dialog
   (Escape, or activating Cancel) leaves the terminal untouched.
 
-It is not yet the full AI CLI workbench. There is no editor, no rendered
+It is not yet the full AI CLI workbench. The editor has no undo (a mid-buffer
+edit is unrecoverable within the session past what Backspace can still
+reach), no syntax highlighting, language server, multi-cursor, or search,
+and files above 4 MiB are not editable. There is no diff/review surface or
+AgentRun report surface yet (RFC-020, M10's second half), no rendered
 approval/trust dialogs beyond the paste confirmation above, no adapter-spawn
 pathway that would make command approval reachable, no Git-based change
 detection, file watcher, or overwrite-confirmation UI, and no cross-platform
@@ -128,15 +145,23 @@ The shell is keyboard-navigable by design. These bindings exist today
 | `Ctrl+Alt+M` | Toggle Content / Terminal mode for the active project |
 | `Ctrl+Alt+T` | Launch a real terminal in the active project (switches to Terminal mode) |
 | `Ctrl+Shift+V` | Paste the clipboard into the focused terminal, subject to RFC-009's policy |
+| `Ctrl+S` | Save the active document in Content mode |
 | `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |
 
 `Ctrl+Shift+P` is reserved for a command palette that does not exist yet — it is
 bound in the keybinding policy but currently does nothing.
 
-`Esc` (dismiss) and `Enter` (activate) work on the shell's modal layer, but nothing
-in the shipped application can currently open one — the only modal today is
-developer-only scaffolding gated behind an environment variable. Real dialogs
-arrive with RFC-022; these bindings currently do nothing a user can reach.
+With `Tab` focused on the sidebar in Content mode, `Up`/`Down` move the explorer
+highlight and `Enter` opens the highlighted file or directory. With focus on the
+main area, typing edits the open document at the real cursor position, `Up`/
+`Down`/`Left`/`Right` move the cursor without editing, `Enter` inserts a newline,
+and `Backspace` deletes the character before the cursor.
+
+`Esc` (dismiss) and `Enter` (activate) work on the shell's modal layer — real
+today for the paste-confirmation and file-changed-on-disk dialogs (RFC-018,
+RFC-019); the developer-only demo modal gated behind an environment variable
+still exists too. Trust/approval/safe-close dialogs arrive with RFC-022 and are
+not reachable yet.
 
 ## Local Data and Privacy
 
