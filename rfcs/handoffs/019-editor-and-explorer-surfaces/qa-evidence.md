@@ -2,7 +2,7 @@
 title: "RFC-019: Editor and Explorer Surfaces - QA Evidence"
 rfc: "RFC-019"
 rfc_file: "../../done/019-editor-and-explorer-surfaces.md"
-status: "PR-019-A/B/C/D accepted (responses 180, 181, 182, 183) — PR-019-E closeout implemented 2026-08-11, not yet reviewed"
+status: "PR-019-A/B/C/D/E accepted with one required follow-up (responses 180, 181, 182, 183, 184) — required follow-up (core-side status-mapping defect recorded) implemented 2026-08-11, not yet reviewed"
 target_milestone: "M10"
 created: "2026-08-10"
 ---
