@@ -2,7 +2,7 @@
 title: "RFC-021 — Post-closeout defects: implementation handoff"
 rfc: "RFC-021"
 rfc_file: "../../done/021-command-approval-model-and-adapter-capability.md"
-status: "Ready for implementation — recorded 2026-08-04, unblocked"
+status: "Both defects resolved — 1 fixed (`e6fd1a9`), 2 diagnosed and mechanism confirmed decisively (`2388329`, `4e6c059`); see qa-evidence.md"
 created: "2026-08-10"
 ---
 
@@ -77,6 +77,18 @@ it is a real race, that is a security finding in the bind path and stops being a
 silence, and this is the one path in the codebase where that trade is clearly wrong.
 
 ### The mechanism, and the check that confirms or kills it
+
+**Confirmed 2026-08-10 — the "flake disappears" branch below is what happened, not a
+still-open question.** Annotated here rather than rewritten, per this project's own
+evidence convention: the check this section describes has been run, and the result is
+recorded in full in `qa-evidence.md` §Open defects found after closeout, item 2
+(commits `2388329`, `4e6c059`) — the exact stress comparison (10 failures per 200
+process-runs with the module's two forking tests included, 0 per 200 with them
+`--skip`-excluded), the product analogue (`AgentRun` launch forks while approval
+sockets exist), and the fail-closed characterisation (a refused bind, not an adopted
+stale socket or a laundered approval) are all there, not only in review response 179.
+`bind_recovers_from_a_stale_socket_file` and `clear_stale_socket` remain untouched in
+the tree, per this section's own instruction below.
 
 Recorded here 2026-08-11, from review response 179, because a hypothesis that lives only
 in a review response is one the next investigator re-derives.
