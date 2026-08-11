@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - QA Evidence"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "PR-024-B implemented 2026-08-11, review resubmitted as request 192 (never actually reviewed — see below); RFC-012 Amendment 1 (ChangeLifecycle) accepted (response 190); PR-024-C content access accepted (response 191); PR-024-D baseline authority implemented 2026-08-11, not yet reviewed"
+status: "PR-024-B implemented 2026-08-11, requests 188 and 192 never relayed to the reviewer (response 193 confirmed this — see below); RFC-012 Amendment 1 (ChangeLifecycle) accepted (response 190); PR-024-C content access accepted (response 191); PR-024-D baseline authority accepted (response 193); closeout blocked on PR-024-B's review landing"
 target_milestone: "M10"
 created: "2026-08-11"
 ---
@@ -44,6 +44,14 @@ Implemented 2026-08-11. Against `task-breakdown-pr-plan.md`'s review gate.
 > slice's own commit (`46a40fa`). Resubmitted as review request 192, since 188 appears not
 > to have reached the reviewer through whatever relays these files. Left unresolved as of
 > this note.
+>
+> **Root cause confirmed (response 193, 2026-08-11).** Both `188` and `192` exist on disk
+> and were never relayed to the reviewer — the architect's own words: "I was wrong four
+> times in a row... concluding from 'I did not see it' that 'it does not exist'." Not a
+> filing gap on this side; a relay gap, now named rather than guessed at. `188`/`192` still
+> need relaying and PR-024-B still needs a real review before RFC-024 can close — response
+> 187's passing praise of two fixtures inside a different slice's review does not count as
+> one.
 
 **A real architectural question, raised before writing any code, not guessed at.** Before
 starting, I traced where a diff's "before" text would actually come from and found it
@@ -295,7 +303,15 @@ protections.
 
 ## PR-024-D — Baseline authority, and closeout
 
-**Implemented 2026-08-11, not yet reviewed.**
+**Implemented 2026-08-11. Accepted (response 193).** The `ExternalChangeDecision` narrowing
+below was independently confirmed as "the third instance of the same discipline" (RFC-012
+Amendment 1's `ChangePathKind`, PR-024-C's `ContentLifecycle`, this slice's staleness
+type) — "declining part of a reuse instruction, with the reason stated, is better
+compliance than reusing wholesale." The ablation was confirmed to find a real security
+consequence: folding every `Access` error into `Ok(true)` would report a symlink-escape
+attempt as ordinary staleness rather than a policy refusal. **Closeout (move to
+`rfcs/done/`) is blocked, not on this slice, but on PR-024-B's own review never having
+reached the reviewer — see the correction in PR-024-B's section above.**
 
 **Reuses `content::FileSnapshot` — no second staleness mechanism, per Decision 3's own
 requirement.** `DiffContent::Added`/`Modified`/`NonTextContent` each gained a `baseline:

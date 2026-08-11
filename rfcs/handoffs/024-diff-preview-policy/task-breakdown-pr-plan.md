@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - Task Breakdown / PR Plan"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "PR-024-B implemented 2026-08-11, review resubmitted as request 192 (never actually reviewed — see qa-evidence.md) — RFC-012 Amendment 1 accepted (response 190) — PR-024-C content access accepted (response 191) — PR-024-D baseline authority implemented 2026-08-11, not yet reviewed"
+status: "PR-024-B implemented 2026-08-11, requests 188 and 192 never relayed to the reviewer (response 193 confirmed this) — RFC-012 Amendment 1 accepted (response 190) — PR-024-C content access accepted (response 191) — PR-024-D baseline authority accepted (response 193) — closeout blocked on PR-024-B's review landing"
 target_milestone: "M10"
 created: "2026-08-11"
 ---
