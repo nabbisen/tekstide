@@ -44,7 +44,23 @@ Two honest options. **I recommend the second.**
 
 Option B also puts each decision in front of the RFC that already reasoned about the surrounding constraints: RFC-011 already decided retention bounds and purge scopes, and a reader that ignores those would be a second policy.
 
-**Recommended: Option B**, with RFC-020 blocked on the two amendments and this document standing as its design in the meantime.
+**Recommended: Option B**, with RFC-020 blocked on the prerequisite model work and this document standing as its design in the meantime.
+
+### Correction, 2026-08-11 — the two prerequisites are not the same size
+
+The owner asked whether Option B preserves security and extensibility, noting that stable performance and data integrity in production matter more than minimalism. That pushback found a real flaw in the framing above, which called both prerequisites "amendments" and so invited the shape of RFC-006 Amendment 1 — one accessor for state that already existed. That fits one of them and badly misfits the other.
+
+**The transcript reader is genuinely amendment-shaped.** RFC-011 has already decided capture mode, retention limits, budget scope and purge. A bounded reader is "read back what policy already governs," and the constraints to review it against already exist.
+
+**The diff content model is not.** It is new state and new I/O, and an accessor-sized amendment would skip exactly the decisions that matter in production:
+
+- **Baseline invalidation (integrity).** RFC-012 computes against a captured `ReviewBaseline`. Nothing yet decides when that baseline goes stale, and a diff rendered against a stale baseline shows changes that are not there. This is the same class as the defect RFC-019 PR-019-E found, where a blocked save reported a conflict for a document with no local edits — a status derived from a source that had stopped being authoritative.
+- **Binary content (integrity).** `ChangePathKind` exists, but nothing decides what a diff *is* for a non-text change. Preventing an attempt to diff a binary is the model's job; a renderer discovering it is a renderer that has already read the file.
+- **Bounding (performance).** RFC-019 bounds editable files at 4 MiB. A diff holds two versions plus the computed difference. Whether that is bounded, streamed, or refused above a threshold is a model decision with a memory profile attached.
+
+So the corrected sequencing is: **the transcript reader as an RFC-011 amendment; the diff content model as design work reviewed on its own terms** — a new RFC or a substantial RFC-012 amendment reviewed as a design rather than as an addition.
+
+**The general principle, worth keeping past this RFC**: minimalism belongs in surfaces, which can grow. A model chosen minimally to satisfy one caller has the wrong shape for the second, and replacing it takes everything built on it along.
 
 ## The security core — a third position in the escaping asymmetry
 
