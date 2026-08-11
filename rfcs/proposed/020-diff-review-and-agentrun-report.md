@@ -62,6 +62,29 @@ So the corrected sequencing is: **the transcript reader as an RFC-011 amendment;
 
 **The general principle, worth keeping past this RFC**: minimalism belongs in surfaces, which can grow. A model chosen minimally to satisfy one caller has the wrong shape for the second, and replacing it takes everything built on it along.
 
+### The form is settled by RFC-012's own text, not by judgement
+
+Approved by the owner 2026-08-11. I was going to argue the diff model is "too large for an amendment"; checking RFC-012 first produced a better answer, because **RFC-012 already anticipated this and named what would authorise it** (§Detection scope):
+
+> The detector must not read or store file contents **unless a later reviewed diff preview policy allows it.** Path-only and metadata-only detection is sufficient for RFC-012.
+
+So this is not an amendment question at all. RFC-012 deliberately deferred content reading to a *separate reviewed policy*, and an amendment to RFC-012 would be that RFC authorising itself to do the thing it declined to authorise.
+
+**Therefore: a new RFC — the diff preview policy RFC-012 named.** It owns:
+
+- when file content may be read at all, and by what;
+- baseline invalidation — when a `ReviewBaseline` stops being authoritative;
+- what a diff is for a non-text change;
+- the memory bound: two versions plus a computed difference, bounded, streamed, or refused.
+
+`022` is unused but reserved by convention for Security Dialogs throughout the delivery plan, so the next free number is **024**.
+
+**Prerequisite order for RFC-020**, now settled:
+
+1. **RFC-024** — diff preview policy (new RFC, the one RFC-012 named).
+2. **RFC-011 Amendment** — a bounded transcript reader, reviewed against RFC-011's existing retention and purge constraints.
+3. **RFC-020** — the two rendering surfaces, unblocked once both land.
+
 ## The security core — a third position in the escaping asymmetry
 
 RFC-019 established two positions. This RFC adds the third, and the reasoning is what makes it defensible rather than arbitrary.
