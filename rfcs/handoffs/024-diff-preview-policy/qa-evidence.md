@@ -2,7 +2,7 @@
 title: "RFC-024: Diff Preview Policy - QA Evidence"
 rfc: "RFC-024"
 rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "PR-024-B accepted (response 190); RFC-012 Amendment 1 (ChangeLifecycle) accepted (response 190); PR-024-C content access implemented 2026-08-11, not yet reviewed"
+status: "PR-024-B implemented 2026-08-11, review resubmitted as request 192 (never actually reviewed — see below); RFC-012 Amendment 1 (ChangeLifecycle) accepted (response 190); PR-024-C content access accepted (response 191); PR-024-D not yet started"
 target_milestone: "M10"
 created: "2026-08-11"
 ---
@@ -33,7 +33,17 @@ Granted by the human owner 2026-08-11 with RFC-024. Handoff pack authored the sa
 
 ## PR-024-B — Gating and bounds
 
-Implemented 2026-08-11, not yet reviewed. Against `task-breakdown-pr-plan.md`'s review gate.
+Implemented 2026-08-11. Against `task-breakdown-pr-plan.md`'s review gate.
+
+> **Status correction (2026-08-11).** Review request 188 was filed for this slice the same
+> day, before RFC-012 Amendment 1 or PR-024-C existed. It never received a response.
+> Responses 190 and 191 (for the amendment and PR-024-C, both built on top of this slice)
+> each independently flagged that PR-024-B has never actually been reviewed on its own —
+> the earlier status lines in this file that said "PR-024-B accepted (response 190)" were
+> wrong: response 190 reviewed only the `ChangeLifecycle` amendment commit, never this
+> slice's own commit (`46a40fa`). Resubmitted as review request 192, since 188 appears not
+> to have reached the reviewer through whatever relays these files. Left unresolved as of
+> this note.
 
 **A real architectural question, raised before writing any code, not guessed at.** Before
 starting, I traced where a diff's "before" text would actually come from and found it
@@ -217,6 +227,21 @@ adapted for a non-retention property rather than those three's validity property
 enumeration (grep), nothing in this commit references `DiffContent` outside `diff.rs`/
 `diff/tests.rs` — no wiring into `ProjectSession` or `AuditCoordinator` exists yet, since
 RFC-020 owns that surface, not this slice.
+>
+> **Correction (2026-08-11, response 191).** The paragraph above overstates what is
+> enforced. Enum variant fields are public in Rust: a consumer can pattern-match
+> `DiffContent::Added { bytes }`, move the `Vec<u8>` out, and retain *that* in any struct
+> that is neither `Clone` nor `Serialize` — the two derives block storing the *wrapper*,
+> not the bytes once unwrapped. What is actually structural: storing `DiffContent` itself
+> in a `Clone` type is a compile error, and passing it to an audit producer is a compile
+> error. General retention of the unwrapped bytes is not prevented — a defensible design
+> (accepted as such), but the claim above should have said this from the start rather than
+> the stronger form. The strictly stronger option, a lifetime-bound
+> `DiffContent<'a> { bytes: &'a [u8] }` tied to a request-scoped buffer, would make
+> retention genuinely unrepresentable; not required here since it would constrain RFC-020's
+> own rendering architecture (rendering would have to happen inside the borrow) and no
+> consumer exists yet to weigh that cost against — recorded as an open choice for RFC-020
+> to decide once a real caller exists, in RFC-020's own text as well as here.
 
 **Not pre-escaped, proven rather than asserted architecturally.**
 `content_is_not_pre_escaped_raw_bytes_survive_unaltered` writes a file containing the exact

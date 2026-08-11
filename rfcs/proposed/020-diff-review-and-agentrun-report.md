@@ -153,3 +153,19 @@ Under Option B, with the amendments landed first:
 1. **Option A or B?** My recommendation is B. The owner's call, since it changes M10's shape and possibly its release plan.
 2. **How is a diff bounded?** A generated change can touch a large file. RFC-011 bounded transcripts and RFC-019 bounded editable files at 4 MiB; a diff needs its own answer, and it belongs in the RFC-012 amendment rather than here.
 3. **Does the change surface offer any action** — accept, revert, stage — or is it read-only like the explorer? Read-only is the smaller and safer first answer, and RFC-012's foundations are detection-only, so anything else needs a model that does not exist yet.
+4. **Should `tekstide_core::project::DiffContent` stay owned, or become lifetime-bound?**
+   (Recorded 2026-08-11, RFC-024 PR-024-C response 191.) RFC-024's `DiffContent` derives
+   neither `Clone` nor `Serialize`, which structurally blocks storing the wrapper in a
+   `Clone` state struct or passing it to an audit producer — but a consumer can still
+   pattern-match it, move the `Vec<u8>` out, and retain the unwrapped bytes indefinitely;
+   general retention is not prevented, only those two specific paths are. A strictly
+   stronger design, `DiffContent<'a> { bytes: &'a [u8], .. }` tied to a request-scoped
+   buffer, would make retention genuinely unrepresentable — but it constrains *this RFC's*
+   own rendering architecture: whatever surface consumes it would have to render inside the
+   borrow, not hold the bytes across a later frame or async boundary. RFC-024 deliberately
+   did not choose this without a real consumer to weigh the cost against (nothing outside
+   `tekstide-core::project::diff` references `DiffContent` yet). **This RFC is that
+   consumer.** Decide the owned-vs-borrowed question against this RFC's actual rendering
+   shape (Option A/B, iced's own update/view cycle) before or during whichever slice first
+   calls `read_diff_content`, rather than inheriting the owned form by default because it
+   was already there.
