@@ -1,8 +1,8 @@
 ---
 title: "RFC-024: Diff Preview Policy - QA Evidence"
 rfc: "RFC-024"
-rfc_file: "../../proposed/024-diff-preview-policy.md"
-status: "PR-024-B implemented 2026-08-11, requests 188 and 192 never relayed to the reviewer (response 193 confirmed this — see below); RFC-012 Amendment 1 (ChangeLifecycle) accepted (response 190); PR-024-C content access accepted (response 191); PR-024-D baseline authority accepted (response 193); closeout blocked on PR-024-B's review landing"
+rfc_file: "../../done/024-diff-preview-policy.md"
+status: "All four slices accepted — PR-024-B (response 192, after a relay gap recorded below), RFC-012 Amendment 1 (response 190), PR-024-C (response 191), PR-024-D (response 193). RFC-024 closed to rfcs/done/ 2026-08-11."
 target_milestone: "M10"
 created: "2026-08-11"
 ---
@@ -52,6 +52,14 @@ Implemented 2026-08-11. Against `task-breakdown-pr-plan.md`'s review gate.
 > need relaying and PR-024-B still needs a real review before RFC-024 can close — response
 > 187's passing praise of two fixtures inside a different slice's review does not count as
 > one.
+>
+> **Accepted (response 192, 2026-08-11).** Once relayed, verified not only against the
+> original commit (`46a40fa`) but against current `main` — the ordering survived two
+> subsequent slices building on it, including PR-024-C's `evaluate_gate` refactor, which
+> reused it rather than re-deriving it. Both fixtures singled out as "the best evidence in
+> this RFC": the `chmod 000` fixture "turns an ordering claim into an observable one," and
+> the FIFO fixture "proves boundedness, which no assertion on a return value can." RFC-024
+> closed to `rfcs/done/` the same day.
 
 **A real architectural question, raised before writing any code, not guessed at.** Before
 starting, I traced where a diff's "before" text would actually come from and found it
@@ -110,7 +118,7 @@ Principles 2) and are gone by diff-request time, not merely unretained. Capturin
 content at baseline time was rejected as a fix — it contradicts RFC-012's own stated
 principle directly and needs RFC-012 **and** RFC-011 amendments plus owner
 authorisation, not an implementation-level choice. Full correction text and reasoning:
-`rfcs/proposed/024-diff-preview-policy.md` §Correction, 2026-08-11;
+`rfcs/done/024-diff-preview-policy.md` §Correction, 2026-08-11;
 `task-breakdown-pr-plan.md`'s own PR-024-C entry carries the corrected per-change-kind
 table forward as this slice's binding scope.
 
@@ -309,9 +317,11 @@ Amendment 1's `ChangePathKind`, PR-024-C's `ContentLifecycle`, this slice's stal
 type) — "declining part of a reuse instruction, with the reason stated, is better
 compliance than reusing wholesale." The ablation was confirmed to find a real security
 consequence: folding every `Access` error into `Ok(true)` would report a symlink-escape
-attempt as ordinary staleness rather than a policy refusal. **Closeout (move to
-`rfcs/done/`) is blocked, not on this slice, but on PR-024-B's own review never having
-reached the reviewer — see the correction in PR-024-B's section above.**
+attempt as ordinary staleness rather than a policy refusal. Closeout (move to
+`rfcs/done/`) was briefly blocked on PR-024-B's own review never having reached the
+reviewer — a relay gap, not a defect in this slice — resolved once response 192 accepted
+PR-024-B; see the correction in PR-024-B's section above. **RFC-024 closed to
+`rfcs/done/` 2026-08-11.**
 
 **Reuses `content::FileSnapshot` — no second staleness mechanism, per Decision 3's own
 requirement.** `DiffContent::Added`/`Modified`/`NonTextContent` each gained a `baseline:
@@ -365,7 +375,7 @@ against a pre-ablation backup (clean, no output).
 
 **Open question 2 answered in RFC-024's own text**, not only here (per this slice's own
 review gate item): per-path, not whole-review. Full reasoning:
-`rfcs/proposed/024-diff-preview-policy.md` §Open questions, item 2. Summary: this RFC's own
+`rfcs/done/024-diff-preview-policy.md` §Open questions, item 2. Summary: this RFC's own
 content-access model is already per-path (Decision 1 clause 2, on-demand); whole-review
 staleness would need either a fresh RFC-012 re-scan (out of scope) or a review-level flag
 answering a question no user asked. Real cost weighed as the question requires: one extra
@@ -384,6 +394,12 @@ from PR-024-A through C; PR-024-D adds no rendering code and no diff algorithm.
 `rfcs/done/`, and the index/reference updates that go with it — deferred to after this
 slice's own review, matching this project's established closeout sequencing (RFC-019 was
 moved to `rfcs/done/` only after its own closeout review was accepted, not alongside it).
+
+> **Update (2026-08-11).** The move happened after response 193 accepted this slice and
+> response 192 separately accepted PR-024-B (closing the relay gap recorded in PR-024-B's
+> own section above). `rfcs/proposed/024-diff-preview-policy.md` is now
+> `rfcs/done/024-diff-preview-policy.md`; every cross-reference to the old path in this
+> handoff pack and `rfcs/README.md` was updated in the same commit as the move.
 
 ## Known Limitations
 

@@ -1,6 +1,6 @@
 # RFC-024: Diff Preview Policy - Developer Handoff Pack
 
-Source RFC: [RFC-024](../../proposed/024-diff-preview-policy.md)
+Source RFC: [RFC-024](../../done/024-diff-preview-policy.md)
 Target milestone: **M10** (`0.6.x`) — prerequisite for RFC-020
 Source RFC status: **Accepted by the human owner 2026-08-11**
 
@@ -10,7 +10,7 @@ Source RFC status: **Accepted by the human owner 2026-08-11**
 
 | # | Document | Purpose |
 | --- | --- | --- |
-| 1 | [RFC-024](../../proposed/024-diff-preview-policy.md) | The four decisions and why each was made. |
+| 1 | [RFC-024](../../done/024-diff-preview-policy.md) | The four decisions and why each was made. |
 | 2 | This file | Orientation and what is binding. |
 | 3 | [`the-four-decisions.md`](./the-four-decisions.md) | **How to implement each decision, and how each is proven.** Read before writing code. |
 | 4 | [`task-breakdown-pr-plan.md`](./task-breakdown-pr-plan.md) | Slice boundaries and review gates. |

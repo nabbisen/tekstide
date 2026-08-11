@@ -1,7 +1,7 @@
 # RFC-024: Diff Preview Policy
 
-Status: Accepted by the human owner 2026-08-11 — ready for a handoff pack
-Target milestone: M10 (`0.6.x`), prerequisite for RFC-020
+Status: Implemented — closed 2026-08-11 by PR-024-D, all four slices accepted (responses 192, 190, 191, and 193). Gating and bounds (`gate_diff_content_read`) refuse above a measured 4 MiB-per-side bound and classify non-text content via a bounded sniff, both before any content read, with the ordering ablated rather than merely asserted. **§Correction (found by the implementer before PR-024-C): this RFC cannot deliver a two-sided diff for a modified file** — the before-bytes were never captured under `FilesystemSnapshot` detection and are gone by request time; current content is delivered instead, **explicitly labelled not a diff**. Content access (`read_diff_content`) reuses the gate rather than re-deriving it, and returns per-change-kind (Added: whole content; Modified: current content, not a diff; Deleted: the fact of deletion). **RFC-012 Amendment 1** (`ChangeLifecycle`, recorded in that RFC's own text) landed as a prerequisite, removing `Deleted` from `ChangePathKind` — a **breaking change**; the next release carrying this RFC is `0.7.0`, not a patch release. Baseline staleness (`diff_content_is_stale`) reuses `content::FileSnapshot`, but deliberately not `ExternalChangeDecision`'s three variants (its `Conflict` state cannot arise in a read-only flow) — the third independent catch, across three consecutive slices, of the same representable-but-meaningless-state class RFC-012 Amendment 1 fixed first. **Known limitations, not defects:** `DiffContent`'s non-retention protection is narrower than Decision 1's third clause literally reads — it blocks storing the wrapper in a `Clone` state struct or an audit producer, not a consumer moving the unwrapped bytes out after a pattern match; `DiffContent` derives `Debug`, unredacted; both, plus whether `DiffContent` should become lifetime-bound instead, are carried into RFC-020's own §Open questions. See `../handoffs/024-diff-preview-policy/qa-evidence.md` for full detail per slice.
+Target milestone: M10 (`0.6.x` at design time; ships in `0.7.0` per RFC-012 Amendment 1's breaking change)
 Date: 2026-08-11
 
 Related baseline documents:
@@ -18,7 +18,7 @@ Depends on:
 
 Blocks:
 
-- [RFC-020](./020-diff-review-and-agentrun-report.md) — the diff review surface has nothing to render until this exists.
+- [RFC-020](../proposed/020-diff-review-and-agentrun-report.md) — the diff review surface has nothing to render until this exists.
 
 ## Why this RFC exists
 

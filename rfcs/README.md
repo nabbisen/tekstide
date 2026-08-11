@@ -18,8 +18,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 024 | [Diff Preview Policy](./proposed/024-diff-preview-policy.md) | **Accepted 2026-08-11** — M10; **prerequisite for RFC-020**, the policy RFC-012 named |
-| 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | Proposed 2026-08-11 — M10 second half; **blocked on prerequisite model work** (RFC-011 reader amendment + a diff-content model designed on its own terms), see the RFC |
+| 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | Proposed 2026-08-11 — M10 second half; RFC-024, its content-access prerequisite, is now implemented and closed |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ## Handoffs
@@ -75,6 +74,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 018 | [Rendered Paste Protection and Trusted-UI Evidence](./done/018-paste-protection-and-trusted-ui-evidence.md) | Implemented with documented limitations — paste ingress, real confirmation dialog, `paste_blocked` producer; dialog **distinguishable by a test the user can perform** (keystroke suppression, positive-control proven); occupying chrome is content-dependent and not relied on as a tell; pastes over 256 KiB refused whole; frozen-schema audit gaps recorded, not amended |
 | 019 | [Editor and Explorer Surfaces](./done/019-editor-and-explorer-surfaces.md) | Implemented with documented limitations — trusted-chrome explorer tree and a cursor-aware editor over `TextDocument`, real save and conflict handling; **RFC-006 Amendment 1** added the cursor-forwarding accessor core was missing; conflict dialog distinguishes a genuine conflict from a clean externally-changed document (found live, fixed at closeout); no undo beyond RFC-006's own model, no syntax highlighting |
 | 021 | [Command Approval Model and Adapter Capability](./done/021-command-approval-model-and-adapter-capability.md) | Implemented **headless** with documented limitations — not reachable by any user; cooperative, not enforced. Fully closed 2026-07-30 |
+| 024 | [Diff Preview Policy](./done/024-diff-preview-policy.md) | Implemented with documented limitations — gated, bounded content access per change kind (Added: whole content; Modified: current content, explicitly not a diff; Deleted: fact of deletion); **RFC-012 Amendment 1** (`ChangeLifecycle`) landed as a prerequisite, a **breaking change — ships in `0.7.0`, not a patch**; no two-sided diff for a modified file (before-bytes were never captured, RFC-012 §Design Principles); `DiffContent`'s non-retention is narrower than a first reading suggests (blocks two specific storage paths, not general retention — carried to RFC-020); no rendering, no diff algorithm, no action on a change. Fully closed 2026-08-11 |
 
 ## Archive
 

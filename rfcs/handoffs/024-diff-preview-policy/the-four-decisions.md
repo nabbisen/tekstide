@@ -1,7 +1,7 @@
 ---
 title: "RFC-024 — The four decisions: implementation handoff"
 rfc: "RFC-024"
-rfc_file: "../../proposed/024-diff-preview-policy.md"
+rfc_file: "../../done/024-diff-preview-policy.md"
 status: "Ready for implementation — accepted 2026-08-11 with the RFC"
 created: "2026-08-11"
 ---
