@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version         = "0.6.0"
+version         = "0.7.0"
 edition         = "2024"
 license             = "Apache-2.0"
 authors             = ["nabbisen"]
@@ -15,7 +15,7 @@ categories          = ["command-line-utilities", "development-tools"]
 keywords            = ["workspace", "developer-tools", "ai", "cli"]
 
 [workspace.dependencies]
-tekstide-core               = { version = "0", path = "crates/tekstide-core" }
+tekstide-core               = { version = "0.7", path = "crates/tekstide-core" }
 
 libc                        = "0.2"
 

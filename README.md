@@ -65,7 +65,9 @@ also a real desktop GUI application shell with mode switching. It includes:
   real, rendered confirmation dialog — the first trusted dialog this product
   has — showing an escaped preview of the pasted content; accepting is the
   only thing that writes it, and every other way to leave the dialog
-  (Escape, or activating Cancel) leaves the terminal untouched.
+  (Escape, or activating Cancel) leaves the terminal untouched. As of
+  `0.7.0` the rest of the window dims behind the dialog while it is open,
+  including chrome the terminal's own pane cannot draw into.
 
 It is not yet the full AI CLI workbench. The editor has no undo (a mid-buffer
 edit is unrecoverable within the session past what Backspace can still
@@ -78,15 +80,17 @@ detection, file watcher, or overwrite-confirmation UI, and no cross-platform
 evidence beyond Linux. There is **no screen-reader support** — not limited,
 not planned, absent for the life of the `iced` substrate decision (RFC-014).
 Command approval (below) remains implemented but unreachable. RFC-018's
-trusted-UI evidence shows one checkable property distinguishing the real
-paste dialog from terminal output imitating it: keystrokes typed while it
-is open never reach the terminal, verified with a positive control proving
-they were reaching the app. The terminal grid can never draw outside its
-own pane, which is architecturally sound but does not mean the dialog
-visibly uses that headroom — whether it does depends on pasted-content
-width, which is attacker-influenced, so it is not claimed as something a
-user can rely on. Nothing here claims an untrained user would notice
-either property unprompted.
+trusted-UI evidence shows two checkable properties distinguishing the real
+paste dialog from terminal output imitating it. First, keystrokes typed
+while it is open never reach the terminal, verified with a positive control
+proving they were reaching the app. Second, as of `0.7.0`, the window dims
+behind the dialog, and that dimming covers chrome the terminal grid can
+never draw into. Unlike the dialog's own size — which depends on the
+pasted content and is therefore attacker-influenced — the dimmed area is
+fixed by the window, so the same tell holds for a one-byte paste and a
+large one alike. Neither property makes the dialog unspoofable; they raise
+the cost of a convincing imitation. Nothing here claims an untrained user
+would notice either property unprompted.
 
 Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked
 root/symlink access, audit-store recovery outcomes, plain-terminal session starts and

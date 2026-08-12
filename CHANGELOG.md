@@ -1,8 +1,64 @@
 # Changelog
 
+## 0.7.0 - A Content-Independent Trusted-UI Tell, and Diff Preview Policy
+
+Status: released on 2026-08-12.
+
+A small release with one user-visible change and one library-level policy. **It contains a
+breaking change to `tekstide-core`**, which is what makes it `0.7.0` rather than `0.6.1`.
+
+### Implemented
+
+- **The window dims behind the paste-confirmation dialog** (RFC-018 PR-018-G). RFC-018
+  shipped the dialog claiming a *spatial* tell — a real dialog occludes trusted chrome,
+  and terminal output cannot draw outside its own pane. Measuring that claim showed it was
+  content-dependent: the dialog's size follows the pasted content, so an attacker who
+  keeps a paste short keeps the dialog inside the terminal's own pane, where imitation is
+  possible. The scrim replaces that tell with one the attacker does not control — its
+  extent is fixed by the window, so it dims chrome no terminal pane can draw into whether
+  the paste is one byte or one megabyte. It is translucent deliberately: an opaque overlay
+  would be indistinguishable from any solid rectangle a spoof could also draw.
+
+  This does **not** make the dialog unspoofable, and it does not repair the spatial claim —
+  that claim was replaced, not fixed, and RFC-018's disclosed limitation stands. Keystroke
+  suppression remains the load-bearing defence; the scrim is an additional check a user can
+  make, not a guarantee.
+
+- **Diff preview policy** (RFC-024, closed). `tekstide-core` can now read the content
+  behind a detected change under an explicit policy: refuse rather than truncate, classify
+  binary before reading text, bound the read against file metadata before any content is
+  loaded, and hold content in a type that cannot outlive the request — `DiffContent`
+  derives neither `Clone` nor `Serialize`, so storing it in session state or handing it to
+  the audit store is a compile error rather than a review comment.
+
+  **No surface renders any of this.** It is a library capability with no UI in this
+  release; the diff review surface is RFC-020.
+
+  One limitation worth stating plainly, because it constrains what a diff can ever be
+  here: for a **modified** file there is no two-sided diff. The before-bytes were never
+  captured — review baselines are metadata-only by deliberate design — so they are gone,
+  not merely unretained, by the time a diff is requested. What is available is the current
+  content, and the API says so in its own type rather than in a doc comment.
+
+### Breaking
+
+- **`ChangePathKind` no longer has a `Deleted` variant, and `DetectedChangedPath` carries a
+  new `ChangeLifecycle { Added, Modified, Deleted }`** (RFC-012 Amendment 1). The old enum
+  conflated *what a path is* (file, directory, symlink) with *what happened to it*, so a
+  deleted directory could not be represented at all, and the Added-vs-Modified distinction
+  was computed during change detection and then discarded. Callers matching on
+  `ChangePathKind::Deleted` should read `ChangeLifecycle` instead.
+
+### Not in this release
+
+No diff or AgentRun report surface (RFC-020), no configuration system, no Git integration,
+no file watcher, and no cross-platform evidence beyond Linux. The project board still
+reports `terminals: not implemented` for a project with no open terminal, which is false —
+it is a known defect, recorded in `rfcs/future-work.md`, not a statement about the feature.
+
 ## 0.6.0 - Editor and File Explorer
 
-Status: release candidate, prepared 2026-08-11, pending review and the owner's signed tag.
+Status: released on 2026-08-11.
 
 Tekstide `0.6.0` opens milestone M10 with RFC-019: Content mode stops being a placeholder
 and becomes a real file explorer and a real text editor. **RFC-019 is closed**
@@ -67,7 +123,7 @@ No new dependencies.
 
 ## 0.5.1 - Paste Protection and Trusted-UI Evidence
 
-Status: release candidate, prepared 2026-08-10, pending review and the owner's signed tag.
+Status: released on 2026-08-10.
 
 Tekstide `0.5.1` completes milestone M9 with RFC-018, the second half of the terminal
 work `0.5.0` began. **RFC-018 is closed** (`rfcs/done/`). The `0.5.0`/`0.5.1` split
@@ -138,7 +194,7 @@ No new dependencies.
 
 ## 0.5.0 - Terminal Renderer, and a Terminal You Can Open
 
-Status: release candidate, prepared 2026-08-08, pending review and the owner's signed tag.
+Status: released on 2026-08-08.
 
 Tekstide `0.5.0` delivers the first half of milestone M9: RFC-017's terminal renderer,
 plus the launch UX that makes it reachable. **RFC-017 is closed** (`rfcs/done/`), accepted
@@ -209,7 +265,7 @@ No new dependencies. Two workspace crates were removed (`tekstide-gui-spike`,
 
 ## 0.4.1 - Mode Switching, Focus Indicator, and RFC-015 Closure
 
-Status: release candidate, prepared 2026-08-01, pending review and the owner's signed tag.
+Status: released on 2026-08-01.
 
 Tekstide `0.4.1` completes milestone M8 (GUI Foundation) with RFC-015 PR-015-E: the
 `0.4.0`/`0.4.1` split deferred mode switching and its latency measurement here because
