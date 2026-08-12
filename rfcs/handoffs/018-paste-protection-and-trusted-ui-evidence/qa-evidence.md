@@ -2,7 +2,7 @@
 title: "RFC-018: Rendered Paste Protection and Trusted-UI Evidence - QA Evidence"
 rfc: "RFC-018"
 rfc_file: "../../done/018-paste-protection-and-trusted-ui-evidence.md"
-status: "PR-018-A through PR-018-F all accepted (responses 170, 171, 172, 175, 177) — RFC-018 closed 2026-08-10, moved to rfcs/done/ — PR-018-G (background scrim) implemented 2026-08-12, not yet reviewed"
+status: "PR-018-A through PR-018-F all accepted (responses 170, 171, 172, 175, 177) — RFC-018 closed 2026-08-10, moved to rfcs/done/ — PR-018-G (background scrim) accepted and closed (responses 194, 195) 2026-08-12"
 target_milestone: "M9"
 created: "2026-08-08"
 ---
@@ -212,9 +212,9 @@ implementing it later would look like) rather than a second bare mention.
 
 ## PR-018-G — Background scrim behind the paste-confirmation dialog
 
-Implemented 2026-08-12, closing the decision `PR-018-F`'s own task-breakdown entry said
-twice should be made and never was (found by grep after `0.6.0` shipped, recorded in
-`rfcs/future-work.md` until now). Full handoff:
+Implemented 2026-08-12, accepted and closed (responses 194, 195), closing the decision
+`PR-018-F`'s own task-breakdown entry said twice should be made and never was (found by
+grep after `0.6.0` shipped, recorded in `rfcs/future-work.md` until now). Full handoff:
 `rfcs/handoffs/018-paste-protection-and-trusted-ui-evidence/pr-018-g-background-scrim.md`.
 
 **The decision: yes, build it.** A full-window dimming layer beneath the paste-confirmation
@@ -277,13 +277,24 @@ left of the pane's blue border, across the sidebar — this geometry cannot repr
 attack condition (a dialog confined entirely inside the pane) at any paste length. What
 `01` and `04` actually show: two different paste lengths (2 lines, 3 lines) producing two
 different dialog sizes, with the top bar ("Tekstide"), sidebar ("Sidebar"), and bottom
-status bar all visibly dimmed relative to baseline (`00`) in both — chrome the dialog
+status bar all visibly dimmed relative to baseline (`05`) in both — chrome the dialog
 itself never occludes, regardless of its own size. Full-window dimming holds by
 construction in both captures; **the inside-the-pane case that originally broke the
 spatial claim is not reproduced here, and is not claimed to be.** Not re-captured at a
 different window size to force the condition — comparing across window geometries is
 exactly what produced two prior wrong claims in this RFC's evidence (responses 173, 174),
 and a stated limitation is worth more than a manufactured demonstration.
+
+**The baseline citation itself was wrong (response 195).** This entry originally cited
+`00` as the dimming comparison point. `00` is the Project Board, captured before any
+terminal exists (its own "terminals: not implemented" row proves it) — a different screen
+from `01`/`04`'s Project Workspace (sidebar, `Terminal 1`, a status bar reading "Project
+Workspace | 1 project" against `00`'s "Project Board | 1 project"), not merely a different
+moment of the same one. Comparing a dimming claim against an image with no sidebar to dim
+is the same error class just corrected above, one variable further removed: cross-*screen*
+rather than cross-geometry. `05` — same screen, same geometry, modal dismissed, chrome at
+full brightness — is the genuine one-variable control and is what every dimming claim in
+this section now cites.
 
 **Ablation, per this slice's own review gate.** Removed `.style(modal_scrim_style(state.theme))`
 from `view`'s modal branch (reverting to the original bare `center(modal_view)`), reran
@@ -301,8 +312,11 @@ screenshot-window`. Six screenshots under `evidence/pr-018-g/`, all 750×826 (th
 window's own geometry — not compared across images at a different geometry, per response
 175's own corrected practice), committed alongside this entry:
 
-- `00-baseline-no-modal.png` — Project Board and a running terminal, no modal, full
-  brightness. The comparison point for every dimming claim below.
+- `00-baseline-no-modal.png` — the Project Board, captured before any terminal exists
+  (visible in its own "terminals: not implemented" row). A different screen from
+  `01`/`04`/`05`'s Project Workspace, not a dimming comparison point — retained for
+  context only (response 195; see the correction above for why `00` cannot serve as the
+  baseline it was originally cited as).
 - `01-content-independence-short-paste-scrim.png` — a 2-line paste; at this window's
   geometry the dialog is not confined inside the terminal pane (its minimum width exceeds
   the pane's), so this does not reproduce response 175's inside-the-pane condition. Chrome
@@ -320,7 +334,9 @@ window's own geometry — not compared across images at a different geometry, pe
   dialog taller still; the same dimming holds for whatever chrome remains outside it. Also
   does not reproduce an inside-the-pane condition, for the same geometry reason as `01`.
 - `05-dismissed-clean-state-restored.png` — `Escape` dismissed cleanly; scrim gone, chrome
-  back to baseline brightness, no residual pasted content in the terminal.
+  back to full brightness, no residual pasted content in the terminal. **The genuine
+  dimming-comparison baseline** (response 195): same screen and geometry as `01`/`04`,
+  modal absent, so it isolates the scrim as the one variable under study — unlike `00`.
 
 **Honesty checklist, carried from the handoff verbatim:**
 - **No claim that the scrim makes the dialog unspoofable.** It raises the cost of a
