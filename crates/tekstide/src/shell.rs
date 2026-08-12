@@ -1631,6 +1631,33 @@ pub(crate) fn terminal_stream_targets_a_live_terminal(
         .is_some()
 }
 
+/// RFC-018 PR-018-G: the full-window dimming layer behind whatever modal
+/// is open. Applied to the same `center(modal_view)` container `opaque`
+/// already wraps -- not a second widget, not a second input-capturing
+/// surface. `center` already fills `Length::Fill` (the whole window), so
+/// `opaque`'s existing click-capture bounds are already full-window;
+/// adding a background colour to that same container changes nothing
+/// about what captures input, only what is drawn. This is deliberate:
+/// `SubscriptionMode::for_modal` plus the `is_none()` guard at the write
+/// site is the one mechanism that actually protects the user (see
+/// `subscription`'s own doc comment below) -- the scrim must stay
+/// additive cosmetics on top of it, never a second one.
+///
+/// Full-window, chrome included, is the whole argument: the spatial tell
+/// PR-018-E's evidence work found broken was content-dependent because
+/// the *pasted content* controlled the dialog's size. A scrim covering
+/// only the content region would reproduce that exact weakness --
+/// unlike pasted content, the attacker does not control the window size,
+/// so this must cover area a terminal pane structurally cannot draw
+/// into (the session bar, the window margin) for the content-independence
+/// argument to hold at all.
+fn modal_scrim_style(theme: crate::theme::Theme) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_base_theme: &iced::Theme| container::Style {
+        background: Some(Background::Color(theme.scrim())),
+        ..container::Style::default()
+    }
+}
+
 pub fn view(state: &State) -> Element<'_, Message> {
     let base: Element<'_, Message> =
         column![top_bar(state), content_area(state), status_bar(state)]
@@ -1648,7 +1675,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
                 external_change_modal_view(state, external_change_modal)
             }
         };
-        stack![base, opaque(center(modal_view))].into()
+        let scrim = center(modal_view).style(modal_scrim_style(state.theme));
+        stack![base, opaque(scrim)].into()
     } else {
         base
     }

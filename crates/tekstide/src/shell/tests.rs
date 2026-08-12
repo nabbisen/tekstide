@@ -5,7 +5,8 @@ use tekstide_core::shell::ApplicationShell;
 use super::{
     ExternalChangeButton, Message, ModalButton, ModalContent, PasteConfirmButton, State,
     TerminalPasteRefusal, content_within_bound, focus_marker, main_area_key, main_area_label,
-    sidebar_label, status_bar_summary, terminal_paste_refusal_text, trusted_ui_state, zone_style,
+    modal_scrim_style, sidebar_label, status_bar_summary, terminal_paste_refusal_text,
+    trusted_ui_state, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -416,6 +417,25 @@ fn zone_style_changes_both_border_colour_and_width_when_focused() {
     );
 }
 
+/// RFC-018 PR-018-G: the scrim style's own output, in isolation --
+/// mirrors `zone_style_changes_both_border_colour_and_width_when_focused`'s
+/// shape (call the closure directly, inspect the returned
+/// `container::Style`), the same technique already established here for
+/// testing a style function without constructing a real `Element`.
+#[test]
+fn modal_scrim_style_paints_the_theme_s_scrim_colour() {
+    let theme = crate::theme::Theme::default();
+    let base = iced::Theme::Light;
+
+    let style = modal_scrim_style(theme)(&base);
+
+    assert_eq!(
+        style.background,
+        Some(iced::Background::Color(theme.scrim())),
+        "the modal layer's background must be exactly the theme's scrim colour"
+    );
+}
+
 /// The textual channel (`NFR-UX-002`'s second, colour-independent
 /// signal), matching the modal's own `"> "`/`"  "` convention.
 #[test]
@@ -582,6 +602,52 @@ fn no_raw_color_construction_anywhere_in_the_crate() {
             path.display()
         );
     }
+}
+
+/// RFC-018 PR-018-G's own review gate: "a test that the scrim is present
+/// whenever the paste modal is open, at the layer where the two are
+/// bound together, so a future modal added without a scrim fails by
+/// name." `view`'s modal branch is that one layer -- every `ModalContent`
+/// variant already flows through the same `stack![base, opaque(scrim)]`
+/// line unconditionally (no per-variant branching decides whether the
+/// scrim applies), so the binding this test needs to prove is that the
+/// single shared line still calls `modal_scrim_style` at all, not that
+/// each variant does so separately.
+///
+/// `iced::Element` cannot be introspected after construction (no public
+/// API exposes a built widget's configured style), so this uses the same
+/// source-scan technique `no_raw_color_construction_anywhere_in_the_crate`
+/// already established in this file for an identical class of property
+/// -- "is X actually wired at this call site," not "does X exist
+/// somewhere." Heuristic, not a full parse: extracts `view`'s own source
+/// text between its signature and the next top-level `pub fn`, matching
+/// this file's existing "heuristic scan, not a full parser" convention.
+///
+/// **Ablation** (per this slice's review gate): delete `.style(modal_scrim_style(state.theme))`
+/// from `view`'s modal branch in `shell.rs`, rerun -- this test fails,
+/// naming `view`. Reverted before committing.
+#[test]
+fn modal_layer_always_applies_the_scrim_style() {
+    let source = std::fs::read_to_string(crate_src_dir().join("shell.rs"))
+        .expect("shell.rs must be readable");
+
+    let start = source
+        .find("pub fn view(state: &State) -> Element<'_, Message> {")
+        .expect("shell.rs must still define `view` with this exact signature");
+    let after_signature = &source[start..];
+    let end = after_signature
+        .match_indices("\npub fn ")
+        .next()
+        .map(|(index, _)| index)
+        .unwrap_or(after_signature.len());
+    let view_body = &after_signature[..end];
+
+    assert!(
+        view_body.contains(".style(modal_scrim_style("),
+        "view's modal branch must apply modal_scrim_style to the layer every ModalContent \
+         variant shares -- a future modal added here without it would render with no scrim, \
+         silently, until someone happened to notice a screenshot"
+    );
 }
 
 /// Mechanical seam check for font size, broadened per response 128: no

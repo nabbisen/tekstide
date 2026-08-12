@@ -2,7 +2,7 @@
 title: "RFC-018: Rendered Paste Protection and Trusted-UI Evidence - QA Evidence"
 rfc: "RFC-018"
 rfc_file: "../../done/018-paste-protection-and-trusted-ui-evidence.md"
-status: "PR-018-A through PR-018-F all accepted (responses 170, 171, 172, 175, 177) — RFC-018 closed 2026-08-10, moved to rfcs/done/"
+status: "PR-018-A through PR-018-F all accepted (responses 170, 171, 172, 175, 177) — RFC-018 closed 2026-08-10, moved to rfcs/done/ — PR-018-G (background scrim) implemented 2026-08-12, not yet reviewed"
 target_milestone: "M9"
 created: "2026-08-08"
 ---
@@ -210,6 +210,119 @@ implementing it later would look like) rather than a second bare mention.
 
 **Accepted (response 177), with one required addition (the 256 KiB refusal-behaviour limitation, added above) and one applied recommendation (the claim statement's headline reworded to "distinguishable by a test the user can perform," so it survives being quoted alone).** The reviewer independently tested rather than accepted the folder-move reasoning: RFC-017's move needed an owner-level step because a real RFC-stated requirement (`NFR-PERF-004`) was found unmet, which is a risk-acceptance decision reserved to the owner — not a property of folder moves in general. RFC-018 has no equivalent; every requirement checked (distinguishability, the falsifiable-claim requirement, both audit gaps, the spatial property) was satisfied or was compliance with what the RFC itself asked to be recorded, not a shortfall against it. **RFC-000 applies directly, and the folder move is authorized** — done as its own commit, immediately following this one.
 
+## PR-018-G — Background scrim behind the paste-confirmation dialog
+
+Implemented 2026-08-12, closing the decision `PR-018-F`'s own task-breakdown entry said
+twice should be made and never was (found by grep after `0.6.0` shipped, recorded in
+`rfcs/future-work.md` until now). Full handoff:
+`rfcs/handoffs/018-paste-protection-and-trusted-ui-evidence/pr-018-g-background-scrim.md`.
+
+**The decision: yes, build it.** A full-window dimming layer beneath the paste-confirmation
+modal, present exactly while a modal is open. The argument that survives scrutiny is
+narrow and stated precisely in the handoff: the scrim's dimensions are fixed by the
+window, not by pasted content, so unlike the spatial tell response 175 broke, the same tell
+holds for a one-byte paste and a one-megabyte paste alike — but only if it covers area a
+terminal pane structurally cannot draw into (chrome, not just the content region).
+
+**Implementation, reusing the existing modal layer rather than a second one.**
+`crate::theme::Theme` gained a `scrim: Color` field (`Color::from_rgba(0.0, 0.0, 0.0,
+0.55)`) and a `scrim()` getter, sourced like every other colour in this crate
+(`NFR-UX-004`; the crate-wide `no_raw_color_construction_anywhere_in_the_crate` scan
+enforces this and would fail on a hardcoded value at the call site). `shell.rs`'s `view`
+gained `modal_scrim_style` (mirroring the existing `chrome_style`/`zone_style` shape) and
+one change to its single modal-composition line: `center(modal_view)` gained
+`.style(modal_scrim_style(state.theme))` before being passed into the same `opaque(...)`
+wrapper every `ModalContent` variant already flowed through. **Not a new widget and not a
+second input-capturing surface**: `center(...)` already fills `Length::Fill` (the whole
+window), so `opaque`'s existing click-capture bounds were already full-window before this
+slice; adding a background colour to that same container changes what is drawn, not what
+captures input. Verified by reading `iced_widget 0.14.2`'s own `opaque()` source
+(`helpers.rs`): its `update` calls `shell.capture_event()` for any mouse-press whose cursor
+is over the *content's own layout bounds* — already full-window here, unchanged by this
+slice.
+
+**What must not change, verified rather than assumed:**
+- **`SubscriptionMode::for_modal` plus the `is_none()` guard remain the one input-blocking
+  mechanism.** No `mouse_area`, no `on_press`, no second capture surface was added anywhere
+  — the scrim is a `.style(...)` call on an existing container, nothing else.
+- **A click on the scrim does not dismiss the dialog.** Live-verified (`02`, below): clicked
+  the dimmed sidebar area, well outside the dialog's own bounds, while a real dialog was
+  open. The dialog remained open, its focus marker unchanged.
+- **PR-018-E's keystroke-suppression positive control still passes, re-run rather than
+  assumed** (`03`, below): with a real dialog open, `xdotool type suppresstest` produces no
+  visible character anywhere in the dialog's own content preview, and a `Tab` sent
+  immediately after moves the `"> "` focus marker from `Cancel` to `Paste` in the same
+  screenshot — proving the window held focus and was receiving keystrokes at the moment
+  `suppresstest` was typed, so its absence is suppression, not non-delivery. Matches
+  `qa-evidence.md`'s own PR-018-E `02` methodology exactly.
+- **No escaping change.** `text_safety::quote_untrusted` is untouched; this slice's only
+  code changes are `theme.rs` (a colour role) and `shell.rs`'s `view` (one style call).
+
+**Content-independence, demonstrated at both ends of the range that broke the original
+spatial claim (response 175) — not one favourable capture.** `01` uses the identical short,
+2-line paste shape that previously kept the dialog entirely inside the terminal's own pane
+(the case that broke the old claim): the dialog is unchanged in size, but the top bar
+("Tekstide"), the sidebar ("Sidebar"), the terminal-status label, and the bottom status bar
+are all visibly dimmed relative to baseline (`00`) — chrome the dialog itself never
+occludes. `04` uses a longer, 3-line paste that grows the dialog taller, into the sidebar
+region: the same dimming is present around whatever chrome remains outside the now-larger
+dialog. Same scrim, same property, holding at both ends of the range an attacker controls.
+
+**Ablation, per this slice's own review gate.** Removed `.style(modal_scrim_style(state.theme))`
+from `view`'s modal branch (reverting to the original bare `center(modal_view)`), reran
+`shell::tests::modal_layer_always_applies_the_scrim_style` — failed exactly as expected,
+naming `view` and stating why a future modal without the scrim would go unnoticed until a
+screenshot caught it. Reverted before committing; diffed the restored `shell.rs` against a
+pre-ablation backup (clean, no output).
+
+**Evidence, captured 2026-08-12 against the rebuilt release binary (`cargo build --release
+-p tekstide`), launched via `.git-exclude/tools/launch-scratch-gui.sh` against a fresh
+scratch project — the same tooling and methodology PR-018-E established.** Real synthetic
+input (`env -u WAYLAND_DISPLAY`, `xdotool windowfocus`/`click`/`type`/`key`, always
+`--clearmodifiers`), real clipboard content (`wl-copy`), screenshots via `niri msg action
+screenshot-window`. Six screenshots under `evidence/pr-018-g/`, all 750×826 (this scratch
+window's own geometry — not compared across images at a different geometry, per response
+175's own corrected practice), committed alongside this entry:
+
+- `00-baseline-no-modal.png` — Project Board and a running terminal, no modal, full
+  brightness. The comparison point for every dimming claim below.
+- `01-content-independence-short-paste-scrim.png` — a 2-line paste (the short-paste shape
+  that broke the original spatial claim), dialog unchanged in size, chrome outside it
+  visibly dimmed.
+- `02-click-on-scrim-does-not-dismiss.png` — clicked the dimmed sidebar area with the
+  dialog open; dialog remains open afterward, unchanged.
+- `03-suppression-positive-control-focus-marker-moved.png` — `suppresstest` typed while
+  open, absent from the preview; `Tab` sent immediately after, focus marker moved to
+  `Paste` in the same screenshot, proving the window held focus throughout.
+- `04-content-independence-long-paste-scrim.png` — a 3-line, longer paste growing the
+  dialog into the sidebar region; the same dimming holds for whatever chrome remains
+  outside it.
+- `05-dismissed-clean-state-restored.png` — `Escape` dismissed cleanly; scrim gone, chrome
+  back to baseline brightness, no residual pasted content in the terminal.
+
+**Honesty checklist, carried from the handoff verbatim:**
+- **No claim that the scrim makes the dialog unspoofable.** It raises the cost of a
+  convincing imitation (an imitation would now also need to dim chrome it cannot actually
+  reach, since a terminal pane cannot draw outside its own bounds — RFC-018's own `04`
+  already proved this architecturally). It does not eliminate spoofing. The defence that
+  holds is keystroke suppression, unchanged and re-verified above, and that ordering is
+  preserved in every claim this entry makes.
+- **No claim that the spatial property is now sound.** It was replaced, not repaired.
+  RFC-018's own disclosed limitation (the dialog's chrome-occlusion is content-dependent)
+  stands as written; this slice adds a second, content-independent property alongside it,
+  not a fix to the first.
+
+**Gates**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
+--all-features -- -D warnings`, full workspace suite (`tekstide` 206 passed, up from 203 —
+3 new tests: `theme::tests::scrim_is_in_range_and_genuinely_translucent`,
+`shell::tests::modal_scrim_style_paints_the_theme_s_scrim_colour`,
+`shell::tests::modal_layer_always_applies_the_scrim_style`; `tekstide-core` 531 passed,
+unchanged), `git diff --check`. All clean.
+
+**`rfcs/future-work.md`'s scrim entry updated in the same commit as this evidence**,
+recording the decision and its outcome rather than leaving the recommendation sitting
+unactioned a second time.
+
 ## Known Limitations
 
-Consolidated above, in PR-018-F's own section, per this file's own convention that a slice's findings belong in that slice's entry.
+Consolidated above, in PR-018-F's own section, per this file's own convention that a slice's findings belong in that slice's entry. PR-018-G's own findings are in its section above, per the same convention.

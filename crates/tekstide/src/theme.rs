@@ -27,6 +27,7 @@ pub struct Theme {
     border_default: Color,
     border_focused: Color,
     surface_elevated: Color,
+    scrim: Color,
     font_size_body: f32,
     font_size_heading: f32,
     font_size_status: f32,
@@ -63,6 +64,17 @@ impl Theme {
         self.surface_elevated
     }
 
+    /// RFC-018 PR-018-G: the full-window dimming layer behind a modal.
+    /// Translucent (`a < 1.0`), not opaque black -- the argument for
+    /// building this at all is that it dims chrome no terminal pane can
+    /// draw into, which only reads as a change if what was already there
+    /// remains faintly visible underneath. An opaque scrim would look
+    /// identical to any solid full-window rectangle a spoofing attempt
+    /// could also draw, undermining the property this exists to add.
+    pub fn scrim(&self) -> Color {
+        self.scrim
+    }
+
     pub fn font_size_body(&self) -> f32 {
         self.font_size_body
     }
@@ -85,6 +97,7 @@ impl Default for Theme {
             border_default: Color::from_rgb(0.35, 0.35, 0.35),
             border_focused: Color::from_rgb(0.30, 0.60, 1.0),
             surface_elevated: Color::from_rgb(0.12, 0.12, 0.12),
+            scrim: Color::from_rgba(0.0, 0.0, 0.0, 0.55),
             font_size_body: 14.0,
             font_size_heading: 16.0,
             font_size_status: 13.0,

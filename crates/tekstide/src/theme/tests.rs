@@ -53,6 +53,30 @@ fn border_focused_is_in_range_and_distinct_from_border_default() {
     );
 }
 
+/// RFC-018 PR-018-G: `scrim` must be a real, in-range colour, and
+/// genuinely translucent -- neither fully transparent (`a == 0.0`, which
+/// would render nothing and defeat the whole slice) nor fully opaque
+/// (`a == 1.0`, which would hide rather than dim whatever is underneath,
+/// undermining the argument that motivated building this at all: chrome
+/// should read as *dimmed*, not replaced).
+#[test]
+fn scrim_is_in_range_and_genuinely_translucent() {
+    let theme = Theme::default();
+    let scrim = theme.scrim();
+
+    for channel in [scrim.r, scrim.g, scrim.b, scrim.a] {
+        assert!(
+            (0.0..=1.0).contains(&channel),
+            "colour channel out of range: {channel}"
+        );
+    }
+    assert!(
+        scrim.a > 0.0 && scrim.a < 1.0,
+        "scrim must be translucent, not fully transparent or fully opaque: a = {}",
+        scrim.a
+    );
+}
+
 /// Font sizes must be positive and heading text must be visually larger
 /// than body/status text -- the shape `NFR-UX-004` implies even before
 /// RFC-023 makes these configurable.

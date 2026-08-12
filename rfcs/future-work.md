@@ -21,11 +21,11 @@ Status: implemented by RFC-007/RFC-008/RFC-009/RFC-017/RFC-018 with documented l
   terminal-output imitation by keystroke suppression under a live positive control, not
   by whether it visibly occupies chrome, which is content-dependent and disclosed rather
   than relied on.
-- **A background scrim behind the paste-confirmation dialog — recommended, never actually
-  decided, an owner decision.** RFC-018 PR-018-E found the dialog's original
-  "occludes chrome" evidence angle was content-dependent (an attacker who keeps a paste
-  short can keep the dialog entirely inside the terminal's own pane, response 175), and
-  named a background dimming/scrim as the fix for that specific weakness: unlike the
+- **A background scrim behind the paste-confirmation dialog — recommended, decided, and
+  implemented 2026-08-12 as RFC-018 PR-018-G.** RFC-018 PR-018-E found the dialog's
+  original "occludes chrome" evidence angle was content-dependent (an attacker who keeps a
+  paste short can keep the dialog entirely inside the terminal's own pane, response 175),
+  and named a background dimming/scrim as the fix for that specific weakness: unlike the
   spatial tell, a scrim is **content-independent** — it does not depend on what the
   attacker pastes. RFC-018's own task breakdown said explicitly, twice (PR-018-E's entry
   and PR-018-F's own scope), that **PR-018-F should decide whether to recommend it**.
@@ -35,14 +35,26 @@ Status: implemented by RFC-007/RFC-008/RFC-009/RFC-017/RFC-018 with documented l
   handoff after `0.6.0` shipped. Not implemented in RFC-018 (deliberately — response 173
   explicitly told PR-018-E not to add background-dimming or any other visual change while
   it was still gathering evidence, so evidence work would not also change what it
-  evidenced) and not decided at closeout either, so the recommendation has been sitting
-  unactioned since 2026-08-10, restated as "the owner's" in every summary since (most
-  recently the `0.6.0` post-publish verification) without ever being packaged into one
-  concrete ask. **The ask**: should the real paste-confirmation dialog (and, by the same
-  reasoning, any future RFC-022 dialog reusing `modal_dialog_box`) render a background
-  scrim behind it, strengthening the distinguishing evidence beyond keystroke suppression
-  alone? If yes, this is a small, additive rendering change to a closed RFC's already-shipped
-  dialog — the same shape RFC-006 Amendment 1 and RFC-013 Amendment 1 used — not a redesign.
+  evidenced) and not decided at closeout either, so the recommendation sat unactioned from
+  2026-08-10 until this handoff packaged it into one concrete ask, accepted by the owner
+  2026-08-11 (`pr-018-g-background-scrim.md`).
+
+  **Outcome**: yes, built. A full-window dimming layer (`crate::theme::Theme::scrim`,
+  `shell.rs`'s `modal_scrim_style`) reusing the existing modal layer every `ModalContent`
+  variant already shares — one `.style(...)` call added to the container `opaque` already
+  wrapped, not a second widget or a second input-capturing surface.
+  `SubscriptionMode::for_modal` plus the `is_none()` guard remain the one mechanism that
+  protects the user; the scrim is additive cosmetics, verified not to consume input (no
+  `mouse_area`/`on_press` added anywhere) and live-verified not to dismiss the dialog on
+  click. Content-independence demonstrated at both ends of the range that broke the
+  original spatial claim: a short 2-line paste and a longer 3-line paste both show chrome
+  outside the dialog dimmed, regardless of how the dialog's own size changes with pasted
+  content. PR-018-E's suppression positive control re-run and still passing. Full evidence,
+  screenshots, and an ablation naming the exact test that catches its own removal:
+  `qa-evidence.md`'s PR-018-G section. **Still not claimed**: that the scrim makes the
+  dialog unspoofable (it raises the cost of a convincing imitation; it does not eliminate
+  one) or that the original spatial property is now sound (it was replaced, not repaired —
+  RFC-018's own disclosed limitation stands unchanged).
 - Add macOS/Windows terminal runtime evidence before claiming cross-platform terminal support.
 
 #### Readiness-driven terminal I/O ("Option B") — owns `NFR-PERF-004`
