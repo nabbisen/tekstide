@@ -262,3 +262,17 @@ Every RFC in this queue inherits these. They are not restated in each document.
 ## Maintenance
 
 This plan is reviewed like product scope. When a milestone completes, mark its RFCs implemented, re-check the gap analysis against the requirements, and re-confirm the queue order before starting the next one.
+
+## Owner decisions, 2026-08-11
+
+Recorded here because a decision that lives only in conversation is one nobody can act on later.
+
+1. **The RFC-018 background scrim is accepted.** It needed only acceptance — the design, the rationale, and the evidence (`01` vs `05`'s content-dependent reversal) are already in `rfcs/future-work.md` and RFC-018's closeout. A small slice against the existing modal layer; no new RFC.
+
+2. **Readiness-driven terminal I/O is to be scheduled.** `future-work.md` sizes it as its own slice with P1/P2 re-enumeration and re-ablation, plausibly an RFC-009/RFC-017 amendment rather than a patch — so scheduling it means scoping it first, which is the architect's. It is the only open item a user can currently feel: three terminals, ~374 KB/s, `NFR-PERF-004` unmet.
+
+3. **Amendments to closed RFCs stay with the architect as design authority.** Confirmed after RFC-006 Amendment 1 (decided directly) and RFC-012 Amendment 1 (raised and authorised). The distinction that matters is not "closed RFC" but **cost**: additive and invariant-preserving is the architect's; anything with a migration, a retention change, or a breaking API removal comes to the owner. RFC-012 Amendment 1 was correctly escalated on the last of those.
+
+4. **The crates.io page corrections ride the next release.** Both are already correct in the published artifacts; only the rendered pages were unverified, and a release re-renders them.
+
+5. **`0.7.0`: as soon as reasonable, not as soon as possible.** The version is already forced to a minor bump by RFC-012 Amendment 1's breaking removal. What is missing is reachable surface — 20 commits since `0.6.0` touched `crates/tekstide/` zero times, so a release today would be indistinguishable from `0.6.0` for a user. It cuts when items 1 and/or 2 land, or when RFC-020 makes RFC-024 reachable.
