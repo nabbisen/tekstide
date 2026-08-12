@@ -245,9 +245,19 @@ slice.
 - **`SubscriptionMode::for_modal` plus the `is_none()` guard remain the one input-blocking
   mechanism.** No `mouse_area`, no `on_press`, no second capture surface was added anywhere
   — the scrim is a `.style(...)` call on an existing container, nothing else.
-- **A click on the scrim does not dismiss the dialog.** Live-verified (`02`, below): clicked
-  the dimmed sidebar area, well outside the dialog's own bounds, while a real dialog was
-  open. The dialog remained open, its focus marker unchanged.
+- **A click on the scrim does not dismiss the dialog — proven structurally, not by the
+  screenshot originally cited here (response 194, Finding 1).** `grep -n "mouse_area\|on_press\|on_click"
+  across `crates/tekstide/src/shell.rs` returns nothing: there is no click handler anywhere
+  in the shell, keyboard-driven throughout. A click cannot dismiss the dialog because no
+  code exists that could make it — a structural argument, independent of any single trial.
+  **The originally-cited screenshot (`02`) does not establish this**: `01` and `02` are
+  byte-identical (`md5sum`: `248d1cfe07b80ffacd4a0319dbda28ab` for both), which is
+  consistent with "the click was delivered and correctly ignored" but equally consistent
+  with "the click never reached the window" — a null result with no proof the operation was
+  delivered, the same class as a green ablation. Unlike `03`'s positive control (`Tab`
+  visibly moving the focus marker, proving delivery before claiming suppression), `02` has
+  no equivalent proving the click was delivered at all. Retained below as a supporting,
+  non-probative capture, not as evidence for this property.
 - **PR-018-E's keystroke-suppression positive control still passes, re-run rather than
   assumed** (`03`, below): with a real dialog open, `xdotool type suppresstest` produces no
   visible character anywhere in the dialog's own content preview, and a `Tab` sent
@@ -258,15 +268,22 @@ slice.
 - **No escaping change.** `text_safety::quote_untrusted` is untouched; this slice's only
   code changes are `theme.rs` (a colour role) and `shell.rs`'s `view` (one style call).
 
-**Content-independence, demonstrated at both ends of the range that broke the original
-spatial claim (response 175) — not one favourable capture.** `01` uses the identical short,
-2-line paste shape that previously kept the dialog entirely inside the terminal's own pane
-(the case that broke the old claim): the dialog is unchanged in size, but the top bar
-("Tekstide"), the sidebar ("Sidebar"), the terminal-status label, and the bottom status bar
-are all visibly dimmed relative to baseline (`00`) — chrome the dialog itself never
-occludes. `04` uses a longer, 3-line paste that grows the dialog taller, into the sidebar
-region: the same dimming is present around whatever chrome remains outside the now-larger
-dialog. Same scrim, same property, holding at both ends of the range an attacker controls.
+**Content-independence: two dialog sizes, both dimming chrome — corrected description
+(response 194, Finding 2).** The entry originally here described `01` as reproducing
+response 175's short-paste, inside-the-pane condition. **It does not**: at this scratch
+window's 750×826 geometry, the dialog's minimum width already exceeds the terminal pane's
+own width, so `01`'s 2-line paste dialog spans nearly the full window and extends well
+left of the pane's blue border, across the sidebar — this geometry cannot reproduce the
+attack condition (a dialog confined entirely inside the pane) at any paste length. What
+`01` and `04` actually show: two different paste lengths (2 lines, 3 lines) producing two
+different dialog sizes, with the top bar ("Tekstide"), sidebar ("Sidebar"), and bottom
+status bar all visibly dimmed relative to baseline (`00`) in both — chrome the dialog
+itself never occludes, regardless of its own size. Full-window dimming holds by
+construction in both captures; **the inside-the-pane case that originally broke the
+spatial claim is not reproduced here, and is not claimed to be.** Not re-captured at a
+different window size to force the condition — comparing across window geometries is
+exactly what produced two prior wrong claims in this RFC's evidence (responses 173, 174),
+and a stated limitation is worth more than a manufactured demonstration.
 
 **Ablation, per this slice's own review gate.** Removed `.style(modal_scrim_style(state.theme))`
 from `view`'s modal branch (reverting to the original bare `center(modal_view)`), reran
@@ -286,17 +303,22 @@ window's own geometry — not compared across images at a different geometry, pe
 
 - `00-baseline-no-modal.png` — Project Board and a running terminal, no modal, full
   brightness. The comparison point for every dimming claim below.
-- `01-content-independence-short-paste-scrim.png` — a 2-line paste (the short-paste shape
-  that broke the original spatial claim), dialog unchanged in size, chrome outside it
-  visibly dimmed.
+- `01-content-independence-short-paste-scrim.png` — a 2-line paste; at this window's
+  geometry the dialog is not confined inside the terminal pane (its minimum width exceeds
+  the pane's), so this does not reproduce response 175's inside-the-pane condition. Chrome
+  outside the dialog is visibly dimmed regardless.
 - `02-click-on-scrim-does-not-dismiss.png` — clicked the dimmed sidebar area with the
-  dialog open; dialog remains open afterward, unchanged.
+  dialog open; dialog remains open afterward, unchanged. **Byte-identical to `01`**
+  (`md5sum` `248d1cfe07b80ffacd4a0319dbda28ab` for both) — does not establish the click was
+  delivered, only that nothing visibly changed. Retained as a supporting capture; the real
+  proof of this property is the structural enumeration above (no click handler exists in
+  `shell.rs`), not this screenshot.
 - `03-suppression-positive-control-focus-marker-moved.png` — `suppresstest` typed while
   open, absent from the preview; `Tab` sent immediately after, focus marker moved to
   `Paste` in the same screenshot, proving the window held focus throughout.
 - `04-content-independence-long-paste-scrim.png` — a 3-line, longer paste growing the
-  dialog into the sidebar region; the same dimming holds for whatever chrome remains
-  outside it.
+  dialog taller still; the same dimming holds for whatever chrome remains outside it. Also
+  does not reproduce an inside-the-pane condition, for the same geometry reason as `01`.
 - `05-dismissed-clean-state-restored.png` — `Escape` dismissed cleanly; scrim gone, chrome
   back to baseline brightness, no residual pasted content in the terminal.
 

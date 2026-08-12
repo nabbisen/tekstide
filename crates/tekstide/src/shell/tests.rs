@@ -626,6 +626,16 @@ fn no_raw_color_construction_anywhere_in_the_crate() {
 /// **Ablation** (per this slice's review gate): delete `.style(modal_scrim_style(state.theme))`
 /// from `view`'s modal branch in `shell.rs`, rerun -- this test fails,
 /// naming `view`. Reverted before committing.
+///
+/// **What this test cannot see (response 194, Finding 3).** It proves the
+/// text `.style(modal_scrim_style(` occurs inside `view`'s body -- it
+/// does not prove that style sits on the *full-window* container
+/// specifically. Someone later moving the same `.style(...)` call onto
+/// an inner, content-sized container (rather than `center(modal_view)`,
+/// which fills `Length::Fill`) would keep this test green while the
+/// content-independence argument silently died -- the screenshots in
+/// `qa-evidence.md`'s PR-018-G section would become the only thing still
+/// holding that property, not this test.
 #[test]
 fn modal_layer_always_applies_the_scrim_style() {
     let source = std::fs::read_to_string(crate_src_dir().join("shell.rs"))
