@@ -95,7 +95,7 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | 017 | Terminal Renderer and Immersion Mode | M9 | 014, 015 | no | **Accepted 2026-08-01 — next up.** Unblocked: 014 decided, 015 shipped `0.4.0` |
 | 018 | Rendered Paste Protection and Trusted UI | M9 | 017 | no | **Implemented and closed 2026-08-10** (`0.5.1`). PR-018-G, the carried-forward background scrim, landed 2026-08-12 (`0.7.0`) |
 | 019 | Editor and Explorer Surfaces | M10 | 015 | no | **Implemented and closed 2026-08-11** (`0.6.0`) |
-| 020 | Diff Review and AgentRun Report Surfaces | M10 | 015, 024 | no | **Next.** RFC-024's content access shipped dark in `0.7.0` and stays unreachable until this lands. Blocked only on the RFC-011 transcript-reader amendment |
+| 020 | Diff Review and AgentRun Report Surfaces | M10 | 015, 024, **adapter-spawn** | no | **Model complete, both surfaces BLOCKED** (2026-08-15, response 200). The transcript reader landed and is reviewed. Neither surface can be built: nothing in production creates an `AgentRun` (`launch_agent_run_with_runtime` and `add_agent_run` have no production caller) or a `ChangeSet` (`crates/tekstide` has zero references to change sets, baselines, or detection). Both would render nothing, forever. Real prerequisite is the adapter-spawn pathway, below |
 | 021 | Command Approval Model and Adapter Capability | M11 | — | **yes** | **Implemented headless and fully closed 2026-07-30. Moved to `done/`. Not reachable by any user until the adapter-spawn slice lands** |
 | 022 | Security Dialogs and Audit Producer Completion | M11 | 015, 021 | no | Blocked |
 | 023 | Configuration System | M12 | — | **yes** | **Authored — ready for implementation.** Headless: shipping it alone would repeat the zero-reachable-surface failure `0.7.0` nearly hit |
@@ -277,3 +277,71 @@ Recorded here because a decision that lives only in conversation is one nobody c
 4. **The crates.io page corrections ride the next release.** Both are already correct in the published artifacts; only the rendered pages were unverified, and a release re-renders them.
 
 5. **`0.7.0`: as soon as reasonable, not as soon as possible.** The version is already forced to a minor bump by RFC-012 Amendment 1's breaking removal. What is missing is reachable surface — 20 commits since `0.6.0` touched `crates/tekstide/` zero times, so a release today would be indistinguishable from `0.6.0` for a user. It cuts when items 1 and/or 2 land, or when RFC-020 makes RFC-024 reachable.
+
+## Re-plan, 2026-08-15 — the bottleneck is adapter-spawn, not rendering
+
+Authorised by the owner the same day, on the architect's recommendation, after response
+200 found that **neither of RFC-020's surfaces can be reached**.
+
+### What was found
+
+Nothing in production creates the two things RFC-020 renders:
+
+- **`AgentRun`** — `launch_agent_run_with_runtime` (`project/session.rs:376`) and
+  `add_agent_run` (`:318`) have zero production callers; every call site is a test.
+  `crates/tekstide`'s only references are an i18n dormancy annotation and
+  `NavigationAction::OpenCurrentAgentRunDetail`, which returns `None`.
+- **`ChangeSet`** — `crates/tekstide` contains zero references to change sets, review
+  baselines, or generated-change detection. `add_detected_generated_change_set` has no
+  production caller. `NavigationAction::OpenDiffReview` also returns `None`.
+
+Built as scheduled, both surfaces would render nothing, forever — the
+zero-reachable-surface failure the standing rule exists to catch, three days after it
+gated `0.7.0`.
+
+**This was the architect's error**, and a repeat: the same assumption went unchecked on
+RFC-024 (diffability assumed without confirming the inputs existed), was recorded as a
+lesson, and recurred one RFC later at larger scale. The convention that would have caught
+it now exists in [`../ARCHITECTURE.md`](../ARCHITECTURE.md) §Evidence conventions —
+*reachability comes before correctness*.
+
+### The accumulation this exposed
+
+**Four reviewed capabilities are dark behind one missing pathway:**
+
+| Capability | State | Blocked by |
+| --- | --- | --- |
+| RFC-021 command approval | implemented, headless, closed | adapter-spawn |
+| RFC-024 diff content | implemented, shipped `0.7.0`, no surface | adapter-spawn (no `ChangeSet` producer) |
+| RFC-011 Amd. 1 transcript reader | implemented, reviewed | adapter-spawn (no `AgentRun`, so no transcript) |
+| RFC-020 both surfaces | not built | adapter-spawn |
+
+This is now the project's dominant risk. It is not that any one thing is wrong — every one
+of those is correct and reviewed. It is that **the project keeps building models nobody can
+see**, and each one added to the pile was individually justified.
+
+The adapter-spawn pathway has been named in `future-work.md` as a standing theme since
+2026-08-01. It was never scheduled.
+
+### Decisions
+
+1. **`0.8.0`'s spine becomes readiness-driven terminal I/O.** It is the only available work
+   that improves something a user can reach today — terminals launch via `Ctrl+Alt+T`, and
+   the latency floor, the ~374 KB/s throughput ceiling and the terminal-count limit are all
+   felt. It was already scoped for `0.9.0`, so this moves it forward rather than inventing
+   new work. Owns `NFR-PERF-004`. Architect scopes it as an RFC-009/RFC-017 amendment;
+   the amendment comes to the owner, since it changes an invariant two slices were built to
+   prove.
+
+2. **Adapter-spawn becomes the M11 priority**, ahead of the rest of M11. It is what makes
+   the four capabilities above reachable, and every milestone spent elsewhere adds to the
+   pile rather than reducing it.
+
+3. **RFC-020 stays open, model-complete, surfaces blocked.** It is not withdrawn and not
+   re-scoped: the surfaces are correct work scheduled against inputs that do not exist yet.
+   It resumes when adapter-spawn lands.
+
+4. **M10 does not close** on RFC-020's closeout as previously planned, because the
+   milestone's second half cannot be delivered. What M10 delivered — RFC-019's editor and
+   explorer, RFC-024's diff policy, the transcript reader — is real; what it did not is
+   recorded here rather than absorbed silently.

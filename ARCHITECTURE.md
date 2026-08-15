@@ -94,6 +94,21 @@ that your check reaches real data before asserting what it does not find.
 **Claims** are checked against the RFC's own text at closeout, not only against the
 evidence file — an RFC has twice asserted something its own results had falsified.
 
+**Reachability comes before correctness.** Before a surface is scheduled, name the path a
+user takes to reach it and the production code that populates what it renders. Not "which
+RFC owns it" — the actual call site.
+
+This is the newest convention and it exists because it was missing. RFC-020 was scheduled
+as `0.8.0`'s spine, and its handoff pack written and accepted, before anyone checked
+whether an `AgentRun` or a `ChangeSet` could be created at all. Neither can:
+`launch_agent_run_with_runtime` and `add_detected_generated_change_set` have no production
+caller, so both of RFC-020's surfaces would have rendered nothing, forever. RFC-021 and
+RFC-024 had already shipped correct, reviewed, unreachable models for the same reason.
+
+Every review gate in every handoff pack asked whether the rendering was **correct**. None
+asked whether anything could **reach** it. A model with no producer and a surface with no
+route are the same defect, and neither is visible from inside the slice that builds it.
+
 ## Glossary
 
 Terms this codebase uses without explanation. Domain vocabulary first, then house terms.
