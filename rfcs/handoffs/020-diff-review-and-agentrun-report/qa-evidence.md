@@ -2,7 +2,7 @@
 title: "RFC-020: Diff Review and AgentRun Report Surfaces - QA Evidence"
 rfc: "RFC-020"
 rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
-status: "PR-020-B's core (transcript reader) implemented 2026-08-15, not yet reviewed — surface not started"
+status: "PR-020-B's core (transcript reader) implemented 2026-08-15; reviewed (response 198), three required corrections applied same day, not yet re-reviewed — surface not started"
 target_milestone: "M10"
 created: "2026-08-15"
 ---
@@ -37,10 +37,11 @@ read-only, and `DiffContent` left owned with its limitation carried forward accu
 
 ## PR-020-B — The transcript reader, and the AgentRun report surface
 
-**Core (the reader): implemented 2026-08-15, not yet reviewed.** Surface (the AgentRun
-report widget): not started — the reader alone is not this slice's own completion (see
-`task-breakdown-pr-plan.md`'s own framing, "a reader with no consumer cannot be shown to be
-correct"), recorded here as a checkpoint, not a claim of PR-020-B being done.
+**Core (the reader): implemented 2026-08-15, reviewed (response 198), three required
+corrections applied same day (commit `b74d8d5`), not yet re-reviewed.** Surface (the
+AgentRun report widget): not started — the reader alone is not this slice's own completion
+(see `task-breakdown-pr-plan.md`'s own framing, "a reader with no consumer cannot be shown
+to be correct"), recorded here as a checkpoint, not a claim of PR-020-B being done.
 
 **A real, pre-existing panic found and fixed first, in a different RFC's own module.**
 Building D2's resynchronization proof required calling `TerminalSecurityParser::parse`
@@ -63,9 +64,12 @@ itself (`1c7b980`), since it is a standalone defect in a different, already-ship
 module, not part of this RFC's own deliverable — flagged prominently here rather than
 folded quietly into the reader's own commit.
 
-**D1 — the window size, measured, not estimated.** A real Rust harness (`rustc -O`,
-`/proc/self/status` `VmRSS` deltas around a realistic PTY-output-shaped buffer — repeated
-SGR-styled lines, not a pathological all-zero buffer) swept 1/2/4/8 MiB candidates:
+**D1 — the window size, measured, not estimated.** **Correction (response 198, Finding
+2): the sweep below is wrong and superseded — left in place, annotated, per this project's
+own evidence-correction convention, rather than silently rewritten.** It varied only the
+window in isolation and never allocated the mandatory `MAX_SCAN_BYTES` (32 MiB) scan buffer
+`read_window` always fills on every call, understating real peak RSS by roughly an order of
+magnitude:
 
 ```text
 mib=1 window_len=1048576  escaped_len=1572864  rss_delta_kb=2572
@@ -74,10 +78,30 @@ mib=4 window_len=4194304  escaped_len=6291456  rss_delta_kb=12296
 mib=8 window_len=8388608  escaped_len=12582912 rss_delta_kb=24584
 ```
 
-**1 MiB chosen**: ~2.6 MiB real transient RSS (trivial), 1/32nd of the retention ceiling —
-meaningfully a window, not "basically the whole transcript." Unlike RFC-024's bound, not
-reused from an existing standard by analogy (a transcript tail is not shaped like a whole
-edited file or a single paste) — a fresh, measured number.
+**Corrected measurement**, against a real on-disk file at the writer's own 32 MiB retention
+ceiling, opened and `read_to_end`'d into a `Vec::with_capacity(total_len)` scan buffer
+exactly as `read_window` does, plus the window's own content copy, plus a simulated escaped
+copy alongside it:
+
+```text
+mib=1 scan_len=33554432 content_len=1048576 escaped_len=1081344 rss_delta_kb=34988
+mib=2 scan_len=33554432 content_len=2097152 escaped_len=2162688 rss_delta_kb=38860
+mib=4 scan_len=33554432 content_len=4194304 escaped_len=4325376 rss_delta_kb=43020
+mib=8 scan_len=33554432 content_len=8388608 escaped_len=8650752 rss_delta_kb=51692
+```
+
+Real peak for a full-size transcript is ~33-50 MiB, dominated by the fixed 32 MiB scan
+buffer — every call pays that cost regardless of the requested window. **1 MiB remains
+chosen**, but not for the "trivial memory cost" reason the wrong figure gave: since the
+scan buffer's fixed 32 MiB dominates every candidate size, the window choice cannot
+meaningfully change *peak* memory, only the smaller marginal cost on top, where 1 MiB is
+still cheapest. The window is chosen for what it always was: 1/32nd of the retention
+ceiling is meaningfully a window, not "basically the whole transcript," and at ordinary PTY
+text density is tens of thousands of lines, far more than a report view could usefully show
+on one screen. Unlike RFC-024's bound, not reused from an existing standard by analogy (a
+transcript tail is not shaped like a whole edited file or a single paste) — a fresh,
+measured number. Full doc comment and methodology in
+`crates/tekstide-core/src/transcript/reader.rs`, on `DEFAULT_TRANSCRIPT_WINDOW_BYTES`.
 
 **D2 — resynchronization, proven against real captured PTY output, not a synthesised
 fixture.** `a_window_starting_inside_a_real_control_sequence_classifies_identically_to_the_whole`
@@ -114,6 +138,27 @@ selected by a caller-supplied flag — nothing on disk distinguishes a live proc
 between writes from a finished transcript, so this cannot be inferred from the file alone
 and is not guessed at. Proven by `still_being_written_threads_into_the_returned_variant`.
 
+**Correction (response 198, Finding 1): an oversized transcript now refuses rather than
+returning the wrong window.** Before the fix, `total_len > MAX_SCAN_BYTES` had no guard: the
+reader would read the first 32 MiB and return a window near the end of *that prefix* — the
+middle of the real file, mislabelled as the tail. `total_len` reported the file's true size
+while `requested_start`/`delivered_start` were offsets into the truncated buffer: internally
+consistent, and inconsistent with the file they claimed to describe. Fixed with a new
+`TranscriptReadErrorReason::TranscriptExceedsScanLimit`, checked immediately after reading
+`total_len` and before any buffer allocation, proven by
+`a_transcript_larger_than_the_scan_limit_is_refused_not_silently_windowed` (writes a
+`MAX_SCAN_BYTES + 1`-byte file directly, bypassing `BoundedTranscriptWriter`'s own retention
+limit, which would otherwise prevent creating a file this large).
+
+**Correction (response 198, Finding 3): `read_window` now documents why it always scans
+from byte 0.** Reading from offset 0 to serve a small tail window looks like an
+optimizable inefficiency; it is load-bearing. Resynchronization (D2) walks tokens forward
+from a position guaranteed to be a sound parse origin, and the file's true start is the only
+position with that guarantee — seeking near the requested tail before scanning would put the
+scan's own starting point at an arbitrary, possibly mid-sequence offset, reintroducing one
+level down the exact defect D2 exists to prevent. Doc comment added directly on
+`read_window`, next to `resynchronize`, so a future reader does not "fix" it with a seek.
+
 **Path safety reused, not duplicated.** `TranscriptStoragePath::is_safe_for_read` delegates
 to the existing `is_safe_for_write` containment check (identical logic, a name that does
 not misdescribe why read-only code calls it) rather than either calling a write-named
@@ -122,10 +167,11 @@ name that could drift from the first. `an_unsafe_storage_path_is_refused_before_
 proves the refusal happens before any file I/O.
 
 **Gates**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
---all-features -- -D warnings`, full workspace suite (`tekstide-core` 546 passed, up from
-531 — 15 new tests across the panic fix and the reader; `tekstide` 206 passed, unchanged —
-no `crates/tekstide` changes, matching "core first" sequencing), `git diff --check`. All
-clean.
+--all-features -- -D warnings`, full workspace suite (`tekstide-core` 547 passed, up from
+531 — 16 new tests across the panic fix, the reader, and response 198's oversized-transcript
+regression test; `tekstide` 206 passed, unchanged — no `crates/tekstide` changes, matching
+"core first" sequencing), `git diff --check`. All clean, re-run after the three corrections
+(commit `b74d8d5`).
 
 **Not done in this checkpoint**: the AgentRun report surface itself (the widget, the
 escaping at the point of rendering, the reader-window-vs-writer-truncation rendered

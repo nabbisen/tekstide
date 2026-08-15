@@ -2,7 +2,7 @@
 title: "RFC-020: Diff Review and AgentRun Report Surfaces — Task Breakdown / PR Plan"
 rfc: "RFC-020"
 rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
-status: "PR-020-B's core (transcript reader) implemented 2026-08-15, not yet reviewed — surface, PR-020-C, and PR-020-D not started"
+status: "PR-020-B's core (transcript reader) implemented 2026-08-15; reviewed (response 198), three required corrections applied same day, not yet re-reviewed — surface, PR-020-C, and PR-020-D not started"
 target_milestone: "M10"
 created: "2026-08-15"
 ---
@@ -49,17 +49,38 @@ Review gate:
 - **Escaping happens at the widget**, and no double-escaping — content containing the
   literal text `<U+202E>` is distinguishable from a real override.
 
-**Core implemented 2026-08-15 (commits `c229781`, `1c7b980`), not yet reviewed. Surface not
-started — this slice is not complete.** Every core-side review gate item above is met; full
-detail in `qa-evidence.md`. **One item found and fixed before the reader could be built at
-all, not part of this slice's own gate**: `TerminalSecurityParser::parse` (RFC-017)
-panicked on a CSI sequence truncated to a bare `ESC [` at a buffer's own end — reachable
-the moment anything calls it on a buffer that was not guaranteed complete, which nothing
-did until this slice's own resynchronization proof needed to. Fixed and disclosed as its
-own commit (`c229781`), separate from the reader (`1c7b980`), since it is a defect in a
-different RFC's already-shipped module. Remaining for this slice: the AgentRun report
-widget, the reader-window-vs-writer-truncation rendered distinction (needs the widget to
-exist), and the no-double-escaping proof (needs the widget's own escaping call site).
+**Core implemented 2026-08-15 (commits `c229781`, `1c7b980`), reviewed (response 198).
+Surface not started — this slice is not complete.** Every core-side review gate item above
+is met; full detail in `qa-evidence.md`. **One item found and fixed before the reader could
+be built at all, not part of this slice's own gate**: `TerminalSecurityParser::parse`
+(RFC-017) panicked on a CSI sequence truncated to a bare `ESC [` at a buffer's own end —
+reachable the moment anything calls it on a buffer that was not guaranteed complete, which
+nothing did until this slice's own resynchronization proof needed to. Fixed and disclosed
+as its own commit (`c229781`), separate from the reader (`1c7b980`), since it is a defect
+in a different RFC's already-shipped module.
+
+**Response 198 accepted the panic fix and the reader outright, with three required
+corrections before surface work starts — all three applied 2026-08-15 (commit `b74d8d5`),
+not yet re-reviewed**:
+
+1. **Refuse when `total_len > MAX_SCAN_BYTES`.** The reader had no guard; a transcript
+   larger than the scan ceiling silently returned a window from the middle of the file,
+   mislabelled as the tail. Fixed with `TranscriptReadErrorReason::TranscriptExceedsScanLimit`
+   and a regression test.
+2. **Re-measure D1's peak memory against the real 32 MiB ceiling.** The original sweep
+   measured only the window in isolation and never allocated the mandatory scan buffer,
+   understating real peak RSS by roughly an order of magnitude. Corrected measurement: real
+   peak is ~33-50 MiB, dominated by the fixed 32 MiB scan buffer regardless of window size.
+   1 MiB remains the chosen window, on the grounds the corrected figure supports (a window,
+   not "basically the whole transcript"), not the "trivial memory cost" reasoning the wrong
+   figure gave.
+3. **Document why `read_window` scans from byte 0 rather than seeking near the tail.**
+   Doc comment added: resynchronization needs a position guaranteed to be a sound parse
+   origin, which only the file's true start provides.
+
+Remaining for this slice: the AgentRun report widget, the reader-window-vs-writer-truncation
+rendered distinction (needs the widget to exist), and the no-double-escaping proof (needs
+the widget's own escaping call site).
 
 ## PR-020-C — The change review surface
 
