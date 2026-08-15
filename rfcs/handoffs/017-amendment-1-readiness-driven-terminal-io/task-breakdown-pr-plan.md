@@ -2,7 +2,7 @@
 title: "RFC-017 Amendment 1: Readiness-driven terminal I/O — Task Breakdown / PR Plan"
 rfc: "RFC-017 Amendment 1"
 rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
-status: "PR-A1-A closed 2026-08-15 (responses 201/202, commits 79d9c23/85dcbef). PR-A1-B implemented 2026-08-15, reviewed (response 203), required fix applied same day (commit e35d690), not yet re-reviewed — C, D not started"
+status: "PR-A1-A and PR-A1-B closed 2026-08-15 (responses 201/202/203/204, commits 79d9c23/85dcbef/9f098ba/e35d690) — C, D not started"
 target_milestone: "M9 (carried), shipping in 0.8.0"
 created: "2026-08-15"
 ---
@@ -72,7 +72,7 @@ Review gate:
 - The output-vs-input asymmetry addressed explicitly: output rendering behind a modal is
   acceptable; input production is not.
 
-**Implemented 2026-08-15, reviewed (response 203).** Every gate item above is met; full
+**Implemented 2026-08-15, reviewed and accepted (responses 203/204).** Every gate item above is met; full
 detail, figures, and screenshot references in `qa-evidence.md`. `TerminalPane` now owns a
 `TerminalReader` and `poll()` drains it instead of calling
 `runtime.read_available_bounded_for` — the old path and the 50ms tick are both still
@@ -86,7 +86,7 @@ cleanly captured, due to a test-fixture quirk rather than an application defect;
 rather than omitted or forced.
 
 **Response 203 accepted PR-A1-B with one required tightening, applied same day (commit
-`e35d690`), not yet re-reviewed**: the original P1/P2 enumerations
+`e35d690`)**: the original P1/P2 enumerations
 (`only_one_call_site_ever_advances_a_terminal_processor_in_the_crate`,
 `only_this_field_drains_a_terminalreader_in_the_crate`) collected *files* containing the
 target substring rather than counting *occurrences*, so a second `.advance(`/
@@ -98,6 +98,12 @@ specifically required — a second occurrence added inside `surface/terminal.rs`
 both confirmed to now fail on total count. Also added, per response 203: the `.advance(`
 test's own doc comment now states what the scan does not cover (a direct mutation of
 `self.term` through a different `alacritty_terminal` entry point, not caught by this seam).
+
+**PR-A1-B closed 2026-08-15 (response 204, commit `e35d690`).** Response 204's own reminders
+for PR-A1-C, in the order most likely to bite: (1) a test that had to be changed to keep
+passing is a finding to report, not a change to make; (2) the 64 KiB truncation must be
+gone, not merely unreached; (3) `dropped_bytes_total` and its field are dead state since
+PR-A1-B — C is where they die, or where the guarantee that keeps them at zero is stated.
 
 ## PR-A1-C — Remove the tick and the sleep
 

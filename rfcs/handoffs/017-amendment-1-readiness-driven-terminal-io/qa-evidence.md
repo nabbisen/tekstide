@@ -2,7 +2,7 @@
 title: "RFC-017 Amendment 1: Readiness-driven terminal I/O - QA Evidence"
 rfc: "RFC-017 Amendment 1"
 rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
-status: "PR-A1-A closed 2026-08-15 (responses 201/202, commits 79d9c23/85dcbef). PR-A1-B implemented 2026-08-15, reviewed (response 203), required fix applied same day (commit e35d690), not yet re-reviewed — C, D not started"
+status: "PR-A1-A and PR-A1-B closed 2026-08-15 (responses 201/202/203/204, commits 79d9c23/85dcbef/9f098ba/e35d690) — C, D not started"
 target_milestone: "M9 (carried), shipping in 0.8.0"
 created: "2026-08-15"
 ---
@@ -154,8 +154,8 @@ started.
 
 ## PR-A1-B — The ingress re-proof
 
-**Implemented 2026-08-15, reviewed (response 203), required fix applied same day (commit
-`e35d690`).** `crates/tekstide-core` untouched; all changes
+**Closed 2026-08-15 — reviewed and accepted (responses 203/204, commits
+`9f098ba`/`e35d690`).** `crates/tekstide-core` untouched; all changes
 in `crates/tekstide`: `TerminalPane` now owns a `TerminalReader` (`launch()` spawns it via
 `spawn_output_reader` right after `launch_project_shell`), and `poll()` reads from
 `reader.drain_available()` instead of `runtime.read_available_bounded_for`. The old,
