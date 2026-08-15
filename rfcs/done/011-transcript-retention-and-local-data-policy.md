@@ -430,3 +430,124 @@ for the not-a-diff case, and which it satisfied with separate constructors.
 - **Search, filtering, or navigation within a transcript.** Not in this amendment.
 - **Making retention configurable.** RFC-011 left that open; it stays open.
 - **Any change to what is captured.** The capture boundary above is untouched.
+
+## Amendment 2: Re-homing transcript capture onto the readiness-driven reader
+
+**Status:** Authored by the architect 2026-08-15. **Requires the owner's authorisation** —
+it changes what happens to a running process when capture fails, which is retention
+semantics rather than an additive accessor. Under the standing delegation, that comes to
+the owner.
+
+**Amendment type:** Structural. Touches RFC-017 Amendment 1's `TerminalReader` and
+RFC-008's session ownership.
+
+### Why this exists
+
+RFC-017 Amendment 1 replaced the terminal's read path. The old one,
+`LinuxTerminalRuntime::read_available_bounded_for`, did two unrelated things in one loop:
+it returned a bounded buffer to its caller, **and it appended every byte to
+`session.transcript_writer` and flushed it**. Those are the only non-test writes to a
+`BoundedTranscriptWriter` in the workspace.
+
+The new `TerminalReader` does not write transcripts at all. Nothing failed, because no
+production code creates an `AgentRun`, so no transcript writer is ever configured.
+
+**Adapter-spawn — the work that makes `AgentRun`s real — is blocked on this.** Whoever
+builds it will wire output through `TerminalReader`, because that is the reviewed path, and
+this RFC's entire retention design plus Amendment 1's bounded reader would then operate on
+files nothing ever writes.
+
+### D1 — The writer moves into the reader thread
+
+Not to the consumer. `TerminalPane::poll()` runs on the UI thread, and file I/O there is
+the precise defect RFC-017 Amendment 1 was written to remove; re-introducing it as a
+transcript write would undo that work under a different name.
+
+The reader thread already blocks on `poll(2)`. It is the correct place for a blocking
+write, and moving the write there is strictly better than the old design, which wrote
+synchronously on the update thread.
+
+**Consequence to design deliberately, not discover:** `session.transcript_writer` is
+currently owned by the runtime and read by `transcript_write_summary`. Once the writer
+lives in the thread, that accessor has no writer to consult. Return the summary through a
+shared, lock-protected snapshot the thread updates, or through the reader's own API — but
+**decide it, and say which**, rather than leaving `transcript_write_summary` returning
+`None` and looking like "no transcript configured."
+
+### D2 — Write before send
+
+The transcript write happens **before** the bytes enter the channel, never after.
+
+This gives one stated invariant: **the transcript is a superset of what was displayed.** A
+crash between write and send loses nothing from the record; a crash between send and write
+would leave the user having seen output the durable record does not contain, which defeats
+the point of having a record.
+
+### D3 — Mid-stream write failure, by capture mode
+
+The old path returned `TerminalRuntimeError::TranscriptWrite` and failed the whole read. A
+thread has no caller to return to, so this needs a real policy.
+
+This RFC already decides the analogous budget-exhaustion case: `LocalBounded` truncates or
+disables further writes with metadata; `RequiredLocalBounded` rejects launch or fails
+preflight **before process start**. Mid-stream is different — the process is already
+running, so "reject launch" is not available.
+
+**Proposed, and the part most needing the owner's judgement:**
+
+- **`LocalBounded`** — mark the transcript `CaptureFailed` (the state already exists,
+  `domain/transcript.rs:93`), stop writing, **keep reading**. The terminal stays usable and
+  the user is told the record stopped. Capture is best-effort in this mode by definition.
+- **`RequiredLocalBounded`** — mark `CaptureFailed` and **stop reading**. Do not kill the
+  child. Ceasing to drain applies Amendment 1's backpressure, so the process blocks on
+  `write()` and makes no further unrecorded progress, while termination stays the caller's
+  decision rather than a reader thread's.
+
+The second is the interesting one: it uses backpressure as a *safety* mechanism rather than
+a performance one, and it stops the run without the reader unilaterally killing anything. A
+mode whose name says the record is required should not continue producing unrecorded work.
+
+**Either way the failure must be observable.** A silent `CaptureFailed` is the same defect
+class as the old code discarding the summary that carried `dropped_bytes`.
+
+### D4 — Backpressure now includes the disk
+
+Stated because it is a real behaviour change and will otherwise be discovered as a bug: a
+slow or stalled disk now stalls the reader, which stalls the child. That follows directly
+from D1 and D2 and is correct — but it means terminal liveness depends on transcript write
+latency whenever capture is on.
+
+The old design had the same coupling and worse, on the UI thread. **Do not "fix" this by
+writing after the send or on a separate unbounded queue** — the first breaks D2's
+invariant, the second reintroduces unbounded buffering that RFC-017 Amendment 1's D1
+rejected.
+
+### What must not change
+
+- **P1/P2 as re-proven by RFC-017 Amendment 1 PR-A1-B.** The writer is a new consumer of
+  the byte stream inside the reader thread; it must not become a second path *out* of it.
+  Re-run those enumerations rather than assuming they transfer.
+- **Retention limits, capture modes, budget scope, purge semantics.** All decided in this
+  RFC's body and untouched here. This amendment moves *where* capture happens, not *what*
+  is captured or *how long* it is kept.
+- **Amendment 1's reader contract** — bounded window, resynchronization, read-only.
+
+### Evidence owed
+
+- A transcript written through the new path, byte-identical to the PTY output, proven
+  against a real child process rather than a synthesised stream.
+- **D2 proven by ordering**, not asserted: a test that observes the record contains bytes
+  the consumer has not yet drained.
+- Mid-stream failure exercised for real in both modes — a genuinely unwritable transcript
+  (permissions, or a full filesystem), not an injected error value.
+- `RequiredLocalBounded`'s stop-reading behaviour shown to stall the child rather than kill
+  it, and shown to leave termination available to the caller.
+- The `transcript_write_summary` decision from D1, with its mechanism named.
+- Ablations: remove the write-before-send ordering and show the specific failure; remove
+  the `CaptureFailed` marking and show what silently succeeds.
+
+### Out of scope
+
+- Any change to what is captured, retention limits, or purge.
+- The transcript *reader* (Amendment 1) — unchanged.
+- Adapter-spawn itself. This unblocks it; it is not it.
