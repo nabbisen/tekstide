@@ -383,8 +383,29 @@ implementing slice rather than assumed — found at least two more, neither touc
 work:
 
 - nothing launches an AI CLI as an adapter;
-- `TerminalEnvironmentPolicy::ExplicitAllowlist` is rejected by the Linux runtime
-  (`runtime/terminal/launch.rs:436`: *"not applied by the Linux runtime yet"*).
+- ~~`TerminalEnvironmentPolicy::ExplicitAllowlist` is rejected by the Linux runtime.~~
+  **Corrected 2026-08-16: adapter-spawn does not need it.** Delivering the capability token
+  is `command.env(APPROVAL_TOKEN_ENV_VAR, token)` — *setting* a value Tekstide generated.
+  `ExplicitAllowlist(Vec<String>)` is a list of **names with no values**, which can only mean
+  *inheriting* variables from Tekstide's own environment. The type is decisive: a generated
+  token's value cannot be expressed as a name in a `Vec<String>`, so that variant is
+  structurally incapable of delivering it. The runtime already does `.env_clear()` plus five
+  fixed `.env(...)` calls (`launch.rs:482-487`); the token is a sixth, inheriting nothing.
+
+  **The two questions separate, and only one belongs to adapter-spawn:**
+
+  - *May the runtime set one additional variable to a value Tekstide itself generated?* —
+    what adapter-spawn needs. A real question (a token in a child's environment is readable
+    by that child and anything it spawns, which constrains scoping and lifetime), but not a
+    tradeoff against usefulness, and it touches no inheritance.
+  - *May a child inherit named variables from Tekstide's environment?* — the genuine
+    security-versus-usefulness question, sharpened by RFC-004's redaction policy having no
+    implemented pattern set. **Adapter-spawn does not force it**, and it can stay rejected
+    until something actually wants inherited environment.
+
+  Recorded because this entry previously asserted the boundary change was required, which
+  would have put a decision to the owner that the design does not need — and would have
+  invited weakening an allowlist boundary for a reason that turns out not to apply.
 
 So adapter-spawn needs **scoping** before implementation — architect work, and the next
 thing on the critical path. Until it lands, RFC-021's command approval, RFC-024's diff
