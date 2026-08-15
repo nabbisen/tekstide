@@ -321,3 +321,112 @@ Recommended slices:
 - `RequiredLocalBounded` remains model vocabulary but must not become the default or be used by an unreviewed workflow.
 - Purge preserves content-free tombstone transcript metadata and AgentRun/TerminalSession references by default.
 - Initial retention defaults are 32 MiB per transcript, 256 MiB per project, 1 GiB app-wide, and 30 days retained.
+
+## Amendment 1: Bounded Transcript Reader
+
+**Status:** Decided by the architect as design authority 2026-08-12, under the owner's
+standing delegation (recorded in `delivery-plan.md` §Owner decisions, 2026-08-11).
+Flagged to the owner rather than escalated, because it meets the delegation's test:
+**additive and invariant-preserving, with no migration, no retention change, and no
+breaking removal.** Escalate if any implementation pressure would change that.
+
+**Amendment type:** Additive — a read path over data this RFC already governs.
+
+**Why an amendment and not a new RFC.** RFC-011 has already decided capture mode,
+retention limits, budget scope, purge semantics, and the untrusted-content boundary. A
+bounded reader is "read back what policy already governs," and the constraints to review
+it against exist here. RFC-020 §Sequencing reached the same conclusion, and contrasted it
+with the diff *content* model — correctly **not** an amendment, because that was new state
+and new I/O. This is neither.
+
+### What is authorised
+
+A read-only, bounded reader in `tekstide-core`'s `transcript/` module, which today has
+`path.rs`, `policy.rs` and `writer.rs` and **no reader at all**.
+
+### D1 — A bounded window, not a refusal, and not the writer's truncation
+
+RFC-024 chose **refuse, never truncate** for diff content. **This amendment deliberately
+chooses differently, and the difference must not be read as inconsistency.**
+
+A truncated diff misleads about what changed — a reviewer acts on it and approves
+something they did not see. A transcript is an append-only log, consumed newest-first, and
+refusing to show a 32 MiB transcript would withhold the feature exactly when a
+long-running agent makes it most valuable. Truncating a diff removes information the user
+is deciding on; windowing a log removes history they can still ask for.
+
+So: **the reader returns a bounded window over the tail**, because the end of a log is
+what a reader wants first.
+
+**The window is not the writer's truncation and must never be conflated with it.** RFC-011
+already lets the *writer* truncate at the byte limit and record that in retention metadata
+(`active and truncated by byte limit`). That is a permanent fact about the file. A reader
+window is a transient fact about one request. A surface that shows "truncated" without
+saying which one is lying to the user about whether bytes still exist.
+
+**The window size is measured, not estimated.** Two estimated figures in this project were
+wrong once measured. Measure against the real retention ceiling (32 MiB per transcript),
+not a comfortable sample.
+
+### D2 — The window boundary is outside the property the filter was proven against
+
+**This is the security-critical decision in this amendment, and it is easy to miss.**
+
+RFC-017 PR-017-B/C established **P4 (stream-position independence)**: the terminal filter
+classifies identically regardless of how the byte stream is chunked. **P4 covers chunking
+where every byte arrives.** A tail window does not chunk — it **drops the prefix**. The
+first byte of the window can land in the middle of a CSI or OSC sequence, and the filter
+was never proven correct for a stream that begins mid-sequence, because no code path could
+previously produce one.
+
+A window that starts mid-sequence can therefore present the leading fragment of a control
+sequence as ordinary text, or swallow following text into an unterminated sequence. That
+is a classification difference produced by *where the read started* — precisely what P4
+exists to deny, arrived at through a door P4 does not cover.
+
+**Required:** the reader must **resynchronize** — advance from the raw window start to the
+first position where a fresh parse is sound, and report the delivered start offset rather
+than the requested one. It must additionally not split a UTF-8 scalar at either edge.
+
+**Evidence owed:** a test that a window starting inside a control sequence classifies
+identically to the same content read whole — and an ablation removing the
+resynchronization that shows the *specific* divergence, with the exact wrong value. A
+green ablation here is a defect in the ablation.
+
+### D3 — Raw bytes out; escaping belongs to the surface
+
+This RFC already says captured bytes remain untrusted and that any renderer must take them
+through RFC-009's boundary before display. The reader **must not pre-escape**.
+
+The reasoning is RFC-024 PR-024-C's and it held there: a model that escapes hides content
+from every non-rendering consumer, and makes "what is actually in the file" unanswerable.
+Per the escaping asymmetry, a transcript is **reviewed, not edited** — so it renders
+escaped, and RFC-020 owns that at the widget.
+
+**Evidence owed:** raw bytes survive the reader unaltered, proven against the same bidi
+probe `text_safety`'s own tests use.
+
+### D4 — Read-only, enforced by enumeration
+
+The reader must not delete, expire, purge, rewrite, or update retention metadata, and must
+not become a second retention policy. RFC-020 §Risks names this risk explicitly.
+
+**Evidence owed:** an enumeration test naming every production call site that opens a
+transcript for reading, and proof that no reader path reaches a mutating call. A new call
+site must fail the test by name.
+
+### D5 — An actively-written transcript is readable, and says so
+
+An AgentRun may still be running. The reader may observe a partial trailing write; it must
+not present that as a completed transcript, and must not block the writer.
+
+**Required:** the returned value distinguishes *complete* from *still being written*, in
+the type rather than in a doc comment — the same instruction RFC-024 PR-024-C was given
+for the not-a-diff case, and which it satisfied with separate constructors.
+
+### What this does not decide
+
+- **Rendering.** No widget, no layout, no words a user reads. RFC-020 owns all of it.
+- **Search, filtering, or navigation within a transcript.** Not in this amendment.
+- **Making retention configurable.** RFC-011 left that open; it stays open.
+- **Any change to what is captured.** The capture boundary above is untouched.

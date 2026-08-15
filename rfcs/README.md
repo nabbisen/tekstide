@@ -18,7 +18,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | Proposed 2026-08-11 — M10 second half; RFC-024, its content-access prerequisite, is now implemented and closed |
+| 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | **Accepted 2026-08-12 — next up, the spine of `0.8.0`.** Both prerequisites are now met: RFC-024 (content access) is implemented and closed, and RFC-011 Amendment 1 authorises the bounded transcript reader. Handoff pack pending |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ### Reserved numbers — check this before authoring
@@ -88,7 +88,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 008 | [TerminalSession and Process Lifecycle](./done/008-terminalsession-process-lifecycle.md) | Implemented with documented limitations |
 | 009 | [Terminal Security Boundary](./done/009-terminal-security-boundary.md) | Implemented with documented limitations |
 | 010 | [AgentRun Launch Model and AI CLI Profiles](./done/010-agentrun-launch-model-and-ai-cli-profiles.md) | Implemented with documented limitations |
-| 011 | [Transcript Retention and Local Data Policy](./done/011-transcript-retention-and-local-data-policy.md) | Implemented with documented limitations |
+| 011 | [Transcript Retention and Local Data Policy](./done/011-transcript-retention-and-local-data-policy.md) | Implemented with documented limitations. **Amendment 1** (2026-08-12) authorises a bounded, read-only transcript reader — RFC-020's last prerequisite; `transcript/` had no reader at all. Additive: no retention change, no migration. Its D2 records that a tail window **drops** bytes and so falls outside RFC-017's **P4 (stream-position independence)**, which covers chunking where every byte arrives — the reader must resynchronize |
 | 012 | [Generated Change Review Foundations](./done/012-generated-change-review-foundations.md) | Implemented with documented limitations on main at 34a1c55 |
 | 013 | [Durable Audit Store and Local Data Policy](./done/013-durable-audit-store-and-local-data-policy.md) | Implemented with documented limitations · **Amendment 1 complete 2026-07-30** (additive v1 → v2 schema migration for RFC-021's `command_cwd_mismatch`; migration, convergence, and interrupted-migration properties all proven) |
 | 014 | [Desktop GUI Substrate and Terminal Rendering Strategy](./done/014-desktop-gui-substrate-and-terminal-rendering.md) | Implemented with documented limitations — `iced` + Option A; R1/R6 discharged, R4-R7 carried to RFC-017 |
