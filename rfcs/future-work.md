@@ -202,7 +202,8 @@ Status: substrate decided, application shell, and mode switching implemented by 
   flake**, whose diagnosed mechanism was a fork window (10 failures/200 with forking tests,
   0/200 without) — a suite that leaves 87 live processes behind is a plausible source of
   the same pressure, and the two were investigated a fortnight apart without being linked.
-  Belongs to general test hygiene; no RFC owns it today, which is why it is here.
+  **Cause found 2026-08-16** (review request 212): `Child::drop` does not kill the process, so **any test that panics before reaching its own cleanup leaks a shell**. That explains why the count varies between runs — it is a function of how many tests *failed*, not how many ran (the dev team measured 1,192 leaked while chasing a flake through repeated failing runs). The fix is cleanup that survives a panic, not a tidier happy path. Belongs to general test hygiene; no RFC owns it today, which is why it is here.
+- **Terminal spawn latency as a function of already-open terminals: never measured, plausibly not constant.** Surfaced 2026-08-16 while diagnosing a test-concurrency flake whose mechanism is `fork()` cost scaling with the forking process's thread count. Tekstide now runs **one reader thread per terminal** (RFC-017 Amendment 1) and `terminal_session_limit` is **6**, so launching the sixth terminal may be measurably slower than the first. RFC-017 Amendment 1 PR-A1-D's N-pane benchmark measured **throughput**, not **spawn latency** — it drained existing panes, it did not time creating them. Deliberately not measured in the slice that found it.
 - **No `NavigationAction` reaches `AppCommand::OpenActiveProjectWorkspace` directly.**
   Found during RFC-019 PR-019-C's GUI evidence work (response 181, 2026-08-11):
   `SwitchActiveProject`'s own keybinding is `None`/`Configurable`, already disclosed as
