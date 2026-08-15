@@ -13,6 +13,7 @@ use crate::project::{ProjectId, ProjectSession};
 use crate::transcript::{BoundedTranscriptWriter, TranscriptWriteError, TranscriptWriteSummary};
 
 use super::pty::{OpenPty, close_fd, resize_master};
+use super::reader::TerminalReader;
 use super::{
     BoundedRuntimeSummary, TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec,
     TerminalOutputSummary, TerminalRuntimeEvent, TerminalRuntimeHandle,
@@ -173,6 +174,32 @@ impl LinuxTerminalRuntime {
                 summary,
             },
         ))
+    }
+
+    /// RFC-017 Amendment 1, PR-A1-A: spawns a dedicated reader thread
+    /// over a *duplicate* of this session's PTY master, built alongside
+    /// `read_available_bounded_for` rather than in place of it. `master`
+    /// stays owned by `RunningTerminal` for `write_input`/`resize`;
+    /// the duplicate the reader thread receives is independent of it in
+    /// Rust's `File` API but shares the same open file description (and
+    /// so the same `O_NONBLOCK` status), which is what lets the reader
+    /// thread do non-blocking drains between `poll(2)` wakeups without
+    /// affecting how writes on the original handle behave.
+    pub fn spawn_output_reader(
+        &self,
+        handle: &TerminalRuntimeHandle,
+    ) -> Result<TerminalReader, TerminalRuntimeError> {
+        let session = self.session(handle)?;
+        let master_for_reader =
+            session
+                .master
+                .try_clone()
+                .map_err(|error| TerminalRuntimeError::Io {
+                    summary: BoundedRuntimeSummary::new(format!(
+                        "failed to duplicate PTY master for reader thread: {error}"
+                    )),
+                })?;
+        Ok(TerminalReader::spawn(master_for_reader))
     }
 
     pub fn resize(
