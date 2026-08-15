@@ -323,6 +323,33 @@ fn only_this_module_opens_a_transcript_file_for_reading() {
     }
 }
 
+/// **Response 198, Finding 1's own required proof.** A transcript larger
+/// than `MAX_SCAN_BYTES` must refuse, not silently return a window near
+/// the end of the first `MAX_SCAN_BYTES` -- the middle of the real file,
+/// mislabelled as the tail. Written directly via `std::fs::write` rather
+/// than through `BoundedTranscriptWriter` -- the writer's own retention
+/// limit would refuse to produce a file this large in the first place,
+/// so this simulates exactly the anomalous case `MAX_SCAN_BYTES` is
+/// documented as defending against (a file that grew past what the
+/// writer would have produced), not a shape the writer itself can reach.
+#[test]
+fn a_transcript_larger_than_the_scan_limit_is_refused_not_silently_windowed() {
+    let (_temp, storage_path) = resolved_storage_path("oversized");
+    fs::create_dir_all(storage_path.transcript_dir()).unwrap();
+    let oversized = vec![b'a'; (MAX_SCAN_BYTES + 1) as usize];
+    fs::write(storage_path.transcript_file(), &oversized).unwrap();
+
+    let result = read_window(&storage_path, TranscriptReadPolicy::default(), false);
+
+    assert_eq!(
+        result,
+        Err(TranscriptReadError {
+            reason: TranscriptReadErrorReason::TranscriptExceedsScanLimit,
+            path: storage_path.transcript_file().to_path_buf(),
+        })
+    );
+}
+
 /// A path outside the reviewer's own containment policy refuses before
 /// any file I/O -- reused (`is_safe_for_read`), not a second check.
 #[test]

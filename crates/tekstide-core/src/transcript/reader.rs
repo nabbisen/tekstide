@@ -42,30 +42,50 @@ use super::TranscriptStoragePath;
 /// RFC-011 Amendment 1, D1: measured against the real 32 MiB retention
 /// ceiling (`DEFAULT_TRANSCRIPT_MAX_TRANSCRIPT_BYTES`), not estimated --
 /// this project has twice shipped an estimated bound that was wrong once
-/// measured (RFC-024's own diff bound, RFC-017's terminal I/O tick).
+/// measured (RFC-024's own diff bound, RFC-017's terminal I/O tick), and
+/// a third time (this figure, first draft) measured the wrong quantity:
+/// the original sweep varied only the window in isolation and never
+/// allocated the mandatory `MAX_SCAN_BYTES` scan buffer `read_window`
+/// always fills, so it understated real peak RSS by roughly an order of
+/// magnitude. Corrected per response 198, Finding 2.
 ///
-/// A real Rust harness (`rustc -O`, `/proc/self/status` `VmRSS` deltas
-/// around a realistic PTY-output-shaped buffer -- repeated SGR-styled
-/// lines, not a pathological all-zero buffer -- plus a second buffer
-/// simulating the widget's own escaped copy existing briefly alongside
-/// the raw window) measured a sweep of candidate sizes:
+/// A real Rust harness (`rustc -O`, `/proc/self/status` `VmRSS` deltas)
+/// now reproduces `read_window`'s actual allocation shape: a real
+/// on-disk file at the writer's own 32 MiB retention ceiling, filled
+/// with realistic PTY-output-shaped content -- repeated SGR-styled
+/// lines, not a pathological all-zero buffer -- opened and
+/// `read_to_end`'d into a `Vec::with_capacity(total_len)` scan buffer
+/// exactly as `read_window` does, plus the window's own `content` copy,
+/// plus a simulated escaped copy alongside it (the widget's own
+/// transient state). Swept across candidate window sizes:
 ///
 /// ```text
-/// mib=1 window_len=1048576  escaped_len=1572864  rss_delta_kb=2572
-/// mib=2 window_len=2097152  escaped_len=3145728  rss_delta_kb=7172
-/// mib=4 window_len=4194304  escaped_len=6291456  rss_delta_kb=12296
-/// mib=8 window_len=8388608  escaped_len=12582912 rss_delta_kb=24584
+/// mib=1 scan_len=33554432 content_len=1048576 escaped_len=1081344 rss_delta_kb=34988
+/// mib=2 scan_len=33554432 content_len=2097152 escaped_len=2162688 rss_delta_kb=38860
+/// mib=4 scan_len=33554432 content_len=4194304 escaped_len=4325376 rss_delta_kb=43020
+/// mib=8 scan_len=33554432 content_len=8388608 escaped_len=8650752 rss_delta_kb=51692
 /// ```
 ///
-/// **1 MiB is chosen**: costs ~2.6 MiB of real transient RSS (trivial),
-/// is 1/32nd of the retention ceiling -- meaningfully a *window*, not
-/// "basically the whole transcript" -- and at ordinary PTY text density
-/// is on the order of tens of thousands of lines, far more than a report
-/// view could usefully show on one screen. Unlike RFC-024's bound, this
-/// is not reused from an existing reviewed standard: a transcript tail
-/// is not shaped like a whole edited file (RFC-019's editable bound) or
-/// a single paste (RFC-018's bound), so this is a fresh number, measured
-/// rather than borrowed by analogy.
+/// **Real peak for a full-size transcript is ~33-50 MiB, dominated by
+/// the fixed 32 MiB scan buffer** -- every call pays that cost
+/// regardless of the requested window, because `MAX_SCAN_BYTES` bounds
+/// what `read_window` reads, not what it returns. The window's own
+/// marginal cost (content copy + escaped copy) is a few MiB at most.
+///
+/// **1 MiB remains the right choice**, though not for the "trivial
+/// memory cost" reason the original (wrong) figure gave: since the scan
+/// buffer's fixed 32 MiB dominates every candidate size, the window
+/// choice cannot meaningfully change *peak* memory -- it changes only
+/// the smaller marginal cost on top, where 1 MiB is still the cheapest
+/// of the sizes measured. The window is still chosen for what it always
+/// was chosen for: 1/32nd of the retention ceiling is meaningfully a
+/// *window*, not "basically the whole transcript," and at ordinary PTY
+/// text density is on the order of tens of thousands of lines, far more
+/// than a report view could usefully show on one screen. Unlike
+/// RFC-024's bound, this is not reused from an existing reviewed
+/// standard: a transcript tail is not shaped like a whole edited file
+/// (RFC-019's editable bound) or a single paste (RFC-018's bound), so
+/// this is a fresh number, measured rather than borrowed by analogy.
 pub const DEFAULT_TRANSCRIPT_WINDOW_BYTES: u64 = 1024 * 1024;
 
 /// The reader's own hard ceiling on how much of the file it will ever
@@ -169,6 +189,16 @@ pub enum TranscriptReadErrorReason {
     OpenFileFailed,
     MetadataFailed,
     ReadFailed,
+    /// Response 198, Finding 1: a transcript larger than `MAX_SCAN_BYTES`
+    /// must refuse, not silently read the first `MAX_SCAN_BYTES` and
+    /// return a window near the end of *that prefix* -- the middle of
+    /// the real file -- mislabelled as the tail. The writer's own
+    /// per-transcript limit means this should never happen; a file this
+    /// large is exactly the anomalous case `MAX_SCAN_BYTES` exists to
+    /// catch, and catching it silently with a wrong answer is worse than
+    /// refusing loudly, because nobody would be looking for the wrong
+    /// answer.
+    TranscriptExceedsScanLimit,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -205,6 +235,18 @@ impl std::error::Error for TranscriptReadError {}
 /// the caller (who tracks the owning `AgentRun`'s own status) can
 /// answer that, so D5's distinction is threaded through rather than
 /// guessed at here.
+///
+/// **Always scans from byte 0, never seeks to the requested tail --
+/// this is load-bearing, not an unoptimized read.** Resynchronization
+/// (see [`resynchronize`]) walks tokens forward from a position
+/// *guaranteed* to be a sound parse origin; the file's true start is the
+/// only position with that guarantee. Seeking to somewhere near the
+/// requested tail before scanning would put the scan's own starting
+/// point at an arbitrary, possibly mid-sequence offset -- exactly the
+/// defect D2 exists to prevent, reintroduced one level down by the
+/// "optimization" meant to avoid it. The cost this buys is a bounded
+/// (`<= MAX_SCAN_BYTES`) linear scan on every read, not an unbounded
+/// one -- see `MAX_SCAN_BYTES` and the refusal below for what bounds it.
 pub fn read_window(
     storage_path: &TranscriptStoragePath,
     policy: TranscriptReadPolicy,
@@ -234,9 +276,21 @@ pub fn read_window(
         })?
         .len();
 
-    let scan_len = total_len.min(MAX_SCAN_BYTES);
-    let mut buffer = Vec::with_capacity(scan_len as usize);
-    file.take(scan_len).read_to_end(&mut buffer).map_err(|_| {
+    // Response 198, Finding 1: refuse rather than silently reading only
+    // the first MAX_SCAN_BYTES and returning a window near the end of
+    // that prefix -- the middle of the real file, mislabelled as the
+    // tail. The writer's own limit means total_len should never exceed
+    // this; if it does, that is exactly the anomaly this check exists to
+    // catch, not a case to paper over with a wrong-but-plausible answer.
+    if total_len > MAX_SCAN_BYTES {
+        return Err(TranscriptReadError::new(
+            TranscriptReadErrorReason::TranscriptExceedsScanLimit,
+            storage_path.transcript_file(),
+        ));
+    }
+
+    let mut buffer = Vec::with_capacity(total_len as usize);
+    file.take(total_len).read_to_end(&mut buffer).map_err(|_| {
         TranscriptReadError::new(
             TranscriptReadErrorReason::ReadFailed,
             storage_path.transcript_file(),
