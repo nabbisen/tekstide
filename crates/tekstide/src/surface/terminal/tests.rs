@@ -241,32 +241,45 @@ fn a_launched_pane_blocks_a_disallowed_sequence_at_the_real_call_site() {
 /// accommodate the new path without first checking whether it belongs
 /// there").
 ///
-/// Ablated manually (not left as a permanent test, per this project's
-/// convention for P1/P2-style ablations): added a second,
-/// filter-bypassing `.advance(` call directly on a `Term` outside
-/// `TerminalPane`, confirmed this test failed by naming the new file,
-/// removed it.
+/// **Counts occurrences of `.advance(`, not files containing it**
+/// (response 203, Required): a file-level check would pass a *second*
+/// `.advance(` added inside `surface/terminal.rs` itself -- not a
+/// hypothetical, the single most likely regression, since a resize
+/// handler or a fast path for large writes would naturally be added to
+/// the file that already owns the emulator. Counting occurrences turns
+/// that from a silent pass into the same by-name failure a call site in
+/// a different file already produces.
+///
+/// **What this does not cover, stated rather than implied**: this scans
+/// for the one seam production code uses to reach `Processor::advance`,
+/// not for every way `alacritty_terminal` could mutate `self.term`. A
+/// call that reached `self.term`'s grid through a different
+/// `alacritty_terminal` entry point (not `Processor::advance`) is a
+/// second ingress this scan cannot see. Not covered elsewhere in this
+/// crate today; `Term::grid_mut()` is not called anywhere in this module
+/// (see the module doc's P2 note), which is the closest existing check,
+/// but it is a narrower claim than "nothing else mutates `self.term`."
+///
+/// Ablated manually twice (not left as permanent tests, per this
+/// project's convention for P1/P2-style ablations): a second,
+/// filter-bypassing `.advance(` call in a throwaway *file* elsewhere in
+/// the crate (caught even by the original, weaker file-level version of
+/// this test); and, per response 203, a second `.advance(` added
+/// *inside* `surface/terminal.rs` itself -- the case the file-level
+/// version would have missed. Both confirmed this test failed (the
+/// second by total count, not by a new file name), both removed.
 #[test]
 fn only_one_call_site_ever_advances_a_terminal_processor_in_the_crate() {
-    let mut files = Vec::new();
-    collect_rs_files(&crate_src_dir(), &mut files);
-
-    let mut call_sites: Vec<String> = files
-        .iter()
-        .filter(|path| path.file_name().and_then(|name| name.to_str()) != Some("tests.rs"))
-        .filter_map(|path| {
-            let content = std::fs::read_to_string(path).expect("readable source file");
-            content.contains(".advance(").then(|| relative_to_src(path))
-        })
-        .collect();
-    call_sites.sort();
+    let occurrences = count_occurrences_in_crate(".advance(");
+    let total: usize = occurrences.iter().map(|(_, count)| count).sum();
 
     assert_eq!(
-        call_sites,
-        vec!["surface/terminal.rs".to_string()],
-        "exactly one production file may call Processor::advance -- P1's single ingress. A \
-         name appearing here that is not surface/terminal.rs is a second, unfiltered write \
-         path into the emulator, not a place to add an allowlist entry."
+        (total, occurrences.as_slice()),
+        (1, [("surface/terminal.rs".to_string(), 1)].as_slice()),
+        "exactly one Processor::advance call may exist in production code -- P1's single \
+         ingress. A second occurrence, even inside surface/terminal.rs itself, is a second, \
+         potentially unfiltered write path into the emulator, not a place to add an allowlist \
+         entry."
     );
 }
 
@@ -279,34 +292,49 @@ fn only_one_call_site_ever_advances_a_terminal_processor_in_the_crate() {
 /// call `drain_available` through a borrow of the one owner this crate
 /// does have (`TerminalPane.reader`).
 ///
-/// Ablated manually: added a second `drain_available()` call in a
-/// throwaway function elsewhere in this crate, confirmed this test
-/// failed by naming that file, removed it.
+/// **Counts occurrences, not files** (response 203, Required), for the
+/// same reason as the `Processor::advance` scan above: a file-level
+/// check would pass a second `drain_available()` call added inside
+/// `surface/terminal.rs` itself.
+///
+/// Ablated manually twice: a second `drain_available()` call in a
+/// throwaway file elsewhere in the crate, and a second call added
+/// *inside* `surface/terminal.rs` itself -- both confirmed this test
+/// failed, both removed.
 #[test]
 fn only_this_field_drains_a_terminalreader_in_the_crate() {
+    let occurrences = count_occurrences_in_crate(".drain_available(");
+    let total: usize = occurrences.iter().map(|(_, count)| count).sum();
+
+    assert_eq!(
+        (total, occurrences.as_slice()),
+        (1, [("surface/terminal.rs".to_string(), 1)].as_slice()),
+        "exactly one TerminalReader::drain_available call may exist in production code -- \
+         P2's 'exactly one consumer', now checked by total occurrence count rather than by \
+         which files contain at least one, since the latter would pass a second call added \
+         inside surface/terminal.rs itself."
+    );
+}
+
+/// Total occurrences of `needle` across this crate's production `.rs`
+/// files (test files excluded), grouped by file and sorted by path --
+/// the shape both P1 and P2's enumerations need, factored out once
+/// rather than duplicated per property.
+fn count_occurrences_in_crate(needle: &str) -> Vec<(String, usize)> {
     let mut files = Vec::new();
     collect_rs_files(&crate_src_dir(), &mut files);
 
-    let mut call_sites: Vec<String> = files
+    let mut occurrences: Vec<(String, usize)> = files
         .iter()
         .filter(|path| path.file_name().and_then(|name| name.to_str()) != Some("tests.rs"))
         .filter_map(|path| {
             let content = std::fs::read_to_string(path).expect("readable source file");
-            content
-                .contains(".drain_available(")
-                .then(|| relative_to_src(path))
+            let count = content.matches(needle).count();
+            (count > 0).then(|| (relative_to_src(path), count))
         })
         .collect();
-    call_sites.sort();
-
-    assert_eq!(
-        call_sites,
-        vec!["surface/terminal.rs".to_string()],
-        "exactly one production file may call TerminalReader::drain_available -- P2's \
-         'exactly one consumer', now checked at the call-site level since the type only rules \
-         out a second owner. A name appearing here that is not surface/terminal.rs is a \
-         second consumer of the channel."
-    );
+    occurrences.sort();
+    occurrences
 }
 
 fn crate_src_dir() -> PathBuf {
