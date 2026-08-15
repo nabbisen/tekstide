@@ -180,16 +180,20 @@ impl ExternalChangeButton {
 /// returned `BlockedExternalChange`, not re-read later, since "Reload"
 /// re-opens exactly this path.
 ///
-/// RFC-019 PR-019-E: `had_local_edits` disambiguates the two situations
-/// `ProjectContentWorkspace::save_active_document`'s own error mapping
-/// conflates into a single `ProjectContentStatus::Conflict` -- a dirty
-/// buffer really would lose local edits on Reload, but a *clean*
-/// document that merely changed on disk has none to lose.
-/// `TextDocument::save()` itself already distinguishes the two
-/// (`self.state` becomes `Conflict` only `if self.is_dirty()`,
-/// `ExternalChanged` otherwise -- `content::document`'s own
-/// `block_external_change`), so this reads that real, already-computed
-/// distinction rather than inventing a second one.
+/// RFC-019 PR-019-E: `had_local_edits` disambiguates the two situations a
+/// `BlockedExternalChange` refusal covers -- a dirty buffer really would
+/// lose local edits on Reload, but a *clean* document that merely
+/// changed on disk has none to lose -- because the modal's own wording
+/// needs to say which case this is, not because
+/// `ProjectContentWorkspace::save_active_document` conflates them
+/// (status-mapping-honesty-fixes Fix 2 removed that conflation;
+/// `ProjectContentStatus` itself now distinguishes `Conflict` from
+/// `ExternalChanged`). `TextDocument::save()` already computes the
+/// distinction this field needs (`self.state` becomes `Conflict` only
+/// `if self.is_dirty()`, `ExternalChanged` otherwise --
+/// `content::document`'s own `block_external_change`), so this reads
+/// that real, already-computed distinction rather than inventing a
+/// second one.
 #[derive(Debug)]
 pub(crate) struct ExternalChangeModal {
     relative_path: std::path::PathBuf,

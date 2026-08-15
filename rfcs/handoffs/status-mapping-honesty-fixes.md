@@ -1,7 +1,7 @@
 ---
 title: "Two status mappings that lie: implementation handoff"
 owning_rfcs: "RFC-012 (change detection), RFC-019 (content workspace) — neither owns both"
-status: "Ready for implementation — scheduled into 0.8.0 alongside RFC-020, 2026-08-12"
+status: "Complete 2026-08-15 (af49c0f, aba555c) — reviewed and closed, responses 196/197"
 created: "2026-08-12"
 ---
 
