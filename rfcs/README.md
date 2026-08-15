@@ -18,7 +18,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | **Accepted 2026-08-12 — next up, the spine of `0.8.0`.** Both prerequisites are now met: RFC-024 (content access) is implemented and closed, and RFC-011 Amendment 1 authorises the bounded transcript reader. Handoff pack pending |
+| 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | **Accepted — the spine of `0.8.0`, ready for implementation 2026-08-15.** Both prerequisites met: RFC-024 (content access) implemented and closed, RFC-011 Amendment 1 authorises the bounded transcript reader (which does not exist yet — PR-020-B builds it). [Handoff pack](./handoffs/020-diff-review-and-agentrun-report/README.md) complete; all four open questions answered there |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ### Reserved numbers — check this before authoring
@@ -68,6 +68,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 017 | [Terminal Renderer and Immersion Mode](./handoffs/017-terminal-renderer-and-immersion-mode/README.md) |
 | 018 | [Rendered Paste Protection and Trusted-UI Evidence](./handoffs/018-paste-protection-and-trusted-ui-evidence/README.md) |
 | 019 | [Editor and Explorer Surfaces](./handoffs/019-editor-and-explorer-surfaces/README.md) |
+| 020 | [Diff Review and AgentRun Report Surfaces](./handoffs/020-diff-review-and-agentrun-report/README.md) |
 | 024 | [Diff Preview Policy](./handoffs/024-diff-preview-policy/README.md) |
 | — | [Minimal user documentation](./handoffs/minimal-user-documentation.md) — no RFC; pulled forward from RFC-029 to M9 |
 | 021 | [Command Approval Model and Adapter Capability](./handoffs/021-command-approval-model-and-adapter-capability/README.md) |
