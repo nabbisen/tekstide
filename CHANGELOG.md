@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.8.0 - Readiness-Driven Terminal I/O
+
+Status: released on 2026-08-15.
+
+One theme: the terminal stopped waiting on a timer. RFC-017 Amendment 1 replaced the 50 ms
+poll tick with a dedicated reader thread that blocks on PTY readiness and wakes the UI when
+bytes actually arrive.
+
+### Implemented
+
+- **Terminal output throughput rose from roughly 374 KB/s to 17-18 MB/s.** The old ceiling
+  was not a property of the hardware or the emulator: a hardcoded 10 ms sleep ran on the UI
+  thread every time a read found nothing, so the reader spent about 0.5% of each tick
+  actually reading. Output now keeps pace with what a producing process can write, measured
+  against the same flood script's own standalone rate.
+
+- **The concurrent-terminal limit rose from 3 to 6**, re-derived from a fresh measurement
+  rather than carried forward. The old `3` was never a product judgement — it was a
+  consequence of each pane's poll costing ~10.1 ms against a 50 ms tick, which saturated at
+  5. The new number comes from an N-pane benchmark that stays clean through 6 and first
+  degrades at 8.
+
+- **Terminal output can no longer be silently dropped.** The old read path truncated at
+  64 KiB mid-read, discarded the remainder, and threw away the event that recorded it —
+  feeding the emulator a byte stream with a hole in it. The replacement applies
+  backpressure instead: when the buffer fills, the reader stops reading and the producing
+  process blocks on `write()`, the way a real terminal behaves. Dropping is not handled
+  better; it is structurally impossible on this path.
+
+### Not fixed, and stated rather than implied
+
+- **`NFR-PERF-004` (terminal input latency, p95 ≤ 16 ms) is still not met.** This release
+  removes the structural cause of the previous failure — the 50 ms interval put the floor
+  near 47.5 ms by arithmetic alone — but removing a known cause does not measure the
+  result. Proving failure needed only a lower bound; proving success needs an upper bound,
+  and three attempts to obtain one were confounded by unrelated load on the measuring
+  machine and discarded rather than reported.
+
+- **The criterion's own wording was corrected in this cycle**, after it had been evaluated
+  twice against a boundary it never stated. It now says where the measurement stops —
+  application state change, excluding compositor and GPU present time — consistent with the
+  two neighbouring latency criteria, which had always been measured that way without saying
+  so. Restating the boundary does not discharge the criterion.
+
+- **Nothing here makes AgentRun or diff-review surfaces reachable.** They remain
+  implemented at the model level with no route to them, along with command approval. The
+  release notes have said this since `0.5.0` and it is still true.
+
+- **A defect this work uncovered is recorded, not fixed**: the new reader has no transcript
+  capture, and the code path that had it is no longer on the terminal's ingress. This is
+  invisible today because nothing in production creates an AgentRun, and is recorded as a
+  blocking prerequisite on the work that would.
+
+
 ## 0.7.0 - A Content-Independent Trusted-UI Tell, and Diff Preview Policy
 
 Status: released on 2026-08-12.

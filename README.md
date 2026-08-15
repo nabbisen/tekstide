@@ -43,7 +43,10 @@ also a real desktop GUI application shell with mode switching. It includes:
   user-reachable terminal (`Ctrl+Alt+T`): a security-filtered PTY session
   rendering real output, with a bounded terminal-count limit and exit
   detection so the session bar reflects what is actually running rather than
-  what was last launched.
+  what was last launched. As of `0.8.0` the terminal wakes on PTY readiness
+  rather than a fixed 50 ms timer: output throughput rose from roughly
+  374 KB/s to 17-18 MB/s, and the concurrent-terminal limit from 3 to 6.
+  Input latency is still **not** verified against its target — see below.
 - A real file explorer and text editor in Content mode (RFC-019, closed as
   of `0.6.0`): a keyboard-navigable explorer tree over the project's
   directory scan (Enter on a directory rescans, Enter on a file opens it;
@@ -77,7 +80,11 @@ AgentRun report surface yet (RFC-020, M10's second half), no rendered
 approval/trust dialogs beyond the paste confirmation above, no adapter-spawn
 pathway that would make command approval reachable, no Git-based change
 detection, file watcher, or overwrite-confirmation UI, and no cross-platform
-evidence beyond Linux. There is **no screen-reader support** — not limited,
+evidence beyond Linux. **Terminal input latency is not verified against its
+16 ms p95 target.** `0.8.0` removed the structural cause of the previous
+failure — a 50 ms polling interval that put the floor near 47.5 ms — but
+removing a known cause is not the same as measuring the result, and the
+criterion is recorded as still not met rather than assumed fixed. There is **no screen-reader support** — not limited,
 not planned, absent for the life of the `iced` substrate decision (RFC-014).
 Command approval (below) remains implemented but unreachable. RFC-018's
 trusted-UI evidence shows two checkable properties distinguishing the real
