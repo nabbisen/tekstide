@@ -7,6 +7,7 @@ mod tests;
 mod types;
 
 pub use launch::{LinuxTerminalRuntime, TerminalLaunchError, TerminalRuntimeError};
+pub(crate) use security::next_token_len;
 pub use security::{
     TerminalAcceptedSequence, TerminalBlockedAppEffect, TerminalCursorEffect,
     TerminalInertSequence, TerminalInputDecision, TerminalInputDecisionReason, TerminalInputPolicy,

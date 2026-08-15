@@ -1,5 +1,6 @@
 mod path;
 mod policy;
+mod reader;
 mod writer;
 
 pub use path::{
@@ -11,6 +12,10 @@ pub use policy::{
     DEFAULT_TRANSCRIPT_MAX_PROJECT_BYTES, DEFAULT_TRANSCRIPT_MAX_TRANSCRIPT_BYTES,
     TranscriptBudgetScope, TranscriptCaptureMode, TranscriptCapturePolicy,
     TranscriptLocalDataSummary, TranscriptRetentionLimits, TranscriptRetentionState,
+};
+pub use reader::{
+    DEFAULT_TRANSCRIPT_WINDOW_BYTES, TranscriptReadError, TranscriptReadErrorReason,
+    TranscriptReadPolicy, TranscriptWindow, read_window,
 };
 pub use writer::{
     BoundedTranscriptWriter, TranscriptWriteError, TranscriptWriteErrorReason,

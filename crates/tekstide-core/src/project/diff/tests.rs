@@ -725,11 +725,22 @@ fn the_bounded_read_refuses_rather_than_truncates_when_called_directly() {
 /// unrelated to what Decision 1 governs; listed here so the scan's
 /// closed list stays accurate rather than silently widening its own
 /// definition of "content" to cover them.
+///
+/// `transcript/reader.rs` (RFC-011 Amendment 1, RFC-020 PR-020-B) reads a
+/// transcript file's own bytes -- a third kind of content this scan's
+/// name is now broad enough to cover, distinct from both project-file
+/// content and the two pre-existing app-state files above. That module
+/// has its own, narrower enumeration test
+/// (`transcript::reader::tests::only_this_module_opens_a_transcript_file_for_reading`)
+/// proving it is the *only* transcript reader in the crate; this list
+/// only needs to know that its one call site exists and is reviewed, not
+/// re-prove exclusivity a second time.
 const FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT: &[&str] = &[
     "project/diff.rs",
     "content/open.rs",
     "project/recent/store.rs",
     "audit/recovery.rs",
+    "transcript/reader.rs",
 ];
 
 fn tekstide_core_src_dir() -> PathBuf {

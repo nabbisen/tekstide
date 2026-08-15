@@ -62,6 +62,17 @@ impl TranscriptStoragePath {
             && !path_contains(&self.project_root, &self.transcript_file)
     }
 
+    /// RFC-011 Amendment 1: the reader's own containment check. This is
+    /// the identical structural test `is_safe_for_write` already performs
+    /// -- containment alone, nothing about open mode -- so the reader
+    /// reuses it under a name that does not misdescribe why it is being
+    /// called, rather than either calling a write-named method from
+    /// read-only code or duplicating the same four `path_contains` calls
+    /// under a second name that could drift from the first.
+    pub(crate) fn is_safe_for_read(&self) -> bool {
+        self.is_safe_for_write()
+    }
+
     #[cfg(test)]
     pub(crate) fn for_test_unchecked(
         state_root: PathBuf,

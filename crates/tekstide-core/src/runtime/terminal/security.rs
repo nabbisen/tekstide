@@ -4,6 +4,12 @@ mod parser;
 mod paste;
 mod trusted_ui;
 
+/// RFC-011 Amendment 1: `transcript::reader`'s resynchronization
+/// primitive. Crate-visible only, matching `next_token_len` itself --
+/// this module's own boundary logic stays the one place it is defined,
+/// reused rather than duplicated, without becoming part of this crate's
+/// external API.
+pub(crate) use parser::next_token_len;
 pub use parser::{
     TerminalAcceptedSequence, TerminalInertSequence, TerminalSecurityParser,
     TerminalSequencePolicy, classify_private_mode_number,
