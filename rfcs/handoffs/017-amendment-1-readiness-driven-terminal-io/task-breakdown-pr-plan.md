@@ -155,19 +155,44 @@ Gate, as actually discharged:
 
 ## PR-A1-D — Measurement and closeout
 
-Review gate:
+**Closed 2026-08-15 (response 209, commits `56b8af3`/`6ad48f4`/`67f01b2`).** Full reasoning
+and figures in `qa-evidence.md`'s own PR-A1-D section; summarized against the gate below.
 
-- **`NFR-PERF-004` measured**, not inferred from the mechanism being better. Non-contamination
-  proven per criterion. **Never reintroduce `iced::window::frames()`.**
-- If it is still not met, **that is the honest outcome** and is recorded as such. A second
-  evidenced "not met" is worth more than an unevidenced "met".
-- **Throughput re-measured** against the ~374 KB/s figure this replaces.
-- **`terminal_session_limit` raised from a new measurement**, taken after the tick is gone.
-  State the new per-pane cost and the number it justifies. Raising it by assumption
-  reopens the saturation risk the default exists to prevent.
-- Claim statement checked **against the amendment's own text**, not only the evidence file.
-- `rfcs/future-work.md`'s §Readiness-driven terminal I/O entry updated to record the
-  outcome, in the same commit.
+- **`NFR-PERF-004` measured, not inferred.** The headless wake-cost benchmark (pure CPU, no
+  GUI/GPU) proves the *structural cause* of the old "not met" verdict is gone: sub-microsecond
+  typical wake-to-`poll()` cost, ~500,000 wakes/sec sustained, zero backlog. **Recorded verdict:
+  structural cause removed, criterion unverified end-to-end — not met, and not claimed met.**
+  A lower-bound arithmetic proof (the old tick) is sufficient to prove failure; an upper bound
+  on the true end-to-end path (which includes compositor/GPU present) is required to prove
+  "met," and this project's own `frames()`-avoidance means no criterion here can produce one,
+  on any machine. `iced::window::frames()` was never reintroduced.
+- **Three live GUI attempts, all confounded** (the same swap-pressure signature PR-017-G's
+  responses 155/156 diagnosed on this shared machine), **disclosed rather than reported as
+  clean numbers** — capped at three per response 209's "stop regardless of outcome." The
+  `Typing`-with-three-real-panes control (p50=22µs even with genuine echo-driven wakes firing
+  in the background) is promoted to a named finding: rules out a wake subscription's mere
+  existence degrading unrelated input.
+- **A real measurement-methodology defect found and fixed, not merely disclosed**: grid
+  occurrence counting for echo detection is defeated by a real PTY canonical-mode redraw
+  behaviour (traced directly: count jumped 20→41 in one wake — a full line re-echo, not a
+  single new character). Replaced with per-send distinctive markers checked by substring
+  presence, immune to the same failure by construction.
+- **Throughput re-measured**: ~17.4-18 MB/s, matching `FLOOD_SCRIPT`'s own standalone rate —
+  the replacement figure for the ~374 KB/s ceiling this slice removes, roughly 47x.
+- **`terminal_session_limit` raised from a new measurement**, headless (`terminal_session_limit_headless_n_pane_wake_throughput_benchmark`),
+  taken after the tick is gone, against the mechanism that actually replaced it (one
+  single-threaded consumer servicing N panes' wakes, not a shared tick period). `Some(3)` →
+  **`Some(6)`** — clean through N=6, degradation first measurable at N=8, unambiguous at
+  N=10; 6 keeps the old default's own margin-below-first-degradation philosophy.
+- **Claim statement checked against the amendment's own text** — see the updated claim
+  statement below.
+- **Two further real findings, out of scope to fix here, recorded in `rfcs/future-work.md`**:
+  `FLOOD_SCRIPT` now drives ~250,000-500,000 wakes/sec (a **saturating** producer, not
+  "bounded background output" — its meaning changed when the tick's throttling was removed,
+  without anyone choosing it); and any per-wake consumer overhead beyond a bare `poll()`
+  becomes a real bottleneck at that wake rate — every per-event instrument in this project was
+  designed under the old tick-throttled assumption, and this slice's own `check_echo_visible`
+  was not the only one that could be affected.
 
 ## Sequencing
 
@@ -181,8 +206,15 @@ emulator has no current proof behind it.
 
 ## What this hands forward
 
-- The new per-pane cost, since `terminal_session_limit` is a function of it and will be
-  revisited again.
-- Whether `NFR-PERF-004` is met, since it has now been recorded unmet twice.
+- The new per-pane throughput/cost figures, since `terminal_session_limit` is a function of
+  them and will be revisited again if the mechanism changes.
+- **`NFR-PERF-004`'s status: structural cause removed, unverified end-to-end** — not "unmet
+  twice." A future slice with access to a clean GUI-timing environment (or a machine-
+  independent way to bound compositor/GPU present cost) is what would actually close this,
+  not another attempt on this same shared machine.
 - The shape of the re-proved P1/P2 enumeration, since the adapter-spawn pathway (M11's
   priority) will add another producer near this path.
+- The three PR-A1-D findings recorded in `rfcs/future-work.md`: the redraw-duplication
+  property of this environment's PTY echo, the instrumentation-scales-with-wake-rate risk for
+  any future per-event instrument, and `FLOOD_SCRIPT`'s changed (saturating, not bounded)
+  character.

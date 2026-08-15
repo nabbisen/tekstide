@@ -2,7 +2,7 @@
 title: "RFC-017 Amendment 1: Readiness-driven terminal I/O - QA Evidence"
 rfc: "RFC-017 Amendment 1"
 rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
-status: "PR-A1-A and PR-A1-B closed 2026-08-15 (responses 201/202/203/204, commits 79d9c23/85dcbef/9f098ba/e35d690) — C, D not started"
+status: "PR-A1-A through PR-A1-D closed 2026-08-15 — NFR-PERF-004 recorded as structural cause removed, unverified end-to-end (not met, not claimed met)"
 target_milestone: "M9 (carried), shipping in 0.8.0"
 created: "2026-08-15"
 ---
@@ -384,4 +384,194 @@ longer exists, not because their own assertions had to bend to stay green.
 
 ## PR-A1-D — Measurement and closeout
 
-*Not started.*
+**Closed 2026-08-15 (response 209, commits `56b8af3`/`6ad48f4`/`67f01b2`).** The most
+consequential finding of this slice is methodological, not numerical: measuring
+"keystroke-to-echo-visible" turned out to be genuinely hard to do honestly, in three
+distinct ways this section records in the order they were found.
+
+### `NFR-PERF-004`: structural cause removed, criterion unverified end-to-end
+
+**Not recorded as met. Not going to be.** Response 209's own framing, adopted verbatim
+because it is exactly right: the original "not met" verdict (RFC-017 PR-017-G) was proven by
+*arithmetic* -- the 50ms tick was the only path to the grid, so poll-wait alone put p95 near
+47.5ms, a **lower bound** that a budget above it is sufficient to fail. **"Met" needs an
+*upper* bound** -- evidence that nothing in the real path exceeds 16ms -- and this slice
+cannot produce one, because the real path includes compositor/GPU present, which this
+project's own `frames()`-avoidance (RFC-015 PR-015-F) means no criterion in this codebase can
+measure on any machine, by design.
+
+What *is* proven: the structural cause of the old "not met" is gone.
+`terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark` (pure CPU, no
+GUI, no GPU) measured wake-to-`poll()` cost at **p50=0µs, p99=1µs, max~400-430µs**, sustaining
+~500,000 real wakes/sec with zero backlog, across repeated runs. The 10ms sleep and the 50ms
+tick that produced the arithmetic floor are both gone (PR-A1-A through C). That closes the
+*known* cause. It does not open a *new* proof that the whole path clears 16ms, and this file
+does not claim one.
+
+### Three live GUI attempts, all confounded, all disclosed rather than reported
+
+`TEKSTIDE_MEASURE_CRITERION=terminal_flood`, `xdotool` at PR-017-G's own 15ms
+`--repeat-delay`, release binary, scratch state, three separate attempts across this slice:
+
+1. **First attempt** (before the marker fix below): `input` (dispatch+write) p50=33.3ms
+   p95=43.3ms max=63.6ms; `echo` p50=33.6ms p95=77.1ms p99=300.5ms max=584.4ms. 1,100/1,100
+   samples, 0% loss. Plausible-looking, but see "the redraw finding" below for why `echo`
+   specifically cannot be trusted from this run.
+2. **Second attempt**: `input`/`echo` both landed on round ~1s/2s/3s/4s plateaus -- the exact
+   major-page-fault signature responses 155/156 diagnosed on this same shared machine.
+   `free -h` showed 26-28GiB swap in use during both attempts.
+3. **Third attempt, after the marker fix, this slice's one capped run per response 209**:
+   `input` p50=17.1ms p95=33.6ms max=34.9ms; `echo` (653 of 1,100 markers found before the
+   run was killed) p50=1.07s(!) p95=13.2s p99=22.9s max=26.1s. `tick` (pure `poll()` cost,
+   untouched by `iced`'s event loop or GPU) stayed clean throughout: p50=0µs p95=5µs p99=84µs
+   max=374µs, **zero** samples over 1 second. Swap at 29GiB. Killed per response 209's "stop
+   regardless of outcome" once a single `tick` sample read 48,286,176µs (48 real seconds) --
+   the confound signature recurring, not a new finding.
+
+**Control, and the best result in this file**: `Criterion::Typing` (no terminal pane)
+measured p50=20µs p95=29µs max=33µs on this same machine at the same time -- the historical
+microsecond figures, exactly. Run again *with three real terminal panes open* (their wake
+subscriptions batched in, receiving genuine echo-driven wakes from real typed input): still
+p50=22µs max=85µs. **This rules out the explanation that would have hurt this whole design
+most** -- that a wake subscription's mere existence degrades unrelated input processing.
+It doesn't. Whatever confounds `TerminalFlood`'s own live numbers is specific to
+`TerminalFlood`'s own path (almost certainly the same swap pressure that has dogged every
+live GUI attempt on this machine since PR-017-G), not a property of the wake mechanism
+itself.
+
+**No further live attempts.** Response 209: "Cap the effort... take one more live run, and
+stop regardless of outcome. If it is confounded again, record the instrument as fixed and the
+measurement as unavailable on this machine." Attempt 3 confirmed the confound again. Stopped.
+
+### The redraw finding, and the marker-based fix
+
+Building a headless proxy for `echo`-visible latency (to get a clean number the live runs
+couldn't), a real, reproducible property of this environment's PTY canonical-mode echo
+surfaced: sending the same character repeatedly with no `Enter` (exactly what
+`MeasuredTerminalInput` already did, and what every live run above also does via `xdotool`),
+past roughly 20 accumulated characters on one unterminated line, the terminal occasionally
+**re-echoes the entire current line in one wake**. Traced directly:
+
+```
+DIAG count=20
+DIAG count=41
+```
+
+20 already present + 21 (a full re-echo of the whole line) = 41, in one step. The original
+`check_echo_visible` design ("grid occurrence count of a repeated character reaches N")
+cannot distinguish a genuine Nth echo from an (N-1)th reappearing in a redraw batch -- a
+sample caught in the batch would have recorded a latency that may be an over-report, a
+**plausible-looking wrong number**, worse than a missing one.
+
+**Fixed** (`6ad48f4`): `Measurement::next_echo_marker` generates a fresh, never-reused marker
+string per send (`"j{index}"`); `check_echo_visible` checks each pending send's own marker
+for **substring presence**, not occurrence count. A *new* marker's first appearance cannot be
+confused with an *old* marker's reappearance the way two occurrences of one repeated
+character can -- immune to the same failure by construction, not by hoping the redraw doesn't
+recur. Also fixed while there: `check_echo_visible`'s first version called
+`TerminalPane::rendered_text` (a real `O(grid)` cost, 13-46µs measured) unconditionally on
+every wake; `Measurement::should_check_echo` throttles this to a 1ms wall-clock floor, gated
+on `pending_echo` being non-empty.
+
+**One caution not fully resolved, deliberately, and stated rather than engineered around**:
+the accumulated input line is never cleared. A `Ctrl+U` line-clear was built and reverted --
+it would have added a fourth production `TerminalPane::write_input` call site, and
+`write_terminal_input_has_exactly_the_three_named_production_call_sites` (RFC-018's own "one
+PTY ingress" enumeration) exists specifically to catch exactly that addition. Expanding a
+security-reviewed enumeration for a diagnostic-only line-length concern, without review, was
+judged not worth it; a bounded run (`target`, default 1,100 sends) times a short marker is a
+bounded total line length instead, the accepted tradeoff.
+
+### `FLOOD_SCRIPT` re-characterised, not replaced
+
+Unchanged since PR-017-G, but its *meaning* changed without anyone choosing it: under the old
+tick it could never exceed one drain per 50ms, so its intensity was irrelevant. Measured this
+slice, headlessly, driving a real reader thread: **~250,000-500,000 wakes/sec** (263,715 in
+1s at N=1 pane; 504,712 in 2s in the dedicated benchmark). That is not "bounded background
+output" -- it is a **saturating** producer, the most aggressive background load this
+measurement could plausibly represent. Per response 209: keep the script (not worth replacing
+now), but the evidence must stop implying the old characterisation. Recorded here, plainly:
+`NFR-PERF-004`'s own phrase has never been evaluated against a realistic *bounded* load, on
+either architecture.
+
+### The instrumentation bug, generalised
+
+`rendered_text` at `O(grid)` on every wake, at ~500,000 wakes/sec, is measurement
+infrastructure perturbing the thing it measures -- and it only became *possible* because the
+wake rate rose two to three orders of magnitude once PR-A1-C removed the tick. Every
+per-event instrument in this project was designed under the old tick-throttled assumption;
+this one was caught because its own headless benchmark stalled at 2 of 200 samples in 25s.
+Others may not be caught the same way. Flagged in `rfcs/future-work.md`.
+
+### `terminal_session_limit`: raised from `Some(3)` to `Some(6)`, headlessly
+
+Measured, not assumed, per response 209 ("the limit is a throughput/keep-up question, not a
+paint question... immune to everything that spoiled the live runs").
+`terminal_session_limit_headless_n_pane_wake_throughput_benchmark`: N real panes, each
+running `FLOOD_SCRIPT` concurrently, drained by **one** single-threaded round-robin loop --
+deliberately not N threads each servicing its own pane, since `iced`'s `update()` is
+single-threaded in production and every pane's wake funnels through that one consumer
+regardless of pane count.
+
+| panes | poll p50 | poll p99 | poll max | aggregate throughput | per-pane |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 0µs | 0µs | 429µs | 18.2 MB/s | 18.2 MB/s |
+| 3 | 0µs | 3µs | 781µs | 51.3 MB/s | 17.1 MB/s |
+| 6 | 2µs | 40µs | 545µs | 99.6 MB/s | 16.6 MB/s |
+| 8 | 20µs | 95µs | 897µs | 135.9 MB/s | 17.0 MB/s |
+| 10 | 132µs | 188µs | 908µs | 141.3 MB/s | 14.1 MB/s |
+
+N≤6: poll cost stays at low single-digit microseconds, aggregate throughput scales linearly
+with N at ~17MB/s/pane, matching `FLOOD_SCRIPT`'s own standalone rate. **Degradation first
+becomes measurable at N=8** (poll cost jumps ~10x to ~20µs, though throughput is still
+linear) **and is unambiguous at N=10** (poll cost ~130µs+, aggregate throughput falling
+meaningfully below linear scaling -- the reader genuinely falling behind, not just costing
+more per call).
+
+**New limit: `6`**, not `8` -- the same margin-below-first-measurable-degradation philosophy
+the old `Some(3)` used (headroom below its own ~5-pane saturation point), this time backed by
+real measured headroom instead of the sleep-imposed one it replaces.
+`ProjectResourceLimits::default`'s own doc comment carries the full reasoning and figures for
+whoever revisits this next; the two tests exercising the default end-to-end
+(`terminal_session_limit_is_enforced_end_to_end_with_a_visible_notice`,
+`ablation_a_seventh_real_process_would_spawn_without_the_limit_check`) were updated to the
+new number and the `tekstide-core` default-value test
+(`project_session_starts_with_correct_defaults`, `project/tests/metadata.rs`) likewise.
+
+### Throughput re-measured against the ~374KB/s baseline
+
+**~17.4-18MB/s**, matching `FLOOD_SCRIPT`'s own standalone rate almost exactly (confirmed
+across every headless benchmark run this slice performed) -- the replacement figure, roughly
+a **47x** improvement, and no longer an architectural ceiling: observed throughput now tracks
+whatever the producer actually writes, not a fixed drain rate independent of it.
+
+### Claim statement, checked against the amendment's own text
+
+The handoff pack's own README states this amendment "discharges `NFR-PERF-004` one way or the
+other." Checked directly against that: it does discharge it, but not into either of the two
+outcomes the phrase anticipates. **Neither "met" nor "not met" -- a third, more precise state
+this slice's own evidence forces**: the structural cause of the prior "not met" (an arithmetic
+lower bound proven by the tick) is removed and evidenced two ways (arithmetic and a headless
+benchmark); the criterion itself is not verified end-to-end, because that requires an upper
+bound this project's own `frames()`-avoidance discipline cannot produce on any machine, not
+only this one. Recording "met" would be a stronger claim than the available evidence supports,
+on weaker grounds than the standard the criterion itself sets. Recording "not met" would
+misstate what changed. **What may be claimed**: RFC-017 Amendment 1 removed the specific,
+named, arithmetically-proven cause of `NFR-PERF-004`'s prior failure, replaced the ~374KB/s
+throughput ceiling with a real, measured ~47x improvement, and re-derived `terminal_session_limit`
+from the new mechanism rather than carrying the old number forward by assumption. **What may
+not be claimed**: that `NFR-PERF-004` passes, or that this slice's live-GUI attempts produced
+usable end-to-end evidence -- three attempts, all confounded, all disclosed rather than
+reported as clean numbers.
+
+### Gates
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D
+warnings`, full workspace suite, `git diff --check` -- all clean throughout. Final counts:
+`tekstide-core` 555 (unchanged -- `terminal_session_limit`'s new value is exercised by
+existing tests, not new ones, in that crate), `tekstide` 212 (up from 211 -- one net new test,
+the N-pane session-limit benchmark; the marker-fix work and the wake-driven benchmark's
+rename touched existing tests without adding or removing any). No test was changed to keep
+passing for an unrelated reason -- every touched test either exercises the deliberately new
+`terminal_session_limit` value (an intentional default change, not a bent assertion) or is
+new.
