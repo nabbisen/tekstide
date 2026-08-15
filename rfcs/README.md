@@ -19,6 +19,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | RFC | Title | Status |
 | --- | --- | --- |
 | 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | **Accepted — the spine of `0.8.0`, ready for implementation 2026-08-15.** Both prerequisites met: RFC-024 (content access) implemented and closed, RFC-011 Amendment 1 authorises the bounded transcript reader (which does not exist yet — PR-020-B builds it). [Handoff pack](./handoffs/020-diff-review-and-agentrun-report/README.md) complete; all four open questions answered there |
+| 022 | [Adapter Spawn and the Command Approval Surface](./proposed/022-adapter-spawn-and-command-approval-surface.md) | **Authored 2026-08-16, awaiting owner acceptance.** Makes command approval reachable, and unblocks RFC-020's two surfaces. Takes the reserved slot's dialog half and adds the spawn pathway, because an adapter whose approval requests nobody can answer is useless or dangerous; audit-producer completion separates out. **Open question 1 may change the plan**: whether any shipping AI CLI speaks RFC-021's protocol, or whether the first adapter is a shim this project writes |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ### Reserved numbers — check this before authoring
@@ -29,7 +30,7 @@ appears**, so this table exists to make a reservation visible to whoever authors
 
 | RFC | Title | Milestone |
 | --- | --- | --- |
-| 022 | Security Dialogs and Audit Producer Completion | M11 |
+| 031 | Audit Producer Completion (`safe_close_decision`, `restricted_mode_blocked`, `project_added`) — split from the original 022 reservation 2026-08-16 | M11 |
 | 025 | Notifications | M12 |
 | 026 | File Watcher and Multi-Document Model | M13 |
 | 027 | Crash Recovery and Unsaved Buffer Persistence | M13 |
