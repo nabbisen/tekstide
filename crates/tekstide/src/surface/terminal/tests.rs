@@ -231,3 +231,102 @@ fn a_launched_pane_blocks_a_disallowed_sequence_at_the_real_call_site() {
          if the marker disappeared, the filter was bypassed and the grid actually swapped"
     );
 }
+
+/// RFC-017 Amendment 1, PR-A1-B: P1 re-enumerated against the new shape.
+/// The two tests above prove real PTY bytes reach the grid through the
+/// filter; this proves, by scanning the crate's own source, that there
+/// is nowhere else in production code they could have come from. A new
+/// production call site fails this test **by name** -- the second half
+/// of P1's own requirement ("do not amend the existing enumeration to
+/// accommodate the new path without first checking whether it belongs
+/// there").
+///
+/// Ablated manually (not left as a permanent test, per this project's
+/// convention for P1/P2-style ablations): added a second,
+/// filter-bypassing `.advance(` call directly on a `Term` outside
+/// `TerminalPane`, confirmed this test failed by naming the new file,
+/// removed it.
+#[test]
+fn only_one_call_site_ever_advances_a_terminal_processor_in_the_crate() {
+    let mut files = Vec::new();
+    collect_rs_files(&crate_src_dir(), &mut files);
+
+    let mut call_sites: Vec<String> = files
+        .iter()
+        .filter(|path| path.file_name().and_then(|name| name.to_str()) != Some("tests.rs"))
+        .filter_map(|path| {
+            let content = std::fs::read_to_string(path).expect("readable source file");
+            content.contains(".advance(").then(|| relative_to_src(path))
+        })
+        .collect();
+    call_sites.sort();
+
+    assert_eq!(
+        call_sites,
+        vec!["surface/terminal.rs".to_string()],
+        "exactly one production file may call Processor::advance -- P1's single ingress. A \
+         name appearing here that is not surface/terminal.rs is a second, unfiltered write \
+         path into the emulator, not a place to add an allowlist entry."
+    );
+}
+
+/// RFC-017 Amendment 1, PR-A1-B: P2 re-enumerated against the new shape.
+/// `TerminalReader::drain_available` is the one place PTY bytes leave
+/// the channel; `TerminalReader` is not `Clone` (see its own module
+/// doc), so the type already makes a second *owner* unrepresentable --
+/// this enumeration is the remaining check the type cannot make on its
+/// own: that no second *call site* exists that could, in principle,
+/// call `drain_available` through a borrow of the one owner this crate
+/// does have (`TerminalPane.reader`).
+///
+/// Ablated manually: added a second `drain_available()` call in a
+/// throwaway function elsewhere in this crate, confirmed this test
+/// failed by naming that file, removed it.
+#[test]
+fn only_this_field_drains_a_terminalreader_in_the_crate() {
+    let mut files = Vec::new();
+    collect_rs_files(&crate_src_dir(), &mut files);
+
+    let mut call_sites: Vec<String> = files
+        .iter()
+        .filter(|path| path.file_name().and_then(|name| name.to_str()) != Some("tests.rs"))
+        .filter_map(|path| {
+            let content = std::fs::read_to_string(path).expect("readable source file");
+            content
+                .contains(".drain_available(")
+                .then(|| relative_to_src(path))
+        })
+        .collect();
+    call_sites.sort();
+
+    assert_eq!(
+        call_sites,
+        vec!["surface/terminal.rs".to_string()],
+        "exactly one production file may call TerminalReader::drain_available -- P2's \
+         'exactly one consumer', now checked at the call-site level since the type only rules \
+         out a second owner. A name appearing here that is not surface/terminal.rs is a \
+         second consumer of the channel."
+    );
+}
+
+fn crate_src_dir() -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+}
+
+fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(dir).expect("crate src dir must exist") {
+        let path = entry.expect("readable dir entry").path();
+        if path.is_dir() {
+            collect_rs_files(&path, out);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            out.push(path);
+        }
+    }
+}
+
+fn relative_to_src(path: &std::path::Path) -> String {
+    path.strip_prefix(crate_src_dir())
+        .expect("scanned path should be under the crate src dir")
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/")
+}

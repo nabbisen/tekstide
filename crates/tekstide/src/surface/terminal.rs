@@ -27,7 +27,13 @@
 //! that constructs a `Term`/`Processor`, and [`TerminalPane::poll`] is
 //! the only place that calls `Processor::advance` — always through
 //! `filter::SecurityFilter::new(&mut self.term)`, never any other path
-//! to `self.term`.
+//! to `self.term`. **RFC-017 Amendment 1, PR-A1-B**: `poll`'s bytes now
+//! come from `TerminalReader::drain_available` (a dedicated reader
+//! thread over a bounded channel) rather than
+//! `runtime.read_available_bounded_for`'s sleep-and-truncate loop --
+//! this re-proof is re-run against that new shape, not assumed to still
+//! hold because the old test suite still passes; see
+//! `only_one_call_site_ever_advances_a_terminal_processor_in_the_crate`.
 //!
 //! **P2 (no side channels).** `Term::grid_mut()` is not called anywhere
 //! in this module; the only non-byte input this pane's own `Term`
@@ -35,7 +41,35 @@
 //! resize -- this slice's split decides *how many* panes to show and
 //! *whether* to show them, not a live reflow of any one pane's own grid
 //! (see [`layout`]'s module doc for why that is a deliberately smaller
-//! claim than "real per-pane resize").
+//! claim than "real per-pane resize"). **RFC-017 Amendment 1, PR-A1-B**:
+//! `TerminalPane.reader` is a `TerminalReader`'s only owner, and
+//! `TerminalReader` is not `Clone` -- a second consumer of its channel
+//! is unrepresentable by the type, and `poll` is the only place in this
+//! crate that calls `drain_available` at all (see
+//! `only_this_field_drains_a_terminalreader_in_the_crate`), covering
+//! both the data channel and the reader's own internal shutdown
+//! `eventfd` (response 201's note: the `eventfd` is a second channel
+//! this module does not touch or need to enumerate separately, since
+//! nothing in `crates/tekstide` ever reaches it -- it is private to
+//! `tekstide-core::runtime::terminal::reader` and reachable only from
+//! `TerminalReader`'s own `Drop`).
+//!
+//! **Modal exclusivity is unchanged by PR-A1-B, and that is the point.**
+//! The reader thread changes how *output* reaches this pane; it does not
+//! touch [`Self::write_input`] or its one caller
+//! (`shell.rs`'s `write_terminal_input`, gated on `state.modal.is_some()`).
+//! Output continuing to flow (and being drawn) while a modal is open is
+//! not itself wrong -- a terminal rendering behind a dialog is normal.
+//! What must not happen, and does not, is *input* reaching the PTY: the
+//! reader thread has no write access to anything, and the guard that
+//! already existed is untouched by this slice. Re-checked at the state
+//! level, unmodified, against this slice's new reader-based `poll`:
+//! `shell::tests::modal_open_blocks_pty_write_and_closing_it_resumes_delivery`.
+//! Re-checked as a live GUI capture with the Tab positive control the
+//! ingress re-proof document requires (keystrokes suppressed and a
+//! modal's own focus marker visibly moving, in the same screenshot):
+//! `rfcs/handoffs/017-amendment-1-readiness-driven-terminal-io/evidence/pr-a1-b/`,
+//! recorded in that handoff's own `qa-evidence.md`.
 //!
 //! **Bounded scrollback.** `pane_config`'s `scrolling_history` is set
 //! explicitly to [`SCROLLBACK_LINES`], not left at `alacritty_terminal`'s
@@ -80,8 +114,8 @@ use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use tekstide_core::domain::TerminalSession;
 use tekstide_core::project::{ProjectId, ProjectSession};
 use tekstide_core::runtime::terminal::{
-    LinuxTerminalRuntime, TerminalDimensions, TerminalLaunchError, TerminalLaunchSpec,
-    TerminalRuntimeEvent, TerminalRuntimeHandle, TerminationOutcome,
+    BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalDimensions, TerminalLaunchError,
+    TerminalLaunchSpec, TerminalReader, TerminalRuntimeHandle, TerminationOutcome,
 };
 
 use filter::SecurityFilter;
@@ -135,13 +169,28 @@ fn pane_config() -> Config {
 pub struct TerminalPane {
     runtime: LinuxTerminalRuntime,
     handle: TerminalRuntimeHandle,
+    /// RFC-017 Amendment 1, PR-A1-B: this pane's single source of PTY
+    /// output, replacing `runtime.read_available_bounded_for` as
+    /// `poll()`'s data source. `TerminalReader` is not `Clone` and this
+    /// is its only owner, so this field is also this crate's half of
+    /// P2's "exactly one consumer" -- see
+    /// `only_this_field_drains_a_terminalreader_in_the_crate` for the
+    /// enumeration proof.
+    reader: TerminalReader,
     processor: Processor<StdSyncHandler>,
     term: Term<VoidListener>,
     /// RFC-017 PR-017-G (response 155 item 3): cumulative bytes
     /// discarded across every `poll()` call because a single bounded
     /// read exceeded its 64KiB cap -- surfaced for the flood
     /// measurement's own evidence ("dropped bytes are a result, not a
-    /// footnote"), not consumed by any production decision.
+    /// footnote"), not consumed by any production decision. **RFC-017
+    /// Amendment 1, PR-A1-B: permanently `0` now that `poll()` reads
+    /// from `TerminalReader`** -- the new reader has no truncation logic
+    /// and no dropped-bytes concept at all (see its own module doc), so
+    /// this is a true structural fact now, not a runtime count that
+    /// happens to be zero. Left in place (not removed) because
+    /// `shell.rs`'s flood measurement and `bytes_read_total` below still
+    /// read it for PR-A1-D's own re-measurement.
     dropped_bytes_total: u64,
     /// RFC-017 PR-017-G (response 156): cumulative bytes actually read
     /// (accepted, not dropped) across every `poll()` call -- paired with
@@ -183,11 +232,19 @@ impl TerminalPane {
         let mut runtime = LinuxTerminalRuntime::new();
         let (session, _events) = runtime.launch_project_shell(&project, spec)?;
         let handle = TerminalRuntimeHandle::new(session.id.clone(), project.id().clone());
+        let reader = runtime.spawn_output_reader(&handle).map_err(|error| {
+            TerminalLaunchError::ReaderUnavailable {
+                summary: BoundedRuntimeSummary::new(format!(
+                    "failed to spawn PTY reader thread: {error:?}"
+                )),
+            }
+        })?;
 
         Ok((
             Self {
                 runtime,
                 handle,
+                reader,
                 processor: Processor::new(),
                 term: Term::new(pane_config(), &PaneSize, VoidListener),
                 dropped_bytes_total: 0,
@@ -197,38 +254,31 @@ impl TerminalPane {
         ))
     }
 
-    /// Reads whatever PTY output is currently available (bounded, short
-    /// poll -- called from a GUI tick subscription, so it must not block
-    /// the render loop) and advances the filtered emulator. **The only
-    /// place in this crate `Processor::advance` is called, and the only
-    /// place `self.term` is mutably borrowed outside construction** --
-    /// P1's re-enumeration. Called every tick regardless of this pane's
-    /// visible slot (see the module doc's hidden-session decision) --
-    /// callers must not skip `poll()` for a hidden pane.
+    /// Drains whatever PTY output the reader thread has buffered so far
+    /// (never blocks -- called from a GUI tick subscription, so it must
+    /// not block the render loop either) and advances the filtered
+    /// emulator. **The only place in this crate `Processor::advance` is
+    /// called, and the only place `self.term` is mutably borrowed
+    /// outside construction** -- P1's re-enumeration. Called every tick
+    /// regardless of this pane's visible slot (see the module doc's
+    /// hidden-session decision) -- callers must not skip `poll()` for a
+    /// hidden pane.
+    ///
+    /// RFC-017 Amendment 1, PR-A1-B: reads from `self.reader`
+    /// (`TerminalReader::drain_available`) rather than
+    /// `runtime.read_available_bounded_for` -- the sleep-and-truncate
+    /// path this replaces. `dropped_bytes_total` is not incremented here
+    /// because there is nothing to increment it from: `drain_available`
+    /// has no dropped-bytes concept to report.
     pub fn poll(&mut self) {
-        let Ok((bytes, event)) = self.runtime.read_available_bounded_for(
-            &self.handle,
-            Duration::from_millis(5),
-            64 * 1024,
-        ) else {
-            return;
-        };
-        // RFC-017 PR-017-G (response 155 item 3): the event this call
-        // produces alongside `bytes` names how many bytes this read
-        // discarded, if the pty had more available than the 64KiB cap --
-        // previously discarded here unread (`let Ok((bytes, _event))`).
-        // Accumulated, not acted on: nothing downstream changes because
-        // of this count today, it exists only to be reported.
-        if let TerminalRuntimeEvent::OutputBuffered { summary, .. } = &event {
-            self.dropped_bytes_total += summary.dropped_bytes as u64;
-        }
-        self.bytes_read_total += bytes.len() as u64;
-        if bytes.is_empty() {
+        let drain = self.reader.drain_available();
+        self.bytes_read_total += drain.bytes().len() as u64;
+        if drain.bytes().is_empty() {
             return;
         }
 
         let mut filter = SecurityFilter::new(&mut self.term);
-        self.processor.advance(&mut filter, &bytes);
+        self.processor.advance(&mut filter, drain.bytes());
     }
 
     /// RFC-017 PR-017-G: cumulative bytes discarded across every

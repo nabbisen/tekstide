@@ -285,15 +285,39 @@ impl Default for LinuxTerminalRuntime {
 pub enum TerminalLaunchError {
     CrossProject,
     UnsupportedTerminalKind,
-    UnsupportedEnvironmentPolicy { summary: BoundedRuntimeSummary },
-    MissingProjectRoot { summary: BoundedRuntimeSummary },
-    InvalidCwd { summary: BoundedRuntimeSummary },
-    CwdEscapesProjectRoot { summary: BoundedRuntimeSummary },
-    ShellUnavailable { summary: BoundedRuntimeSummary },
-    PtyUnavailable { summary: BoundedRuntimeSummary },
-    SpawnFailed { summary: BoundedRuntimeSummary },
-    TranscriptWriterUnavailable { summary: BoundedRuntimeSummary },
-    UnexpectedLifecycleTransition { summary: BoundedRuntimeSummary },
+    UnsupportedEnvironmentPolicy {
+        summary: BoundedRuntimeSummary,
+    },
+    MissingProjectRoot {
+        summary: BoundedRuntimeSummary,
+    },
+    InvalidCwd {
+        summary: BoundedRuntimeSummary,
+    },
+    CwdEscapesProjectRoot {
+        summary: BoundedRuntimeSummary,
+    },
+    ShellUnavailable {
+        summary: BoundedRuntimeSummary,
+    },
+    PtyUnavailable {
+        summary: BoundedRuntimeSummary,
+    },
+    SpawnFailed {
+        summary: BoundedRuntimeSummary,
+    },
+    /// RFC-017 Amendment 1, PR-A1-B: the reader thread's shutdown
+    /// `eventfd` could not be created (`TerminalReader::spawn`'s only
+    /// failure mode, itself only resource exhaustion).
+    ReaderUnavailable {
+        summary: BoundedRuntimeSummary,
+    },
+    TranscriptWriterUnavailable {
+        summary: BoundedRuntimeSummary,
+    },
+    UnexpectedLifecycleTransition {
+        summary: BoundedRuntimeSummary,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq)]
