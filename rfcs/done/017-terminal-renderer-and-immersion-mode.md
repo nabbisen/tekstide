@@ -183,10 +183,16 @@ If P1-P4 cannot be re-established in product code, **stop and escalate** rather 
 
 ## Amendment 1: Readiness-driven terminal I/O
 
-**Status:** Authored by the architect 2026-08-15. **Requires the owner's authorisation** —
-it is not additive. It removes the poll tick this RFC established, changes the shape of the
-one ingress path PR-017-B/C's P1 and P2 were enumerated and ablated against, and changes
-observable behaviour under load. Under the standing delegation, that comes to the owner.
+**Status:** Authored by the architect 2026-08-15, **authorised by the human owner the same
+day**, including D1's backpressure decision. It is not additive: it removes the poll tick
+this RFC established, changes the shape of the one ingress path PR-017-B/C's P1 and P2 were
+enumerated and ablated against, and changes observable behaviour under load — which is why
+it went to the owner rather than being decided under the standing delegation.
+
+**The trade the owner accepted, stated plainly**: under backpressure a process producing
+output faster than the terminal renders it will **block on `write()`** rather than have its
+output silently thinned. A stalled process was judged more honest than a corrupted display,
+and far cheaper to prove correct — see D1.
 
 **Amendment type:** Structural. Touches RFC-008's `read_available_bounded_for` as well as
 this RFC's subscription.
