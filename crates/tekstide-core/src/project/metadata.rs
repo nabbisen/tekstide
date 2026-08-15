@@ -84,21 +84,43 @@ impl Default for ProjectResourceLimits {
             // keybinding a user can hold down would spawn unbounded real
             // shell processes without this.
             //
-            // This is a function of poll cost, not process count. Every
-            // live session (visible or hidden) is polled sequentially each
-            // tick by `Message::TerminalPollTick`, and each `poll()` call
-            // carries `read_available_bounded_for`'s hardcoded 10ms
-            // `WouldBlock` sleep -- measured linear at ~10.1ms/pane against
-            // a 50ms tick period. 5 panes (~50.3ms) saturates the tick; 4
-            // (~40.3ms) leaves ~10ms for everything else in the handler,
-            // which is tight. 3 (~30.2ms) leaves ~20ms of headroom, and
-            // matches the pane count this project already shipped and
-            // exercised via the diagnostic demo path before this handoff.
-            // Revisit this number deliberately -- not by raising it in
-            // isolation -- once readiness-driven terminal I/O
-            // (`rfcs/future-work.md` §Readiness-driven terminal I/O)
-            // removes the per-poll sleep this bound is defending against.
-            terminal_session_limit: Some(3),
+            // RFC-017 Amendment 1, PR-A1-D: raised from `Some(3)`, and
+            // re-derived from scratch, not by assumption. The old number
+            // was a function of `read_available_bounded_for`'s 10ms
+            // `WouldBlock` sleep against a shared 50ms tick -- both gone
+            // since PR-A1-A/C. There is no shared tick period to divide
+            // by any more: each pane's wake fires independently, and the
+            // real constraint is whether `iced`'s single-threaded
+            // `update()` can keep servicing every pane's wakes as more
+            // panes flood concurrently, not a per-tick budget.
+            //
+            // Measured headlessly (`terminal_session_limit_headless_n_pane_wake_throughput_benchmark`,
+            // `crates/tekstide/src/shell/tests.rs`, deliberately not the
+            // live GUI -- this slice found the live path unreliable on a
+            // shared, swap-pressured machine, see `qa-evidence.md`'s
+            // PR-A1-D section): N real panes, each running an
+            // un-fork-bound flood concurrently, drained by one
+            // single-threaded round-robin loop (the same shape
+            // `update()` imposes in production, since every pane's wake
+            // funnels through that one thread regardless of pane count).
+            // N=1/3/6 all measured with poll() cost at low single-digit
+            // microseconds and aggregate throughput scaling linearly with
+            // N (~17MB/s/pane, matching the flood's own standalone rate).
+            // Degradation first became measurable at N=8 (poll cost
+            // jumped roughly 10x to ~20µs, though throughput was still
+            // linear) and was unambiguous at N=10 (poll cost ~130µs+,
+            // aggregate throughput falling meaningfully below linear
+            // scaling -- the reader genuinely falling behind, not just
+            // costing more per call).
+            //
+            // `6`, not `8`, keeps the same margin-below-first-measurable-
+            // degradation philosophy the old `Some(3)` used (headroom
+            // below its own ~5-pane saturation point) -- this time backed
+            // by real measured headroom rather than the sleep-imposed
+            // one it replaces. Revisit deliberately, from a fresh
+            // measurement, not by raising it in isolation, if the
+            // underlying wake mechanism changes again.
+            terminal_session_limit: Some(6),
             agent_run_limit: None,
             approval_request_limit: None,
         }

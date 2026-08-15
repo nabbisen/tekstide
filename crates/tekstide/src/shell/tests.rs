@@ -1598,6 +1598,95 @@ fn terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark(
     );
 }
 
+/// RFC-017 Amendment 1, PR-A1-D, response 209: `terminal_session_limit`'s
+/// re-derivation, headless -- "the limit is a throughput/keep-up
+/// question, not a paint question," so this deliberately does not touch
+/// the GUI runs the rest of this slice found unreliable on this machine.
+/// `Some(3)`'s own derivation (`ProjectResourceLimits::default`'s doc)
+/// was `~10.1ms/pane linear against a 50ms shared tick period` -- there
+/// is no longer a shared tick period to divide by, since PR-A1-C made
+/// each pane's wake independent, so this measures the analogous new
+/// question directly: launch N real panes, each running
+/// [`super::FLOOD_SCRIPT`] concurrently, and drive all N through **one**
+/// single-threaded round-robin `poll()` loop -- deliberately not N
+/// threads each servicing its own pane, since that would prove nothing
+/// about the real constraint: `iced`'s own `update()` is single-threaded
+/// in production, so every pane's wake ultimately funnels through one
+/// consumer regardless of how many panes exist.
+///
+/// For each `N` tried, a 1s window reports: per-poll cost distribution
+/// (does it rise off the single-pane sub-microsecond floor the benchmark
+/// above establishes?) and aggregate observed throughput (does it keep
+/// scaling with `N`, or does a shared bottleneck cap the total regardless
+/// of how many panes are flooding?). No hard pass/fail assertion on the
+/// scaling itself -- the point is the reported numbers, which
+/// `qa-evidence.md` states the conclusion from, matching this project's
+/// own "measure, don't declare" discipline for this exact kind of
+/// capacity question.
+#[test]
+fn terminal_session_limit_headless_n_pane_wake_throughput_benchmark() {
+    for pane_count in [1_usize, 3, 6, 8, 10] {
+        let mut panes = Vec::with_capacity(pane_count);
+        let mut notifiers = Vec::with_capacity(pane_count);
+        for index in 0..pane_count {
+            let project_id = tekstide_core::project::ProjectId::new_uuid();
+            let (mut pane, _session) = crate::surface::terminal::TerminalPane::launch(
+                project_id,
+                format!("session-limit benchmark pane {index}"),
+                fresh_project_dir(&format!("session-limit-benchmark-{pane_count}-{index}")),
+                PathBuf::from("/bin/sh"),
+            )
+            .expect("launch a real shell for the session-limit benchmark");
+            let notifier = pane
+                .wake_notifier()
+                .expect("a freshly launched pane must be able to clone a wake notifier");
+            pane.write_input(super::FLOOD_SCRIPT.as_bytes());
+            panes.push(pane);
+            notifiers.push(notifier);
+        }
+
+        let benchmark_window = std::time::Duration::from_secs(1);
+        let benchmark_started = std::time::Instant::now();
+        let mut poll_micros: Vec<u128> = Vec::new();
+        // Round-robin: one `block_until_woken` per pane per pass, not a
+        // single shared wait -- there is no "wait on any of N" primitive
+        // exposed, and this shape (poll every pane once, then poll every
+        // pane again) is itself a fair proxy for one thread fairly
+        // servicing N wake sources, which is what matters here.
+        while benchmark_started.elapsed() < benchmark_window {
+            for (pane, notifier) in panes.iter_mut().zip(notifiers.iter()) {
+                if !notifier.block_until_woken() {
+                    continue;
+                }
+                let poll_started = std::time::Instant::now();
+                pane.poll();
+                poll_micros.push(poll_started.elapsed().as_micros());
+            }
+        }
+
+        poll_micros.sort_unstable();
+        let sample_count = poll_micros.len();
+        let p50_micros = poll_micros
+            .get(sample_count / 2)
+            .copied()
+            .unwrap_or_default();
+        let p99_micros = poll_micros
+            .get(sample_count * 99 / 100)
+            .copied()
+            .unwrap_or_default();
+        let max_micros = poll_micros.last().copied().unwrap_or_default();
+        let aggregate_bytes: u64 = panes.iter().map(|pane| pane.bytes_read_total()).sum();
+        let aggregate_bytes_per_sec =
+            aggregate_bytes as f64 / benchmark_started.elapsed().as_secs_f64();
+
+        eprintln!(
+            "terminal_session_limit_n_pane_benchmark panes={pane_count} samples={sample_count} \
+             p50_us={p50_micros} p99_us={p99_micros} max_us={max_micros} \
+             aggregate_bytes={aggregate_bytes} aggregate_bytes_per_sec={aggregate_bytes_per_sec:.0}"
+        );
+    }
+}
+
 // --- Terminal launch UX handoff ----------------------------------------
 
 /// **The review gate's own first item**: "a user can open a terminal,
@@ -1679,12 +1768,13 @@ fn launch_terminal_shell_input_switches_to_terminal_immersion_and_launches_a_rea
 
 /// **Review gate**: "the session limit is enforced in core and
 /// demonstrated, including what the user sees on refusal." Runs the
-/// default limit (`ProjectResourceLimits::default`, 3 -- a function of
-/// tick-poll cost, not process count, see that doc comment) to
-/// exhaustion with real launches, confirms the typed refusal names the
-/// real number, and confirms the refusal notice a user would actually
-/// see states that number too -- not a generic message that could pass
-/// whether or not the real limit made it through.
+/// default limit (`ProjectResourceLimits::default`, 6 as of RFC-017
+/// Amendment 1 PR-A1-D -- a real headless N-pane measurement, not
+/// assumption, see that doc comment) to exhaustion with real launches,
+/// confirms the typed refusal names the real number, and confirms the
+/// refusal notice a user would actually see states that number too --
+/// not a generic message that could pass whether or not the real limit
+/// made it through.
 #[test]
 fn terminal_session_limit_is_enforced_end_to_end_with_a_visible_notice() {
     let mut app_shell = ApplicationShell::new();
@@ -1693,35 +1783,35 @@ fn terminal_session_limit_is_enforced_end_to_end_with_a_visible_notice() {
         .expect("a freshly created directory is a valid project root");
     let mut state = state_with(app_shell);
 
-    for index in 0..3 {
+    for index in 0..6 {
         super::attempt_terminal_launch(&mut state).unwrap_or_else(|error| {
             panic!("launch {index} must succeed, under the limit: {error:?}")
         });
     }
-    assert_eq!(state.terminal_panes.len(), 3);
+    assert_eq!(state.terminal_panes.len(), 6);
 
     let refusal = super::attempt_terminal_launch(&mut state)
-        .expect_err("the 4th launch must be refused once the default limit of 3 is reached");
+        .expect_err("the 7th launch must be refused once the default limit of 6 is reached");
     assert_eq!(
         refusal,
-        super::TerminalLaunchRefusal::SessionLimitExceeded { limit: 3 }
+        super::TerminalLaunchRefusal::SessionLimitExceeded { limit: 6 }
     );
     assert_eq!(
         state.terminal_panes.len(),
-        3,
+        6,
         "a refused launch must not add a pane"
     );
 
     let notice_text = super::terminal_launch_refusal_text(&state.catalog, &refusal);
     assert!(
-        notice_text.contains('3'),
+        notice_text.contains('6'),
         "the refusal notice a user sees must state the real limit, not a generic message: \
          {notice_text:?}"
     );
 }
 
 /// **Ablation** for the limit above: with the pre-check and the
-/// `add_terminal_session` refusal both bypassed, a 4th real process
+/// `add_terminal_session` refusal both bypassed, a 7th real process
 /// would be spawned -- confirming the assertions above are load-bearing,
 /// not passing for an unrelated reason. Simulated here by calling the
 /// real spawn machinery directly past where `attempt_terminal_launch`
@@ -1729,14 +1819,14 @@ fn terminal_session_limit_is_enforced_end_to_end_with_a_visible_notice() {
 /// run (`tekstide-core`'s own `terminal_session_limit_is_enforced_with_a_typed_refusal`
 /// ablates the enforcement itself at its real call site).
 #[test]
-fn ablation_a_fourth_real_process_would_spawn_without_the_limit_check() {
+fn ablation_a_seventh_real_process_would_spawn_without_the_limit_check() {
     let mut app_shell = ApplicationShell::new();
     app_shell
         .add_project_from_path(fresh_project_dir("terminal-session-limit-ablation"))
         .expect("a freshly created directory is a valid project root");
     let mut state = state_with(app_shell);
 
-    for index in 0..3 {
+    for index in 0..6 {
         super::attempt_terminal_launch(&mut state).unwrap_or_else(|error| {
             panic!("launch {index} must succeed, under the limit: {error:?}")
         });
@@ -1744,18 +1834,18 @@ fn ablation_a_fourth_real_process_would_spawn_without_the_limit_check() {
 
     // The real project-level check tekstide-core::project::tests::collections
     // ablates directly; this proves the *consequence* would be a real,
-    // fourth spawned process if that check were absent, by launching one
+    // seventh spawned process if that check were absent, by launching one
     // through the same TerminalPane::launch the production path uses,
     // bypassing only the registration (which would itself refuse).
-    let root = fresh_project_dir("terminal-session-limit-ablation-4th");
+    let root = fresh_project_dir("terminal-session-limit-ablation-7th");
     let (pane, _session) = crate::surface::terminal::TerminalPane::launch(
         tekstide_core::project::ProjectId::new_uuid(),
-        "ablation 4th",
+        "ablation 7th",
         root,
         PathBuf::from("/bin/sh"),
     )
     .expect(
-        "a 4th real shell can always be spawned -- nothing in the OS stops it, which is \
+        "a 7th real shell can always be spawned -- nothing in the OS stops it, which is \
              exactly why the application-level limit above is the only thing that does",
     );
     assert!(

@@ -36,10 +36,11 @@ fn new_project_initializes_rfc002_session_metadata_with_inert_provider_defaults(
         project.resource_limits(),
         ProjectResourceLimits {
             visible_terminal_limit: Some(2),
-            // Terminal launch UX handoff: was `None` (unenforced) --
-            // see `ProjectResourceLimits::default`'s own doc comment for
-            // why 3 (a function of tick-poll cost, not process count).
-            terminal_session_limit: Some(3),
+            // RFC-017 Amendment 1, PR-A1-D: raised from `Some(3)` to
+            // `Some(6)`, re-derived from a real headless N-pane
+            // measurement -- see `ProjectResourceLimits::default`'s own
+            // doc comment for the figures.
+            terminal_session_limit: Some(6),
             agent_run_limit: None,
             approval_request_limit: None,
         }
