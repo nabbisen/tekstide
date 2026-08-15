@@ -2,7 +2,7 @@
 title: "RFC-020: Diff Review and AgentRun Report Surfaces — Task Breakdown / PR Plan"
 rfc: "RFC-020"
 rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
-status: "PR-020-B's core (transcript reader) implemented 2026-08-15; reviewed (response 198), three required corrections applied same day, not yet re-reviewed — surface, PR-020-C, and PR-020-D not started"
+status: "PR-020-B's core (transcript reader) implemented 2026-08-15, reviewed and accepted (responses 198/199, commits b74d8d5/c92d97e) — surface, PR-020-C, and PR-020-D not started"
 target_milestone: "M10"
 created: "2026-08-15"
 ---
@@ -60,8 +60,9 @@ as its own commit (`c229781`), separate from the reader (`1c7b980`), since it is
 in a different RFC's already-shipped module.
 
 **Response 198 accepted the panic fix and the reader outright, with three required
-corrections before surface work starts — all three applied 2026-08-15 (commit `b74d8d5`),
-not yet re-reviewed**:
+corrections before surface work starts — all three applied 2026-08-15 (commit `b74d8d5`)
+and accepted by response 199 (commit `c92d97e`). The reader core is reviewed; surface work
+may proceed.**
 
 1. **Refuse when `total_len > MAX_SCAN_BYTES`.** The reader had no guard; a transcript
    larger than the scan ceiling silently returned a window from the middle of the file,

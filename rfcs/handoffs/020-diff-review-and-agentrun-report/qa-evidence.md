@@ -2,7 +2,7 @@
 title: "RFC-020: Diff Review and AgentRun Report Surfaces - QA Evidence"
 rfc: "RFC-020"
 rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
-status: "PR-020-B's core (transcript reader) implemented 2026-08-15; reviewed (response 198), three required corrections applied same day, not yet re-reviewed — surface not started"
+status: "PR-020-B's core (transcript reader) implemented 2026-08-15, reviewed and accepted (responses 198/199, commits b74d8d5/c92d97e) — surface not started"
 target_milestone: "M10"
 created: "2026-08-15"
 ---
@@ -37,11 +37,11 @@ read-only, and `DiffContent` left owned with its limitation carried forward accu
 
 ## PR-020-B — The transcript reader, and the AgentRun report surface
 
-**Core (the reader): implemented 2026-08-15, reviewed (response 198), three required
-corrections applied same day (commit `b74d8d5`), not yet re-reviewed.** Surface (the
-AgentRun report widget): not started — the reader alone is not this slice's own completion
-(see `task-breakdown-pr-plan.md`'s own framing, "a reader with no consumer cannot be shown
-to be correct"), recorded here as a checkpoint, not a claim of PR-020-B being done.
+**Core (the reader): implemented 2026-08-15, reviewed and accepted (responses 198/199,
+commits `b74d8d5`/`c92d97e`).** Surface (the AgentRun report widget): not started — the
+reader alone is not this slice's own completion (see `task-breakdown-pr-plan.md`'s own
+framing, "a reader with no consumer cannot be shown to be correct"), recorded here as a
+checkpoint, not a claim of PR-020-B being done.
 
 **A real, pre-existing panic found and fixed first, in a different RFC's own module.**
 Building D2's resynchronization proof required calling `TerminalSecurityParser::parse`
