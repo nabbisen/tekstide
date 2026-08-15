@@ -144,6 +144,17 @@ second writer existing. The byte-identical proof above is this amendment's P1/P2
 channel path is unchanged; `transcript_written_through_the_reader_thread_is_byte_identical_to_pty_output`
 proves the new transcript path carries the identical bytes.
 
+**Correction (response 211): P2's substance changed, not merely "re-ran."** P2 says no path
+carries terminal bytes anywhere except the one ingress. After this slice, terminal bytes have
+a **second destination inside `tekstide-core`**: the transcript file, written from inside the
+reader thread. This is authorised, not an exposure — RFC-011 governs it, with its own
+retention limits, path-resolution policy (`TranscriptPathResolver`), and purge — and the
+destination existed before RFC-017 Amendment 1 temporarily removed it (this amendment's whole
+purpose is putting it back). But it is a real change to what P2 describes, not a re-proof of
+an unchanged property, and is recorded here explicitly so the next person enumerating where
+terminal bytes go finds the transcript named rather than has to rediscover it — the exact gap
+that created this amendment in the first place.
+
 All 5 new tests, plus the full pre-existing `runtime::terminal::reader` suite, pass. Full
 gate (`cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D
 warnings`, `cargo test --workspace --all-targets --all-features`, `git diff --check`) run

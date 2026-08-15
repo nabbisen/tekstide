@@ -65,6 +65,11 @@ Review gate:
 - **No claim that transcript capture is exercised in production.** Nothing creates an
   `AgentRun` yet; this is correct-before-reachable, deliberately.
 - D4's disk coupling stated as shipped behaviour, not omitted because it is unwelcome.
+- **Record from response 211: PR-A2-A is a breaking change to `tekstide-core`.**
+  `TranscriptWriterConfig` gained a public `mode` field, so every external construction of
+  that struct now fails to compile. The field is the right design, not a defect — but the
+  next release is `0.9.0`, not `0.8.1`, on the same basis `0.7.0` was forced earlier. State
+  this in the closeout so the release gets numbered correctly.
 - `rfcs/future-work.md`'s blocking-prerequisite entry updated in the same commit to record
   that it is discharged.
 
