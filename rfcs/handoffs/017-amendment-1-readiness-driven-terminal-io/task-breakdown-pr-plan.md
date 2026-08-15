@@ -2,7 +2,7 @@
 title: "RFC-017 Amendment 1: Readiness-driven terminal I/O — Task Breakdown / PR Plan"
 rfc: "RFC-017 Amendment 1"
 rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
-status: "PR-A1-A closed 2026-08-15 (responses 201/202, commits 79d9c23/85dcbef) — B, C, D not started"
+status: "PR-A1-A closed 2026-08-15 (responses 201/202, commits 79d9c23/85dcbef). PR-A1-B implemented 2026-08-15, not yet reviewed — C, D not started"
 target_milestone: "M9 (carried), shipping in 0.8.0"
 created: "2026-08-15"
 ---
@@ -71,6 +71,23 @@ Review gate:
   keystrokes reached the app while none reached the PTY.
 - The output-vs-input asymmetry addressed explicitly: output rendering behind a modal is
   acceptable; input production is not.
+
+**Implemented 2026-08-15, not yet reviewed.** Every gate item above is met; full detail,
+figures, and screenshot references in `qa-evidence.md`. `TerminalPane` now owns a
+`TerminalReader` and `poll()` drains it instead of calling
+`runtime.read_available_bounded_for` — the old path and the 50ms tick are both still
+present, deliberately not removed (PR-A1-C's job). P1/P2 re-enumerated by two new
+grep-based scans in `surface/terminal/tests.rs`
+(`only_one_call_site_ever_advances_a_terminal_processor_in_the_crate`,
+`only_this_field_drains_a_terminalreader_in_the_crate`), both ablated for real with a
+throwaway file. Modal exclusivity re-checked against two existing, unmodified headless
+tests plus a fresh live GUI capture (`evidence/pr-a1-b/`) using the
+`ExternalChangeModal` rather than the paste-confirmation dialog PR-018-E used, since this
+session's `iced` clipboard integration did not deliver real clipboard content under
+synthetic input — disclosed in `qa-evidence.md`, not hidden. One secondary positive control
+(input works again immediately after the modal closes) was attempted and not cleanly
+captured, due to a test-fixture quirk rather than an application defect; disclosed rather
+than omitted or forced.
 
 ## PR-A1-C — Remove the tick and the sleep
 

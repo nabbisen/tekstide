@@ -2,7 +2,7 @@
 title: "RFC-017 Amendment 1: Readiness-driven terminal I/O - QA Evidence"
 rfc: "RFC-017 Amendment 1"
 rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
-status: "PR-A1-A closed 2026-08-15 (responses 201/202, commits 79d9c23/85dcbef) — B, C, D not started"
+status: "PR-A1-A closed 2026-08-15 (responses 201/202, commits 79d9c23/85dcbef). PR-A1-B implemented 2026-08-15, not yet reviewed — C, D not started"
 target_milestone: "M9 (carried), shipping in 0.8.0"
 created: "2026-08-15"
 ---
@@ -154,7 +154,103 @@ started.
 
 ## PR-A1-B — The ingress re-proof
 
-*Not started.*
+**Implemented 2026-08-15, not yet reviewed.** `crates/tekstide-core` untouched; all changes
+in `crates/tekstide`: `TerminalPane` now owns a `TerminalReader` (`launch()` spawns it via
+`spawn_output_reader` right after `launch_project_shell`), and `poll()` reads from
+`reader.drain_available()` instead of `runtime.read_available_bounded_for`. The old,
+now-unused `read_available_bounded_for` and the 50ms tick subscription are both still
+present in the source — deliberately not removed here, per the pack's own sequencing
+("C removes the reviewed ingress; B is what makes the replacement reviewed").
+
+**P1, re-enumerated against the new shape, not assumed from the old suite still
+passing.** `only_one_call_site_ever_advances_a_terminal_processor_in_the_crate` scans every
+`.rs` file under `crates/tekstide/src` (excluding test files) for the literal substring
+`.advance(`, asserting the list of matching files is exactly `["surface/terminal.rs"]` — a
+new production call site fails this test by naming the offending file, not merely by a
+diffuse suite failure. **Ablated for real**: added a throwaway file
+(`surface/_ablation_scratch_p1.rs`, never wired into the module tree, but still walked by
+the filesystem scan) containing a second `.advance(` call; the test failed, listing
+`["surface/_ablation_scratch_p1.rs", "surface/terminal.rs"]`. Removed before commit.
+
+**P2, re-enumerated against the new shape.** `TerminalReader` is not `Clone` (PR-A1-A), so a
+second *owner* of the channel is already unrepresentable by the type; this enumeration
+covers what the type alone cannot: a second *call site* draining the one owner this crate
+has through a borrow.
+`only_this_field_drains_a_terminalreader_in_the_crate` scans the same file set for
+`.drain_available(`, asserting the same single-file result. **Ablated for real**: same
+pattern, a throwaway file with a second `drain_available()` call; the test failed, listing
+the offending file. Removed before commit. Response 201's own addition to this gate —
+"the shutdown `eventfd` is a second channel this module owns" — needs no crate-side
+enumeration: nothing in `crates/tekstide` ever reaches it (it is private to
+`tekstide-core::runtime::terminal::reader`, touched only by `TerminalReader::spawn` and its
+own `Drop`), so P2's claim for this crate covers the data channel completely and the
+`eventfd` is out of this crate's reach by construction, not merely by convention.
+
+**Modal exclusivity: unchanged, re-checked at both the state level and with a live GUI
+positive control.** The mechanism is untouched by this slice — `write_terminal_input`
+(`shell.rs`), the one production caller of `TerminalPane::write_input`, is still gated on
+`state.modal.is_some()`, and `SubscriptionMode::for_modal` still structurally replaces the
+whole non-modal input-routing subscription with `modal_subscription()` (Tab/Shift+Tab/
+Enter/Escape only) whenever a modal is open — nothing about *output* changed this in any
+way, since the reader thread has no write access to anything. Re-checked two ways:
+
+1. **State level, unmodified**: `shell::tests::modal_open_blocks_pty_write_and_closing_it_resumes_delivery`
+   and `shell::tests::tab_cycles_shell_focus_with_a_real_terminal_focused_and_writes_nothing`
+   both pass against this slice's new reader-based `poll()` without any change to either
+   test — the property holds against the new shape, not merely against the old one the
+   tests were written for.
+2. **A live GUI capture**, since the pack requires "a live positive control (a Tab visibly
+   moving the focus marker in the same capture)" and this is the property `the-ingress-re-proof.md`
+   names as "the one that fails silently." Captured 2026-08-15 against the release binary
+   (`cargo build --release -p tekstide`), launched via `.git-exclude/tools/launch-scratch-gui.sh`
+   against a scratch project. Real synthetic input (`xdotool windowfocus`, `--clearmodifiers`),
+   screenshots via `niri msg action screenshot-window` (this session's `screenshot-path null`
+   config routes captures through the clipboard, read back with `wl-paste --type image/png`
+   rather than a file path). Four screenshots under `evidence/pr-a1-b/`:
+   - **`00`** — a real terminal (`Ctrl+Alt+T`), running a bounded, self-terminating counter
+     script for continuous, observable live output, matching PR-018-E's own convention.
+   - **`01`** — a real modal open over a live document conflict (`ExternalChangeModal`,
+     triggered by editing a file, modifying it externally on disk, then `Ctrl+S` — chosen
+     over the paste-confirmation dialog PR-018-E used because this environment's `iced`
+     clipboard integration did not return real clipboard content to the app under synthetic
+     `xdotool` input despite `wl-copy`/`wl-paste` working correctly at the CLI level; not
+     investigated further since `ExternalChangeModal` reaches the identical property through
+     a clipboard-independent trigger and needed no code change to exercise).
+   - **`02`, the primary evidence** — `xdotool type` sends a distinctive marker
+     (`MODALKEYS_A1B_TEST`) intended for the terminal, then `Tab`, captured in **one
+     screenshot**: the modal's own focus marker (`"> "`) has visibly moved from `Dismiss` to
+     `Reload`, and the typed marker text appears nowhere in the modal body — proving the
+     keystrokes reached the application (Tab moved real state) at the exact moment the
+     typed text was suppressed, not merely that nothing happened.
+   - **`03`** — after `Escape` dismisses the modal and the view switches back to the
+     terminal, its tick count is substantially higher than before the modal sequence began
+     (elapsed wall-clock time, not a frozen or broken pane) and `MODALKEYS_A1B_TEST` is
+     absent from the visible transcript.
+
+   **The output-vs-input asymmetry, addressed explicitly**: `03`'s tick-count comparison is
+   evidence the *hidden* terminal pane kept polling and producing output for the whole
+   modal episode (this modal opens from Content mode, so the terminal is not visually behind
+   it the way the paste dialog sits over `TerminalImmersion` mode) — output continuing is
+   the expected, correct behaviour per the pack's own framing, not a defect.
+
+   **One secondary check attempted and not cleanly captured, disclosed rather than
+   omitted**: PR-018-E also captured "the same stream, sent after the modal closes, reaches
+   the PTY" as a belt-and-suspenders proof the pane itself was never broken. Attempted here
+   too, but the test fixture's own counter script proved resistant to synthetic `SIGINT` in
+   this session (traced to real, if surprising, causes — a duplicated counter invocation
+   from an earlier retry, and a builtin-`sleep` shell not forking a distinctly-killable
+   child) — a fixture problem, not a finding about `tekstide`. Not pursued further: the
+   pack's own required evidence is the Tab-during-suppression capture (`02`), which does not
+   depend on this secondary check, and this project's "avoid rabbit holes" convention favours
+   disclosing a stalled secondary attempt over continuing to force it.
+
+**Gates**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features
+-- -D warnings`, full workspace suite (`tekstide-core` 552 passed, unchanged — no core
+changes this slice; `tekstide` 208 passed, up from 206 — the two new enumeration tests),
+`git diff --check`. All clean.
+
+**Not done in this checkpoint**: removing the old tick/sleep path (PR-A1-C's job, which this
+slice deliberately leaves in place); measurement (PR-A1-D's job).
 
 ## PR-A1-C — Remove the tick and the sleep
 
