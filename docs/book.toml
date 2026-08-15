@@ -1,0 +1,9 @@
+[book]
+title = "Tekstide"
+authors = ["nabbisen"]
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "dark"
+git-repository-url = "https://github.com/nabbisen/tekstide"

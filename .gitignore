@@ -23,3 +23,6 @@ target
 # custom
 /.git-exclude/
 *.local.json
+
+# mdBook build output (docs/src is the source; docs/book is generated)
+docs/book
