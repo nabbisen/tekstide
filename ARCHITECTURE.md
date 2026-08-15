@@ -94,6 +94,28 @@ that your check reaches real data before asserting what it does not find.
 **Claims** are checked against the RFC's own text at closeout, not only against the
 evidence file — an RFC has twice asserted something its own results had falsified.
 
+**Latency criteria stop the clock at state change, not at pixels.** Every `NFR-PERF-*`
+latency figure in this project is measured from input arriving at the application to the
+application's own state being updated. **Compositor and GPU present time are excluded.**
+
+This is not a convenience. The only in-process way to timestamp presentation,
+`iced::window::frames()`, *forces continuous redraw once subscribed* (RFC-015 §R1) — so it
+does not merely add load, it replaces redraw-on-demand with redraw-always and changes the
+mechanism under measurement. A number obtained that way would not describe the shipping
+product.
+
+State the boundary whenever you report one of these figures. It was left implicit for
+three criteria and cost real work: `NFR-PERF-002` and `NFR-PERF-003` were quietly measured
+this way and read as though they covered pixels, while `NFR-PERF-004` was measured to
+pixels and declared unverifiable — the same silence, failing in opposite directions.
+Corrected 2026-08-15; see RFC-017 Amendment 1.
+
+Also state the **load condition**, and do not let it drift. `NFR-PERF-004` names "bounded
+output"; the script used for it became a *saturating* producer (~250,000-500,000 wakes/sec)
+when readiness-driven I/O removed the tick that had been throttling it, and nobody chose
+that. A test condition whose meaning depends on a defect elsewhere will change silently
+when the defect is fixed.
+
 **Reachability comes before correctness.** Before a surface is scheduled, name the path a
 user takes to reach it and the production code that populates what it renders. Not "which
 RFC owns it" — the actual call site.

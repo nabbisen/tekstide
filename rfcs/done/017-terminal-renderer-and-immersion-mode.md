@@ -301,3 +301,44 @@ If it is still not met, record that as this amendment's honest outcome. A second
 - **Changing the security filter's policy.** The filter's classification is untouched; only
   what feeds it changes.
 - **Windows/macOS readiness primitives.** Linux only, consistent with everything else here.
+
+### Amendment 1 addendum: `NFR-PERF-004`'s measurement boundary, restated 2026-08-15
+
+**Decided by the human owner** after PR-A1-D recorded the criterion unmet for the second
+time. Recorded here because this amendment owns the criterion; the rule itself lives in
+[`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) §Evidence conventions, which is where a
+contributor will actually look.
+
+**What was wrong.** `NFR-PERF-004` never said where the stopwatch stops. Neither do
+`NFR-PERF-002` or `NFR-PERF-003`. In practice 002 and 003 have always been measured to
+**application state change**, excluding compositor and GPU present — that is why 003 reports
+~29 µs and passes comfortably. 004 alone was measured to **pixels**, which is why PR-A1-D
+concluded it could not be verified.
+
+The same silence failed in both directions: two criteria passing without saying they
+exclude drawing, one declared unverifiable for including it.
+
+**Why the exclusion is principled, not a concession.** The only in-process way to timestamp
+presentation is `iced::window::frames()`, which *forces continuous redraw once subscribed*
+(RFC-015 §R1). It does not merely add load — it replaces redraw-on-demand with
+redraw-always, changing the mechanism under measurement. A figure obtained that way would
+not describe the shipping product.
+
+**Neither verdict ever needed present time.** The original "not met" came from the 50 ms
+tick delaying *bytes reaching the grid*; PR-A1-D's evidence (sub-microsecond wake-to-`poll()`
+cost) measures the same segment. Both live entirely inside the state-change boundary. The
+"unverifiable end-to-end" framing was an artifact of PR-A1-D attempting echo-visible timing
+through the GUI, not a property of the criterion.
+
+**So this is a correction, not a narrowing.** The criterion now states the boundary both of
+its evaluations already used.
+
+**"Bounded output" is also now defined**, because it drifted: the script used for
+`NFR-PERF-004` became a *saturating* producer (~250,000-500,000 wakes/sec) once this
+amendment removed the tick that had been throttling it, and nobody chose that. A load
+condition whose meaning depends on a defect elsewhere changes silently when the defect is
+fixed.
+
+**Status unchanged: `NFR-PERF-004` is still not met.** Restating the boundary does not
+discharge it. What it does is make the criterion answerable — the next measurement can
+return a verdict instead of "unverifiable by construction."
