@@ -32,9 +32,9 @@
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
-use std::sync::Arc;
 use std::thread::JoinHandle;
 
 /// One `read(2)` call reads at most this many bytes before the chunk is

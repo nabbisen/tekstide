@@ -784,14 +784,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 /// into the existing poll path... which is where a non-blocking exit
 /// check belongs" -- unchanged by moving from a tick to a wake.
 fn handle_terminal_woke(state: &mut State, terminal_id: &tekstide_core::domain::TerminalId) {
-    let already_exited = active_project_terminal_sessions(state).iter().any(|session| {
-        session.id == *terminal_id
-            && matches!(
-                session.status(),
-                tekstide_core::domain::TerminalStatus::Exited
-                    | tekstide_core::domain::TerminalStatus::Failed
-            )
-    });
+    let already_exited = active_project_terminal_sessions(state)
+        .iter()
+        .any(|session| {
+            session.id == *terminal_id
+                && matches!(
+                    session.status(),
+                    tekstide_core::domain::TerminalStatus::Exited
+                        | tekstide_core::domain::TerminalStatus::Failed
+                )
+        });
     if already_exited {
         // Already reflected in core -- "stop polling that pane's PTY."
         return;
@@ -852,10 +854,10 @@ fn record_terminal_exit(
             tekstide_core::domain::TerminalStatus::Failed,
         ),
     };
-    let _ = state.app_shell.state_mut().assign_terminal_visible_slot(
-        &terminal_id,
-        tekstide_core::domain::VisibleSlot::Hidden,
-    );
+    let _ = state
+        .app_shell
+        .state_mut()
+        .assign_terminal_visible_slot(&terminal_id, tekstide_core::domain::VisibleSlot::Hidden);
     if let Some(store) = audit_store.as_mut() {
         let _ = tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
             .record_plain_terminal_terminated(project_id, terminal_id, &outcome);

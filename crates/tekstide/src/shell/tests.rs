@@ -3109,8 +3109,7 @@ fn terminal_bridge_thread_count_is_stable_across_many_view_rebuilds() {
     let terminal_id = pane.terminal_id().clone();
 
     let mut tracker = iced_futures::subscription::Tracker::new();
-    let (message_sender, _message_receiver) =
-        iced::futures::channel::mpsc::channel::<Message>(16);
+    let (message_sender, _message_receiver) = iced::futures::channel::mpsc::channel::<Message>(16);
 
     let mut total_new_spawns = 0;
     for _ in 0..50 {

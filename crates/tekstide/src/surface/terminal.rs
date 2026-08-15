@@ -286,9 +286,7 @@ impl TerminalPane {
     /// `TerminalReader::spawn` can already fail on; the caller decides
     /// what a failure here means for that one pane (`shell.rs`'s
     /// `terminal_wake_subscriptions` currently just excludes it).
-    pub fn wake_notifier(
-        &self,
-    ) -> std::io::Result<tekstide_core::runtime::terminal::WakeNotifier> {
+    pub fn wake_notifier(&self) -> std::io::Result<tekstide_core::runtime::terminal::WakeNotifier> {
         self.reader.try_clone_wake_notifier()
     }
 
