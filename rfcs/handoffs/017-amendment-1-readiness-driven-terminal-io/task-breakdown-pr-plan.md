@@ -2,7 +2,7 @@
 title: "RFC-017 Amendment 1: Readiness-driven terminal I/O — Task Breakdown / PR Plan"
 rfc: "RFC-017 Amendment 1"
 rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
-status: "Ready for implementation"
+status: "PR-A1-A implemented 2026-08-15 (commit 79d9c23), not yet reviewed — B, C, D not started"
 target_milestone: "M9 (carried), shipping in 0.8.0"
 created: "2026-08-15"
 ---
@@ -28,6 +28,15 @@ Review gate:
   the update thread is the defect this whole amendment exists to remove.
 - Backpressure demonstrated end to end: a producer faster than the consumer **stalls on
   `write()`** and resumes correctly, with no byte loss across the stall.
+
+**Implemented 2026-08-15 (commit `79d9c23`), not yet reviewed.** Every gate item above is
+met; full detail and figures in `qa-evidence.md`. Two real bugs were found and fixed by this
+slice's own tests before commit — a `Drop`-ordering deadlock, and two test-methodology bugs
+in the backpressure fixture (a false-positive marker match against the shell's own echoed,
+unevaluated command text; `ONLCR`'s LF→CRLF translation) — both disclosed in the commit
+message and in `qa-evidence.md` rather than folded quietly into a clean diff. Nothing in
+`crates/tekstide` changed; nothing drains this reader in production yet. Remaining for this
+slice: PR-A1-B (the ingress re-proof), which this checkpoint does not attempt.
 
 ## PR-A1-B — The ingress re-proof
 
