@@ -284,7 +284,89 @@ by this limiter.
 
 ## PR-A2-C - Closeout
 
-*Not started.*
+**Closed 2026-08-16.** PR-A2-A (response 211), PR-A2-B (responses 212/213) both accepted.
+This section closes the amendment.
+
+### Claim statement, checked against RFC-011 Amendment 2's own text
+
+The amendment's own "Why this exists" section states the transcript-capture gap **"blocks"**
+adapter-spawn and that re-homing capture into `TerminalReader` **"unblocks it; it is not
+it"** (§Out of scope). Checked directly against that framing:
+
+**What may be claimed.** The named blocking prerequisite is discharged. D1: the writer
+lives inside `TerminalReader`'s own thread, not the UI thread and not the runtime — moved,
+not copied, `BoundedTranscriptWriter` is not `Clone` so no second handle can exist.
+`transcript_write_summary`'s replacement is decided and named (the reader's own accessor,
+backed by a shared snapshot). D2: write-before-send is proven by ordering, not asserted — a
+test observes the transcript holding bytes the channel has not yet drained, ablated to a
+concrete violation (142,148 drained against 52,705 committed) and reverted. D3: both capture
+modes have a real, tested mid-stream failure policy against a genuinely unwritable
+transcript (`/dev/full`, not an injected error) — `LocalBounded` marks `CaptureFailed` and
+keeps the terminal usable; `RequiredLocalBounded` marks it and stops reading entirely,
+stalling the child rather than killing it, with termination still available to the caller.
+Both ablated (removing the `CaptureFailed` marking produces a silent, healthy-looking
+`Active` summary) and reverted. P1/P2 re-run for the new path, not assumed to transfer.
+`read_available_bounded_for` is untouched and confirmed still load-bearing for the
+agent-run subsystem's own, separate call site.
+
+**What may not be claimed.**
+
+- **Adapter-spawn is not unblocked beyond this one named prerequisite.** Other work remains
+  before an `AgentRun` can be real — `future-work.md`'s adapter-spawn entry names what:
+  nothing launches an AI CLI as an adapter yet, and `TerminalEnvironmentPolicy::ExplicitAllowlist`
+  (needed to deliver the capability token) is still rejected as unsupported inside the
+  RFC-009/RFC-010 terminal security boundary. This amendment removes one specific,
+  previously-blocking gap; it does not touch either of those.
+- **Transcript capture is not exercised in production.** Nothing creates an `AgentRun`
+  today (unchanged since this amendment's "Starting state"), so no transcript writer is
+  ever configured outside tests. Correct-before-reachable, deliberately — the capability had
+  to be right before adapter-spawn depends on it, not proven through it.
+
+### D4 — backpressure now includes the disk, stated as shipped behaviour
+
+Not a caveat, not omitted because it is unwelcome: a stalled or slow disk now stalls the
+reader thread, which stalls the child, whenever capture is on. This is a direct, intended
+consequence of D1 (writer inside the reader thread) and D2 (write before send) — the same
+coupling the old design had, on the UI thread instead. `RequiredLocalBounded`'s own D3
+behaviour (PR-A2-B) is the sharpest instance of this by design: the reader stops draining on
+purpose, so the child's own `write()` blocks against the PTY's kernel buffer — backpressure
+used deliberately as a safety mechanism, not merely tolerated as a side effect.
+
+### Two items carried forward from responses 211 and 213
+
+1. **The next release carrying this amendment is `0.9.0`, not `0.8.1`.**
+   `TranscriptWriterConfig` (PR-A2-A) gained a public `mode` field — every external
+   construction of that struct now fails to compile, a breaking change to `tekstide-core` on
+   the same basis `0.7.0` was forced by RFC-012 Amendment 1's breaking removal. The field is
+   the right design, not a defect; recorded here so the release gets numbered correctly.
+   Not acted on directly — `rfcs/delivery-plan.md` and any actual version bump are the
+   owner's territory, not mine to touch.
+2. **P2 now has a second, named destination.** Before this amendment, P2 meant "no path
+   carries terminal bytes anywhere except the one ingress." After it, terminal bytes reach
+   **two** destinations inside `tekstide-core`: the reader's channel (display) and the
+   transcript file (durable record), both from inside the same reader thread, both governed
+   by RFC-011's own retention limits, path-resolution policy, and purge. Authorised, not an
+   exposure — but a real change to what P2 describes, named explicitly so the next
+   enumeration of "where do terminal bytes go" finds it rather than rediscovers it, which is
+   how this amendment's own defect came to exist in the first place.
+
+### Test-infrastructure note
+
+Response 213: with `runtime::terminal::reader::tests`'s own flake resolved (PR-A2-B), the
+only known flake remaining in the full workspace suite is the pre-existing RFC-021 socket
+test (`bind_recovers_from_a_stale_socket_file`), already connected in `future-work.md` to
+the same fork-window pressure this amendment's own investigation characterised. Not this
+amendment's to fix; recorded here only so the connection isn't lost.
+
+### Gates
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D
+warnings`, full workspace suite, `git diff --check` — clean throughout. Final counts:
+`tekstide-core` 562 (up from 555 at the amendment's start — 5 new tests from PR-A2-A, 2 from
+PR-A2-B), `tekstide` 212 (unchanged — no `tekstide`-crate files touched anywhere in this
+amendment). No test was changed to keep passing for an unrelated reason: every touched test
+either exercises this amendment's own new behaviour, is new, or had a genuine, disclosed bug
+of its own found and fixed while closing this amendment out (PR-A2-B's two bugs, above).
 
 ## Known limitations going in
 

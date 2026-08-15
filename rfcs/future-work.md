@@ -192,6 +192,16 @@ Status: substrate decided, application shell, and mode switching implemented by 
   needs a real decision, not a copied line: file I/O on the reader thread, what happens when
   a transcript write fails mid-stream, and how that interacts with the bounded channel's
   backpressure. RFC-011's territory, not a performance amendment's.
+
+  **Discharged 2026-08-16 by RFC-011 Amendment 2 (PR-A2-A through C, responses 211/212/213).**
+  The writer now lives inside `TerminalReader`'s own thread (D1), write happens before send
+  with the ordering proven, not assumed (D2), mid-stream failure has a real, tested policy
+  per capture mode (D3), and the disk-backpressure coupling this produces is recorded as
+  shipped behaviour (D4). `read_available_bounded_for` is untouched and still serves the
+  agent-run subsystem's own separate call site — this closes the *terminal-pane-reader* gap
+  named above, not a removal of the older path. **Adapter-spawn is still not built** — this
+  discharges the one named prerequisite blocking it, nothing more; see the adapter-spawn
+  entry below for what remains.
 - **The `tekstide-core` test suite leaks real shell processes — roughly 87 orphaned
   `/bin/sh` per full run.** Found 2026-08-15 while diagnosing PR-A1-A's own (since-fixed)
   test flakiness, and disclosed rather than absorbed (review request 201, response 201).

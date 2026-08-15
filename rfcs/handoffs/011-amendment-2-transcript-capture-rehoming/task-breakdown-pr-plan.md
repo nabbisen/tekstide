@@ -2,7 +2,7 @@
 title: "RFC-011 Amendment 2: Re-homing transcript capture — Task Breakdown / PR Plan"
 rfc: "RFC-011 Amendment 2"
 rfc_file: "../../done/011-transcript-retention-and-local-data-policy.md"
-status: "Ready for implementation"
+status: "Closed 2026-08-16 — PR-A2-A through C all accepted"
 target_milestone: "M11 prerequisite"
 created: "2026-08-15"
 ---
@@ -12,7 +12,7 @@ created: "2026-08-15"
 Three slices. **[`the-ordering-and-the-failure.md`](./the-ordering-and-the-failure.md) is
 required reading before any of them.**
 
-## PR-A2-A — Capture in the reader thread, and the ordering [Implemented — pending review]
+## PR-A2-A — Capture in the reader thread, and the ordering [Accepted — response 211]
 
 Move the writer into `TerminalReader`, write before send, keep the happy path correct.
 
@@ -35,14 +35,14 @@ Review gate:
 - **P1/P2 re-run**, not assumed to transfer. The writer is a new consumer of the byte
   stream inside the thread; prove it is not a second path out of it.
 
-## PR-A2-B — The failure policy [Accepted — response 212; closeout request pending]
+## PR-A2-B — The failure policy [Accepted — responses 212/213]
 
 Both capture modes, against real failures.
 
 See [`qa-evidence.md`](./qa-evidence.md#pr-a2-b---the-failure-policy) for the full evidence
 record. Response 212 accepted the D3 evidence and directed a file-wide test-concurrency
-limiter (Option A); that limiter is built, verified, and disclosed as a test-infrastructure
-fix separate from the D3 evidence itself.
+limiter (Option A); response 213 accepted the built limiter, disclosed as a
+test-infrastructure fix separate from the D3 evidence itself.
 
 Review gate:
 
@@ -59,7 +59,10 @@ Review gate:
 - **Ablate the marking**: remove it, show what silently succeeds. If nothing observable
   changes, that is a finding about observability.
 
-## PR-A2-C — Closeout
+## PR-A2-C — Closeout [Closed 2026-08-16]
+
+See [`qa-evidence.md`](./qa-evidence.md#pr-a2-c---closeout) for the claim statement, the D4
+restatement, and both items carried forward from responses 211/213.
 
 Review gate:
 
