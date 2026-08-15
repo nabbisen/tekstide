@@ -369,3 +369,32 @@ adapter-spawn without re-homing transcript capture.
 
 **Still true**: RFC-020's two surfaces remain blocked, model-complete, waiting on
 adapter-spawn. M10 does not close.
+
+### Re-plan status, 2026-08-16
+
+**Decision 2's named prerequisite is discharged.** RFC-011 Amendment 2 closed 2026-08-16:
+transcript capture is re-homed onto the readiness-driven reader, with the ordering proven by
+direct observation and a per-mode failure policy tested against a genuinely unwritable
+transcript.
+
+**Adapter-spawn is still not ready to start, and this is the part worth reading.** The
+amendment discharged *one named blocker*. Checking what else it needs — done by the
+implementing slice rather than assumed — found at least two more, neither touched by this
+work:
+
+- nothing launches an AI CLI as an adapter;
+- `TerminalEnvironmentPolicy::ExplicitAllowlist` is rejected by the Linux runtime
+  (`runtime/terminal/launch.rs:436`: *"not applied by the Linux runtime yet"*).
+
+So adapter-spawn needs **scoping** before implementation — architect work, and the next
+thing on the critical path. Until it lands, RFC-021's command approval, RFC-024's diff
+content, RFC-011 Amendment 1's transcript reader, and RFC-020's two surfaces all remain
+correct, reviewed and unreachable.
+
+**The distinction this records**: "my prerequisite is discharged" and "the thing it blocked
+is ready" are different claims. Conflating them is exactly how RFC-020's surfaces came to be
+scheduled as `0.8.0`'s spine.
+
+**Next release is `0.9.0`, not `0.8.1`** — `TranscriptWriterConfig` gained a public `mode`
+field, a breaking change to `tekstide-core`. Field additions are how this gets missed, since
+the reflex is to look for removals.
