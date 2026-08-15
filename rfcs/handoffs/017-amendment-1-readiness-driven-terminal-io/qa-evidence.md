@@ -2,7 +2,7 @@
 title: "RFC-017 Amendment 1: Readiness-driven terminal I/O - QA Evidence"
 rfc: "RFC-017 Amendment 1"
 rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
-status: "PR-A1-A implemented 2026-08-15 (commit 79d9c23), not yet reviewed — B, C, D not started"
+status: "PR-A1-A implemented 2026-08-15, reviewed (response 201), required fix applied same day (commit 85dcbef), not yet re-reviewed — B, C, D not started"
 target_milestone: "M9 (carried), shipping in 0.8.0"
 created: "2026-08-15"
 ---
@@ -113,16 +113,41 @@ the commit message rather than folded silently into a clean-looking diff**:
 processes it spawns — running them without the 4 new reader tests still leaves ~87 orphaned
 `/bin/sh` processes (`PS1=tekstide$`, reparented to `systemd --user`) after the run. Not
 introduced by this slice (the 4 new reader tests leak zero processes in isolation, confirmed
-across multiple runs) and not fixed here — flagged for whoever owns general test hygiene,
-since it was noticed only while diagnosing an unrelated timing issue in this slice's own
-tests.
+across multiple runs) and not fixed here. **Recorded in `rfcs/future-work.md` by the
+reviewer (response 201)** rather than left dependent on either of us remembering it, and
+connected there to a plausible fork-window mechanism behind the RFC-021 socket flake.
+
+**Correction (response 201): `Drop` could still block forever.** The version above proved
+`drain_available()` never blocks, but not `Drop` — the gate's own wording ("a blocking call
+reachable from the update thread is the defect this whole amendment exists to remove")
+covers both entry points. Dropping `receiver` only unblocks a thread parked in `sender.send`
+on a full channel; it does nothing for a thread parked in `poll(2)` on a live, silent child
+producing no output right now — the common case once a real caller drops a reader for an
+idle terminal, not a corner case. **Fixed 2026-08-15 (commit `85dcbef`)**: a shutdown
+`eventfd` is added to the `poll(2)` set alongside the PTY master; `Drop` writes to it first
+(wakes a `poll(2)`-parked thread regardless of PTY state), then still drops `receiver` (the
+independent unblock path for a thread parked in `send`), then joins. `TerminalReader::spawn`
+is now fallible (`eventfd(2)` can fail on resource exhaustion), propagated as
+`TerminalRuntimeError::Io`.
+
+**Evidence, per the required-fix instruction**:
+`dropping_a_reader_over_a_live_silent_child_completes_promptly` spawns a real, live shell,
+sends it no command (so the reader thread parks in `poll(2)` with nothing to read), drops the
+reader on its own thread, and waits on a channel with a real 5-second `recv_timeout` — a
+regression fails *this test* with a clear message rather than hanging the suite, matching how
+the original `Drop` deadlock was actually found (a test that hung 30+ seconds). **Ablated for
+real**: removing the `eventfd` write and re-running reproduces exactly that — the test fails
+cleanly at its own 5.05s internal timeout with the expected panic message, rather than a bare
+hang, confirming both the fix and the test are real. Reverted before commit.
 
 **Gates**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features
--- -D warnings`, full workspace suite (`tekstide-core` 551 passed, up from 547 — the 4 new
-reader tests; `tekstide` 206 passed, unchanged — no `crates/tekstide` changes), `git diff
---check`. All clean.
+-- -D warnings`, full workspace suite (`tekstide-core` 552 passed, up from 547 — the 5 reader
+tests now including the liveness test; `tekstide` 206 passed, unchanged — no
+`crates/tekstide` changes), `git diff --check`. All clean, re-run after the fix (commit
+`85dcbef`).
 
-**Not done in this checkpoint**: the P1/P2 re-enumeration against the new shape, modal
+**Not done in this checkpoint**: the P1/P2 re-enumeration against the new shape (now also
+covering the shutdown `eventfd` as a second channel, per response 201's own note), modal
 exclusivity, and wiring this reader into any production consumer — all PR-A1-B's job, not
 started.
 

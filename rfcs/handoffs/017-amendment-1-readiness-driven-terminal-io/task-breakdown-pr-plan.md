@@ -2,7 +2,7 @@
 title: "RFC-017 Amendment 1: Readiness-driven terminal I/O — Task Breakdown / PR Plan"
 rfc: "RFC-017 Amendment 1"
 rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
-status: "PR-A1-A implemented 2026-08-15 (commit 79d9c23), not yet reviewed — B, C, D not started"
+status: "PR-A1-A implemented 2026-08-15, reviewed (response 201), required fix applied same day (commit 85dcbef), not yet re-reviewed — B, C, D not started"
 target_milestone: "M9 (carried), shipping in 0.8.0"
 created: "2026-08-15"
 ---
@@ -29,14 +29,29 @@ Review gate:
 - Backpressure demonstrated end to end: a producer faster than the consumer **stalls on
   `write()`** and resumes correctly, with no byte loss across the stall.
 
-**Implemented 2026-08-15 (commit `79d9c23`), not yet reviewed.** Every gate item above is
-met; full detail and figures in `qa-evidence.md`. Two real bugs were found and fixed by this
-slice's own tests before commit — a `Drop`-ordering deadlock, and two test-methodology bugs
-in the backpressure fixture (a false-positive marker match against the shell's own echoed,
-unevaluated command text; `ONLCR`'s LF→CRLF translation) — both disclosed in the commit
-message and in `qa-evidence.md` rather than folded quietly into a clean diff. Nothing in
-`crates/tekstide` changed; nothing drains this reader in production yet. Remaining for this
-slice: PR-A1-B (the ingress re-proof), which this checkpoint does not attempt.
+**Implemented 2026-08-15 (commit `79d9c23`), reviewed (response 201).** Every gate item above
+is met; full detail and figures in `qa-evidence.md`. Two real bugs were found and fixed by
+this slice's own tests before commit — a `Drop`-ordering deadlock, and two test-methodology
+bugs in the backpressure fixture (a false-positive marker match against the shell's own
+echoed, unevaluated command text; `ONLCR`'s LF→CRLF translation) — both disclosed in the
+commit message and in `qa-evidence.md` rather than folded quietly into a clean diff. Nothing
+in `crates/tekstide` changed; nothing drains this reader in production yet.
+
+**Response 201 accepted PR-A1-A with one required fix, applied same day (commit
+`85dcbef`), not yet re-reviewed**: `Drop` could still block forever. Dropping `receiver`
+only unblocks a thread parked in `sender.send` on a full channel; it does nothing for a
+thread parked in `poll(2)` on a live, silent child producing no output — the common case, not
+a corner case, once a real caller drops a reader for an idle terminal. Fixed with a shutdown
+`eventfd` added to the `poll(2)` set; `Drop` writes to it before dropping `receiver` and
+joining, so both unblock paths are now independent of the child's behaviour. Proven by
+`dropping_a_reader_over_a_live_silent_child_completes_promptly`, which waits on the drop with
+a real 5-second timeout so a regression fails that test rather than hanging the suite;
+ablated by removing the `eventfd` write and confirming the test fails cleanly at its own
+timeout rather than hanging. Response 201 also noted the shutdown `eventfd` is itself a
+second channel this module owns, which **P2's re-enumeration in PR-A1-B must account for**.
+
+Remaining for this slice: PR-A1-B (the ingress re-proof), which this checkpoint does not
+attempt.
 
 ## PR-A1-B — The ingress re-proof
 
