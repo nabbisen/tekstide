@@ -85,104 +85,9 @@ impl TerminalSecurityParser {
         let mut index = 0;
 
         while index < input.len() {
-            match input[index] {
-                b'\r' => {
-                    effects.push(TerminalSurfaceEffect::Cursor(
-                        TerminalCursorEffect::CarriageReturn,
-                    ));
-                    index += 1;
-                }
-                b'\n' => {
-                    effects.push(TerminalSurfaceEffect::Cursor(
-                        TerminalCursorEffect::LineFeed,
-                    ));
-                    index += 1;
-                }
-                b'\t' => {
-                    effects.push(TerminalSurfaceEffect::Cursor(TerminalCursorEffect::Tab));
-                    index += 1;
-                }
-                0x08 => {
-                    effects.push(TerminalSurfaceEffect::Cursor(
-                        TerminalCursorEffect::Backspace,
-                    ));
-                    index += 1;
-                }
-                0x1b => {
-                    let (effect, consumed) = parse_escape_sequence(&input[index..]);
-                    effects.push(effect);
-                    index += consumed;
-                }
-                0x90 => {
-                    let (effect, consumed) =
-                        parse_string_control(&input[index..], TerminalSequenceFamily::Dcs);
-                    effects.push(effect);
-                    index += consumed;
-                }
-                0x9d => {
-                    let (effect, consumed) = parse_osc(&input[index..]);
-                    effects.push(effect);
-                    index += consumed;
-                }
-                0x9e => {
-                    let (effect, consumed) =
-                        parse_string_control(&input[index..], TerminalSequenceFamily::Pm);
-                    effects.push(effect);
-                    index += consumed;
-                }
-                0x9f => {
-                    let (effect, consumed) =
-                        parse_string_control(&input[index..], TerminalSequenceFamily::Apc);
-                    effects.push(effect);
-                    index += consumed;
-                }
-                0x00..=0x1f | 0x7f => {
-                    effects.push(blocked_sequence(
-                        TerminalSequenceFamily::C0Control,
-                        TerminalPolicyReason::UnsupportedSequence,
-                        1,
-                    ));
-                    index += 1;
-                }
-                0x80..=0x9f => {
-                    effects.push(blocked_sequence(
-                        TerminalSequenceFamily::C1Control,
-                        TerminalPolicyReason::UnsupportedSequence,
-                        1,
-                    ));
-                    index += 1;
-                }
-                byte if byte.is_ascii() => {
-                    let start = index;
-                    while index < input.len()
-                        && input[index].is_ascii()
-                        && !input[index].is_ascii_control()
-                    {
-                        index += 1;
-                    }
-                    effects.push(TerminalSurfaceEffect::Text(TerminalTextEffect::Printable {
-                        chars: index - start,
-                    }));
-                }
-                _ => {
-                    if let Some((character, consumed)) = parse_utf8_char(&input[index..]) {
-                        effects.push(TerminalSurfaceEffect::Text(TerminalTextEffect::Printable {
-                            chars: usize::from(character != '\0'),
-                        }));
-                        index += consumed;
-                    } else {
-                        effects.push(TerminalSurfaceEffect::Text(
-                            TerminalTextEffect::InvalidBytesReplaced { bytes: 1 },
-                        ));
-                        effects.push(blocked_sequence(
-                            TerminalSequenceFamily::PrintableText,
-                            TerminalPolicyReason::InvalidBytes,
-                            1,
-                        ));
-                        index += 1;
-                    }
-                }
-            }
+            let (mut token_effects, consumed) = next_token(&input[index..]);
+            effects.append(&mut token_effects);
+            index += consumed;
         }
 
         effects
@@ -195,6 +100,128 @@ impl TerminalSecurityParser {
             payload_bytes,
         )
     }
+}
+
+/// `parse`'s own per-iteration step, factored out unchanged -- every
+/// arm's logic and every effect it pushes is identical to what `parse`'s
+/// loop body inlined before this split (the crate's own parser tests, run
+/// unmodified against this refactor, are the proof it is behavior
+/// preserving). Returns every effect the original loop would have pushed
+/// for this one token -- usually one, two only for invalid UTF-8 (a
+/// placeholder plus a diagnostic, matching `parse`'s own prior inline
+/// arm) -- and how many bytes it consumed. `input` must be non-empty;
+/// `consumed` is always `&gt;= 1`.
+fn next_token(input: &[u8]) -> (Vec<TerminalSurfaceEffect>, usize) {
+    match input[0] {
+        b'\r' => (
+            vec![TerminalSurfaceEffect::Cursor(
+                TerminalCursorEffect::CarriageReturn,
+            )],
+            1,
+        ),
+        b'\n' => (
+            vec![TerminalSurfaceEffect::Cursor(
+                TerminalCursorEffect::LineFeed,
+            )],
+            1,
+        ),
+        b'\t' => (
+            vec![TerminalSurfaceEffect::Cursor(TerminalCursorEffect::Tab)],
+            1,
+        ),
+        0x08 => (
+            vec![TerminalSurfaceEffect::Cursor(
+                TerminalCursorEffect::Backspace,
+            )],
+            1,
+        ),
+        0x1b => {
+            let (effect, consumed) = parse_escape_sequence(input);
+            (vec![effect], consumed)
+        }
+        0x90 => {
+            let (effect, consumed) = parse_string_control(input, TerminalSequenceFamily::Dcs);
+            (vec![effect], consumed)
+        }
+        0x9d => {
+            let (effect, consumed) = parse_osc(input);
+            (vec![effect], consumed)
+        }
+        0x9e => {
+            let (effect, consumed) = parse_string_control(input, TerminalSequenceFamily::Pm);
+            (vec![effect], consumed)
+        }
+        0x9f => {
+            let (effect, consumed) = parse_string_control(input, TerminalSequenceFamily::Apc);
+            (vec![effect], consumed)
+        }
+        0x00..=0x1f | 0x7f => (
+            vec![blocked_sequence(
+                TerminalSequenceFamily::C0Control,
+                TerminalPolicyReason::UnsupportedSequence,
+                1,
+            )],
+            1,
+        ),
+        0x80..=0x9f => (
+            vec![blocked_sequence(
+                TerminalSequenceFamily::C1Control,
+                TerminalPolicyReason::UnsupportedSequence,
+                1,
+            )],
+            1,
+        ),
+        byte if byte.is_ascii() => {
+            let mut index = 0;
+            while index < input.len() && input[index].is_ascii() && !input[index].is_ascii_control()
+            {
+                index += 1;
+            }
+            (
+                vec![TerminalSurfaceEffect::Text(TerminalTextEffect::Printable {
+                    chars: index,
+                })],
+                index,
+            )
+        }
+        _ => {
+            if let Some((character, consumed)) = parse_utf8_char(input) {
+                (
+                    vec![TerminalSurfaceEffect::Text(TerminalTextEffect::Printable {
+                        chars: usize::from(character != '\0'),
+                    })],
+                    consumed,
+                )
+            } else {
+                (
+                    vec![
+                        TerminalSurfaceEffect::Text(TerminalTextEffect::InvalidBytesReplaced {
+                            bytes: 1,
+                        }),
+                        blocked_sequence(
+                            TerminalSequenceFamily::PrintableText,
+                            TerminalPolicyReason::InvalidBytes,
+                            1,
+                        ),
+                    ],
+                    1,
+                )
+            }
+        }
+    }
+}
+
+/// `transcript::reader`'s own resynchronization primitive (RFC-011
+/// Amendment 1, D2): the length, in bytes, of the token starting at
+/// `input[0]` -- the same boundary this module's own `parse` loop already
+/// computes per iteration, exposed without the effect/policy
+/// classification a boundary-only caller does not need. Reusing this
+/// rather than a second, independently-maintained copy of the same
+/// CSI-final-byte/string-terminator/UTF-8-width logic is the point: this
+/// crate has already been burned by that drift once (`classify_private_mode`'s
+/// own doc comment, response 144). `input` must be non-empty.
+pub(crate) fn next_token_len(input: &[u8]) -> usize {
+    next_token(input).1
 }
 
 fn parse_escape_sequence(input: &[u8]) -> (TerminalSurfaceEffect, usize) {
@@ -226,8 +253,23 @@ fn parse_escape_sequence(input: &[u8]) -> (TerminalSurfaceEffect, usize) {
 }
 
 fn parse_csi(input: &[u8]) -> (TerminalSurfaceEffect, usize) {
-    let (sequence, consumed) = take_until_csi_final(input);
-    let Some(final_byte) = sequence.last().copied() else {
+    let (sequence, consumed, found_final_byte) = take_until_csi_final(input);
+    // `take_until_csi_final` reports explicitly whether it found a real
+    // terminator or gave up and returned its own scan-window prefix
+    // verbatim -- checking `sequence.last()`'s *value* instead (an
+    // earlier version of this fix did exactly that) is not reliable: `[`
+    // (0x5b), the CSI introducer's own second byte, is itself inside the
+    // `0x40..=0x7e` final-byte range, so a 2-byte fallback slice `ESC``[`
+    // would pass a byte-range check while still being too short for
+    // `body`'s `[2..len - 1]` slice below, which would then underflow
+    // and panic. Only the scan's own "did I actually match the loop's
+    // return, or fall through" signal is trustworthy. Discovered while
+    // building `transcript::reader`'s resynchronization proof, the first
+    // caller to ever exercise a CSI sequence truncated at a buffer's own
+    // end -- `TerminalSecurityParser::parse` has no production caller
+    // today, so this was unreachable rather than exploited, but a new
+    // caller must not inherit it.
+    if !found_final_byte {
         return (
             blocked_sequence(
                 TerminalSequenceFamily::Csi,
@@ -236,7 +278,10 @@ fn parse_csi(input: &[u8]) -> (TerminalSurfaceEffect, usize) {
             ),
             consumed,
         );
-    };
+    }
+    let final_byte = *sequence
+        .last()
+        .expect("found_final_byte guarantees a non-empty sequence ending in a real terminator");
 
     let body = &sequence[2..sequence.len().saturating_sub(1)];
 
@@ -345,14 +390,20 @@ fn parse_string_control(
     )
 }
 
-fn take_until_csi_final(input: &[u8]) -> (&[u8], usize) {
+/// Returns `(sequence, consumed, found_final_byte)`. `found_final_byte`
+/// is the only reliable way to tell "the loop matched a real CSI final
+/// byte" from "the scan window ran out and this is a raw, possibly very
+/// short, fallback prefix" -- `sequence`'s own last byte cannot be used
+/// for that (see `parse_csi`'s own comment: `[` is itself inside the
+/// `0x40..=0x7e` final-byte range).
+fn take_until_csi_final(input: &[u8]) -> (&[u8], usize, bool) {
     let limit = input.len().min(MAX_CONTROL_SEQUENCE_BYTES);
     for index in 2..limit {
         if (0x40..=0x7e).contains(&input[index]) {
-            return (&input[..=index], index + 1);
+            return (&input[..=index], index + 1, true);
         }
     }
-    (&input[..limit], limit.max(1))
+    (&input[..limit], limit.max(1), false)
 }
 
 fn take_until_string_terminator(input: &[u8]) -> (&[u8], usize) {
@@ -555,6 +606,57 @@ mod tests {
                 TerminalInertSequence::CsiUnsupported,
                 TerminalInertSequence::UnknownEsc,
             ]
+        );
+    }
+
+    /// **Found while building `transcript::reader`'s resynchronization
+    /// proof (RFC-011 Amendment 1, D2), not in this parser's own review.**
+    /// A CSI sequence truncated at a buffer's own end, with no final byte
+    /// (`0x40..=0x7e`) anywhere in what remains, must classify as an
+    /// unsupported/incomplete sequence -- not panic. `sequence.last()`
+    /// alone cannot distinguish "a real final byte was found" from "the
+    /// scan gave up and returned its own raw prefix," since a non-empty
+    /// slice always has a last byte; the fix checks the byte's actual
+    /// value is in range.
+    #[test]
+    fn a_csi_sequence_truncated_with_no_final_byte_does_not_panic() {
+        let parser = TerminalSecurityParser;
+
+        // The shortest input that reaches this path: ESC '[' with
+        // nothing after -- `take_until_csi_final`'s scan window is empty
+        // (`2..2`), so it falls back to returning its own 2-byte prefix
+        // verbatim, whose last byte ('[', 0x5b) is not a real CSI final
+        // byte.
+        let effects = parser.parse(b"\x1b[");
+
+        assert_eq!(
+            effects,
+            vec![blocked_sequence(
+                TerminalSequenceFamily::Csi,
+                TerminalPolicyReason::UnsupportedSequence,
+                2,
+            )],
+            "a truncated CSI sequence with no final byte must report as unsupported, \
+             consuming exactly the bytes present"
+        );
+    }
+
+    /// The same property, against a longer truncated sequence (parameter
+    /// bytes present, still no final byte) -- confirms the fix holds
+    /// beyond the minimal 2-byte case above.
+    #[test]
+    fn a_longer_csi_sequence_truncated_with_no_final_byte_does_not_panic() {
+        let parser = TerminalSecurityParser;
+
+        let effects = parser.parse(b"\x1b[31");
+
+        assert_eq!(
+            effects,
+            vec![blocked_sequence(
+                TerminalSequenceFamily::Csi,
+                TerminalPolicyReason::UnsupportedSequence,
+                4,
+            )]
         );
     }
 
