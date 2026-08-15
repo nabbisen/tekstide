@@ -2,7 +2,7 @@
 title: "RFC-020: Diff Review and AgentRun Report Surfaces — Task Breakdown / PR Plan"
 rfc: "RFC-020"
 rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
-status: "Ready for implementation"
+status: "PR-020-B's core (transcript reader) implemented 2026-08-15, not yet reviewed — surface, PR-020-C, and PR-020-D not started"
 target_milestone: "M10"
 created: "2026-08-15"
 ---
@@ -48,6 +48,18 @@ Review gate:
   estimated figures in this project were wrong once measured.
 - **Escaping happens at the widget**, and no double-escaping — content containing the
   literal text `<U+202E>` is distinguishable from a real override.
+
+**Core implemented 2026-08-15 (commits `c229781`, `1c7b980`), not yet reviewed. Surface not
+started — this slice is not complete.** Every core-side review gate item above is met; full
+detail in `qa-evidence.md`. **One item found and fixed before the reader could be built at
+all, not part of this slice's own gate**: `TerminalSecurityParser::parse` (RFC-017)
+panicked on a CSI sequence truncated to a bare `ESC [` at a buffer's own end — reachable
+the moment anything calls it on a buffer that was not guaranteed complete, which nothing
+did until this slice's own resynchronization proof needed to. Fixed and disclosed as its
+own commit (`c229781`), separate from the reader (`1c7b980`), since it is a defect in a
+different RFC's already-shipped module. Remaining for this slice: the AgentRun report
+widget, the reader-window-vs-writer-truncation rendered distinction (needs the widget to
+exist), and the no-double-escaping proof (needs the widget's own escaping call site).
 
 ## PR-020-C — The change review surface
 
