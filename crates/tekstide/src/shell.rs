@@ -756,25 +756,28 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // uninformative, samples against nothing rather than
             // panicking, matching `MeasuredModeSwitch`'s own "no active
             // project" fallback.
-            // RFC-017 Amendment 1, PR-A1-D: the pre-write occurrence
-            // count of `MEASURED_KEY_CHARACTER`, plus one, is what
-            // `check_echo_visible` (called from `handle_terminal_woke`
-            // on this pane's next real wake) must see in the grid before
-            // this send's own echo counts as visible -- captured before
-            // the write so a send racing an in-flight flood line does
-            // not miscount.
+            // RFC-017 Amendment 1, PR-A1-D, response 209's required fix:
+            // write a fresh, never-reused marker to the pty instead of
+            // the bare `MEASURED_KEY_CHARACTER` -- `check_echo_visible`
+            // (called from `handle_terminal_woke` on this pane's next
+            // real wake) looks for *this* marker's own first appearance,
+            // immune to the redraw-duplication finding a bare repeated
+            // character's occurrence count was vulnerable to. See
+            // `Measurement::next_echo_marker`'s own doc.
+            let marker = state
+                .measurement
+                .as_mut()
+                .map(measurement::Measurement::next_echo_marker);
             if let Some(pane) = state.terminal_panes.first_mut() {
-                let expected_occurrences = pane
-                    .rendered_text()
-                    .matches(measurement::MEASURED_KEY_CHARACTER)
-                    .count()
-                    + 1;
-                pane.write_input(measurement::MEASURED_KEY_CHARACTER.as_bytes());
-                if let Some(measurement) = state.measurement.as_mut() {
-                    measurement.note_measured_send(sent_at, expected_occurrences);
-                }
+                let bytes = marker
+                    .as_deref()
+                    .unwrap_or(measurement::MEASURED_KEY_CHARACTER);
+                pane.write_input(bytes.as_bytes());
             }
             if let Some(measurement) = state.measurement.as_mut() {
+                if let Some(marker) = marker {
+                    measurement.note_measured_send(sent_at, marker);
+                }
                 measurement.record_input(sent_at);
             }
         }
@@ -844,11 +847,7 @@ fn handle_terminal_woke(state: &mut State, terminal_id: &tekstide_core::domain::
         // see that method's own doc for why "only while pending" alone
         // was still not enough under a real flood.
         if measurement.should_check_echo() {
-            measurement.check_echo_visible(
-                pane.rendered_text()
-                    .matches(measurement::MEASURED_KEY_CHARACTER)
-                    .count(),
-            );
+            measurement.check_echo_visible(&pane.rendered_text());
         }
     }
 }

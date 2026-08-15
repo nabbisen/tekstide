@@ -85,15 +85,25 @@
 //! `sent_at`**: `input` (unchanged since PR-017-G -- dispatch plus the
 //! pty `write(2)`, via `record_input`) and `echo` (new, PR-A1-D) -- the
 //! full interval from the same `sent_at` to the moment
-//! [`Measurement::check_echo_visible`] first observes the grid's
-//! occurrence count of [`MEASURED_KEY_CHARACTER`] reach the count
-//! expected after this send, checked once per real wake from
-//! `handle_terminal_woke` (never on a timer). `echo` **is**
-//! `NFR-PERF-004` as actually defined, to the same "app-internal, not
-//! end-to-end" precision this whole module already commits to for every
-//! other criterion (grid-state-visible, not painted-to-screen --
-//! avoiding the exact `frames()` contamination this module exists to
-//! avoid, stated once at the top rather than re-argued per criterion).
+//! [`Measurement::check_echo_visible`] first observes this send's own
+//! fresh marker string (via [`Measurement::next_echo_marker`], not a
+//! bare repeated character -- see that method's own doc for why:
+//! response 209's required fix, after a real, reproducible PTY
+//! canonical-mode redraw behaviour was found to duplicate a repeated
+//! character's occurrence count) as a substring of the grid's rendered
+//! text, checked once per real wake from `handle_terminal_woke` (never
+//! on a timer, and throttled -- see [`Measurement::should_check_echo`]).
+//! `echo` **is** `NFR-PERF-004` as actually defined, to the same
+//! "app-internal, not end-to-end" precision this whole module already
+//! commits to for every other criterion (grid-state-visible, not
+//! painted-to-screen -- avoiding the exact `frames()` contamination this
+//! module exists to avoid, stated once at the top rather than re-argued
+//! per criterion). **It is not, on its own, sufficient to claim
+//! `NFR-PERF-004` "met"**: a clean measurement here is only a lower-bound
+//! contributor (dispatch-to-grid cost), not an upper bound on the true
+//! end-to-end path, which also includes compositor/GPU present -- this
+//! module's own `frames()`-avoidance means it structurally cannot
+//! measure that part at all, on any machine.
 //!
 //! It still does **not** use the view-build decomposition
 //! (`uses_input_view_decomposition` stays `false` for it): `view` is
@@ -206,12 +216,29 @@ pub struct Measurement {
     /// send still waiting for its own echo to land in the grid -- see
     /// [`Self::note_measured_send`]/[`Self::check_echo_visible`]. Empty
     /// for every criterion but `TerminalFlood`, which never pushes to it.
-    pending_echo: VecDeque<(Instant, usize)>,
+    ///
+    /// **A distinctive per-send marker string, not a repeated character's
+    /// occurrence count** -- response 209's required fix. An earlier
+    /// version tracked "grid occurrence count of a single repeated
+    /// character reaches N," which a real, reproducible property of PTY
+    /// canonical-mode echo defeats: past roughly 20 accumulated
+    /// characters on one unterminated line, this environment's terminal
+    /// occasionally re-echoes the **entire current line** in one wake
+    /// (traced directly: occurrence count jumped from 20 to 41 in a
+    /// single step -- 20 already present plus a full 21-character
+    /// re-echo). A repeated character's Nth occurrence is indistinguishable
+    /// from its (N-1)th reappearing in a redraw; a *new, distinct* marker's
+    /// first appearance cannot be confused with an *old* marker's
+    /// reappearance, so substring presence of a fresh marker per send is
+    /// immune to the same failure. See [`Self::next_echo_marker`].
+    pending_echo: VecDeque<(Instant, String)>,
     /// RFC-017 Amendment 1, PR-A1-D: when [`Self::check_echo_visible`]
     /// was last actually run -- see [`Self::should_check_echo`]'s own
     /// doc for why a real wall-clock throttle, not just "is anything
     /// pending," is required here.
     last_echo_check: Option<Instant>,
+    /// RFC-017 Amendment 1, PR-A1-D: counter behind [`Self::next_echo_marker`].
+    next_marker_index: u64,
 }
 
 impl Measurement {
@@ -247,6 +274,7 @@ impl Measurement {
             started_at: Instant::now(),
             pending_echo: VecDeque::new(),
             last_echo_check: None,
+            next_marker_index: 0,
         })
     }
 
@@ -331,26 +359,38 @@ impl Measurement {
         }
     }
 
-    /// RFC-017 Amendment 1, PR-A1-D: records that `MeasuredTerminalInput`
-    /// has just written its measured character, and that this send's own
-    /// echo has not yet been observed in the grid. `expected_occurrences`
-    /// is the grid's own occurrence count of
-    /// [`MEASURED_KEY_CHARACTER`] *before* this write, plus one -- the
-    /// count [`Self::check_echo_visible`] must see before this send
-    /// counts as visible. Paired with [`Self::record_input`] (called
-    /// right after this, from the same handler) so every send produces
-    /// two samples from one `sent_at`: `input` (dispatch plus the pty
-    /// `write(2)`, unchanged since PR-017-G) and, later, `echo` (the full
-    /// keystroke-to-grid-visible interval `NFR-PERF-004` actually names).
-    pub fn note_measured_send(&mut self, sent_at: Instant, expected_occurrences: usize) {
-        self.pending_echo.push_back((sent_at, expected_occurrences));
+    /// RFC-017 Amendment 1, PR-A1-D, response 209's required fix: a fresh,
+    /// never-reused marker string per send, written to the pty instead of
+    /// a bare repeated character. `"j{index}"` -- keeps `j` as a visible
+    /// prefix (this stays what a real routed `j` keystroke would look
+    /// like echoed) while the numeric suffix makes every send's marker
+    /// distinct from every other send's, which is the property that
+    /// matters: substring presence of a *new* marker cannot be confused
+    /// with an *old* marker's reappearance the way two occurrences of a
+    /// single repeated character can. See the `pending_echo` field's own
+    /// doc for the redraw-duplication finding this replaces.
+    pub fn next_echo_marker(&mut self) -> String {
+        let marker = format!("j{}", self.next_marker_index);
+        self.next_marker_index += 1;
+        marker
+    }
+
+    /// Records that `MeasuredTerminalInput` has just written `marker` to
+    /// the pty, and that this send's own echo has not yet been observed.
+    /// Paired with [`Self::record_input`] (called right after this, from
+    /// the same handler) so every send produces two samples from one
+    /// `sent_at`: `input` (dispatch plus the pty `write(2)`, unchanged
+    /// since PR-017-G) and, later, `echo` (the full keystroke-to-grid-
+    /// visible interval `NFR-PERF-004` actually names).
+    pub fn note_measured_send(&mut self, sent_at: Instant, marker: String) {
+        self.pending_echo.push_back((sent_at, marker));
     }
 
     /// A 1ms floor between real grid checks -- see [`Self::should_check_echo`].
     const ECHO_CHECK_INTERVAL: Duration = Duration::from_millis(1);
 
     /// The caller's guard against computing the (real, `O(grid)`)
-    /// occurrence count on every single wake. **Not just "is anything
+    /// rendered text on every single wake. **Not just "is anything
     /// pending"** -- an earlier version of this method was exactly that,
     /// and it was not enough: under a genuine flood the reader can wake
     /// hundreds of thousands of times per second (measured: 504,712 in
@@ -377,25 +417,41 @@ impl Measurement {
     }
 
     /// Called from `handle_terminal_woke`, guarded by
-    /// [`Self::should_check_echo`], with the grid's current occurrence
-    /// count of [`MEASURED_KEY_CHARACTER`]. Drains every pending send
-    /// whose expected count has now been reached, oldest first, logging
-    /// one `echo`-prefixed sample per drained entry --
-    /// `MEASURED_KEY_CHARACTER` never appears in [`super::FLOOD_SCRIPT`]'s
-    /// own output or the shell's prompt (checked directly, not assumed),
-    /// so every occurrence in the grid is this criterion's own doing and
-    /// a same-character queue is not at risk of confusing flood noise
-    /// for an echo.
-    pub fn check_echo_visible(&mut self, current_occurrences: usize) {
+    /// [`Self::should_check_echo`], with the grid's current rendered
+    /// text. Checks **every** pending send's own marker independently
+    /// (not just the oldest) -- markers are not ordered the way occurrence
+    /// counts were, so an out-of-order arrival must not head-of-line-block
+    /// a later marker that already landed. Logs one `echo`-prefixed sample
+    /// per marker found, oldest-`sent_at`-first for log readability, and
+    /// removes it from the pending queue.
+    ///
+    /// **The accumulated input line is never cleared, deliberately --
+    /// response 209's second caution ("decide what happens as the line
+    /// grows... pick one and state it") is answered by letting it grow
+    /// for the run's own bounded lifetime.** A `Ctrl+U` (`VKILL`) clear
+    /// was built and reverted: it would have added a fourth production
+    /// `TerminalPane::write_input` call site, and
+    /// `write_terminal_input_has_exactly_the_three_named_production_call_sites`
+    /// (`shell::tests`, RFC-018's own "one PTY ingress" enumeration)
+    /// exists specifically to catch that -- exactly the trap its own doc
+    /// names ("a second inline `.write_input(` call in a new message
+    /// arm"). A diagnostic-only line-length concern is not worth
+    /// expanding a security-reviewed enumeration for without review; a
+    /// bounded run (`target`, default 1,100 sends) times a short marker
+    /// is a bounded total line length, which is the accepted tradeoff
+    /// this method makes instead.
+    pub fn check_echo_visible(&mut self, rendered_text: &str) {
         self.last_echo_check = Some(Instant::now());
-        while let Some(&(sent_at, expected)) = self.pending_echo.front() {
-            if current_occurrences < expected {
-                break;
+        let mut still_pending = VecDeque::with_capacity(self.pending_echo.len());
+        while let Some((sent_at, marker)) = self.pending_echo.pop_front() {
+            if rendered_text.contains(&marker) {
+                let elapsed = Instant::now().saturating_duration_since(sent_at);
+                let _ = writeln!(self.log, "echo {}", elapsed.as_micros());
+            } else {
+                still_pending.push_back((sent_at, marker));
             }
-            let elapsed = Instant::now().saturating_duration_since(sent_at);
-            let _ = writeln!(self.log, "echo {}", elapsed.as_micros());
-            self.pending_echo.pop_front();
         }
+        self.pending_echo = still_pending;
     }
 
     pub fn is_done(&self) -> bool {
@@ -434,6 +490,7 @@ impl Measurement {
             started_at: Instant::now(),
             pending_echo: VecDeque::new(),
             last_echo_check: None,
+            next_marker_index: 0,
         }
     }
 }
