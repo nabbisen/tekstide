@@ -178,6 +178,17 @@ Status: substrate decided, application shell, and mode switching implemented by 
   name. No GUI change needed — `crates/tekstide`'s own `count_display_args` and the i18n
   enforcement scan's exempt-literal list already supported `CountDisplay::Unknown` before
   this fix landed.
+- **The `tekstide-core` test suite leaks real shell processes — roughly 87 orphaned
+  `/bin/sh` per full run.** Found 2026-08-15 while diagnosing PR-A1-A's own (since-fixed)
+  test flakiness, and disclosed rather than absorbed (review request 201, response 201).
+  Each carries `PS1=tekstide$` and reparents to `systemd --user` after the run completes.
+  **Not introduced by the reader work**: its four new tests leak zero in isolation,
+  confirmed across repeated runs both alone and combined, and the ~87 come from the other
+  547 tests. Whoever picks this up should check the connection to **the RFC-021 socket
+  flake**, whose diagnosed mechanism was a fork window (10 failures/200 with forking tests,
+  0/200 without) — a suite that leaves 87 live processes behind is a plausible source of
+  the same pressure, and the two were investigated a fortnight apart without being linked.
+  Belongs to general test hygiene; no RFC owns it today, which is why it is here.
 - **No `NavigationAction` reaches `AppCommand::OpenActiveProjectWorkspace` directly.**
   Found during RFC-019 PR-019-C's GUI evidence work (response 181, 2026-08-11):
   `SwitchActiveProject`'s own keybinding is `None`/`Configurable`, already disclosed as
