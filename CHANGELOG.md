@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.9.0 - Transcript Capture, Re-homed
+
+Status: released on 2026-08-16.
+
+**A correctness release with nothing a user can see.** `0.8.0` replaced the terminal's read
+path; this repairs a capability that replacement silently removed. It is published because
+the fix should not sit unreleased while the work that depends on it is designed — not
+because it adds anything reachable.
+
+### Fixed
+
+- **Transcript capture, which `0.8.0` had silently stopped performing.** The old read path
+  wrote every byte to the transcript as a side effect of a function named for something
+  else, and it was the only transcript-writing code in the workspace. When `0.8.0` moved the
+  terminal's ingress to a dedicated reader thread, capture went with the old path — nothing
+  failed, because nothing in this release or any before it creates an AgentRun, so no
+  transcript writer is ever configured.
+
+  Capture now lives in the reader thread, and writes **before** the bytes reach the display,
+  so the durable record is a superset of what was shown rather than the reverse. Mid-stream
+  write failure has a real policy for the first time: best-effort capture marks itself
+  failed and keeps the terminal usable, while required capture stops reading — so the
+  process stalls on its own `write()` rather than making progress that is not being
+  recorded, and is not killed.
+
+### Breaking
+
+- **`TranscriptWriterConfig` gained a public `mode` field**, and its `new` constructor a
+  third parameter. Callers constructing it either way must be updated. This is what makes
+  the release `0.9.0` rather than `0.8.1`.
+
+### Not in this release
+
+Nothing user-visible, deliberately. Transcript retention is still **not wired into the
+desktop application** — nothing creates an AgentRun, so no transcript is ever written in
+practice. This release makes the capability correct *before* the work that will depend on
+it, rather than after.
+
+Command approval, diff content, the transcript reader, and the diff/AgentRun surfaces all
+remain implemented, reviewed and unreachable, waiting on an adapter-spawn pathway that does
+not exist. `NFR-PERF-004` remains not met.
+
+### Also in this cycle
+
+- A test-concurrency flake in the terminal reader suite, which made the workspace gate fail
+  roughly one run in five, is fixed. Three separate bugs were behind it, two of them found
+  only because a full-serialisation experiment failed to resolve the flake and the theory
+  was re-examined rather than the fix tuned.
+
+
 ## 0.8.0 - Readiness-Driven Terminal I/O
 
 Status: released on 2026-08-15.
