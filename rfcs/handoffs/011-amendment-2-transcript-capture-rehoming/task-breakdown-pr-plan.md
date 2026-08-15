@@ -35,9 +35,13 @@ Review gate:
 - **P1/P2 re-run**, not assumed to transfer. The writer is a new consumer of the byte
   stream inside the thread; prove it is not a second path out of it.
 
-## PR-A2-B — The failure policy
+## PR-A2-B — The failure policy [Evidence complete — pending review request 212]
 
 Both capture modes, against real failures.
+
+See [`qa-evidence.md`](./qa-evidence.md#pr-a2-b---the-failure-policy) for the full evidence
+record. A separate, pre-existing test-concurrency finding surfaced while closing this out —
+recorded as review request 212, not part of this gate, and does not block it.
 
 Review gate:
 

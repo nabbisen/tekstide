@@ -526,6 +526,22 @@ fn backpressure_stalls_the_producer_and_resumes_with_no_byte_loss_across_the_sta
 /// reading the *same* raw PTY stream the reader thread saw, so nothing
 /// short of an actual bug (a chunk written but not sent, or vice versa)
 /// could make them differ.
+/// **Found live, under full-workspace-suite contention, and fixed**: the
+/// first version of this test used `drain_until_contains` to collect
+/// `drained`, which returns as soon as the marker text appears -- before
+/// the reader thread has necessarily delivered *later* chunks (the
+/// echoed `exit\r\n`, any trailing bytes) to the channel, since whether
+/// those bytes land in the same read chunk as the marker or a later one
+/// depends on real scheduling timing. Comparing against a channel drain
+/// taken that early produced a genuine, reproducible one-line-short
+/// mismatch once under contention (`drained` missing the shell's own
+/// `exit\r\n` echo that the transcript file still had) -- disclosed
+/// here rather than silently patched; see `qa-evidence.md`. Fixed by
+/// waiting for the reader's own wake notifier to report no more wakes
+/// are coming (the same "reader has permanently stopped" signal
+/// `the_wake_notifier_delivers_a_final_wake_and_then_reports_no_more_are_coming`
+/// already proves is accurate) before draining, so nothing sent after
+/// the marker but before the reader's own completion can be missed.
 #[test]
 fn transcript_written_through_the_reader_thread_is_byte_identical_to_pty_output() {
     let (mut runtime, handle, storage, dirs) =
@@ -533,16 +549,31 @@ fn transcript_written_through_the_reader_thread_is_byte_identical_to_pty_output(
     let reader = runtime
         .spawn_output_reader(&handle)
         .expect("reader thread should spawn against a real PTY master");
+    let notifier = reader
+        .try_clone_wake_notifier()
+        .expect("wake notifier should clone against a live reader");
 
     runtime
         .write_input(&handle, b"printf 'tekstide-transcript-marker\\n'\nexit\n")
         .expect("marker command should write to PTY");
 
-    let drained = drain_until_contains(
-        &reader,
-        b"tekstide-transcript-marker",
-        Duration::from_secs(5),
-    );
+    let (done_sender, done_receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        loop {
+            if !notifier.block_until_woken() {
+                let _ = done_sender.send(());
+                return;
+            }
+        }
+    });
+    if done_receiver.recv_timeout(Duration::from_secs(5)).is_err() {
+        panic!(
+            "the reader never reported it had permanently stopped within 5s after the marker \
+             command exited -- EOF is not reaching the wake signal"
+        );
+    }
+
+    let drained = reader.drain_available().into_bytes();
     assert!(
         contains_subsequence(&drained, b"tekstide-transcript-marker"),
         "the channel should carry the real marker output; drained: {}",
@@ -892,6 +923,248 @@ fn only_two_named_production_call_sites_ever_append_to_a_transcript_writer() {
          call site appeared or disappeared without this test being updated to say so: \
          {occurrences:?}"
     );
+}
+
+/// RFC-011 Amendment 2, D3: `LocalBounded`'s mid-stream failure policy,
+/// exercised against a real, genuinely unwritable transcript -- not an
+/// injected error value. `/dev/full` is a real kernel character device
+/// that always fails `write(2)` with `ENOSPC`, the identical failure a
+/// truly full filesystem produces, without needing root or any
+/// filesystem setup of its own, and isolated to just this one path (no
+/// other test or process is affected).
+#[test]
+fn local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable()
+ {
+    let (mut runtime, handle, _storage, dirs) = launch_with_unwritable_transcript_capture(
+        "local-bounded-unwritable",
+        TranscriptCaptureMode::LocalBounded,
+    );
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against a real PTY master");
+
+    runtime
+        .write_input(&handle, b"printf 'trigger-the-failed-write\\n'\n")
+        .expect("trigger command should write to PTY");
+
+    let summary = wait_for_summary_state(
+        &reader,
+        TranscriptRetentionState::CaptureFailed,
+        Duration::from_secs(5),
+    );
+    assert_eq!(
+        summary.retention_state,
+        TranscriptRetentionState::CaptureFailed,
+        "writing to a real, always-full device should mark the transcript CaptureFailed, not \
+         silently succeed or stay Active"
+    );
+
+    // LocalBounded: reading resumes for later chunks even though
+    // capture is now permanently off for this reader's remaining
+    // lifetime -- the terminal must stay usable. Proven, not assumed,
+    // by writing a second, distinct marker *after* the failure and
+    // confirming it actually reaches the reader's channel.
+    runtime
+        .write_input(
+            &handle,
+            b"printf 'still-usable-after-capture-failed\\n'\nexit\n",
+        )
+        .expect("second marker command should write to PTY");
+    let output = drain_until_contains(
+        &reader,
+        b"still-usable-after-capture-failed",
+        Duration::from_secs(5),
+    );
+    assert!(
+        contains_subsequence(&output, b"still-usable-after-capture-failed"),
+        "LocalBounded must keep reading after a capture failure -- the terminal stays usable \
+         even though its transcript stopped; captured: {}",
+        String::from_utf8_lossy(&output)
+    );
+
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("shell wait should not fail");
+    assert_eq!(outcome, Some(TerminationOutcome::Exited { exit_status: 0 }));
+    drop(reader);
+    drop(dirs);
+}
+
+/// RFC-011 Amendment 2, D3: `RequiredLocalBounded`'s mid-stream failure
+/// policy -- marks `CaptureFailed`, stops reading **altogether** (not
+/// just the one failing chunk), and applies RFC-017 Amendment 1's
+/// backpressure so the child stalls on its own `write(2)` rather than
+/// being killed; termination stays the caller's decision. Exercised
+/// separately from the `LocalBounded` case above, against the same
+/// real `/dev/full` device, per the pack's own gate ("covering only
+/// LocalBounded proves the easier half").
+#[test]
+fn required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it()
+ {
+    let (mut runtime, handle, _storage, dirs) = launch_with_unwritable_transcript_capture(
+        "required-local-bounded-unwritable",
+        TranscriptCaptureMode::RequiredLocalBounded,
+    );
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against a real PTY master");
+
+    // `yes` produces output continuously and directly, so once the
+    // reader thread stops draining the PTY (below), `yes`'s own
+    // `write(2)` calls fill the PTY's kernel buffer and then block --
+    // the real backpressure D3 describes, not a synthesised stall.
+    runtime
+        .write_input(&handle, b"yes never-drained-because-reading-stopped\n")
+        .expect("payload command should write to PTY");
+
+    let summary = wait_for_summary_state(
+        &reader,
+        TranscriptRetentionState::CaptureFailed,
+        Duration::from_secs(5),
+    );
+    assert_eq!(
+        summary.retention_state,
+        TranscriptRetentionState::CaptureFailed
+    );
+
+    // "Stops reading altogether": every chunk `yes` produces after the
+    // first (failing) one must never reach the channel either -- not
+    // just the one that failed. Poll for a sustained window rather than
+    // a single snapshot, so a reader that resumed reading a moment
+    // later would still be caught.
+    let mut drained_total = 0_usize;
+    let deadline = Instant::now() + Duration::from_millis(500);
+    while Instant::now() < deadline {
+        drained_total += reader.drain_available().bytes().len();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        drained_total, 0,
+        "RequiredLocalBounded must stop reading entirely on capture failure -- any bytes \
+         reaching the channel after CaptureFailed would be unrecorded output making it to the \
+         display, exactly what D2's ordering guarantee exists to prevent"
+    );
+
+    // The child is stalled, not killed: still alive, blocked on its own
+    // `write(2)` into a full PTY buffer, well past the point a killed
+    // process would already have been reaped.
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_millis(300))
+        .expect("inspecting the child's status should not fail");
+    assert_eq!(
+        outcome, None,
+        "the child must still be alive and merely stalled, not exited or killed, while \
+         RequiredLocalBounded has stopped reading"
+    );
+
+    // Termination stays the caller's decision, and still works even
+    // though the reader stopped draining -- SIGTERM reaches a process
+    // blocked in write(2) exactly as it would any other blocking call.
+    let events = runtime
+        .request_terminate(
+            &handle,
+            TerminationRequest {
+                source: TerminationRequestSource::TestHarness,
+                reason: BoundedRuntimeSummary::new("required-local-bounded stall cleanup"),
+            },
+            Duration::from_secs(2),
+            Duration::from_secs(2),
+        )
+        .expect("terminating a stalled RequiredLocalBounded child should still succeed");
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, TerminalRuntimeEvent::Terminated { .. })),
+        "termination must still succeed against a child stalled on write(2), not hang or \
+         silently no-op: {events:?}"
+    );
+
+    drop(reader);
+    drop(dirs);
+}
+
+/// Polls [`TerminalReader::transcript_write_summary`] until it reports
+/// `expected`, or panics after `timeout` -- the observability half of
+/// D3's "the failure must be observable" requirement: this is the exact
+/// mechanism (D1's chosen replacement, `TerminalReader`'s own accessor)
+/// a real caller would use to notice a capture failure.
+fn wait_for_summary_state(
+    reader: &TerminalReader,
+    expected: TranscriptRetentionState,
+    timeout: Duration,
+) -> TranscriptWriteSummary {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(summary) = reader.transcript_write_summary()
+            && summary.retention_state == expected
+        {
+            return summary;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "transcript_write_summary did not reach {expected:?} within {timeout:?} \
+                 (last seen: {:?})",
+                reader.transcript_write_summary()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Same shape as [`launch_with_transcript_capture`], except the
+/// resolved transcript path is replaced on disk with a symlink to
+/// `/dev/full` before launch. `TranscriptStoragePath::is_safe_for_write`
+/// checks containment with a lexical `Path::starts_with`, not a
+/// symlink-resolving one, so the resolved path still passes it; opening
+/// it (`OpenOptions::open`, which follows symlinks) reaches the real
+/// device instead. `BoundedTranscriptWriter::create`'s own `open()`
+/// call succeeds against `/dev/full` (only writes to it fail), so the
+/// shell launch itself succeeds -- the failure genuinely happens
+/// mid-stream, inside the reader thread's first write attempt, not at
+/// preflight.
+fn launch_with_unwritable_transcript_capture(
+    label: &str,
+    mode: TranscriptCaptureMode,
+) -> (
+    LinuxTerminalRuntime,
+    TerminalRuntimeHandle,
+    TranscriptStoragePath,
+    TestDirs,
+) {
+    let dirs = TestDirs::new(label);
+    let project = project_session(ProjectId::for_test(1), &dirs.project_root);
+    let mut spec = TerminalLaunchSpec::plain_shell(
+        project.id().clone(),
+        "Shell",
+        &dirs.project_root,
+        "/bin/sh",
+    );
+    let request = TranscriptPathRequest::new(
+        &dirs.state_root,
+        &dirs.project_root,
+        ProjectId::for_test(1),
+        AgentRunId::for_test(1),
+    );
+    let storage_path = TranscriptPathResolver
+        .resolve_agent_run(request)
+        .expect("test storage path should resolve");
+    std::fs::create_dir_all(storage_path.transcript_dir())
+        .expect("transcript dir should be creatable");
+    std::os::unix::fs::symlink("/dev/full", storage_path.transcript_file())
+        .expect("symlinking the resolved transcript path to /dev/full should succeed");
+    spec.set_transcript_writer_config(Some(TranscriptWriterConfig::new(
+        storage_path.clone(),
+        TranscriptRetentionLimits::agent_run_default(),
+        mode,
+    )));
+
+    let mut runtime = LinuxTerminalRuntime::new();
+    let (terminal, _) = runtime.launch_project_shell(&project, spec).expect(
+        "shell launch should succeed even though the transcript path is unwritable -- \
+         opening /dev/full for write succeeds; only later writes to it fail",
+    );
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    (runtime, handle, storage_path, dirs)
 }
 
 fn launch_with_transcript_capture(

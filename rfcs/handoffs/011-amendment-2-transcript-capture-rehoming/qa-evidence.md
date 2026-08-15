@@ -162,7 +162,73 @@ clean against the final state.
 
 ## PR-A2-B - The failure policy
 
-*Not started.*
+**A genuinely unwritable transcript, not an injected error value.** Both new tests
+(`local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable`,
+`required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it`,
+both in `runtime/terminal/reader/tests.rs`) point the resolved transcript path at a real
+symlink to `/dev/full` — a kernel character device that always fails `write(2)` with
+`ENOSPC`, the identical failure a truly full filesystem produces, without root and without
+mounting anything. `TranscriptStoragePath::is_safe_for_write`'s containment check is a
+lexical `Path::starts_with`, not symlink-resolving, so the resolved, in-policy path still
+passes it; `OpenOptions::open` (which follows symlinks) reaches the real device.
+`BoundedTranscriptWriter::create`'s own `open()` succeeds against it — only writes fail —
+so the shell launch itself succeeds and the failure genuinely happens mid-stream, inside
+the reader thread's first write attempt, not at preflight.
+
+**`LocalBounded`**: the trigger write fails, `transcript_write_summary()` reports
+`CaptureFailed` (polled via a real accessor call, not asserted from the writer's own
+internal state), and a second, later marker written *after* the failure still reaches the
+channel — proven by draining for it, not assumed from the mode's name. Terminal stays
+usable.
+
+**`RequiredLocalBounded`**: exercised separately, against a continuous `yes` producer so a
+real, sustained backpressure scenario exists to observe. The very first chunk read fails
+(same `/dev/full` device), so **zero bytes ever reach the channel for this reader's entire
+lifetime** — polled for a sustained 500ms window to catch a reader that resumed reading a
+moment later, not just a single snapshot. The child is confirmed alive and merely stalled
+(`wait_for_exit(..., 300ms)` returns `None`, not `Some(Exited/Terminated)`), not killed.
+`request_terminate` still succeeds against it within its normal timeout — SIGTERM reaches a
+process blocked in `write(2)` exactly as it would any other blocking call, so termination
+stays available to the caller as D3 requires.
+
+**`CaptureFailed` is the existing state** (`domain/transcript.rs:93`) — no new state
+introduced, per the pack's own instruction.
+
+**The failure is observable, and where it surfaces is stated.** `TerminalReader::transcript_write_summary()`
+(D1's mechanism, PR-A2-A) is the observation point for both modes; both new tests poll it
+directly rather than inferring the failure from a side effect.
+
+**Ablated**: removed the `CaptureFailed`-marking write in `ReaderTranscriptState::record_write`'s
+`Err` branch (kept `self.failed = true` and the `stop_reading` policy split, since ablating
+*those* would test a different property). Both new tests failed with the same concrete
+wrong value: `TranscriptWriteSummary { byte_count: 0, retention_state: Active }` — the
+transcript looks untouched and healthy even though the write genuinely failed, exactly the
+silent-success class of defect this ablation exists to catch. Reverted; both tests pass
+again.
+
+**A second, unrelated bug was found and fixed while re-running the full gate to close this
+out**: `transcript_written_through_the_reader_thread_is_byte_identical_to_pty_output`
+(PR-A2-A) compared a channel drain taken via `drain_until_contains` — which returns as soon
+as the marker text appears — against the full transcript file. Under real scheduling
+variance the shell's own `exit\r\n` echo can land in a read chunk *after* the one containing
+the marker, so the comparison raced; reproduced live with a concrete byte-exact mismatch
+(`drained` missing the trailing `exit\r\n` the transcript file still had). Fixed by waiting
+for the reader's own wake notifier to report no more wakes are coming (the same signal
+`the_wake_notifier_delivers_a_final_wake_and_then_reports_no_more_are_coming` already proves
+accurate) before taking the final drain. Unrelated to D3; disclosed here because it surfaced
+during this slice's own gate runs.
+
+**A separate, pre-existing test-concurrency finding — not yet resolved — is recorded as
+review request 212**, not here: under default full test-parallelism, `runtime::terminal::reader::tests`
+now has 15 real-PTY-spawning tests (10 from PR-A1-C/D, 5 from this amendment) sharing a
+5-second wake-timeout convention that was never stress-tested against this many concurrent
+real subprocesses. Isolated sweeps show 0/8 failures at ≤4 concurrent real-PTY tests,
+escalating to 5/8 at 16-way (this machine's default). The actual gate command reproduced it
+at roughly 1 run in 5. Root-caused to `fork()`'s known cost scaling with a test binary's
+total thread count, not a logic bug in the wake mechanism (re-checked and sound) or in D1-D3
+themselves. A scope decision (fix file-wide, fix only this amendment's 5 added tests, or
+disclose and defer) is pending the architect's response to request 212; this PR-A2-B
+evidence above is complete and correct independent of which option is chosen.
 
 ## PR-A2-C - Closeout
 
