@@ -139,26 +139,32 @@ Status: substrate decided, application shell, and mode switching implemented by 
   `project::content::save_active_document`: read `document.state()` (or the document's
   own dirty flag at the point of the error) the same way the shell-side fix now does,
   rather than collapsing both cases before the caller ever sees them.
-- **The project board tells the user terminals are not implemented, in a build where they
-  are.** Found in PR-018-G's own baseline screenshot (`00-baseline-no-modal.png`, response
-  195, 2026-08-12): the board row renders `terminals: not implemented` and
-  `agent runs: not implemented`, while `05` in the same pack shows a terminal running in
+- **The project board told the user terminals were not implemented, in a build where they
+  were — fixed 2026-08-15 (`rfcs/handoffs/status-mapping-honesty-fixes.md`, Fix 1).**
+  Found in PR-018-G's own baseline screenshot (`00-baseline-no-modal.png`, response 195,
+  2026-08-12): the board row rendered `terminals: not implemented` and
+  `agent runs: not implemented`, while `05` in the same pack showed a terminal running in
   the same build. `RuntimeSummary::default()` sets `terminal_count: None`
   (`project/runtime.rs:25`); `refresh_runtime_summary_from_collections` only raises it to
   `Some(..)` when a collection actually mutates (`project/session.rs:1181`); and
-  `active_session_row`'s `.unwrap_or(CountDisplay::NotImplemented)`
-  (`project_board.rs:192-195`) renders that `None` as **"not implemented."** So `None`
-  carries two incompatible meanings — *the feature does not exist* and *nothing has
-  happened yet* — and the label asserts the first when the truth is the second. A
-  freshly-opened project claims the feature is absent; launching one terminal silently
-  flips the same line to `terminals: 1`. **Same shape as the `content.rs:174` entry
-  above** — a status mapped unconditionally where the truth is conditional — and it is a
-  false statement in trusted chrome, the category RFC-018 exists to defend. The fix is
-  not to default the count to `Some(0)` at construction (that just moves the guess): it is
-  to stop overloading `None`, so "unknown" and "not implemented" are separate states and
-  the board can say `terminals: 0` when it means zero. `agent_run_count` has the identical
-  defect on the same two lines, and `recent_project_row` (`project_board.rs:245-250`)
-  hardcodes `NotImplemented` for five fields where the honest answer is "no open session."
+  `active_project_row`'s `.unwrap_or(CountDisplay::NotImplemented)`
+  (`project_board.rs`) rendered that `None` as **"not implemented."** `None` carried two
+  incompatible meanings — *the feature does not exist* and *nothing has happened yet* —
+  and the label asserted the first when the truth was the second. **Fixed**: both
+  `.unwrap_or(...)` calls now read `CountDisplay::Unknown` (already an existing, correctly
+  labelled, but never-constructed variant), with a doc comment on `CountDisplay` itself
+  recording the distinction so it cannot be re-conflated silently. `recent_project_row`'s
+  five hardcoded `NotImplemented` fields (a recent, unopened project has no session to
+  count from — "nothing has happened yet," the same shape, not a separate limitation) were
+  fixed the same way, decided and stated rather than left ambiguous. Proven with a positive
+  control before the negative (a project with a real terminal reports `KnownCount(1)`,
+  *then* an empty project reports `Unknown`) and ablated for real: reverting either
+  `unwrap_or` call back to `NotImplemented` fails both
+  `project_rows_preserve_placeholder_field_shape_without_probing` and
+  `a_project_with_a_terminal_reports_a_real_count_and_an_empty_one_reports_unknown` by
+  name. No GUI change needed — `crates/tekstide`'s own `count_display_args` and the i18n
+  enforcement scan's exempt-literal list already supported `CountDisplay::Unknown` before
+  this fix landed.
 - **No `NavigationAction` reaches `AppCommand::OpenActiveProjectWorkspace` directly.**
   Found during RFC-019 PR-019-C's GUI evidence work (response 181, 2026-08-11):
   `SwitchActiveProject`'s own keybinding is `None`/`Configurable`, already disclosed as

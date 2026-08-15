@@ -23,6 +23,12 @@ fn empty_project_board_has_first_run_state() {
     assert_eq!(view_model.global_attention_summary, "Calm");
 }
 
+/// **status-mapping-honesty-fixes, Fix 1**: a freshly opened project has
+/// not yet had `refresh_runtime_summary_from_collections` run (no
+/// terminal or agent run has ever been added), so `terminal_count`/
+/// `agent_run_count` must read `Unknown` -- "nothing counted yet" -- not
+/// `NotImplemented`, which would falsely claim the features do not
+/// exist. See `CountDisplay`'s own doc comment.
 #[test]
 fn project_rows_preserve_placeholder_field_shape_without_probing() {
     let mut state = AppState::default();
@@ -35,8 +41,8 @@ fn project_rows_preserve_placeholder_field_shape_without_probing() {
     assert_eq!(view_model.rows.len(), 1);
     let row = &view_model.rows[0];
     assert_eq!(row.branch_status, CountDisplay::Unavailable);
-    assert_eq!(row.terminal_count, CountDisplay::NotImplemented);
-    assert_eq!(row.agent_run_count, CountDisplay::NotImplemented);
+    assert_eq!(row.terminal_count, CountDisplay::Unknown);
+    assert_eq!(row.agent_run_count, CountDisplay::Unknown);
     assert_eq!(row.approval_count, CountDisplay::KnownCount(0));
     assert_eq!(row.review_count, CountDisplay::KnownCount(0));
     assert_eq!(row.dirty_file_count, CountDisplay::KnownCount(0));
@@ -110,6 +116,38 @@ fn restored_stale_recent_project_is_displayed_without_active_session() {
         RestrictedModeFeature::ALL.len()
     );
     assert_eq!(view_model.rows[0].row_kind, BoardRowKind::RecentMissing);
+}
+
+/// **status-mapping-honesty-fixes, Fix 1: `recent_project_row`'s own
+/// five fields, fixed the same way, not disclosed as a separate
+/// limitation.** A recent-but-unopened project has no `ProjectSession`
+/// to count from at all -- the same "nothing has happened yet" shape as
+/// a freshly opened project before its first collection mutation, not a
+/// claim that any of these features do not exist.
+#[test]
+fn a_recent_unopened_project_reports_unknown_counts_not_not_implemented() {
+    let mut state = AppState::default();
+    state.restore_recent_projects(RecentProjectState {
+        state_version: 1,
+        projects: vec![RecentProject::new(
+            ProjectId::for_test(1),
+            "Recent Project",
+            "/recent/project",
+            "/recent/project",
+            Timestamp::from_persisted("2026-07-04T00:00:00Z"),
+            "Trusted",
+        )],
+    });
+
+    let view_model = ProjectBoardViewModel::from_app_state(&state);
+
+    assert_eq!(view_model.rows.len(), 1);
+    let row = &view_model.rows[0];
+    assert_eq!(row.terminal_count, CountDisplay::Unknown);
+    assert_eq!(row.agent_run_count, CountDisplay::Unknown);
+    assert_eq!(row.approval_count, CountDisplay::Unknown);
+    assert_eq!(row.review_count, CountDisplay::Unknown);
+    assert_eq!(row.dirty_file_count, CountDisplay::Unknown);
 }
 
 #[test]
@@ -200,6 +238,62 @@ fn view_model_uses_runtime_summary_for_known_counts_and_attention() {
     assert_eq!(row.dirty_file_count, CountDisplay::KnownCount(5));
     assert_eq!(row.attention, AttentionState::ApprovalNeeded);
     assert_eq!(view_model.global_attention_summary, "Approval needed");
+}
+
+/// **status-mapping-honesty-fixes, Fix 1's own required proof: a
+/// positive control before the negative.** Asserting only that an
+/// empty project reads `Unknown` would pass against a board that always
+/// reports `Unknown` regardless of real state -- proven wrong first, on
+/// a real terminal actually added to a *different* project, before the
+/// empty project's own row is checked.
+#[test]
+fn a_project_with_a_terminal_reports_a_real_count_and_an_empty_one_reports_unknown() {
+    let mut state = AppState::default();
+    let populated_id =
+        state.add_project_session("Populated", "/workspace/populated", "/workspace/populated");
+    let mut terminal = TerminalSession::new(
+        populated_id.clone(),
+        TerminalKind::Plain,
+        "Shell",
+        "/workspace/populated",
+        "bash",
+    );
+    terminal.transition_to(TerminalStatus::Running).unwrap();
+    state
+        .project_mut(&populated_id)
+        .expect("project should exist")
+        .add_terminal_session(terminal)
+        .unwrap();
+    let empty_id = state.add_project_session("Empty", "/workspace/empty", "/workspace/empty");
+
+    let view_model = ProjectBoardViewModel::from_app_state(&state);
+
+    let populated_row = view_model
+        .rows
+        .iter()
+        .find(|row| row.project_id == populated_id)
+        .expect("populated project must have a row");
+    assert_eq!(
+        populated_row.terminal_count,
+        CountDisplay::KnownCount(1),
+        "the positive control: a project with a real terminal must report a real count"
+    );
+
+    let empty_row = view_model
+        .rows
+        .iter()
+        .find(|row| row.project_id == empty_id)
+        .expect("empty project must have a row");
+    assert_eq!(
+        empty_row.terminal_count,
+        CountDisplay::Unknown,
+        "a project that has never added a terminal must read Unknown, not NotImplemented"
+    );
+    assert_eq!(
+        empty_row.agent_run_count,
+        CountDisplay::Unknown,
+        "agent_run_count has the identical defect on the same two lines"
+    );
 }
 
 #[test]

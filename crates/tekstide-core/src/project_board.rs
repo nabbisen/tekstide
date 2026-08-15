@@ -3,6 +3,15 @@ use crate::project::recent::{RecentProjectAvailability, RestoredRecentProject};
 use crate::project::{ProjectId, ProjectRuntimeSummary, ProjectSession};
 use crate::security::RestrictedModeSummary;
 
+/// `NotImplemented` and `Unknown` answer different questions and must not
+/// be conflated: `NotImplemented` claims the feature does not exist;
+/// `Unknown` says the feature exists but nothing has counted it yet (a
+/// fresh session before its first collection mutation, or a recent
+/// project that has never been opened). Overloading one `Option::None`
+/// to mean both was the defect the status-mapping-honesty-fixes handoff
+/// found live in `0.7.0` -- a freshly opened project claimed terminals
+/// were unimplemented, and the same line silently became a real count
+/// the moment one was launched.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CountDisplay {
     KnownCount(u32),
@@ -189,14 +198,19 @@ fn active_project_row(project: &ProjectSession) -> ProjectBoardRow {
             .map(str::to_owned)
             .collect(),
         branch_status: CountDisplay::Unavailable,
+        // `Unknown`, not `NotImplemented`: `terminal_count`/`agent_run_count`
+        // are `None` only until `refresh_runtime_summary_from_collections`
+        // first runs (session.rs) -- a freshly opened project that has not
+        // yet added a terminal or agent run, not a project whose terminals
+        // do not exist. See `CountDisplay`'s own doc comment.
         terminal_count: runtime_summary
             .terminal_count
             .map(CountDisplay::KnownCount)
-            .unwrap_or(CountDisplay::NotImplemented),
+            .unwrap_or(CountDisplay::Unknown),
         agent_run_count: runtime_summary
             .agent_run_count
             .map(CountDisplay::KnownCount)
-            .unwrap_or(CountDisplay::NotImplemented),
+            .unwrap_or(CountDisplay::Unknown),
         approval_count: CountDisplay::KnownCount(runtime_summary.pending_approvals),
         review_count: CountDisplay::KnownCount(runtime_summary.review_ready_changes),
         dirty_file_count: CountDisplay::KnownCount(runtime_summary.dirty_files),
@@ -242,11 +256,16 @@ fn recent_project_row(restored: &RestoredRecentProject) -> ProjectBoardRow {
             .map(str::to_owned)
             .collect(),
         branch_status: CountDisplay::Unavailable,
-        terminal_count: CountDisplay::NotImplemented,
-        agent_run_count: CountDisplay::NotImplemented,
-        approval_count: CountDisplay::NotImplemented,
-        review_count: CountDisplay::NotImplemented,
-        dirty_file_count: CountDisplay::NotImplemented,
+        // Same fix as `active_project_row`, not a disclosed limitation:
+        // a recent-but-unopened project has no `ProjectSession` to count
+        // from, which is "nothing has happened yet" -- the same shape as
+        // a freshly opened project before its first collection mutation,
+        // not a claim that any of these five features do not exist.
+        terminal_count: CountDisplay::Unknown,
+        agent_run_count: CountDisplay::Unknown,
+        approval_count: CountDisplay::Unknown,
+        review_count: CountDisplay::Unknown,
+        dirty_file_count: CountDisplay::Unknown,
         attention: AttentionState::Calm,
         attention_label: AttentionState::Calm.label().to_owned(),
         row_kind,
