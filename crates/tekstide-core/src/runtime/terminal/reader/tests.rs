@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Condvar, Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::domain::AgentRunId;
@@ -14,8 +14,104 @@ use crate::transcript::{
 
 use super::super::*;
 
+/// Caps how many of this file's real-PTY-spawning tests run their
+/// spawn-through-cleanup critical section at once, regardless of
+/// `--test-threads`.
+///
+/// Real subprocess spawning inside a heavily multi-threaded test binary
+/// gets measurably slower as the binary's total thread count grows --
+/// `fork()`'s well-known cost scaling with the parent process's thread
+/// count. The first version of this measurement (see review request
+/// 212) was confounded by a real, separate bug in one of this file's
+/// own tests (channel starvation while waiting for a final wake without
+/// draining in between -- see
+/// `transcript_written_through_the_reader_thread_is_byte_identical_to_pty_output`'s
+/// own doc comment), which failed at low thread counts for a reason
+/// unrelated to contention. **Corrected measurement, that bug fixed**,
+/// `cargo test -p tekstide-core --lib runtime::terminal::reader::tests::`,
+/// isolated, no other workspace tests running:
+///
+/// | `--test-threads`            | failures |
+/// |---|---|
+/// | 2                            | 0/8 |
+/// | 4                            | 0/8 |
+/// | 8                            | 0/8, then 0/20 on a larger sample |
+/// | 16 (this machine's default)  | 6/8 |
+///
+/// **6 is the cap**: below the clean 8-thread measurement for margin,
+/// and confirmed clean itself at 0/30 default-concurrency runs of this
+/// file plus 0/25 runs of the full `cargo test --workspace
+/// --all-targets --all-features` gate. Response 212 independently
+/// reproduced the original (confounded) shape and found the *identity*
+/// of the failing test changing between repeats -- the signature of
+/// contention, not any one test being wrong; that observation still
+/// holds for the residual, now-isolated contention effect this cap
+/// addresses.
+///
+/// **What this removes**: wall-clock overlap between *different test
+/// functions'* real processes -- nothing else. It does not remove any
+/// coverage of concurrent readers *within* a single test: no test in
+/// this file spawns more than one `TerminalReader` (checked directly
+/// via the file's own `spawn_output_reader` call sites, not assumed).
+/// The only place multiple simultaneous terminals are exercised at all
+/// is PR-A1-D's N-pane throughput measurement
+/// (`crates/tekstide/src/measurement.rs`), a manual, human-observed
+/// tool run against the live app, not a `cargo test` target this
+/// limiter touches.
+struct RealProcessLimiter {
+    count: Mutex<usize>,
+    freed: Condvar,
+}
+
+impl RealProcessLimiter {
+    const CAP: usize = 6;
+
+    fn acquire() -> RealProcessSlot {
+        static LIMITER: OnceLock<RealProcessLimiter> = OnceLock::new();
+        let limiter = LIMITER.get_or_init(|| RealProcessLimiter {
+            count: Mutex::new(0),
+            freed: Condvar::new(),
+        });
+        let mut count = limiter
+            .count
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while *count >= Self::CAP {
+            count = limiter
+                .freed
+                .wait(count)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        *count += 1;
+        drop(count);
+        RealProcessSlot(limiter)
+    }
+}
+
+/// RAII permit from [`RealProcessLimiter::acquire`]. Bind this as the
+/// *first* local in a test function -- Rust drops locals in reverse
+/// declaration order, so binding it first makes it drop *last*, holding
+/// the slot for the test's entire real-process lifetime rather than
+/// releasing early while cleanup (`wait_for_exit`, `drop(reader)`) is
+/// still in flight.
+struct RealProcessSlot(&'static RealProcessLimiter);
+
+impl Drop for RealProcessSlot {
+    fn drop(&mut self) {
+        let mut count = self
+            .0
+            .count
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *count -= 1;
+        drop(count);
+        self.0.freed.notify_one();
+    }
+}
+
 #[test]
 fn real_pty_output_reaches_the_channel_end_to_end() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let root = test_root("reader-basic");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
@@ -55,6 +151,7 @@ fn real_pty_output_reaches_the_channel_end_to_end() {
 /// suite.
 #[test]
 fn the_wake_notifier_wakes_when_real_pty_output_arrives() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let root = test_root("reader-wake-data");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
@@ -110,6 +207,7 @@ fn the_wake_notifier_wakes_when_real_pty_output_arrives() {
 /// the terminal-launch-UX slice was written to fix.
 #[test]
 fn the_wake_notifier_delivers_a_final_wake_and_then_reports_no_more_are_coming() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let root = test_root("reader-wake-final");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
@@ -179,6 +277,7 @@ fn the_wake_notifier_delivers_a_final_wake_and_then_reports_no_more_are_coming()
 /// anyway.
 #[test]
 fn dropping_a_reader_over_a_live_silent_child_also_delivers_a_final_wake() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let root = test_root("reader-wake-on-drop");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
@@ -249,6 +348,7 @@ fn dropping_a_reader_over_a_live_silent_child_also_delivers_a_final_wake() {
 /// deadlock was actually found (a test that hung for 30+ seconds).
 #[test]
 fn dropping_a_reader_over_a_live_silent_child_completes_promptly() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let root = test_root("reader-drop-live-child");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
@@ -307,6 +407,7 @@ fn dropping_a_reader_over_a_live_silent_child_completes_promptly() {
 /// Measured, not asserted from the mechanism's description alone.
 #[test]
 fn reader_thread_does_not_busy_wait_while_idle() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let root = test_root("reader-idle-cpu");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
@@ -353,6 +454,7 @@ fn reader_thread_does_not_busy_wait_while_idle() {
 /// `mpsc::Receiver::try_recv`'s documented non-blocking behaviour.
 #[test]
 fn drain_available_never_blocks_the_caller_even_under_sustained_production() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let root = test_root("reader-nonblocking-drain");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
@@ -428,6 +530,7 @@ fn drain_available_never_blocks_the_caller_even_under_sustained_production() {
 /// `END`) is wrong here.
 #[test]
 fn backpressure_stalls_the_producer_and_resumes_with_no_byte_loss_across_the_stall() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let root = test_root("reader-backpressure");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
@@ -544,6 +647,7 @@ fn backpressure_stalls_the_producer_and_resumes_with_no_byte_loss_across_the_sta
 /// the marker but before the reader's own completion can be missed.
 #[test]
 fn transcript_written_through_the_reader_thread_is_byte_identical_to_pty_output() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let (mut runtime, handle, storage, dirs) =
         launch_with_transcript_capture("byte-identical", TranscriptCaptureMode::LocalBounded);
     let reader = runtime
@@ -557,23 +661,52 @@ fn transcript_written_through_the_reader_thread_is_byte_identical_to_pty_output(
         .write_input(&handle, b"printf 'tekstide-transcript-marker\\n'\nexit\n")
         .expect("marker command should write to PTY");
 
-    let (done_sender, done_receiver) = mpsc::channel();
+    // Drain on *every* wake, not just the final one -- an earlier version
+    // of this test waited for the final wake alone and drained only
+    // afterward. That starves the channel: with transcript capture on,
+    // each chunk costs a real disk write inside the reader thread before
+    // it is ever sent, and a real shell delivers its output in several
+    // separate bursts (input echo, the printf's own output, the next
+    // prompt, the `exit` echo) rather than one. If enough bursts land as
+    // separate chunks before anything drains, `sender.send` inside the
+    // reader thread blocks on the channel's bounded capacity -- the
+    // reader can never reach EOF or signal a final wake while stuck
+    // there, so the test hangs waiting for a signal that can only arrive
+    // after the drain that never comes. Found live: this exact ordering
+    // reproduced a real, standalone hang with `--test-threads=1` and only
+    // this one test running, no other concurrency involved -- ruling out
+    // contention as the cause of *this* particular failure (a separate,
+    // real contention-sensitivity finding for other tests in this file
+    // is tracked in review request 212). Draining after every wake keeps
+    // the channel from ever backing up, exactly how a real caller must
+    // use `TerminalReader`.
+    let (wake_sender, wake_receiver) = mpsc::channel();
     std::thread::spawn(move || {
         loop {
-            if !notifier.block_until_woken() {
-                let _ = done_sender.send(());
+            let more_coming = notifier.block_until_woken();
+            if wake_sender.send(more_coming).is_err() || !more_coming {
                 return;
             }
         }
     });
-    if done_receiver.recv_timeout(Duration::from_secs(5)).is_err() {
-        panic!(
-            "the reader never reported it had permanently stopped within 5s after the marker \
-             command exited -- EOF is not reaching the wake signal"
-        );
-    }
 
-    let drained = reader.drain_available().into_bytes();
+    let mut drained = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match wake_receiver.recv_timeout(remaining) {
+            Ok(more_coming) => {
+                drained.extend_from_slice(reader.drain_available().bytes());
+                if !more_coming {
+                    break;
+                }
+            }
+            Err(_) => panic!(
+                "the reader never reported it had permanently stopped within 5s after the \
+                 marker command exited -- EOF is not reaching the wake signal"
+            ),
+        }
+    }
     assert!(
         contains_subsequence(&drained, b"tekstide-transcript-marker"),
         "the channel should carry the real marker output; drained: {}",
@@ -643,6 +776,7 @@ fn transcript_written_through_the_reader_thread_is_byte_identical_to_pty_output(
 /// subset of. Restored afterward.
 #[test]
 fn transcript_write_blocking_also_blocks_every_later_send() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let dirs = TestDirs::new("d2-ordering-fifo");
     let request = TranscriptPathRequest::new(
         &dirs.state_root,
@@ -825,6 +959,7 @@ fn make_fifo(path: &Path) {
 /// every plain-shell launch in this crate today.
 #[test]
 fn transcript_write_summary_is_none_when_capture_was_never_configured() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let root = test_root("reader-transcript-summary-none");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
@@ -856,6 +991,7 @@ fn transcript_write_summary_is_none_when_capture_was_never_configured() {
 /// anything to consult once the writer moves.
 #[test]
 fn transcript_write_summary_reflects_real_writes_through_the_reader() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let (mut runtime, handle, _storage, dirs) = launch_with_transcript_capture(
         "summary-reflects-writes",
         TranscriptCaptureMode::LocalBounded,
@@ -864,14 +1000,21 @@ fn transcript_write_summary_reflects_real_writes_through_the_reader() {
         .spawn_output_reader(&handle)
         .expect("reader thread should spawn against a real PTY master");
 
+    // The baseline is whatever the summary reports right after spawn, not
+    // assumed to be exactly zero: a shell can legitimately emit its own
+    // unprompted startup bytes (found live, under real contention, as a
+    // genuine `byte_count: 8` here where this test used to hard-code `0`
+    // -- disclosed in qa-evidence.md). What this test actually needs to
+    // prove is that `transcript_write_summary` advances past whatever it
+    // started at once real marker output is written, not that nothing
+    // could possibly have happened yet.
+    let baseline = reader
+        .transcript_write_summary()
+        .expect("capture was configured, so a summary must exist immediately after spawn");
     assert_eq!(
-        reader.transcript_write_summary(),
-        Some(TranscriptWriteSummary {
-            byte_count: 0,
-            retention_state: TranscriptRetentionState::Active,
-        }),
-        "configured but nothing written yet must report Active at zero bytes, matching \
-         BoundedTranscriptWriter::create's own initial state"
+        baseline.retention_state,
+        TranscriptRetentionState::Active,
+        "capture just configured, nothing should have failed yet: {baseline:?}"
     );
 
     runtime
@@ -881,16 +1024,18 @@ fn transcript_write_summary_reflects_real_writes_through_the_reader() {
 
     let summary_started = Instant::now();
     let mut summary = reader.transcript_write_summary();
-    while summary.map(|summary| summary.byte_count) == Some(0)
+    while summary.map(|summary| summary.byte_count) == Some(baseline.byte_count)
         && summary_started.elapsed() < Duration::from_secs(5)
     {
         std::thread::sleep(Duration::from_millis(5));
         summary = reader.transcript_write_summary();
     }
     assert!(
-        summary.is_some_and(|summary| summary.byte_count > 0
+        summary.is_some_and(|summary| summary.byte_count > baseline.byte_count
             && summary.retention_state == TranscriptRetentionState::Active),
-        "byte_count must have advanced past zero once real output was written: {summary:?}"
+        "byte_count must have advanced past the baseline ({}) once real output was written: \
+         {summary:?}",
+        baseline.byte_count
     );
 
     drop(reader);
@@ -935,6 +1080,7 @@ fn only_two_named_production_call_sites_ever_append_to_a_transcript_writer() {
 #[test]
 fn local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable()
  {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let (mut runtime, handle, _storage, dirs) = launch_with_unwritable_transcript_capture(
         "local-bounded-unwritable",
         TranscriptCaptureMode::LocalBounded,
@@ -1001,6 +1147,7 @@ fn local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_g
 #[test]
 fn required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it()
  {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let (mut runtime, handle, _storage, dirs) = launch_with_unwritable_transcript_capture(
         "required-local-bounded-unwritable",
         TranscriptCaptureMode::RequiredLocalBounded,

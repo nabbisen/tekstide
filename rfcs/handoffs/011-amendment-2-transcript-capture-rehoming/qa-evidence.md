@@ -218,17 +218,69 @@ for the reader's own wake notifier to report no more wakes are coming (the same 
 accurate) before taking the final drain. Unrelated to D3; disclosed here because it surfaced
 during this slice's own gate runs.
 
-**A separate, pre-existing test-concurrency finding — not yet resolved — is recorded as
-review request 212**, not here: under default full test-parallelism, `runtime::terminal::reader::tests`
-now has 15 real-PTY-spawning tests (10 from PR-A1-C/D, 5 from this amendment) sharing a
-5-second wake-timeout convention that was never stress-tested against this many concurrent
-real subprocesses. Isolated sweeps show 0/8 failures at ≤4 concurrent real-PTY tests,
-escalating to 5/8 at 16-way (this machine's default). The actual gate command reproduced it
-at roughly 1 run in 5. Root-caused to `fork()`'s known cost scaling with a test binary's
-total thread count, not a logic bug in the wake mechanism (re-checked and sound) or in D1-D3
-themselves. A scope decision (fix file-wide, fix only this amendment's 5 added tests, or
-disclose and defer) is pending the architect's response to request 212; this PR-A2-B
-evidence above is complete and correct independent of which option is chosen.
+**A separate, pre-existing test-concurrency finding is recorded here as a test-infrastructure
+fix, not as D3 evidence** (response 212's third condition) — a test-harness change is not
+evidence for a capture property, so it is disclosed on its own rather than folded into the
+record above.
+
+Response 212 accepted PR-A2-B's own evidence and directed Option A (a file-wide concurrency
+limiter), independently reproducing the flake and finding the *identity* of the failing test
+changed between repeats — the signature of contention, not any one test being wrong.
+Building it surfaced two more things, both corrected before the limiter was finalized:
+
+- **A second, genuine, standalone bug**, found while implementing the limiter, unrelated to
+  concurrency: `transcript_written_through_the_reader_thread_is_byte_identical_to_pty_output`
+  waited for the reader's final wake *without draining the channel in between*. With
+  transcript capture on, each chunk costs a real disk write inside the reader thread before
+  it is ever sent; a real shell delivers its output in several separate bursts, and if
+  enough land as separate chunks before anything drains, `sender.send` inside the reader
+  thread blocks on the channel's bounded capacity (`CHANNEL_CAPACITY = 8`) — the reader can
+  then never reach EOF or signal a final wake. Reproduced with `--test-threads=1` and only
+  this one test running, no other concurrency involved, ruling out contention as *this*
+  failure's cause: 4/15 failures alone before the fix, 0/20 after. Fixed by draining on
+  every wake, not just the final one — the correct way to consume `TerminalReader` in the
+  first place. This confounded the *first* concurrency measurement in review request 212
+  (its 4-threads-clean number was really "4 threads clean of a channel-starvation bug that
+  had nothing to do with thread count"), which is why the corrected table below differs from
+  request 212's own.
+- **A third, narrower, genuinely contention-sensitive race**, found once the above was fixed
+  and the corrected measurement was underway: `transcript_write_summary_reflects_real_writes_through_the_reader`
+  asserted `byte_count == 0` immediately after spawn, assuming nothing could have been
+  written yet. A shell can legitimately emit its own unprompted startup bytes before any
+  input is sent; under real contention this reproduced live as `byte_count: 8` where `0` was
+  hard-coded as expected. Fixed by capturing whatever the summary reports as a baseline
+  (asserting only that its retention state is `Active`) and asserting the later summary
+  advances *past that baseline*, not past a hard-coded zero — the property the test actually
+  needs (`transcript_write_summary` reflects real writes) without assuming a race-free
+  window that was never guaranteed.
+
+**Corrected concurrency measurement**, both bugs above fixed, `cargo test -p tekstide-core
+--lib runtime::terminal::reader::tests::`, isolated:
+
+| `--test-threads` | failures |
+|---|---|
+| 2 | 0/8 |
+| 4 | 0/8 |
+| 8 | 0/8, then 0/20 on a larger sample |
+| 16 (this machine's default) | 6/8 |
+
+A `RealProcessLimiter` (`runtime/terminal/reader/tests.rs`) caps how many of this file's 14
+real-PTY-spawning tests run their spawn-through-cleanup critical section at once, at **6**
+(below the clean 8-thread measurement, for margin), applied to all 14 — including the 10
+from PR-A1-C/D this amendment does not otherwise touch, per response 212's own reasoning
+that the wrong assumption ("5 seconds is enough margin") belongs to the file, not to any one
+test. Confirmed clean: 0/30 runs of the full reader module at default concurrency, 0/25 runs
+of the full `cargo test --workspace --all-targets --all-features` gate (one unrelated
+failure across those 25 runs, on `approval::tests::channel::bind_recovers_from_a_stale_socket_file`
+— the pre-existing, already-tracked RFC-021 socket flake `future-work.md` already connects
+to the same fork-window pressure, not a reader-suite regression).
+
+Per response 212's second condition: no test in this file spawns more than one
+`TerminalReader`, so the limiter removes only wall-clock overlap *between* test functions,
+not any coverage of concurrent readers within one. The only place multiple simultaneous
+terminals are exercised at all is PR-A1-D's N-pane throughput measurement
+(`crates/tekstide/src/measurement.rs`), a manual tool run against the live app, unaffected
+by this limiter.
 
 ## PR-A2-C - Closeout
 
