@@ -1514,94 +1514,87 @@ fn sentinel_pasted_content_never_reaches_the_durable_audit_store() {
     );
 }
 
-/// RFC-017 PR-017-G response 158: a **headless** benchmark answering the
-/// discriminator question response 156 raised, without a GUI or GPU at
-/// all -- `poll()`'s own cost (a real PTY read plus `Processor::advance`
-/// through `SecurityFilter`) under a real, un-fork-bound flood, against
-/// the 50ms tick period `terminal_demo_subscription` polls at in
-/// production. `poll()` is pure CPU (no `iced`, no surface, no
-/// synthetic input), so this needs none of the machinery the three live
-/// GUI attempts kept getting blocked by (swap pressure, then a broken
-/// X11/EGL path unrelated to this crate) -- the same real pane-launching
-/// machinery `sentinel_terminal_derived_text_never_reaches_the_durable_audit_store`
-/// and the hidden-session ablation above already use, just driven on a
-/// timer instead of through `shell::update`.
+/// RFC-017 PR-017-G response 158, **revised for RFC-017 Amendment 1
+/// PR-A1-D** per PR-A1-C's own note that this benchmark's fixed 50ms
+/// sampling loop was a stand-in, not a claim about the new mechanism.
+/// Still a **headless** benchmark, no GUI or GPU at all -- `poll()`'s
+/// own cost (a real PTY read plus `Processor::advance` through
+/// `SecurityFilter`) under a real, un-fork-bound flood -- but now driven
+/// by the *real* wake mechanism (`WakeNotifier::block_until_woken`, a
+/// real `poll(2)` park) instead of an artificial timer, so every sample
+/// is a genuine production-shaped wake-to-`poll()` cost rather than a
+/// cost sampled once per 50ms regardless of how often real wakes fire.
 ///
-/// **Answers three things this benchmark's own output makes legible,
-/// not the end-to-end `NFR-PERF-004` figure** (that needs the real
-/// event loop and stays parked on the GUI): whether handler cost
-/// approaches the 50ms tick period (the saturation hypothesis -- if
-/// so, that's a real, structural contributor independent of any
-/// environment noise); dropped bytes under a *genuine* flood (still
-/// unexamined before this -- the confounded live runs' `0` was, per
-/// response 156's re-reading, evidence the flood never reached rate,
-/// not evidence of no drops); and observed in-app throughput against
-/// the flood script's own ~17.2 MiB/s standalone figure.
+/// **Why this, not the live GUI, is this slice's trustworthy source for
+/// wake-handling cost**: two live `TEKSTIDE_MEASURE_CRITERION=terminal_flood`
+/// runs during this slice reproduced the exact confound signature
+/// PR-017-G's responses 155/156 diagnosed on this same shared machine
+/// (swap in the mid-20s GiB both times; one run showed plausible
+/// tens-of-microsecond-to-millisecond figures, the other showed
+/// `input`/`echo` samples landing on suspicious round ~1s/2s/3s/4s
+/// plateaus -- the same major-page-fault signature, not a code defect).
+/// `record_tick_handler`'s own `tick` samples, by contrast, stayed
+/// consistent across both confounded and non-confounded live runs (low
+/// single-digit microseconds p50 both times) precisely because they
+/// never touch `iced`'s event loop or the GPU present path -- pure CPU
+/// timing, the same property that makes *this* headless benchmark
+/// trustworthy where the GUI numbers are not. See `qa-evidence.md`'s
+/// PR-A1-D section for the full live-run numbers and the disclosure.
 ///
 /// The only assertion is a generous, order-of-magnitude regression
-/// guard (10x the tick period) -- this is a diagnostic report, not
-/// `NFR-PERF-004`'s acceptance test, and asserting a tight bound here
-/// would make this flaky against exactly the kind of shared-machine
-/// noise the three GUI attempts already ran into.
+/// guard -- this is a diagnostic report, not `NFR-PERF-004`'s
+/// acceptance test, and asserting a tight bound here would make this
+/// flaky against ordinary machine noise.
 #[test]
-fn terminal_poll_handler_cost_under_a_real_flood_headless_benchmark() {
+fn terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark() {
     let project_id = tekstide_core::project::ProjectId::new_uuid();
     let (mut pane, _session) = crate::surface::terminal::TerminalPane::launch(
         project_id,
         "headless flood benchmark",
-        fresh_project_dir("headless-flood-benchmark"),
+        fresh_project_dir("headless-wake-flood-benchmark"),
         PathBuf::from("/bin/sh"),
     )
     .expect("launch a real shell for the headless benchmark");
+    let notifier = pane
+        .wake_notifier()
+        .expect("a freshly launched pane must be able to clone a wake notifier");
 
     pane.write_input(super::FLOOD_SCRIPT.as_bytes());
-    // Give the backgrounded flood a moment to actually start producing
-    // before the timed window begins -- otherwise the first samples
-    // would measure an empty pipe, not the flood this benchmark exists
-    // to observe.
-    std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let tick_period = std::time::Duration::from_millis(50);
     let benchmark_window = std::time::Duration::from_secs(2);
     let benchmark_started = std::time::Instant::now();
     let mut tick_micros: Vec<u128> = Vec::new();
     while benchmark_started.elapsed() < benchmark_window {
+        if !notifier.block_until_woken() {
+            break;
+        }
         let tick_started = std::time::Instant::now();
         pane.poll();
-        let elapsed = tick_started.elapsed();
-        tick_micros.push(elapsed.as_micros());
-        // RFC-017 Amendment 1, PR-A1-C: `tick_period` is this
-        // benchmark's own sampling cadence only, not a claim about
-        // production's cadence anymore -- production polls per-pane on
-        // that pane's own wake firing, not a fixed interval, now that
-        // `terminal_poll_subscription` is gone. Left at 50ms here since
-        // this benchmark still needs *some* fixed sampling interval to
-        // report a p50/max distribution against; PR-A1-D's own
-        // remeasurement is where this harness itself may be revisited
-        // for the new mechanism, not this removal.
-        std::thread::sleep(tick_period.saturating_sub(elapsed));
+        tick_micros.push(tick_started.elapsed().as_micros());
     }
 
     tick_micros.sort_unstable();
     let sample_count = tick_micros.len();
     let p50_micros = tick_micros[sample_count / 2];
-    let max_micros = *tick_micros.last().expect("at least one tick must have run");
+    let p99_micros = tick_micros[sample_count * 99 / 100];
+    let max_micros = *tick_micros
+        .last()
+        .expect("at least one wake must have fired");
     let bytes_read_total = pane.bytes_read_total();
     let observed_bytes_per_sec =
         bytes_read_total as f64 / benchmark_started.elapsed().as_secs_f64();
 
     eprintln!(
-        "terminal_poll_headless_benchmark samples={sample_count} p50_us={p50_micros} \
-         max_us={max_micros} bytes_read_total={bytes_read_total} \
+        "terminal_poll_wake_driven_headless_benchmark samples={sample_count} p50_us={p50_micros} \
+         p99_us={p99_micros} max_us={max_micros} bytes_read_total={bytes_read_total} \
          observed_bytes_per_sec={observed_bytes_per_sec:.0}"
     );
 
     assert!(
-        max_micros < tick_period.as_micros() * 10,
-        "poll() cost blew past a sane, order-of-magnitude-over-the-tick-period bound: \
-         max={max_micros}us against a {}us tick period -- this is a real regression, not \
-         measurement noise, since the bound is 10x the period it is meant to fit inside",
-        tick_period.as_micros()
+        max_micros < 50_000,
+        "a single wake-driven poll() cost blew past a sane bound: max={max_micros}us -- this \
+         is a real regression, not measurement noise, since 50ms is already generous headroom \
+         over the tens-of-microsecond costs a real read plus VTE advance should take"
     );
 }
 

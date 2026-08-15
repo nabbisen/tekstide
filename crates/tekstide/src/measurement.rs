@@ -57,66 +57,64 @@
 //! to switch into that wasn't the Project Board against an empty
 //! placeholder; PR-015-E is what makes it a real target.
 //!
-//! **Terminal input under flood (C3 / `NFR-PERF-004`, RFC-017 PR-017-G)
-//! reuses the same input-to-state-change mechanism**, not the
-//! decomposition, but **its definition is narrower than the budget's own
-//! name suggests, and this is stated explicitly here per response 154's
-//! finding that the module doc previously explained what was skipped
-//! without ever stating what the interval spans.**
+//! **Terminal input under flood (C3 / `NFR-PERF-004`)** was originally
+//! built (RFC-017 PR-017-G) reusing only the input-to-state-change half
+//! of the `Typing`/`ModeSwitch` decomposition -- dispatch plus one pty
+//! `write(2)`, deliberately **not** `NFR-PERF-004` as that requirement
+//! is actually understood ("terminal input latency" means keystroke-to-
+//! echo-visible). At the time, echo visibility depended entirely on a
+//! fixed-interval poll tick -- the only place PTY bytes reached the
+//! emulator grid -- so a keystroke's echo was uncorrelated with when the
+//! key arrived, and no in-app timestamp could honestly attribute a given
+//! echo to a given keystroke. The tick contributed an arithmetic expected
+//! p95 of ~47.5ms from poll-wait alone, roughly three times the entire
+//! 16ms budget, before any other cost was even added -- recorded as
+//! `NFR-PERF-004` **not met** on that arithmetic (RFC-017 PR-017-H).
 //!
-//! **What the figure currently covers**: wall-clock time from a
-//! measurement keystroke's arrival (timestamped the instant the
-//! subscription receives it) to the completion of the real
-//! `TerminalPane::write_input` call this same message makes
-//! (`shell.rs`'s `Message::MeasuredTerminalInput` handler,
-//! `record_input` called *after* the write, response 154 Finding 1 --
-//! recording before it, as an earlier revision of this handler did,
-//! would have measured only `iced`'s event-to-update dispatch latency,
-//! silently excluding the write). That is: **dispatch plus one pty
-//! `write(2)`.** It does **not** cover the PTY round-trip, the poll
-//! pickup, the VTE parse, or the view rebuild -- none of which happen
-//! synchronously inside this message's handler.
+//! **RFC-017 Amendment 1 removed the tick.** PTY output now reaches the
+//! grid only when `Message::TerminalWoke` fires -- one real `poll(2)`-
+//! driven wake per pane, sent the instant the reader thread sees new
+//! bytes, not on a fixed schedule. This makes a keystroke's own
+//! echo attributable for the first time: `Message::TerminalWoke` itself
+//! deliberately carries no content (response 205's `TerminalId`-only
+//! constraint, so terminal bytes never become `Debug`/`Clone`-reachable
+//! through `Message`), so this criterion cannot know *from the message*
+//! which wake carried its own echo -- it has to look at the grid.
 //!
-//! **This is not yet `NFR-PERF-004` as that requirement is actually
-//! understood** ("terminal input latency" means keystroke-to-echo-
-//! visible, which is what a p95 ≤ 16ms -- one 60Hz frame -- budget's
-//! magnitude is about). Echo visibility depends on
-//! [`crate::shell::terminal_demo_subscription`]'s 50ms poll tick, the
-//! only place PTY bytes reach the emulator grid; a keystroke's echo
-//! waits for the next tick, uncorrelated with when the key arrived, so
-//! poll-wait alone contributes an expected p95 of ~47.5ms (0.95 × 50ms)
-//! before any pty, VTE, layout, or paint cost is added -- roughly three
-//! times the entire budget, arithmetically, independent of any live run.
-//! **This is under analysis (response 154), not yet resolved**: the
-//! options (shorten the tick and pay a permanent idle-CPU cost on every
-//! terminal pane forever, move to a readiness-driven wake that removes
-//! the tradeoff instead of tuning it, or record `NFR-PERF-004` as
-//! honestly not met under the current architecture) are the owner's
-//! choice, not this module's to silently pick by tuning a constant until
-//! a number passes.
+//! **What the figure now covers, in two samples per send from one
+//! `sent_at`**: `input` (unchanged since PR-017-G -- dispatch plus the
+//! pty `write(2)`, via `record_input`) and `echo` (new, PR-A1-D) -- the
+//! full interval from the same `sent_at` to the moment
+//! [`Measurement::check_echo_visible`] first observes the grid's
+//! occurrence count of [`MEASURED_KEY_CHARACTER`] reach the count
+//! expected after this send, checked once per real wake from
+//! `handle_terminal_woke` (never on a timer). `echo` **is**
+//! `NFR-PERF-004` as actually defined, to the same "app-internal, not
+//! end-to-end" precision this whole module already commits to for every
+//! other criterion (grid-state-visible, not painted-to-screen --
+//! avoiding the exact `frames()` contamination this module exists to
+//! avoid, stated once at the top rather than re-argued per criterion).
 //!
-//! It does **not** use the view-build decomposition
-//! (`uses_input_view_decomposition` is `false` for it): writing to a pty
-//! does not itself cause a synchronous view rebuild the way pushing a
-//! character into `typing_doc` or toggling project mode does -- the
-//! grid only changes on the next, unrelated `TerminalDemoTick` poll, so
-//! a `view` sample logged against *this* message would not describe
-//! this message's own cost. **This reasoning holds only for the
-//! definition above**; if the definition is later widened to span poll
-//! pickup, the tick's grid update and view rebuild stop being
-//! "unrelated" and become the dominant term being measured, and this
-//! decomposition question would need revisiting then, not now.
+//! It still does **not** use the view-build decomposition
+//! (`uses_input_view_decomposition` stays `false` for it): `view` is
+//! timed by wrapping `shell::view` itself, and this criterion's own
+//! `handle_terminal_woke` call already happens on a message dispatch
+//! separate from `MeasuredTerminalInput`'s -- a `view` sample logged
+//! against either message would describe an unrelated cycle's rebuild
+//! cost, not this criterion's own, the same reasoning PR-017-G
+//! established and PR-A1-D changes nothing about.
 //!
 //! The one real terminal pane this criterion measures against still
 //! renders normally in `view()` every cycle (registered with
 //! `tekstide-core`, project mode set to `TerminalImmersion`) -- that
-//! rendering, and the concurrent flood's PTY-read/VTE-processing cost
-//! inside `TerminalDemoTick`'s handler, are real, uninstrumented
-//! contention on the same executor as this message's dispatch, and do
-//! affect the currently-graded figure even though they are not part of
-//! it -- a flood busy enough to delay `MeasuredTerminalInput`'s own
-//! dispatch would still show up as a higher `record_input` sample, via
-//! queuing, even under today's narrower definition.
+//! rendering, and the concurrent flood's own wake-driven poll/VTE cost,
+//! are real, uninstrumented contention on the same `iced` executor as
+//! this criterion's own message dispatches, and do affect both graded
+//! figures even though they are not part of either: a flood busy enough
+//! to delay `MeasuredTerminalInput`'s dispatch shows up as a higher
+//! `input` sample via queuing, and a flood busy enough to delay this
+//! send's own `TerminalWoke` behind others already queued shows up as a
+//! higher `echo` sample the same way.
 //!
 //! # Non-contamination when inactive
 //!
@@ -130,6 +128,7 @@
 //! no timer started and nothing written -- verified by idle-CPU
 //! comparison in `qa-evidence.md`, not merely asserted here.
 
+use std::collections::VecDeque;
 use std::io::Write;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -160,10 +159,15 @@ pub enum Criterion {
     /// view-build cost for a real mode switch, the same decomposition
     /// `Typing` uses -- see the module doc.
     ModeSwitch,
-    /// C3 (`NFR-PERF-004`, RFC-017 PR-017-G): input-to-state-change only,
-    /// against a real, live terminal pane under a bounded background
-    /// output flood -- see the module doc for why this one does not use
-    /// the view-build half of the decomposition.
+    /// C3 (`NFR-PERF-004`, RFC-017 PR-017-G, redefined RFC-017
+    /// Amendment 1 PR-A1-D): two samples per send -- `input`
+    /// (dispatch plus the pty `write(2)`, PR-017-G's original figure)
+    /// and `echo` (dispatch to grid-visible, the full interval the
+    /// budget actually names, first measurable once PR-A1-C's wake made
+    /// a keystroke's own echo attributable) -- against a real, live
+    /// terminal pane under a bounded background output flood. See the
+    /// module doc for why this one still does not use the view-build
+    /// half of the decomposition.
     TerminalFlood,
 }
 
@@ -198,6 +202,16 @@ pub struct Measurement {
     target: u32,
     startup_recorded: bool,
     started_at: Instant,
+    /// RFC-017 Amendment 1, PR-A1-D: one entry per `MeasuredTerminalInput`
+    /// send still waiting for its own echo to land in the grid -- see
+    /// [`Self::note_measured_send`]/[`Self::check_echo_visible`]. Empty
+    /// for every criterion but `TerminalFlood`, which never pushes to it.
+    pending_echo: VecDeque<(Instant, usize)>,
+    /// RFC-017 Amendment 1, PR-A1-D: when [`Self::check_echo_visible`]
+    /// was last actually run -- see [`Self::should_check_echo`]'s own
+    /// doc for why a real wall-clock throttle, not just "is anything
+    /// pending," is required here.
+    last_echo_check: Option<Instant>,
 }
 
 impl Measurement {
@@ -231,6 +245,8 @@ impl Measurement {
             target,
             startup_recorded: false,
             started_at: Instant::now(),
+            pending_echo: VecDeque::new(),
+            last_echo_check: None,
         })
     }
 
@@ -284,15 +300,20 @@ impl Measurement {
     /// (`sent_at`) to this call, which happens at the end of
     /// `shell::update`'s handling of it. One line per sample, prefixed
     /// `input` so the driver can separate this stream from the `view`/
-    /// `tick`/`env` lines that can share the same log file (RFC-017
-    /// PR-017-G response 156: **the confirmed sample count for R9's
-    /// stopping/reporting rule is `grep -c '^input ' <log>`, never
+    /// `tick`/`env`/`echo` lines that can share the same log file
+    /// (RFC-017 PR-017-G response 156: **the confirmed sample count for
+    /// R9's stopping/reporting rule is `grep -c '^input ' <log>`, never
     /// `wc -l`** -- once `tick`/`env` lines exist alongside `input`
     /// ones, a bare line count silently stops meaning "samples received."
     /// Do not substitute `Measurement::received` for this either: it
     /// counts arrivals at this handler, the dispatched-side quantity R9
     /// exists to distrust, not the on-disk, survives-a-crash ground
-    /// truth the grep gives.
+    /// truth the grep gives. The same rule applies to `echo` lines,
+    /// PR-A1-D's own addition: **`grep -c '^echo ' <log>`**, checked
+    /// against `grep -c '^input ' <log>` -- `Measurement::is_done`
+    /// already requires `pending_echo` to be empty before a `TerminalFlood`
+    /// run exits, but the on-disk count is the one that survives a crash
+    /// or a `kill -9`, which `is_done`'s in-memory check does not.
     pub fn record_input(&mut self, sent_at: Instant) {
         self.received += 1;
         let elapsed = Instant::now().saturating_duration_since(sent_at);
@@ -310,11 +331,86 @@ impl Measurement {
         }
     }
 
+    /// RFC-017 Amendment 1, PR-A1-D: records that `MeasuredTerminalInput`
+    /// has just written its measured character, and that this send's own
+    /// echo has not yet been observed in the grid. `expected_occurrences`
+    /// is the grid's own occurrence count of
+    /// [`MEASURED_KEY_CHARACTER`] *before* this write, plus one -- the
+    /// count [`Self::check_echo_visible`] must see before this send
+    /// counts as visible. Paired with [`Self::record_input`] (called
+    /// right after this, from the same handler) so every send produces
+    /// two samples from one `sent_at`: `input` (dispatch plus the pty
+    /// `write(2)`, unchanged since PR-017-G) and, later, `echo` (the full
+    /// keystroke-to-grid-visible interval `NFR-PERF-004` actually names).
+    pub fn note_measured_send(&mut self, sent_at: Instant, expected_occurrences: usize) {
+        self.pending_echo.push_back((sent_at, expected_occurrences));
+    }
+
+    /// A 1ms floor between real grid checks -- see [`Self::should_check_echo`].
+    const ECHO_CHECK_INTERVAL: Duration = Duration::from_millis(1);
+
+    /// The caller's guard against computing the (real, `O(grid)`)
+    /// occurrence count on every single wake. **Not just "is anything
+    /// pending"** -- an earlier version of this method was exactly that,
+    /// and it was not enough: under a genuine flood the reader can wake
+    /// hundreds of thousands of times per second (measured: 504,712 in
+    /// 2s headlessly, with a bare `poll()` keeping up cleanly at that
+    /// rate), and while *any* send is outstanding, "pending, so check"
+    /// alone still means computing `rendered_text()` on every one of
+    /// those wakes for as long as the send stays outstanding -- which
+    /// starved the reader of CPU time itself, extended how long sends
+    /// stayed outstanding, and compounded into a headless benchmark
+    /// completing only 2 of 200 samples in 25 real seconds. A 1ms
+    /// wall-clock floor between checks caps this at ~1,000 checks/sec
+    /// regardless of wake volume -- negligible bias (at most ~1ms of
+    /// detection-delay jitter on figures this slice otherwise measures
+    /// in milliseconds-to-tens-of-milliseconds) against a large,
+    /// necessary reduction in redundant work.
+    pub fn should_check_echo(&self) -> bool {
+        if self.pending_echo.is_empty() {
+            return false;
+        }
+        match self.last_echo_check {
+            None => true,
+            Some(at) => at.elapsed() >= Self::ECHO_CHECK_INTERVAL,
+        }
+    }
+
+    /// Called from `handle_terminal_woke`, guarded by
+    /// [`Self::should_check_echo`], with the grid's current occurrence
+    /// count of [`MEASURED_KEY_CHARACTER`]. Drains every pending send
+    /// whose expected count has now been reached, oldest first, logging
+    /// one `echo`-prefixed sample per drained entry --
+    /// `MEASURED_KEY_CHARACTER` never appears in [`super::FLOOD_SCRIPT`]'s
+    /// own output or the shell's prompt (checked directly, not assumed),
+    /// so every occurrence in the grid is this criterion's own doing and
+    /// a same-character queue is not at risk of confusing flood noise
+    /// for an echo.
+    pub fn check_echo_visible(&mut self, current_occurrences: usize) {
+        self.last_echo_check = Some(Instant::now());
+        while let Some(&(sent_at, expected)) = self.pending_echo.front() {
+            if current_occurrences < expected {
+                break;
+            }
+            let elapsed = Instant::now().saturating_duration_since(sent_at);
+            let _ = writeln!(self.log, "echo {}", elapsed.as_micros());
+            self.pending_echo.pop_front();
+        }
+    }
+
     pub fn is_done(&self) -> bool {
         match self.criterion {
             Criterion::Startup => self.startup_recorded,
-            Criterion::Typing | Criterion::ModeSwitch | Criterion::TerminalFlood => {
-                self.received >= self.target
+            Criterion::Typing | Criterion::ModeSwitch => self.received >= self.target,
+            // RFC-017 Amendment 1, PR-A1-D: also requires every dispatched
+            // send's echo to have actually been observed and logged --
+            // exiting the instant `received` hits target (as the other
+            // criteria do) would race the last few in-flight echoes and
+            // silently under-report the `echo` sample count relative to
+            // the `input` one, the exact kind of quiet loss response 157
+            // required a confirmed-on-disk count to catch.
+            Criterion::TerminalFlood => {
+                self.received >= self.target && self.pending_echo.is_empty()
             }
         }
     }
@@ -336,6 +432,8 @@ impl Measurement {
             target,
             startup_recorded: false,
             started_at: Instant::now(),
+            pending_echo: VecDeque::new(),
+            last_echo_check: None,
         }
     }
 }

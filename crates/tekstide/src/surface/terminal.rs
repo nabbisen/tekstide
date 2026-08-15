@@ -338,11 +338,15 @@ impl TerminalPane {
         let _ = self.runtime.write_input(&self.handle, bytes);
     }
 
-    /// Plain-text rendering, for `shell::tests`'s live-input assertions
-    /// (RFC-017 PR-017-D) -- `pub(crate)` rather than a bare
-    /// `#[cfg(test)]` fn, since it must be reachable from `shell`'s own
-    /// test module, a different module tree than this one's.
-    #[cfg(test)]
+    /// Plain-text rendering. Originally test-only, for `shell::tests`'s
+    /// live-input assertions (RFC-017 PR-017-D); RFC-017 Amendment 1
+    /// PR-A1-D broadened it into a real (non-`#[cfg(test)]`) accessor so
+    /// the `TerminalFlood` measurement criterion can detect, in a live
+    /// release build, when its own sent character has become visible in
+    /// the emulator's grid -- `shell.rs`'s `check_echo_visible` call
+    /// site. `pub(crate)` rather than fully private either way, since it
+    /// must be reachable from `shell`'s own module tree, not just this
+    /// one.
     pub(crate) fn rendered_text(&self) -> String {
         grid_colors::styled_rows(&self.term)
             .into_iter()

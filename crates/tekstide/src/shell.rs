@@ -756,8 +756,23 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // uninformative, samples against nothing rather than
             // panicking, matching `MeasuredModeSwitch`'s own "no active
             // project" fallback.
+            // RFC-017 Amendment 1, PR-A1-D: the pre-write occurrence
+            // count of `MEASURED_KEY_CHARACTER`, plus one, is what
+            // `check_echo_visible` (called from `handle_terminal_woke`
+            // on this pane's next real wake) must see in the grid before
+            // this send's own echo counts as visible -- captured before
+            // the write so a send racing an in-flight flood line does
+            // not miscount.
             if let Some(pane) = state.terminal_panes.first_mut() {
+                let expected_occurrences = pane
+                    .rendered_text()
+                    .matches(measurement::MEASURED_KEY_CHARACTER)
+                    .count()
+                    + 1;
                 pane.write_input(measurement::MEASURED_KEY_CHARACTER.as_bytes());
+                if let Some(measurement) = state.measurement.as_mut() {
+                    measurement.note_measured_send(sent_at, expected_occurrences);
+                }
             }
             if let Some(measurement) = state.measurement.as_mut() {
                 measurement.record_input(sent_at);
@@ -821,6 +836,20 @@ fn handle_terminal_woke(state: &mut State, terminal_id: &tekstide_core::domain::
     pane.poll();
     if let Some(measurement) = state.measurement.as_mut() {
         measurement.record_tick_handler(started.elapsed(), pane.bytes_read_total());
+        // RFC-017 Amendment 1, PR-A1-D: this wake may be the one
+        // carrying a `MeasuredTerminalInput` send's own echo --
+        // `Message::TerminalWoke` cannot say so itself (deliberately, by
+        // response 205's design), so this checks the grid directly.
+        // Gated on `should_check_echo`, not called unconditionally --
+        // see that method's own doc for why "only while pending" alone
+        // was still not enough under a real flood.
+        if measurement.should_check_echo() {
+            measurement.check_echo_visible(
+                pane.rendered_text()
+                    .matches(measurement::MEASURED_KEY_CHARACTER)
+                    .count(),
+            );
+        }
     }
 }
 
@@ -1550,7 +1579,16 @@ fn launch_measurement_terminal_pane(
         .assign_terminal_visible_slot(&terminal_id, tekstide_core::domain::VisibleSlot::Primary)
         .expect("the sole measurement pane must be assignable to Primary");
     app_shell.dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
-    pane.write_input(FLOOD_SCRIPT.as_bytes());
+    // RFC-017 Amendment 1, PR-A1-D: `TEKSTIDE_TERMINAL_FLOOD_QUIET` skips
+    // starting `FLOOD_SCRIPT` -- a diagnostic-only, checked-but-usually-
+    // absent toggle (same shape as every other measurement env var here)
+    // for a zero-contention baseline against the same pane-launch/
+    // dispatch/instrumentation path a real flood run uses, so an
+    // elevated figure under flood can be attributed to the flood itself
+    // rather than argued from the flood run's numbers alone.
+    if std::env::var("TEKSTIDE_TERMINAL_FLOOD_QUIET").is_err() {
+        pane.write_input(FLOOD_SCRIPT.as_bytes());
+    }
     vec![pane]
 }
 
