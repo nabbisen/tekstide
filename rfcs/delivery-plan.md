@@ -345,3 +345,27 @@ The adapter-spawn pathway has been named in `future-work.md` as a standing theme
    milestone's second half cannot be delivered. What M10 delivered — RFC-019's editor and
    explorer, RFC-024's diff policy, the transcript reader — is real; what it did not is
    recorded here rather than absorbed silently.
+
+### Re-plan status, 2026-08-15 (end of day)
+
+**Decision 1 is delivered.** RFC-017 Amendment 1 (readiness-driven terminal I/O) was
+authored, authorised by the owner, implemented across PR-A1-A through PR-A1-D, and closed
+the same day. `0.8.0` now has a spine that a user can feel: the 50 ms tick, the 10 ms sleep
+and the terminal-pane truncation path are gone; throughput moved from ~374 KB/s to
+~17.4-18 MB/s; `terminal_session_limit` was re-derived from a fresh headless N-pane
+measurement rather than carried, 3 → 6.
+
+**`NFR-PERF-004` remains not met**, for the second time and on better evidence: the
+structural cause is removed, but "met" needs an *upper* bound on the end-to-end path, and
+the previous "not met" only ever needed a *lower* one. See `future-work.md`
+§Readiness-driven terminal I/O — including an **open owner question** on whether a
+criterion we cannot verify under our own measurement discipline should be restated in terms
+we can bound (RFC-015's `input-to-state-change`) or accepted as permanently unverified.
+
+**Decision 2 (adapter-spawn as M11 priority) has gained a hard prerequisite**, found while
+this work was underway: `TerminalReader` has no transcript hook, and the path that had one
+is no longer on the ingress. Recorded in `future-work.md` as blocking. Do not start
+adapter-spawn without re-homing transcript capture.
+
+**Still true**: RFC-020's two surfaces remain blocked, model-complete, waiting on
+adapter-spawn. M10 does not close.
