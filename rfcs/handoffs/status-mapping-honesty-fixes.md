@@ -102,5 +102,26 @@ caller sees them. A caller-side fix is what produced the split in the first plac
 - **Broadening the `no_count_display_or_attention_label` scan to free functions** —
   belongs to whoever next touches `i18n::enforcement`; that module is not this slice's
   territory, for the same reason RFC-019 was told not to widen it.
-- **Any rendering change.** Both fixes are in `tekstide-core`. If a fix appears to require
-  a shell change, stop and raise it rather than reaching across the boundary.
+- **Any rendering change**, with one authorised exception below. Both fixes are otherwise
+  in `tekstide-core`. If a fix appears to require a shell change, stop and raise it rather
+  than reaching across the boundary.
+
+### Scope amendment, 2026-08-15 (response 196)
+
+**`attempt_save_active_document` (`crates/tekstide/src/shell.rs`) is in scope, for one
+change only.** The boundary above worked as intended: Fix 2 was implemented, the GUI's own
+regression test failed, and the slice stopped and filed rather than crossing or shipping
+the regression.
+
+The stop was worth more than the fix. `attempt_save_active_document` reconstructs *why* a
+save failed by re-reading a status field core mutates as a side effect — which is why a
+correct core fix broke it. The reason was always on the returned value:
+`ProjectContentError::Save(e)` carries `e.decision()`. The guard reads the decision
+directly instead, which makes the shell independent of the status mapping rather than
+accommodating it, and corrects that function's doc comment, whose stated premise —
+that only the status can distinguish these — is false.
+
+Widening the guard to `Conflict | ExternalChanged` was rejected: it works, but preserves
+the coupling, and RFC-020 is about to add statuses in this same area.
+
+Everything else in `crates/tekstide` remains out of scope.
