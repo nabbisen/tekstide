@@ -2,7 +2,7 @@
 title: "RFC-017 Amendment 1: Readiness-driven terminal I/O - QA Evidence"
 rfc: "RFC-017 Amendment 1"
 rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
-status: "PR-A1-A closed 2026-08-15 (responses 201/202, commits 79d9c23/85dcbef). PR-A1-B implemented 2026-08-15, not yet reviewed — C, D not started"
+status: "PR-A1-A closed 2026-08-15 (responses 201/202, commits 79d9c23/85dcbef). PR-A1-B implemented 2026-08-15, reviewed (response 203), required fix applied same day (commit e35d690), not yet re-reviewed — C, D not started"
 target_milestone: "M9 (carried), shipping in 0.8.0"
 created: "2026-08-15"
 ---
@@ -154,7 +154,8 @@ started.
 
 ## PR-A1-B — The ingress re-proof
 
-**Implemented 2026-08-15, not yet reviewed.** `crates/tekstide-core` untouched; all changes
+**Implemented 2026-08-15, reviewed (response 203), required fix applied same day (commit
+`e35d690`).** `crates/tekstide-core` untouched; all changes
 in `crates/tekstide`: `TerminalPane` now owns a `TerminalReader` (`launch()` spawns it via
 `spawn_output_reader` right after `launch_project_shell`), and `poll()` reads from
 `reader.drain_available()` instead of `runtime.read_available_bounded_for`. The old,
@@ -164,27 +165,49 @@ present in the source — deliberately not removed here, per the pack's own sequ
 
 **P1, re-enumerated against the new shape, not assumed from the old suite still
 passing.** `only_one_call_site_ever_advances_a_terminal_processor_in_the_crate` scans every
-`.rs` file under `crates/tekstide/src` (excluding test files) for the literal substring
-`.advance(`, asserting the list of matching files is exactly `["surface/terminal.rs"]` — a
-new production call site fails this test by naming the offending file, not merely by a
-diffuse suite failure. **Ablated for real**: added a throwaway file
-(`surface/_ablation_scratch_p1.rs`, never wired into the module tree, but still walked by
-the filesystem scan) containing a second `.advance(` call; the test failed, listing
-`["surface/_ablation_scratch_p1.rs", "surface/terminal.rs"]`. Removed before commit.
+`.rs` file under `crates/tekstide/src` (excluding test files) for occurrences of the literal
+substring `.advance(`, asserting the **total count** is exactly 1, in `surface/terminal.rs`.
+**Ablated for real, twice**: first (before response 203) a throwaway file elsewhere in the
+crate with a second `.advance(` call; the test failed, listing the offending file. Removed.
+Second (response 203's required addition): a second `.advance(` call added *inside*
+`surface/terminal.rs` itself; the test failed on total count (`(2, [("surface/terminal.rs",
+2)])` against the expected `(1, [("surface/terminal.rs", 1)])`) — the case a file-level check
+would have missed, since it already contains the one allowed occurrence. Removed before
+commit (`e35d690`).
+
+**Correction (response 203): the original enumeration counted files, not call sites.** Both
+tests originally collected files *containing* the substring and asserted the file list —
+passing silently for a second occurrence added inside `surface/terminal.rs` itself, which
+the reviewer named as the single most likely real regression (a resize handler, a replay
+path, a fast path for large writes all naturally land in the file that already owns the
+emulator). The test's own name
+(`only_one_call_site_ever_advances_a_terminal_processor_in_the_crate`) claimed a stronger
+guarantee than the file-level check actually gave. **Fixed**: both tests now count total
+occurrences via `count_occurrences_in_crate` (shared helper), asserting the count is exactly
+1 and naming which file it's in. Both proven to now catch the same-file case via the second
+ablation above.
+
+**What the `.advance(` scan does not cover, now stated in the test's own doc comment
+(response 203, required)**: it proves "one use of this API," not "nothing else mutates the
+emulator" — a direct manipulation of `self.term` through a different `alacritty_terminal`
+entry point would be a second ingress the scan cannot see. The closest existing check is
+`Term::grid_mut()` not being called anywhere in this module (the module doc's P2 note), but
+that is a narrower claim.
 
 **P2, re-enumerated against the new shape.** `TerminalReader` is not `Clone` (PR-A1-A), so a
 second *owner* of the channel is already unrepresentable by the type; this enumeration
 covers what the type alone cannot: a second *call site* draining the one owner this crate
 has through a borrow.
-`only_this_field_drains_a_terminalreader_in_the_crate` scans the same file set for
-`.drain_available(`, asserting the same single-file result. **Ablated for real**: same
-pattern, a throwaway file with a second `drain_available()` call; the test failed, listing
-the offending file. Removed before commit. Response 201's own addition to this gate —
-"the shutdown `eventfd` is a second channel this module owns" — needs no crate-side
-enumeration: nothing in `crates/tekstide` ever reaches it (it is private to
-`tekstide-core::runtime::terminal::reader`, touched only by `TerminalReader::spawn` and its
-own `Drop`), so P2's claim for this crate covers the data channel completely and the
-`eventfd` is out of this crate's reach by construction, not merely by convention.
+`only_this_field_drains_a_terminalreader_in_the_crate` uses the same
+`count_occurrences_in_crate` helper against `.drain_available(`, same total-count assertion,
+same two-stage ablation (a throwaway file, then a second call inside
+`surface/terminal.rs` itself, per response 203) — both confirmed and reverted. Response
+201's own addition to this gate — "the shutdown `eventfd` is a second channel this module
+owns" — needs no crate-side enumeration: nothing in `crates/tekstide` ever reaches it (it is
+private to `tekstide-core::runtime::terminal::reader`, touched only by
+`TerminalReader::spawn` and its own `Drop`), so P2's claim for this crate covers the data
+channel completely and the `eventfd` is out of this crate's reach by construction, not
+merely by convention.
 
 **Modal exclusivity: unchanged, re-checked at both the state level and with a live GUI
 positive control.** The mechanism is untouched by this slice — `write_terminal_input`
@@ -246,8 +269,9 @@ way, since the reader thread has no write access to anything. Re-checked two way
 
 **Gates**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features
 -- -D warnings`, full workspace suite (`tekstide-core` 552 passed, unchanged — no core
-changes this slice; `tekstide` 208 passed, up from 206 — the two new enumeration tests),
-`git diff --check`. All clean.
+changes this slice; `tekstide` 208 passed, up from 206 — the two new enumeration tests, same
+count after response 203's tightening since no test was added or removed, only made
+stronger), `git diff --check`. All clean, re-run after the tightening (commit `e35d690`).
 
 **Not done in this checkpoint**: removing the old tick/sleep path (PR-A1-C's job, which this
 slice deliberately leaves in place); measurement (PR-A1-D's job).
