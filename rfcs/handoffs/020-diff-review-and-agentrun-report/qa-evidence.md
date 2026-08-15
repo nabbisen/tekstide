@@ -2,7 +2,7 @@
 title: "RFC-020: Diff Review and AgentRun Report Surfaces - QA Evidence"
 rfc: "RFC-020"
 rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
-status: "PR-020-B's core (transcript reader) implemented 2026-08-15, reviewed and accepted (responses 198/199, commits b74d8d5/c92d97e) — surface not started"
+status: "PR-020-B's core (transcript reader) implemented 2026-08-15, reviewed and accepted (responses 198/199, commits b74d8d5/c92d97e). Surface work for both PR-020-B and PR-020-C stopped 2026-08-15 (response 200): no production path creates an AgentRun or a captured change set to render. Re-sequencing owned by the architect/owner, not this slice."
 target_milestone: "M10"
 created: "2026-08-15"
 ---
@@ -173,10 +173,18 @@ regression test; `tekstide` 206 passed, unchanged — no `crates/tekstide` chang
 "core first" sequencing), `git diff --check`. All clean, re-run after the three corrections
 (commit `b74d8d5`).
 
-**Not done in this checkpoint**: the AgentRun report surface itself (the widget, the
-escaping at the point of rendering, the reader-window-vs-writer-truncation rendered
-distinction, the no-double-escaping proof) — all deferred to the next round of this slice.
-Nothing here claims PR-020-B complete.
+**Not done in this checkpoint, and blocked rather than merely deferred (response 200,
+2026-08-15)**: the AgentRun report surface itself (the widget, the escaping at the point of
+rendering, the reader-window-vs-writer-truncation rendered distinction, the no-double-escaping
+proof). Before writing any surface code, request 200 asked which `AgentRun` the report
+should show; response 200 found no `AgentRun` can exist in production today —
+`launch_agent_run_with_runtime` and `add_agent_run` have zero production callers (grep
+independently re-verified against `agent/tests.rs`/`project/tests/*.rs` only), and
+`NavigationAction::OpenCurrentAgentRunDetail` maps to `None` in `shell.rs`'s
+`app_command_for` (verified at `shell.rs:1598-1620`). No adapter-spawn pathway exists to
+create one. Building the report against this would render "nothing here" forever. No
+surface code was written; nothing here claims PR-020-B complete. Full detail in
+`task-breakdown-pr-plan.md`'s PR-020-B section.
 
 ## PR-020-C — The change review surface
 

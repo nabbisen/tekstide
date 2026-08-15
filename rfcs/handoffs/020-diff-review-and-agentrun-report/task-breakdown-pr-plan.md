@@ -2,7 +2,7 @@
 title: "RFC-020: Diff Review and AgentRun Report Surfaces — Task Breakdown / PR Plan"
 rfc: "RFC-020"
 rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
-status: "PR-020-B's core (transcript reader) implemented 2026-08-15, reviewed and accepted (responses 198/199, commits b74d8d5/c92d97e) — surface, PR-020-C, and PR-020-D not started"
+status: "PR-020-B's core (transcript reader) implemented 2026-08-15, reviewed and accepted (responses 198/199, commits b74d8d5/c92d97e). Surface work for both PR-020-B and PR-020-C stopped 2026-08-15 (response 200): no production path creates an AgentRun or a captured change set to render. Re-sequencing owned by the architect/owner, not this slice. PR-020-D not started."
 target_milestone: "M10"
 created: "2026-08-15"
 ---
@@ -79,15 +79,51 @@ may proceed.**
    Doc comment added: resynchronization needs a position guaranteed to be a sound parse
    origin, which only the file's true start provides.
 
-Remaining for this slice: the AgentRun report widget, the reader-window-vs-writer-truncation
-rendered distinction (needs the widget to exist), and the no-double-escaping proof (needs
-the widget's own escaping call site).
+**Stopped here 2026-08-15 (response 200): PR-020-B is core-complete and surface-blocked, not
+merely "not started."** Before building the AgentRun report widget, request 200 asked *which*
+`AgentRun` it should show, since no "currently selected run" concept exists anywhere. Response
+200 found the question was blocked on a prerequisite upstream of selection: **an `AgentRun`
+cannot exist at all in production today.**
+
+- `launch_agent_run_with_runtime` (`project/session.rs`) and `add_agent_run` have **zero
+  production callers** — every call site is in `agent/tests.rs` / `project/tests/*.rs`.
+  Independently re-verified by grep before recording this, per this session's standing
+  practice of not taking a reviewer's claim on trust: confirmed.
+- `crates/tekstide` references `AgentRun` in exactly two places: an i18n dormancy
+  annotation, and `NavigationAction::OpenCurrentAgentRunDetail`, which `shell.rs`'s
+  `app_command_for` maps to `None` in its documented-honest catch-all arm ("no default
+  binding at all until RFC-023") — independently re-verified at `shell.rs:1598-1620`.
+- No adapter-spawn pathway exists to create a real `AgentRun`. This was already disclosed in
+  this pack's own `README.md` and in `future-work.md`'s standing "adapter-spawn pathway"
+  theme, but nothing connected it to RFC-020's surface work until this request.
+
+Building the report against this would render "nothing here" forever — a surface with
+correct rendering logic and zero reachable data, the same failure class the standing
+zero-reachable-surface rule exists to catch. **No surface code was written.** Per response
+200's explicit instruction: PR-020-C is equally blocked (see its own section below) and is
+not started either; no new review request was filed for this — the re-sequencing is the
+architect's and owner's, not this slice's.
+
+**Remaining for this slice, once unblocked**: the AgentRun report widget, the
+reader-window-vs-writer-truncation rendered distinction (needs the widget to exist), and the
+no-double-escaping proof (needs the widget's own escaping call site) — none of this can start
+until an adapter-spawn pathway makes a real `AgentRun` reachable.
 
 ## PR-020-C — The change review surface
 
 Depends on B only for the escaping pattern it establishes. All model work exists already.
 
-Review gate:
+**Blocked 2026-08-15 (response 200), same defect as PR-020-B's surface half: no production
+path populates the model this surface would render.** `add_detected_generated_change_set`
+has zero production callers (every call site is `project/tests/change_detection.rs`,
+independently re-verified by grep); `crates/tekstide` has zero references to change sets,
+review baselines, or generated-change detection; `NavigationAction::OpenDiffReview` maps to
+`None` in `shell.rs`'s `app_command_for`, same as `OpenCurrentAgentRunDetail`. **Not
+started. Do not start until PR-020-B's blocker (an adapter-spawn pathway) is resolved and
+this pathway is separately confirmed unblocked** — detection also needs something to
+capture a `ReviewBaseline` and run detection against, which nothing currently does.
+
+Review gate (unchanged, applies once unblocked):
 
 - **Rendered per `ChangeLifecycle`, never inferred from `ChangePathKind`** — the
   distinction RFC-012 Amendment 1 exists to provide.
