@@ -278,7 +278,109 @@ slice deliberately leaves in place); measurement (PR-A1-D's job).
 
 ## PR-A1-C — Remove the tick and the sleep
 
-*Not started.*
+**Closed 2026-08-15 — reviewed and accepted (responses 205/206, commits `19dfc36`/`564cbc9`).**
+Two decisions preceded any code: a genuine design fork (response 205, "Build Option B" — a
+dedicated wake `eventfd`, mirroring PR-A1-A's shutdown signal, rather than routing raw PTY
+bytes through `Message`) and a scope question (response 206) about whether the gate's
+"truncation gone" language reached `read_available_bounded_for` outside the terminal-pane
+path. Both are recorded in full in review requests 205/206 and their responses; summarized
+here as what they changed about the implementation.
+
+**The wake mechanism (response 205, Option B, all five build constraints).** New in
+`tekstide-core::runtime::terminal::reader`: a second `eventfd`, orthogonal to the existing
+shutdown one, plus a `WakeNotifier` (`try_clone`, `block_until_woken`) that a caller polls on
+with `poll(2)` — never a sleep. `TerminalReader::spawn` creates it, the reader thread writes
+to it on every successful `send` **and** on every exit path (`stop_reading`, shared by
+shutdown/EOF/error), gated by an `Arc<AtomicBool>` (`reader_alive`) so the notifier can tell
+"woken because data/exit happened" from "woken because the reader is gone for good" — an
+eventfd's own counter has no such distinction on its own.
+
+1. **The wake message carries only a `TerminalId`.** `Message::TerminalWoke(TerminalId)`
+   replaces `TerminalPollTick`; no bytes, no length, nothing content-derived. Response 205's
+   own reasoning, not just mine: `Message` derives `Debug, Clone, PartialEq`, so a bytes-
+   carrying variant would make terminal content formattable/clonable outside the one
+   reviewed ingress — the inverse of RFC-024's deliberate choice to give `DiffContent`
+   neither `Clone` nor `Serialize`, and the exact shape P2 exists to deny.
+2. **Fires on exit, not only on a successful `send`.** The reader thread already sees
+   `POLLHUP`/`read() == 0` on child exit; `stop_reading` signals the wake there too, so a
+   `WakeNotifier` held by a pane that's about to close doesn't leak its bridging thread.
+3. **`check_exit()` stays on the wake path.** `handle_terminal_woke` preserves the old tick
+   handler's exact two-pass logic (check already-exited, then `check_exit()`/`poll()`),
+   scoped to the one pane the wake names instead of iterating all panes.
+4. **P2 extended to the wake `eventfd`.** Two new enumeration tests in
+   `surface/terminal/tests.rs`, same `count_occurrences_in_crate` pattern PR-A1-B's response
+   203 established:
+   `only_one_call_site_ever_asks_a_terminalpane_for_its_wake_notifier` (`.wake_notifier(`,
+   total 1, in `shell.rs`) and `only_one_call_site_ever_blocks_on_a_wake_notifier`
+   (`.block_until_woken(`, total 1, in `shell.rs`). Both ablated (a redundant second call
+   site added, confirmed the count-based assertion catches it) and reverted.
+5. **Thread stability proven, not assumed.** `iced_futures`'s own documented dedup behaviour
+   (`Recipe::stream` runs once per unique `Subscription` hash across rebuilds) is real but
+   was previously unverified against this specific `Hash` impl.
+   `shell::tests::terminal_bridge_thread_count_is_stable_across_many_view_rebuilds` drives
+   `iced_futures::subscription::Tracker::update` — the actual runtime dedup mechanism
+   `Subscription::run_with` relies on, not a description of it — across 50 rebuilds of the
+   same `TerminalId`'s wake subscription, each with its own freshly `try_clone()`'d
+   `WakeNotifier` exactly as a real `subscription()` rebuild would produce. Asserts exactly
+   one new future is ever spawned. `iced_futures = "0.14"` added as a `[dev-dependencies]`
+   entry in `crates/tekstide/Cargo.toml` to reach `Tracker`/`into_recipes` (neither is
+   re-exported by the top-level `iced` crate); resolves to the version already locked
+   transitively, no version conflict. **Ablated for real**: temporarily made
+   `TerminalWakeSource`'s `Hash` impl include a per-call counter (simulating "iced treats
+   every rebuild as a new subscription"); the test failed correctly (`left: 50, right: 1`);
+   reverted.
+
+`TerminalWakeSource`'s `Hash` impl is hand-written, not derived, and deliberately hashes only
+`terminal_id` — documented at the impl site, since this is precisely what lets a fresh
+`dup()`'d fd each rebuild still dedupe against the one already-running bridging thread.
+
+`terminal_poll_subscription` and `Message::TerminalPollTick` are both gone; `subscription()`
+now batches `terminal_wake_subscriptions(&state.terminal_panes)` (one `Subscription` per pane,
+`filter_map`ping out any pane whose `wake_notifier()` call fails — no rendering surface exists
+to report that failure on, so the pane simply stops receiving event-driven wakes, documented
+as an accepted degradation rather than a silent one).
+
+**The truncation-scope question (response 206) — Option A, with the gate corrected, not just
+applied.** I asked whether "the 64 KiB truncation behaviour gone, not merely unreached" (the
+original PR-A1-C gate text) reached `read_available_bounded_for`'s use *outside* the
+terminal-pane path, since `agent::tests` has a real regression test that deliberately forces
+`dropped_bytes > 0` to prove agent-run output capture stays memory-bounded while the
+transcript file itself is never truncated. Response 206 found something neither of us had:
+`read_available_bounded_for` is **not just an old read loop** — it is **the only code in the
+workspace that writes to a transcript** (the sole non-test `.append(`/`.flush(` calls on a
+`BoundedTranscriptWriter`), and PR-A1-A/B's `TerminalReader` replacement has no transcript
+capture of any kind (`reader.rs` contains the string "transcript" zero times). Reading the
+original gate literally would have deleted transcript capture as a side effect of a
+performance amendment. **Resolution, corrected and recorded in `rfcs/future-work.md` as a
+blocking prerequisite on adapter-spawn** (not fixed here — re-homing capture onto
+`TerminalReader` needs its own design decision about file I/O on the reader thread, mid-
+stream write failure, and interaction with backpressure; RFC-011's territory):
+
+- `read_available_bounded_for`, its 10ms `WouldBlock` sleep, its truncation logic, and
+  `TerminalOutputSummary::dropped_bytes` all **stay untouched**. The sleep in particular:
+  removing it in isolation would make the function's `while started.elapsed() < duration`
+  loop busy-spin for the full duration on every `WouldBlock`, burning a core in every test
+  that still calls it — worse than the thing it would "fix," and `dropped_bytes` staying zero
+  in that function depends on the sleep starving the reader, so the two are coupled, not
+  independent cleanups.
+- The gate is corrected to: no polling, sleeping, or truncating path remains **on the
+  terminal-pane ingress** — already fully satisfied by PR-A1-A/B, since
+  `read_available_bounded_for` has zero production callers anywhere in the workspace
+  (confirmed by grep; its only non-test caller is its own definition).
+- `TerminalPane::dropped_bytes_total` (the GUI-side field, distinct from
+  `TerminalOutputSummary::dropped_bytes`) **is** removed — nothing has incremented it since
+  PR-A1-B replaced the pane's ingress, so unlike the runtime-level field it has no live
+  producer left anywhere.
+
+**Gates**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features
+-- -D warnings`, full workspace suite (`tekstide-core` 555 passed, up from 552 — the three new
+wake-notifier tests in `reader/tests.rs`; `tekstide` 211 passed, up from 208 — the two new
+enumeration tests plus the thread-stability test), `git diff --check`. All clean. No test was
+changed to keep passing — every test touched this slice is either new or, per response 205's
+sharpened reading of that gate (a wholesale contract change is different from a removal
+quietly threatening an existing test), the ones intentionally moved from
+`Message::TerminalPollTick` to `Message::TerminalWoke` because the message they drive no
+longer exists, not because their own assertions had to bend to stay green.
 
 ## PR-A1-D — Measurement and closeout
 

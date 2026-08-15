@@ -107,19 +107,51 @@ PR-A1-B — C is where they die, or where the guarantee that keeps them at zero 
 
 ## PR-A1-C — Remove the tick and the sleep
 
-Only after B is accepted. Removing the old path before the new one is proven would leave a
-window with no reviewed ingress at all.
+**Closed 2026-08-15 (responses 205/206, commits `19dfc36`/`564cbc9`).** Two questions raised
+before writing code, both answered by review rather than guessed: response 205 picked Option
+B (a dedicated wake `eventfd`, not raw bytes through `Message`) for the redraw trigger the
+tick removal leaves with no replacement; response 206 corrected the gate below after finding
+`read_available_bounded_for` is the workspace's only transcript-write code path, not a dead
+read loop — see `qa-evidence.md`'s PR-A1-C section for the full reasoning on both.
 
-Review gate:
+Gate, as actually discharged:
 
-- `terminal_demo_subscription`'s 50 ms tick removed; no polling path remains.
-- The 10 ms `WouldBlock` sleep removed from `read_available_bounded_for`.
-- The 64 KiB truncation behaviour **gone**, not merely unreached — if a truncation path
-  still exists, the fix is incomplete.
-- `TerminalOutputSummary`'s `dropped_bytes` either removed or proven unreachable; if it
-  survives, say why and what now guarantees it stays zero.
-- Full suite green with no test amended to accommodate the removal. **A test that had to be
-  changed to keep passing is a finding** — report it rather than changing it.
+- `terminal_poll_subscription`'s 50 ms tick removed; no polling path remains — replaced by
+  one `Subscription` per pane (`terminal_wake_subscriptions`), each driven by a real `poll(2)`
+  wait on its own wake `eventfd`, proven not to respawn its bridging thread across rebuilds
+  (`terminal_bridge_thread_count_is_stable_across_many_view_rebuilds`).
+- The 10 ms `WouldBlock` sleep in `read_available_bounded_for` **stays** — response 206:
+  removing it in isolation makes the loop busy-spin for the rest of its `duration` on every
+  `WouldBlock`, and `dropped_bytes` staying zero in that function already depends on the sleep
+  starving the reader; the two are coupled, not independently removable.
+- The 64 KiB truncation behaviour **stays**, scope-corrected: `read_available_bounded_for` is
+  the sole transcript-capture code in the workspace (the only non-test
+  `.append(`/`.flush(` calls on a `BoundedTranscriptWriter`), used by nothing in
+  `crates/tekstide` and by three `tekstide-core` test suites — one of which
+  (`agent::tests`) tests the truncation itself as a real, load-bearing property (bounded
+  memory for a live read, full fidelity in the transcript file). The original gate text
+  ("truncation gone, not merely unreached") was written against a model of this function that
+  didn't account for its transcript-writing half; read literally it would have deleted
+  transcript capture as a side effect of a performance amendment. Corrected scope: no
+  polling/sleeping/truncating path remains **on the terminal-pane ingress** — already
+  satisfied, since this function has zero production callers anywhere in the workspace.
+- `TerminalOutputSummary::dropped_bytes` **stays**, live for `read_available_bounded_for`.
+  `TerminalPane::dropped_bytes_total` — the GUI-side field, unrelated to the runtime-level
+  one above — **is removed**: nothing has incremented it since PR-A1-B, so unlike the
+  runtime field it had no live producer left.
+- Full suite green (`tekstide-core` 555, up from 552; `tekstide` 211, up from 208), no test
+  changed to keep passing — every touched test is either new or moved from
+  `Message::TerminalPollTick` to `Message::TerminalWoke` because the message it drove no
+  longer exists.
+- **Found in the course of this slice, not fixed in it**: `TerminalReader` (PR-A1-A/B's
+  ingress replacement) has no transcript-capture hook at all — `reader.rs` contains the
+  string "transcript" zero times. Invisible today only because no production code creates an
+  `AgentRun` yet, so no transcript writer is ever configured. Recorded in
+  `rfcs/future-work.md` as a **blocking prerequisite on adapter-spawn** (M11), since whichever
+  work wires terminal output through the reviewed `TerminalReader` path will otherwise
+  silently produce empty transcripts forever. Deliberately not built here — re-homing capture
+  needs its own decision about file I/O on the reader thread, mid-stream write failure, and
+  interaction with backpressure; RFC-011's territory, not this amendment's.
 
 ## PR-A1-D — Measurement and closeout
 
