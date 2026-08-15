@@ -46,13 +46,25 @@
 //! `TerminalReader` is not `Clone` -- a second consumer of its channel
 //! is unrepresentable by the type, and `poll` is the only place in this
 //! crate that calls `drain_available` at all (see
-//! `only_this_field_drains_a_terminalreader_in_the_crate`), covering
-//! both the data channel and the reader's own internal shutdown
-//! `eventfd` (response 201's note: the `eventfd` is a second channel
-//! this module does not touch or need to enumerate separately, since
-//! nothing in `crates/tekstide` ever reaches it -- it is private to
-//! `tekstide-core::runtime::terminal::reader` and reachable only from
-//! `TerminalReader`'s own `Drop`).
+//! `only_this_field_drains_a_terminalreader_in_the_crate`), covering the
+//! data channel. The reader's shutdown `eventfd` is unreachable from
+//! `crates/tekstide` by construction, unchanged by this note -- it is
+//! private to `tekstide-core::runtime::terminal::reader`, reachable only
+//! from `TerminalReader`'s own `Drop`. **RFC-017 Amendment 1, PR-A1-C**:
+//! the reader's *second* `eventfd` (the wake signal) is different --
+//! [`Self::wake_notifier`] is a real, new call site in this crate that
+//! reaches it, so it needs its own enumeration rather than inheriting
+//! the shutdown fd's "unreachable" claim. `shell.rs`'s
+//! `terminal_wake_subscriptions` is the one production caller of
+//! `wake_notifier`, and `terminal_wake_stream` is the one production
+//! caller of the resulting `WakeNotifier::block_until_woken` --
+//! `only_one_call_site_ever_asks_a_terminalpane_for_its_wake_notifier`
+//! and `only_one_call_site_ever_blocks_on_a_wake_notifier` in
+//! `shell::tests` prove both by occurrence count, the same shape
+//! response 203 required for the `Processor::advance`/
+//! `TerminalReader::drain_available` enumerations below (deliberately
+//! spelled without their own trailing `(` here, so this sentence does
+//! not itself become a second match for those two scans).
 //!
 //! **Modal exclusivity is unchanged by PR-A1-B, and that is the point.**
 //! The reader thread changes how *output* reaches this pane; it does not
@@ -82,11 +94,15 @@
 //! session down and rebuilding it from scrollback would lose state and
 //! change what "hidden" means to a user checking on it later; retaining
 //! it costs a bound already paid for, not a new, unbounded one. Hidden
-//! panes are still polled every tick (`shell.rs`'s `TerminalDemoTick`
-//! handler iterates all of them, not only the visible ones) -- proven
-//! in `terminal::tests` that a hidden pane's content keeps growing while
-//! hidden and is exactly what a caller sees once it becomes visible
-//! again, not a reset.
+//! panes still get their own wake subscription and are polled whenever
+//! it fires, the same as a visible one -- `shell.rs`'s
+//! `terminal_wake_subscriptions` builds one per tracked pane regardless
+//! of visible slot (RFC-017 Amendment 1, PR-A1-C replaced the old fixed
+//! tick that iterated every pane with this, but the "hidden panes are
+//! not skipped" property is the same one, re-proven against the new
+//! shape rather than assumed) -- proven in `terminal::tests` that a
+//! hidden pane's content keeps growing while hidden and is exactly what
+//! a caller sees once it becomes visible again, not a reset.
 //!
 //! **The grid renders as data, never as chrome** (RFC-015/RFC-018):
 //! [`grid_colors::view`] takes `&TerminalPane` and a font size only --
@@ -179,19 +195,6 @@ pub struct TerminalPane {
     reader: TerminalReader,
     processor: Processor<StdSyncHandler>,
     term: Term<VoidListener>,
-    /// RFC-017 PR-017-G (response 155 item 3): cumulative bytes
-    /// discarded across every `poll()` call because a single bounded
-    /// read exceeded its 64KiB cap -- surfaced for the flood
-    /// measurement's own evidence ("dropped bytes are a result, not a
-    /// footnote"), not consumed by any production decision. **RFC-017
-    /// Amendment 1, PR-A1-B: permanently `0` now that `poll()` reads
-    /// from `TerminalReader`** -- the new reader has no truncation logic
-    /// and no dropped-bytes concept at all (see its own module doc), so
-    /// this is a true structural fact now, not a runtime count that
-    /// happens to be zero. Left in place (not removed) because
-    /// `shell.rs`'s flood measurement and `bytes_read_total` below still
-    /// read it for PR-A1-D's own re-measurement.
-    dropped_bytes_total: u64,
     /// RFC-017 PR-017-G (response 156): cumulative bytes actually read
     /// (accepted, not dropped) across every `poll()` call -- paired with
     /// `Measurement::elapsed` to compute the flood's *observed*,
@@ -247,7 +250,6 @@ impl TerminalPane {
                 reader,
                 processor: Processor::new(),
                 term: Term::new(pane_config(), &PaneSize, VoidListener),
-                dropped_bytes_total: 0,
                 bytes_read_total: 0,
             },
             session,
@@ -255,21 +257,16 @@ impl TerminalPane {
     }
 
     /// Drains whatever PTY output the reader thread has buffered so far
-    /// (never blocks -- called from a GUI tick subscription, so it must
-    /// not block the render loop either) and advances the filtered
-    /// emulator. **The only place in this crate `Processor::advance` is
-    /// called, and the only place `self.term` is mutably borrowed
-    /// outside construction** -- P1's re-enumeration. Called every tick
-    /// regardless of this pane's visible slot (see the module doc's
-    /// hidden-session decision) -- callers must not skip `poll()` for a
-    /// hidden pane.
+    /// (never blocks) and advances the filtered emulator. **The only
+    /// place in this crate `Processor::advance` is called, and the only
+    /// place `self.term` is mutably borrowed outside construction** --
+    /// P1's re-enumeration. Callers must not skip `poll()` for a hidden
+    /// pane -- see the module doc's hidden-session decision.
     ///
-    /// RFC-017 Amendment 1, PR-A1-B: reads from `self.reader`
-    /// (`TerminalReader::drain_available`) rather than
-    /// `runtime.read_available_bounded_for` -- the sleep-and-truncate
-    /// path this replaces. `dropped_bytes_total` is not incremented here
-    /// because there is nothing to increment it from: `drain_available`
-    /// has no dropped-bytes concept to report.
+    /// RFC-017 Amendment 1, PR-A1-C: called from `shell.rs`'s
+    /// `handle_terminal_woke`, triggered by this pane's own
+    /// `wake_notifier()` firing -- not a fixed-interval tick anymore.
+    /// See [`Self::wake_notifier`].
     pub fn poll(&mut self) {
         let drain = self.reader.drain_available();
         self.bytes_read_total += drain.bytes().len() as u64;
@@ -281,12 +278,18 @@ impl TerminalPane {
         self.processor.advance(&mut filter, drain.bytes());
     }
 
-    /// RFC-017 PR-017-G: cumulative bytes discarded across every
-    /// `poll()` call this pane has made so far -- see the field's own
-    /// doc comment. Read by the flood measurement's evidence-gathering
-    /// only; no production caller.
-    pub fn dropped_bytes_total(&self) -> u64 {
-        self.dropped_bytes_total
+    /// RFC-017 Amendment 1, PR-A1-C: a duplicated handle onto this
+    /// pane's reader thread's wake signal -- what `shell.rs`'s
+    /// subscription bridges into an event-driven `poll()` trigger,
+    /// replacing the fixed 50ms tick this amendment removes. `Err` only
+    /// on `eventfd(2)` resource exhaustion, the same failure mode
+    /// `TerminalReader::spawn` can already fail on; the caller decides
+    /// what a failure here means for that one pane (`shell.rs`'s
+    /// `terminal_wake_subscriptions` currently just excludes it).
+    pub fn wake_notifier(
+        &self,
+    ) -> std::io::Result<tekstide_core::runtime::terminal::WakeNotifier> {
+        self.reader.try_clone_wake_notifier()
     }
 
     /// RFC-017 PR-017-G (response 156): cumulative bytes actually read

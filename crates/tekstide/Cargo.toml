@@ -22,3 +22,6 @@ unic-langid                 = { workspace = true }
 sys-locale                  = { workspace = true }
 alacritty_terminal          = { workspace = true }
 vte                         = { workspace = true }
+
+[dev-dependencies]
+iced_futures                = { version = "0.14" }

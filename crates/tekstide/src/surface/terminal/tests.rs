@@ -316,6 +316,54 @@ fn only_this_field_drains_a_terminalreader_in_the_crate() {
     );
 }
 
+/// RFC-017 Amendment 1, PR-A1-C: P2 extended to the wake `eventfd`,
+/// per response 205's fourth constraint -- unlike the shutdown
+/// `eventfd`, which stays entirely inside `tekstide-core`, the wake
+/// signal genuinely needs a real caller in this crate, so it needs its
+/// own enumeration rather than inheriting the shutdown fd's
+/// "unreachable from this crate" claim. `TerminalPane::wake_notifier`
+/// is the one way this crate can ever obtain a `WakeNotifier`; this
+/// proves only one production call site ever asks for one.
+///
+/// Ablated manually: a second `wake_notifier()` call added inside
+/// `shell.rs` itself, confirmed this test failed on total count, removed.
+#[test]
+fn only_one_call_site_ever_asks_a_terminalpane_for_its_wake_notifier() {
+    let occurrences = count_occurrences_in_crate(".wake_notifier(");
+    let total: usize = occurrences.iter().map(|(_, count)| count).sum();
+
+    assert_eq!(
+        (total, occurrences.as_slice()),
+        (1, [("shell.rs".to_string(), 1)].as_slice()),
+        "exactly one production call may ever ask a TerminalPane for its wake notifier -- a \
+         second occurrence is a second potential subscriber to reader-thread readiness, not a \
+         place to add an allowlist entry."
+    );
+}
+
+/// RFC-017 Amendment 1, PR-A1-C: the companion enumeration to
+/// [`only_one_call_site_ever_asks_a_terminalpane_for_its_wake_notifier`]
+/// -- obtaining a `WakeNotifier` is only half of P2's extended claim;
+/// this proves only one production call site ever blocks on one, so a
+/// second, independent consumer of a pane's wake signal cannot be added
+/// silently even by a caller that already held a valid `WakeNotifier`
+/// from elsewhere.
+///
+/// Ablated manually: a second `block_until_woken()` call added inside
+/// `shell.rs` itself, confirmed this test failed on total count, removed.
+#[test]
+fn only_one_call_site_ever_blocks_on_a_wake_notifier() {
+    let occurrences = count_occurrences_in_crate(".block_until_woken(");
+    let total: usize = occurrences.iter().map(|(_, count)| count).sum();
+
+    assert_eq!(
+        (total, occurrences.as_slice()),
+        (1, [("shell.rs".to_string(), 1)].as_slice()),
+        "exactly one production call may ever block on a WakeNotifier -- a second occurrence \
+         is a second consumer of the same reader's wake signal."
+    );
+}
+
 /// Total occurrences of `needle` across this crate's production `.rs`
 /// files (test files excluded), grouped by file and sorted by path --
 /// the shape both P1 and P2's enumerations need, factored out once

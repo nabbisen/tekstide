@@ -35,6 +35,7 @@
 //! (`catalog`, `theme`, `focus`, `modal`), none of which duplicate a
 //! value already inside it.
 
+use iced::futures::SinkExt;
 use iced::widget::{center, column, container, opaque, row, stack, text};
 use iced::{Background, Border, Element, Length, Subscription, Task, keyboard};
 
@@ -426,15 +427,22 @@ pub enum Message {
     /// flood -- see `measurement`'s module doc for why this one skips
     /// the view-build half of the decomposition.
     MeasuredTerminalInput(std::time::Instant),
-    /// RFC-017 PR-017-C/E, renamed by the terminal-launch-UX handoff
-    /// (was `TerminalDemoTick`): periodic poll for every pane in
-    /// `state.terminal_panes` -- see [`launch_terminal_demo_panes`] and
-    /// [`terminal_poll_subscription`]. Every pane still tracked is
-    /// polled every tick regardless of its session's visible slot (the
-    /// hidden-session decision, `surface::terminal`'s module doc) --
-    /// *tracked*, not merely visible, is also what makes exit detection
-    /// (this handler's other job now) reach hidden sessions too.
-    TerminalPollTick,
+    /// RFC-017 Amendment 1, PR-A1-C: replaces `TerminalPollTick` (a
+    /// fixed 50ms timer polling every pane) with an event carrying only
+    /// which one pane has something to report -- see
+    /// [`terminal_wake_subscription`]. **Carries a `TerminalId` and
+    /// nothing else, deliberately**: `Message` derives `Debug` and
+    /// `Clone`, so a payload of raw PTY bytes here would be formattable
+    /// and duplicable outside the one reviewed ingress -- the exact
+    /// shape P2 exists to deny, the reasoning response 205 settled this
+    /// slice's design on. Fires on real data arriving, and once more on
+    /// EOF/termination even if the pane produced nothing (a silently
+    /// exited shell must still be noticed) -- see `WakeNotifier`'s own
+    /// module doc in `tekstide-core`. Handled per-pane
+    /// (`handle_terminal_woke`), not by iterating every tracked pane the
+    /// way the old tick's handler did; a pane not named by this message
+    /// is not touched.
+    TerminalWoke(tekstide_core::domain::TerminalId),
     /// RFC-018 PR-018-B: a real clipboard read, triggered by
     /// `Ctrl+Shift+V`, has resolved. `target` is the terminal that was
     /// keyboard-focused when the key was pressed, captured then rather
@@ -692,9 +700,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 if let (Some(pane), Some(measurement)) =
                     (state.terminal_panes.first(), state.measurement.as_ref())
                 {
+                    // RFC-017 Amendment 1, PR-A1-C: `dropped_bytes_total`
+                    // no longer appears here -- the field it read was
+                    // dead state since PR-A1-B (nothing incremented it
+                    // once `poll()` stopped calling
+                    // `read_available_bounded_for`), and this slice
+                    // removes that function entirely, so there is no
+                    // code left anywhere that could ever produce a
+                    // non-zero count. Removed rather than kept printing
+                    // a permanent, structurally-guaranteed `0`.
                     eprintln!(
-                        "terminal_flood dropped_bytes_total {} bytes_read_total {} elapsed_secs {:.3}",
-                        pane.dropped_bytes_total(),
+                        "terminal_flood bytes_read_total {} elapsed_secs {:.3}",
                         pane.bytes_read_total(),
                         measurement.elapsed().as_secs_f64(),
                     );
@@ -747,103 +763,103 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 measurement.record_input(sent_at);
             }
         }
-        Message::TerminalPollTick => {
-            // Terminal launch UX handoff: exit detection folded into the
-            // existing poll loop, not a second periodic tick -- "wire it
-            // into the existing poll path... which is where a
-            // non-blocking exit check belongs."
-            //
-            // Two passes, not one, and deliberately so: pass 1 only
-            // touches `state.terminal_panes` (a `check_exit`/`poll` per
-            // pane, no `tekstide-core` access), pass 2 only touches
-            // `state.app_shell` (the status transition, slot release,
-            // audit write) -- avoiding a simultaneous `&state.app_shell`
-            // (to skip already-exited panes) and `&mut state.terminal_panes`
-            // borrow the loop would otherwise need.
-            let exited_ids: std::collections::HashSet<_> = active_project_terminal_sessions(state)
-                .iter()
-                .filter(|session| {
-                    matches!(
-                        session.status(),
-                        tekstide_core::domain::TerminalStatus::Exited
-                            | tekstide_core::domain::TerminalStatus::Failed
-                    )
-                })
-                .map(|session| session.id.clone())
-                .collect();
-
-            let mut newly_exited: Vec<(
-                tekstide_core::domain::TerminalId,
-                tekstide_core::runtime::terminal::TerminationOutcome,
-            )> = Vec::new();
-            for pane in &mut state.terminal_panes {
-                let terminal_id = pane.terminal_id().clone();
-                if exited_ids.contains(&terminal_id) {
-                    // Already reflected in core -- "stop polling that
-                    // pane's PTY."
-                    continue;
-                }
-                if let Some(outcome) = pane.check_exit() {
-                    newly_exited.push((terminal_id, outcome));
-                    continue;
-                }
-                // Response 156's discriminator: this handler's own wall
-                // time (the PTY read plus VTE parse), reported relative
-                // to the 50ms tick period regardless of machine load --
-                // unlike `record_input`'s figure, this does not itself
-                // need a quiet machine to be informative.
-                let started = std::time::Instant::now();
-                pane.poll();
-                if let Some(measurement) = state.measurement.as_mut() {
-                    measurement.record_tick_handler(started.elapsed(), pane.bytes_read_total());
-                }
-            }
-
-            if !newly_exited.is_empty()
-                && let Some(project_id) = state.app_shell.state().active_project_id().cloned()
-            {
-                let mut audit_store = open_real_audit_store(&state.app_shell);
-                let mut audit_health = tekstide_core::audit::AuditHealth::default();
-                for (terminal_id, outcome) in newly_exited {
-                    // `mark_terminal_exited` always transitions to
-                    // `Exited` and records the real exit code; any other
-                    // outcome (signalled, or an ambiguous `Failed`/
-                    // `OrphanedUnknown` shape `try_wait` cannot itself
-                    // produce here) transitions to `Failed` via the more
-                    // general status API instead -- "the session bar
-                    // stops lying" either way, best-effort past this
-                    // point for the same reason `launch_terminal`'s own
-                    // post-registration steps are.
-                    let _ = match &outcome {
-                        tekstide_core::runtime::terminal::TerminationOutcome::Exited {
-                            exit_status,
-                        } => state
-                            .app_shell
-                            .state_mut()
-                            .mark_terminal_exited(&terminal_id, Some(*exit_status)),
-                        _ => state.app_shell.state_mut().transition_terminal_status(
-                            &terminal_id,
-                            tekstide_core::domain::TerminalStatus::Failed,
-                        ),
-                    };
-                    let _ = state.app_shell.state_mut().assign_terminal_visible_slot(
-                        &terminal_id,
-                        tekstide_core::domain::VisibleSlot::Hidden,
-                    );
-                    if let Some(store) = audit_store.as_mut() {
-                        let _ =
-                            tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
-                                .record_plain_terminal_terminated(
-                                    project_id.clone(),
-                                    terminal_id,
-                                    &outcome,
-                                );
-                    }
-                }
-            }
+        Message::TerminalWoke(terminal_id) => {
+            handle_terminal_woke(state, &terminal_id);
         }
     }
     Task::none()
+}
+
+/// RFC-017 Amendment 1, PR-A1-C: the per-pane replacement for the old
+/// tick handler's loop body. Same two-pass shape the tick handler
+/// already used and for the same reason (pass 1 touches only
+/// `state.terminal_panes` -- `check_exit`/`poll`, no `tekstide-core`
+/// access; pass 2, factored into [`record_terminal_exit`], only touches
+/// `state.app_shell` -- the status transition, slot release, audit
+/// write -- avoiding a simultaneous `&state.app_shell` and
+/// `&mut state.terminal_panes` borrow), just scoped to the one pane this
+/// wake named instead of iterating every tracked pane on a fixed
+/// schedule. Exit detection stays folded into the same handler that
+/// polls, per the terminal-launch-UX handoff's own reasoning -- "wire it
+/// into the existing poll path... which is where a non-blocking exit
+/// check belongs" -- unchanged by moving from a tick to a wake.
+fn handle_terminal_woke(state: &mut State, terminal_id: &tekstide_core::domain::TerminalId) {
+    let already_exited = active_project_terminal_sessions(state).iter().any(|session| {
+        session.id == *terminal_id
+            && matches!(
+                session.status(),
+                tekstide_core::domain::TerminalStatus::Exited
+                    | tekstide_core::domain::TerminalStatus::Failed
+            )
+    });
+    if already_exited {
+        // Already reflected in core -- "stop polling that pane's PTY."
+        return;
+    }
+
+    let Some(pane) = state
+        .terminal_panes
+        .iter_mut()
+        .find(|pane| pane.terminal_id() == terminal_id)
+    else {
+        // The pane this wake named closed between the wake firing and
+        // this message reaching `update` -- nothing left to poll.
+        return;
+    };
+
+    if let Some(outcome) = pane.check_exit() {
+        record_terminal_exit(state, terminal_id.clone(), outcome);
+        return;
+    }
+
+    // Response 156's discriminator: this handler's own wall time (the
+    // PTY read plus VTE parse) -- unlike `record_input`'s figure, this
+    // does not itself need a quiet machine to be informative.
+    let started = std::time::Instant::now();
+    pane.poll();
+    if let Some(measurement) = state.measurement.as_mut() {
+        measurement.record_tick_handler(started.elapsed(), pane.bytes_read_total());
+    }
+}
+
+/// The exit-recording half of [`handle_terminal_woke`], factored out so
+/// it can be called for the one terminal a single wake found exited,
+/// without needing the old tick handler's `Vec` of possibly several.
+fn record_terminal_exit(
+    state: &mut State,
+    terminal_id: tekstide_core::domain::TerminalId,
+    outcome: tekstide_core::runtime::terminal::TerminationOutcome,
+) {
+    let Some(project_id) = state.app_shell.state().active_project_id().cloned() else {
+        return;
+    };
+    let mut audit_store = open_real_audit_store(&state.app_shell);
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    // `mark_terminal_exited` always transitions to `Exited` and records
+    // the real exit code; any other outcome (signalled, or an ambiguous
+    // `Failed`/`OrphanedUnknown` shape `try_wait` cannot itself produce
+    // here) transitions to `Failed` via the more general status API
+    // instead -- "the session bar stops lying" either way, best-effort
+    // past this point for the same reason `launch_terminal`'s own
+    // post-registration steps are.
+    let _ = match &outcome {
+        tekstide_core::runtime::terminal::TerminationOutcome::Exited { exit_status } => state
+            .app_shell
+            .state_mut()
+            .mark_terminal_exited(&terminal_id, Some(*exit_status)),
+        _ => state.app_shell.state_mut().transition_terminal_status(
+            &terminal_id,
+            tekstide_core::domain::TerminalStatus::Failed,
+        ),
+    };
+    let _ = state.app_shell.state_mut().assign_terminal_visible_slot(
+        &terminal_id,
+        tekstide_core::domain::VisibleSlot::Hidden,
+    );
+    if let Some(store) = audit_store.as_mut() {
+        let _ = tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
+            .record_plain_terminal_terminated(project_id, terminal_id, &outcome);
+    }
 }
 
 /// Terminal launch UX handoff: why a real launch was refused -- a typed
@@ -1576,12 +1592,122 @@ fn open_audit_store(
     tekstide_core::audit::AuditStore::open(storage_path).ok()
 }
 
-/// Periodic poll driving [`State::terminal_demo`] -- only ever added to
-/// the real subscription tree when a demo pane exists (see
-/// [`subscription`]), so this changes nothing about `subscription`'s
-/// reviewed non-modal/modal routing for any normal run.
-fn terminal_poll_subscription() -> Subscription<Message> {
-    iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::TerminalPollTick)
+/// RFC-017 Amendment 1, PR-A1-C: one [`Subscription`] per pane currently
+/// tracked in `state.terminal_panes`, replacing the fixed 50ms
+/// `terminal_poll_subscription` this amendment removes. Added to the
+/// real subscription tree by [`subscription`] under the same "only when
+/// panes exist" condition the old tick used, so this changes nothing
+/// about `subscription`'s reviewed non-modal/modal routing for any
+/// normal run beyond what drives `poll`/`check_exit`.
+///
+/// A pane whose `wake_notifier()` fails (`eventfd(2)` resource
+/// exhaustion, `TerminalPane::wake_notifier`'s own doc) is silently
+/// excluded here rather than surfaced as an error -- that pane simply
+/// stops receiving event-driven wakes until something else (a future
+/// wake, if the failure was transient and a later `subscription()` call
+/// succeeds) restores it; there is no rendering/UX surface for this
+/// slice to report it on (out of scope, per the amendment's own text),
+/// and failing the whole subscription tree over one pane's `eventfd`
+/// would take every other tracked pane down with it.
+fn terminal_wake_subscriptions(
+    panes: &[crate::surface::terminal::TerminalPane],
+) -> Vec<Subscription<Message>> {
+    panes
+        .iter()
+        .filter_map(|pane| {
+            pane.wake_notifier()
+                .ok()
+                .map(|notifier| terminal_wake_subscription(pane.terminal_id().clone(), notifier))
+        })
+        .collect()
+}
+
+/// One pane's own wake subscription, keyed by its `TerminalId` so
+/// `iced` recognises the same pane across `subscription()` rebuilds and
+/// reuses the already-running bridging thread rather than spawning a
+/// new one each time -- `terminal_bridge_thread_count_is_stable_across_many_view_rebuilds`
+/// (in `shell::tests`) proves this rather than assuming `Subscription::run_with`'s
+/// documented dedup behaviour holds here unverified.
+fn terminal_wake_subscription(
+    terminal_id: tekstide_core::domain::TerminalId,
+    notifier: tekstide_core::runtime::terminal::WakeNotifier,
+) -> Subscription<Message> {
+    Subscription::run_with(
+        TerminalWakeSource {
+            terminal_id,
+            notifier,
+        },
+        terminal_wake_stream,
+    )
+}
+
+/// `Subscription::run_with`'s own identity data. **`Hash` is
+/// hand-written, not derived, and deliberately ignores `notifier`**:
+/// `subscription()` builds a fresh `TerminalWakeSource` (with a freshly
+/// duplicated `eventfd`) on every rebuild, but only the *first* one for
+/// a given `terminal_id` should ever reach [`terminal_wake_stream`] --
+/// `iced` decides that by comparing hashes across rebuilds, so if the
+/// notifier's own fd number were part of the hash, every rebuild would
+/// look like a brand new subscription and spawn a brand new bridging
+/// thread. Every later, redundant `TerminalWakeSource` for an
+/// already-running `terminal_id` is simply dropped once built (closing
+/// its own duplicated fd harmlessly) without its `notifier` ever being
+/// used -- a few wasted `dup`/`close` syscalls per rebuild, not a
+/// leaked thread.
+struct TerminalWakeSource {
+    terminal_id: tekstide_core::domain::TerminalId,
+    notifier: tekstide_core::runtime::terminal::WakeNotifier,
+}
+
+impl std::hash::Hash for TerminalWakeSource {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.terminal_id.hash(state);
+    }
+}
+
+/// The bridging stream itself: spawns one dedicated OS thread that
+/// blocks on [`WakeNotifier::block_until_woken`] (a real `poll(2)` park,
+/// not a timer) and forwards exactly the terminal's own id into `iced`'s
+/// async world each time -- **response 205's first constraint**: the
+/// message carries a `TerminalId` and nothing else, never bytes, so
+/// terminal content can never become `Debug`-formattable or `Clone`-able
+/// through `Message`, and P2's "one consumer" property does not depend
+/// on `iced`'s own internal queueing.
+///
+/// The async block itself does no blocking work -- it only keeps the
+/// stream alive (`std::future::pending`) while the real work happens on
+/// the spawned thread, matching the pattern `iced_futures`'s own
+/// `Subscription::run` documentation shows for bridging a synchronous
+/// worker into an async `Stream`.
+fn terminal_wake_stream(
+    source: &TerminalWakeSource,
+) -> impl iced::futures::Stream<Item = Message> + use<> {
+    let terminal_id = source.terminal_id.clone();
+    let notifier = source.notifier.try_clone();
+    iced::stream::channel(1, async move |mut output| {
+        let Ok(notifier) = notifier else {
+            // Duplicating an already-open eventfd should not fail in
+            // practice; if it somehow does, this pane just never wakes
+            // again through this stream -- no data was lost (nothing
+            // was read), only the event-driven trigger for this one
+            // pane, same degradation as `terminal_wake_subscriptions`'s
+            // own `wake_notifier()` failure case.
+            std::future::pending::<()>().await;
+            return;
+        };
+        std::thread::spawn(move || {
+            loop {
+                let more_coming = notifier.block_until_woken();
+                let send_result = iced::futures::executor::block_on(
+                    output.send(Message::TerminalWoke(terminal_id.clone())),
+                );
+                if send_result.is_err() || !more_coming {
+                    return;
+                }
+            }
+        });
+        std::future::pending::<()>().await;
+    })
 }
 
 /// `OpenProjectBoard` and, since PR-015-E, `ToggleProjectMode` map to
@@ -1728,7 +1854,9 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         return if state.terminal_panes.is_empty() {
             measurement_routing
         } else {
-            Subscription::batch([measurement_routing, terminal_poll_subscription()])
+            let mut subscriptions = terminal_wake_subscriptions(&state.terminal_panes);
+            subscriptions.push(measurement_routing);
+            Subscription::batch(subscriptions)
         };
     }
 
@@ -1745,7 +1873,9 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     // normal run -- the same "checked but usually absent" shape the
     // measurement branch above already uses.
     if !state.terminal_panes.is_empty() {
-        Subscription::batch([routing, terminal_poll_subscription()])
+        let mut subscriptions = terminal_wake_subscriptions(&state.terminal_panes);
+        subscriptions.push(routing);
+        Subscription::batch(subscriptions)
     } else {
         routing
     }

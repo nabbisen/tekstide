@@ -1124,8 +1124,22 @@ fn state_with_two_visible_and_one_hidden_pane(label: &str) -> State {
     state
 }
 
+/// RFC-017 Amendment 1, PR-A1-C: the old tick handler polled every
+/// tracked pane in one `Message::TerminalPollTick`; the real replacement
+/// (`Message::TerminalWoke`) is per-pane, driven by that pane's own wake
+/// firing. This helper drives the real handler for every pane
+/// `state.terminal_panes` currently tracks, matching the same "poll
+/// everything" test convenience the old single-message call gave,
+/// without pretending a fixed tick still exists.
 fn poll_all_via_real_update(state: &mut State) {
-    let _ = super::update(state, Message::TerminalPollTick);
+    let terminal_ids: Vec<_> = state
+        .terminal_panes
+        .iter()
+        .map(|pane| pane.terminal_id().clone())
+        .collect();
+    for terminal_id in terminal_ids {
+        let _ = super::update(state, Message::TerminalWoke(terminal_id));
+    }
 }
 
 /// `active_project_terminal_sessions` must list every registered
@@ -1152,10 +1166,11 @@ fn active_project_terminal_sessions_lists_hidden_sessions_too() {
 }
 
 /// **The hidden-session grid-state decision, demonstrated, not argued.**
-/// A hidden pane is still polled every tick (`Message::TerminalPollTick`
-/// iterates every pane in `state.terminal_panes`, not only the visible
-/// ones) and its content is retained across a later slot reassignment --
-/// proving "hidden" means "not currently displayed," not "torn down."
+/// A hidden pane is still polled -- `poll_all_via_real_update` drives
+/// the real `Message::TerminalWoke` handler for every pane in
+/// `state.terminal_panes`, not only the visible ones -- and its content
+/// is retained across a later slot reassignment, proving "hidden" means
+/// "not currently displayed," not "torn down."
 #[test]
 fn a_hidden_pane_keeps_polling_and_retains_its_content_across_a_slot_change() {
     let mut state = state_with_two_visible_and_one_hidden_pane("hidden-pane-retained");
@@ -1212,12 +1227,12 @@ fn a_hidden_pane_keeps_polling_and_retains_its_content_across_a_slot_change() {
     );
 }
 
-/// **Ablated**: if `Message::TerminalPollTick` only polled visible
+/// **Ablated**: if the real wake-driven handler only polled visible
 /// panes (the alternative to the decision this slice made), the hidden
 /// pane's content would never appear. Simulated here by polling only
 /// the non-hidden panes directly, confirming the hidden pane's own
-/// content is absent -- the failure mode the real, poll-everything
-/// handler exists to avoid.
+/// content is absent -- the failure mode the real, every-tracked-pane
+/// subscription (`terminal_wake_subscriptions`) exists to avoid.
 #[test]
 fn ablation_polling_only_visible_panes_would_miss_the_hidden_ones_output() {
     let mut state = state_with_two_visible_and_one_hidden_pane("hidden-pane-ablation");
@@ -1555,11 +1570,15 @@ fn terminal_poll_handler_cost_under_a_real_flood_headless_benchmark() {
         pane.poll();
         let elapsed = tick_started.elapsed();
         tick_micros.push(elapsed.as_micros());
-        // Sleeping only the remainder of the tick period matches
-        // production's `iced::time::every(50ms)` cadence when `poll()`
-        // is fast, and correctly busy-polls with no extra delay when
-        // `poll()` itself already exceeds the period -- exactly what a
-        // saturating update loop would do in production too.
+        // RFC-017 Amendment 1, PR-A1-C: `tick_period` is this
+        // benchmark's own sampling cadence only, not a claim about
+        // production's cadence anymore -- production polls per-pane on
+        // that pane's own wake firing, not a fixed interval, now that
+        // `terminal_poll_subscription` is gone. Left at 50ms here since
+        // this benchmark still needs *some* fixed sampling interval to
+        // report a p50/max distribution against; PR-A1-D's own
+        // remeasurement is where this harness itself may be revisited
+        // for the new mechanism, not this removal.
         std::thread::sleep(tick_period.saturating_sub(elapsed));
     }
 
@@ -1568,14 +1587,12 @@ fn terminal_poll_handler_cost_under_a_real_flood_headless_benchmark() {
     let p50_micros = tick_micros[sample_count / 2];
     let max_micros = *tick_micros.last().expect("at least one tick must have run");
     let bytes_read_total = pane.bytes_read_total();
-    let dropped_bytes_total = pane.dropped_bytes_total();
     let observed_bytes_per_sec =
         bytes_read_total as f64 / benchmark_started.elapsed().as_secs_f64();
 
     eprintln!(
         "terminal_poll_headless_benchmark samples={sample_count} p50_us={p50_micros} \
          max_us={max_micros} bytes_read_total={bytes_read_total} \
-         dropped_bytes_total={dropped_bytes_total} \
          observed_bytes_per_sec={observed_bytes_per_sec:.0}"
     );
 
@@ -1756,9 +1773,9 @@ fn ablation_a_fourth_real_process_would_spawn_without_the_limit_check() {
 
 /// **Review gate**: "exit detection demonstrated: type exit, session
 /// bar shows Exited, slot is freed and reusable by a new launch."
-/// Drives the real `TerminalPollTick` handler against a real,
-/// just-launched shell, sending it a real `exit` command through the
-/// same `write_input` a routed keystroke would use.
+/// Drives the real `TerminalWoke` handler against a real, just-launched
+/// shell, sending it a real `exit` command through the same
+/// `write_input` a routed keystroke would use.
 #[test]
 fn a_real_session_exit_updates_status_frees_the_slot_and_is_reusable() {
     let mut app_shell = ApplicationShell::new();
@@ -1800,14 +1817,14 @@ fn a_real_session_exit_updates_status_frees_the_slot_and_is_reusable() {
     while std::time::Instant::now() < deadline
         && status_of(&state) != tekstide_core::domain::TerminalStatus::Exited
     {
-        let _ = super::update(&mut state, Message::TerminalPollTick);
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
 
     assert_eq!(
         status_of(&state),
         tekstide_core::domain::TerminalStatus::Exited,
-        "typing exit must be reflected as Exited within a few real ticks, not left at Running"
+        "typing exit must be reflected as Exited within a few real wakes, not left at Running"
     );
     assert_eq!(
         slot_of(&state),
@@ -1870,7 +1887,7 @@ fn ablation_without_check_exit_a_dead_shell_still_reports_running() {
         status,
         tekstide_core::domain::TerminalStatus::Running,
         "without check_exit, a dead shell must still (wrongly) report Running -- this is the \
-         exact lie the real TerminalPollTick handler exists to prevent"
+         exact lie the real TerminalWoke handler exists to prevent"
     );
 }
 
@@ -3065,5 +3082,53 @@ fn saving_a_clean_document_over_a_real_external_change_does_not_claim_discarded_
         !rendered_body.contains("discarded"),
         "the real modal must not claim discarded changes when there were none: \
          {rendered_body:?}"
+    );
+}
+
+/// **Response 205 constraint 5**: "Prove the bridging thread is not
+/// recreated on every rebuild." Drives `iced`'s own real deduplication
+/// path -- [`iced_futures::subscription::Tracker`], the mechanism
+/// `Subscription::run_with` relies on in production, not a mock of it --
+/// against 50 separate [`super::terminal_wake_subscription`] rebuilds
+/// for the *same* `TerminalId`, each carrying its own freshly
+/// `try_clone()`'d `WakeNotifier` exactly as a real `subscription()`
+/// rebuild would. Only the very first rebuild may ever be handed back as
+/// a new future to spawn; every later one must be recognised as already
+/// running and discarded (along with its harmlessly duplicated `eventfd`)
+/// without spawning a second bridging thread.
+#[test]
+fn terminal_bridge_thread_count_is_stable_across_many_view_rebuilds() {
+    let root = fresh_project_dir("wake-subscription-thread-stability");
+    let (pane, _session) = crate::surface::terminal::TerminalPane::launch(
+        tekstide_core::project::ProjectId::new_uuid(),
+        "wake-stability pane",
+        root,
+        PathBuf::from("/bin/sh"),
+    )
+    .expect("a real shell must launch to prove wake-subscription dedup against a real pane");
+    let terminal_id = pane.terminal_id().clone();
+
+    let mut tracker = iced_futures::subscription::Tracker::new();
+    let (message_sender, _message_receiver) =
+        iced::futures::channel::mpsc::channel::<Message>(16);
+
+    let mut total_new_spawns = 0;
+    for _ in 0..50 {
+        let notifier = pane
+            .wake_notifier()
+            .expect("wake notifier must clone against a live pane");
+        let subscription = super::terminal_wake_subscription(terminal_id.clone(), notifier);
+        let recipes = iced_futures::subscription::into_recipes(subscription);
+        let new_futures = tracker.update(recipes.into_iter(), message_sender.clone());
+        total_new_spawns += new_futures.len();
+    }
+
+    assert_eq!(
+        total_new_spawns, 1,
+        "the same terminal_id's wake subscription, rebuilt 50 times as a real \
+         `subscription()` call would on every view rebuild, must only ever need ONE real \
+         spawn -- a count above 1 means iced's own Subscription::run_with identity is not \
+         deduping this subscription across rebuilds, which would leak one bridging thread \
+         (and one duplicated eventfd) per rebuild in production"
     );
 }

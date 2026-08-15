@@ -3001,6 +3001,7 @@ dependencies = [
  "alacritty_terminal",
  "fluent-bundle",
  "iced",
+ "iced_futures",
  "sys-locale",
  "tekstide-core",
  "unic-langid",

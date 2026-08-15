@@ -40,6 +40,195 @@ fn real_pty_output_reaches_the_channel_end_to_end() {
     cleanup_root(root);
 }
 
+/// RFC-017 Amendment 1, PR-A1-C: the wake notifier must actually wake on
+/// real reader-thread activity, not merely compile. Real PTY output,
+/// real blocking wait, run on its own thread and joined with a bounded
+/// timeout so a regression fails this test rather than hanging the
+/// suite.
+#[test]
+fn the_wake_notifier_wakes_when_real_pty_output_arrives() {
+    let root = test_root("reader-wake-data");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against a real PTY master");
+    let notifier = reader
+        .try_clone_wake_notifier()
+        .expect("wake notifier should clone against a live reader");
+
+    runtime
+        .write_input(&handle, b"printf 'tekstide-wake-ok\\n'\nexit\n")
+        .expect("marker command should write to PTY");
+
+    let (done_sender, done_receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let more_coming = notifier.block_until_woken();
+        let _ = done_sender.send(more_coming);
+    });
+
+    match done_receiver.recv_timeout(Duration::from_secs(5)) {
+        Ok(more_coming) => assert!(
+            more_coming,
+            "the first wake from real PTY output should report more wakes may still come, not \
+             that the reader has already stopped"
+        ),
+        Err(_) => panic!(
+            "block_until_woken did not return within 5s against real PTY output -- the wake \
+             eventfd is not being signalled on a successful send"
+        ),
+    }
+
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("shell wait should not fail");
+    assert_eq!(outcome, Some(TerminationOutcome::Exited { exit_status: 0 }));
+    drop(reader);
+    cleanup_root(root);
+}
+
+/// RFC-017 Amendment 1, PR-A1-C, response 205's second required
+/// constraint: the wake must fire on EOF/termination, not only on a
+/// successful send. A child that exits without producing any output of
+/// its own must still wake a waiting caller exactly once more, or
+/// `check_exit()` never runs for that pane and the session bar keeps
+/// reporting a dead shell as running forever -- the exact regression
+/// the terminal-launch-UX slice was written to fix.
+#[test]
+fn the_wake_notifier_delivers_a_final_wake_and_then_reports_no_more_are_coming() {
+    let root = test_root("reader-wake-final");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against a real PTY master");
+    let notifier = reader
+        .try_clone_wake_notifier()
+        .expect("wake notifier should clone against a live reader");
+
+    runtime
+        .write_input(&handle, b"exit\n")
+        .expect("exit command should write to PTY");
+
+    let (done_sender, done_receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        // Zero or more `true` wakes first (the echoed "exit" line's own
+        // bytes), always followed by exactly one `false` once the child
+        // is gone.
+        loop {
+            if !notifier.block_until_woken() {
+                let _ = done_sender.send(());
+                return;
+            }
+        }
+    });
+
+    if done_receiver.recv_timeout(Duration::from_secs(5)).is_err() {
+        panic!(
+            "the wake notifier never reported the reader had stopped within 5s after the \
+             child exited -- EOF is not reaching the wake signal"
+        );
+    }
+
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("shell wait should not fail");
+    assert_eq!(outcome, Some(TerminationOutcome::Exited { exit_status: 0 }));
+    drop(reader);
+    cleanup_root(root);
+}
+
+/// RFC-017 Amendment 1, PR-A1-C: the shutdown path (`Drop` over a live,
+/// silent child, not a child exiting on its own) must also deliver a
+/// final wake -- otherwise a `WakeNotifier` cloned before the pane
+/// closes would block forever with nothing left to ever signal it,
+/// which is exactly the bridging-thread leak a caller on the other end
+/// of this notifier needs to avoid.
+///
+/// The shell's own startup output (a real, visible prompt -- confirmed
+/// separately by this session's own GUI evidence for PR-A1-B) produces
+/// at least one ordinary wake before this test ever calls `Drop`.
+/// Consumed synchronously and asserted `true` first, deliberately, so
+/// that wake cannot land close enough in time to the shutdown-triggered
+/// one to be mistaken for it -- eventfd's own counter accumulates
+/// pending signals into one value, so a background thread that only
+/// checks "did I eventually see `false`" could pass even with the
+/// shutdown path's own signal ablated, if an unrelated earlier wake's
+/// `read(2)` happened to land after `reader_alive` had already flipped.
+/// Found by ablating this test's own predecessor and watching it pass
+/// anyway.
+#[test]
+fn dropping_a_reader_over_a_live_silent_child_also_delivers_a_final_wake() {
+    let root = test_root("reader-wake-on-drop");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against a real PTY master");
+    let notifier = reader
+        .try_clone_wake_notifier()
+        .expect("wake notifier should clone against a live reader");
+
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        notifier.block_until_woken(),
+        "the shell's own startup output should produce an ordinary wake reporting the reader \
+         still alive, consumed here before Drop so it cannot be confused with the final one"
+    );
+
+    let (done_sender, done_receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let more_coming = notifier.block_until_woken();
+        let _ = done_sender.send(more_coming);
+    });
+
+    drop(reader);
+
+    match done_receiver.recv_timeout(Duration::from_secs(5)) {
+        Ok(more_coming) => assert!(
+            !more_coming,
+            "the wake immediately after Drop should report the reader has stopped for good, \
+             not that more wakes may still come"
+        ),
+        Err(_) => panic!(
+            "the wake notifier never reported the reader had stopped within 5s after Drop -- \
+             the shutdown path is not signalling the wake eventfd, which would leak the \
+             bridging thread on the other end of any WakeNotifier for the pane's whole session"
+        ),
+    }
+
+    runtime
+        .request_terminate(
+            &handle,
+            TerminationRequest {
+                source: TerminationRequestSource::TestHarness,
+                reason: BoundedRuntimeSummary::new("cleanup after wake-on-drop test"),
+            },
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+        )
+        .expect("termination should succeed");
+    cleanup_root(root);
+}
+
 /// Response 201's required evidence: dropping a `TerminalReader` must
 /// not depend on the child ever producing output or exiting. The child
 /// here is real, alive, and deliberately never told to do anything --

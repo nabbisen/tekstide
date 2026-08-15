@@ -8,7 +8,7 @@ mod tests;
 mod types;
 
 pub use launch::{LinuxTerminalRuntime, TerminalLaunchError, TerminalRuntimeError};
-pub use reader::{TerminalReader, TerminalReaderDrain};
+pub use reader::{TerminalReader, TerminalReaderDrain, WakeNotifier};
 pub(crate) use security::next_token_len;
 pub use security::{
     TerminalAcceptedSequence, TerminalBlockedAppEffect, TerminalCursorEffect,

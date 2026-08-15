@@ -178,6 +178,26 @@ Status: substrate decided, application shell, and mode switching implemented by 
   name. No GUI change needed — `crates/tekstide`'s own `count_display_args` and the i18n
   enforcement scan's exempt-literal list already supported `CountDisplay::Unknown` before
   this fix landed.
+- **BLOCKING PREREQUISITE ON ADAPTER-SPAWN: `TerminalReader` has no transcript capture, and
+  the path that had it is no longer on the ingress.** Found 2026-08-15 by a scoping question
+  from the dev team (review request 206, response 206), not by a failing test — nothing
+  fails, and nothing will until it matters.
+  `LinuxTerminalRuntime::read_available_bounded_for` (`runtime/terminal/launch.rs:115`) does
+  two unrelated things in one loop: it returns a capped buffer to its caller, **and it
+  appends every byte read to `session.transcript_writer` and flushes it** (`:131-136`,
+  `:162-169`). Those are **the only non-test `.append(`/`.flush(` calls on a
+  `BoundedTranscriptWriter` in the workspace** — it is the sole transcript producer.
+  RFC-017 Amendment 1 PR-A1-A/B replaced the terminal ingress with `TerminalReader`, whose
+  module contains the string "transcript" **zero times**. So the new path captures nothing.
+  This is invisible today only because no production code creates an `AgentRun` (response
+  200), so no transcript writer is ever configured. **Adapter-spawn is the work that makes
+  `AgentRun`s real**, and whoever builds it will wire output through `TerminalReader`
+  because that is the reviewed path — at which point RFC-011's whole retention design, and
+  RFC-011 Amendment 1's bounded reader, read empty files forever with nothing failing to
+  say so. **Do not start adapter-spawn without re-homing transcript capture first.** It
+  needs a real decision, not a copied line: file I/O on the reader thread, what happens when
+  a transcript write fails mid-stream, and how that interacts with the bounded channel's
+  backpressure. RFC-011's territory, not a performance amendment's.
 - **The `tekstide-core` test suite leaks real shell processes — roughly 87 orphaned
   `/bin/sh` per full run.** Found 2026-08-15 while diagnosing PR-A1-A's own (since-fixed)
   test flakiness, and disclosed rather than absorbed (review request 201, response 201).

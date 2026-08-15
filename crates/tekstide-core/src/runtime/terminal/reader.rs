@@ -17,11 +17,24 @@
 //! send blocks until there is room. There is no code path that computes
 //! a byte count and then discards part of it -- "unreachable" here is a
 //! structural property of the type, not a runtime check.
+//!
+//! **RFC-017 Amendment 1, PR-A1-C: [`WakeNotifier`], a second `eventfd`
+//! separate from the shutdown one.** `read_available_bounded_for`'s old
+//! call site was reached by a fixed-interval poll tick; removing that
+//! tick (PR-A1-C's own job) needs something to replace its role of
+//! telling a caller "go check this terminal now" without reintroducing
+//! a timer. The reader thread signals this `eventfd` whenever it
+//! buffers new bytes, and one final time on every exit path (shutdown,
+//! EOF, or a fatal read error) -- see [`WakeNotifier::block_until_woken`]'s
+//! own doc for why "the reader is done" needs an explicit signal rather
+//! than being inferred from the `eventfd`'s own semantics.
 
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 /// One `read(2)` call reads at most this many bytes before the chunk is
@@ -66,6 +79,63 @@ pub struct TerminalReader {
     // `poll(2)` on a live, silent child (no data, PTY not hung up). This
     // is what makes that case interruptible too -- see `Drop`.
     shutdown: fs::File,
+    // RFC-017 Amendment 1, PR-A1-C: a second `eventfd`, signalled by the
+    // reader thread (not `Drop`) every time it either buffers new bytes
+    // or stops for good -- what lets a caller replace polling with a
+    // real wait. `TerminalReader` itself never reads this fd; it exists
+    // to be duplicated out via [`Self::try_clone_wake_notifier`] for
+    // whoever needs to wake up when this reader has something to report.
+    wake: fs::File,
+    // Set to `false` by the reader thread immediately before its last
+    // ever wake signal, on every exit path -- shutdown, EOF, or a fatal
+    // read error. `eventfd`'s own counter has no notion of "the writer
+    // is done" (unlike a pipe's write end closing), so this is the
+    // explicit signal a `WakeNotifier` checks to know no further wakes
+    // are coming, rather than trying to encode that into the counter
+    // value itself.
+    reader_alive: Arc<AtomicBool>,
+}
+
+/// A duplicated handle onto one [`TerminalReader`]'s wake `eventfd`,
+/// obtained via [`TerminalReader::try_clone_wake_notifier`]. Carries no
+/// PTY data of its own -- see [`Self::block_until_woken`].
+pub struct WakeNotifier {
+    file: fs::File,
+    reader_alive: Arc<AtomicBool>,
+}
+
+impl WakeNotifier {
+    /// Blocks (a real `poll(2)` park, not a sleep) until the reader
+    /// thread has either buffered new bytes or stopped for good, then
+    /// drains the `eventfd`'s accumulated count. Returns `true` if more
+    /// wakes may still arrive -- the caller should act on this wake and
+    /// call again; `false` means this was the reader's last wake ever,
+    /// on any exit path (shutdown, EOF, or a fatal read error) -- the
+    /// caller should still act on it once (there may be a final exit to
+    /// notice) and then stop waiting, since nothing will signal this
+    /// notifier again.
+    pub fn block_until_woken(&self) -> bool {
+        if !block_on_eventfd(self.file.as_raw_fd()) {
+            return false;
+        }
+        let mut buffer = [0_u8; 8];
+        let _ = (&self.file).read(&mut buffer);
+        self.reader_alive.load(Ordering::Acquire)
+    }
+
+    /// A second, independent duplicate of this notifier's own `eventfd`
+    /// handle, sharing the same underlying counter and `reader_alive`
+    /// flag -- for a caller that only holds a borrow (`&WakeNotifier`,
+    /// for example inside an API that hands out `&self` rather than
+    /// ownership) but needs an owned, `'static` handle to move into a
+    /// background thread. Failure here is the same resource-exhaustion
+    /// case `try_clone_wake_notifier` can already fail on.
+    pub fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            file: self.file.try_clone()?,
+            reader_alive: Arc::clone(&self.reader_alive),
+        })
+    }
 }
 
 /// What one non-blocking drain call collected. `ended` means the reader
@@ -104,24 +174,29 @@ impl TerminalReader {
     /// is given and will hold it open for as long as the thread runs.
     ///
     /// **Blocks on readiness, never sleeps, never busy-waits**: the
-    /// thread calls `poll(2)` with an infinite timeout on `master`'s fd
-    /// and a shutdown `eventfd`. The kernel parks the thread until
-    /// either is ready, consuming no CPU while parked -- a real blocking
-    /// primitive, not a fixed delay guessed to be short enough.
+    /// thread calls `poll(2)` with an infinite timeout on `master`'s fd,
+    /// a shutdown `eventfd`, and (implicitly, via its own writes) signals
+    /// the wake `eventfd`. The kernel parks the thread until something is
+    /// ready, consuming no CPU while parked -- a real blocking primitive,
+    /// not a fixed delay guessed to be short enough.
     ///
     /// Fallible only because `eventfd(2)` can fail (resource exhaustion)
     /// -- everything else here is infallible in practice.
     pub(super) fn spawn(master: fs::File) -> io::Result<Self> {
-        let shutdown_fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC) };
-        if shutdown_fd == -1 {
-            return Err(io::Error::last_os_error());
-        }
         // Owned by `TerminalReader` for the `write` side `Drop` uses to
         // signal shutdown; the reader thread below only needs the bare
         // fd number to `poll(2)` it, not ownership -- `shutdown` here
         // keeps the fd open for as long as `TerminalReader` (and
         // therefore the thread that polls it) exists.
+        let shutdown_fd = create_eventfd()?;
         let shutdown = unsafe { fs::File::from_raw_fd(shutdown_fd) };
+        // Same shape, second `eventfd`: kept alive here only so
+        // `try_clone_wake_notifier` has something to duplicate from for
+        // as long as this `TerminalReader` exists. Nothing on this
+        // struct ever reads it.
+        let wake_fd = create_eventfd()?;
+        let wake = unsafe { fs::File::from_raw_fd(wake_fd) };
+        let reader_alive = Arc::new(AtomicBool::new(true));
 
         let (sender, receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
         // A one-shot handshake so the caller can learn the reader
@@ -130,9 +205,10 @@ impl TerminalReader {
         // (`reader_thread_does_not_busy_wait_while_idle`); harmless
         // overhead (one syscall at thread start) on the production path.
         let (tid_sender, tid_receiver) = mpsc::sync_channel(1);
+        let thread_reader_alive = Arc::clone(&reader_alive);
         let join_handle = std::thread::spawn(move || {
             let _ = tid_sender.send(current_thread_id());
-            reader_thread_loop(master, sender, shutdown_fd);
+            reader_thread_loop(master, sender, shutdown_fd, wake_fd, thread_reader_alive);
         });
         let os_thread_id = tid_receiver
             .recv()
@@ -142,6 +218,8 @@ impl TerminalReader {
             join_handle: Some(join_handle),
             os_thread_id,
             shutdown,
+            wake,
+            reader_alive,
         })
     }
 
@@ -151,6 +229,18 @@ impl TerminalReader {
     /// description.
     pub fn os_thread_id(&self) -> i32 {
         self.os_thread_id
+    }
+
+    /// RFC-017 Amendment 1, PR-A1-C: a duplicate handle onto this
+    /// reader's wake `eventfd`, for a caller that wants to wait for
+    /// readiness instead of polling `drain_available` on a timer.
+    /// `try_clone`'s failure mode is the same resource exhaustion
+    /// `spawn` can already fail on.
+    pub fn try_clone_wake_notifier(&self) -> io::Result<WakeNotifier> {
+        Ok(WakeNotifier {
+            file: self.wake.try_clone()?,
+            reader_alive: Arc::clone(&self.reader_alive),
+        })
     }
 
     /// Drains everything currently buffered in the channel **without
@@ -228,29 +318,63 @@ fn current_thread_id() -> i32 {
     unsafe { libc::syscall(libc::SYS_gettid) as i32 }
 }
 
-fn reader_thread_loop(mut master: fs::File, sender: SyncSender<Vec<u8>>, shutdown_fd: RawFd) {
+/// RFC-017 Amendment 1, PR-A1-C: every exit path here does the same two
+/// things in the same order before returning -- mark `reader_alive`
+/// `false`, then signal `wake_fd` -- so a `WakeNotifier` can never
+/// observe "still alive" after the reader has actually stopped, nor
+/// miss the final wake that tells it so. Factored into one place rather
+/// than repeated at each `return`, so that ordering cannot drift between
+/// call sites.
+fn reader_thread_loop(
+    mut master: fs::File,
+    sender: SyncSender<Vec<u8>>,
+    shutdown_fd: RawFd,
+    wake_fd: RawFd,
+    reader_alive: Arc<AtomicBool>,
+) {
     let pty_fd = master.as_raw_fd();
     let mut buffer = [0_u8; READ_CHUNK_BYTES];
 
     loop {
         match poll_for_readiness(pty_fd, shutdown_fd) {
-            PollOutcome::ShutdownRequested | PollOutcome::Failed => return,
+            PollOutcome::ShutdownRequested | PollOutcome::Failed => {
+                return stop_reading(&reader_alive, wake_fd);
+            }
             PollOutcome::PtyReadable => {}
         }
 
         loop {
             match master.read(&mut buffer) {
-                Ok(0) => return,
+                Ok(0) => return stop_reading(&reader_alive, wake_fd),
                 Ok(bytes_read) => {
                     if sender.send(buffer[..bytes_read].to_vec()).is_err() {
-                        return;
+                        return stop_reading(&reader_alive, wake_fd);
                     }
+                    signal_wake(wake_fd);
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => return,
+                Err(_) => return stop_reading(&reader_alive, wake_fd),
             }
         }
+    }
+}
+
+/// The reader thread's last act on every exit path: mark itself dead,
+/// then wake anyone waiting so they notice -- both the "the reader has
+/// permanently stopped" state and the "something happened, go check"
+/// signal reuse the same `eventfd`, ordered so a waiter reading `false`
+/// off `reader_alive` can trust it.
+fn stop_reading(reader_alive: &AtomicBool, wake_fd: RawFd) {
+    reader_alive.store(false, Ordering::Release);
+    signal_wake(wake_fd);
+}
+
+fn signal_wake(wake_fd: RawFd) {
+    let value: u64 = 1;
+    let bytes = value.to_ne_bytes();
+    unsafe {
+        libc::write(wake_fd, bytes.as_ptr().cast(), bytes.len());
     }
 }
 
@@ -296,6 +420,42 @@ fn poll_for_readiness(pty_fd: RawFd, shutdown_fd: RawFd) -> PollOutcome {
             return PollOutcome::PtyReadable;
         }
         // Spurious wakeup with nothing actually ready; poll again.
+    }
+}
+
+/// Blocks until `fd` is readable or `poll(2)` itself fails
+/// unrecoverably. The single-fd counterpart to [`poll_for_readiness`],
+/// used by [`WakeNotifier::block_until_woken`] -- that caller has only
+/// one fd to wait on, not a PTY master plus a shutdown signal.
+fn block_on_eventfd(fd: RawFd) -> bool {
+    let mut pollfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+
+    loop {
+        let result = unsafe { libc::poll(&mut pollfd, 1, -1) };
+        if result == -1 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return false;
+        }
+        if pollfd.revents != 0 {
+            return true;
+        }
+        // Spurious wakeup with nothing actually ready; poll again.
+    }
+}
+
+fn create_eventfd() -> io::Result<RawFd> {
+    let fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC) };
+    if fd == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(fd)
     }
 }
 
