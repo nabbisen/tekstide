@@ -1098,33 +1098,37 @@ fn handle_editor_key(state: &mut State, key: &input::KeyPress) {
     }
 }
 
-/// RFC-019 PR-019-D: `Ctrl+S`'s real handler. `save_active_document`'s
-/// own error-mapping (`project::content`'s `save_active_document`) has
-/// already turned a `BlockedExternalChange` refusal into
-/// `ProjectContentStatus::Conflict` by the time this reads it back --
-/// checked here, not derived from the `Result` itself, since every
-/// other `SaveError` shares the same `Err` shape and only the status
-/// distinguishes them. Any other failure is left to `editor::view`'s own
-/// `chrome_line`/state rendering (`TextDocumentState::SaveError`), the
-/// same "rendered by the surface, not a second notice" shape
+/// RFC-019 PR-019-D: `Ctrl+S`'s real handler. status-mapping-honesty-fixes
+/// (response 196) amended this function's own scope boundary to correct
+/// it: it used to re-read `ProjectContentStatus::Conflict` off
+/// `workspace.status()` after the save call returned, coupling the
+/// shell to however core happened to *summarise* the failure rather than
+/// to the failure itself -- which is exactly why fixing `save_active_document`'s
+/// own status-mapping defect (Fix 2) broke this function. The reason a
+/// save failed is already on the value the call returns
+/// (`ProjectContentError::Save(error)` carries `error.decision()`), so
+/// this reads it directly. Any other failure is left to `editor::view`'s
+/// own `chrome_line`/state rendering (`TextDocumentState::SaveError`),
+/// the same "rendered by the surface, not a second notice" shape
 /// `terminal_launch_notice` deliberately does *not* use here.
 fn attempt_save_active_document(state: &mut State) {
-    if state.app_shell.save_active_project_text_document().is_ok() {
+    let Err(tekstide_core::project::ProjectContentError::Save(error)) =
+        state.app_shell.save_active_project_text_document()
+    else {
+        return;
+    };
+    if error.decision() != tekstide_core::content::SaveDecision::BlockedExternalChange {
         return;
     }
     let Some(project) = state.app_shell.state().active_project() else {
         return;
     };
-    let workspace = project.content_workspace();
-    if *workspace.status() != tekstide_core::project::ProjectContentStatus::Conflict {
-        return;
-    }
-    let Some(document) = workspace.active_document() else {
+    let Some(document) = project.content_workspace().active_document() else {
         return;
     };
-    // RFC-019 PR-019-E: `ProjectContentStatus::Conflict` is set for both
-    // a genuine conflict (local edits would be lost) and a clean
-    // document that merely changed on disk (nothing would be lost) --
+    // RFC-019 PR-019-E: a `BlockedExternalChange` refusal covers both a
+    // genuine conflict (local edits would be lost) and a clean document
+    // that merely changed on disk (nothing would be lost) --
     // `TextDocument::save()` already computed which one this is
     // (`block_external_change`'s own `if self.is_dirty()` branch), so
     // this reads `document.state()` rather than re-deriving it.

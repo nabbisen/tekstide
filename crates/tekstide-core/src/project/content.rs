@@ -171,7 +171,21 @@ impl ProjectContentWorkspace {
             }
             Err(error) => {
                 self.status = match error.decision() {
-                    SaveDecision::BlockedExternalChange => ProjectContentStatus::Conflict,
+                    // `TextDocument::save` already distinguished these two
+                    // cases on `self.state` before collapsing both into
+                    // `BlockedExternalChange` for this `SaveDecision`
+                    // (`content::document`'s `block_external_change`: state
+                    // becomes `Conflict` only if the buffer was dirty,
+                    // `ExternalChanged` otherwise). Reading `document.state()`
+                    // back here recovers that distinction rather than
+                    // re-deriving or guessing it -- the same pattern
+                    // `refresh_active_document` below already uses, and the
+                    // one the shell's own RFC-019 PR-019-E fix reads
+                    // independently for its conflict-modal wording.
+                    SaveDecision::BlockedExternalChange => match document.state() {
+                        TextDocumentState::Conflict => ProjectContentStatus::Conflict,
+                        _ => ProjectContentStatus::ExternalChanged,
+                    },
                     _ => ProjectContentStatus::SaveError {
                         message: error.to_string(),
                     },

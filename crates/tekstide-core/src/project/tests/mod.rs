@@ -2,6 +2,7 @@ use super::{ProjectId, ProjectSession};
 
 mod change_detection;
 mod collections;
+mod content;
 mod metadata;
 mod references;
 mod transcripts;

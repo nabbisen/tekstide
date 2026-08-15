@@ -121,24 +121,37 @@ Status: substrate decided, application shell, and mode switching implemented by 
   clean externally-changed document — the dialog's wording now reads each correctly).
   Undo history remains out of scope (RFC-019 non-goal, inherited from RFC-006). Diff
   review and the AgentRun report are RFC-020, M10's second half.
-- **`ProjectContentWorkspace::save_active_document`'s error mapping does not distinguish
-  a genuine conflict from a clean, externally-changed document — a real `tekstide-core`
-  defect, found during RFC-019 PR-019-E closeout (response 184), not RFC-019's to fix
-  since it renders core state rather than owning it.** `project/content.rs:174` maps
+- **`ProjectContentWorkspace::save_active_document`'s error mapping conflated a genuine
+  conflict with a clean, externally-changed document — fixed 2026-08-15
+  (`rfcs/handoffs/status-mapping-honesty-fixes.md`, Fix 2; response 196).** Found during
+  RFC-019 PR-019-E closeout (response 184). `project/content.rs` mapped
   `SaveDecision::BlockedExternalChange` to `ProjectContentStatus::Conflict`
-  unconditionally, regardless of whether the buffer was actually dirty. This disagrees
-  with `refresh_active_document` in the same file (lines ~224–227), which correctly
-  distinguishes `ExternalChangeDecision::ExternalChanged` from `::Conflict`. The two
-  variants `ProjectContentStatus` already has prove the coarseness at line 174 is a
-  defect, not a deliberate simplification. **Consequence**: `workspace.status()` reports
-  `Conflict` for a clean external change, so any future consumer of `status()` — not only
-  the shell's own conflict modal, which now reads the more authoritative
-  `document.state()` instead and no longer depends on this mapping — gets the wrong
-  answer; `render_text()` also renders this status, so `tekstide-core`'s own pre-GUI
-  harness reports "conflict" for a save that lost nothing. Fix belongs in
-  `project::content::save_active_document`: read `document.state()` (or the document's
-  own dirty flag at the point of the error) the same way the shell-side fix now does,
-  rather than collapsing both cases before the caller ever sees them.
+  unconditionally, disagreeing with `refresh_active_document` in the same file, which
+  already distinguished `ExternalChangeDecision::ExternalChanged` from `::Conflict`.
+  **Correction to this entry's own earlier claim**: the shell's conflict modal did *not*
+  "no longer depend on this mapping" as originally written here — only its `had_local_edits`
+  wording read `document.state()`; the decision to open the modal at all still gated on
+  `ProjectContentStatus::Conflict` specifically, which is exactly why fixing this mapping
+  broke that gate (found by the slice's own regression test, not shipped). **Fixed**:
+  `save_active_document` now reads `document.state()` back, the same pattern
+  `refresh_active_document` already used, producing `ProjectContentStatus::ExternalChanged`
+  for a clean external change and `::Conflict` only when local edits would actually be
+  lost. `render_text()` no longer renders the self-contradiction found live —
+  `content status: conflict | document: external changed` on the same line for a save that
+  lost nothing. **Scope amended mid-slice to authorise one shell change**:
+  `attempt_save_active_document` (`crates/tekstide/src/shell.rs`) was coupled to the exact
+  bug being fixed, re-reading `workspace.status()` after the save call rather than the
+  `SaveDecision` the call already returned — so a correct, narrowly-scoped core fix broke
+  it. Rewritten to read `error.decision()` directly off the returned
+  `ProjectContentError::Save(error)`, removing the coupling rather than widening the guard
+  to accommodate it (a `Conflict | ExternalChanged` match would have worked but left the
+  next status refinement free to break it again, and RFC-020 is about to add statuses in
+  this same area). Both the core mapping and the shell guard were ablated for real by
+  reverting each independently and confirming the exact named test fails; the
+  genuine-conflict case (dirty buffer, real external write) still opens the modal with
+  `had_local_edits: true`, proven by a dedicated test that must not regress. Enumeration
+  after the fix found no remaining `crates/tekstide` call site coupled to the
+  `Conflict`/`ExternalChanged` distinction — the coupling is gone, not merely reduced.
 - **The project board told the user terminals were not implemented, in a build where they
   were — fixed 2026-08-15 (`rfcs/handoffs/status-mapping-honesty-fixes.md`, Fix 1).**
   Found in PR-018-G's own baseline screenshot (`00-baseline-no-modal.png`, response 195,

@@ -514,6 +514,50 @@ fn external_dirty_conflict_is_visible_without_overwriting_disk() {
     );
 }
 
+/// **status-mapping-honesty-fixes, Fix 2: `render_text()`'s own output
+/// checked**, since it is the pre-GUI harness's own answer and rendered
+/// exactly the contradiction the defect produced live: `content status:
+/// conflict | document: external changed` on the same line, for a clean
+/// document that lost nothing. After the fix, `content status:` must
+/// agree with `document:` -- both `external changed` -- for this same
+/// scenario. Same shape as `external_dirty_conflict_is_visible_without_overwriting_disk`
+/// above, with the one variable under study (a local edit) removed.
+#[test]
+fn external_clean_change_is_visible_without_a_false_conflict_claim() {
+    let sandbox = TestSandbox::new("shell-content-clean-external-change");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/file.txt", b"original\n");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+    shell
+        .open_active_project_text_document("file.txt")
+        .expect("text document should open");
+    // No local edit -- the document stays Clean.
+    fs::write(project_dir.join("file.txt"), b"external edit\n").unwrap();
+
+    shell
+        .save_active_project_text_document()
+        .expect_err("external change should block save");
+    let rendered = shell.render_text();
+
+    assert!(
+        rendered.contains("content status: external changed"),
+        "a clean document must not report the more alarming conflict status: {rendered:?}"
+    );
+    assert!(rendered.contains("document: external changed"));
+    assert!(
+        !rendered.contains("content status: conflict"),
+        "content status and document state must agree, not contradict each other on the \
+         same rendered line: {rendered:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(project_dir.join("file.txt")).unwrap(),
+        "external edit\n"
+    );
+}
+
 struct TestSandbox {
     root: std::path::PathBuf,
 }
