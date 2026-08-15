@@ -93,13 +93,14 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | 015 | Application Shell and Rendered Surface Model | M8 | 014 | no | **Implemented and closed 2026-08-01.** `0.4.0` (B/C/D/F/G) + `0.4.1` (E, focus indicator, C4). Moved to `done/`. RFC-014 R1 and R6 discharged |
 | 016 | Internationalization and Localization | M8 | 014 | partly | **Implemented and closed 2026-08-01** (PR-016-B/C/D/E/F). Moved to `done/` |
 | 017 | Terminal Renderer and Immersion Mode | M9 | 014, 015 | no | **Accepted 2026-08-01 — next up.** Unblocked: 014 decided, 015 shipped `0.4.0` |
-| 018 | Rendered Paste Protection and Trusted UI | M9 | 017 | no | Blocked |
-| 019 | Editor and Explorer Surfaces | M10 | 015 | no | Blocked |
-| 020 | Diff Review and AgentRun Report Surfaces | M10 | 015 | no | Blocked |
+| 018 | Rendered Paste Protection and Trusted UI | M9 | 017 | no | **Implemented and closed 2026-08-10** (`0.5.1`). PR-018-G, the carried-forward background scrim, landed 2026-08-12 (`0.7.0`) |
+| 019 | Editor and Explorer Surfaces | M10 | 015 | no | **Implemented and closed 2026-08-11** (`0.6.0`) |
+| 020 | Diff Review and AgentRun Report Surfaces | M10 | 015, 024 | no | **Next.** RFC-024's content access shipped dark in `0.7.0` and stays unreachable until this lands. Blocked only on the RFC-011 transcript-reader amendment |
 | 021 | Command Approval Model and Adapter Capability | M11 | — | **yes** | **Implemented headless and fully closed 2026-07-30. Moved to `done/`. Not reachable by any user until the adapter-spawn slice lands** |
 | 022 | Security Dialogs and Audit Producer Completion | M11 | 015, 021 | no | Blocked |
-| 023 | Configuration System | M12 | — | **yes** | **Authored — ready for implementation** |
-| 024 | Git Integration | M12 | — | **yes** | Queued (parallel-ready) |
+| 023 | Configuration System | M12 | — | **yes** | **Authored — ready for implementation.** Headless: shipping it alone would repeat the zero-reachable-surface failure `0.7.0` nearly hit |
+| 024 | Diff Preview Policy | M10 | 012 | **yes** | **Implemented and closed 2026-08-11** (`0.7.0`). Authored out of order as RFC-020's content-access prerequisite; carried RFC-012 Amendment 1, a breaking change |
+| 030 | Git Integration | M12 | — | **yes** | Queued (parallel-ready). **Renumbered from 024** 2026-08-12: this row still claimed a number RFC-024 (Diff Preview Policy) had taken on 2026-08-11, so an M12 item was left unaddressable. 025-029 could not absorb the shift — RFC-029 is referenced from closed RFCs (013, 016) and from `handoffs/minimal-user-documentation.md`, and closed documents are not edited to match a later state |
 | 025 | Notifications | M12 | 023 | partly | Queued |
 | 026 | File Watcher and Multi-Document Model | M13 | 019 | partly | Blocked |
 | 027 | Crash Recovery and Unsaved Buffer Persistence | M13 | — | **yes** | Queued (parallel-ready) |
@@ -117,7 +118,7 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 - **021 Command Approval** — adapter capability contract, approval policy, risk classification, approve/deny/edit semantics, and the audit correlation. **Headless and unblocked.** The dialog is RFC-022's job.
 - **022 Security Dialogs** — trust, safe-close, destructive confirmation, Restricted Mode blocked-action surfacing, plus wiring four audit producers.
 - **023 Configuration** — file format, schema, atomic validation, diagnostics, hot-reload policy with the security-sensitive-settings rule, and moving AI CLI profiles from code-defined to user configuration.
-- **024 Git Integration** — repository detection, branch, dirty state, per-file status. Must honor the subprocess safety rules already specified in RFC-012 (reviewed non-project-local executable, no shell, deterministic argv, sanitized environment, no workspace hooks, bounded time/output).
+- **030 Git Integration** — repository detection, branch, dirty state, per-file status. Must honor the subprocess safety rules already specified in RFC-012 (reviewed non-project-local executable, no shell, deterministic argv, sanitized environment, no workspace hooks, bounded time/output).
 - **025 Notifications** — domain model, levels, actionable wording, and surfacing in Project Board and status bar.
 - **026 Watcher and Multi-Document** — debounced watching, batching under churn, multi-document model replacing the RFC-006 single-document limitation, overwrite confirmation.
 - **027 Crash Recovery** — unsaved buffer persistence and labelled recovery on restart.
@@ -177,7 +178,7 @@ Both are mine, from the M8-M14 restructure on 2026-07-28.
 
 Sequencing these behind the GUI would leave the two most product-defining gaps until last, when schedule pressure is highest. That is the wrong order for work whose correctness matters most.
 
-**RFC-024 (Git) and RFC-027 (crash recovery)** are also parallel-ready and can absorb capacity whenever GUI work blocks.
+**RFC-030 (Git) and RFC-027 (crash recovery)** are also parallel-ready and can absorb capacity whenever GUI work blocks.
 
 ## Release Cycle Tracking
 

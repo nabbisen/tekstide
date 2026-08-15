@@ -21,6 +21,30 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | Proposed 2026-08-11 — M10 second half; RFC-024, its content-access prerequisite, is now implemented and closed |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
+### Reserved numbers — check this before authoring
+
+These are claimed by [`delivery-plan.md`](./delivery-plan.md)'s RFC queue but have no
+document yet. **An RFC number is taken the moment the plan reserves it, not when a file
+appears**, so this table exists to make a reservation visible to whoever authors next.
+
+| RFC | Title | Milestone |
+| --- | --- | --- |
+| 022 | Security Dialogs and Audit Producer Completion | M11 |
+| 025 | Notifications | M12 |
+| 026 | File Watcher and Multi-Document Model | M13 |
+| 027 | Crash Recovery and Unsaved Buffer Persistence | M13 |
+| 028 | Cross-Platform Support | M14 |
+| 029 | Documentation, CI, and Release Automation | M14 |
+| 030 | Git Integration | M12 |
+
+Added 2026-08-12 after a real collision: RFC-024 was authored just-in-time as
+*Diff Preview Policy* and took a number the delivery plan had already reserved for Git
+Integration. Nothing connected the two files, so the clash went unnoticed until the plan
+was read for release planning, by which point RFC-024 was implemented, closed and shipped
+in `0.7.0` — and Git Integration had silently lost its number. Git Integration is now 030;
+the intervening numbers could not absorb the shift because RFC-029 is referenced from
+closed RFCs (013, 016), and closed documents are not edited to match a later state.
+
 ## Handoffs
 
 | RFC | Handoff Pack |
