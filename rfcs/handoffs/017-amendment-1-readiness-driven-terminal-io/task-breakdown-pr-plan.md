@@ -2,7 +2,7 @@
 title: "RFC-017 Amendment 1: Readiness-driven terminal I/O — Task Breakdown / PR Plan"
 rfc: "RFC-017 Amendment 1"
 rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
-status: "PR-A1-A implemented 2026-08-15, reviewed (response 201), required fix applied same day (commit 85dcbef), not yet re-reviewed — B, C, D not started"
+status: "PR-A1-A closed 2026-08-15 (responses 201/202, commits 79d9c23/85dcbef) — B, C, D not started"
 target_milestone: "M9 (carried), shipping in 0.8.0"
 created: "2026-08-15"
 ---
@@ -37,21 +37,24 @@ echoed, unevaluated command text; `ONLCR`'s LF→CRLF translation) — both disc
 commit message and in `qa-evidence.md` rather than folded quietly into a clean diff. Nothing
 in `crates/tekstide` changed; nothing drains this reader in production yet.
 
-**Response 201 accepted PR-A1-A with one required fix, applied same day (commit
-`85dcbef`), not yet re-reviewed**: `Drop` could still block forever. Dropping `receiver`
-only unblocks a thread parked in `sender.send` on a full channel; it does nothing for a
-thread parked in `poll(2)` on a live, silent child producing no output — the common case, not
-a corner case, once a real caller drops a reader for an idle terminal. Fixed with a shutdown
-`eventfd` added to the `poll(2)` set; `Drop` writes to it before dropping `receiver` and
-joining, so both unblock paths are now independent of the child's behaviour. Proven by
+**Response 201 accepted PR-A1-A with one required fix — `Drop` could still block forever.**
+Dropping `receiver` only unblocks a thread parked in `sender.send` on a full channel; it does
+nothing for a thread parked in `poll(2)` on a live, silent child producing no output — the
+common case, not a corner case, once a real caller drops a reader for an idle terminal. Fixed
+(commit `85dcbef`) with a shutdown `eventfd` added to the `poll(2)` set; `Drop` writes to it
+before dropping `receiver` and joining, so both unblock paths are now independent of the
+child's behaviour. Proven by
 `dropping_a_reader_over_a_live_silent_child_completes_promptly`, which waits on the drop with
 a real 5-second timeout so a regression fails that test rather than hanging the suite;
 ablated by removing the `eventfd` write and confirming the test fails cleanly at its own
-timeout rather than hanging. Response 201 also noted the shutdown `eventfd` is itself a
-second channel this module owns, which **P2's re-enumeration in PR-A1-B must account for**.
+timeout rather than hanging.
 
-Remaining for this slice: PR-A1-B (the ingress re-proof), which this checkpoint does not
-attempt.
+**PR-A1-A closed 2026-08-15 (response 202, commit `85dcbef`).** Response 201 also noted the
+shutdown `eventfd` is itself a second channel this module owns, which **P2's re-enumeration
+in PR-A1-B must account for** — carried forward into PR-A1-B's own gate below. Response 202
+additionally flagged **modal exclusivity** as the item to be most careful about in PR-A1-B,
+since it is the one that fails silently (the reader thread does not stop when the
+subscription stops).
 
 ## PR-A1-B — The ingress re-proof
 

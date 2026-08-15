@@ -2,7 +2,7 @@
 title: "RFC-017 Amendment 1: Readiness-driven terminal I/O - QA Evidence"
 rfc: "RFC-017 Amendment 1"
 rfc_file: "../../done/017-terminal-renderer-and-immersion-mode.md"
-status: "PR-A1-A implemented 2026-08-15, reviewed (response 201), required fix applied same day (commit 85dcbef), not yet re-reviewed — B, C, D not started"
+status: "PR-A1-A closed 2026-08-15 (responses 201/202, commits 79d9c23/85dcbef) — B, C, D not started"
 target_milestone: "M9 (carried), shipping in 0.8.0"
 created: "2026-08-15"
 ---
@@ -40,7 +40,8 @@ Recorded here so the after-figures have something to be compared against:
 
 ## PR-A1-A — The reader thread and bounded channel
 
-**Implemented 2026-08-15 (commit `79d9c23`), not yet reviewed.** New module
+**Closed 2026-08-15 — reviewed and accepted (responses 201/202, commits `79d9c23`/`85dcbef`).**
+New module
 `crates/tekstide-core/src/runtime/terminal/reader.rs`, built alongside
 `read_available_bounded_for` (untouched) per the pack's own sequencing — nothing in
 `crates/tekstide` consumes this yet.
