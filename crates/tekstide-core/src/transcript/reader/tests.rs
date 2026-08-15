@@ -9,7 +9,7 @@ use crate::runtime::terminal::{
     LinuxTerminalRuntime, TerminalLaunchSpec, TerminalRuntimeHandle, TerminalSecurityParser,
 };
 use crate::transcript::{
-    BoundedTranscriptWriter, TranscriptPathRequest, TranscriptPathResolver,
+    BoundedTranscriptWriter, TranscriptCaptureMode, TranscriptPathRequest, TranscriptPathResolver,
     TranscriptRetentionLimits, TranscriptWriterConfig,
 };
 
@@ -65,6 +65,7 @@ fn write_transcript(storage_path: &TranscriptStoragePath, bytes: &[u8]) {
     let mut writer = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
         storage_path.clone(),
         TranscriptRetentionLimits::agent_run_default(),
+        TranscriptCaptureMode::LocalBounded,
     ))
     .expect("writer should create");
     writer.append(bytes).expect("append should succeed");

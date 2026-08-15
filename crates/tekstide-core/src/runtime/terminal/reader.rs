@@ -32,10 +32,15 @@
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+
+use crate::transcript::{
+    BoundedTranscriptWriter, TranscriptCaptureMode, TranscriptRetentionState,
+    TranscriptWriteSummary,
+};
 
 /// One `read(2)` call reads at most this many bytes before the chunk is
 /// handed to the channel. Matches the old path's 64 KiB per-poll cap in
@@ -94,6 +99,15 @@ pub struct TerminalReader {
     // are coming, rather than trying to encode that into the counter
     // value itself.
     reader_alive: Arc<AtomicBool>,
+    // RFC-011 Amendment 2, D1: `None` iff no `TranscriptCapture` was
+    // handed to `spawn` (capture not configured for this terminal at
+    // all) -- distinct from "configured, zero bytes written yet",
+    // which is `Some(TranscriptWriteSummary::active(0))`, matching the
+    // exact `Option` semantics the runtime-level accessor this replaces
+    // (`LinuxTerminalRuntime::transcript_write_summary`) used to have.
+    // The reader thread is the sole writer of the lock's contents; this
+    // handle only ever reads it.
+    transcript_write_summary: Option<Arc<Mutex<TranscriptWriteSummary>>>,
 }
 
 /// A duplicated handle onto one [`TerminalReader`]'s wake `eventfd`,
@@ -136,6 +150,96 @@ impl WakeNotifier {
             reader_alive: Arc::clone(&self.reader_alive),
         })
     }
+}
+
+/// RFC-011 Amendment 2, D1: what [`TerminalReader::spawn`] needs to move
+/// transcript capture into the reader thread -- the writer itself, plus
+/// the capture mode D3's mid-stream failure policy is keyed on. Built by
+/// the caller (`LinuxTerminalRuntime::spawn_output_reader`) from
+/// whatever `RunningTerminal` already holds; this module has no opinion
+/// on where either value came from.
+pub struct TranscriptCapture {
+    pub writer: BoundedTranscriptWriter,
+    pub mode: TranscriptCaptureMode,
+}
+
+impl TranscriptCapture {
+    pub fn new(writer: BoundedTranscriptWriter, mode: TranscriptCaptureMode) -> Self {
+        Self { writer, mode }
+    }
+}
+
+/// RFC-011 Amendment 2, D3: the reader thread's own mutable transcript
+/// state -- the writer it owns exclusively (nothing else can reach it
+/// once moved here), the mode deciding what a write failure means, the
+/// shared snapshot `TerminalReader::transcript_write_summary` reads, and
+/// whether capture has already failed once (so a `LocalBounded` reader
+/// does not keep re-attempting a write that is not going to start
+/// succeeding again mid-stream).
+struct ReaderTranscriptState {
+    writer: BoundedTranscriptWriter,
+    mode: TranscriptCaptureMode,
+    shared_summary: Arc<Mutex<TranscriptWriteSummary>>,
+    failed: bool,
+}
+
+/// What the reader thread's main loop must do with the chunk it just
+/// read, after [`ReaderTranscriptState::record_write`] -- see that
+/// method's own doc for why a chunk whose own write failed is never
+/// `Send`.
+enum TranscriptCaptureOutcome {
+    Send,
+    Suppress { stop_reading: bool },
+}
+
+impl ReaderTranscriptState {
+    /// **D2, held exactly, per chunk, with no exception**: the write
+    /// happens before the bytes would enter the channel, so if the write
+    /// fails, the bytes must not enter the channel either -- the
+    /// ordering guarantee was not actually satisfied for this chunk, and
+    /// showing it anyway would mean the display contains something the
+    /// durable record does not, the one outcome D2 exists to prevent.
+    /// Once `failed` is set (a prior chunk's write already failed under
+    /// `LocalBounded`), later chunks skip the write attempt entirely and
+    /// are always `Send` -- capture is permanently off for this reader's
+    /// remaining lifetime, not retried per chunk.
+    ///
+    /// **D3's policy split lives entirely in the return value**:
+    /// `LocalBounded` resumes normal reading from the *next* chunk
+    /// (`stop_reading: false`) with capture now off; `RequiredLocalBounded`
+    /// tells the caller to stop reading altogether
+    /// (`stop_reading: true`) -- "no further unrecorded progress," held
+    /// at the byte level, not just "no further reads attempted."
+    fn record_write(&mut self, bytes: &[u8]) -> TranscriptCaptureOutcome {
+        if self.failed {
+            return TranscriptCaptureOutcome::Send;
+        }
+        let result = self.writer.append(bytes).and_then(|_| self.writer.flush());
+        match result {
+            Ok(summary) => {
+                *lock_summary(&self.shared_summary) = summary;
+                TranscriptCaptureOutcome::Send
+            }
+            Err(error) => {
+                self.failed = true;
+                *lock_summary(&self.shared_summary) = TranscriptWriteSummary {
+                    byte_count: error.byte_count,
+                    retention_state: TranscriptRetentionState::CaptureFailed,
+                };
+                TranscriptCaptureOutcome::Suppress {
+                    stop_reading: self.mode == TranscriptCaptureMode::RequiredLocalBounded,
+                }
+            }
+        }
+    }
+}
+
+fn lock_summary(
+    shared: &Mutex<TranscriptWriteSummary>,
+) -> std::sync::MutexGuard<'_, TranscriptWriteSummary> {
+    shared
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// What one non-blocking drain call collected. `ended` means the reader
@@ -182,7 +286,20 @@ impl TerminalReader {
     ///
     /// Fallible only because `eventfd(2)` can fail (resource exhaustion)
     /// -- everything else here is infallible in practice.
-    pub(super) fn spawn(master: fs::File) -> io::Result<Self> {
+    ///
+    /// **RFC-011 Amendment 2, D1**: `transcript_capture`, when `Some`,
+    /// moves a real `BoundedTranscriptWriter` into this reader thread --
+    /// the thread already blocks on `poll(2)`, which is the correct
+    /// place for a blocking write (`UI thread` file I/O is the exact
+    /// defect RFC-017 Amendment 1 removed; re-introducing it as a
+    /// transcript write under a different name would undo that). `None`
+    /// means capture is not configured for this terminal at all, the
+    /// common case today since nothing in `crates/tekstide` yet
+    /// requests it.
+    pub(super) fn spawn(
+        master: fs::File,
+        transcript_capture: Option<TranscriptCapture>,
+    ) -> io::Result<Self> {
         // Owned by `TerminalReader` for the `write` side `Drop` uses to
         // signal shutdown; the reader thread below only needs the bare
         // fd number to `poll(2)` it, not ownership -- `shutdown` here
@@ -206,9 +323,27 @@ impl TerminalReader {
         // overhead (one syscall at thread start) on the production path.
         let (tid_sender, tid_receiver) = mpsc::sync_channel(1);
         let thread_reader_alive = Arc::clone(&reader_alive);
+        let transcript_write_summary = transcript_capture
+            .as_ref()
+            .map(|capture| Arc::new(Mutex::new(capture.writer.summary())));
+        let transcript_state = transcript_capture
+            .zip(transcript_write_summary.clone())
+            .map(|(capture, shared_summary)| ReaderTranscriptState {
+                writer: capture.writer,
+                mode: capture.mode,
+                shared_summary,
+                failed: false,
+            });
         let join_handle = std::thread::spawn(move || {
             let _ = tid_sender.send(current_thread_id());
-            reader_thread_loop(master, sender, shutdown_fd, wake_fd, thread_reader_alive);
+            reader_thread_loop(
+                master,
+                sender,
+                shutdown_fd,
+                wake_fd,
+                thread_reader_alive,
+                transcript_state,
+            );
         });
         let os_thread_id = tid_receiver
             .recv()
@@ -220,7 +355,23 @@ impl TerminalReader {
             shutdown,
             wake,
             reader_alive,
+            transcript_write_summary,
         })
+    }
+
+    /// RFC-011 Amendment 2, D1's chosen replacement for the old
+    /// `LinuxTerminalRuntime::transcript_write_summary` -- that method
+    /// read a writer the runtime owned; once the writer moves into this
+    /// thread (`spawn`, above), the runtime has nothing left to consult,
+    /// so the summary is queried from the reader itself instead, backed
+    /// by the shared, lock-protected snapshot the reader thread updates
+    /// after every write attempt (success or failure). `None` iff
+    /// capture was never configured for this terminal; `Some` thereafter
+    /// for the lifetime of this reader, even after `CaptureFailed`.
+    pub fn transcript_write_summary(&self) -> Option<TranscriptWriteSummary> {
+        self.transcript_write_summary
+            .as_ref()
+            .map(|shared| *lock_summary(shared))
     }
 
     /// The reader thread's kernel thread id (`gettid(2)`), for
@@ -331,6 +482,7 @@ fn reader_thread_loop(
     shutdown_fd: RawFd,
     wake_fd: RawFd,
     reader_alive: Arc<AtomicBool>,
+    mut transcript: Option<ReaderTranscriptState>,
 ) {
     let pty_fd = master.as_raw_fd();
     let mut buffer = [0_u8; READ_CHUNK_BYTES];
@@ -347,10 +499,44 @@ fn reader_thread_loop(
             match master.read(&mut buffer) {
                 Ok(0) => return stop_reading(&reader_alive, wake_fd),
                 Ok(bytes_read) => {
-                    if sender.send(buffer[..bytes_read].to_vec()).is_err() {
-                        return stop_reading(&reader_alive, wake_fd);
+                    let chunk = &buffer[..bytes_read];
+                    let outcome = transcript
+                        .as_mut()
+                        .map(|state| state.record_write(chunk))
+                        .unwrap_or(TranscriptCaptureOutcome::Send);
+                    match outcome {
+                        TranscriptCaptureOutcome::Send => {
+                            if sender.send(chunk.to_vec()).is_err() {
+                                return stop_reading(&reader_alive, wake_fd);
+                            }
+                            signal_wake(wake_fd);
+                        }
+                        TranscriptCaptureOutcome::Suppress { stop_reading: true } => {
+                            // RFC-011 Amendment 2, D3: `RequiredLocalBounded`.
+                            // This chunk is discarded, not displayed
+                            // (see `ReaderTranscriptState::record_write`'s
+                            // own doc for why), and no further reading
+                            // happens -- the child stalls on its own
+                            // `write()` once the pty's kernel buffer
+                            // fills, since nothing drains it from here
+                            // on. Not killed: the caller still decides
+                            // termination, and this thread stays alive
+                            // and joinable, responsive only to shutdown
+                            // from now on.
+                            signal_wake(wake_fd);
+                            return wait_for_shutdown_only(&reader_alive, shutdown_fd, wake_fd);
+                        }
+                        TranscriptCaptureOutcome::Suppress {
+                            stop_reading: false,
+                        } => {
+                            // `LocalBounded`: this one chunk is
+                            // discarded, but reading resumes immediately
+                            // -- capture is now permanently off for the
+                            // rest of this reader's life, and the
+                            // *next* chunk read is `Send` again.
+                            signal_wake(wake_fd);
+                        }
                     }
-                    signal_wake(wake_fd);
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -368,6 +554,25 @@ fn reader_thread_loop(
 fn stop_reading(reader_alive: &AtomicBool, wake_fd: RawFd) {
     reader_alive.store(false, Ordering::Release);
     signal_wake(wake_fd);
+}
+
+/// RFC-011 Amendment 2, D3: `RequiredLocalBounded`'s "stop reading"
+/// landing state -- reused from [`block_on_eventfd`], the same
+/// single-fd `poll(2)` primitive [`WakeNotifier::block_until_woken`]
+/// already uses, since waiting on exactly the shutdown fd and nothing
+/// else is exactly what this needs. **Deliberately does not call
+/// `stop_reading` (mark dead) on entry**: the reader has not
+/// permanently ended -- the child is still alive, just blocked -- so
+/// `reader_alive` must stay `true` for as long as this thread is merely
+/// stalled rather than actually gone. Only once real shutdown arrives
+/// (`Drop`, or any other future termination path that reuses the same
+/// `eventfd`) does this proceed to the normal exit, at which point
+/// `reader_alive` finally becomes `false` and one last wake fires --
+/// the same guarantee every other exit path in this module already
+/// gives a `WakeNotifier`.
+fn wait_for_shutdown_only(reader_alive: &AtomicBool, shutdown_fd: RawFd, wake_fd: RawFd) {
+    block_on_eventfd(shutdown_fd);
+    stop_reading(reader_alive, wake_fd);
 }
 
 fn signal_wake(wake_fd: RawFd) {

@@ -10,10 +10,12 @@ use std::time::{Duration, Instant};
 
 use crate::domain::{TerminalId, TerminalSession, TerminalStatus};
 use crate::project::{ProjectId, ProjectSession};
-use crate::transcript::{BoundedTranscriptWriter, TranscriptWriteError, TranscriptWriteSummary};
+use crate::transcript::{
+    BoundedTranscriptWriter, TranscriptCaptureMode, TranscriptWriteError, TranscriptWriteSummary,
+};
 
 use super::pty::{OpenPty, close_fd, resize_master};
-use super::reader::TerminalReader;
+use super::reader::{TerminalReader, TranscriptCapture};
 use super::{
     BoundedRuntimeSummary, TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec,
     TerminalOutputSummary, TerminalRuntimeEvent, TerminalRuntimeHandle,
@@ -37,13 +39,17 @@ impl LinuxTerminalRuntime {
     ) -> Result<(TerminalSession, Vec<TerminalRuntimeEvent>), TerminalLaunchError> {
         validate_launch_spec(project, &spec)?;
 
-        let transcript_writer = match spec.transcript_writer_config() {
-            Some(config) => Some(BoundedTranscriptWriter::create(config.clone()).map_err(
-                |error| TerminalLaunchError::TranscriptWriterUnavailable {
-                    summary: transcript_write_error_summary(&error),
-                },
-            )?),
-            None => None,
+        let (transcript_writer, transcript_capture_mode) = match spec.transcript_writer_config() {
+            Some(config) => {
+                let mode = config.mode;
+                let writer = BoundedTranscriptWriter::create(config.clone()).map_err(|error| {
+                    TerminalLaunchError::TranscriptWriterUnavailable {
+                        summary: transcript_write_error_summary(&error),
+                    }
+                })?;
+                (Some(writer), Some(mode))
+            }
+            None => (None, None),
         };
         let mut pty = OpenPty::new(spec.dimensions)
             .map_err(|summary| TerminalLaunchError::PtyUnavailable { summary })?;
@@ -73,6 +79,7 @@ impl LinuxTerminalRuntime {
                 child,
                 master: pty.into_master(),
                 transcript_writer,
+                transcript_capture_mode,
             },
         );
 
@@ -185,11 +192,25 @@ impl LinuxTerminalRuntime {
     /// so the same `O_NONBLOCK` status), which is what lets the reader
     /// thread do non-blocking drains between `poll(2)` wakeups without
     /// affecting how writes on the original handle behave.
+    ///
+    /// **RFC-011 Amendment 2, D1**: also moves this session's transcript
+    /// writer (if configured) into the new reader thread -- `&mut self`
+    /// since `Option::take` is how that move happens.
+    /// `RunningTerminal.transcript_writer` becomes `None` from this call
+    /// onward regardless of whether capture was configured; a second
+    /// call to this method (or a later call to `read_available_bounded_for`
+    /// on the same session) would find no writer left to use. Nothing in
+    /// this crate does that today -- `crates/tekstide` calls this
+    /// exactly once per launch (`TerminalPane::launch`), and
+    /// `read_available_bounded_for`'s own callers are a separate,
+    /// decoupled test/agent-output-capture path that never also calls
+    /// this method on the same session (see `qa-evidence.md`'s PR-A2-A
+    /// section for why re-homing left that path alone).
     pub fn spawn_output_reader(
-        &self,
+        &mut self,
         handle: &TerminalRuntimeHandle,
     ) -> Result<TerminalReader, TerminalRuntimeError> {
-        let session = self.session(handle)?;
+        let session = self.session_mut(handle)?;
         let master_for_reader =
             session
                 .master
@@ -199,10 +220,18 @@ impl LinuxTerminalRuntime {
                         "failed to duplicate PTY master for reader thread: {error}"
                     )),
                 })?;
-        TerminalReader::spawn(master_for_reader).map_err(|error| TerminalRuntimeError::Io {
-            summary: BoundedRuntimeSummary::new(format!(
-                "failed to create reader thread shutdown eventfd: {error}"
-            )),
+        let transcript_capture = session.transcript_writer.take().map(|writer| {
+            let mode = session
+                .transcript_capture_mode
+                .expect("transcript_capture_mode is always Some whenever transcript_writer is");
+            TranscriptCapture::new(writer, mode)
+        });
+        TerminalReader::spawn(master_for_reader, transcript_capture).map_err(|error| {
+            TerminalRuntimeError::Io {
+                summary: BoundedRuntimeSummary::new(format!(
+                    "failed to create reader thread shutdown eventfd: {error}"
+                )),
+            }
         })
     }
 
@@ -334,6 +363,12 @@ pub(super) struct RunningTerminal {
     pub(super) child: Child,
     pub(super) master: fs::File,
     pub(super) transcript_writer: Option<BoundedTranscriptWriter>,
+    /// RFC-011 Amendment 2, D1: carried alongside `transcript_writer` so
+    /// `spawn_output_reader` has the capture mode available at the
+    /// point it moves the writer into the reader thread -- `Some` iff
+    /// `transcript_writer` is `Some`, checked by construction in
+    /// `launch_project_shell` (both are set from the same `match` arm).
+    pub(super) transcript_capture_mode: Option<TranscriptCaptureMode>,
 }
 
 fn transcript_write_error_summary(error: &TranscriptWriteError) -> BoundedRuntimeSummary {

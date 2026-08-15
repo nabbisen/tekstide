@@ -12,9 +12,12 @@ created: "2026-08-15"
 Three slices. **[`the-ordering-and-the-failure.md`](./the-ordering-and-the-failure.md) is
 required reading before any of them.**
 
-## PR-A2-A — Capture in the reader thread, and the ordering
+## PR-A2-A — Capture in the reader thread, and the ordering [Implemented — pending review]
 
 Move the writer into `TerminalReader`, write before send, keep the happy path correct.
+
+See [`qa-evidence.md`](./qa-evidence.md#pr-a2-a---capture-in-the-reader-thread-and-the-ordering)
+for the full evidence record.
 
 Review gate:
 

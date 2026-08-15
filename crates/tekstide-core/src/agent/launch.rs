@@ -341,6 +341,7 @@ impl AgentRunLaunchPlan {
             .set_transcript_writer_config(Some(TranscriptWriterConfig::new(
                 storage_path.clone(),
                 self.spec.transcript_capture.retention_limits,
+                self.spec.transcript_capture.mode,
             )));
         self.transcript_storage_path = Some(storage_path);
         Ok(())

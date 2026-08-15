@@ -247,6 +247,7 @@ fn bounded_writer_creates_file_and_records_byte_count_without_content_summary() 
     let mut writer = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
         storage_path.clone(),
         TranscriptRetentionLimits::agent_run_default(),
+        TranscriptCaptureMode::LocalBounded,
     ))
     .unwrap();
 
@@ -265,9 +266,12 @@ fn bounded_writer_creates_file_and_records_byte_count_without_content_summary() 
 fn bounded_writer_truncates_at_per_transcript_limit() {
     let (_temp, storage_path) = resolved_storage_path("writer-truncates");
     let limits = TranscriptRetentionLimits::new(5, 5, 5, DEFAULT_TRANSCRIPT_MAX_AGE_DAYS);
-    let mut writer =
-        BoundedTranscriptWriter::create(TranscriptWriterConfig::new(storage_path.clone(), limits))
-            .unwrap();
+    let mut writer = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
+        storage_path.clone(),
+        limits,
+        TranscriptCaptureMode::LocalBounded,
+    ))
+    .unwrap();
 
     let summary = writer.append(b"abcdefghi").unwrap();
     let after_more = writer.append(b"jkl").unwrap();
@@ -287,9 +291,12 @@ fn bounded_writer_truncates_at_per_transcript_limit() {
 fn bounded_writer_allows_exact_limit_without_truncation() {
     let (_temp, storage_path) = resolved_storage_path("writer-exact-limit");
     let limits = TranscriptRetentionLimits::new(5, 5, 5, DEFAULT_TRANSCRIPT_MAX_AGE_DAYS);
-    let mut writer =
-        BoundedTranscriptWriter::create(TranscriptWriterConfig::new(storage_path.clone(), limits))
-            .unwrap();
+    let mut writer = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
+        storage_path.clone(),
+        limits,
+        TranscriptCaptureMode::LocalBounded,
+    ))
+    .unwrap();
 
     let summary = writer.append(b"abcde").unwrap();
 
@@ -304,6 +311,7 @@ fn bounded_writer_empty_append_keeps_current_summary() {
     let mut writer = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
         storage_path,
         TranscriptRetentionLimits::agent_run_default(),
+        TranscriptCaptureMode::LocalBounded,
     ))
     .unwrap();
 
@@ -318,9 +326,12 @@ fn bounded_writer_rejects_unbounded_retention_without_creating_file() {
     let (_temp, storage_path) = resolved_storage_path("writer-rejects-unbounded");
     let limits = TranscriptRetentionLimits::new(0, 0, 0, 0);
 
-    let error =
-        BoundedTranscriptWriter::create(TranscriptWriterConfig::new(storage_path.clone(), limits))
-            .unwrap_err();
+    let error = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
+        storage_path.clone(),
+        limits,
+        TranscriptCaptureMode::LocalBounded,
+    ))
+    .unwrap_err();
 
     assert_eq!(error.reason, TranscriptWriteErrorReason::UnboundedRetention);
     assert_eq!(error.byte_count, 0);
@@ -335,6 +346,7 @@ fn bounded_writer_open_error_is_bounded_and_content_free() {
     let error = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
         storage_path,
         TranscriptRetentionLimits::agent_run_default(),
+        TranscriptCaptureMode::LocalBounded,
     ))
     .unwrap_err();
 
@@ -358,6 +370,7 @@ fn bounded_writer_rejects_forged_project_root_storage_path_before_side_effects()
     let error = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
         storage_path,
         TranscriptRetentionLimits::agent_run_default(),
+        TranscriptCaptureMode::LocalBounded,
     ))
     .unwrap_err();
 

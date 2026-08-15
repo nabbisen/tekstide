@@ -1,8 +1,16 @@
+use std::fs;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::domain::AgentRunId;
 use crate::project::{ProjectId, ProjectSession};
+use crate::transcript::{
+    TranscriptCaptureMode, TranscriptPathRequest, TranscriptPathResolver,
+    TranscriptRetentionLimits, TranscriptRetentionState, TranscriptStoragePath,
+    TranscriptWriteSummary, TranscriptWriterConfig,
+};
 
 use super::super::*;
 
@@ -508,6 +516,503 @@ fn backpressure_stalls_the_producer_and_resumes_with_no_byte_loss_across_the_sta
     assert_eq!(outcome, Some(TerminationOutcome::Exited { exit_status: 0 }));
     drop(reader);
     cleanup_root(root);
+}
+
+/// RFC-011 Amendment 2, PR-A2-A: "a transcript written through the new
+/// path is byte-identical to the PTY output, proven against a real
+/// child process." Drains the reader's channel to completion (the same
+/// bytes a real consumer would ever see) and compares it, byte for
+/// byte, against what landed in the transcript file on disk -- both are
+/// reading the *same* raw PTY stream the reader thread saw, so nothing
+/// short of an actual bug (a chunk written but not sent, or vice versa)
+/// could make them differ.
+#[test]
+fn transcript_written_through_the_reader_thread_is_byte_identical_to_pty_output() {
+    let (mut runtime, handle, storage, dirs) =
+        launch_with_transcript_capture("byte-identical", TranscriptCaptureMode::LocalBounded);
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against a real PTY master");
+
+    runtime
+        .write_input(&handle, b"printf 'tekstide-transcript-marker\\n'\nexit\n")
+        .expect("marker command should write to PTY");
+
+    let drained = drain_until_contains(
+        &reader,
+        b"tekstide-transcript-marker",
+        Duration::from_secs(5),
+    );
+    assert!(
+        contains_subsequence(&drained, b"tekstide-transcript-marker"),
+        "the channel should carry the real marker output; drained: {}",
+        String::from_utf8_lossy(&drained)
+    );
+
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("shell wait should not fail");
+    assert_eq!(outcome, Some(TerminationOutcome::Exited { exit_status: 0 }));
+    drop(reader);
+
+    let transcript_bytes =
+        std::fs::read(storage.transcript_file()).expect("transcript file should be readable");
+    assert_eq!(
+        transcript_bytes, drained,
+        "the transcript must be byte-identical to what the consumer actually saw -- any \
+         difference here means the reader thread's write path and its channel-send path \
+         disagree about what the PTY produced"
+    );
+    drop(dirs);
+    cleanup_root(storage.transcript_dir().to_path_buf());
+}
+
+/// RFC-011 Amendment 2, PR-A2-A, D2: "a test that observes the record
+/// contains bytes the consumer has not yet drained" -- proven exactly,
+/// per byte, not by racing wall-clock timing against a microsecond-scale
+/// write (tried first; see below for why it does not work) and not by
+/// an aggregate byte-count threshold either (also tried first; also
+/// does not work, for a more interesting reason).
+///
+/// **Why a real PTY payload plus a byte-count threshold does not work.**
+/// The first attempt wrote a large payload and asserted the transcript
+/// exceeded the reader's own ~512 KiB channel bound
+/// (`CHANNEL_CAPACITY * READ_CHUNK_BYTES`) before ever draining. In
+/// practice the transcript plateaus far below that -- this environment's
+/// real PTY throughput stalls *upstream* of the channel (kernel PTY/line-
+/// discipline buffering, well under a single `READ_CHUNK_BYTES`
+/// chunk's worth), so the channel itself never fills against a real
+/// child process at all. Switching to a **named pipe (FIFO)** standing
+/// in for the transcript file fixed that: its own kernel buffer (a real
+/// pipe, ~64 KiB) reliably fills once nothing reads it, so
+/// `self.writer.append(...)`'s `write_all` reliably blocks **inside
+/// `record_write`**. But an aggregate "total bytes ever drained" bound
+/// *still* does not distinguish orderings: the reader thread is single-
+/// threaded and sequential, so a block *anywhere* inside one chunk's
+/// processing halts every later chunk equally, regardless of which side
+/// of the send it sits on -- a send-before-write reordering only ever
+/// lets **one extra chunk** (at most `READ_CHUNK_BYTES`) through before
+/// hitting the same wall, nowhere near the channel's own much larger
+/// bound a threshold-based assertion was checking against.
+///
+/// **What actually distinguishes it**: `FIONREAD` (`fionread`, below)
+/// reports exactly how many bytes are queued in the FIFO's kernel
+/// buffer *without consuming them* -- precisely how many bytes have
+/// really been committed to the transcript so far, independent of
+/// anything this test drains from the channel. With the real ordering,
+/// nothing can ever be sent that was not already committed first, so
+/// `drained_total <= written_to_transcript` always holds, exactly, no
+/// margin needed.
+///
+/// **Ablated**: swapping this call site to send *before* calling
+/// `ReaderTranscriptState::record_write` (rather than after, as written)
+/// made this test fail with a concrete, real violation: 142,148 bytes
+/// drained against only 52,705 bytes ever committed to the transcript --
+/// the channel visibly ahead of the record it is supposed to be a
+/// subset of. Restored afterward.
+#[test]
+fn transcript_write_blocking_also_blocks_every_later_send() {
+    let dirs = TestDirs::new("d2-ordering-fifo");
+    let request = TranscriptPathRequest::new(
+        &dirs.state_root,
+        &dirs.project_root,
+        ProjectId::for_test(1),
+        AgentRunId::for_test(1),
+    );
+    let storage = TranscriptPathResolver
+        .resolve_agent_run(request)
+        .expect("test storage path should resolve");
+    std::fs::create_dir_all(storage.transcript_dir()).expect("transcript dir should be creatable");
+    make_fifo(storage.transcript_file());
+
+    // Rendezvous with the writer's own blocking `open()` -- a FIFO's
+    // write side does not unblock `open` until a reader is also open.
+    // This reader thread then does nothing further: it never calls
+    // `read`, so the FIFO's kernel buffer is the only thing absorbing
+    // bytes from here on, exactly the deterministic small capacity this
+    // test depends on.
+    let fifo_path = storage.transcript_file().to_path_buf();
+    let fifo_reader = std::thread::spawn(move || {
+        fs::File::open(&fifo_path).expect("fifo should be openable for reading")
+    });
+
+    let project = project_session(ProjectId::for_test(1), &dirs.project_root);
+    let mut spec = TerminalLaunchSpec::plain_shell(
+        project.id().clone(),
+        "Shell",
+        &dirs.project_root,
+        "/bin/sh",
+    );
+    spec.set_transcript_writer_config(Some(TranscriptWriterConfig::new(
+        storage.clone(),
+        TranscriptRetentionLimits::agent_run_default(),
+        TranscriptCaptureMode::LocalBounded,
+    )));
+    let mut runtime = LinuxTerminalRuntime::new();
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("transcript-capturing shell launch should succeed (fifo reader must be open)");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against a real PTY master");
+    let _fifo_reader_file = fifo_reader
+        .join()
+        .expect("fifo reader thread should not panic");
+
+    // A real PTY payload well over the FIFO's own small kernel-buffer
+    // capacity, but nowhere near the channel's own much larger one --
+    // `yes` writes continuously and directly (no intermediate pipe stage
+    // of its own to become an earlier bottleneck).
+    runtime
+        .write_input(
+            &handle,
+            b"yes aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        )
+        .expect("payload command should write to PTY");
+
+    // Deliberately never drain until the check below. Poll a single
+    // `drain_available` repeatedly (each call itself never blocks, per
+    // this module's own contract) until its cumulative total stops
+    // growing for a sustained window -- the real stall signature, not a
+    // guessed sleep duration.
+    let mut drained_total = 0_usize;
+    let mut stable_since = Instant::now();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while stable_since.elapsed() < Duration::from_millis(500) && Instant::now() < deadline {
+        let drain = reader.drain_available();
+        if !drain.bytes().is_empty() {
+            drained_total += drain.bytes().len();
+            stable_since = Instant::now();
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    // `FIONREAD` reports how many bytes are currently queued in the
+    // FIFO's own kernel buffer *without consuming them* -- exactly "how
+    // much has actually been committed to the transcript, still
+    // sitting there," independent of anything this test has drained
+    // from the channel. Single-threaded, sequential execution inside
+    // the reader thread means *any* block halts every later chunk
+    // equally regardless of which side of it the block sits on, so the
+    // aggregate totals alone do not distinguish orderings (tried first,
+    // found not to -- see `qa-evidence.md`'s PR-A2-A section). This
+    // exact, per-byte comparison does: with the real ordering, nothing
+    // can ever be sent that was not already committed to the transcript
+    // first.
+    let written_to_transcript = fionread(&_fifo_reader_file);
+    assert!(
+        drained_total <= written_to_transcript,
+        "the channel drained {drained_total} bytes but only {written_to_transcript} bytes were \
+         ever actually committed to the transcript (queued in the FIFO's own kernel buffer) -- \
+         the channel must never get ahead of the transcript it is supposed to be a subset of; \
+         if it does, some byte was sent before its own write ever reached the transcript"
+    );
+
+    // Cleanup: `yes` never exits on its own, so kill it first (stops
+    // further production). The drain and the drop must then run
+    // *concurrently*, not one after the other: draining the FIFO to EOF
+    // only completes once the reader thread's writer closes, which only
+    // happens once the reader thread notices shutdown -- but it cannot
+    // notice shutdown until its *current* blocked `write_all` unblocks,
+    // which requires the drain to keep consuming. Sequencing "drain
+    // fully, then drop" makes each side wait on the other under
+    // scheduling contention: this thread's `read()` blocks (write end
+    // still open, no more data yet) while the reader thread's `write()`
+    // blocks (FIFO still full, nothing draining it) -- a real deadlock,
+    // not a hang specific to this environment (found via a genuine hang
+    // under concurrent build load, not reasoned about in the abstract).
+    // Running the drop on its own thread, bounded by a timeout matching
+    // `dropping_a_reader_over_a_live_silent_child_completes_promptly`'s
+    // own established pattern, breaks the cycle: shutdown is signalled
+    // immediately, so the reader thread proceeds as soon as this
+    // thread's ongoing drain unblocks its current write.
+    let request = TerminationRequest {
+        source: TerminationRequestSource::TestHarness,
+        reason: BoundedRuntimeSummary::new("d2 fifo ablation test cleanup"),
+    };
+    let _ = runtime.request_terminate(
+        &handle,
+        request,
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+    );
+
+    let mut fifo_reader_file = _fifo_reader_file;
+    let drain_thread = std::thread::spawn(move || {
+        let mut sink = [0_u8; 4096];
+        while fifo_reader_file.read(&mut sink).unwrap_or(0) > 0 {}
+    });
+
+    let (done_sender, done_receiver) = mpsc::channel();
+    let drop_thread = std::thread::spawn(move || {
+        drop(reader);
+        let _ = done_sender.send(());
+    });
+    if done_receiver.recv_timeout(Duration::from_secs(10)).is_err() {
+        panic!(
+            "dropping the reader after the d2 ordering stall did not complete within 10s -- \
+             the reader thread is stuck somewhere the shutdown signal and a concurrent FIFO \
+             drain should both reach"
+        );
+    }
+    let _ = drop_thread.join();
+    drain_thread
+        .join()
+        .expect("fifo drain thread should not panic");
+    drop(dirs);
+}
+
+/// `ioctl(fd, FIONREAD, ...)`: bytes currently queued and readable on
+/// `file`, without consuming any of them -- the non-destructive way to
+/// observe "how much has the writer actually committed so far."
+fn fionread(file: &fs::File) -> usize {
+    use std::os::fd::AsRawFd;
+    let mut available: libc::c_int = 0;
+    let result = unsafe { libc::ioctl(file.as_raw_fd(), libc::FIONREAD, &mut available) };
+    assert_eq!(result, 0, "FIONREAD should succeed on a real fifo fd");
+    available.max(0) as usize
+}
+
+fn make_fifo(path: &Path) {
+    let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+        .expect("transcript path must not contain a NUL byte");
+    let result = unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) };
+    assert_eq!(
+        result,
+        0,
+        "mkfifo should succeed for a fresh test path: {}",
+        io::Error::last_os_error()
+    );
+}
+
+/// RFC-011 Amendment 2, PR-A2-A, D1: the replacement for the old
+/// `LinuxTerminalRuntime::transcript_write_summary` must not silently
+/// return `None` and look like "no transcript configured" once the
+/// writer moves into the reader thread. `None` here means capture was
+/// genuinely never requested for this terminal -- the ordinary case for
+/// every plain-shell launch in this crate today.
+#[test]
+fn transcript_write_summary_is_none_when_capture_was_never_configured() {
+    let root = test_root("reader-transcript-summary-none");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against a real PTY master");
+
+    assert_eq!(
+        reader.transcript_write_summary(),
+        None,
+        "a plain-shell launch never configures transcript capture, so the summary must stay \
+         None -- not a zero-byte Some, which would look configured when it is not"
+    );
+
+    drop(reader);
+    cleanup_root(root);
+}
+
+/// The positive case for the same replacement: once capture is
+/// configured, `TerminalReader::transcript_write_summary` must reflect
+/// real writes as they land, queried through the reader itself (D1's
+/// chosen mechanism) rather than the runtime, which no longer has
+/// anything to consult once the writer moves.
+#[test]
+fn transcript_write_summary_reflects_real_writes_through_the_reader() {
+    let (mut runtime, handle, _storage, dirs) = launch_with_transcript_capture(
+        "summary-reflects-writes",
+        TranscriptCaptureMode::LocalBounded,
+    );
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against a real PTY master");
+
+    assert_eq!(
+        reader.transcript_write_summary(),
+        Some(TranscriptWriteSummary {
+            byte_count: 0,
+            retention_state: TranscriptRetentionState::Active,
+        }),
+        "configured but nothing written yet must report Active at zero bytes, matching \
+         BoundedTranscriptWriter::create's own initial state"
+    );
+
+    runtime
+        .write_input(&handle, b"printf 'tekstide-summary-marker\\n'\nexit\n")
+        .expect("marker command should write to PTY");
+    let _ = drain_until_contains(&reader, b"tekstide-summary-marker", Duration::from_secs(5));
+
+    let summary_started = Instant::now();
+    let mut summary = reader.transcript_write_summary();
+    while summary.map(|summary| summary.byte_count) == Some(0)
+        && summary_started.elapsed() < Duration::from_secs(5)
+    {
+        std::thread::sleep(Duration::from_millis(5));
+        summary = reader.transcript_write_summary();
+    }
+    assert!(
+        summary.is_some_and(|summary| summary.byte_count > 0
+            && summary.retention_state == TranscriptRetentionState::Active),
+        "byte_count must have advanced past zero once real output was written: {summary:?}"
+    );
+
+    drop(reader);
+    drop(dirs);
+}
+
+/// RFC-011 Amendment 2, PR-A2-A: "an enumeration names the production
+/// transcript-write call site, so a future disappearance fails a test
+/// rather than going unnoticed for two months" -- the exact defect that
+/// created this amendment, named explicitly here so it cannot recur the
+/// same way twice. Scans `.append(` calls specifically on a variable
+/// named `writer` (`writer.append(`) rather than a bare `.append(` --
+/// `Vec::append`/`AuditStore::append` elsewhere in this crate are a
+/// different method entirely, and a bare-substring scan would wrongly
+/// count them. Both named sites are legitimate and distinct:
+/// `read_available_bounded_for`'s own writer (out of scope for this
+/// amendment -- see `qa-evidence.md`'s PR-A2-A section for why re-homing
+/// left it alone) and this amendment's own new reader-thread writer.
+#[test]
+fn only_two_named_production_call_sites_ever_append_to_a_transcript_writer() {
+    let occurrences = count_occurrences_in_crate("writer.append(");
+    assert_eq!(
+        occurrences,
+        vec![
+            ("runtime/terminal/launch.rs".to_string(), 1),
+            ("runtime/terminal/reader.rs".to_string(), 1),
+        ],
+        "exactly these two named files may ever call BoundedTranscriptWriter::append -- any \
+         other file, or an unexpected count in either of these two, means a transcript-write \
+         call site appeared or disappeared without this test being updated to say so: \
+         {occurrences:?}"
+    );
+}
+
+fn launch_with_transcript_capture(
+    label: &str,
+    mode: TranscriptCaptureMode,
+) -> (
+    LinuxTerminalRuntime,
+    TerminalRuntimeHandle,
+    TranscriptStoragePath,
+    TestDirs,
+) {
+    let dirs = TestDirs::new(label);
+    let project = project_session(ProjectId::for_test(1), &dirs.project_root);
+    let mut spec = TerminalLaunchSpec::plain_shell(
+        project.id().clone(),
+        "Shell",
+        &dirs.project_root,
+        "/bin/sh",
+    );
+    let request = TranscriptPathRequest::new(
+        &dirs.state_root,
+        &dirs.project_root,
+        ProjectId::for_test(1),
+        AgentRunId::for_test(1),
+    );
+    let storage_path = TranscriptPathResolver
+        .resolve_agent_run(request)
+        .expect("test storage path should resolve");
+    spec.set_transcript_writer_config(Some(TranscriptWriterConfig::new(
+        storage_path.clone(),
+        TranscriptRetentionLimits::agent_run_default(),
+        mode,
+    )));
+
+    let mut runtime = LinuxTerminalRuntime::new();
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("transcript-capturing shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    (runtime, handle, storage_path, dirs)
+}
+
+struct TestDirs {
+    base: PathBuf,
+    state_root: PathBuf,
+    project_root: PathBuf,
+}
+
+impl TestDirs {
+    fn new(label: &str) -> Self {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "tekstide-reader-transcript-{label}-{}-{unique}",
+            std::process::id()
+        ));
+        let state_root = base.join("state");
+        let project_root = base.join("project");
+        std::fs::create_dir_all(&state_root).unwrap();
+        std::fs::create_dir_all(&project_root).unwrap();
+        Self {
+            base,
+            state_root,
+            project_root,
+        }
+    }
+}
+
+impl Drop for TestDirs {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.base);
+    }
+}
+
+/// Total occurrences of `needle` across `tekstide-core`'s production
+/// `.rs` files (any file literally named `tests.rs` excluded) --
+/// mirrors `crates/tekstide`'s own `count_occurrences_in_crate`
+/// (`surface/terminal/tests.rs`), the same shape this project already
+/// uses for `.advance(`/`.drain_available(`/`write_terminal_input`.
+fn count_occurrences_in_crate(needle: &str) -> Vec<(String, usize)> {
+    let mut files = Vec::new();
+    collect_rs_files(&crate_src_dir(), &mut files);
+
+    let mut occurrences: Vec<(String, usize)> = files
+        .iter()
+        .filter(|path| path.file_name().and_then(|name| name.to_str()) != Some("tests.rs"))
+        .filter_map(|path| {
+            let content = std::fs::read_to_string(path).expect("readable source file");
+            let count = content.matches(needle).count();
+            (count > 0).then(|| (relative_to_src(path), count))
+        })
+        .collect();
+    occurrences.sort();
+    occurrences
+}
+
+fn crate_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+}
+
+fn relative_to_src(path: &Path) -> String {
+    path.strip_prefix(crate_src_dir())
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rs_files(&path, out);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            out.push(path);
+        }
+    }
 }
 
 fn thread_cpu_ticks(tid: i32) -> u64 {

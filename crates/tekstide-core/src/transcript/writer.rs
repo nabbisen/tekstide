@@ -4,24 +4,34 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 use super::{
-    TranscriptBudgetScope, TranscriptRetentionLimits, TranscriptRetentionState,
-    TranscriptStoragePath,
+    TranscriptBudgetScope, TranscriptCaptureMode, TranscriptRetentionLimits,
+    TranscriptRetentionState, TranscriptStoragePath,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TranscriptWriterConfig {
     pub storage_path: TranscriptStoragePath,
     pub retention_limits: TranscriptRetentionLimits,
+    /// RFC-011 Amendment 2: carried alongside the writer's own config so
+    /// whoever moves the writer into the reader thread
+    /// (`LinuxTerminalRuntime::spawn_output_reader`) has the capture
+    /// mode available at the point it constructs the reader's
+    /// `TranscriptCapture` -- the mode decides D3's mid-stream failure
+    /// policy, which is the reader thread's decision, not the writer's
+    /// own. `BoundedTranscriptWriter` itself never reads this field.
+    pub mode: TranscriptCaptureMode,
 }
 
 impl TranscriptWriterConfig {
     pub fn new(
         storage_path: TranscriptStoragePath,
         retention_limits: TranscriptRetentionLimits,
+        mode: TranscriptCaptureMode,
     ) -> Self {
         Self {
             storage_path,
             retention_limits,
+            mode,
         }
     }
 }
