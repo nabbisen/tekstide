@@ -180,3 +180,118 @@ If P1-P4 cannot be re-established in product code, **stop and escalate** rather 
 1. **Does Tab reach the terminal?** Decided in PR-017-D, with the escape hatch stated.
 2. **Where does the emulator's grid state live when a session is hidden** — retained in memory, or torn down and rebuilt from scrollback? The first costs memory per hidden session; the second loses state and changes what "hidden" means. Decide in PR-017-E against the bounded-scrollback decision.
 3. **Does the filter belong in a separate crate** (`tekstide-terminal`) rather than the shell crate? Only if something needs the terminal without the GUI. Nothing does today; revisit if RFC-024 or a headless test harness changes that.
+
+## Amendment 1: Readiness-driven terminal I/O
+
+**Status:** Authored by the architect 2026-08-15. **Requires the owner's authorisation** —
+it is not additive. It removes the poll tick this RFC established, changes the shape of the
+one ingress path PR-017-B/C's P1 and P2 were enumerated and ablated against, and changes
+observable behaviour under load. Under the standing delegation, that comes to the owner.
+
+**Amendment type:** Structural. Touches RFC-008's `read_available_bounded_for` as well as
+this RFC's subscription.
+
+**Why an amendment and not an RFC.** The properties at stake (P1-P4) are this RFC's, the
+poll tick is this RFC's, and the change replaces a mechanism rather than adding a
+capability. A new RFC would re-derive this RFC's own constraints to reach the same place.
+
+### The problem, measured
+
+`NFR-PERF-004` (terminal input latency p95 <= 16 ms) is **not met**, and cannot be met by
+tuning. The 50 ms poll tick is the only path by which PTY bytes reach the grid, so poll-wait
+alone contributes an expected p95 near **47.5 ms** — arithmetic over a code-visible
+constant, not a measurement artifact. The update loop is not saturating (`poll()` costs
+~10.3 ms against the 50 ms period, 21% duty), so the ceiling is the interval itself.
+
+Two coupled defects in `read_available_bounded_for`
+(`crates/tekstide-core/src/runtime/terminal/launch.rs:147-150`):
+
+1. **A hardcoded 10 ms `WouldBlock` sleep** against a caller-supplied 5 ms bound, run
+   synchronously on `iced`'s update thread. Caps real throughput at roughly **374 KB/s**
+   (measured) while the reader sustains ~69 MB/s when actually reading.
+2. **A 64 KiB per-poll cap that truncates mid-read**, discards the remainder, keeps
+   reading — feeding the emulator a stream **with a hole in it** — while `TerminalPane::poll()`
+   discards the `TerminalOutputSummary` carrying `dropped_bytes`.
+
+**They must be fixed in the same change.** `dropped_bytes` is zero today *only because the
+sleep starves the reader*: ~18.7 KB accumulates per poll against a 64 KiB cap. Fix the
+sleep alone and a 5 ms window offers ~104 KB against that cap, and the truncation goes live.
+**Fixing the sleep in isolation trades a throughput cap for a stream-corruption bug.**
+
+### D1 — Backpressure, not dropping, and this decides how much must be re-proven
+
+The cap needs a real policy. Three were available: block, grow, or drop-with-a-reported-count.
+
+**Take backpressure.** A dedicated reader thread blocks on PTY readability and pushes into
+a **bounded** channel; when that channel is full the reader stops reading, the PTY buffer
+fills, and the child process blocks on `write()`. That is what a real terminal does, and
+the UI thread never blocks because the blocking lives on the reader thread — which is the
+whole point of moving off the poll tick.
+
+**The reason this is not merely the nicest of three options** is that it determines the
+proof obligation, and that is not obvious:
+
+- **P4 (stream-position independence) covers chunking where every byte arrives.** It does
+  **not** cover dropped bytes. A hole landing mid-escape-sequence leaves the parser
+  consuming later output as that sequence's parameters — a classification difference P4
+  never proved anything about. (RFC-011 Amendment 1's D2 hit the same gap from the other
+  direction, with a window that drops a prefix.)
+- Choosing **drop-with-a-count** would therefore require establishing an entirely new
+  property, with its own enumeration and ablation, for a failure mode with no upper bound
+  on how wrong the rendering gets.
+- Choosing **backpressure makes dropping structurally impossible**, so **P4's existing
+  proof continues to cover the system unchanged.**
+
+Grow was rejected outright: an unbounded buffer against a hostile or merely verbose
+producer is a memory-exhaustion path.
+
+**`dropped_bytes` must become unreachable, and that must be proven rather than asserted** —
+an enumeration showing no code path can produce a non-zero count, not a comment saying it
+cannot happen. If it cannot be made unreachable, stop and raise it; a silently discarded
+`TerminalOutputSummary` is how this defect survived in the first place.
+
+### D2 — P1 and P2 are re-enumerated and re-ablated, not assumed
+
+PR-017-B/C proved **P1 (single ingress)** and **P2 (no side channels)** against the current
+shape. A dedicated reader thread and a channel are a **new ingress path**, and the fact
+that the old proofs passed says nothing about the new one.
+
+Required: the same treatment those slices got — enumeration naming every production write
+site into the emulator, and an ablation per property showing the specific failure. A new
+ingress that bypasses the filter is exactly the shape P1 exists to deny, and a channel is a
+plausible way to introduce one by accident.
+
+**P3 and the modal exclusivity guarantee must also survive.** `SubscriptionMode::for_modal`
+plus the `is_none()` guard currently rely on the subscription not producing input while a
+modal is open. A reader thread that keeps pushing regardless would defeat that at the
+source. State how the new design preserves it.
+
+### D3 — The terminal-count limit rises only after re-measurement
+
+`terminal_session_limit` is `Some(3)` — not a product judgement but a consequence of this
+same sleep: each `poll()` costs ~10.1 ms, measured linear per pane against the 50 ms tick,
+saturating at 5. Three was the largest count with real headroom.
+
+This is the most user-visible of the three motivations: a user with a build running, a log
+tailing and a shell open is already at the limit.
+
+**Raise it in the same change, but from a new measurement, not by assumption.** The limit
+is a function of a cost this amendment removes; the new cost must be measured before a new
+number is chosen. Raising it without measuring reopens the saturation risk the default
+exists to prevent.
+
+### D4 — `NFR-PERF-004` is measured, not declared met
+
+The criterion is this amendment's to discharge. Measure it; do not infer it from the
+mechanism being better. **Never reintroduce `iced::window::frames()`** as a measurement
+path, and prove non-contamination per criterion, per this RFC's own measurement discipline.
+
+If it is still not met, record that as this amendment's honest outcome. A second evidenced
+"not met" is worth more than an unevidenced "met".
+
+### Out of scope
+
+- **Any rendering or UX change.** No new surface, no new keybinding.
+- **Changing the security filter's policy.** The filter's classification is untouched; only
+  what feeds it changes.
+- **Windows/macOS readiness primitives.** Linux only, consistent with everything else here.
