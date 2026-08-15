@@ -433,10 +433,12 @@ for the not-a-diff case, and which it satisfied with separate constructors.
 
 ## Amendment 2: Re-homing transcript capture onto the readiness-driven reader
 
-**Status:** Authored by the architect 2026-08-15. **Requires the owner's authorisation** —
-it changes what happens to a running process when capture fails, which is retention
-semantics rather than an additive accessor. Under the standing delegation, that comes to
-the owner.
+**Status:** Authored by the architect 2026-08-15, **authorised by the human owner the same
+day**, including D3's failure policy as proposed. It changes what happens to a running
+process when capture fails, which is retention semantics rather than an additive accessor —
+which is why it went to the owner rather than being decided under the standing delegation.
+
+**Handoff:** [`../handoffs/011-amendment-2-transcript-capture-rehoming/README.md`](../handoffs/011-amendment-2-transcript-capture-rehoming/README.md)
 
 **Amendment type:** Structural. Touches RFC-017 Amendment 1's `TerminalReader` and
 RFC-008's session ownership.

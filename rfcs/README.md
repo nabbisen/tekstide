@@ -66,6 +66,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 015 | [Application Shell and Rendered Surface Model](./handoffs/015-application-shell-and-rendered-surface-model/README.md) |
 | 016 | [Internationalization and Localization](./handoffs/016-internationalization-and-localization/README.md) |
 | 017 | [Terminal Renderer and Immersion Mode](./handoffs/017-terminal-renderer-and-immersion-mode/README.md) |
+| 011 A2 | [Re-homing transcript capture](./handoffs/011-amendment-2-transcript-capture-rehoming/README.md) — RFC-011 Amendment 2 |
 | 017 A1 | [Readiness-driven terminal I/O](./handoffs/017-amendment-1-readiness-driven-terminal-io/README.md) — RFC-017 Amendment 1 |
 | 018 | [Rendered Paste Protection and Trusted-UI Evidence](./handoffs/018-paste-protection-and-trusted-ui-evidence/README.md) |
 | 019 | [Editor and Explorer Surfaces](./handoffs/019-editor-and-explorer-surfaces/README.md) |
