@@ -19,8 +19,8 @@
 //! structural property of the type, not a runtime check.
 
 use std::fs;
-use std::io::{self, Read};
-use std::os::fd::{AsRawFd, RawFd};
+use std::io::{self, Read, Write};
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::thread::JoinHandle;
 
@@ -46,7 +46,10 @@ const CHANNEL_CAPACITY: usize = 8;
 /// most one consumer of this channel can ever exist. That is P2's
 /// "exactly one consumer" made unrepresentable by the type rather than
 /// checked by a test, per the ingress re-proof document's own
-/// preference for that discipline.
+/// preference for that discipline. When PR-A1-B re-enumerates P2 against
+/// the new shape, the shutdown `eventfd` below is a second channel this
+/// module owns and must be accounted for in that enumeration too -- it
+/// carries no PTY data, but it is a channel.
 pub struct TerminalReader {
     // `Option` so `Drop` can explicitly drop this *before* joining the
     // thread -- a custom `Drop::drop` body runs before Rust's automatic
@@ -56,6 +59,13 @@ pub struct TerminalReader {
     receiver: Option<Receiver<Vec<u8>>>,
     join_handle: Option<JoinHandle<()>>,
     os_thread_id: i32,
+    // The write end of an `eventfd(2)` the reader thread also `poll(2)`s
+    // alongside the PTY master. Response 201: dropping `receiver` alone
+    // only unblocks a thread parked in `sender.send` on a full channel;
+    // it does nothing for the far more common case of a thread parked in
+    // `poll(2)` on a live, silent child (no data, PTY not hung up). This
+    // is what makes that case interruptible too -- see `Drop`.
+    shutdown: fs::File,
 }
 
 /// What one non-blocking drain call collected. `ended` means the reader
@@ -94,11 +104,25 @@ impl TerminalReader {
     /// is given and will hold it open for as long as the thread runs.
     ///
     /// **Blocks on readiness, never sleeps, never busy-waits**: the
-    /// thread calls `poll(2)` with an infinite timeout on `master`'s
-    /// fd. The kernel parks the thread until the fd is readable (or
-    /// hung up), consuming no CPU while parked -- a real blocking
+    /// thread calls `poll(2)` with an infinite timeout on `master`'s fd
+    /// and a shutdown `eventfd`. The kernel parks the thread until
+    /// either is ready, consuming no CPU while parked -- a real blocking
     /// primitive, not a fixed delay guessed to be short enough.
-    pub(super) fn spawn(master: fs::File) -> Self {
+    ///
+    /// Fallible only because `eventfd(2)` can fail (resource exhaustion)
+    /// -- everything else here is infallible in practice.
+    pub(super) fn spawn(master: fs::File) -> io::Result<Self> {
+        let shutdown_fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC) };
+        if shutdown_fd == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        // Owned by `TerminalReader` for the `write` side `Drop` uses to
+        // signal shutdown; the reader thread below only needs the bare
+        // fd number to `poll(2)` it, not ownership -- `shutdown` here
+        // keeps the fd open for as long as `TerminalReader` (and
+        // therefore the thread that polls it) exists.
+        let shutdown = unsafe { fs::File::from_raw_fd(shutdown_fd) };
+
         let (sender, receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
         // A one-shot handshake so the caller can learn the reader
         // thread's kernel thread id -- used only for the idle-CPU
@@ -108,16 +132,17 @@ impl TerminalReader {
         let (tid_sender, tid_receiver) = mpsc::sync_channel(1);
         let join_handle = std::thread::spawn(move || {
             let _ = tid_sender.send(current_thread_id());
-            reader_thread_loop(master, sender);
+            reader_thread_loop(master, sender, shutdown_fd);
         });
         let os_thread_id = tid_receiver
             .recv()
             .expect("reader thread should report its id before spawn returns");
-        Self {
+        Ok(Self {
             receiver: Some(receiver),
             join_handle: Some(join_handle),
             os_thread_id,
-        }
+            shutdown,
+        })
     }
 
     /// The reader thread's kernel thread id (`gettid(2)`), for
@@ -161,32 +186,38 @@ impl TerminalReader {
 
 impl Drop for TerminalReader {
     fn drop(&mut self) {
-        // Explicitly drop `receiver` first, before joining. A custom
-        // `Drop::drop` body runs *before* Rust's automatic field drops,
-        // not after -- relying on struct field order here (as an earlier
-        // version of this comment claimed) is wrong, and would leave
-        // `receiver` alive for this entire function body. If the channel
-        // was full and nothing was draining it, the reader thread is
-        // blocked inside `sender.send`, and joining while its matching
-        // `receiver` is still alive waits for a send that can now never
-        // succeed and can never fail either -- a real deadlock, found via
-        // a test that panicked mid-drain and then hung forever instead of
-        // reporting its failure. Dropping `receiver` here makes that
-        // blocked (or any future) `send` return an error immediately,
+        // Response 201: the previous version of this `drop` only had the
+        // `receiver`-drop path below and could still hang forever --
+        // that path unblocks a thread parked in `sender.send` on a full
+        // channel, but does nothing for a thread parked in `poll(2)` on
+        // a live, silent child (no data, PTY not hung up), which is the
+        // common case once a real caller drops a reader for a terminal
+        // that is simply not producing output right now. Writing to the
+        // shutdown `eventfd` wakes `poll(2)` regardless of PTY state --
+        // the fd shows readable, `reader_thread_loop` sees it ahead of
+        // the PTY fd and returns immediately. A write failure here is
+        // not actionable (`join` below is the only thing that must still
+        // complete), so it is not propagated.
+        let wakeup: u64 = 1;
+        let _ = self.shutdown.write(&wakeup.to_ne_bytes());
+
+        // Drop `receiver` next -- a custom `Drop::drop` body runs
+        // *before* Rust's automatic field drops, not after, so this must
+        // be explicit rather than relying on struct field order (an
+        // earlier version of this comment claimed the latter and was
+        // wrong). This is the second, independent unblock path: a thread
+        // already past `poll(2)` and blocked inside `sender.send` on a
+        // full channel is not reading `shutdown` at that moment, so the
+        // write above does not reach it -- dropping `receiver` makes
+        // that blocked (or any future) `send` return an error instead,
         // which is `reader_thread_loop`'s own signal to stop.
         self.receiver.take();
 
-        // If the thread is instead parked in `poll(2)` waiting for PTY
-        // data that never comes, this join blocks until the PTY reports
-        // end-of-file or an error -- acceptable here because every
-        // production caller of `spawn` already terminates the child (and
-        // therefore closes every slave-side fd) before dropping its
-        // `RunningTerminal`, per `termination.rs`'s own sequencing. A
-        // `TerminalReader` created over a PTY whose child is deliberately
-        // kept alive and silent would hang this join -- not a concern
-        // this checkpoint's tests create, and flagged here rather than
-        // hidden for whoever wires this into session teardown in
-        // PR-A1-B/C.
+        // With both unblock paths in place, this join can no longer
+        // depend on the child's own behaviour --
+        // `dropping_a_reader_over_a_live_silent_child_completes_promptly`
+        // proves it under a real timeout, so a regression here fails
+        // that test rather than hanging the suite.
         if let Some(join_handle) = self.join_handle.take() {
             let _ = join_handle.join();
         }
@@ -197,13 +228,14 @@ fn current_thread_id() -> i32 {
     unsafe { libc::syscall(libc::SYS_gettid) as i32 }
 }
 
-fn reader_thread_loop(mut master: fs::File, sender: SyncSender<Vec<u8>>) {
-    let fd = master.as_raw_fd();
+fn reader_thread_loop(mut master: fs::File, sender: SyncSender<Vec<u8>>, shutdown_fd: RawFd) {
+    let pty_fd = master.as_raw_fd();
     let mut buffer = [0_u8; READ_CHUNK_BYTES];
 
     loop {
-        if !block_until_readable(fd) {
-            return;
+        match poll_for_readiness(pty_fd, shutdown_fd) {
+            PollOutcome::ShutdownRequested | PollOutcome::Failed => return,
+            PollOutcome::PtyReadable => {}
         }
 
         loop {
@@ -222,26 +254,48 @@ fn reader_thread_loop(mut master: fs::File, sender: SyncSender<Vec<u8>>) {
     }
 }
 
-/// Blocks until `fd` is readable or hung up. Returns `false` only when
-/// `poll(2)` itself fails unrecoverably -- the reader thread's own
-/// signal to stop rather than loop forever on a broken fd.
-fn block_until_readable(fd: RawFd) -> bool {
-    let mut pollfd = libc::pollfd {
-        fd,
-        events: libc::POLLIN,
-        revents: 0,
-    };
+enum PollOutcome {
+    PtyReadable,
+    ShutdownRequested,
+    Failed,
+}
+
+/// Blocks until the PTY master is readable, the shutdown `eventfd` is
+/// signalled, or `poll(2)` itself fails unrecoverably. Checks the
+/// shutdown fd first: if a `Drop` write and real PTY output race on the
+/// same wakeup, exiting promptly is correct either way, since whatever
+/// is still in the PTY's kernel buffer is not this module's job to keep
+/// draining once the caller has asked to stop.
+fn poll_for_readiness(pty_fd: RawFd, shutdown_fd: RawFd) -> PollOutcome {
+    let mut fds = [
+        libc::pollfd {
+            fd: pty_fd,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: shutdown_fd,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
 
     loop {
-        let result = unsafe { libc::poll(&mut pollfd, 1, -1) };
+        let result = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, -1) };
         if result == -1 {
             let error = io::Error::last_os_error();
             if error.kind() == io::ErrorKind::Interrupted {
                 continue;
             }
-            return false;
+            return PollOutcome::Failed;
         }
-        return true;
+        if fds[1].revents != 0 {
+            return PollOutcome::ShutdownRequested;
+        }
+        if fds[0].revents != 0 {
+            return PollOutcome::PtyReadable;
+        }
+        // Spurious wakeup with nothing actually ready; poll again.
     }
 }
 

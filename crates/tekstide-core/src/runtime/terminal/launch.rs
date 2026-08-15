@@ -199,7 +199,11 @@ impl LinuxTerminalRuntime {
                         "failed to duplicate PTY master for reader thread: {error}"
                     )),
                 })?;
-        Ok(TerminalReader::spawn(master_for_reader))
+        TerminalReader::spawn(master_for_reader).map_err(|error| TerminalRuntimeError::Io {
+            summary: BoundedRuntimeSummary::new(format!(
+                "failed to create reader thread shutdown eventfd: {error}"
+            )),
+        })
     }
 
     pub fn resize(

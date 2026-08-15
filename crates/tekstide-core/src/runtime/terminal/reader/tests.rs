@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::project::{ProjectId, ProjectSession};
@@ -36,6 +37,70 @@ fn real_pty_output_reaches_the_channel_end_to_end() {
         .expect("shell wait should not fail");
     assert_eq!(outcome, Some(TerminationOutcome::Exited { exit_status: 0 }));
     drop(reader);
+    cleanup_root(root);
+}
+
+/// Response 201's required evidence: dropping a `TerminalReader` must
+/// not depend on the child ever producing output or exiting. The child
+/// here is real, alive, and deliberately never told to do anything --
+/// the reader thread is parked in `poll(2)` on a live, silent PTY, the
+/// exact case the `receiver`-drop path in `Drop` does not reach (that
+/// path only unblocks a thread parked in `sender.send` on a full
+/// channel). Runs the drop on its own thread and waits on it with a
+/// real timeout, so a regression in `Drop` fails **this test** rather
+/// than hanging the suite -- matching how the earlier `Drop`-ordering
+/// deadlock was actually found (a test that hung for 30+ seconds).
+#[test]
+fn dropping_a_reader_over_a_live_silent_child_completes_promptly() {
+    let root = test_root("reader-drop-live-child");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against a real PTY master");
+
+    // Let the reader thread settle into poll(2) with nothing to read --
+    // the shell is alive but has not been sent any command, so it
+    // produces no output on its own.
+    std::thread::sleep(Duration::from_millis(50));
+
+    let (done_sender, done_receiver) = mpsc::channel();
+    let drop_thread = std::thread::spawn(move || {
+        drop(reader);
+        let _ = done_sender.send(());
+    });
+
+    if done_receiver.recv_timeout(Duration::from_secs(5)).is_err() {
+        panic!(
+            "dropping TerminalReader over a live, silent child did not complete within 5s -- \
+             Drop is blocked, most likely joining a reader thread parked in poll(2) that \
+             nothing woke up"
+        );
+    }
+    let _ = drop_thread.join();
+
+    // The child is still alive -- dropping the reader stops the reader
+    // thread, not the terminal session. Terminate it directly rather
+    // than via the (now reader-less) session's own output stream.
+    runtime
+        .request_terminate(
+            &handle,
+            TerminationRequest {
+                source: TerminationRequestSource::TestHarness,
+                reason: BoundedRuntimeSummary::new(
+                    "cleanup after drop-over-live-silent-child liveness test",
+                ),
+            },
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+        )
+        .expect("termination should succeed");
     cleanup_root(root);
 }
 
