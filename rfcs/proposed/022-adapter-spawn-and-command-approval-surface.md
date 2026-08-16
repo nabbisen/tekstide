@@ -178,9 +178,90 @@ having no implemented pattern set.
 2. **What happens when an approval request goes unanswered** — the user is away, the dialog
    is open, the adapter is blocked. Timeout and deny, or block indefinitely? RFC-021 defines
    the protocol but not the human-absent case.
-3. **Does the approval dialog interrupt whatever the user is doing?** It is a modal in a
-   workbench where the user may be mid-edit. RFC-018's paste dialog is user-initiated;
-   this one is not.
+3. ~~**Does the approval dialog interrupt whatever the user is doing?**~~ **Answered by the
+   owner 2026-08-16, after a design review that changed the question.** Full reasoning below.
+
+## The arrival model (open question 3, answered)
+
+The question was originally posed as interrupt-versus-notify. That framing was wrong: an
+arriving proposal must never replace an open modal, so something has to hold proposals that
+cannot be shown yet — which means a queue exists in every design, and a queue the user
+cannot see expires silently. **What was actually being decided is when a queued proposal
+promotes itself to a modal.**
+
+### The decision
+
+- **All proposals enter a bounded queue.** Bound is **per `AgentRun`**, matching the socket
+  and token that already scope per run — so a looping adapter exhausts its own budget rather
+  than starving a different agent's proposals. **An app-wide ceiling is also required**,
+  because `agent_run_limit` defaults to `None` and per-run bounds otherwise multiply without
+  limit.
+- **`High` and `Destructive` promote to a modal automatically**, if no modal is open and the
+  proposal belongs to the **active project**.
+- **`Low` and `Medium` do not promote.** They surface in the queue.
+- **Cross-project promotion does not happen.** A dialog promoted from a background project
+  shows a command and a working directory belonging to a project that is not on screen —
+  the same confusion the escaped `cwd` field exists to prevent, arriving through the front
+  door. Other projects raise `AttentionState::ApprovalNeeded`, which already outranks
+  `Review` and `Failed` in `calculate_attention`.
+- **Focus defaults to Reject** on any promoted dialog, matching the paste dialog. A single
+  stray keystroke can then only reject; approving requires moving focus *and* activating.
+
+### Why promotion is limited by severity
+
+**Habituation is a security property, not a comfort one.** An agent making twenty requests
+in one task, each seizing the screen, teaches the user the keystroke that dismisses it. The
+dialog then manufactures a record of consent nobody gave — and this dialog's own honest
+copy makes that worse, since a user told the choice is *advisory, not a safeguard* has been
+given a reason not to read the next nineteen.
+
+Rare interruption is what keeps interruption meaningful.
+
+### Expiry is trapped, not designed around (the owner's correction)
+
+Adapters time out — the reference adapter at 30 seconds — so a queued proposal is often
+dead before the user looks. The architect initially proposed relabelling the non-promoted
+tier as history. **The owner's alternative is better: do not design the failure away, catch
+and handle it.**
+
+It also costs almost nothing, because **expiry is not an outcome of the decision — it is a
+property of the connection**:
+
+- `ApprovalDecision` stays `Pending`, which is honest. Nobody decided. Adding an `Expired`
+  variant would record an outcome that never happened.
+- **The audit trail needs no change.** A `command_request` with no following
+  `command_approve`/`command_reject` already means "asked, not approved" — the absence *is*
+  the record, and no reading of it produces a false approval. **No frozen-schema change.**
+- The surface needs only to know whether the request is still answerable, which the
+  fail-closed design already signals by closing the connection.
+
+So each queue entry carries its own truth — **live and answerable**, or **expired, this was
+asked and was not approved** — rather than a whole severity tier being written off on an
+average. Some genuinely are answerable.
+
+### Constraints that fall out, and are not optional
+
+- **No bulk approval and no multi-select.** A list with risk labels invites triage by label
+  instead of reading commands, which is the habituation failure returning by another route.
+  One decision, one command, read individually.
+- **An expired entry must be visibly unanswerable**, not merely fail when acted on. Offering
+  a control that cannot work is the same defect as recording a decision that cannot be
+  delivered.
+- **Expired proposals stop counting toward `pending_approvals`.** Otherwise a project sits
+  in `AttentionState::ApprovalNeeded` permanently and masks `Failed` and `Review` on the
+  board — feeding pre-existing modelled behaviour in a way nobody anticipated when it was
+  written.
+- **A promoted dialog briefly ignores input after appearing.** Promotion otherwise eats
+  keystrokes out of the editor mid-word — not dangerous, but losing typed input is a serious
+  complaint, and the window also blunts the accidental-activation case further.
+
+### Known limitation, to be stated on the surface
+
+Promotion depends on `RiskLevel`, which is a **heuristic over argv**. A destructive command
+misclassified as `Low` will not promote. The failure is safe in direction — nothing is
+auto-approved, and an unanswered request is not an approved one — but it means the
+interruption guarantee is only as good as the classifier, and that must be disclosed rather
+than buried.
 
 ## Risks
 
