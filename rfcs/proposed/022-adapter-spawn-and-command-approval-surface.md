@@ -23,8 +23,24 @@ Depends on:
 
 ## Summary
 
-Make command approval reachable: launch an AI CLI **as a cooperating adapter**, deliver its
-per-run capability token, and render the dialog that answers its approval requests.
+Launch an AI CLI through a reviewed spawn path, deliver a per-run capability token, and
+render the dialog that answers an adapter's approval requests.
+
+**Corrected 2026-08-16 (response 218).** This section originally read *"Make command
+approval reachable."* **It does not, for a real user, and cannot.** Open question 1
+established that no shipping AI CLI speaks RFC-021's protocol. `validate_compatibility`
+rejects `Managed` unless a profile declares `structured_action_approval`, which only an
+adapter speaking our protocol can honestly declare, and only the reference adapter does.
+
+So **`Managed` — and therefore command approval — can only ever be exercised by the
+reference adapter**, which is a test artifact. What a real user gets from this RFC is an
+AgentRun at `Plain` or `Supervised`: a real AI CLI in a project-owned terminal, with
+transcript capture and audit, and no approval protocol involved.
+
+**What this RFC delivers, stated honestly:** the approval pathway exists and is proven end
+to end; AgentRuns become reachable; command approval becomes reachable *the day a real
+adapter exists*, which is not this RFC's to produce. The architect answered open question 1
+and did not trace this consequence until PR-022-D's research forced it.
 
 ## Why this is one RFC and not two
 
