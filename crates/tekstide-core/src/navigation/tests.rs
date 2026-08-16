@@ -153,7 +153,7 @@ fn primary_navigation_workflows_have_keyboard_policy_entries() {
         NavigationAction::CycleVisibleTerminalSession,
         NavigationAction::LaunchAgentRun,
         NavigationAction::OpenCurrentAgentRunDetail,
-        NavigationAction::OpenPendingApproval,
+        NavigationAction::OpenApprovalHistory,
         NavigationAction::OpenDiffReview,
         NavigationAction::OpenSafeCloseDialog,
     ] {

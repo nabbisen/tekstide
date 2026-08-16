@@ -34,7 +34,17 @@ pub enum NavigationAction {
     /// project, resource limit reached) the way `LaunchTerminal` can.
     LaunchAgentRun,
     OpenCurrentAgentRunDetail,
-    OpenPendingApproval,
+    /// RFC-022 PR-022-E: opens the active project's `ApprovalHistory`
+    /// surface -- named for what it renders (response 233: the surface
+    /// shows every retained request, decided and expired included, not
+    /// only ones still awaiting a decision, so the action's own name
+    /// must not promise a "pending" subset the surface does not show).
+    /// Renamed from `OpenPendingApproval`, the same identifier this
+    /// action was declared under before the surface it opens had a
+    /// name -- the seventh instance of "wired with no reader" this RFC
+    /// has found was this exact action having no `app_command_for` arm
+    /// at all until this response.
+    OpenApprovalHistory,
     OpenDiffReview,
     OpenSafeCloseDialog,
     OpenCommandPalette,
@@ -156,7 +166,7 @@ impl KeybindingPolicy {
                     KeybindingStatus::Configurable,
                 ),
                 KeybindingRule::new(
-                    NavigationAction::OpenPendingApproval,
+                    NavigationAction::OpenApprovalHistory,
                     None,
                     KeybindingStatus::Configurable,
                 ),

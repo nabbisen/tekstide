@@ -36,7 +36,7 @@
 //! value already inside it.
 
 use iced::futures::SinkExt;
-use iced::widget::{center, column, container, opaque, row, stack, text};
+use iced::widget::{button, center, column, container, opaque, row, scrollable, stack, text};
 use iced::{Background, Border, Element, Length, Subscription, Task, keyboard};
 
 use tekstide_core::command::AppCommand;
@@ -698,6 +698,13 @@ pub enum Message {
     /// user-perceptible delay for something the user was not expecting
     /// at that exact instant anyway.
     ApprovalPollTick,
+    /// Response 233: fired by a live entry's control on the
+    /// `ApprovalHistory` surface. Reuses the exact same `ApprovalDialog`
+    /// construction `evaluate_promotion` uses (see
+    /// `open_approval_history_entry`) rather than a second, inline
+    /// decision UI -- "one decision, one command, read individually"
+    /// must hold regardless of how the dialog was reached.
+    OpenApprovalHistoryEntry(tekstide_core::domain::ApprovalId),
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -1094,6 +1101,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::ApprovalPollTick => {
             poll_approval_channels(state);
+        }
+        Message::OpenApprovalHistoryEntry(approval_id) => {
+            open_approval_history_entry(state, &approval_id);
         }
     }
     Task::none()
@@ -1535,9 +1545,28 @@ fn ensure_explorer_scanned(state: &mut State) {
     if project.content_workspace().explorer_scan().is_some() {
         return;
     }
+    // Response 233: `scan_active_project_explorer_directory`
+    // (`ProjectSession::scan_content_explorer_directory`) also sets
+    // `open_surface` to `TextEditor` as a side effect -- appropriate for
+    // `handle_explorer_key`'s own explicit rescan (browsing the file
+    // tree legitimately means "show me the editor"), wrong for this
+    // function's incidental, background priming of the explorer cache
+    // the first time a project enters Content mode for *any* reason.
+    // Without restoring it, `OpenActiveProjectSurface(surface)` for any
+    // surface other than `TextEditor` was silently overwritten back to
+    // `TextEditor` by this very call, one line after `dispatch` set it
+    // correctly -- found by
+    // `opening_approval_history_from_navigation_sets_the_open_surface_and_forces_content_mode`,
+    // the first real reader `open_surface` has ever had (response 233's
+    // own finding: every variant was previously set and never read).
+    let project_id = project.id().clone();
+    let open_surface_before_scan = project.open_surface();
     let _ = state
         .app_shell
         .scan_active_project_explorer_directory(std::path::PathBuf::new());
+    if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
+        project.set_open_surface(open_surface_before_scan);
+    }
     state.explorer_highlight = 0;
 }
 
@@ -2297,6 +2326,15 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         NavigationAction::OpenCurrentAgentRunDetail => Some(AppCommand::OpenActiveProjectSurface(
             ProjectOpenSurface::AgentRunDetail,
         )),
+        // RFC-022 PR-022-E: the same shape as `OpenCurrentAgentRunDetail`
+        // immediately above -- no I/O, so no `update` special-case is
+        // needed. `ProjectOpenSurface::ApprovalHistory`'s own doc comment
+        // explains why this is the *first* `open_surface`-conditional
+        // branch `view()` has ever had (response 233 Finding: all seven
+        // variants were previously set and never read anywhere).
+        NavigationAction::OpenApprovalHistory => Some(AppCommand::OpenActiveProjectSurface(
+            ProjectOpenSurface::ApprovalHistory,
+        )),
         // RFC-018 PR-018-B: paste needs no core route/mode change --
         // `update`'s `Shell` arm special-cases it directly, the same
         // shape `LaunchTerminal` uses for the half of its own work that
@@ -2309,7 +2347,6 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         | NavigationAction::OpenCommandPalette
         | NavigationAction::SwitchActiveProject
         | NavigationAction::CycleVisibleTerminalSession
-        | NavigationAction::OpenPendingApproval
         | NavigationAction::OpenDiffReview
         | NavigationAction::OpenSafeCloseDialog => None,
     }
@@ -2875,7 +2912,7 @@ fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Messa
         // `TerminalImmersion` arm above already established for its own
         // mode -- substitute the placeholder with a real surface rather
         // than adding a third rendering path.
-        (Some(ProjectMode::Content), _) => content_mode_editor_view(state),
+        (Some(ProjectMode::Content), _) => content_mode_view(state),
         _ => column![text(main_area_label(state, mode)).size(state.theme.font_size_body())]
             .spacing(6)
             .into(),
@@ -2886,6 +2923,46 @@ fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Messa
         .padding(16)
         .style(zone_style(state.theme, focused))
         .into()
+}
+
+/// Response 233: `ProjectMode::Content`'s dispatch on
+/// `ProjectSession::open_surface()` -- the **first** `open_surface`-
+/// conditional branch this crate has ever had. Every one of
+/// `ProjectOpenSurface`'s seven other variants (including
+/// `AgentRunDetail`, despite `OpenCurrentAgentRunDetail` having a real
+/// `AppCommand` dispatch since PR-022-D) was, until this response, set
+/// and never read anywhere in this crate outside tests -- `view()` only
+/// ever branched on `ProjectMode`. Confirmed directly
+/// (`grep -rn "open_surface()" crates/tekstide/src`, no non-test
+/// matches) before writing this function, not assumed.
+///
+/// Deliberately exhaustive, no `_ =>` catch-all: the six still-dormant
+/// variants are named individually, each explicitly falling to today's
+/// behaviour (the plain editor view, unconditional on `open_surface`
+/// exactly as it always has been) rather than to a wildcard. A
+/// catch-all would let a future variant silently render the wrong
+/// surface with nothing failing to compile; naming every arm means
+/// adding an eighth variant fails to compile here until someone decides
+/// what it renders. Building only `ApprovalHistory`'s real arm is the
+/// intended scope of this response -- not building six more surfaces to
+/// prove the mechanism works for one.
+fn content_mode_view(state: &State) -> Element<'_, Message> {
+    let open_surface = state
+        .app_shell
+        .state()
+        .active_project()
+        .map(tekstide_core::project::ProjectSession::open_surface);
+    match open_surface {
+        Some(ProjectOpenSurface::ApprovalHistory) => approval_history_view(state),
+        Some(ProjectOpenSurface::ProjectDashboard)
+        | Some(ProjectOpenSurface::TextEditor)
+        | Some(ProjectOpenSurface::GitStatus)
+        | Some(ProjectOpenSurface::AgentRunDetail)
+        | Some(ProjectOpenSurface::DiffReview)
+        | Some(ProjectOpenSurface::HandoffReport)
+        | Some(ProjectOpenSurface::TrustSettings)
+        | None => content_mode_editor_view(state),
+    }
 }
 
 /// RFC-019 PR-019-C: `ProjectMode::Content`'s real content, the
@@ -3493,6 +3570,66 @@ fn evaluate_promotion(state: &mut State) {
     })));
 }
 
+/// Response 233: manual open from the `ApprovalHistory` surface --
+/// `Message::OpenApprovalHistoryEntry`'s handler. Reuses the exact same
+/// `ApprovalDialog` construction [`evaluate_promotion`] uses, but
+/// consults none of promotion's own guards
+/// (`should_promote_to_modal`'s active-project-only / severity checks):
+/// those exist to constrain *automatic interruption* the user did not
+/// ask for, and neither reason applies to something the user explicitly
+/// opened while already looking at that project's own history -- in
+/// fact both are structurally satisfied by that context already (the
+/// history surface only ever shows the active project, and a modal
+/// covers the surface the user just clicked on).
+///
+/// **What does still apply, because it is a correctness rule rather
+/// than a promotion guard**: never replace an open modal. The user's
+/// place in another decision is not this surface's to discard, for the
+/// same reason an arriving proposal must not either -- checked first,
+/// same as `evaluate_promotion`'s own first line.
+fn open_approval_history_entry(state: &mut State, approval_id: &tekstide_core::domain::ApprovalId) {
+    if state.modal.is_some() {
+        return;
+    }
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    let Some(candidate) = project
+        .approval_requests()
+        .iter()
+        .find(|request| {
+            &request.id == approval_id
+                && request.decision == tekstide_core::domain::ApprovalDecision::Pending
+                && !project.expired_approval_ids().contains(&request.id)
+        })
+        .cloned()
+    else {
+        return;
+    };
+    let Some(agent_run_id) = candidate.agent_run_id.clone() else {
+        return;
+    };
+    let Some(proposal_id) = state.approval_proposal_ids.get(&candidate.id).cloned() else {
+        return;
+    };
+    // Re-confirmed against the real, authoritative coordinator rather
+    // than trusting `expired_approval_ids` alone, the same reasoning
+    // `evaluate_promotion` uses -- that set is only as fresh as the last
+    // `sweep_expired_approvals` tick.
+    if !state
+        .approval_coordinator
+        .is_still_answerable(&agent_run_id, &proposal_id)
+    {
+        return;
+    }
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog {
+        request: candidate,
+        proposal_id,
+        focus: ApprovalDialogButton::Reject,
+        ignore_input_until: Some(std::time::Instant::now() + APPROVAL_DIALOG_INPUT_IGNORE_WINDOW),
+    })));
+}
+
 /// RFC-022 PR-022-E: `ModalActivate`'s handler for a promoted approval
 /// dialog -- sends the real decision through the real coordinator (the
 /// same `decide`/`decide_with_edited_argv` "no decision recorded for an
@@ -3633,6 +3770,160 @@ fn approval_dialog_view<'a>(state: &'a State, dialog: &'a ApprovalDialog) -> Ele
     ];
 
     modal_dialog_box(state, column(lines).spacing(10).into())
+}
+
+/// Response 233: `ProjectOpenSurface::ApprovalHistory`'s real content --
+/// every retained `ApprovalRequest` for the active project, decided and
+/// expired included (response 231: the constraint is *visibly*
+/// unanswerable, and a live-only view would have nothing to be visibly
+/// anything). Both non-optional disclosures (retention limit,
+/// classifier limitation) render above the list, always, not only when
+/// the list is non-empty -- a user who has never seen an expired entry
+/// yet still needs to know risk level is inferred, not guaranteed.
+///
+/// **No bulk approval, no multi-select** (RFC-022's own explicit
+/// constraint): each still-live entry gets its own, individual open
+/// control; nothing here selects more than one at a time or exposes a
+/// "decide all" action of any kind.
+fn approval_history_view(state: &State) -> Element<'_, Message> {
+    let Some(project) = state.app_shell.state().active_project() else {
+        // Unreachable while routed to `ActiveProjectWorkspace` (core
+        // guards every transition into this route on an active project
+        // existing) -- the same "fail visible, not panic" fallback
+        // `main_area_key`'s own doc comment already establishes for the
+        // analogous case in `content_mode_editor_view`.
+        return text(state.catalog.get("approval-history-empty"))
+            .size(state.theme.font_size_body())
+            .into();
+    };
+
+    let mut lines: Vec<Element<'_, Message>> = vec![
+        text(state.catalog.get("approval-history-heading"))
+            .size(state.theme.font_size_heading())
+            .into(),
+        text(state.catalog.get("approval-history-retention-notice"))
+            .size(state.theme.font_size_status())
+            .into(),
+        text(state.catalog.get("approval-history-classifier-notice"))
+            .size(state.theme.font_size_status())
+            .into(),
+    ];
+
+    let requests = project.approval_requests();
+    if requests.is_empty() {
+        lines.push(
+            text(state.catalog.get("approval-history-empty"))
+                .size(state.theme.font_size_body())
+                .into(),
+        );
+    } else {
+        for request in requests {
+            let is_expired = project.expired_approval_ids().contains(&request.id);
+            lines.push(approval_history_entry_view(state, request, is_expired));
+        }
+    }
+
+    scrollable(column(lines).spacing(12))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+/// One retained request's row. Live (`Pending`, not expired) entries
+/// get a real control (`Message::OpenApprovalHistoryEntry`) opening the
+/// same decision dialog `evaluate_promotion` would; every other state
+/// is plain, unclickable text -- there is nothing left to decide about
+/// an already-decided or expired entry, and offering a control that
+/// cannot work is the same defect RFC-022 names for expiry itself
+/// ("visibly unanswerable, not merely fail when acted on").
+fn approval_history_entry_view<'a>(
+    state: &'a State,
+    request: &'a tekstide_core::domain::ApprovalRequest,
+    is_expired: bool,
+) -> Element<'a, Message> {
+    let body = text(approval_history_entry_body(
+        &state.catalog,
+        request,
+        is_expired,
+    ))
+    .size(state.theme.font_size_status());
+    let is_live =
+        request.decision == tekstide_core::domain::ApprovalDecision::Pending && !is_expired;
+
+    let content: Element<'_, Message> = if is_live {
+        column![
+            body,
+            button(
+                text(state.catalog.get("approval-history-entry-open"))
+                    .size(state.theme.font_size_status())
+            )
+            .on_press(Message::OpenApprovalHistoryEntry(request.id.clone())),
+        ]
+        .spacing(4)
+        .into()
+    } else {
+        column![body].into()
+    };
+
+    container(content)
+        .width(Length::Fill)
+        .padding(8)
+        .style(move |_base_theme: &iced::Theme| container::Style {
+            background: Some(Background::Color(state.theme.surface_elevated())),
+            text_color: Some(state.theme.foreground()),
+            border: Border {
+                color: state.theme.border_default(),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// Factored out from [`approval_history_entry_view`] so the actual
+/// rendered text (escaping, catalog selection) is directly testable
+/// without going through `iced`'s `Element` tree -- the same shape
+/// `approval_dialog_body`/`surface::board::row_lines` already use.
+pub(crate) fn approval_history_entry_body(
+    catalog: &Catalog,
+    request: &tekstide_core::domain::ApprovalRequest,
+    is_expired: bool,
+) -> String {
+    let command = tekstide_core::text_safety::quote_untrusted(&request.display_command);
+    let cwd = tekstide_core::text_safety::quote_untrusted(&request.cwd.display().to_string());
+    catalog.get_with_args(
+        "approval-history-entry",
+        &CatalogArgs::new()
+            .untrusted("command", &command)
+            .untrusted("cwd", &cwd)
+            .trusted_symbol("risk", risk_level_symbol(request.risk_level))
+            .trusted_symbol(
+                "state",
+                approval_history_entry_state_symbol(request, is_expired),
+            ),
+    )
+}
+
+/// A trusted, compile-time symbol for an entry's decision state.
+/// `ApprovalDecision::Pending` alone cannot tell a user whether an
+/// entry is still answerable, since RFC-022's own design keeps
+/// `decision` at `Pending` even after the connection is gone ("expiry
+/// is a connection property, not a decision outcome") -- `is_expired`
+/// (from `ProjectSession::expired_approval_ids`) is what actually
+/// distinguishes the two, the entire reason this surface exists.
+fn approval_history_entry_state_symbol(
+    request: &tekstide_core::domain::ApprovalRequest,
+    is_expired: bool,
+) -> &'static str {
+    use tekstide_core::domain::ApprovalDecision;
+    match request.decision {
+        ApprovalDecision::Pending if is_expired => "expired",
+        ApprovalDecision::Pending => "answerable",
+        ApprovalDecision::ApprovedOnce => "approved",
+        ApprovalDecision::Rejected => "rejected",
+        ApprovalDecision::EditedAndApproved => "edited-and-approved",
+    }
 }
 
 fn external_change_modal_view<'a>(

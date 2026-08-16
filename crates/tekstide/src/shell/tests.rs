@@ -2476,6 +2476,215 @@ fn command_approval_family_produces_real_durable_audit_records_through_the_pipel
     );
 }
 
+/// Response 233: the real navigation-to-dispatch path for
+/// `ProjectOpenSurface::ApprovalHistory`, the same shape
+/// `a_toggle_project_mode_shell_input_dispatches_the_real_app_command`
+/// already proves for a different action. `OpenActiveProjectSurface`
+/// forces `ProjectMode::Content` unconditionally
+/// (`AppState::open_active_project_surface`, unchanged by this
+/// response) -- proven here by starting the project in
+/// `TerminalImmersion` first, so success is not an accident of already
+/// being in the right mode.
+#[test]
+fn opening_approval_history_from_navigation_sets_the_open_surface_and_forces_content_mode() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("approval-history-navigate"))
+        .expect("a freshly created directory is a valid project root");
+    app_shell
+        .state_mut()
+        .open_active_project_terminal_workspace();
+    assert_eq!(
+        app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "test precondition: starting in TerminalImmersion, not already the mode this action \
+         would leave behind by accident"
+    );
+
+    let mut state = state_with(app_shell);
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenApprovalHistory,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    assert_eq!(
+        project.open_surface(),
+        tekstide_core::project::ProjectOpenSurface::ApprovalHistory,
+        "OpenApprovalHistory must reach the real AppCommand, not be silently swallowed"
+    );
+    assert_eq!(
+        project.mode(),
+        tekstide_core::project::ProjectMode::Content,
+        "opening a surface must land in Content mode regardless of which mode preceded it"
+    );
+    assert_eq!(
+        state.app_shell.route(),
+        tekstide_core::route::AppRoute::ActiveProjectWorkspace
+    );
+}
+
+/// Response 233's own design answer, proven end to end: manually
+/// opening a live entry from the history surface must **not** consult
+/// `should_promote_to_modal` -- a `Low`-risk entry (the real reference
+/// adapter's own unconfigurable default, which `evaluate_promotion`
+/// would never promote) must still open when the user explicitly asks
+/// for it. Reuses the real receive pipeline (no mock, no override),
+/// the same methodology `launch_real_managed_agent_run`'s own doc
+/// comment establishes, then drives the manual-open message through
+/// real `update()` routing and confirms a real decision still reaches
+/// the real coordinator afterward -- not just that a dialog appeared.
+#[test]
+fn manually_opening_a_low_risk_live_entry_bypasses_the_promotion_predicate() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-history-manual-open");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    let request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    assert_eq!(
+        request.risk_level,
+        tekstide_core::domain::RiskLevel::Low,
+        "test precondition: the real adapter's own default proposal, which \
+         should_promote_to_modal would never promote"
+    );
+    assert!(
+        state.modal.is_none(),
+        "test precondition: a Low-risk proposal must not have auto-promoted"
+    );
+
+    let _ = super::update(
+        &mut state,
+        Message::OpenApprovalHistoryEntry(request.id.clone()),
+    );
+
+    let proposal_id = match state.modal {
+        Some(ModalContent::Approval(ref dialog)) => {
+            assert_eq!(dialog.request.id, request.id);
+            assert_eq!(
+                dialog.focus,
+                ApprovalDialogButton::Reject,
+                "focus must still default to Reject, the same as automatic promotion"
+            );
+            dialog.proposal_id.clone()
+        }
+        ref other => panic!(
+            "manually opening a Low-risk live entry must open the real dialog anyway, got \
+             {other:?}"
+        ),
+    };
+
+    // Deciding it must still reach the real coordinator -- proving this
+    // is the same real dialog/decide path, not a second, inline UI.
+    // Rebuilt via `ApprovalDialog::for_test` (`ignore_input_until: None`)
+    // rather than deciding the dialog `open_approval_history_entry` just
+    // constructed directly -- that one carries a real post-open
+    // input-ignore window (the same one promotion uses), which this
+    // immediate `ModalActivate` would otherwise fall inside of; the
+    // dialog's own construction (request/proposal_id/focus, asserted
+    // above) is what this test is actually about, the same separation
+    // `deciding_the_promoted_dialog_sends_a_real_decision_and_updates_the_stored_request`
+    // already establishes for the promoted case.
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog::for_test(
+        request.clone(),
+        proposal_id,
+        ApprovalDialogButton::Reject,
+    ))));
+    let _ = super::update(&mut state, Message::ModalActivate);
+    let stored = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    assert_eq!(
+        stored.decision,
+        tekstide_core::domain::ApprovalDecision::Rejected,
+        "the real decide round trip must reach Decided -- got {stored:?}"
+    );
+}
+
+/// The one rule response 233 said still applies to a manual open even
+/// though promotion's own guards do not: never replace an open modal.
+/// Opens a real, promoted `Destructive` dialog first (any modal would
+/// do; a real one is used since it is already available), then attempts
+/// to manually open a second, different entry -- the first dialog must
+/// still be the one showing.
+#[test]
+fn manually_opening_an_entry_does_not_replace_an_already_open_modal() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-history-manual-open-guard");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    let first_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .id
+        .clone();
+
+    let _ = super::update(
+        &mut state,
+        Message::OpenApprovalHistoryEntry(first_id.clone()),
+    );
+    assert!(
+        matches!(state.modal, Some(ModalContent::Approval(_))),
+        "test precondition: the first manual open must succeed"
+    );
+
+    // A second, distinct request in the same project -- a fabricated
+    // one is fine here, since the guard under test (`state.modal.is_some()`)
+    // is checked before this id is ever looked up.
+    let second_id = tekstide_core::domain::ApprovalId::new_uuid();
+    let _ = super::update(&mut state, Message::OpenApprovalHistoryEntry(second_id));
+
+    match state.modal {
+        Some(ModalContent::Approval(ref dialog)) => {
+            assert_eq!(
+                dialog.request.id, first_id,
+                "an already-open modal must not be replaced by a second manual-open request"
+            );
+        }
+        ref other => panic!("the first dialog must still be open, got {other:?}"),
+    }
+}
+
 /// Response 228 Required 2, the other pruning route. Deliberately uses
 /// an **expired**, not decided, first entry: `decide_approval` already
 /// prunes its own entry immediately (proven above), so a decided entry
@@ -4318,6 +4527,110 @@ fn approval_dialog_cooperative_notice_states_all_three_required_non_claims() {
     assert!(
         notice.to_lowercase().contains("only one request"),
         "must state that the shown command is not all the adapter will do: {notice:?}"
+    );
+}
+
+/// Response 233 (`ApprovalHistory`): the same escaping property
+/// `approval_dialog_body_escapes_a_bidi_override_in_the_cwd` proves for
+/// the dialog, proven here for the history surface's own render
+/// function -- a second `ApprovalRequest.cwd` consumer, escaped
+/// independently rather than assumed safe by association.
+#[test]
+fn approval_history_entry_body_escapes_a_bidi_override_in_the_cwd() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let request = approval_request_fixture(
+        "cat notes.txt",
+        "/home/user/proj\u{202E}gpj",
+        tekstide_core::domain::RiskLevel::Low,
+    );
+
+    let body = super::approval_history_entry_body(&catalog, &request, false);
+
+    assert!(
+        body.contains("<U+202E>"),
+        "expected the escaped marker in {body:?}"
+    );
+    assert!(
+        !body.contains('\u{202E}'),
+        "the raw override character must never reach the history surface, got {body:?}"
+    );
+}
+
+/// The state distinction this surface exists for: a `Pending` decision
+/// alone cannot tell a user whether an entry is still answerable
+/// (RFC-022's own "expiry is a connection property, not a decision
+/// outcome"). Both readings of the same `Pending` request must render
+/// distinguishably.
+#[test]
+fn approval_history_entry_body_distinguishes_answerable_from_expired_pending() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let request = approval_request_fixture(
+        "ls",
+        "/home/user/project",
+        tekstide_core::domain::RiskLevel::Low,
+    );
+
+    let answerable = super::approval_history_entry_body(&catalog, &request, false);
+    let expired = super::approval_history_entry_body(&catalog, &request, true);
+
+    assert_ne!(
+        answerable, expired,
+        "an answerable and an expired Pending request must not render identically"
+    );
+    assert!(
+        answerable.to_lowercase().contains("awaiting"),
+        "an answerable entry must say so: {answerable:?}"
+    );
+    assert!(
+        expired.to_lowercase().contains("no longer answerable")
+            || expired.to_lowercase().contains("expired"),
+        "an expired entry must be visibly unanswerable, not merely fail when acted on: \
+         {expired:?}"
+    );
+}
+
+/// Every decided outcome must render distinguishably from every other
+/// decided outcome and from both `Pending` readings -- the same
+/// "distinguishable, not just present" property
+/// `approval_dialog_body_renders_each_risk_level_distinguishably` proves
+/// for risk levels.
+#[test]
+fn approval_history_entry_body_renders_every_decision_state_distinguishably() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let mut request = approval_request_fixture(
+        "ls",
+        "/home/user/project",
+        tekstide_core::domain::RiskLevel::Low,
+    );
+
+    let mut rendered = Vec::new();
+    rendered.push(super::approval_history_entry_body(
+        &catalog, &request, false,
+    ));
+    rendered.push(super::approval_history_entry_body(&catalog, &request, true));
+    for decision in [
+        tekstide_core::domain::ApprovalDecision::ApprovedOnce,
+        tekstide_core::domain::ApprovalDecision::Rejected,
+        tekstide_core::domain::ApprovalDecision::EditedAndApproved,
+    ] {
+        request.decide(decision).unwrap();
+        rendered.push(super::approval_history_entry_body(
+            &catalog, &request, false,
+        ));
+        // Reset for the next iteration -- `decide` is one-shot.
+        request = approval_request_fixture(
+            "ls",
+            "/home/user/project",
+            tekstide_core::domain::RiskLevel::Low,
+        );
+    }
+
+    let unique: std::collections::HashSet<_> = rendered.iter().collect();
+    assert_eq!(
+        unique.len(),
+        rendered.len(),
+        "all five decision-state readings must render distinguishably from each other: \
+         {rendered:?}"
     );
 }
 

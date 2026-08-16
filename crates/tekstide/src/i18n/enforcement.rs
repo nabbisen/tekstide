@@ -247,6 +247,15 @@ const CORE_EXEMPT_LITERALS: &[CoreExemptSite] = &[
     CoreExemptSite::dormant("project/metadata.rs", "Diff Review"),
     CoreExemptSite::dormant("project/metadata.rs", "Handoff Report"),
     CoreExemptSite::dormant("project/metadata.rs", "Trust Settings"),
+    // Response 233: `ApprovalHistory` is the first `ProjectOpenSurface`
+    // variant with a real render arm in `view()` -- but `label()` itself
+    // is still not that arm's source of user-facing text
+    // (`approval_history_view` reads the `approval-history-heading`
+    // catalog key directly, not `open_surface.label()`), so this
+    // literal's own reachability is unchanged: still only
+    // `tekstide_core::shell::render_text`'s pre-GUI harness, same as
+    // every other variant above.
+    CoreExemptSite::dormant("project/metadata.rs", "Approval History"),
     // project/metadata.rs -- ProjectMode::label. Same reason.
     CoreExemptSite::dormant("project/metadata.rs", "Content Mode"),
     CoreExemptSite::dormant("project/metadata.rs", "Terminal / Agent Immersion Mode"),

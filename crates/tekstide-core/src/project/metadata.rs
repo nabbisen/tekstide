@@ -28,6 +28,19 @@ pub enum ProjectOpenSurface {
     DiffReview,
     HandoffReport,
     TrustSettings,
+    /// RFC-022 PR-022-E ("the arrival model"): the active project's
+    /// retained `approval_requests()`, decided and expired entries
+    /// included, not only ones still awaiting a decision -- named for
+    /// what it actually renders rather than a subset of it (response
+    /// 233: a name like `PendingApprovals` would promise a filter this
+    /// surface does not apply, the same defect class as a test named
+    /// `only_one_call_site_...` that counted files, or a
+    /// `StateRootMissing` error naming a mechanism instead of a
+    /// policy). `ApprovalHistory` also signals the one non-optional
+    /// disclosure this surface must carry: it shows the most recent
+    /// `approval_history_limit` entries, not the project's complete
+    /// history.
+    ApprovalHistory,
 }
 
 impl ProjectOpenSurface {
@@ -40,6 +53,7 @@ impl ProjectOpenSurface {
             Self::DiffReview => "Diff Review",
             Self::HandoffReport => "Handoff Report",
             Self::TrustSettings => "Trust Settings",
+            Self::ApprovalHistory => "Approval History",
         }
     }
 }

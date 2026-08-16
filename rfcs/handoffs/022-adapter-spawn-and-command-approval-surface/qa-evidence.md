@@ -1078,6 +1078,93 @@ record, then move on.
 Full gate clean: `tekstide` 229 (unchanged), `tekstide-core` 594 (unchanged -- existing tests
 moved/wrapped, none added or removed).
 
+### Priority item 3: the queue-viewing surface, `ApprovalHistory`
+
+Response 233 approved the plan surfaced in review request 233, with three changes and one
+answered design question -- all applied as directed.
+
+**A real, pre-existing gap found before writing any code**: `ProjectSession::open_surface()`
+had zero readers anywhere in the GUI crate outside tests -- `view()` never branched on it, for
+any of `ProjectOpenSurface`'s seven variants, including `AgentRunDetail` despite
+`OpenCurrentAgentRunDetail` having had a real `AppCommand` dispatch since PR-022-D. This is the
+seventh instance of "wired with no reader" this RFC has found. Confirmed by direct search
+before building anything, not assumed.
+
+**Three changes from response 233, all applied**:
+- Named `ProjectOpenSurface::ApprovalHistory` (not `PendingApprovals`) -- the surface renders
+  every retained request, decided and expired included, and a name promising a "pending"
+  subset would be the same defect class this project has already been bitten by twice
+  (`only_one_call_site_...`, `StateRootMissing`).
+- Reused the existing, previously-dead `NavigationAction::OpenPendingApproval` rather than
+  adding a second action beside it -- renamed to `OpenApprovalHistory` for the same naming
+  reason as the surface, and given its first real `app_command_for` arm
+  (`AppCommand::OpenActiveProjectSurface(ProjectOpenSurface::ApprovalHistory)`).
+- `content_mode_view` is the first real `open_surface`-conditional dispatch this crate has
+  had, and it is exhaustive -- all eight variants named explicitly, the six still-dormant ones
+  (`AgentRunDetail` included) falling to today's unconditional editor view by their own named
+  arm, not a `_ =>` catch-all. Building only `ApprovalHistory`'s real arm, not six more
+  surfaces to prove the mechanism works for one -- `AgentRunDetail`'s own "selected-run
+  concept" question stays RFC-020's, untouched.
+
+**A second real, pre-existing defect found by the first real test of this dispatch, not by
+inspection**: `ensure_explorer_scanned`'s incidental, background explorer-cache priming (the
+first scan when a project enters Content mode for any reason) went through
+`ProjectSession::scan_content_explorer_directory`, which also sets `open_surface` to
+`TextEditor` as a side effect -- appropriate for `handle_explorer_key`'s own explicit rescan,
+wrong for an incidental background call. Every `OpenActiveProjectSurface(surface)` for any
+surface other than `TextEditor` was silently overwritten back to `TextEditor` one line after
+`dispatch` set it correctly, whenever the active project's explorer had not been scanned yet.
+Invisible until today because nothing ever read `open_surface` to notice. **Fixed**:
+`ensure_explorer_scanned` now captures `open_surface` before the incidental scan and restores
+it afterward; `handle_explorer_key`'s own direct call site is untouched, so its legitimate
+"browsing the tree opens the editor" behavior is unaffected. **Ablated**: reverted the
+restore, reran `opening_approval_history_from_navigation_sets_the_open_surface_and_forces_content_mode`
+-- failed identically (`open_surface` reported `TextEditor` instead of `ApprovalHistory`).
+Restored, reran clean.
+
+**The design question, answered and implemented as directed**: manually opening a live entry
+from the surface (`Message::OpenApprovalHistoryEntry` -> `open_approval_history_entry`) does
+not consult `should_promote_to_modal` (the active-project/severity guards exist to constrain
+*automatic interruption*, and both are structurally satisfied already by the user looking at
+that project's own history) but does still refuse to replace an already-open modal (a
+correctness rule, not a promotion guard -- the user's place in another decision is not this
+surface's to discard). Reuses the exact same `ApprovalDialog` construction
+`evaluate_promotion` uses, not a second inline decision UI, so "one decision, one command,
+read individually" holds regardless of how the dialog was reached.
+
+**Content**: renders every retained `ApprovalRequest` for the active project (decided and
+expired included), both non-optional disclosures above the list unconditionally (the
+retention-limit caveat and the classifier-limitation caveat -- response 233's priority item 4,
+folded into this response since the surface itself is where that copy belongs), and a real
+open control on each still-live entry only -- no bulk approval, no multi-select, matching
+RFC-022's own explicit constraint. First use of `iced::widget::button`/`scrollable` in this
+crate; disclosed rather than silent, since every prior interactive control in this crate has
+been keyboard-driven (Tab/focus-marker/Enter) -- the history list is mouse-only for now, a
+known accessibility gap, not yet a keyboard-navigable focus zone.
+
+**Tests, all real**: `approval_history_entry_body_escapes_a_bidi_override_in_the_cwd` (the
+same escaping property already proven for the dialog, proven independently for this surface's
+own render function -- a second `ApprovalRequest.cwd` consumer, not assumed safe by
+association), `approval_history_entry_body_distinguishes_answerable_from_expired_pending`,
+`approval_history_entry_body_renders_every_decision_state_distinguishably`,
+`opening_approval_history_from_navigation_sets_the_open_surface_and_forces_content_mode` (the
+real navigation path, proven starting from `TerminalImmersion` so success is not an accident
+of already being in the right mode),
+`manually_opening_a_low_risk_live_entry_bypasses_the_promotion_predicate` (real launch, real
+receive, a genuinely `Low`-risk entry that `evaluate_promotion` would never touch, opened
+manually and decided for real through the same coordinator),
+`manually_opening_an_entry_does_not_replace_an_already_open_modal`.
+
+**Not built, disclosed rather than dropped**: an explicit enumeration test asserting
+no-bulk-approval (priority item 5 -- satisfied by omission today, no multi-select UI exists to
+violate it, but nothing fails by name if one is added later); the active-project-change
+promotion-re-evaluation trigger (priority item 6, still blocked on project-switching existing
+at all anywhere in the GUI); keyboard navigation for the history list's own entries.
+
+Full gate clean: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
+--all-features -- -D warnings`, full workspace suite (`tekstide` 235, up from 229 -- six new
+tests; `tekstide-core` 594, unchanged), `git diff --check`.
+
 ## PR-022-F - Closeout
 
 *Not started.*

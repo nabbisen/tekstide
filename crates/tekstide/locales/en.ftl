@@ -367,3 +367,46 @@ approval-dialog-reject = Reject
 # it -- do not extend this hint to describe outcomes this line does not
 # yet know about.
 approval-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.
+
+# RFC-022 PR-022-E ("the arrival model"), response 233: the queue-viewing
+# surface (`ProjectOpenSurface::ApprovalHistory`). Renders every retained
+# `ApprovalRequest` for the active project -- decided and expired
+# included, not only ones still awaiting a decision, so the two notices
+# below are non-optional, not cosmetic.
+approval-history-heading = Approval History
+# The retention-limit disclosure: this list shows the most recently
+# retained requests, not the project's complete history -- deliberately
+# unnumbered (no `$limit` interpolation) so the copy stays true whether
+# or not `approval_history_limit` is configured, rather than branching
+# on an `Option<u32>` the render layer would otherwise have to unwrap.
+approval-history-retention-notice = This list shows the most recently retained requests. Older entries may already have been removed to stay within this project's retention limit -- this is not necessarily the complete history.
+# The classifier-limitation disclosure (task-breakdown-pr-plan.md's own
+# non-optional item): risk level is Tekstide's own inference from the
+# command's argv, not a guarantee. An unclassified or misclassified
+# command can still be destructive.
+approval-history-classifier-notice = Risk level is Tekstide's own automatic classification of the command, not a guarantee -- an unrecognized or misclassified command can still be destructive. Read the command itself, not only its risk label.
+approval-history-empty = No approval requests recorded for this project yet.
+# `$command`/`$cwd`/`$risk` reuse `approval-dialog-body`'s own escaping
+# and selector conventions exactly (untrusted, quoted before this point;
+# risk is Tekstide's own classification, never adapter text). `$state`
+# is this surface's own addition -- distinguishing "still Pending and
+# answerable" from "still Pending but expired" is the entire reason
+# response 231/RFC-022 requires this surface to exist at all ("visibly
+# unanswerable, not merely fail when acted on").
+approval-history-entry = { $command }
+    in { $cwd }
+    Risk: { $risk ->
+        [low] Low
+        [medium] Medium
+        [high] High
+       *[destructive] Destructive
+    }
+    Status: { $state ->
+        [answerable] Awaiting your decision
+        [expired] Expired -- no longer answerable
+        [approved] Approved once
+        [rejected] Rejected
+        [edited-and-approved] Edited and approved
+       *[unknown] Unknown
+    }
+approval-history-entry-open = Open
