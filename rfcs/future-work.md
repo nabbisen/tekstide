@@ -244,6 +244,34 @@ Status: substrate decided, application shell, and mode switching implemented by 
 
   **Until then**, the honest public statement stands unchanged: command approval is implemented, unreachable, and cooperative rather than enforced.
 
+- **RFC-021's approval protocol has no client surface, and no adapter can be written
+  against it.** Found 2026-08-16 by RFC-022 PR-022-B — the first thing ever to speak the
+  protocol from outside `approval::channel` (review request 215, response 215).
+  `WireCommandProposal`/`WireCommandDecision` are **private to `channel.rs`**, so the
+  reference adapter — a `[[bin]]` in the same *package*, which is still a separate crate for
+  privacy — had to **hand-mirror their fields**, cited against the real definitions in a doc
+  comment. The round trip catches renamed or newly-required fields, because deserialisation
+  fails loudly; it does **not** catch a newly-added *optional* field, which the server
+  defaults and the adapter then silently stops exercising.
+
+  **Why this matters beyond the duplication.** RFC-022 scope item 6 exists precisely because
+  no shipping AI CLI speaks this protocol. If speaking it requires reading `tekstide-core`'s
+  private structs, none ever will — there is no specification, no client library, and no
+  stable surface to implement against. This is a prerequisite for the adapter ecosystem
+  RFC-022 assumes, not a detail of the test artifact that exposed it. Two shapes would
+  resolve it: a published wire-format specification, or a small client module exposed for
+  adapter authors. Both are RFC-021's territory.
+
+- **A rejected adapter cannot tell why it was rejected.** Same origin (response 215).
+  `approval::channel` is fail-closed **without an error frame**: on a token mismatch the
+  server observes `TokenMismatch` and simply closes the connection. From the adapter's side
+  that is indistinguishable from the server crashing or the socket dropping — the reference
+  adapter exits `3` on EOF for both. **The security reasoning is sound** (an error frame is
+  a probing oracle, and this project's fail-closed discipline is deliberate), so this is
+  recorded as a **tradeoff to revisit when the protocol is specified**, not a defect to fix
+  reflexively. A real cooperating adapter that cannot distinguish a bad token from a crashed
+  server will retry the wrong thing.
+
 - **Audit-schema migration guide.** Owner decision 2026-08-01, reaffirmed the same day: breaking audit-schema changes are accepted **for a while** — no end date set, and recorded as a future event rather than a pending decision. A migration guide becomes required when that changes. Belongs with RFC-029 (documentation, M14) unless the end condition above arrives sooner — if breaking changes stop being acceptable before M14, the guide is needed at that point, not at M14. See RFC-013 §Schema Versioning and Migration.
 
 - Accessibility: visible focus indicators now render at the shell-chrome level (`0.4.1`, three independent channels — border colour, border width, textual marker). Screen-reader support remains out of scope for the life of the `iced` substrate decision (RFC-014 R2, owner-accepted).
