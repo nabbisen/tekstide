@@ -55,17 +55,15 @@ harmless-looking string. The user approves what they read; the adapter runs what
 
 ### Evidence owed
 
-- **The falsifiable claim, tested**: a proposal whose `argv` contains a bidi override
-  renders it visibly as an escape marker, not as reordered text. State it as a claim that
-  could be false.
-- **No double-escaping** — a proposal containing the literal text `<U+202E>` stays
+- **The falsifiable claim, tested, against `cwd`**: a proposal whose **working directory**
+  contains a bidi override renders it visibly as an escape marker, not as reordered text.
+  State it as a claim that could be false.
+- **No double-escaping** — a `cwd` containing the literal text `<U+202E>` stays
   distinguishable from a real override.
-- **Escaping happens at the widget**, not in the model. `CommandProposal` keeps raw bytes,
-  for the same reason `DiffContent` and the transcript reader do: a model that pre-escapes
-  makes "what was actually proposed" unanswerable, and the audit record needs the real
-  value.
-- **Ablate it**: remove the escaping call, show the specific rendering difference against a
-  real override.
+- **`argv`'s escaping is inherited, and cited rather than re-proven.** RFC-021's ten-probe
+  suite covers it; repeating that here would test RFC-021, not this slice.
+- **Ablate the `cwd` escaping** — remove it in the GUI crate, show the specific rendering
+  difference against a real override. This is the ablation that belongs to this slice.
 
 ## 2. What the dialog may claim, and what it may not
 
