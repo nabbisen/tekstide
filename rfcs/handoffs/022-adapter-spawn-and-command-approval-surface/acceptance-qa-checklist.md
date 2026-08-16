@@ -45,7 +45,10 @@ Every unchecked line at closeout carries a stated reason.
 - [ ] The cooperative limit appears on the surface; wording quoted and justified.
 - [ ] No claim that rejection prevents execution.
 - [ ] Modal exclusivity proven under a live positive control.
-- [ ] Owner's answers to open questions 2 and 3 incorporated.
+- [ ] **No decision recorded for an undeliverable proposal**; the dialog says the
+      connection is gone rather than silently recording one.
+- [ ] Proven against a real exited adapter, not a synthesised closed socket; ablated.
+- [ ] Owner's answer to open question 3 (mid-edit interruption) incorporated.
 - [ ] `command_approval` has its first real producer.
 
 ## Honesty (PR-022-F)

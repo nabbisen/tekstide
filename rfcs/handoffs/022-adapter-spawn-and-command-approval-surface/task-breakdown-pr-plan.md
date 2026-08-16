@@ -89,8 +89,26 @@ Review gate:
 - **No claim that rejection prevents execution**, anywhere in the surface or its copy.
 - Modal exclusivity holds, under a live positive control (a `Tab` visibly moving a focus
   marker in the same capture) proving keystrokes reached the app while none reached the PTY.
-- Open questions 2 and 3 answered by the owner before this lands; if the implementation
-  forces either earlier, **stop and raise it**.
+- **A decision that can no longer be delivered is not recorded as if it were.** Decided by
+  the architect 2026-08-16, replacing what was open question 2.
+
+  The waiting belongs to the adapter, not to Tekstide: after sending a proposal the adapter
+  does its own blocking read and sets its own timeout — PR-022-B's reference adapter already
+  uses 30 seconds. Tekstide cannot make it wait longer or stop sooner. **What Tekstide owns
+  is what happens when the user answers after the adapter has already given up.**
+
+  Left alone, the user clicks Approve, an approval is written to the `command_approval`
+  audit family, and it is sent to a connection nobody is reading. The audit trail then
+  states that a command was approved which never ran — a false record in the one subsystem
+  whose entire purpose is being an accurate one — and the user sees a button do nothing.
+
+  Required: the dialog detects the connection is gone and **says so**, and **no decision is
+  recorded for an undeliverable proposal**. Prove it against a real adapter that has actually
+  exited, not a synthesised closed socket. Ablate it: remove the check and show the audit
+  record that appears for a command nothing ran.
+
+- Open question 3 (does this dialog interrupt a user mid-edit) is the owner's and must be
+  answered before this lands; if the implementation forces it earlier, **stop and raise it**.
 - The `command_approval` audit family gains its first real producer — it has been wired with
   no caller since RFC-021.
 
