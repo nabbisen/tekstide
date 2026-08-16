@@ -27,6 +27,28 @@ a file it read, a web page it fetched).
 established rule, not a new one. It is named here because this is the position where getting
 it wrong has the worst consequence.
 
+**Corrected 2026-08-16 (response 221), because the original wording below was wrong for this
+model.** This section said escaping "happens at the widget, not in the model," reasoning by
+analogy with `DiffContent` and the transcript reader, where model-side escaping destroys the
+answer to *what is actually in the file*. **That analogy does not transfer.** Risk
+classification must run on the **raw** `argv`, so RFC-021 correctly keeps the raw form for
+deciding and derives an escaped `display_command` for rendering — raw where meaning matters,
+escaped where rendering happens. Do not re-derive it.
+
+**The real rule: escape at the widget whatever the model has not already escaped.** And the
+field that matters is not the one the original text was aimed at:
+
+| Field | State | Widget's job |
+| --- | --- | --- |
+| `display_command` (argv) | **escaped by the model** (`display_argv`, ten-probe suite) | render it; cite RFC-021, do not re-prove |
+| `cwd` | **raw `PathBuf` from the adapter** | **escape it** — this is the live attack |
+| `environment_summary` | check provenance | treat as `cwd` if adapter-derived |
+
+**`cwd` is arguably the sharper target than `argv` ever was.** A user reads the command
+carefully and reads the directory to confirm context — a skim-check is exactly what a
+rendering attack aims at. A path that displays as `/home/you/project` while being something
+else is the whole Trojan Source case, in the field nobody escaped.
+
 **The concrete attack:** a proposed `argv` containing a bidi override renders as something
 benign while executing as something else. `rm -rf ~/project` can be made to *display* as a
 harmless-looking string. The user approves what they read; the adapter runs what was sent.
