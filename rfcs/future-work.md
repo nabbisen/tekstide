@@ -244,6 +244,46 @@ Status: substrate decided, application shell, and mode switching implemented by 
 
   **Until then**, the honest public statement stands unchanged: command approval is implemented, unreachable, and cooperative rather than enforced.
 
+- **Workspace trust is a one-state machine: no project in the shipped app can ever leave
+  `Restricted`.** Found 2026-08-16 by RFC-022 PR-022-D — the first thing that ever tried to
+  pass through the trust gate (review request 219, response 219).
+  `AuditCoordinator::grant_project_trust` (`audit/integration.rs`) is correct and fully
+  audited, recording both `TrustGrant` authorization and application — and has **zero
+  production callers**. `ProjectSession::grant_trust` beneath it is `pub(crate)` to
+  `tekstide-core`. `crates/tekstide` contains no trust-granting anything. Every project
+  defaults to `Restricted` at `ProjectSession::new` and stays there for the life of the
+  installation.
+
+  **The consequence is not limited to agent runs.** *Every* capability gated on workspace
+  trust is permanently unreachable, and has been since the GUI existed — RFC-004's Restricted
+  Mode is not a mode, it is the only state. PR-022-D surfaced it because a `Supervised`
+  Claude Code profile honestly declares `MayDiscoverWorkspaceFiles`, which
+  `validate_workspace_discovery_policy` refuses in a `Restricted` project. The slice
+  correctly refused to weaken that declaration to route around the gate.
+
+  **Needs its own design, not a button**: what the user is told they are authorising, whether
+  it persists across sessions, whether it is revocable, and what its scope is. A security
+  dialog with real consequences.
+
+- **The systemic pattern behind four separate findings: core capability, no GUI route,
+  nothing fails.** Recorded 2026-08-16 rather than logging a fourth instance. Within RFC-022
+  alone: no shipping AI CLI speaks RFC-021's protocol (response 218), no code-defined
+  `AiCliProfile` exists though the delivery plan describes profiles as "code-defined only"
+  (218), and no trust route exists (219). Before it, RFC-020's two surfaces were scheduled
+  against models nothing populates (response 200).
+
+  **The shape is identical every time**: `tekstide-core` holds a correct, reviewed, tested
+  capability; `crates/tekstide` has no path to it; no test fails, because nothing ever tried.
+  Each was invisible until the previous one was cleared — a queue of prerequisites discovered
+  one at a time, each by whichever slice was unlucky enough to reach it first.
+
+  `ARCHITECTURE.md` §Evidence conventions now carries *reachability comes before
+  correctness*, added after the RFC-020 instance. That convention governs **new** work. It
+  does not surface the backlog of already-built capabilities with no route, which is what
+  keeps being discovered. A deliberate audit — enumerate `tekstide-core`'s public
+  capabilities, mark which have a production caller in `crates/tekstide` — would find the
+  rest at once instead of one slice at a time.
+
 - **The Tekstide state root lives on the transcript subsystem, and other subsystems have to
   reach through it.** Found 2026-08-16 by RFC-022 PR-022-C (review request 216, response
   216). `prepare_adapter_approval` needs somewhere to bind an approval socket, and the only
