@@ -346,10 +346,24 @@ approval-dialog-body = An AI CLI is asking to run:
     }
 # what-the-dialog-must-not-lie-about.md §2: "the highest-consequence
 # sentence in this RFC." States plainly, in the words a user actually
-# reads (not only in documentation), the two things this dialog must
+# reads (not only in documentation), the three things this dialog must
 # never let a user assume by omission: that a decision here is
-# enforced, and that approving means the command is safe.
-approval-dialog-cooperative-notice = This choice is advisory, not a safeguard: Tekstide sends it to the AI CLI, but the AI CLI decides whether to actually run the command. Approving does not make the command safe, and rejecting cannot stop the AI CLI from running it anyway.
+# enforced, that approving means the command is safe, and that the
+# command shown is all the adapter will do. Response 222: the third
+# non-claim does not depend on open question 3 (RFC-022's interrupt-
+# timing question, still open as of this text) -- it is about what a
+# single dialog's authority covers, true whenever the dialog appears,
+# regardless of how or when it was reached.
+approval-dialog-cooperative-notice = This choice is advisory, not a safeguard: Tekstide sends it to the AI CLI, but the AI CLI decides whether to actually run the command. Approving does not make the command safe, and rejecting cannot stop the AI CLI from running it anyway. This is also only one request -- the AI CLI may make others, with or without asking.
 approval-dialog-approve = Approve Once
 approval-dialog-reject = Reject
-approval-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape leaves this request pending.
+# Response 222: matches RFC-018's paste dialog ("Escape always cancels"),
+# not `external-change-dialog-hint`'s "dismisses" -- and deliberately
+# does not say what Escape leaves behind. The previous wording ("leaves
+# this request pending") committed to a state open question 3 has not
+# decided exists: if that question resolves toward interrupt-on-arrival,
+# a request Escape leaves pending has to do *something* next (reappear,
+# queue, expire) that is not yet designed. Provisional until 220 answers
+# it -- do not extend this hint to describe outcomes this line does not
+# yet know about.
+approval-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.

@@ -214,6 +214,8 @@ pub(crate) enum ApprovalDialogButton {
     Reject,
 }
 
+/// See `ApprovalDialog`'s own doc comment for why this `#[allow(dead_code)]`
+/// is a condition on 220 remaining open, not a resting state.
 #[allow(dead_code)]
 impl ApprovalDialogButton {
     const ORDER: [ApprovalDialogButton; 2] = [
@@ -254,6 +256,12 @@ impl ApprovalDialogButton {
 /// decides, so it is deliberately not built yet. This struct and its
 /// rendering are provable and correct independent of that answer, which
 /// is why they are built now rather than waiting.
+///
+/// **`#[allow(dead_code)]` is a condition, not a resting state**
+/// (response 222): correct while 220 is open, wrong at a release. If a
+/// release is cut before 220 is answered, this type and
+/// `ApprovalDialogButton` must either be wired into `ModalContent` for
+/// real or removed -- not shipped dead, silenced lint and all.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct ApprovalDialog {

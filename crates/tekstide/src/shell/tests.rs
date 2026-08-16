@@ -3442,12 +3442,16 @@ fn approval_dialog_body_renders_each_risk_level_distinguishably() {
 }
 
 /// **`what-the-dialog-must-not-lie-about.md` §2**: "the highest-consequence
-/// sentence in this RFC." Asserts the two things this dialog must never
-/// let a user assume by omission are actually stated in words, not only
-/// documented: that a decision here does not stop execution, and that
-/// approving does not make the command safe.
+/// sentence in this RFC." Asserts all three things this dialog must
+/// never let a user assume by omission are actually stated in words, not
+/// only documented: that a decision here does not stop execution, that
+/// approving does not make the command safe, and that the command shown
+/// is all the adapter will do. Response 222: the third non-claim was
+/// initially deferred pending open question 3, then added here once the
+/// reviewer pointed out it does not depend on that answer -- it is about
+/// a single dialog's authority, true whenever the dialog appears.
 #[test]
-fn approval_dialog_cooperative_notice_states_both_required_non_claims() {
+fn approval_dialog_cooperative_notice_states_all_three_required_non_claims() {
     let catalog = state_with(ApplicationShell::new()).catalog;
     let notice = catalog.get("approval-dialog-cooperative-notice");
 
@@ -3460,6 +3464,10 @@ fn approval_dialog_cooperative_notice_states_both_required_non_claims() {
             .to_lowercase()
             .contains("does not make the command safe"),
         "must state that approving does not make the command safe: {notice:?}"
+    );
+    assert!(
+        notice.to_lowercase().contains("only one request"),
+        "must state that the shown command is not all the adapter will do: {notice:?}"
     );
 }
 

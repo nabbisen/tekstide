@@ -514,6 +514,33 @@ formality passed by construction.
 - `tekstide-core`: 578 (unchanged -- no core changes this round).
 - `tekstide`: 220 (up from 215 -- the five tests named above).
 
+**Response 222, two required fixes, both cheap, neither blocked on 220:**
+
+- **The Escape hint committed to a state 220 has not decided exists.** `approval-dialog-hint`
+  read "Escape leaves this request pending" -- a specific outcome for the interrupt-timing
+  question the pack itself says is not mine to decide, and a diverging one: RFC-018's paste
+  dialog says "Escape always cancels," which a user has already learned means "get out, no
+  consequence." Leaving an adapter's proposal pending (practically: waiting out its own
+  30-second timeout) is a different outcome reached by the same trained key, undisclosed.
+  Fixed by matching RFC-018's own wording instead of inventing a new one, with a code comment
+  explicitly marking it provisional -- do not extend this hint to describe outcomes it does
+  not yet know about once 220 answers.
+- **The third non-claim ("this is one proposal among however many the adapter may make") was
+  deferred, then added** once the reviewer pointed out it does not depend on 220's answer --
+  it describes what a single dialog's authority covers, true regardless of how or when that
+  dialog was reached. `approval_dialog_cooperative_notice_states_all_three_required_non_claims`
+  (renamed from `..._both_required_non_claims`) now asserts all three.
+- **`#[allow(dead_code)]` on `ApprovalDialog`/`ApprovalDialogButton` is a condition, not a
+  resting state**, per the reviewer's flag -- correct while 220 is open, wrong at a release.
+  Recorded directly on both types' own doc comments: if a release is cut before 220 is
+  answered, they must be wired into `ModalContent` for real or removed, not shipped dead with
+  the lint silenced. Also recorded here as a standing release-gating note, not only in code,
+  since a closeout is exactly where this kind of thing gets missed if it lives in only one
+  place.
+
+Re-verified after the fixes: `tekstide-core` 578, `tekstide` 220 (same counts -- one test
+renamed and extended, none added), all gates clean.
+
 ## PR-022-F - Closeout
 
 *Not started.*
