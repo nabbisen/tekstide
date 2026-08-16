@@ -95,7 +95,14 @@ impl AppState {
             .find(|project| project.id() == project_id)
     }
 
-    #[cfg(test)]
+    /// RFC-022 PR-022-E ("the arrival model"): de-gated from
+    /// `#[cfg(test)]` -- a real, non-test caller now exists
+    /// (`decide_approval`, `crates/tekstide/src/shell.rs`), which needs
+    /// to update a specific project's own `ProjectSession` by id rather
+    /// than only the currently active one (`active_project_mut`,
+    /// private): an approval decision names the project the proposal
+    /// belongs to, not necessarily whichever project happens to be on
+    /// screen when the decision is made.
     pub fn project_mut(&mut self, project_id: &ProjectId) -> Option<&mut ProjectSession> {
         self.projects
             .iter_mut()
@@ -250,7 +257,14 @@ impl AppState {
         &mut self,
         plan: AgentRunLaunchPlan,
         runtime: &mut LinuxTerminalRuntime,
-    ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
+    ) -> Result<
+        (
+            AgentRunId,
+            Vec<TerminalRuntimeEvent>,
+            Option<crate::approval::ApprovalChannelEndpoint>,
+        ),
+        ProjectAgentRuntimeLaunchError,
+    > {
         let project = self
             .active_project_mut()
             .ok_or(ProjectAgentRuntimeLaunchError::Launch(

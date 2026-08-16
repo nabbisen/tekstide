@@ -202,6 +202,22 @@ pub(crate) struct ExternalChangeModal {
     focus: ExternalChangeButton,
 }
 
+/// RFC-022 PR-022-E ("the arrival model"): how often
+/// `Message::ApprovalPollTick` fires. Disclosed trade-off in
+/// `Message::ApprovalPollTick`'s own doc comment -- a plain interval,
+/// not the wake-`eventfd` machinery `terminal_panes` uses, since an
+/// approval proposal is far rarer than terminal output.
+const APPROVAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// RFC-022 PR-022-E ("the arrival model"), response 227: how long a
+/// freshly promoted approval dialog ignores modal input for -- long
+/// enough that a keystroke already in flight (typing mid-word, or
+/// dismissing a different modal that just closed) cannot reach this new
+/// one, short enough that a user who genuinely wants to act on it right
+/// away is not made to wait.
+const APPROVAL_DIALOG_INPUT_IGNORE_WINDOW: std::time::Duration =
+    std::time::Duration::from_millis(400);
+
 /// RFC-022 PR-022-E: which button the approval dialog's focus is on.
 /// `ApproveOnce`/`Reject` only -- `task-breakdown-pr-plan.md`'s own
 /// PR-022-E review gate names Approve/Reject and the cooperative-limit
@@ -214,9 +230,6 @@ pub(crate) enum ApprovalDialogButton {
     Reject,
 }
 
-/// See `ApprovalDialog`'s own doc comment for why this `#[allow(dead_code)]`
-/// is a condition on 220 remaining open, not a resting state.
-#[allow(dead_code)]
 impl ApprovalDialogButton {
     const ORDER: [ApprovalDialogButton; 2] = [
         ApprovalDialogButton::ApproveOnce,
@@ -240,6 +253,56 @@ impl ApprovalDialogButton {
     }
 }
 
+/// RFC-022 PR-022-E ("the arrival model"): a live approval channel this
+/// GUI is serving, one per `Managed` agent run with a bound endpoint --
+/// registered by `register_approval_channel` once
+/// `launch_agent_run_with_runtime` returns one (response 227's found
+/// defect: this used to be silently dropped one layer down). Holds the
+/// `mpsc::Receiver` side of `ApprovalChannelEndpoint::serve_concurrently`
+/// (polled by `ApprovalPollTick`) and the `ServeShutdown` handle needed
+/// to tear the accept loop down cleanly.
+///
+/// `verified_cwd`/`project_root`/`state_root` are captured once, at
+/// launch time, and reused for every proposal this run's adapter later
+/// sends -- `receive_proposal` needs all three on every call, but
+/// `VerifiedCwd` has no public constructor accepting an arbitrary path
+/// (the only way to obtain one is `AgentRunLaunchValidator::validate`,
+/// which runs once at launch, not once per proposal).
+struct ApprovalChannelServing {
+    project_id: tekstide_core::project::ProjectId,
+    agent_run_id: tekstide_core::domain::AgentRunId,
+    verified_cwd: tekstide_core::agent::VerifiedCwd,
+    project_root: std::path::PathBuf,
+    state_root: std::path::PathBuf,
+    receiver: std::sync::mpsc::Receiver<
+        Result<
+            tekstide_core::approval::AcceptedProposal,
+            tekstide_core::approval::ApprovalChannelError,
+        >,
+    >,
+    // `ApprovalChannelEndpoint::serve_concurrently` deliberately drops the
+    // strong `Arc` it is given (see its own doc comment: the accept loop
+    // holds only a `Weak`) and relies on the caller retaining a clone for
+    // as long as serving should continue. Without this field, the
+    // endpoint's strong count hit zero the instant `register_approval_channel`
+    // returned -- running `ApprovalChannelEndpoint`'s `Drop` immediately,
+    // which both closed the listener and removed the real socket special
+    // file, before the accept-loop thread ever got a chance to call
+    // `accept()`. This is what a real adapter's `connect()` was racing and
+    // losing every time (`ENOENT`), not a socket-path mismatch. Never
+    // explicitly read otherwise -- held purely to keep the endpoint (and
+    // therefore the bound socket) alive for this serving's lifetime.
+    #[allow(dead_code)]
+    endpoint: std::sync::Arc<tekstide_core::approval::ApprovalChannelEndpoint>,
+    // RFC-022 PR-022-E: never explicitly read -- held only so its own
+    // `Drop` runs when this `ApprovalChannelServing` is dropped
+    // (`poll_approval_channels` simply not re-inserting a disconnected
+    // serving into `still_open`), the "simply dropping this value" half
+    // of `ServeShutdown`'s own documented contract, not an oversight.
+    #[allow(dead_code)]
+    shutdown: tekstide_core::approval::ServeShutdown,
+}
+
 /// RFC-022 PR-022-E: the security surface -- see
 /// `what-the-dialog-must-not-lie-about.md` and response 221. Holds the
 /// full `ApprovalRequest` rather than a handful of extracted fields the
@@ -249,24 +312,47 @@ impl ApprovalDialogButton {
 /// against once a decision is made), so extracting a subset would just
 /// be a second, partial copy of the same struct.
 ///
-/// **Not yet wired into `ModalContent`.** Review request 220 (open
-/// question 3: does this dialog interrupt whatever the user is doing)
-/// is still open -- the trigger path (when/how `state.modal` becomes
-/// `Some(ModalContent::Approval(..))`) is exactly what that answer
-/// decides, so it is deliberately not built yet. This struct and its
-/// rendering are provable and correct independent of that answer, which
-/// is why they are built now rather than waiting.
-///
-/// **`#[allow(dead_code)]` is a condition, not a resting state**
-/// (response 222): correct while 220 is open, wrong at a release. If a
-/// release is cut before 220 is answered, this type and
-/// `ApprovalDialogButton` must either be wired into `ModalContent` for
-/// real or removed -- not shipped dead, silenced lint and all.
+/// **Wired into `ModalContent` as of response 227's "the arrival
+/// model."** `proposal_id` bridges back to `ApprovalCoordinator`'s own
+/// map (keyed by the wire `ProposalId`, not the domain `ApprovalId`
+/// `request.id` carries -- `ApprovalRequest` has no reference back to
+/// the wire id, since it is the audit-facing type RFC-021 already
+/// defined and this slice does not widen it for GUI-only convenience;
+/// `State.approval_proposal_ids` records the mapping instead).
+/// `ignore_input_until` is the post-promotion input-ignore window
+/// (response 227, and `what-the-dialog-must-not-lie-about.md`'s own
+/// "focus defaults to Reject" pairing) -- a stray keystroke already in
+/// flight when this dialog is promoted (mid-edit, or dismissing a
+/// *different* modal that just closed) must not immediately activate or
+/// dismiss it.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub(crate) struct ApprovalDialog {
     request: tekstide_core::domain::ApprovalRequest,
+    proposal_id: tekstide_core::approval::ProposalId,
     focus: ApprovalDialogButton,
+    ignore_input_until: Option<std::time::Instant>,
+}
+
+#[cfg(test)]
+impl ApprovalDialog {
+    /// Test-only constructor: every real dialog is built by
+    /// `evaluate_promotion`, which always arms the input-ignore window
+    /// -- this lets a test construct one with `ignore_input_until: None`
+    /// to exercise `decide_approval`'s own real wire round trip in
+    /// isolation from that window, which is proven separately
+    /// (`modal_input_is_ignored_within_the_post_promotion_window`).
+    pub(crate) fn for_test(
+        request: tekstide_core::domain::ApprovalRequest,
+        proposal_id: tekstide_core::approval::ProposalId,
+        focus: ApprovalDialogButton,
+    ) -> Self {
+        Self {
+            request,
+            proposal_id,
+            focus,
+            ignore_input_until: None,
+        }
+    }
 }
 
 /// RFC-018 PR-018-C: `state.modal` must remain the *one* value
@@ -289,6 +375,22 @@ pub(crate) enum ModalContent {
     /// re-opens (discarding local edits), Dismiss/Escape leaves the file
     /// untouched.
     ExternalChange(ExternalChangeModal),
+    /// RFC-022 PR-022-E ("the arrival model", response 220/227): a
+    /// promoted `High`/`Destructive` approval request. Unlike every
+    /// other modal here, this one is never opened directly in response
+    /// to the keystroke that produced it -- `evaluate_promotion` sets
+    /// it, from an adapter's own proposal arriving, possibly while the
+    /// user is mid-edit elsewhere. Escape leaves the request pending
+    /// (no decision recorded), matching `ApprovalCoordinator::decide`'s
+    /// own "nobody decided" semantics -- unlike Reload/Accept above,
+    /// there is no "closes without consequence" reading here: Reject is
+    /// a real decision, reachable only by moving focus and activating,
+    /// the same "one stray keystroke can only reject" property
+    /// `focus: Reject` by default already gives Escape's usual meaning.
+    // Boxed per clippy::large_enum_variant -- `ApprovalDialog` holds a
+    // full `ApprovalRequest`, the same reason `ReceiveOutcome::Created`
+    // boxes its own copy.
+    Approval(Box<ApprovalDialog>),
 }
 
 impl Default for ModalContent {
@@ -374,6 +476,42 @@ pub struct State {
     /// Reset to `0` every time a scan succeeds, so it can never point
     /// past the end of a freshly-replaced row list.
     explorer_highlight: usize,
+    /// RFC-022 PR-022-E ("the arrival model"): the live, security-critical
+    /// coordinator. Lives here, not in `tekstide-core::project::ProjectSession`
+    /// -- see `ApprovalDialog`'s own doc comment and response 224:
+    /// `AcceptedProposal` holds a real `UnixStream`, so anything holding
+    /// one can never be `Clone`/`PartialEq`, unlike `ProjectSession`.
+    /// The same reason `TerminalPane` (also holding live OS resources)
+    /// lives in `state.terminal_panes` rather than `tekstide-core`. One
+    /// coordinator, not one per project: its internal map already keys
+    /// by `AgentRunId` (globally unique), the same flat-collection shape
+    /// `terminal_panes` already uses across every open project.
+    approval_coordinator: tekstide_core::approval::ApprovalCoordinator,
+    /// One entry per `AgentRun` with a live approval channel being
+    /// served -- populated when `launch_agent_run_with_runtime` returns
+    /// a bound endpoint for a `Managed` profile (response 227's found
+    /// defect, now fixed one layer down). Polled by `ApprovalPollTick`.
+    approval_channels: Vec<ApprovalChannelServing>,
+    /// `ApprovalRequest` (the domain/audit-facing type, mirrored into
+    /// `ProjectSession.approval_requests`) carries no reference back to
+    /// the wire `ProposalId` `ApprovalCoordinator`'s own map is keyed
+    /// by -- RFC-021 already defined that type's shape, and this slice
+    /// does not widen it for GUI-only convenience. This is the bridge:
+    /// populated on every `ReceiveOutcome::Created`, read whenever a
+    /// rendered `ApprovalRequest.id` needs to become a real
+    /// `decide`/`is_still_answerable` call. **Known, disclosed gap**:
+    /// entries are never removed, including once `ProjectSession.approval_requests`
+    /// evicts the matching `ApprovalRequest` under `approval_history_limit`
+    /// -- this map can outlive the record it points at. Not unbounded
+    /// (grows only as fast as real proposals arrive, the same rate
+    /// `ApprovalCoordinator`'s own never-shrinking map already grows
+    /// at), but a real, small leak relative to the eviction policy
+    /// already built; worth closing in a follow-up rather than blocking
+    /// this slice on it.
+    approval_proposal_ids: std::collections::HashMap<
+        tekstide_core::domain::ApprovalId,
+        tekstide_core::approval::ProposalId,
+    >,
 }
 
 impl State {
@@ -439,6 +577,9 @@ impl State {
             agent_run_launch_notice: None,
             terminal_paste_notice: None,
             explorer_highlight: 0,
+            approval_coordinator: tekstide_core::approval::ApprovalCoordinator::new(),
+            approval_channels: Vec::new(),
+            approval_proposal_ids: std::collections::HashMap::new(),
         }
     }
 
@@ -530,9 +671,44 @@ pub enum Message {
         target: TerminalId,
         content: Option<String>,
     },
+    /// RFC-022 PR-022-E ("the arrival model"): periodic check of every
+    /// `state.approval_channels` entry for a newly-arrived proposal, and
+    /// every retained-but-`Pending` `ApprovalRequest` for whether its
+    /// connection has since closed. A plain interval tick
+    /// (`iced::time::every`), not the wake-`eventfd` machinery
+    /// `terminal_panes` uses -- disclosed trade-off, not an oversight:
+    /// an approval proposal is far rarer than terminal output (the
+    /// adapter is already blocked waiting up to 30 seconds once one
+    /// arrives), so a few hundred milliseconds of polling latency to
+    /// notice it is a small fraction of that budget, not a
+    /// user-perceptible delay for something the user was not expecting
+    /// at that exact instant anyway.
+    ApprovalPollTick,
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
+    // RFC-022 PR-022-E ("the arrival model"), response 227: a promoted
+    // approval dialog briefly ignores modal input after appearing, so a
+    // keystroke already in flight (typing mid-word, or dismissing a
+    // *different* modal that just closed and re-triggered promotion)
+    // cannot immediately activate or dismiss it. Checked once, ahead of
+    // the real `match` below, for exactly the four modal-input messages
+    // every other modal already responds to -- this dialog's own
+    // rendering/promotion/decision logic is otherwise unaffected.
+    if matches!(
+        message,
+        Message::ModalFocusNext
+            | Message::ModalFocusPrevious
+            | Message::ModalActivate
+            | Message::ModalDismiss
+    ) && let Some(ModalContent::Approval(dialog)) = state.modal.as_ref()
+        && dialog
+            .ignore_input_until
+            .is_some_and(|until| std::time::Instant::now() < until)
+    {
+        return Task::none();
+    }
+
     match message {
         Message::Input(RoutedInput::Shell(shell_input)) => {
             let action = shell_input.action();
@@ -717,12 +893,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::LayerDemo { focus }) => *focus = focus.next(),
             Some(ModalContent::PasteConfirmation(modal)) => modal.focus = modal.focus.next(),
             Some(ModalContent::ExternalChange(modal)) => modal.focus = modal.focus.next(),
+            Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.next(),
             None => {}
         },
         Message::ModalFocusPrevious => match state.modal.as_mut() {
             Some(ModalContent::LayerDemo { focus }) => *focus = focus.previous(),
             Some(ModalContent::PasteConfirmation(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::ExternalChange(modal)) => modal.focus = modal.focus.previous(),
+            Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.previous(),
             None => {}
         },
         // RFC-018 PR-018-C: the layer-demo placeholder still has no
@@ -734,34 +912,65 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         // without writing anything. Escape defaulting to "not pasting"
         // holds structurally: `ModalDismiss`'s arm never touches the
         // write path at all, for either modal kind.
-        Message::ModalActivate => match state.modal.take() {
-            Some(ModalContent::PasteConfirmation(modal))
-                if modal.focus == PasteConfirmButton::Accept =>
-            {
-                write_terminal_input(state, &modal.target, modal.content.as_bytes());
+        Message::ModalActivate => {
+            match state.modal.take() {
+                Some(ModalContent::PasteConfirmation(modal))
+                    if modal.focus == PasteConfirmButton::Accept =>
+                {
+                    write_terminal_input(state, &modal.target, modal.content.as_bytes());
+                }
+                // RFC-019 PR-019-D: Reload re-opens the document fresh --
+                // `open_active_project_text_document` takes disk's current
+                // content and drops local edits, the only way past a
+                // conflict `TextDocument::save()` itself provides. Any other
+                // focus (Dismiss), or `ModalDismiss` (Escape) below, closes
+                // the modal without touching the file at all -- the same
+                // "every dismissal path defaults to not overwriting" shape
+                // the paste dialog's own Reject/Escape arms already hold.
+                Some(ModalContent::ExternalChange(modal))
+                    if modal.focus == ExternalChangeButton::Reload =>
+                {
+                    let _ = state
+                        .app_shell
+                        .open_active_project_text_document(&modal.relative_path);
+                }
+                // RFC-022 PR-022-E: unlike Paste/ExternalChange above, *both*
+                // of this dialog's own focus positions are real decisions --
+                // there is no "closes without consequence" reading for
+                // Approve/Reject the way Dismiss/anything-but-Reload is for
+                // the other two. `decide_approval` records whichever one
+                // focus landed on.
+                Some(ModalContent::Approval(dialog)) => {
+                    let decision = match dialog.focus {
+                        ApprovalDialogButton::ApproveOnce => {
+                            tekstide_core::approval::SimpleDecision::ApprovedOnce
+                        }
+                        ApprovalDialogButton::Reject => {
+                            tekstide_core::approval::SimpleDecision::Rejected
+                        }
+                    };
+                    decide_approval(state, *dialog, decision);
+                }
+                Some(ModalContent::LayerDemo { .. })
+                | Some(ModalContent::PasteConfirmation(_))
+                | Some(ModalContent::ExternalChange(_))
+                | None => {}
             }
-            // RFC-019 PR-019-D: Reload re-opens the document fresh --
-            // `open_active_project_text_document` takes disk's current
-            // content and drops local edits, the only way past a
-            // conflict `TextDocument::save()` itself provides. Any other
-            // focus (Dismiss), or `ModalDismiss` (Escape) below, closes
-            // the modal without touching the file at all -- the same
-            // "every dismissal path defaults to not overwriting" shape
-            // the paste dialog's own Reject/Escape arms already hold.
-            Some(ModalContent::ExternalChange(modal))
-                if modal.focus == ExternalChangeButton::Reload =>
-            {
-                let _ = state
-                    .app_shell
-                    .open_active_project_text_document(&modal.relative_path);
-            }
-            Some(ModalContent::LayerDemo { .. })
-            | Some(ModalContent::PasteConfirmation(_))
-            | Some(ModalContent::ExternalChange(_))
-            | None => {}
-        },
+            // RFC-022 PR-022-E, response 227: re-evaluate after every
+            // activation, not only a real approval decision -- any
+            // `ModalActivate` closes whatever modal was open (its own
+            // action, or a no-op focus), freeing the slot the same way
+            // `ModalDismiss` does below.
+            evaluate_promotion(state);
+        }
         Message::ModalDismiss => {
             state.modal = None;
+            // RFC-022 PR-022-E, response 227: re-evaluate on every modal
+            // close, not only this dialog's own -- dismissing the paste
+            // dialog can free the slot a queued Destructive proposal for
+            // the active project has been waiting on. `evaluate_promotion`
+            // itself is a no-op if nothing qualifies.
+            evaluate_promotion(state);
         }
         Message::MeasuredKey(sent_at) => {
             if let Some(measurement) = state.measurement.as_mut() {
@@ -868,6 +1077,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::TerminalWoke(terminal_id) => {
             handle_terminal_woke(state, &terminal_id);
+        }
+        Message::ApprovalPollTick => {
+            poll_approval_channels(state);
         }
     }
     Task::none()
@@ -1224,12 +1436,43 @@ fn attempt_agent_run_launch_with_profile(
     };
 
     let project_id = plan.spec().project_id().clone();
+    // Captured before `plan` is consumed below -- `receive_proposal`
+    // needs all three on every future proposal this run's adapter
+    // sends, not only at launch (`ApprovalChannelServing`'s own doc
+    // comment explains why `VerifiedCwd` specifically has to be captured
+    // now rather than re-derived later).
+    let verified_cwd = plan.spec().verified_cwd().clone();
+    let project_root = plan.spec().project_root().to_path_buf();
     let mut runtime = LinuxTerminalRuntime::new();
-    let (agent_run_id, _events) = state
+    let (agent_run_id, _events, approval_endpoint) = state
         .app_shell
         .state_mut()
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .map_err(AgentRunLaunchRefusal::Runtime)?;
+    // `claude_code_linux_default` is `Supervised`, which never binds an
+    // approval endpoint -- `None` here today. Registered for real once a
+    // `Managed` profile can reach this path (response 227's found
+    // defect: this endpoint used to be silently dropped one layer down;
+    // it no longer is, and this is where a real one would be handed to
+    // `state.approval_coordinator`'s own serving machinery). Re-resolves
+    // the state root rather than reusing the one captured above (already
+    // moved into the request at that point) -- cheap, and guaranteed
+    // consistent: `prepare_adapter_approval` could only have bound a
+    // real endpoint at all if this same resolution had already produced
+    // `Some` once, earlier in this same call.
+    if let Some(endpoint) = approval_endpoint {
+        let state_root = open_real_agent_run_state_root()
+            .expect("a resolvable state root, or prepare_adapter_approval would have failed closed instead of binding an endpoint");
+        register_approval_channel(
+            state,
+            project_id.clone(),
+            agent_run_id.clone(),
+            verified_cwd,
+            project_root,
+            state_root,
+            endpoint,
+        );
+    }
 
     // The run this call just attached always has a terminal id --
     // `launch_prepared_agent_run_with_runtime` attaches the terminal
@@ -1615,6 +1858,11 @@ fn trusted_ui_state(state: &State) -> TerminalTrustedUiState {
         // modal exclusivity (this state's only real consumer today)
         // needs every open modal to read as active, not just the two
         // paste-specific ones.
+        // RFC-022 PR-022-E: the third contributor this doc comment
+        // anticipated -- `ApprovalActive` was already a dedicated
+        // variant, defined by RFC-021 ahead of this dialog actually
+        // existing.
+        Some(ModalContent::Approval(_)) => TerminalTrustedUiState::ApprovalActive,
         Some(ModalContent::LayerDemo { .. }) | Some(ModalContent::ExternalChange(_)) => {
             TerminalTrustedUiState::SecurityDialogActive
         }
@@ -2116,6 +2364,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ModalContent::ExternalChange(external_change_modal) => {
                 external_change_modal_view(state, external_change_modal)
             }
+            ModalContent::Approval(dialog) => approval_dialog_view(state, dialog),
         };
         let scrim = center(modal_view).style(modal_scrim_style(state.theme));
         stack![base, opaque(scrim)].into()
@@ -2180,12 +2429,27 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     // was set), so this changes nothing about the routing above for any
     // normal run -- the same "checked but usually absent" shape the
     // measurement branch above already uses.
-    if !state.terminal_panes.is_empty() {
-        let mut subscriptions = terminal_wake_subscriptions(&state.terminal_panes);
+    let mut subscriptions = if !state.terminal_panes.is_empty() {
+        terminal_wake_subscriptions(&state.terminal_panes)
+    } else {
+        Vec::new()
+    };
+    // RFC-022 PR-022-E ("the arrival model"): polled regardless of modal
+    // state -- a new proposal must still enter the queue while a
+    // *different* modal is open (it just cannot promote until that modal
+    // closes, per `evaluate_promotion`'s own guard), the same "keeps
+    // running underneath modal exclusivity" shape terminal output
+    // already has. Only added when there is something to poll, the same
+    // "checked but usually absent" precedent the two branches above use.
+    if !state.approval_channels.is_empty() {
+        subscriptions
+            .push(iced::time::every(APPROVAL_POLL_INTERVAL).map(|_| Message::ApprovalPollTick));
+    }
+    if subscriptions.is_empty() {
+        routing
+    } else {
         subscriptions.push(routing);
         Subscription::batch(subscriptions)
-    } else {
-        routing
     }
 }
 
@@ -2925,13 +3189,336 @@ pub(crate) fn external_change_dialog_body(
     )
 }
 
+/// RFC-022 PR-022-E ("the arrival model"): registers a freshly bound
+/// approval channel for polling -- the one production call site for
+/// `ApprovalChannelEndpoint::serve_concurrently` (response 227's found
+/// defect: the endpoint used to be silently dropped before anything
+/// could call this). `serve_concurrently`'s accept loop holds only a
+/// `Weak` reference internally (see that method's own doc comment in
+/// `tekstide-core`) and explicitly drops the strong `Arc` it is handed --
+/// a caller-retained clone is required for the endpoint, and therefore
+/// the bound socket, to stay alive at all. An earlier version of this
+/// function passed a bare temporary `Arc::new(endpoint)` straight into
+/// `serve_concurrently` and kept no clone, so the strong count hit zero
+/// the instant this function returned: `ApprovalChannelEndpoint::drop`
+/// ran immediately, removing the real socket special file and closing
+/// the listener before the accept-loop thread's first `accept()` call, a
+/// real adapter's `connect()` losing the resulting race every time
+/// (`ENOENT`). `endpoint` below is that missing caller-retained clone,
+/// stored on `ApprovalChannelServing` for the whole serving lifetime;
+/// dropping the returned `ServeShutdown` is what tears the accept loop --
+/// and eventually this `Arc`'s strong count -- down.
+fn register_approval_channel(
+    state: &mut State,
+    project_id: tekstide_core::project::ProjectId,
+    agent_run_id: tekstide_core::domain::AgentRunId,
+    verified_cwd: tekstide_core::agent::VerifiedCwd,
+    project_root: std::path::PathBuf,
+    state_root: std::path::PathBuf,
+    endpoint: tekstide_core::approval::ApprovalChannelEndpoint,
+) {
+    let endpoint = std::sync::Arc::new(endpoint);
+    // The clone handed to `serve_concurrently` is consumed and downgraded
+    // to a `Weak` internally; `endpoint` itself is the caller-retained
+    // strong reference `serve_concurrently`'s contract requires, stored
+    // below on `ApprovalChannelServing` for the serving's whole lifetime.
+    let (receiver, shutdown) = std::sync::Arc::clone(&endpoint).serve_concurrently();
+    state.approval_channels.push(ApprovalChannelServing {
+        project_id,
+        agent_run_id,
+        verified_cwd,
+        project_root,
+        state_root,
+        receiver,
+        endpoint,
+        shutdown,
+    });
+}
+
+/// RFC-022 PR-022-E ("the arrival model"): `Message::ApprovalPollTick`'s
+/// handler -- drains every open channel's receiver (non-blocking;
+/// `try_recv` never waits for a proposal that has not arrived), feeds
+/// each accepted proposal through the real coordinator, mirrors the
+/// result into the owning `ProjectSession`, sweeps every still-`Pending`
+/// request for expiry, and finally re-evaluates promotion once (an
+/// arrival is exactly the "point-in-time predicate" case
+/// `should_promote_to_modal` was always meant to answer, not only the
+/// modal-close/project-switch re-evaluation cases response 227 added).
+fn poll_approval_channels(state: &mut State) {
+    // RFC-022 PR-022-E: `.retain` would drop a serving the moment its
+    // receiver reports `Disconnected` -- but a disconnected receiver
+    // (the adapter's own listen loop exited, or `ServeShutdown` fired)
+    // says nothing about whether *already-accepted* proposals on that
+    // run are still individually live; each one answers that for itself
+    // via `AcceptedProposal::is_connection_still_open`, checked in the
+    // expiry sweep below. So a disconnected serving is only dropped from
+    // this list (stops being polled for *new* proposals); it does not
+    // touch anything already in the coordinator's own map.
+    let mut still_open = Vec::with_capacity(state.approval_channels.len());
+    for serving in std::mem::take(&mut state.approval_channels) {
+        let mut accepted_this_tick = Vec::new();
+        loop {
+            match serving.receiver.try_recv() {
+                Ok(Ok(accepted)) => accepted_this_tick.push(accepted),
+                // A connection that failed authentication -- already
+                // logged/rejected server-side (`accept_proposal`'s own
+                // fail-closed-without-a-dialog design); nothing further
+                // for this GUI to do with it.
+                Ok(Err(_channel_error)) => {}
+                Err(
+                    std::sync::mpsc::TryRecvError::Empty
+                    | std::sync::mpsc::TryRecvError::Disconnected,
+                ) => {
+                    break;
+                }
+            }
+        }
+        let disconnected = matches!(
+            serving.receiver.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected)
+        );
+        for accepted in accepted_this_tick {
+            receive_approval_proposal(state, &serving, accepted);
+        }
+        if !disconnected {
+            still_open.push(serving);
+        }
+    }
+    state.approval_channels = still_open;
+
+    sweep_expired_approvals(state);
+    evaluate_promotion(state);
+}
+
+/// RFC-022 PR-022-E: feeds one accepted proposal through the real
+/// `ApprovalCoordinator`, mirroring a `Created` result into the owning
+/// `ProjectSession` (`add_approval_request`) and recording the
+/// `ApprovalId` -> `ProposalId` bridge (`ApprovalDialog`'s own doc
+/// comment explains why that bridge has to live here). `DuplicateRejected`/
+/// `QueueLimitExceeded` need no mirroring: the coordinator already
+/// dropped the connection and created nothing to mirror. `verified_cwd`/
+/// `project_root`/`state_root` come from `serving` -- captured once, at
+/// launch time (`register_approval_channel`), since `VerifiedCwd` has no
+/// public constructor accepting an arbitrary path (the only way to
+/// obtain one is `AgentRunLaunchValidator::validate`, which runs once,
+/// not on every proposal a long-lived agent run's adapter later sends).
+fn receive_approval_proposal(
+    state: &mut State,
+    serving: &ApprovalChannelServing,
+    accepted: tekstide_core::approval::AcceptedProposal,
+) {
+    let Some(project) = state
+        .app_shell
+        .state()
+        .project(&serving.project_id)
+        .cloned()
+    else {
+        return;
+    };
+    let limits = tekstide_core::approval::ApprovalQueueLimits {
+        per_agent_run: project.resource_limits().agent_run_approval_limit,
+        per_project: project.resource_limits().approval_request_limit,
+    };
+    let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
+        // RFC-022 PR-022-E: `receive_proposal` requires a real
+        // `AuditCoordinator` to call at all -- the same "no store, no
+        // action" degraded mode `decide_approval` also accepts, for the
+        // same reason. This specific proposal is lost, not retried
+        // (`try_recv` already removed it from the channel before this
+        // function was called) -- rare (state-dir-unavailable) and
+        // already an accepted degraded mode elsewhere in this crate; not
+        // solved further in this slice.
+        return;
+    };
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    let mut audit =
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health);
+    let proposal_id = accepted.proposal.proposal_id().clone();
+    let outcome = state.approval_coordinator.receive_proposal(
+        serving.project_id.clone(),
+        serving.agent_run_id.clone(),
+        &serving.verified_cwd,
+        &serving.project_root,
+        &serving.state_root,
+        accepted,
+        limits,
+        &mut audit,
+    );
+    let tekstide_core::approval::ReceiveOutcome::Created { request, .. } = outcome else {
+        return;
+    };
+    let approval_id = request.id.clone();
+    state.approval_proposal_ids.insert(approval_id, proposal_id);
+    if let Some(project) = state.app_shell.state_mut().project_mut(&serving.project_id) {
+        let _ = project.add_approval_request(*request);
+    }
+}
+
+/// RFC-022 PR-022-E ("the arrival model"): every still-`Pending`,
+/// not-yet-marked-expired request across every open project is checked
+/// against the real coordinator (`is_still_answerable` -- the
+/// authoritative liveness check `AcceptedProposal::is_connection_still_open`
+/// backs) and marked expired the moment its connection is found closed.
+/// This is what keeps "visibly unanswerable" honest: without this sweep,
+/// a request could sit `Pending`, its adapter long gone, indistinguishable
+/// from one still genuinely awaiting a decision.
+fn sweep_expired_approvals(state: &mut State) {
+    let project_ids: Vec<_> = state
+        .app_shell
+        .state()
+        .projects()
+        .iter()
+        .map(|project| project.id().clone())
+        .collect();
+    for project_id in project_ids {
+        let Some(project) = state.app_shell.state().project(&project_id) else {
+            continue;
+        };
+        let newly_expired: Vec<_> = project
+            .approval_requests()
+            .iter()
+            .filter(|request| {
+                request.decision == tekstide_core::domain::ApprovalDecision::Pending
+                    && !project.expired_approval_ids().contains(&request.id)
+            })
+            .filter_map(|request| {
+                let agent_run_id = request.agent_run_id.clone()?;
+                let proposal_id = state.approval_proposal_ids.get(&request.id)?.clone();
+                Some((request.id.clone(), agent_run_id, proposal_id))
+            })
+            .filter(|(_, agent_run_id, proposal_id)| {
+                !state
+                    .approval_coordinator
+                    .is_still_answerable(agent_run_id, proposal_id)
+            })
+            .map(|(approval_id, ..)| approval_id)
+            .collect();
+        if newly_expired.is_empty() {
+            continue;
+        }
+        if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
+            for approval_id in newly_expired {
+                let _ = project.mark_approval_expired(&approval_id);
+            }
+        }
+    }
+}
+
+/// RFC-022 PR-022-E ("the arrival model"), response 227: **not only
+/// called on arrival.** The promotion decision
+/// (`approval::should_promote_to_modal`) is a point-in-time predicate,
+/// and response 227's own correction was that a point-in-time check
+/// alone is incomplete -- a `Destructive` proposal arriving while a
+/// *different* modal is open must not be silently downgraded to a
+/// `Low`-equivalent "never promotes" outcome just because of arrival
+/// timing. So this is called from every place that can flip the
+/// predicate from `false` to `true`: a new arrival (`poll_approval_channels`),
+/// a modal closing (`ModalActivate`/`ModalDismiss`), and -- **not yet
+/// wired, disclosed rather than silently skipped**: an active-project
+/// change, since nothing in the shipped GUI currently switches which
+/// project is active during a session at all (`AppState::switch_active_project`
+/// has no production caller anywhere in this crate; `NavigationAction::SwitchActiveProject`
+/// itself maps to no `AppCommand`). The re-evaluation logic below is
+/// unconditionally correct regardless of *why* it was called, so wiring
+/// a real call site once project-switching exists elsewhere is a one-line
+/// addition, not a design question.
+///
+/// **Oldest qualifying proposal first** (response 227): `approval_requests()`
+/// is already insertion-ordered (push-only), so the first entry this
+/// scan finds satisfying every guard *is* the oldest.
+fn evaluate_promotion(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    let Some(candidate) = project
+        .approval_requests()
+        .iter()
+        .find(|request| {
+            request.decision == tekstide_core::domain::ApprovalDecision::Pending
+                && !project.expired_approval_ids().contains(&request.id)
+                && tekstide_core::approval::should_promote_to_modal(request.risk_level, false, true)
+        })
+        .cloned()
+    else {
+        return;
+    };
+    let Some(agent_run_id) = candidate.agent_run_id.clone() else {
+        return;
+    };
+    let Some(proposal_id) = state.approval_proposal_ids.get(&candidate.id).cloned() else {
+        return;
+    };
+    // Re-confirmed against the real, authoritative coordinator rather
+    // than trusting `expired_approval_ids` alone -- that set is only as
+    // fresh as the last `sweep_expired_approvals` tick, and promoting a
+    // request whose adapter gave up moments ago (before the next sweep)
+    // would put a dead request in the one place this whole design exists
+    // to make trustworthy.
+    if !state
+        .approval_coordinator
+        .is_still_answerable(&agent_run_id, &proposal_id)
+    {
+        return;
+    }
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog {
+        request: candidate,
+        proposal_id,
+        focus: ApprovalDialogButton::Reject,
+        ignore_input_until: Some(std::time::Instant::now() + APPROVAL_DIALOG_INPUT_IGNORE_WINDOW),
+    })));
+}
+
+/// RFC-022 PR-022-E: `ModalActivate`'s handler for a promoted approval
+/// dialog -- sends the real decision through the real coordinator (the
+/// same `decide`/`decide_with_edited_argv` "no decision recorded for an
+/// undeliverable proposal" guard applies here exactly as it does
+/// anywhere else `decide` is called) and mirrors the result into the
+/// owning `ProjectSession` so `pending_approvals` reflects it
+/// immediately.
+fn decide_approval(
+    state: &mut State,
+    dialog: ApprovalDialog,
+    decision: tekstide_core::approval::SimpleDecision,
+) {
+    let Some(agent_run_id) = dialog.request.agent_run_id.clone() else {
+        return;
+    };
+    let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
+        // RFC-022 PR-022-E: `decide` requires a real `AuditCoordinator`
+        // to call at all -- `ApprovedOnce`'s own fail-closed authorization
+        // needs one to fail closed *against*. Without a real store, this
+        // decision cannot be recorded either way, so it is left exactly
+        // as it was: `Pending`. Rare (state-dir-unavailable) and already
+        // an accepted degraded mode elsewhere in this crate.
+        return;
+    };
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    let mut audit =
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health);
+    let outcome =
+        state
+            .approval_coordinator
+            .decide(&agent_run_id, &dialog.proposal_id, decision, &mut audit);
+    let tekstide_core::approval::DecideOutcome::Decided { request, .. } = outcome else {
+        // `Undeliverable`/`AlreadyDecided`/`NotFound`/`AuditBlocked`:
+        // the stored request's own decision (still `Pending`) is
+        // already the honest state for all four -- nothing to mirror.
+        return;
+    };
+    let project_id = dialog.request.project_id.clone();
+    if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
+        let _ = project.replace_approval_request(request);
+    }
+}
+
 /// RFC-022 PR-022-E: a compile-time literal symbol for `RiskLevel`, the
 /// same `trusted_symbol` division of labour every other symbol-driven
 /// Fluent lookup in this file uses -- the words live in `en.ftl`'s
 /// `approval-dialog-risk` select expression, not here. `RiskLevel` is
-/// Tekstide's own classification output (`approval::risk::classify`),
-/// never adapter-supplied text, so this needs no escaping -- only
-/// `display_command`/`cwd` do (response 221).
+/// Tekstide's own classification output (`approval::risk::classify`).
 fn risk_level_symbol(level: tekstide_core::domain::RiskLevel) -> &'static str {
     use tekstide_core::domain::RiskLevel;
     match level {
@@ -2986,13 +3573,8 @@ pub(crate) fn approval_dialog_body(
     )
 }
 
-/// Not yet called from `view()` -- see [`ApprovalDialog`]'s own doc
-/// comment for why the trigger wiring waits on response 220.
-/// `#[allow(dead_code)]` rather than a throwaway caller: this function,
-/// [`approval_dialog_body`], and [`risk_level_symbol`] are exercised
-/// directly by `shell::tests` today, which proves them correct ahead of
-/// the wiring that will make them reachable from `main` for real.
-#[allow(dead_code)]
+/// Called from `view()` as of response 220/227's "the arrival model" --
+/// `ModalContent::Approval`'s own render arm.
 fn approval_dialog_view<'a>(state: &'a State, dialog: &'a ApprovalDialog) -> Element<'a, Message> {
     let button_line = |target: ApprovalDialogButton, label_key: &str| {
         let marker = if dialog.focus == target { "> " } else { "  " };

@@ -802,6 +802,119 @@ nowhere in production, the same "wired with no caller" shape response 219 found 
 new `ProjectOpenSurface` variant and its queue-viewing surface, and the `command_approval`
 audit family's first real producer.
 
+### The GUI wiring itself -- the arrival model made real (response 227's explicit go-ahead)
+
+Built the full production path per response 227's "the forks that needed raising have been
+raised, and the remaining work is execution against a settled shape": `State` gained a real
+`approval_coordinator: ApprovalCoordinator` (one, flat, keyed by the coordinator's own
+globally-unique `AgentRunId`s -- same shape as `state.terminal_panes`, not per-project, for
+the same reason `AcceptedProposal` holding a live `UnixStream` rules out storing it on
+`ProjectSession`: that type derives `Clone`/`PartialEq`, a `UnixStream` cannot), a
+`Vec<ApprovalChannelServing>` (one per live-served `Managed` run), and an
+`approval_proposal_ids: HashMap<ApprovalId, ProposalId>` bridge -- disclosed as a real, small,
+never-explicitly-cleaned-up leak relative to `ProjectSession`'s own eviction policy, closing it
+scoped as a follow-up rather than blocking this slice.
+
+`Message::ApprovalPollTick` (`iced::time::every`, 250ms, a new `APPROVAL_POLL_INTERVAL` const)
+drains every open channel non-blockingly, feeds accepted proposals through the real
+coordinator (`ApprovalQueueLimits` built from the owning project's real `resource_limits()`),
+mirrors into `ProjectSession` via the now-de-gated `AppState::project_mut`, sweeps expiry
+(`ApprovalCoordinator::is_still_answerable` against every still-`Pending` request), then calls
+`should_promote_to_modal`'s real call site for the first time: `evaluate_promotion` -- no-op if
+a modal is already open, otherwise the active project's oldest qualifying `Pending` proposal
+(re-confirmed live via `is_still_answerable`, not trusting the last sweep alone) promotes,
+focus defaulting to Reject, with the post-promotion input-ignore window
+(`APPROVAL_DIALOG_INPUT_IGNORE_WINDOW`, 400ms) set. `ModalContent::Approval(Box<ApprovalDialog>)`
+is now genuinely constructed and dispatched (`view()`, `trusted_ui_state` -- resolving that
+accessor's own long-standing "third contributor" doc-comment note); `ModalActivate` computes a
+real `SimpleDecision` from focus for both buttons (unlike Paste/ExternalChange, dismissing this
+dialog is never a no-op); both `ModalActivate` and `ModalDismiss` re-run `evaluate_promotion`
+afterward, since freeing the one modal slot is itself a promotion trigger, per response 227's
+correction that promotion is not only an arrival-time check.
+
+**A real defect found and fixed while building this: the endpoint was still being dropped, one
+layer higher than PR-022-C/D's discarding bug.** `ApprovalChannelEndpoint::serve_concurrently`
+(`self: Arc<Self>`) deliberately drops its own strong `Arc` internally and keeps only a `Weak`
+in its accept-loop thread -- its own doc comment says a caller-retained clone is required for
+the endpoint to stay alive. The first version of `register_approval_channel` wrote
+`Arc::new(endpoint).serve_concurrently()` with no clone retained anywhere: the temporary
+`Arc`'s strong count hit zero the instant the call returned, running
+`ApprovalChannelEndpoint::drop` immediately -- closing the listener and removing the real
+socket special file -- before the accept-loop thread's first `accept()` call ever ran. Found
+via the first real GUI-level end-to-end test
+(`a_real_low_risk_proposal_is_received_mirrored_and_stays_queued_without_promoting`): the real
+reference adapter subprocess connected to a socket path that reported `ENOENT`
+(`connect to <path> failed: No such file or directory (os error 2)`) and exited with its own
+defined connect-failure code (3), confirmed via a `ps aux` check that no `reference_adapter`
+process was still alive ~200ms after launch. Traced by reading `ApprovalChannelEndpoint::bind`
+and `serve_concurrently` directly rather than trusting an earlier, wrong hypothesis (that a
+re-resolved `state_root` used only for GUI-side risk-classification context had somehow
+diverged from the real bind path -- it never touches the bind path at all, which is determined
+entirely inside `prepare_adapter_approval`). Fixed by storing the retained `Arc` on
+`ApprovalChannelServing` itself (`endpoint: Arc<ApprovalChannelEndpoint>`, `#[allow(dead_code)]`
+-- never explicitly read, held purely to keep the socket alive for the serving's lifetime,
+same shape as the pre-existing `shutdown: ServeShutdown` field). **Ablated**: temporarily
+reverted `register_approval_channel` to the exact original single-`Arc`-with-no-retained-clone
+shape (removing the `endpoint` field entirely) and reran the same test -- it failed identically
+(`the real adapter should send its default proposal within the poll window`, the coordinator
+never receiving anything within the 4s poll window), confirming the fix is what makes the real
+end-to-end path work, not an artifact of test setup. Restored and reran clean.
+
+**Six new tests, all against the real pathway** (no mock adapter, no synthetic socket -- the
+actual `reference_adapter` binary, spawned through the production `Managed` launch path):
+`a_real_low_risk_proposal_is_received_mirrored_and_stays_queued_without_promoting`,
+`a_destructive_risk_level_promotes_with_focus_defaulting_to_reject`,
+`deciding_the_promoted_dialog_sends_a_real_decision_and_updates_the_stored_request`,
+`a_destructive_proposal_for_a_background_project_does_not_promote`,
+`re_evaluation_promotes_a_queued_destructive_proposal_once_a_different_modal_closes`,
+`modal_input_is_ignored_within_the_post_promotion_window`. Since the reference adapter's real
+argv is not controllable through the production launch path (no CLI-arg-injection mechanism
+exists for `AiCliPromptPolicy::Argument`), every real proposal received this way is `Low` risk
+by the adapter's own unconfigurable default; tests needing `High`/`Destructive` risk override
+only the GUI-mirrored copy's `risk_level` via `replace_approval_request`, leaving the real wire
+connection and the coordinator's own liveness tracking untouched -- documented directly in the
+test helper (`launch_real_managed_agent_run`) as the methodology, not asserted implicitly.
+
+**A second, unrelated bug found and fixed while writing these tests**: the cross-project test
+(`a_destructive_proposal_for_a_background_project_does_not_promote`) assumed
+`add_project_from_path` makes the newly added project active. It does not --
+`AppState::add_project_session` only auto-activates a project when none was active yet
+(`app.rs:136-138`); a second project added while one is already active leaves the first one
+active unless `switch_active_project` is called explicitly, which is exactly the function
+already disclosed (PR-022-E's promotion-decision evidence, above) as having no production
+caller anywhere in the GUI crate. This was a test-setup defect, not a production one -- fixed
+by having the test call `switch_active_project` explicitly rather than assuming it happens
+implicitly. Recorded here since it is a second, independent confirmation of the same disclosed
+gap (no GUI feature exists yet to switch a project's active status interactively), not a new
+one.
+
+**A pre-existing, unrelated doc-comment defect found and fixed while documenting the retained-`Arc`
+fix**: `risk_level_symbol`'s own doc comment (explaining its `trusted_symbol` Fluent-lookup
+division of labour) had become orphaned onto `register_approval_channel` -- a leftover
+merge artifact from earlier editing in this same file, with no function signature separating
+the two doc blocks, so rustdoc silently attached both to whichever item followed. Moved back to
+its own function.
+
+Full gate clean after this increment: `cargo fmt --all --check`, `cargo clippy --workspace
+--all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets
+--all-features` (`tekstide` 226, up from 220 -- the six new tests; `tekstide-core` 593, up from
+591 -- unrelated to this increment's own tests, reflecting the workspace's current state),
+`git diff --check`.
+
+**Still not built, disclosed and carried forward**: the four non-optional UI constraints beyond
+what this increment covers (no-bulk-approval is satisfied by omission -- no multi-select UI
+exists to violate it -- but not explicitly tested; visibly-unanswerable expired entries needs
+an actual queue-viewing surface, which does not exist yet); the classifier-limitation
+disclosure copy; the new `ProjectOpenSurface` variant, its queue-viewing surface, and
+`NavigationAction::OpenPendingApproval` (still mapped to `None` in `app_command_for`); an
+explicit GUI-level test asserting the `command_approval` audit family produces real durable
+records through this pipeline (implied by `receive_approval_proposal`/`decide_approval`
+passing a real `AuditCoordinator`, not yet directly queried and asserted in a test); wiring the
+"active-project-change" re-evaluation trigger for real, once project-switching exists anywhere
+in the GUI (the logic itself, `evaluate_promotion`, is unconditionally correct regardless of
+caller -- this is a one-line addition once a real call site exists, not a design question);
+closing the `approval_proposal_ids` bridge's own small leak.
+
 ## PR-022-F - Closeout
 
 *Not started.*

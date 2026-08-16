@@ -522,7 +522,7 @@ fn project_session_launches_agent_run_through_terminal_runtime_and_completes() {
     let plan = launch_plan_for(&project, &profile);
     let mut runtime = LinuxTerminalRuntime::new();
 
-    let (agent_run_id, events) = project
+    let (agent_run_id, events, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("validated minimal AgentRun should launch through terminal runtime");
     let run = project
@@ -598,7 +598,7 @@ fn local_bounded_agent_run_transcript_capture_attaches_metadata_and_writes_outpu
     let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
     let mut runtime = LinuxTerminalRuntime::new();
 
-    let (agent_run_id, _) = project
+    let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("transcript-enabled AgentRun should launch");
     let run = project
@@ -682,7 +682,7 @@ fn transcript_capture_retains_pty_bytes_dropped_from_ui_buffer() {
     let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
     let mut runtime = LinuxTerminalRuntime::new();
 
-    let (agent_run_id, _) = project
+    let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("transcript-enabled AgentRun should launch");
     let run = project
@@ -757,7 +757,7 @@ fn transcript_opt_out_launches_without_transcript_metadata() {
     let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
     let mut runtime = LinuxTerminalRuntime::new();
 
-    let (agent_run_id, _) = project
+    let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("opted-out AgentRun should launch");
     let run = project
@@ -843,7 +843,7 @@ fn local_bounded_transcript_capture_disables_when_path_preflight_fails() {
     let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
     let mut runtime = LinuxTerminalRuntime::new();
 
-    let (agent_run_id, _) = project
+    let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("local bounded capture should disable when preflight fails");
     let run = project
@@ -907,7 +907,7 @@ fn project_session_launches_validated_managed_agent_run_through_terminal_runtime
         .expect("validated Managed launch should produce a launch plan");
     let mut runtime = LinuxTerminalRuntime::new();
 
-    let (agent_run_id, _) = project
+    let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("validated Managed AgentRun should launch through terminal runtime");
     let terminal_id = project.agent_runs()[0]
@@ -1291,7 +1291,7 @@ fn active_clean_text_document_permits_agent_runtime_launch() {
     let plan = launch_plan_for(&project, &profile);
     let mut runtime = LinuxTerminalRuntime::new();
 
-    let (agent_run_id, _) = project
+    let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("clean active document should permit launch");
     let terminal_id = project.agent_runs()[0]
@@ -1473,7 +1473,7 @@ fn safe_save_blocks_external_change_while_agent_run_is_active() {
     let plan = launch_plan_for(&project, &profile);
     let mut runtime = LinuxTerminalRuntime::new();
 
-    let (agent_run_id, _) = project
+    let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("clean active document should permit launch");
     let terminal_id = project.agent_runs()[0]
@@ -1601,7 +1601,7 @@ fn project_session_maps_nonzero_agent_run_exit_to_failed() {
     let plan = launch_plan_for(&project, &profile);
     let mut runtime = LinuxTerminalRuntime::new();
 
-    let (agent_run_id, _) = project
+    let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("validated minimal AgentRun should launch through terminal runtime");
     let terminal_id = project.agent_runs()[0]
@@ -1986,7 +1986,7 @@ fn a_trusted_project_launches_a_real_claude_code_profile_through_the_production_
         .expect("validated launch should produce a launch plan");
 
     let mut runtime = LinuxTerminalRuntime::new();
-    let (agent_run_id, _events) = project
+    let (agent_run_id, _events, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("the de-gated production entry point should launch for real");
 

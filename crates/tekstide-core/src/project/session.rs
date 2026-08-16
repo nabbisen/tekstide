@@ -422,13 +422,37 @@ impl ProjectSession {
         Ok(agent_run_id)
     }
 
+    /// **Response 227 (found while planning the GUI wiring): this used to
+    /// discard the `Option<ApprovalChannelEndpoint>` `prepare_agent_run_launch`
+    /// returns.** `self.prepare_agent_run_launch(&mut plan)?;` in
+    /// statement position propagated the error but threw away the `Ok`
+    /// value -- for a real `Managed` launch through this one-shot
+    /// convenience wrapper, the approval socket bound and was then
+    /// immediately dropped before anything could `accept_proposal`/
+    /// `serve_concurrently` on it. No production consequence yet
+    /// (PR-022-D's own real profile is `Supervised`, which never binds
+    /// an endpoint at all, and every real `Managed` round-trip test
+    /// calls `prepare_agent_run_launch`/`launch_prepared_agent_run_with_runtime`
+    /// as two separate steps specifically to keep the endpoint alive
+    /// itself), but real for the first caller that launches `Managed`
+    /// through this path. Now returns the endpoint alongside the
+    /// existing two values, so a caller (the GUI's own
+    /// `ApprovalCoordinator`/`serve_concurrently` machinery) can keep it.
     pub fn launch_agent_run_with_runtime(
         &mut self,
         mut plan: AgentRunLaunchPlan,
         runtime: &mut LinuxTerminalRuntime,
-    ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
-        self.prepare_agent_run_launch(&mut plan)?;
-        self.launch_prepared_agent_run_with_runtime(plan, runtime)
+    ) -> Result<
+        (
+            AgentRunId,
+            Vec<TerminalRuntimeEvent>,
+            Option<ApprovalChannelEndpoint>,
+        ),
+        ProjectAgentRuntimeLaunchError,
+    > {
+        let endpoint = self.prepare_agent_run_launch(&mut plan)?;
+        let (agent_run_id, events) = self.launch_prepared_agent_run_with_runtime(plan, runtime)?;
+        Ok((agent_run_id, events, endpoint))
     }
 
     /// Returns the bound `ApprovalChannelEndpoint` when `plan`'s profile
@@ -611,6 +635,30 @@ impl ProjectSession {
     /// expired -- see [`Self::mark_approval_expired`].
     pub fn expired_approval_ids(&self) -> &std::collections::HashSet<ApprovalId> {
         &self.expired_approval_ids
+    }
+
+    /// RFC-022 PR-022-E ("the arrival model"): replaces a stored
+    /// `ApprovalRequest` wholesale with the post-decision value
+    /// `ApprovalCoordinator::decide`/`decide_with_edited_argv` already
+    /// computed and returned (`DecideOutcome::Decided { request, .. }`)
+    /// -- the coordinator is authoritative for what a request's decided
+    /// state actually is (RFC-021's own domain), so this mirrors that
+    /// value rather than re-deriving `decision`/`decided_at` field by
+    /// field. Recomputes `pending_approvals` immediately: a decided
+    /// request stops counting the same call that records it, not on the
+    /// next unrelated mutation.
+    pub fn replace_approval_request(
+        &mut self,
+        updated: ApprovalRequest,
+    ) -> Result<(), OwnershipError> {
+        let existing = self
+            .approval_requests
+            .iter_mut()
+            .find(|request| request.id == updated.id)
+            .ok_or(OwnershipError::MissingReference)?;
+        *existing = updated;
+        self.refresh_runtime_summary_from_collections();
+        Ok(())
     }
 
     fn evict_oldest_terminal_approval_request(&mut self) -> bool {

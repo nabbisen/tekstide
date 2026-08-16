@@ -538,6 +538,7 @@ impl AcceptedProposal {
     }
 }
 
+#[derive(Debug)]
 pub struct ApprovalChannelEndpoint {
     listener: UnixListener,
     socket_path: PathBuf,

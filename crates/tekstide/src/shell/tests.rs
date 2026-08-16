@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 use tekstide_core::shell::ApplicationShell;
 
 use super::{
-    AgentRunLaunchRefusal, ExternalChangeButton, Message, ModalButton, ModalContent,
-    PasteConfirmButton, State, TerminalPasteRefusal, agent_run_launch_refusal_text,
-    attempt_agent_run_launch_with_profile, content_within_bound, focus_marker, main_area_key,
-    main_area_label, modal_scrim_style, sidebar_label, status_bar_summary,
-    terminal_paste_refusal_text, trusted_ui_state, zone_style,
+    AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ExternalChangeButton, Message,
+    ModalButton, ModalContent, PasteConfirmButton, State, TerminalPasteRefusal,
+    agent_run_launch_refusal_text, attempt_agent_run_launch_with_profile, content_within_bound,
+    evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
+    poll_approval_channels, sidebar_label, status_bar_summary, terminal_paste_refusal_text,
+    trusted_ui_state, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -1951,6 +1952,500 @@ fn attempt_agent_run_launch_with_profile_spawns_registers_and_selects_a_real_run
         project.selected_agent_run(),
         Some(&run.id),
         "the just-launched run must become the selected one"
+    );
+}
+
+/// RFC-022 PR-022-E ("the arrival model"): the reference adapter, real
+/// and compiled, spawned through the actual `Managed` launch path this
+/// GUI crate now supports end to end -- `structured_action_approval:
+/// true` on a `DisabledByLaunch` profile (bypasses the trust gate
+/// PR-022-D's own `claude_code_linux_default` cannot get past, the same
+/// way `tekstide-core`'s own `built_in_profile` test helper does).
+/// Deliberately never the real, live product this pathway is modelled
+/// on -- see every other real-process test in this RFC for why.
+fn reference_adapter_binary_path() -> std::path::PathBuf {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_reference_adapter") {
+        return std::path::PathBuf::from(path);
+    }
+    let test_exe = std::env::current_exe().expect("current_exe should resolve for a running test");
+    let profile_dir = test_exe
+        .parent()
+        .and_then(Path::parent)
+        .expect("test binary should live under target/<profile>/deps");
+    let candidate = profile_dir.join("reference_adapter");
+    assert!(
+        candidate.is_file(),
+        "expected the reference_adapter binary at {}; the [[bin]] target may not have built",
+        candidate.display()
+    );
+    candidate
+}
+
+/// Launches the real reference adapter through the real, production
+/// `Managed` path (`attempt_agent_run_launch_with_profile` ->
+/// `AppState::launch_agent_run_with_runtime` -> `register_approval_channel`)
+/// and returns the launched run's id. The adapter proposes its own
+/// `DEFAULT_PROPOSAL_ARGV` (`echo tekstide-reference-adapter-default-proposal`)
+/// -- nothing in the production profile/launch path injects a custom
+/// argv (`AiCliPromptPolicy::Argument` has no implementation wiring it
+/// into the spawned command line), so every real proposal this helper's
+/// callers receive classifies `Low`. Tests that need a `High`/
+/// `Destructive` proposal to exercise promotion get a real, received,
+/// still-live proposal from this helper first, then override only the
+/// GUI-mirrored copy's `risk_level` via `replace_approval_request` --
+/// the underlying wire connection and the coordinator's own liveness
+/// tracking stay entirely real and untouched, only the locally-cached
+/// classification is adjusted, so `is_still_answerable` (what
+/// `evaluate_promotion` itself re-checks before promoting) still answers
+/// truthfully.
+fn launch_real_managed_agent_run(state: &mut State) -> tekstide_core::domain::AgentRunId {
+    let mut profile = tekstide_core::agent::AiCliProfile::new(
+        "reference-adapter",
+        "Reference Adapter (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: reference_adapter_binary_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Managed,
+    );
+    profile.adapter_capabilities = tekstide_core::agent::AiCliAdapterCapabilities {
+        structured_action_approval: true,
+    };
+    profile.workspace_discovery_policy =
+        tekstide_core::agent::AiCliWorkspaceDiscoveryPolicy::DisabledByLaunch {
+            evidence: "test: bypasses the trust gate the same way tekstide-core's own \
+                       built_in_profile test helper does"
+                .to_owned(),
+        };
+
+    attempt_agent_run_launch_with_profile(state, profile)
+        .expect("a resolvable Managed profile should launch the real reference adapter");
+    let project = state.app_shell.state().active_project().unwrap();
+    project.agent_runs().last().unwrap().id.clone()
+}
+
+/// The real, freshly spawned adapter needs a moment to connect and send
+/// its proposal over the real socket -- not instantaneous, the same
+/// reason `poll_demo_pane_until` retries rather than polling exactly
+/// once.
+fn poll_approval_channels_until(
+    state: &mut State,
+    mut condition: impl FnMut(&State) -> bool,
+) -> bool {
+    for _ in 0..200 {
+        poll_approval_channels(state);
+        if condition(state) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    false
+}
+
+/// RFC-022 PR-022-E ("the arrival model"): the real receive pipeline,
+/// end to end -- a real `Managed` launch, a real spawned reference
+/// adapter, a real proposal over a real socket, received by the real
+/// `ApprovalCoordinator` and mirrored into the real `ProjectSession`.
+/// `Low` risk (the adapter's own unconfigurable default proposal) must
+/// **not** promote -- it stays a queued, `Pending`, live entry.
+#[test]
+fn a_real_low_risk_proposal_is_received_mirrored_and_stays_queued_without_promoting() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-real-receive");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let agent_run_id = launch_real_managed_agent_run(&mut state);
+    assert_eq!(
+        state.approval_channels.len(),
+        1,
+        "a real Managed launch must register a real approval channel"
+    );
+    let received = poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    assert!(
+        received,
+        "the real adapter should send its default proposal within the poll window"
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    assert_eq!(project.approval_requests().len(), 1);
+    let request = &project.approval_requests()[0];
+    assert_eq!(request.agent_run_id, Some(agent_run_id));
+    assert_eq!(request.risk_level, tekstide_core::domain::RiskLevel::Low);
+    assert_eq!(
+        request.decision,
+        tekstide_core::domain::ApprovalDecision::Pending
+    );
+    assert_eq!(
+        state.approval_proposal_ids.len(),
+        1,
+        "the ApprovalId -> ProposalId bridge must be populated on receipt"
+    );
+    assert!(
+        state.modal.is_none(),
+        "a Low-risk proposal must not promote to a modal"
+    );
+}
+
+/// RFC-022 PR-022-E, response 227's own correction: promotion is not
+/// only a point-in-time arrival check. A real, live, received proposal
+/// (proven real above) whose GUI-mirrored copy is then classified
+/// `Destructive` must promote -- with focus defaulting to `Reject`
+/// (`what-the-dialog-must-not-lie-about.md` §"one stray keystroke can
+/// only reject") and the post-promotion input-ignore window armed.
+#[test]
+fn a_destructive_risk_level_promotes_with_focus_defaulting_to_reject() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-promote-destructive");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+
+    // Override only the GUI-mirrored copy's classification -- the real
+    // wire connection and the coordinator's own liveness tracking are
+    // untouched (see `launch_real_managed_agent_run`'s own doc comment).
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .id()
+        .clone();
+    let mut request = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    request.risk_level = tekstide_core::domain::RiskLevel::Destructive;
+    state
+        .app_shell
+        .state_mut()
+        .project_mut(&project_id)
+        .unwrap()
+        .replace_approval_request(request)
+        .unwrap();
+
+    evaluate_promotion(&mut state);
+
+    match state.modal {
+        Some(ModalContent::Approval(ref dialog)) => {
+            assert_eq!(
+                dialog.focus,
+                ApprovalDialogButton::Reject,
+                "focus must default to Reject"
+            );
+            assert!(
+                dialog.ignore_input_until.is_some(),
+                "a promoted dialog must arm the post-promotion input-ignore window"
+            );
+        }
+        ref other => panic!("expected a promoted approval dialog, got {other:?}"),
+    }
+}
+
+/// RFC-022 PR-022-E: the real `decide` round trip -- `ModalActivate`,
+/// driven through the real `update()`, must send a real decision over
+/// the real socket and mirror the coordinator's own authoritative
+/// post-decision value back into `ProjectSession`. Constructs the
+/// promoted dialog directly (`ignore_input_until: None`) rather than via
+/// `evaluate_promotion`, so this test exercises the decide path in
+/// isolation from the input-ignore window, which
+/// `modal_input_is_ignored_within_the_post_promotion_window` proves
+/// separately.
+#[test]
+fn deciding_the_promoted_dialog_sends_a_real_decision_and_updates_the_stored_request() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-decide-real");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    let request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    let proposal_id = state.approval_proposal_ids[&request.id].clone();
+
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog::for_test(
+        request.clone(),
+        proposal_id,
+        ApprovalDialogButton::Reject,
+    ))));
+
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert!(
+        state.modal.is_none(),
+        "activating must close the dialog regardless of outcome"
+    );
+    let stored = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    assert_eq!(
+        stored.decision,
+        tekstide_core::domain::ApprovalDecision::Rejected,
+        "the real decide round trip must reach Decided, not Undeliverable/AuditBlocked -- \
+         got {stored:?}"
+    );
+    assert!(stored.decided_at.is_some());
+}
+
+/// RFC-022 PR-022-E, response 224's own required guard, extended to
+/// promotion (response 227 asked for this explicitly): a `Destructive`
+/// proposal belonging to a project that is **not** the active one must
+/// not promote, even though every other condition is met.
+#[test]
+fn a_destructive_proposal_for_a_background_project_does_not_promote() {
+    let mut app_shell = ApplicationShell::new();
+    let active_project_dir = fresh_project_dir("approval-cross-project-active");
+    app_shell
+        .add_project_from_path(&active_project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    let background_project_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .id()
+        .clone();
+    let mut request = state
+        .app_shell
+        .state()
+        .project(&background_project_id)
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    request.risk_level = tekstide_core::domain::RiskLevel::Destructive;
+    state
+        .app_shell
+        .state_mut()
+        .project_mut(&background_project_id)
+        .unwrap()
+        .replace_approval_request(request)
+        .unwrap();
+
+    // A second project is opened and explicitly switched to -- adding a
+    // project alone does not change which one is active unless it is the
+    // very first project ever added (`AppState::add_project_session` only
+    // auto-activates in that case); `switch_active_project` is the real
+    // mechanism, disclosed elsewhere as having no GUI-crate caller yet.
+    // The first project (holding the real, live, Destructive proposal) is
+    // now the background one.
+    let second_project_dir = fresh_project_dir("approval-cross-project-second");
+    let outcome = state
+        .app_shell
+        .add_project_from_path(&second_project_dir)
+        .expect("a second freshly created directory is a valid project root");
+    let second_project_id = match outcome {
+        tekstide_core::app::AddProjectOutcome::Added(project_id) => project_id,
+        tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => {
+            panic!("a freshly created directory must not collide with an existing project")
+        }
+    };
+    assert!(
+        state
+            .app_shell
+            .state_mut()
+            .switch_active_project(&second_project_id),
+        "the second project must exist to switch to"
+    );
+    assert_ne!(
+        state.app_shell.state().active_project().unwrap().id(),
+        &background_project_id,
+        "test precondition: the second project must now be active"
+    );
+
+    evaluate_promotion(&mut state);
+
+    assert!(
+        state.modal.is_none(),
+        "a Destructive proposal for a background project must not promote"
+    );
+}
+
+/// RFC-022 PR-022-E, response 227's required correction: re-evaluation
+/// on modal close. A `Destructive` proposal arriving (via risk-level
+/// override, same technique as above) while a *different* modal is open
+/// must stay queued, not silently downgraded to "never promotes" by
+/// arrival timing -- and must promote the moment that modal closes.
+#[test]
+fn re_evaluation_promotes_a_queued_destructive_proposal_once_a_different_modal_closes() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-reevaluate-on-close");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    // A different modal is already open -- promotion must not happen
+    // while it is.
+    state.modal = Some(ModalContent::LayerDemo {
+        focus: ModalButton::Dismiss,
+    });
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .id()
+        .clone();
+    let mut request = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    request.risk_level = tekstide_core::domain::RiskLevel::Destructive;
+    state
+        .app_shell
+        .state_mut()
+        .project_mut(&project_id)
+        .unwrap()
+        .replace_approval_request(request)
+        .unwrap();
+
+    // `poll_approval_channels` itself calls `evaluate_promotion` at the
+    // end of every tick -- confirm it correctly declined to promote
+    // while the layer-demo modal was open.
+    poll_approval_channels(&mut state);
+    assert!(
+        matches!(state.modal, Some(ModalContent::LayerDemo { .. })),
+        "a Destructive proposal must not promote over an already-open, different modal"
+    );
+
+    let _ = super::update(&mut state, Message::ModalDismiss);
+
+    assert!(
+        matches!(state.modal, Some(ModalContent::Approval(_))),
+        "the queued Destructive proposal must promote the moment the other modal closes, \
+         got {:?}",
+        state.modal
+    );
+}
+
+/// RFC-022 PR-022-E, response 227: the post-promotion input-ignore
+/// window. A stray `ModalActivate` (Enter) arriving within the window
+/// must do nothing -- neither deciding nor closing the dialog.
+#[test]
+fn modal_input_is_ignored_within_the_post_promotion_window() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-ignore-window");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .id()
+        .clone();
+    let mut request = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    request.risk_level = tekstide_core::domain::RiskLevel::Destructive;
+    state
+        .app_shell
+        .state_mut()
+        .project_mut(&project_id)
+        .unwrap()
+        .replace_approval_request(request)
+        .unwrap();
+
+    evaluate_promotion(&mut state);
+    assert!(
+        matches!(state.modal, Some(ModalContent::Approval(_))),
+        "test precondition: the proposal must have promoted"
+    );
+
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert!(
+        matches!(state.modal, Some(ModalContent::Approval(_))),
+        "a ModalActivate within the ignore window must not close or decide the dialog"
+    );
+    let stored = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    assert_eq!(
+        stored.decision,
+        tekstide_core::domain::ApprovalDecision::Pending,
+        "no decision may be recorded while the ignore window is still active"
     );
 }
 

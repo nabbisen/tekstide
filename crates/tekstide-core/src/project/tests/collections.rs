@@ -256,6 +256,74 @@ fn mark_approval_expired_excludes_it_from_pending_approvals_without_changing_its
     assert!(project.expired_approval_ids().contains(&approval_id));
 }
 
+/// RFC-022 PR-022-E ("the arrival model"): `replace_approval_request`
+/// mirrors `ApprovalCoordinator::decide`'s own authoritative
+/// post-decision value into `ProjectSession.approval_requests`, and
+/// `pending_approvals` reflects it immediately -- the same call, not a
+/// later recompute.
+#[test]
+fn replace_approval_request_updates_the_stored_copy_and_pending_count() {
+    let mut project = project_session(1);
+    let mut approval = ApprovalRequest::pending(
+        project.id().clone(),
+        None,
+        "command",
+        "cargo test",
+        RiskLevel::Medium,
+        Vec::new(),
+        "/workspace/project-1",
+    );
+    let approval_id = approval.id.clone();
+    project.add_approval_request(approval.clone()).unwrap();
+    assert_eq!(project.runtime_summary().pending_approvals, 1);
+
+    approval
+        .decide(crate::domain::ApprovalDecision::ApprovedOnce)
+        .unwrap();
+    project.replace_approval_request(approval.clone()).unwrap();
+
+    assert_eq!(
+        project.runtime_summary().pending_approvals,
+        0,
+        "a decided request must stop counting toward pending_approvals immediately"
+    );
+    let stored = project
+        .approval_requests()
+        .iter()
+        .find(|request| request.id == approval_id)
+        .expect("the request must still be retained");
+    assert_eq!(
+        stored.decision,
+        crate::domain::ApprovalDecision::ApprovedOnce
+    );
+    assert!(stored.decided_at.is_some());
+}
+
+/// A request that was never added cannot be replaced -- the same
+/// "cannot mutate what was never attached" shape every other collection
+/// mutator in this file already enforces.
+#[test]
+fn replace_approval_request_rejects_an_unknown_request() {
+    let mut project = project_session(1);
+    let mut unknown = ApprovalRequest::pending(
+        project.id().clone(),
+        None,
+        "command",
+        "cargo test",
+        RiskLevel::Medium,
+        Vec::new(),
+        "/workspace/project-1",
+    );
+    unknown
+        .decide(crate::domain::ApprovalDecision::Rejected)
+        .unwrap();
+
+    assert_eq!(
+        project.replace_approval_request(unknown),
+        Err(OwnershipError::MissingReference)
+    );
+}
+
 /// RFC-022 PR-022-E: `approval_requests` retention is bounded by
 /// `approval_history_limit` (response 225: a field of its own, separate
 /// from `approval_request_limit`'s fd-driven live-queue bound, since an
