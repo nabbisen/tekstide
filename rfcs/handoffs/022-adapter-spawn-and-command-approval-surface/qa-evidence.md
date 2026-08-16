@@ -696,6 +696,59 @@ live-queue bound already prevents that many simultaneously-live proposals from e
 - `tekstide-core`: 587 (up from 581 -- the six tests named above).
 - `tekstide`: 220 (unchanged -- no GUI changes this round).
 
+**Response 225, one required change: `approval_request_limit` was bounding two different
+quantities.** Full exchange in
+`.git-exclude/review-request/225-rfc022-pr-022e-bounded-queue-and-expiry.md` and
+`.git-exclude/reviewed/tekstide-review-request-225-bounded-queue-response.md`. I had reused
+the field to bound `ProjectSession.approval_requests`'s retained history too, on the stated
+reasoning "the same real quantity, for the same project." The reviewer's correction: it is
+the same *project*, not the same *quantity* -- an expired entry holds no file descriptor
+(established in this same slice), so the fd-exhaustion rationale that justifies the field's
+*value* does not apply to retained-history bloat, which is a memory/disclosure cost instead.
+This was the third occurrence of the identical shape this session found (PR-022-C's
+state-root reuse, request 224's own per-run misreading of this same field, then this) --
+recorded because the reviewer named the general check that catches all three: when reusing a
+field, state the reason its current value was chosen, then ask whether that reason travels to
+the new use.
+
+**Fixed with a genuinely new field**: `approval_history_limit: Option<u32>` (default
+`Some(100)`), reasoned from disclosure/memory, not fds -- "how much of a project's approval
+history is worth keeping in memory for a user to review." `approval_request_limit` now bounds
+only the coordinator's live queue, as originally intended; `add_approval_request` reads
+`approval_history_limit` instead. All eight `ProjectResourceLimits` construction sites across
+the crate updated; the two retention tests
+(`approval_request_retention_limit_evicts_the_oldest_terminal_entry`/
+`..._refuses_when_nothing_is_evictable`) now set `approval_history_limit` rather than
+`approval_request_limit`, and their continued passing is itself confirmation the fix took
+effect (`approval_request_limit` is `None` in both, so if the code still read the old field
+the guard would never fire and both would fail).
+
+**Also addressed: the "unmeasured" note.** The reviewer asked to ground the fd numbers or
+disclose plainly that they are unmeasured and why. Checked `ulimit -n` on the reference dev
+machine: soft and hard `RLIMIT_NOFILE` both report 1,048,576 -- not the "1024 on most
+distributions" the original doc comment claimed without checking, which is itself now
+corrected to say so explicitly and not generalize from either number (containers and minimal
+distros commonly still cap at 1024 or lower; Tekstide has no way to discover the real limit
+its own process runs under). Reasoned a baseline Tekstide fd count from the code rather than a
+live instrumented measurement (no running GUI instance was available in this environment):
+`terminal_session_limit`'s own 6 sessions each hold a PTY master plus two `eventfd`s
+(`runtime::terminal::reader`) -- already ~18 -- plus a handful for the audit store's WAL-mode
+sqlite files and any open transcript writers, putting steady-state usage around 20-30 fds.
+`approval_request_limit`'s `50` brings the project comfortably under 100 total, under 10% of
+even the constrained 1024 floor. Recorded in the field's own doc comment as reasoned, not
+benchmarked -- unlike `terminal_session_limit`'s real N-pane throughput measurement, there is
+no throughput to measure here, only a ceiling to stay well clear of.
+
+**Also addressed: eviction is real disclosure loss.** The reviewer's point stands as a
+carry-forward requirement, not something fixable in this slice's own code: whatever future
+surface renders `ProjectSession::approval_requests()` must say it is showing the most recent
+`approval_history_limit` entries, not imply the list is the project's complete approval
+history. Recorded on the accessor's own doc comment and the new field's doc comment so the
+GUI-wiring increment inherits the requirement rather than rediscovering it.
+
+Re-verified after the fix: `tekstide-core` 587 (unchanged -- no tests added, two tests'
+resource-limit setup corrected to the right field), `tekstide` 220, all gates clean.
+
 **Not yet built, and next**: the promotion decision itself (`High`/`Destructive`, active
 project, no modal open) and *its own* cross-project guard (a GUI-level property --
 `state.active_project_id` deciding whether a project-A proposal may promote while project B

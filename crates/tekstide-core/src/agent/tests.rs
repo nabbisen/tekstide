@@ -1804,6 +1804,7 @@ fn agent_run_limit_is_enforced_with_a_typed_refusal() {
         agent_run_limit: Some(1),
         approval_request_limit: None,
         agent_run_approval_limit: None,
+        approval_history_limit: None,
     });
     let profile = built_in_profile(&executable);
 

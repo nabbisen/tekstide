@@ -215,11 +215,15 @@ impl ProjectSession {
         self.selected_agent_run.as_ref()
     }
 
-    /// Every approval request this project has ever received. Includes
-    /// decided and expired entries (see [`Self::add_approval_request`]'s
-    /// own doc comment for the retention/eviction policy) -- a caller
-    /// distinguishing "still answerable" from "expired" or "decided"
-    /// reads `decision`/[`Self::expired_approval_ids`] alongside this.
+    /// Every approval request this project has ever received, up to
+    /// `approval_history_limit` (see [`Self::add_approval_request`]'s
+    /// own doc comment for the retention/eviction policy). **Not
+    /// guaranteed complete** once eviction has happened -- response 225:
+    /// a surface rendering this must say it is showing the most recent
+    /// `approval_history_limit` entries, not imply the list is the
+    /// project's whole approval history. A caller distinguishing "still
+    /// answerable" from "expired" or "decided" reads
+    /// `decision`/[`Self::expired_approval_ids`] alongside this.
     pub fn approval_requests(&self) -> &[ApprovalRequest] {
         &self.approval_requests
     }
@@ -524,21 +528,30 @@ impl ProjectSession {
     /// the whole point of retaining them is an honest, visible history
     /// (`ApprovalCoordinator`'s own map has the identical shape, for the
     /// identical reason). Left unbounded, that is unbounded growth in
-    /// `ProjectSession` over a long session. `approval_request_limit`
-    /// bounds it here too (the same field that bounds
-    /// `ApprovalCoordinator`'s *live* queue, response 224's fd-exhaustion
-    /// rationale) -- at capacity, the oldest **terminal** entry (already
-    /// decided, or marked expired via `mark_approval_expired`) is evicted
-    /// to make room; a still-`Pending`-and-live entry is never evicted,
-    /// since silently dropping an answerable request from view would be
-    /// worse than the audit trail's own "the absence is the record"
-    /// principle, which is about decided requests, not about deleting
-    /// live ones. If no terminal entry exists to evict (every retained
-    /// entry is genuinely still live), the new one is refused --
-    /// `ApprovalCoordinator`'s own per-project live-queue bound (the same
-    /// number) already prevents that many simultaneously-live proposals
-    /// from existing in the first place, so this is a backstop, not the
-    /// primary enforcement.
+    /// `ProjectSession` over a long session. `approval_history_limit`
+    /// bounds it here -- **response 225: a separate field from
+    /// `approval_request_limit`**, which bounds `ApprovalCoordinator`'s
+    /// *live* queue for an unrelated reason (file-descriptor exhaustion,
+    /// which an expired-or-decided entry does not contribute to at all).
+    /// Reusing that field for this was the defect response 225 found and
+    /// required fixing. At capacity, the oldest **terminal** entry
+    /// (already decided, or marked expired via `mark_approval_expired`)
+    /// is evicted to make room; a still-`Pending`-and-live entry is
+    /// never evicted, since silently dropping an answerable request from
+    /// view would be worse than the audit trail's own "the absence is
+    /// the record" principle, which is about decided requests, not about
+    /// deleting live ones. **Eviction here is real disclosure loss**
+    /// (response 225): whatever surface renders
+    /// [`Self::approval_requests`] must say it is showing the most
+    /// recent `approval_history_limit` entries, not imply the list is
+    /// complete. If no terminal entry exists to evict (every retained
+    /// entry is genuinely still live), the new one is refused -- a
+    /// backstop, not the primary enforcement, since
+    /// `ApprovalCoordinator`'s own live-queue bound already prevents
+    /// that many simultaneously-live proposals from existing at all
+    /// (though the two bounds are independent numbers now, not
+    /// guaranteed equal, so this backstop is not purely theoretical the
+    /// way it was when both reused one field).
     pub fn add_approval_request(
         &mut self,
         approval: ApprovalRequest,
@@ -558,7 +571,7 @@ impl ProjectSession {
                 OwnershipError::DuplicateAttachment,
             ));
         }
-        if let Some(limit) = self.resource_limits.approval_request_limit
+        if let Some(limit) = self.resource_limits.approval_history_limit
             && self.approval_requests.len() as u32 >= limit
             && !self.evict_oldest_terminal_approval_request()
         {
@@ -1375,7 +1388,7 @@ pub enum ProjectChangeSetError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectApprovalError {
     Ownership(OwnershipError),
-    /// `approval_requests` is at `approval_request_limit`, and no
+    /// `approval_requests` is at `approval_history_limit`, and no
     /// terminal (decided or expired) entry exists to evict to make
     /// room -- every retained entry is genuinely still live. See
     /// `add_approval_request`'s own doc comment for why this is a

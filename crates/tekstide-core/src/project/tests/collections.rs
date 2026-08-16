@@ -257,12 +257,13 @@ fn mark_approval_expired_excludes_it_from_pending_approvals_without_changing_its
 }
 
 /// RFC-022 PR-022-E: `approval_requests` retention is bounded by
-/// `approval_request_limit`, the same field that bounds
-/// `ApprovalCoordinator`'s live queue (response 224) -- but here it
-/// evicts the oldest **terminal** (decided or expired) entry to make
-/// room, rather than refusing outright, since refusing would silently
-/// desync this registry from whatever `ApprovalCoordinator` already
-/// accepted.
+/// `approval_history_limit` (response 225: a field of its own, separate
+/// from `approval_request_limit`'s fd-driven live-queue bound, since an
+/// expired-or-decided entry holds no file descriptor and the two are
+/// different costs) -- it evicts the oldest **terminal** (decided or
+/// expired) entry to make room, rather than refusing outright, since
+/// refusing would silently desync this registry from whatever
+/// `ApprovalCoordinator` already accepted.
 #[test]
 fn approval_request_retention_limit_evicts_the_oldest_terminal_entry() {
     let mut project = project_session(1);
@@ -270,8 +271,9 @@ fn approval_request_retention_limit_evicts_the_oldest_terminal_entry() {
         visible_terminal_limit: None,
         terminal_session_limit: None,
         agent_run_limit: None,
-        approval_request_limit: Some(2),
+        approval_request_limit: None,
         agent_run_approval_limit: None,
+        approval_history_limit: Some(2),
     });
 
     let first = ApprovalRequest::pending(
@@ -346,8 +348,9 @@ fn approval_request_retention_limit_refuses_when_nothing_is_evictable() {
         visible_terminal_limit: None,
         terminal_session_limit: None,
         agent_run_limit: None,
-        approval_request_limit: Some(1),
+        approval_request_limit: None,
         agent_run_approval_limit: None,
+        approval_history_limit: Some(1),
     });
 
     let first = ApprovalRequest::pending(
@@ -522,6 +525,7 @@ fn terminal_session_limit_is_enforced_with_a_typed_refusal() {
         agent_run_limit: None,
         approval_request_limit: None,
         agent_run_approval_limit: None,
+        approval_history_limit: None,
     });
 
     for index in 0..2 {

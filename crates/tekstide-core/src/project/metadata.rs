@@ -77,17 +77,29 @@ pub struct ProjectResourceLimits {
     /// initially proposed reading it that way (the same shape of defect
     /// response 216 found in PR-022-C: reusing a field for a different
     /// scope than its container because the name happened to fit).
-    /// Bounds two things with the same real quantity underneath: how
-    /// many of a project's approval requests `ApprovalCoordinator` will
-    /// hold *live* (`Pending`, connection still open) at once across all
-    /// of that project's `AgentRun`s, and how many `ApprovalRequest`s
-    /// `ProjectSession.approval_requests` retains in total. The
-    /// justification is `AcceptedProposal` holding a live `UnixStream`
-    /// per pending entry (response 224): the real ceiling this protects
-    /// is process file-descriptor exhaustion, which does not degrade
-    /// approvals gracefully -- it takes down PTYs, the audit store, and
-    /// transcript writers with it, since they all draw on the same
-    /// per-process limit.
+    /// Bounds how many of a project's approval requests
+    /// `ApprovalCoordinator` will hold **live** (`Pending`, connection
+    /// still open) at once across all of that project's `AgentRun`s.
+    /// The justification is `AcceptedProposal` holding a live
+    /// `UnixStream` per pending entry (response 224): the real ceiling
+    /// this protects is process file-descriptor exhaustion, which does
+    /// not degrade approvals gracefully -- it takes down PTYs, the audit
+    /// store, and transcript writers with it, since they all draw on the
+    /// same per-process limit.
+    ///
+    /// **Response 225: this field must not also bound retained
+    /// history** (`ProjectSession.approval_requests`'s total length,
+    /// including decided and expired entries) -- an expired entry holds
+    /// no file descriptor, so the fd rationale that justifies this
+    /// field's value does not apply to that quantity. That is a
+    /// different cost (memory, and how much history a user can usefully
+    /// review) with its own field: [`ProjectResourceLimits::approval_history_limit`].
+    /// Reusing this one for both was the third occurrence of the same
+    /// defect shape this session found (PR-022-C's state-root reuse,
+    /// this field's own original per-run misreading, then this) --
+    /// a field's name and its current value travel together; the
+    /// *reason* the value was chosen does not travel automatically to a
+    /// new use, and has to be checked every time, not assumed.
     pub approval_request_limit: Option<u32>,
     /// RFC-022 PR-022-E ("the arrival model"), response 224: the
     /// genuinely per-`AgentRun` bound the gate asks for ("a looping
@@ -97,6 +109,21 @@ pub struct ProjectResourceLimits {
     /// this struct's own convention is one field per scope, not one
     /// field meaning something different from its neighbours.
     pub agent_run_approval_limit: Option<u32>,
+    /// RFC-022 PR-022-E ("the arrival model"), response 225: how many
+    /// `ApprovalRequest`s `ProjectSession.approval_requests` retains in
+    /// total (decided and expired entries included, not only live
+    /// ones) -- a **separate** bound from `approval_request_limit`
+    /// above, added after response 225 found the two fields were
+    /// wrongly sharing one. The reason for *this* number is disclosure
+    /// and memory, not file descriptors: an expired or decided entry
+    /// costs nothing but the small `ApprovalRequest` struct itself, and
+    /// the real question is how much of a project's approval history is
+    /// worth keeping in memory for a user to review, not what would
+    /// exhaust a process resource. Eviction at this bound is real
+    /// disclosure loss (response 225) -- whatever surface renders
+    /// `approval_requests()` must say it is showing the most recent N,
+    /// not imply the list is complete.
+    pub approval_history_limit: Option<u32>,
 }
 
 impl Default for ProjectResourceLimits {
@@ -147,17 +174,33 @@ impl Default for ProjectResourceLimits {
             // underlying wake mechanism changes again.
             terminal_session_limit: Some(6),
             agent_run_limit: None,
-            // RFC-022 PR-022-E: reasoned, not measured (unlike
-            // `terminal_session_limit` above) -- this bounds simultaneous
-            // open file descriptors, not throughput, so a benchmark does
-            // not apply. `50` live per project is generously above any
-            // legitimate burst (RFC-021's own reference adapter makes one
-            // proposal per invocation), and a Linux process's default
-            // soft `RLIMIT_NOFILE` (1024 on most distributions) is shared
-            // with every PTY, the audit store, and every transcript
-            // writer this project also holds open -- a low, explicit cap
-            // here protects those unrelated subsystems from a single
-            // project's approval backlog, not just approvals themselves.
+            // RFC-022 PR-022-E, response 225: grounded against a real
+            // `ulimit -n` check, not left as a bare assumption -- the
+            // reference dev machine reports a *soft and hard*
+            // `RLIMIT_NOFILE` of 1,048,576 (modern systemd-raised
+            // default), not the historically-cited "1024 on most
+            // distributions" this comment originally claimed without
+            // checking. That number is real for *this* machine and not
+            // safe to generalize from -- containers and minimal distros
+            // commonly still cap at 1024 or lower, and Tekstide has no
+            // way to discover the limit its own process is actually
+            // running under. `50` is chosen against the *lower,
+            // constrained* end of that range, not the measured one: a
+            // rough, reasoned baseline (not a live instrumented count,
+            // since fd usage here is cheap enough that precision would
+            // be theater) puts Tekstide's own steady-state usage at
+            // roughly 20-30 fds under typical defaults --
+            // `terminal_session_limit`'s own `6` sessions each holding a
+            // PTY master plus two `eventfd`s (`runtime::terminal::reader`)
+            // is already ~18, plus a handful for the audit store's
+            // WAL-mode sqlite files and any open transcript writers.
+            // Adding this bound's `50` brings the project comfortably
+            // under 100 total, under 10% of even the constrained 1024
+            // floor -- conservative enough that further precision would
+            // not change the decision. Unlike `terminal_session_limit`
+            // above, this is reasoned, not benchmarked: there is no
+            // throughput to measure, only a ceiling to stay well clear
+            // of.
             approval_request_limit: Some(50),
             // A looping or malfunctioning adapter must exhaust its own
             // budget well before it could meaningfully contribute to the
@@ -166,6 +209,19 @@ impl Default for ProjectResourceLimits {
             // without any single one being able to consume the whole
             // project's budget alone.
             agent_run_approval_limit: Some(20),
+            // RFC-022 PR-022-E, response 225: a genuinely different
+            // number from `approval_request_limit` above, for a
+            // genuinely different reason -- this bounds retained
+            // *history* (memory and how much a user can usefully
+            // review), not live file descriptors, so it is not derived
+            // from the same fd-exhaustion reasoning at all. `100` is a
+            // round, generous multiple of the live-queue ceiling,
+            // chosen so a legitimately busy session's full approval
+            // history stays reviewable without unbounded growth --
+            // reasoned, not measured, the same as the field above, but
+            // against a different constraint (usefulness to a reader,
+            // not a process resource).
+            approval_history_limit: Some(100),
         }
     }
 }

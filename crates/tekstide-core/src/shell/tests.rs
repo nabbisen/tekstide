@@ -88,6 +88,7 @@ fn active_workspace_visible_panes_are_capped_by_navigation_policy() {
             agent_run_limit: None,
             approval_request_limit: None,
             agent_run_approval_limit: None,
+            approval_history_limit: None,
         });
 
     shell.dispatch(AppCommand::OpenActiveProjectWorkspace);

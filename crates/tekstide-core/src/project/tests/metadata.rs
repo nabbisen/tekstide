@@ -44,9 +44,11 @@ fn new_project_initializes_rfc002_session_metadata_with_inert_provider_defaults(
             agent_run_limit: None,
             // RFC-022 PR-022-E: reasoned defaults -- see
             // `ProjectResourceLimits::default`'s own doc comments for
-            // the fd-exhaustion justification.
+            // the fd-exhaustion (this field, and the next) and
+            // disclosure/memory (the field after) justifications.
             approval_request_limit: Some(50),
             agent_run_approval_limit: Some(20),
+            approval_history_limit: Some(100),
         }
     );
     assert_eq!(project.file_state(), &ProjectFileState::default());
@@ -111,6 +113,7 @@ fn project_session_surface_mode_and_deferred_summaries_are_owned_per_project() {
         agent_run_limit: Some(3),
         approval_request_limit: Some(20),
         agent_run_approval_limit: Some(5),
+        approval_history_limit: Some(40),
     });
     project.set_file_state(ProjectFileState {
         provider_state: ProjectProviderState::Complete,
