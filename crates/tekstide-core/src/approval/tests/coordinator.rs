@@ -291,6 +291,85 @@ fn deciding_an_unknown_proposal_returns_not_found() {
     assert!(matches!(outcome, DecideOutcome::NotFound));
 }
 
+/// RFC-022 PR-022-E ("the arrival model"): `is_still_answerable`'s own
+/// two states, isolated from the full real-adapter-process integration
+/// test (`approval::tests::reference_adapter`) -- a synthetic socket
+/// pair is enough to prove the coordinator asks the right question of
+/// the right connection, without paying for a spawned process on every
+/// run. `_peer` dropped (not merely left open) closes its end for real:
+/// `UnixStream`'s `Drop` calls `close(2)`, which is what an exited
+/// adapter process's own kernel-level teardown does too -- see
+/// `approval::tests::reference_adapter::deciding_a_proposal_whose_real_adapter_process_has_already_exited_is_undeliverable`
+/// for the real-process version of this same property.
+#[test]
+fn is_still_answerable_reflects_the_real_connection_state() {
+    let mut coordinator = ApprovalCoordinator::new();
+    let agent_run_id = AgentRunId::for_test(1);
+    let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let proposal_id = command_proposal.proposal_id().clone();
+    let mut test_audit = TestAudit::new("still-answerable");
+
+    let (outcome, peer) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &command_proposal,
+        &mut test_audit.coordinator(),
+    );
+    assert!(matches!(outcome, ReceiveOutcome::Created { .. }));
+    assert!(
+        coordinator.is_still_answerable(&agent_run_id, &proposal_id),
+        "a freshly received request with its peer still connected must be answerable"
+    );
+
+    drop(peer);
+    assert!(
+        !coordinator.is_still_answerable(&agent_run_id, &proposal_id),
+        "once the peer closes its end, the same request must no longer be answerable"
+    );
+}
+
+/// The other two ways a request can stop being "still answerable" that
+/// have nothing to do with the connection at all: it was never received,
+/// or it already has a decision. `is_still_answerable` folds both into
+/// `false` rather than a bool that only means one narrow thing (see its
+/// own doc comment).
+#[test]
+fn is_still_answerable_is_false_for_unknown_and_already_decided_requests() {
+    let mut coordinator = ApprovalCoordinator::new();
+    let agent_run_id = AgentRunId::for_test(1);
+    let command_proposal = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let proposal_id = command_proposal.proposal_id().clone();
+    let mut test_audit = TestAudit::new("still-answerable-negative");
+
+    assert!(
+        !coordinator.is_still_answerable(&agent_run_id, &proposal_id),
+        "a request that was never received cannot be answerable"
+    );
+
+    let (outcome, _peer) = receive(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &command_proposal,
+        &mut test_audit.coordinator(),
+    );
+    assert!(matches!(outcome, ReceiveOutcome::Created { .. }));
+
+    let decide_outcome = coordinator.decide(
+        &agent_run_id,
+        &proposal_id,
+        SimpleDecision::Rejected,
+        &mut test_audit.coordinator(),
+    );
+    assert!(matches!(decide_outcome, DecideOutcome::Decided { .. }));
+    assert!(
+        !coordinator.is_still_answerable(&agent_run_id, &proposal_id),
+        "an already-decided request is not still answerable, even though its connection \
+         is still open"
+    );
+}
+
 /// Response 111/113's central concern, reproduced as a fixture rather than
 /// left as a sentence: a proposal claiming `cwd = "/"` must not be able to
 /// make an external absolute path classify as project-internal. This is a

@@ -541,6 +541,82 @@ formality passed by construction.
 Re-verified after the fixes: `tekstide-core` 578, `tekstide` 220 (same counts -- one test
 renamed and extended, none added), all gates clean.
 
+**Response 220 (four rounds late, by a relay failure the reviewer owned, not a decision
+delay): open question 3 is answered.** Full reasoning in RFC-022 §"The arrival model" and the
+rewritten PR-022-E gate in `task-breakdown-pr-plan.md`. Summary: interrupt-versus-notify was
+the wrong framing -- every design needs a queue (an arriving proposal must never replace an
+open modal), so the real decision is *when a queued proposal promotes itself to a modal*.
+`High`/`Destructive` promote (active project only, no modal open); `Low`/`Medium` stay
+queued; focus defaults to Reject; a promoted dialog briefly ignores input; expiry is a
+connection property, not a decision outcome (`ApprovalDecision` stays `Pending`, no audit
+schema change). This section covers the first piece built against that answer -- the
+undeliverable-decision requirement, which the gate already asked for independent of the
+queue/promotion machinery. The queue, promotion, and GUI wiring are separate, later
+increments within this same slice.
+
+**The undeliverable-decision requirement (`task-breakdown-pr-plan.md`'s own "a decision that
+can no longer be delivered is not recorded as if it were"), built and proven against a real,
+actually-exited adapter process, not a synthesised closed socket.**
+
+`AcceptedProposal::is_connection_still_open` (`approval/channel.rs`) -- a non-blocking,
+non-consuming liveness probe via raw `libc::recv(..., MSG_PEEK | MSG_DONTWAIT)`, not
+`UnixStream::peek` (not yet stable in `std`: `unix_socket_peek`, rust-lang issue #76923; this
+file already reaches into `libc` directly elsewhere for comparable reasons). `Ok(0)`/EOF or
+any I/O error other than `EAGAIN`/`EWOULDBLOCK` reads as "gone," fail-safe.
+
+`ApprovalCoordinator::decide`/`decide_with_edited_argv` both gained a guard, checked *before*
+`audit.authorize_command_decision` and before `send_decision` is ever attempted -- not
+discovered afterward via `Decided.sent` being `Err`, which remains the correct, unchanged
+handling for a genuine race (the connection was alive at check-time and died between the
+check and the send; RFC-021's own reasoning for why that case's decision stays final is
+untouched). `DecideOutcome::Undeliverable` is the new outcome: nothing authorized, nothing
+recorded, `ApprovalDecision` stays `Pending`. `ApprovalCoordinator::is_still_answerable` is
+the same check exposed standalone, for a queue view to ask without attempting a decision.
+
+**Proven against a real process, per the gate's own requirement:**
+
+- `deciding_a_proposal_whose_real_adapter_process_has_already_exited_is_undeliverable`
+  (`approval::tests::reference_adapter`) -- spawns the real compiled `reference_adapter`
+  binary, accepts its real proposal, then `SIGKILL`s and reaps the process (a genuine exit,
+  not a dropped `UnixStream` or a half-close simulated from the test's own side) *before*
+  calling `decide`. No 30-second wait for the adapter's own read timeout: killing the process
+  is itself a real exit, and the kernel tears down its socket as part of that regardless of
+  whether the timeout would eventually have fired too. Asserts `Undeliverable`, the stored
+  request still `Pending`, and no `CommandApprove` record of any outcome in the real audit
+  store. **Ablated**: temporarily disabled the guard (`if false && !...`), reran -- the
+  decision succeeded (`Decided { decision: ApprovedOnce, sent: Err(BrokenPipe), .. }`),
+  exactly the false record the gate describes ("an approval is written... for a command
+  nothing ran"). Restored, reran clean.
+- `is_still_answerable_reflects_the_real_connection_state` and
+  `is_still_answerable_is_false_for_unknown_and_already_decided_requests`
+  (`approval::tests::coordinator`) -- the lighter, synthetic-socket-pair unit tests isolating
+  `is_still_answerable`'s own logic (connection open/closed, request unknown, request already
+  decided) from the full real-process integration test above.
+- A real bug caught mid-build, not hypothetical: the first version of the real-process test
+  used `AgentRunId::for_test(5)` and failed query with `AuditStoreError { reason: DecodeFailed }`
+  -- the exact, already-documented gotcha `coordinator.rs`'s own
+  `receive_and_approve_persist_the_expected_audit_records` explains (`from_persisted`, the
+  decode path every query row goes through, requires a real `<prefix>-<uuid>` shape; `for_test`'s
+  short sequence-based ids don't have it). Fixed by switching to `AgentRunId::new_uuid()`,
+  the same fix that test already carries as a documented precedent I didn't apply on the
+  first pass.
+
+**Gates.** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features
+-- -D warnings`, full workspace suite, `git diff --check` -- all clean.
+
+- `tekstide-core`: 581 (up from 578 -- the three tests named above).
+- `tekstide`: 220 (unchanged -- no GUI changes this round).
+
+**Not yet built, and next**: the bounded queue (per-run and app-wide), the promotion decision
+(`High`/`Destructive`, active project, no modal open), expiry's integration with
+`pending_approvals`/`AttentionState::ApprovalNeeded`, the four non-optional UI constraints
+(no bulk approval, visibly-unanswerable expired entries, focus-defaults-to-Reject, the
+post-promotion input-ignore window), the classifier-limitation disclosure, and the entire GUI
+wiring (a long-lived `ApprovalCoordinator`/endpoint ownership -- currently nowhere in
+production, the same "wired with no caller" shape response 219 found for `launch_agent_run_with_runtime`
+-- the poll/subscription path, `ModalContent::Approval`, a new queue-viewing surface, and the
+`command_approval` audit family's first real producer).
+
 ## PR-022-F - Closeout
 
 *Not started.*

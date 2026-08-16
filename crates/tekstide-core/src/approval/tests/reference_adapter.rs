@@ -373,3 +373,96 @@ fn a_real_adapter_process_exits_distinctly_on_a_rejected_token() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+/// **RFC-022 PR-022-E ("the arrival model"): "a decision that can no
+/// longer be delivered is not recorded as if it were."** The adapter
+/// process is killed for real (`SIGKILL`, then reaped) after it has sent
+/// its proposal but before any decision is made -- a genuinely exited
+/// process, not a synthesised closed socket, matching the gate's own
+/// requirement ("prove it against a real adapter that has actually
+/// exited"). No 30-second wait for the adapter's own read timeout is
+/// needed: killing the process is itself a real exit, and the kernel
+/// tears down its end of the socket as part of that, independent of
+/// whether the adapter's own timeout would eventually have fired too.
+///
+/// `decide` must refuse to authorize or record anything: `Undeliverable`,
+/// the request still `Pending`, and no `CommandApprove` audit record at
+/// any outcome (`Requested` from `receive_proposal` is the only record
+/// that should exist).
+#[test]
+fn deciding_a_proposal_whose_real_adapter_process_has_already_exited_is_undeliverable() {
+    let channel = TestChannel::new("undeliverable");
+    // A real UUID-shaped id, not `AgentRunId::for_test` -- this test
+    // queries a real store afterward, and `from_persisted` (the decode
+    // path every query row goes through) requires the genuine
+    // `<prefix>-<uuid>` shape `for_test`'s short, sequence-based ids do
+    // not have (same reason `coordinator.rs`'s own
+    // `receive_and_approve_persist_the_expected_audit_records` uses it).
+    let agent_run_id = AgentRunId::new_uuid();
+    let (endpoint, raw_token, socket_path) = channel.bind(&agent_run_id);
+
+    let mut child = spawn_adapter(Some(&socket_path), Some(&raw_token), &["rm", "-rf", "/"]);
+
+    let accepted = endpoint
+        .accept_proposal()
+        .expect("the real adapter's proposal should authenticate and parse");
+
+    // The real process exits here -- not a dropped `UnixStream`, not a
+    // half-close simulated from this test's own side.
+    child.kill().expect("kill the real adapter process");
+    child.wait().expect("reap the killed adapter process");
+
+    let mut coordinator = ApprovalCoordinator::new();
+    let mut audit = TestAudit::new("undeliverable");
+    let proposal_id = accepted.proposal.proposal_id().clone();
+    let receive_outcome = coordinator.receive_proposal(
+        ProjectId::for_test(1),
+        agent_run_id.clone(),
+        &VerifiedCwd::for_test(PROJECT_ROOT),
+        std::path::Path::new(PROJECT_ROOT),
+        channel.directory.state_root(),
+        accepted,
+        &mut audit.coordinator(),
+    );
+    assert!(
+        matches!(receive_outcome, ReceiveOutcome::Created { .. }),
+        "the proposal itself was received before the process exited, and must still be: {receive_outcome:?}"
+    );
+
+    let decide_outcome = coordinator.decide(
+        &agent_run_id,
+        &proposal_id,
+        SimpleDecision::ApprovedOnce,
+        &mut audit.coordinator(),
+    );
+    assert!(
+        matches!(decide_outcome, DecideOutcome::Undeliverable),
+        "deciding a proposal whose real adapter has already exited must refuse, not \
+         authorize-then-fail-to-send: {decide_outcome:?}"
+    );
+
+    let stored = coordinator
+        .find(&agent_run_id, &proposal_id)
+        .expect("the request must still exist");
+    assert_eq!(
+        stored.decision,
+        crate::domain::ApprovalDecision::Pending,
+        "nobody decided -- recording anything else would be false"
+    );
+
+    let records = audit
+        .store
+        .query(&crate::audit::AuditQuery::latest(10))
+        .expect("query the real audit store")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .collect::<Vec<_>>();
+    assert!(
+        records
+            .iter()
+            .all(|record| record.action_kind != crate::audit::AuditActionKind::CommandApprove),
+        "no CommandApprove record of any outcome may exist for an undeliverable decision -- \
+         got: {records:?}"
+    );
+}

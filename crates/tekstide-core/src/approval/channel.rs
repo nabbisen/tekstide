@@ -469,6 +469,58 @@ impl AcceptedProposal {
         write_frame(&mut self.stream, &bytes)
     }
 
+    /// RFC-022 PR-022-E ("the arrival model"): a non-blocking,
+    /// non-consuming check for whether the adapter on the other end of
+    /// this proposal's connection is still there. `MSG_PEEK` reads
+    /// without removing the byte from the socket's receive buffer, so a
+    /// `true` result leaves `send_decision` free to still work
+    /// afterward -- this is a liveness probe, not a read. Raw
+    /// `libc::recv` rather than `UnixStream::peek`: peeking a Unix
+    /// socket is not yet stable in `std` (`unix_socket_peek`, rust-lang
+    /// issue #76923), and this crate already reaches into `libc`
+    /// directly elsewhere in this same file for comparable reasons.
+    ///
+    /// An orderly close (the reference adapter's own 30-second read
+    /// timeout, or any other clean exit) surfaces as `recv` returning
+    /// `0` (EOF). Any other failure -- a reset connection, or any
+    /// `errno` other than `EAGAIN`/`EWOULDBLOCK` -- is treated the same
+    /// way: fail-safe, "cannot confirm this is still answerable" wins
+    /// over "assume it is." A positive byte count (the adapter sending
+    /// something unsolicited, which this protocol never has it do after
+    /// a proposal) is treated as "still open" rather than as an
+    /// impossible case to panic on -- an unexpected byte from a live
+    /// peer is still evidence of a live peer.
+    ///
+    /// This is `ApprovalCoordinator::decide`'s guard against recording a
+    /// decision for a proposal nobody can still deliver it to, and a
+    /// queued (not yet promoted) entry's own "is this still answerable"
+    /// check.
+    pub fn is_connection_still_open(&self) -> bool {
+        let fd = self.stream.as_raw_fd();
+        let mut probe: u8 = 0;
+        // SAFETY: `fd` is a valid, open file descriptor for the
+        // lifetime of this call (owned by `self.stream`, borrowed for
+        // this call only); `probe` is a valid, correctly-sized buffer
+        // for the requested length (1 byte); `MSG_DONTWAIT` makes this
+        // call non-blocking regardless of the socket's own blocking
+        // mode, so this never toggles or otherwise mutates socket state
+        // -- unlike the `set_nonblocking`-based approach this replaced,
+        // there is nothing to restore afterward.
+        let received = unsafe {
+            libc::recv(
+                fd,
+                (&mut probe as *mut u8).cast::<libc::c_void>(),
+                1,
+                libc::MSG_PEEK | libc::MSG_DONTWAIT,
+            )
+        };
+        match received {
+            0 => false,
+            n if n > 0 => true,
+            _ => matches!(io::Error::last_os_error().kind(), io::ErrorKind::WouldBlock),
+        }
+    }
+
     /// Test-only constructor for `approval::coordinator`'s tests, which
     /// need a real, working `AcceptedProposal` (this type has no public
     /// constructor otherwise -- the only way to obtain one in production

@@ -189,6 +189,19 @@ pub enum DecideOutcome {
     /// No request exists for this `(AgentRunId, ProposalId)` pair -- a
     /// decision cannot be made for a proposal that was never received.
     NotFound,
+    /// RFC-022 PR-022-E ("the arrival model"): the adapter's connection
+    /// is already gone -- checked via `AcceptedProposal::is_connection_still_open`
+    /// *before* anything is authorized or recorded, not discovered after
+    /// the fact via `Decided.sent` being `Err`. Unlike an ordinary send
+    /// failure (a genuine race, where the decision was already made and
+    /// stays final -- `Decided`'s own doc explains why), this is the
+    /// case `task-breakdown-pr-plan.md`'s PR-022-E gate names explicitly:
+    /// "left alone, the user clicks Approve, an approval is written...
+    /// and it is sent to a connection nobody is reading." Nothing is
+    /// authorized, nothing is recorded, and `pending.request.decision`
+    /// stays `Pending` -- call [`ApprovalCoordinator::find`] to observe
+    /// it, the same way [`Self::AuditBlocked`] directs.
+    Undeliverable,
     /// The audit write **authorizing** this decision failed. Per the
     /// RFC's fail-closed matrix ("audit append failure for the
     /// authorization blocks execution", the same precedent as
@@ -212,7 +225,9 @@ impl DecideOutcome {
         match self {
             DecideOutcome::Decided { request, .. } => Some(request),
             DecideOutcome::AlreadyDecided(request) => Some(request),
-            DecideOutcome::NotFound | DecideOutcome::AuditBlocked(_) => None,
+            DecideOutcome::NotFound
+            | DecideOutcome::AuditBlocked(_)
+            | DecideOutcome::Undeliverable => None,
         }
     }
 }
@@ -414,6 +429,13 @@ impl ApprovalCoordinator {
             // non-overwriting.
             return DecideOutcome::AlreadyDecided(pending.request.clone());
         }
+        if !pending.accepted.is_connection_still_open() {
+            // RFC-022 PR-022-E: checked before anything below runs, not
+            // after -- the whole point is that authorization and the
+            // send attempt never happen for a proposal that is already
+            // undeliverable.
+            return DecideOutcome::Undeliverable;
+        }
 
         let operation_id = if decision == SimpleDecision::ApprovedOnce {
             match audit.authorize_command_decision(
@@ -502,6 +524,9 @@ impl ApprovalCoordinator {
         if pending.request.decision != ApprovalDecision::Pending {
             return DecideOutcome::AlreadyDecided(pending.request.clone());
         }
+        if !pending.accepted.is_connection_still_open() {
+            return DecideOutcome::Undeliverable;
+        }
 
         // Response 116 Required 1: reclassify *before* authorizing, into
         // locals -- classification is pure computation with no side
@@ -576,6 +601,23 @@ impl ApprovalCoordinator {
         self.requests
             .get(&(agent_run_id.clone(), proposal_id.clone()))
             .map(|pending| &pending.request)
+    }
+
+    /// RFC-022 PR-022-E ("the arrival model"): whether a still-`Pending`
+    /// request's connection is still open -- what a queued (not yet
+    /// promoted) entry renders as "live" or "expired" with, and the same
+    /// check `decide`/`decide_with_edited_argv` use as their own guard
+    /// (exposed separately so a queue view can ask without attempting a
+    /// decision). A request that does not exist, or one that has already
+    /// been decided, is not "still answerable" either -- both fold into
+    /// `false` rather than a `bool` that only means one narrow thing.
+    pub fn is_still_answerable(&self, agent_run_id: &AgentRunId, proposal_id: &ProposalId) -> bool {
+        self.requests
+            .get(&(agent_run_id.clone(), proposal_id.clone()))
+            .is_some_and(|pending| {
+                pending.request.decision == ApprovalDecision::Pending
+                    && pending.accepted.is_connection_still_open()
+            })
     }
 }
 
