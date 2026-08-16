@@ -121,8 +121,41 @@ Review gate:
   exited, not a synthesised closed socket. Ablate it: remove the check and show the audit
   record that appears for a command nothing ran.
 
-- Open question 3 (does this dialog interrupt a user mid-edit) is the owner's and must be
-  answered before this lands; if the implementation forces it earlier, **stop and raise it**.
+### The arrival model — open question 3, answered 2026-08-16
+
+Full reasoning in RFC-022 §"The arrival model". Gate items:
+
+- **All proposals enter a bounded queue.** Bound **per `AgentRun`** — a looping adapter must
+  exhaust its own budget, not starve another agent's proposals. Prove that isolation, do not
+  assert it.
+- **An app-wide ceiling as well**, because `agent_run_limit` is `None` and per-run bounds
+  multiply. A per-run bound alone leaves memory growth exactly where it was found.
+- **Only `High`/`Destructive` promote**, only when no modal is open, only for the **active
+  project**. A promotion from a background project would show a command and `cwd` from a
+  project not on screen — the confusion the escaped `cwd` exists to prevent, by the front
+  door.
+- **Focus defaults to Reject.** One stray keystroke can only reject; approving needs focus
+  movement *and* activation. Prove both halves.
+- **A promoted dialog ignores input briefly after appearing**, so promotion does not eat
+  keystrokes out of the editor mid-word.
+- **Expiry is trapped, not avoided.** Each entry is individually **live and answerable** or
+  **expired**. `ApprovalDecision` stays `Pending` for an expired request — nobody decided,
+  and recording otherwise would be false. **No audit change**: a `command_request` with no
+  following decision already means asked-and-not-approved.
+- **An expired entry is visibly unanswerable**, not merely failing when acted on. Prove it
+  against a real adapter that has actually exited.
+- **Expired proposals stop counting toward `pending_approvals`** — otherwise a project sits
+  in `AttentionState::ApprovalNeeded` permanently and masks `Failed` and `Review`. Test that
+  the attention state clears.
+- **No bulk approval, no multi-select.** Structural, not a UI preference: a list with risk
+  labels invites triage by label instead of reading commands. If the surface makes it easy to
+  add later, that is a finding to raise.
+- **The classifier limitation is on the surface**: promotion depends on `RiskLevel`, a
+  heuristic over argv, so a misclassified destructive command will not promote. Safe in
+  direction, but disclosed rather than buried.
+- **The notice's readability checked against a real capture** (response 223): if the command
+  and `cwd` end up visually subordinate to the four-sentence disclaimer, that is a finding —
+  and the fix is layout, not cutting a required non-claim.
 - The `command_approval` audit family gains its first real producer — it has been wired with
   no caller since RFC-021.
 
