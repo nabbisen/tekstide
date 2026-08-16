@@ -1,6 +1,6 @@
 # RFC-022: Adapter Spawn and the Command Approval Surface
 
-Status: Proposed
+Status: **Accepted by the human owner 2026-08-16.** Open question 1 answered by the architect the same day — see below; it adds a scope item rather than changing the design.
 Target milestone: M11
 Date: 2026-08-16
 
@@ -119,6 +119,11 @@ having no implemented pattern set.
    rules RFC-018 established.
 5. **A route from the GUI** to start an agent run and to reach a run's detail — the concept
    RFC-020's surface work found missing.
+6. **A reference adapter** — a small, purpose-built program that speaks RFC-021's protocol,
+   added per open question 1's answer. It is the thing that makes every other item in this
+   list demonstrable: without it there is no adapter to spawn, no token to deliver, and no
+   approval request for the dialog to answer. It is a test-and-proof artifact, not a
+   product feature, and the RFC must not present it as one.
 
 ## Non-goals
 
@@ -132,11 +137,28 @@ having no implemented pattern set.
 
 ## Open questions for the owner
 
-1. **Which AI CLI is the first real adapter, and does it exist?** RFC-021's protocol assumes
-   a cooperating adapter. If no shipping AI CLI speaks this protocol today, then the first
-   adapter is something this project writes — a shim — and that is a materially different
-   scope. **This is the question most likely to change the plan, and it should be answered
-   before any slice starts.**
+1. ~~**Which AI CLI is the first real adapter, and does it exist?**~~ **Answered
+   2026-08-16 by the architect, not the owner — it was answerable from this repository and
+   should not have been raised as an owner question.**
+
+   **No shipping AI CLI speaks this protocol, because the protocol is this project's own
+   invention.** RFC-021 defined the socket, the `CommandProposal` encoding and the
+   capability token; nothing external implements a Tekstide-specific handshake, and nothing
+   would without adoption this project does not have.
+
+   **The codebase already assumes this.** `validate_compatibility`
+   (`agent/launch.rs:651-658`) rejects a `Managed` profile unless it declares
+   `adapter_capabilities.structured_action_approval`, and RFC-010 §"Labels describe proven
+   behavior" requires Managed be *"rejected or downgraded before launch if the selected
+   adapter cannot prove the required capability."* Both were written anticipating exactly
+   this: that no adapter proves it.
+
+   **Consequence — a scope item, added below:** the first adapter is a **reference adapter**
+   written by this project. Deliberately *not* an integration with any particular AI CLI:
+   the goal is to make the pathway reachable and testable end to end, and coupling that to
+   a third party's interface would put this RFC's provability at the mercy of their release
+   cycle. Integrating a real AI CLI is later, separate work that this reference
+   implementation makes possible.
 2. **What happens when an approval request goes unanswered** — the user is away, the dialog
    is open, the adapter is blocked. Timeout and deny, or block indefinitely? RFC-021 defines
    the protocol but not the human-absent case.
@@ -148,6 +170,9 @@ having no implemented pattern set.
 
 - **Overclaiming enforcement.** The single largest risk in this RFC. Mitigated by stating
   the cooperative limit in the surface, not only in documentation.
-- **The first adapter not existing**, making this RFC's premise unbuildable. Open question 1.
+- ~~The first adapter not existing.~~ Resolved by open question 1's answer: it does not
+  exist, this RFC writes one, and that is now scope item 6 rather than an unquantified risk.
+- **The reference adapter being mistaken for a product feature**, or for evidence that real
+  AI CLIs are supported. It is neither. The closeout must say so.
 - **A dialog nobody can reach**, repeating the failure this project has hit three times.
   Mitigated by scope items 3 and 5 being in the same RFC as the dialog.
