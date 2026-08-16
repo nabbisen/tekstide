@@ -485,11 +485,19 @@ fn deciding_a_proposal_whose_real_adapter_process_has_already_exited_is_undelive
 /// libc family, `fork`) rather than a broader lexical net -- narrow
 /// enough that this test does not fail on unrelated future code (a
 /// string that happens to contain "exec", say), wide enough to catch
-/// every ordinary way this file could gain a real spawn path. Not a
-/// sandbox: a `#[no_mangle]` FFI trick or an `unsafe` raw syscall built
-/// by hand would not match any of these substrings. Proportionate to
-/// what a reference/demo binary in this codebase would plausibly grow,
-/// not to an adversarial rewrite of it.
+/// every ordinary way this file could gain a real spawn path.
+///
+/// **Response 230: this is a denylist, not proof of absence, and that
+/// limit is worth stating rather than leaving implicit** -- the same
+/// discipline response 203 required for `.advance(`'s own scan. It
+/// names the spawn APIs a reviewer could think of; it cannot prove this
+/// file never spawns anything, only that it does not use *these*
+/// APIs. A `#[no_mangle]` FFI trick, an `unsafe` raw syscall built by
+/// hand, or any future process-spawning API not on this list would pass
+/// silently. Proportionate to what a reference/demo binary in this
+/// codebase would plausibly grow toward, not to an adversarial rewrite
+/// of it -- but a reader relying on this test for more than that should
+/// know where its coverage actually ends.
 #[test]
 fn reference_adapter_binary_never_executes_the_argv_it_proposes() {
     let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bin/reference_adapter.rs");

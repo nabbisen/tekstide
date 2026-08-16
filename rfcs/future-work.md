@@ -213,6 +213,28 @@ Status: substrate decided, application shell, and mode switching implemented by 
   0/200 without) — a suite that leaves 87 live processes behind is a plausible source of
   the same pressure, and the two were investigated a fortnight apart without being linked.
   **Cause found 2026-08-16** (review request 212): `Child::drop` does not kill the process, so **any test that panics before reaching its own cleanup leaks a shell**. That explains why the count varies between runs — it is a function of how many tests *failed*, not how many ran (the dev team measured 1,192 leaked while chasing a flake through repeated failing runs). The fix is cleanup that survives a panic, not a tidier happy path. Belongs to general test hygiene; no RFC owns it today, which is why it is here.
+  **A second test flaking under the same pressure, found 2026-08-17** (review response 230
+  asked whether a `tekstide-core` suite run it saw fail once in ten was the known socket
+  flake; response 213's own rate was 10/200 — one measurement, not a fixed constant). Sampled
+  150 full-suite runs on the dev machine: 3 failures. Two were the already-known
+  `approval::tests::channel::bind_recovers_from_a_stale_socket_file` (identical panic each
+  time: `second bind must clear the stale file and succeed: ApprovalChannelError { reason: Io,
+  source: None }`, `channel.rs:168`) — confirms it is still live, not fixed by anything since
+  response 213. The third was a **different** test failing the same way under the same kind
+  of load: `approval::tests::coordinator::agent_run_queue_limit_is_enforced_and_only_counts_live_entries`
+  (RFC-022 PR-022-E, commit `375d256` — predates this file's own most recent RFC-022 work, not
+  introduced by it). That test also depends on a real socket's liveness transition completing
+  within an expected window under concurrent suite pressure (`drop(first_peer)` closes one
+  half of a real `UnixStream` pair from `AcceptedProposal::for_test`, then a later
+  `receive_proposal` call must observe the other half as no-longer-open via
+  `is_connection_still_open`'s real `recv(MSG_PEEK|MSG_DONTWAIT)`). Neither reproduced in 40
+  isolated single-test reruns — both need concurrent suite pressure to surface, the same shape
+  as the diagnosed fork-window mechanism. **Not confirmed to be the same root cause**, but
+  consistent with one: both are real-socket/fd state-transition timing under load, and RFC-022
+  has been adding more real-socket tests test-by-test (PR-022-B through E), which plausibly
+  raises exposure rather than lowering it. Not root-caused or fixed in this pass — recording
+  the second failure mode here so it is not lost the way response 213 warned "the count varies
+  between runs" could hide before this file's cause-found note existed.
 - **Terminal spawn latency as a function of already-open terminals: never measured, plausibly not constant.** Surfaced 2026-08-16 while diagnosing a test-concurrency flake whose mechanism is `fork()` cost scaling with the forking process's thread count. Tekstide now runs **one reader thread per terminal** (RFC-017 Amendment 1) and `terminal_session_limit` is **6**, so launching the sixth terminal may be measurably slower than the first. RFC-017 Amendment 1 PR-A1-D's N-pane benchmark measured **throughput**, not **spawn latency** — it drained existing panes, it did not time creating them. Deliberately not measured in the slice that found it.
 - **No `NavigationAction` reaches `AppCommand::OpenActiveProjectWorkspace` directly.**
   Found during RFC-019 PR-019-C's GUI evidence work (response 181, 2026-08-11):
