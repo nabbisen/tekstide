@@ -63,7 +63,15 @@ Review gate:
   anything configures a transcript writer in production, so it is the first real exercise
   of that amendment. **Say what that proves and what it does not.**
 
-## PR-022-D — AgentRun creation, and a route to start one
+## PR-022-D — AgentRun creation, and a route to start one [Implemented — pending review]
+
+See [`qa-evidence.md`](./qa-evidence.md#pr-022-d---agentrun-creation-and-route) for the full
+evidence record, including response 218's redirection of what the keybinding actually
+launches (a real, code-defined profile for an installed AI CLI, not the reference adapter),
+and a finding not anticipated by that response: `WorkspaceTrust::Restricted` is every
+project's permanent default with no GUI-reachable path to `Trusted`, so the keybinding this
+slice builds currently refuses for every real user, every time — not the "no AI CLI found"
+common case response 218 described.
 
 Review gate:
 

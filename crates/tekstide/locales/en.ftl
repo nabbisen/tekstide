@@ -200,6 +200,19 @@ terminal-launch-refused = { $reason ->
    *[error] Couldn't start a terminal.
 }
 
+# RFC-022 PR-022-D: same shape as `terminal-launch-refused` above.
+# `not-found` is the common first-run state (no AI CLI installed where
+# this profile looks) -- an honest, useful message, not a bug to route
+# around (response 218). `workspace-blocked` is the correctly-refused
+# case for an untrusted project (the profile may discover workspace
+# files, so a Restricted project refuses until trust is granted).
+agent-run-launch-refused = { $reason ->
+    [limit] Agent run limit reached ({ $limit } running) — close one to start another.
+    [not-found] No AI CLI found. Install one and try again.
+    [workspace-blocked] This project isn't trusted yet — grant trust to start an agent run.
+   *[error] Couldn't start an agent run.
+}
+
 # RFC-018 PR-018-B: same shape as `terminal-launch-refused` above --
 # `$reason` a compile-time symbol (`TerminalPasteRefusal`'s own shape),
 # never the refusal's Rust `Debug` text or the pasted content itself.

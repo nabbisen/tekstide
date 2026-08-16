@@ -58,6 +58,18 @@ pub struct ProjectSession {
     transcripts: Vec<Transcript>,
     change_sets: Vec<ChangeSet>,
     audit_events: Vec<AuditEvent>,
+    /// RFC-022 PR-022-D: the selected-run concept the review gate asks
+    /// for, since `ProjectOpenSurface::AgentRunDetail` carries no id of
+    /// its own. An explicit field, not derived at render time the way
+    /// `active_terminal_focus` derives "which terminal" from
+    /// `VisibleSlot::Primary` -- there is no slot system for agent runs,
+    /// and RFC-022 explicitly does not build one (multiple concurrent
+    /// runs are a non-goal "unless it falls out for free"). Set to the
+    /// just-launched run on every successful `attach_agent_launch_plan`;
+    /// nothing else mutates it yet -- a user explicitly selecting a
+    /// *different*, already-running run is the future detail view's
+    /// concern (RFC-020's report surface), not this slice's.
+    selected_agent_run: Option<AgentRunId>,
 }
 
 impl ProjectSession {
@@ -91,6 +103,7 @@ impl ProjectSession {
             transcripts: Vec::new(),
             change_sets: Vec::new(),
             audit_events: Vec::new(),
+            selected_agent_run: None,
         }
     }
 
@@ -180,6 +193,13 @@ impl ProjectSession {
 
     pub fn agent_runs(&self) -> &[AgentRun] {
         &self.agent_runs
+    }
+
+    /// RFC-022 PR-022-D: the selected-run concept -- see the field's own
+    /// doc comment on why this is a stored, explicit id rather than
+    /// derived at call time.
+    pub fn selected_agent_run(&self) -> Option<&AgentRunId> {
+        self.selected_agent_run.as_ref()
     }
 
     pub fn approval_requests(&self) -> &[ApprovalRequest] {
@@ -359,6 +379,11 @@ impl ProjectSession {
         if !terminal_matches_launch_spec(&terminal, &plan) {
             return Err(ProjectAgentLaunchError::TerminalDoesNotMatchLaunchSpec);
         }
+        if let Some(limit) = self.resource_limits.agent_run_limit
+            && self.agent_runs.len() as u32 >= limit
+        {
+            return Err(ProjectAgentLaunchError::AgentRunLimitExceeded { limit });
+        }
 
         let (_, mut agent_run, terminal_launch_spec) = plan.into_parts();
         agent_run.attach_terminal(&terminal)?;
@@ -368,14 +393,14 @@ impl ProjectSession {
 
         self.terminal_sessions.push(terminal);
         self.agent_runs.push(agent_run);
+        self.selected_agent_run = Some(agent_run_id.clone());
         self.record_activity();
         self.refresh_runtime_summary_from_collections();
 
         Ok(agent_run_id)
     }
 
-    #[cfg(test)]
-    pub(crate) fn launch_agent_run_with_runtime(
+    pub fn launch_agent_run_with_runtime(
         &mut self,
         mut plan: AgentRunLaunchPlan,
         runtime: &mut LinuxTerminalRuntime,
@@ -1253,6 +1278,15 @@ pub enum ProjectAgentLaunchError {
     Ownership(OwnershipError),
     InvalidAgentRunTransition(AgentRunTransitionError),
     TerminalDoesNotMatchLaunchSpec,
+    /// RFC-022 PR-022-D: mirrors `ProjectTerminalError::SessionLimitExceeded`
+    /// -- enforced here, not at any call site, for the same reason: a limit
+    /// enforced at the call site is one the next caller forgets. This is
+    /// the first slice where a user action can spawn a real adapter
+    /// process, so this is the only thing between a held-down keybinding
+    /// and unbounded adapter processes.
+    AgentRunLimitExceeded {
+        limit: u32,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

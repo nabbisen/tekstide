@@ -1781,6 +1781,226 @@ fn project_session_rejects_duplicate_launch_plan_without_extra_attachment() {
     cleanup_root(bin);
 }
 
+/// RFC-022 PR-022-D: mirrors `project::tests::collections::terminal_session_limit_is_enforced_with_a_typed_refusal`
+/// -- the review gate's own required pattern, applied to `agent_run_limit`
+/// (previously declared on `ProjectResourceLimits` but read by nothing).
+/// Enforced in `attach_agent_launch_plan` itself, not by a caller that
+/// could forget to check -- the same reasoning `terminal_session_limit`
+/// already established, restated here because this is the first slice
+/// where a user action can spawn a real, transcript-capturing, audited
+/// process (response 217): whatever limit is enforced is the only thing
+/// between a held-down keybinding and unbounded adapter processes.
+#[test]
+fn agent_run_limit_is_enforced_with_a_typed_refusal() {
+    let root = test_root("agent-run-limit-root");
+    let bin = test_root("agent-run-limit-bin");
+    let executable = executable_file(&bin, "ai-cli");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    project.set_resource_limits(crate::project::ProjectResourceLimits {
+        visible_terminal_limit: None,
+        terminal_session_limit: None,
+        agent_run_limit: Some(1),
+        approval_request_limit: None,
+    });
+    let profile = built_in_profile(&executable);
+
+    let plan = launch_plan_for(&project, &profile);
+    let terminal = terminal_from_plan(&plan);
+    project
+        .attach_agent_launch_plan(plan, terminal)
+        .expect("the first agent run must be accepted, under the limit");
+
+    let second_plan = launch_plan_for(&project, &profile);
+    let second_terminal = terminal_from_plan(&second_plan);
+    assert_eq!(
+        project.attach_agent_launch_plan(second_plan, second_terminal),
+        Err(ProjectAgentLaunchError::AgentRunLimitExceeded { limit: 1 })
+    );
+    assert_eq!(
+        project.agent_runs().len(),
+        1,
+        "a refused agent run must not be added"
+    );
+
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
+/// RFC-022 PR-022-D: the selected-run concept the review gate asks for
+/// -- `ProjectOpenSurface::AgentRunDetail` carries no id of its own, so
+/// something has to track "which run" a detail view would show. Set on
+/// every successful attach, moving to whichever run was most recently
+/// launched -- nothing else mutates it yet (a user explicitly selecting
+/// a *different*, already-running run is the future detail view's
+/// concern, not this slice's).
+#[test]
+fn attach_agent_launch_plan_selects_the_just_launched_run() {
+    let root = test_root("agent-run-select-root");
+    let bin = test_root("agent-run-select-bin");
+    let executable = executable_file(&bin, "ai-cli");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(&executable);
+
+    assert_eq!(project.selected_agent_run(), None);
+
+    let plan = launch_plan_for(&project, &profile);
+    let terminal = terminal_from_plan(&plan);
+    let agent_run_id = plan.agent_run().id.clone();
+    let attached = project
+        .attach_agent_launch_plan(plan, terminal)
+        .expect("agent run should attach");
+
+    assert_eq!(attached, agent_run_id);
+    assert_eq!(project.selected_agent_run(), Some(&agent_run_id));
+
+    let second_plan = launch_plan_for(&project, &profile);
+    let second_terminal = terminal_from_plan(&second_plan);
+    let second_id = second_plan.agent_run().id.clone();
+    project
+        .attach_agent_launch_plan(second_plan, second_terminal)
+        .expect("a second agent run should attach");
+    assert_eq!(
+        project.selected_agent_run(),
+        Some(&second_id),
+        "the most recently launched run becomes selected"
+    );
+
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
+/// RFC-022 PR-022-D (response 218): the profile's shape when a real
+/// `HOME` is available -- prefers `$HOME/.local/bin` (the real install
+/// location confirmed on the reference dev machine), then falls back to
+/// the reviewed system directories, none of them `project_local` (this
+/// profile is never satisfied by anything inside the project root).
+#[test]
+fn claude_code_profile_lookup_paths_prefer_home_local_bin_when_home_is_set() {
+    let profile = AiCliProfile::claude_code_from_env(Some("/home/example"));
+    match &profile.executable {
+        AiCliExecutable::PathLookup {
+            command,
+            lookup_paths,
+            provenance,
+        } => {
+            assert_eq!(command, "claude");
+            assert_eq!(*provenance, AiCliExecutableProvenance::UserGlobal);
+            assert_eq!(
+                lookup_paths
+                    .iter()
+                    .map(|entry| entry.path.clone())
+                    .collect::<Vec<_>>(),
+                vec![
+                    PathBuf::from("/home/example/.local/bin"),
+                    PathBuf::from("/usr/local/bin"),
+                    PathBuf::from("/usr/bin"),
+                ]
+            );
+            assert!(
+                lookup_paths.iter().all(|entry| !entry.project_local),
+                "none of these paths are inside any project"
+            );
+        }
+        other => panic!("expected a PathLookup executable, got {other:?}"),
+    }
+    assert_eq!(
+        profile.compatibility_level,
+        AgentCompatibilityLevel::Supervised
+    );
+    assert_eq!(profile.source, AiCliProfileSource::UserGlobal);
+    assert!(
+        matches!(
+            profile.workspace_discovery_policy,
+            AiCliWorkspaceDiscoveryPolicy::MayDiscoverWorkspaceFiles { .. }
+        ),
+        "Claude Code genuinely reads workspace files -- disclosing anything less would be \
+         the dishonest disclosure this project's dialogs are built to avoid"
+    );
+}
+
+/// The `HOME`-unavailable branch: falls back to the reviewed system
+/// directories only, never silently substituting something else.
+#[test]
+fn claude_code_profile_falls_back_to_system_paths_only_without_home() {
+    let profile = AiCliProfile::claude_code_from_env(None::<&str>);
+    match &profile.executable {
+        AiCliExecutable::PathLookup { lookup_paths, .. } => {
+            assert_eq!(
+                lookup_paths
+                    .iter()
+                    .map(|entry| entry.path.clone())
+                    .collect::<Vec<_>>(),
+                vec![PathBuf::from("/usr/local/bin"), PathBuf::from("/usr/bin")]
+            );
+        }
+        other => panic!("expected a PathLookup executable, got {other:?}"),
+    }
+}
+
+/// RFC-022 PR-022-D: `launch_agent_run_with_runtime`'s real-profile
+/// proof -- validates and launches a `claude_code_from_env` profile for
+/// real, through the exact same de-gated, now-`pub` entry point the GUI
+/// crate's production `Ctrl+Alt+A` path calls. Deliberately does **not**
+/// invoke the real, live Claude Code CLI: it points the profile at a
+/// stand-in script under a fake `$HOME/.local/bin/claude`, the same
+/// "real spawn machinery, controlled test artifact" shape every other
+/// real-process test in this file already uses (`built_in_profile` +
+/// `executable_file`) -- the real product requires interactive auth and
+/// makes real network calls, and spawning it from an automated test
+/// would be unbounded and unsafe, not merely slow.
+///
+/// Requires a **trusted** project: `claude_code_from_env`'s honest
+/// `MayDiscoverWorkspaceFiles` policy is correctly refused in the
+/// default `Restricted` project (proven separately in
+/// `restricted_mode_blocks_workspace_local_automation_paths`-adjacent
+/// coverage; `security::tests` already proves `WorkspaceDiscoveryBlocked`
+/// fires under `Restricted`) -- this test's job is to prove the other
+/// side: that a genuinely trusted, genuinely resolvable launch actually
+/// works end to end, not merely validates.
+#[test]
+fn a_trusted_project_launches_a_real_claude_code_profile_through_the_production_spawn_path() {
+    let root = test_root("agent-claude-code-root");
+    let home = test_root("agent-claude-code-home");
+    let state_root = test_root("agent-claude-code-state");
+    executable_file(&home.join(".local/bin"), "claude");
+
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    project.grant_trust("test: workspace discovery requires a trusted project");
+
+    let profile = AiCliProfile::claude_code_from_env(Some(&home));
+    let request = AgentRunLaunchRequest::new(project.id().clone(), &profile.id, "test session")
+        .with_local_bounded_transcript(state_root.clone());
+    let validation = AgentRunLaunchValidator
+        .validate(&project, &profile, &request)
+        .expect("a trusted project with a real, resolvable executable should validate");
+    assert_eq!(
+        validation.compatibility_level(),
+        AgentCompatibilityLevel::Supervised
+    );
+
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Claude Code")
+        .expect("validated launch should produce a launch plan");
+
+    let mut runtime = LinuxTerminalRuntime::new();
+    let (agent_run_id, _events) = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect("the de-gated production entry point should launch for real");
+
+    assert_eq!(project.agent_runs().len(), 1);
+    assert_eq!(project.selected_agent_run(), Some(&agent_run_id));
+    let run = &project.agent_runs()[0];
+    assert_eq!(run.id, agent_run_id);
+    assert_eq!(run.status, AgentRunStatus::Running);
+    assert!(
+        run.terminal_id.is_some(),
+        "a runtime-launched AgentRun must have a real terminal id"
+    );
+
+    cleanup_root(root);
+    cleanup_root(home);
+    cleanup_root(state_root);
+}
+
 fn built_in_profile(executable: &Path) -> AiCliProfile {
     let mut profile = AiCliProfile::new(
         "builtin-ai",

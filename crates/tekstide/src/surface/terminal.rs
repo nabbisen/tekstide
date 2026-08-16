@@ -235,6 +235,27 @@ impl TerminalPane {
         let mut runtime = LinuxTerminalRuntime::new();
         let (session, _events) = runtime.launch_project_shell(&project, spec)?;
         let handle = TerminalRuntimeHandle::new(session.id.clone(), project.id().clone());
+        let pane = Self::from_launched(runtime, handle)?;
+
+        Ok((pane, session))
+    }
+
+    /// RFC-022 PR-022-D: wraps a runtime/handle pair that a caller
+    /// already launched -- `launch_project_shell` for a plain terminal
+    /// (via [`Self::launch`] above) or `launch_project_adapter`/an
+    /// AgentRun's own launch path (`tekstide-core::project::ProjectSession::launch_agent_run_with_runtime`)
+    /// for an agent run. Deliberately the *only* other constructor
+    /// besides [`Self::launch`]: reusing this type for an agent run's
+    /// terminal, rather than building a second, parallel pane/rendering/
+    /// subscription pipeline, means `shell.rs`'s existing wake-subscription
+    /// machinery drains an agent run's reader thread for free -- an
+    /// undrained `TerminalReader` channel would otherwise eventually
+    /// block the reader thread and, via PTY backpressure, stall the
+    /// agent's own process.
+    pub fn from_launched(
+        mut runtime: LinuxTerminalRuntime,
+        handle: TerminalRuntimeHandle,
+    ) -> Result<Self, TerminalLaunchError> {
         let reader = runtime.spawn_output_reader(&handle).map_err(|error| {
             TerminalLaunchError::ReaderUnavailable {
                 summary: BoundedRuntimeSummary::new(format!(
@@ -243,17 +264,14 @@ impl TerminalPane {
             }
         })?;
 
-        Ok((
-            Self {
-                runtime,
-                handle,
-                reader,
-                processor: Processor::new(),
-                term: Term::new(pane_config(), &PaneSize, VoidListener),
-                bytes_read_total: 0,
-            },
-            session,
-        ))
+        Ok(Self {
+            runtime,
+            handle,
+            reader,
+            processor: Processor::new(),
+            term: Term::new(pane_config(), &PaneSize, VoidListener),
+            bytes_read_total: 0,
+        })
     }
 
     /// Drains whatever PTY output the reader thread has buffered so far

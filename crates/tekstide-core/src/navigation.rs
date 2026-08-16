@@ -25,6 +25,14 @@ pub enum NavigationAction {
     /// per-keystroke encoding.
     SaveActiveDocument,
     CycleVisibleTerminalSession,
+    /// RFC-022 PR-022-D: launches a real AgentRun in the active project,
+    /// through a code-defined profile (`AiCliProfile::claude_code_linux_default`)
+    /// resolved at launch time -- see response 218. Distinct from
+    /// `LaunchTerminal`: the spawned process is an AI CLI under transcript
+    /// capture/audit, not a plain shell, and the launch can be refused
+    /// (no executable found, workspace discovery blocked in a Restricted
+    /// project, resource limit reached) the way `LaunchTerminal` can.
+    LaunchAgentRun,
     OpenCurrentAgentRunDetail,
     OpenPendingApproval,
     OpenDiffReview,
@@ -118,6 +126,18 @@ impl KeybindingPolicy {
                 KeybindingRule::new(
                     NavigationAction::SaveActiveDocument,
                     Some("Ctrl+S"),
+                    KeybindingStatus::Candidate,
+                ),
+                // RFC-022 PR-022-D: `Ctrl+Alt+A`, following the existing
+                // `Ctrl+Alt+<letter>` shape (`P`, `M`, `T` above) -- `A`
+                // for Agent, unused by any other rule here and not
+                // `Ctrl+Shift+P`'s `Reserved` command-palette binding, so
+                // it collides with nothing (checked mechanically by
+                // `launch_agent_run_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone).
+                KeybindingRule::new(
+                    NavigationAction::LaunchAgentRun,
+                    Some("Ctrl+Alt+A"),
                     KeybindingStatus::Candidate,
                 ),
                 KeybindingRule::new(

@@ -42,11 +42,11 @@ use iced::{Background, Border, Element, Length, Subscription, Task, keyboard};
 use tekstide_core::command::AppCommand;
 use tekstide_core::domain::TerminalId;
 use tekstide_core::navigation::{KeybindingPolicy, NavigationAction};
-use tekstide_core::project::ProjectMode;
+use tekstide_core::project::{ProjectMode, ProjectOpenSurface};
 use tekstide_core::route::AppRoute;
 use tekstide_core::runtime::terminal::{
-    TerminalInputDecision, TerminalInputDecisionReason, TerminalInputPolicy, TerminalInputSource,
-    TerminalRuntimeHandle, TerminalTrustedUiState,
+    LinuxTerminalRuntime, TerminalInputDecision, TerminalInputDecisionReason, TerminalInputPolicy,
+    TerminalInputSource, TerminalLaunchError, TerminalRuntimeHandle, TerminalTrustedUiState,
 };
 use tekstide_core::shell::ApplicationShell;
 
@@ -285,6 +285,12 @@ pub struct State {
     /// every new launch attempt, so it never outlives the situation that
     /// produced it.
     terminal_launch_notice: Option<TerminalLaunchRefusal>,
+    /// RFC-022 PR-022-D: the same shell-local, transient shape as
+    /// `terminal_launch_notice`, for `LaunchAgentRun`'s own refusals --
+    /// most commonly `ExecutableUnavailable` ("no AI CLI found"), the
+    /// honest, common first-run state, not a bug to route around (see
+    /// response 218). Cleared at the start of every new launch attempt.
+    agent_run_launch_notice: Option<AgentRunLaunchRefusal>,
     /// RFC-018 PR-018-B: the most recent paste refusal, if any -- same
     /// shell-local, transient shape as `terminal_launch_notice`. Never
     /// holds a successful paste (`TerminalPasteRefusal` cannot represent
@@ -363,6 +369,7 @@ impl State {
             typing_doc,
             terminal_panes,
             terminal_launch_notice: None,
+            agent_run_launch_notice: None,
             terminal_paste_notice: None,
             explorer_highlight: 0,
         }
@@ -476,6 +483,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.terminal_launch_notice = None;
                     if let Err(refusal) = attempt_terminal_launch(state) {
                         state.terminal_launch_notice = Some(refusal);
+                    }
+                }
+                // RFC-022 PR-022-D: the same shape as `LaunchTerminal`
+                // just above -- real I/O before `dispatch`, attempted
+                // regardless of what `dispatch` will do next, so a
+                // refused launch still lands the user in Terminal
+                // Immersion where the notice is visible.
+                if command == AppCommand::LaunchAgentRun {
+                    state.agent_run_launch_notice = None;
+                    if let Err(refusal) = attempt_agent_run_launch(state) {
+                        state.agent_run_launch_notice = Some(refusal);
                     }
                 }
                 state.app_shell.dispatch(command);
@@ -998,6 +1016,179 @@ fn launch_terminal(
     }
 
     Ok(pane)
+}
+
+/// RFC-022 PR-022-D: `TerminalLaunchRefusal`'s sibling for `LaunchAgentRun`
+/// -- a typed answer the shell can render, never a panic and never a
+/// silent no-op. `RunLimitExceeded` mirrors `TerminalLaunchRefusal::SessionLimitExceeded`
+/// exactly, for the same reason (see [`attempt_agent_run_launch`]'s own
+/// doc comment on why its pre-check is not the real enforcement). The
+/// other variants wrap the real `tekstide-core` error at the coarsest
+/// boundary that still lets the renderer distinguish "no AI CLI found"
+/// (`Validation`'s `ExecutableUnavailable` case -- the honest, common
+/// first-run state per response 218) and "this project is untrusted"
+/// (`Validation`'s `WorkspaceDiscoveryBlocked` case) from every other,
+/// rarer failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AgentRunLaunchRefusal {
+    RunLimitExceeded { limit: u32 },
+    Validation(tekstide_core::agent::AgentRunLaunchValidationError),
+    PlanTransition(tekstide_core::domain::AgentRunTransitionError),
+    Runtime(tekstide_core::project::ProjectAgentRuntimeLaunchError),
+    Registration(TerminalLaunchError),
+}
+
+/// A compile-time literal symbol, not the displayed word -- the words
+/// live in `en.ftl`'s `agent-run-launch-refused` select expression, the
+/// same division of labour `terminal_launch_refusal_symbol` already
+/// uses.
+fn agent_run_launch_refusal_symbol(refusal: &AgentRunLaunchRefusal) -> &'static str {
+    use tekstide_core::agent::AgentRunLaunchValidationError;
+    match refusal {
+        AgentRunLaunchRefusal::RunLimitExceeded { .. } => "limit",
+        AgentRunLaunchRefusal::Validation(
+            AgentRunLaunchValidationError::ExecutableUnavailable { .. },
+        ) => "not-found",
+        AgentRunLaunchRefusal::Validation(
+            AgentRunLaunchValidationError::WorkspaceDiscoveryBlocked { .. },
+        ) => "workspace-blocked",
+        AgentRunLaunchRefusal::Validation(_)
+        | AgentRunLaunchRefusal::PlanTransition(_)
+        | AgentRunLaunchRefusal::Runtime(_)
+        | AgentRunLaunchRefusal::Registration(_) => "error",
+    }
+}
+
+/// The one catalog lookup a refusal's full text takes -- same factoring
+/// as `terminal_launch_refusal_text`.
+fn agent_run_launch_refusal_text(catalog: &Catalog, refusal: &AgentRunLaunchRefusal) -> String {
+    let mut args =
+        CatalogArgs::new().trusted_symbol("reason", agent_run_launch_refusal_symbol(refusal));
+    if let AgentRunLaunchRefusal::RunLimitExceeded { limit } = refusal {
+        args = args.number("limit", *limit);
+    }
+    catalog.get_with_args("agent-run-launch-refused", &args)
+}
+
+/// RFC-022 PR-022-D: the same `AppStatePathProvider::linux_default()`
+/// resolution [`open_real_audit_store`] already uses -- RFC-013's own
+/// "one resolution, N consumers" convention, extended to a third
+/// consumer here rather than inventing new XDG resolution logic in this
+/// crate. `None` degrades to "no transcript capture for this launch,"
+/// not a launch refusal: `TranscriptCaptureMode::LocalBounded` (what
+/// `AgentRunLaunchRequest::new` defaults to) does not reject launch when
+/// unavailable -- only `RequiredLocalBounded` does, and this slice does
+/// not ask for that.
+fn open_real_agent_run_state_root() -> Option<std::path::PathBuf> {
+    let path_provider =
+        tekstide_core::project::recent::AppStatePathProvider::linux_default().ok()?;
+    let state_dir = path_provider.state_dir().to_path_buf();
+    std::fs::create_dir_all(&state_dir).ok()?;
+    Some(state_dir)
+}
+
+/// RFC-022 PR-022-D: the real `Ctrl+Alt+A` path, and `launch_agent_run_with_runtime`'s
+/// first production caller (response 218's own required outcome for
+/// this slice). Points at [`tekstide_core::agent::AiCliProfile::claude_code_linux_default`],
+/// a real, code-defined profile for a genuinely installed AI CLI at
+/// `Supervised` compatibility -- not the reference adapter (stays
+/// test-only, see `what-the-dialog-must-not-lie-about.md` §4) and not
+/// an unconditional stub refusal (response 218: a typed refusal is the
+/// honest outcome only when nothing genuinely resolves, not a stand-in
+/// for real behaviour).
+///
+/// `agent_run_limit` is enforced for real in `tekstide-core`
+/// (`ProjectSession::attach_agent_launch_plan`); the pre-check below
+/// exists only to avoid spawning a real subprocess we already know will
+/// be refused -- the same non-authoritative shape [`launch_terminal`]'s
+/// own pre-check documents for `terminal_session_limit`, doubly
+/// important here since (per response 217) this is the first slice
+/// where a user action can spawn a real, transcript-capturing, audited
+/// process: whatever limit is enforced is the only thing between a
+/// held-down keybinding and unbounded adapter processes.
+///
+/// No active project is a silent no-op, matching [`attempt_terminal_launch`]'s
+/// own precedent.
+fn attempt_agent_run_launch(state: &mut State) -> Result<(), AgentRunLaunchRefusal> {
+    attempt_agent_run_launch_with_profile(
+        state,
+        tekstide_core::agent::AiCliProfile::claude_code_linux_default(),
+    )
+}
+
+/// [`attempt_agent_run_launch`] split out with the profile as a
+/// parameter -- the same testability shape [`launch_terminal`]'s own
+/// explicit `shell: PathBuf` parameter uses (hardcoded to `/bin/sh` by
+/// its one real caller, injectable by tests). Tests use this to exercise
+/// the real launch plumbing against a controlled profile without
+/// depending on what happens to be installed on the machine running the
+/// suite, and without ever pointing it at the real, live product this
+/// profile is modelled on.
+fn attempt_agent_run_launch_with_profile(
+    state: &mut State,
+    profile: tekstide_core::agent::AiCliProfile,
+) -> Result<(), AgentRunLaunchRefusal> {
+    let state_root = open_real_agent_run_state_root();
+
+    let plan = {
+        let Some(project) = state.app_shell.state().active_project() else {
+            return Ok(());
+        };
+        if let Some(limit) = project.resource_limits().agent_run_limit
+            && project.agent_runs().len() as u32 >= limit
+        {
+            return Err(AgentRunLaunchRefusal::RunLimitExceeded { limit });
+        }
+
+        let mut request = tekstide_core::agent::AgentRunLaunchRequest::new(
+            project.id().clone(),
+            &profile.id,
+            "Interactive Claude Code session",
+        );
+        if let Some(state_root) = state_root {
+            request = request.with_local_bounded_transcript(state_root);
+        }
+
+        let validation = tekstide_core::agent::AgentRunLaunchValidator
+            .validate(project, &profile, &request)
+            .map_err(AgentRunLaunchRefusal::Validation)?;
+        tekstide_core::agent::AgentRunLaunchPlan::from_validation(validation, "Claude Code")
+            .map_err(AgentRunLaunchRefusal::PlanTransition)?
+    };
+
+    let project_id = plan.spec().project_id().clone();
+    let mut runtime = LinuxTerminalRuntime::new();
+    let (agent_run_id, _events) = state
+        .app_shell
+        .state_mut()
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .map_err(AgentRunLaunchRefusal::Runtime)?;
+
+    // The run this call just attached always has a terminal id --
+    // `launch_prepared_agent_run_with_runtime` attaches the terminal
+    // before returning `Ok` -- but this reads the real record rather
+    // than assuming it, the same discipline every other post-launch
+    // fact in this module is read fresh rather than cached.
+    let terminal_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .and_then(|project| {
+            project
+                .agent_runs()
+                .iter()
+                .find(|run| run.id == agent_run_id)
+        })
+        .and_then(|run| run.terminal_id.clone());
+    let Some(terminal_id) = terminal_id else {
+        return Ok(());
+    };
+
+    let handle = TerminalRuntimeHandle::new(terminal_id, project_id);
+    let pane = crate::surface::terminal::TerminalPane::from_launched(runtime, handle)
+        .map_err(AgentRunLaunchRefusal::Registration)?;
+    state.terminal_panes.push(pane);
+    Ok(())
 }
 
 /// RFC-019 PR-019-B: the explorer tree needs a scan to render, and
@@ -1765,6 +1956,18 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         NavigationAction::OpenProjectBoard => Some(AppCommand::OpenProjectBoard),
         NavigationAction::ToggleProjectMode => Some(AppCommand::ToggleActiveProjectMode),
         NavigationAction::LaunchTerminal => Some(AppCommand::LaunchTerminal),
+        // RFC-022 PR-022-D: mirrors `LaunchTerminal` -- the actual launch
+        // (profile resolution, validation, PTY spawn, registration) is
+        // real I/O and lives in `update`'s `Shell` arm, dispatched
+        // alongside this command rather than inside it, the same split
+        // `LaunchTerminal` already uses.
+        NavigationAction::LaunchAgentRun => Some(AppCommand::LaunchAgentRun),
+        // RFC-022 PR-022-D: the route to an already-running run's detail
+        // view -- no I/O, so no `update` special-case is needed the way
+        // `LaunchAgentRun` above needs one.
+        NavigationAction::OpenCurrentAgentRunDetail => Some(AppCommand::OpenActiveProjectSurface(
+            ProjectOpenSurface::AgentRunDetail,
+        )),
         // RFC-018 PR-018-B: paste needs no core route/mode change --
         // `update`'s `Shell` arm special-cases it directly, the same
         // shape `LaunchTerminal` uses for the half of its own work that
@@ -1777,7 +1980,6 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         | NavigationAction::OpenCommandPalette
         | NavigationAction::SwitchActiveProject
         | NavigationAction::CycleVisibleTerminalSession
-        | NavigationAction::OpenCurrentAgentRunDetail
         | NavigationAction::OpenPendingApproval
         | NavigationAction::OpenDiffReview
         | NavigationAction::OpenSafeCloseDialog => None,
@@ -2406,6 +2608,18 @@ fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
                 .into()
         });
 
+    // RFC-022 PR-022-D: the same "owed a visible answer" shape as
+    // `notice` above, for `LaunchAgentRun`'s own refusals -- rendered
+    // here rather than in a separate detail view since a refused agent
+    // run still lands the user in Terminal Immersion (`AppCommand::LaunchAgentRun`
+    // reuses the same route `LaunchTerminal` does).
+    let agent_run_notice: Option<Element<'_, Message>> =
+        state.agent_run_launch_notice.as_ref().map(|refusal| {
+            text(agent_run_launch_refusal_text(&state.catalog, refusal))
+                .size(state.theme.font_size_body())
+                .into()
+        });
+
     let entries: Vec<crate::surface::terminal::session_bar::SessionBarEntry> = sessions
         .iter()
         .enumerate()
@@ -2465,6 +2679,9 @@ fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
     }
     if let Some(paste_notice) = paste_notice {
         rows.push(paste_notice);
+    }
+    if let Some(agent_run_notice) = agent_run_notice {
+        rows.push(agent_run_notice);
     }
     rows.push(bar);
     rows.push(panes_view);

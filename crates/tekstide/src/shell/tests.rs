@@ -1,12 +1,14 @@
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use tekstide_core::shell::ApplicationShell;
 
 use super::{
-    ExternalChangeButton, Message, ModalButton, ModalContent, PasteConfirmButton, State,
-    TerminalPasteRefusal, content_within_bound, focus_marker, main_area_key, main_area_label,
-    modal_scrim_style, sidebar_label, status_bar_summary, terminal_paste_refusal_text,
-    trusted_ui_state, zone_style,
+    AgentRunLaunchRefusal, ExternalChangeButton, Message, ModalButton, ModalContent,
+    PasteConfirmButton, State, TerminalPasteRefusal, agent_run_launch_refusal_text,
+    attempt_agent_run_launch_with_profile, content_within_bound, focus_marker, main_area_key,
+    main_area_label, modal_scrim_style, sidebar_label, status_bar_summary,
+    terminal_paste_refusal_text, trusted_ui_state, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -1763,6 +1765,192 @@ fn launch_terminal_shell_input_switches_to_terminal_immersion_and_launches_a_rea
     assert_eq!(
         sessions[0].cwd, project_dir,
         "the pane must be rooted in the real project directory, not a scratch temp dir"
+    );
+}
+
+/// RFC-022 PR-022-D: the real `Ctrl+Alt+A` path against a freshly opened
+/// project -- `WorkspaceTrust::Restricted` by default, and nothing in
+/// this crate (production or test) can grant trust yet (`grant_trust` is
+/// `pub(crate)` to `tekstide-core` alone). `claude_code_linux_default`'s
+/// honest `MayDiscoverWorkspaceFiles` policy is therefore refused here
+/// every time, regardless of whether an AI CLI happens to be installed
+/// on the machine running this suite -- the real, current, disclosed
+/// behaviour of this keybinding today, not a gap in this test. Still
+/// switches to Terminal Immersion, the same "refused but still lands
+/// where the notice is visible" shape `launch_terminal`'s own dispatch
+/// arm uses.
+#[test]
+fn agent_run_launch_shell_input_switches_to_terminal_immersion_and_shows_the_real_trust_refusal() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("agent-run-dispatch");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+
+    let mut state = state_with(app_shell);
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::LaunchAgentRun,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "a refused agent run launch must still land in Terminal Immersion, where the notice \
+         is visible"
+    );
+    assert_eq!(
+        state.terminal_panes.len(),
+        0,
+        "a refusal must not add a pane"
+    );
+    assert!(
+        matches!(
+            state.agent_run_launch_notice,
+            Some(AgentRunLaunchRefusal::Validation(
+                tekstide_core::agent::AgentRunLaunchValidationError::WorkspaceDiscoveryBlocked { .. }
+            ))
+        ),
+        "a fresh, untrusted project must refuse with WorkspaceDiscoveryBlocked: {:?}",
+        state.agent_run_launch_notice
+    );
+    let notice = state.agent_run_launch_notice.as_ref().unwrap();
+    let notice_text = agent_run_launch_refusal_text(&state.catalog, notice);
+    assert!(
+        notice_text.to_lowercase().contains("trust"),
+        "the refusal a user sees must say this is a trust problem, not a generic error: \
+         {notice_text:?}"
+    );
+}
+
+/// The other side of the same refusal: a fake profile whose executable
+/// genuinely does not exist, but whose workspace-discovery policy is
+/// `NoKnownWorkspaceDiscovery` (the default `AiCliProfile::new` sets) so
+/// the launch reaches executable resolution at all under the default
+/// `Restricted` test project -- isolating "no AI CLI found" from the
+/// trust gate proven above. Proves `agent_run_launch_refusal_text`
+/// renders response 218's own honest first-run message, not a generic
+/// one, for the refusal type a real Claude Code profile cannot currently
+/// reach (see the previous test) but the refusal machinery itself must
+/// still render correctly for.
+#[test]
+fn agent_run_launch_refusal_text_renders_the_not_found_reason_honestly() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("agent-run-not-found");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let empty_lookup_dir = fresh_project_dir("agent-run-not-found-empty-bin");
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "definitely-absent-ai-cli",
+        "Definitely Absent AI CLI",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::PathLookup {
+            command: "definitely-absent-ai-cli".to_owned(),
+            lookup_paths: vec![tekstide_core::agent::ExecutableLookupPath::reviewed_system(
+                empty_lookup_dir,
+            )],
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    let refusal = attempt_agent_run_launch_with_profile(&mut state, profile)
+        .expect_err("an executable that genuinely does not exist must be refused");
+    assert!(
+        matches!(
+            refusal,
+            AgentRunLaunchRefusal::Validation(
+                tekstide_core::agent::AgentRunLaunchValidationError::ExecutableUnavailable { .. }
+            )
+        ),
+        "expected ExecutableUnavailable, got {refusal:?}"
+    );
+    let notice_text = agent_run_launch_refusal_text(&state.catalog, &refusal);
+    assert!(
+        notice_text.to_lowercase().contains("no ai cli found"),
+        "response 218: 'no AI CLI found' is the honest, common first-run message, not a \
+         generic error: {notice_text:?}"
+    );
+}
+
+/// **The GUI-side production plumbing this slice's gate names**:
+/// `attempt_agent_run_launch`'s downstream chain (`AppState::launch_agent_run_with_runtime`,
+/// `TerminalPane::from_launched`, pane registration) genuinely spawns,
+/// registers, and selects a real agent run -- proven against a
+/// controlled, in-repo test executable via `attempt_agent_run_launch_with_profile`
+/// (the same "real spawn machinery, controlled test artifact" shape
+/// `tekstide-core`'s own agent tests use), not the real, live Claude
+/// Code CLI: the real product needs interactive auth and makes real
+/// network calls, which is unsafe and unbounded for an automated test.
+/// The profile's `NoKnownWorkspaceDiscovery` policy (the `AiCliProfile::new`
+/// default) is what makes this reachable in the default `Restricted`
+/// test project without needing trust-granting, which this crate cannot
+/// do at all yet (see the dispatch test above).
+#[test]
+fn attempt_agent_run_launch_with_profile_spawns_registers_and_selects_a_real_run() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("agent-run-launch-real");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let bin_dir = fresh_project_dir("agent-run-launch-real-bin");
+    let executable = bin_dir.join("fake-ai-cli");
+    std::fs::write(&executable, "#!/bin/sh\n").expect("test executable should be written");
+    let mut permissions = std::fs::metadata(&executable)
+        .expect("test executable metadata should be readable")
+        .permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions)
+        .expect("test executable permissions should be set");
+
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "fake-ai-cli",
+        "Fake AI CLI",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: executable,
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    attempt_agent_run_launch_with_profile(&mut state, profile)
+        .expect("a resolvable, trust-compatible profile should launch for real");
+
+    assert_eq!(
+        state.terminal_panes.len(),
+        1,
+        "exactly one real pane must be launched"
+    );
+    assert!(
+        state.agent_run_launch_notice.is_none(),
+        "a successful launch must not leave a stale refusal notice"
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    assert_eq!(project.agent_runs().len(), 1);
+    let run = &project.agent_runs()[0];
+    assert_eq!(
+        run.status,
+        tekstide_core::domain::AgentRunStatus::Running,
+        "a freshly launched run must already be Running, not left at Preparing forever"
+    );
+    assert_eq!(
+        project.selected_agent_run(),
+        Some(&run.id),
+        "the just-launched run must become the selected one"
     );
 }
 

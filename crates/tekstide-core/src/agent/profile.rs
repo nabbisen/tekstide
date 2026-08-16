@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::PathBuf;
 
 use crate::domain::AgentCompatibilityLevel;
@@ -39,6 +40,57 @@ impl AiCliProfile {
             adapter_capabilities: AiCliAdapterCapabilities::default(),
             transcript_policy: TranscriptPrivacyPolicy::metadata_only_until_retention_ready(),
         }
+    }
+
+    /// RFC-022 PR-022-D: the first real, code-defined profile -- see
+    /// response 218 (review request 218's answer). Not the reference
+    /// adapter: that stays test-only (`what-the-dialog-must-not-lie-about.md`
+    /// §4). This profile points at a genuinely installed AI CLI (Claude
+    /// Code) at `Supervised` compatibility, which needs no adapter
+    /// protocol -- `Managed`/command-approval remains reachable only
+    /// through the reference adapter, per response 218's traced
+    /// consequence, which this profile does not attempt to change.
+    ///
+    /// `workspace_discovery_policy` is `MayDiscoverWorkspaceFiles`, not
+    /// `NoKnownWorkspaceDiscovery`: Claude Code genuinely reads project
+    /// files as part of normal operation, and claiming otherwise would be
+    /// the same kind of dishonest disclosure this project's dialogs are
+    /// built to avoid. The honest consequence is that a launch through
+    /// this profile is correctly refused in a Restricted (untrusted,
+    /// default) project until the user grants trust -- not a bug to route
+    /// around.
+    pub fn claude_code_linux_default() -> Self {
+        Self::claude_code_from_env(std::env::var_os("HOME"))
+    }
+
+    pub fn claude_code_from_env(home: Option<impl AsRef<OsStr>>) -> Self {
+        let mut lookup_paths = Vec::new();
+        if let Some(home) = home.filter(|value| !value.as_ref().is_empty()) {
+            lookup_paths.push(ExecutableLookupPath::reviewed_system(
+                PathBuf::from(home.as_ref()).join(".local/bin"),
+            ));
+        }
+        lookup_paths.push(ExecutableLookupPath::reviewed_system("/usr/local/bin"));
+        lookup_paths.push(ExecutableLookupPath::reviewed_system("/usr/bin"));
+
+        let mut profile = Self::new(
+            "claude-code",
+            "Claude Code",
+            AiCliProfileSource::UserGlobal,
+            AiCliExecutable::PathLookup {
+                command: "claude".to_owned(),
+                lookup_paths,
+                provenance: AiCliExecutableProvenance::UserGlobal,
+            },
+            AgentCompatibilityLevel::Supervised,
+        );
+        profile.workspace_discovery_policy =
+            AiCliWorkspaceDiscoveryPolicy::MayDiscoverWorkspaceFiles {
+                summary:
+                    "Claude Code reads files in the project workspace as part of normal operation"
+                        .to_owned(),
+            };
+        profile
     }
 }
 

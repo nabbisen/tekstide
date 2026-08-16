@@ -2,7 +2,7 @@
 title: "RFC-022: Adapter Spawn and the Command Approval Surface - QA Evidence"
 rfc: "RFC-022"
 rfc_file: "../../proposed/022-adapter-spawn-and-command-approval-surface.md"
-status: "Open - no slices implemented yet"
+status: "In progress - PR-022-A through PR-022-D implemented, PR-022-D pending review"
 target_milestone: "M11"
 created: "2026-08-16"
 ---
@@ -237,7 +237,192 @@ reason to shrink their own names).
 
 ## PR-022-D - AgentRun creation and route
 
-*Not started.*
+**Scope was redirected before any code, by review request 218 / response 218.** The pack's
+own gate ("a keybinding launches an AgentRun," "`launch_agent_run_with_runtime` gains its
+first production caller") did not say what a real keybinding could honestly launch, and
+research before writing code found the only concrete answer the pack implied — the reference
+adapter — was structurally impossible to ship (a `[[bin]]` of `tekstide-core`, a library
+dependency `cargo install tekstide` does not install). Response 218 redirected the slice: a
+real, code-defined profile for a genuinely installed AI CLI, `Plain`/`Supervised`, no adapter
+protocol needed. Full research and the fork are in
+`.git-exclude/review-request/218-rfc022-pr-022d-profile-source-question.md`; the redirection
+is `.git-exclude/reviewed/tekstide-review-request-218-profile-source-response.md`. Everything
+below implements that redirection, not the pack's original wording.
+
+**The unaffected half of the gate, done first, exactly as scoped.** Response 217/218 both
+state resource limits, the selected-run concept, and the keybinding collision check are
+unchanged by the profile-source question. Built in that order, before the profile:
+
+- `ProjectSession.selected_agent_run: Option<AgentRunId>` — an explicit field, not derived at
+  render time the way `active_terminal_focus` derives "which terminal" from
+  `VisibleSlot::Primary`. There is no slot system for agent runs and RFC-022 does not build
+  one, so there is nothing to derive from. Set on every successful `attach_agent_launch_plan`,
+  moving to the most recently launched run — proven by
+  `attach_agent_launch_plan_selects_the_just_launched_run`, which launches two runs in
+  sequence and checks selection moves with the second, not just that it is set at all.
+- `ProjectAgentLaunchError::AgentRunLimitExceeded { limit }`, enforced inside
+  `attach_agent_launch_plan` itself — the same shape and the same reasoning
+  `ProjectTerminalError::SessionLimitExceeded`/`add_terminal_session` already established
+  (a limit enforced at the call site is one the next caller forgets), restated because
+  response 217 flagged this as the first slice where a user action can spawn a real,
+  transcript-capturing, audited process. **Ablated**: replaced the real check with a
+  structurally-similar but inert one (`if false && ...`), ran
+  `agent_run_limit_is_enforced_with_a_typed_refusal` — it failed with `Ok(AgentRunId(...))`
+  where `Err(AgentRunLimitExceeded { limit: 1 })` was expected, i.e. the second, over-limit
+  launch silently succeeded. Restored, reran clean.
+- `NavigationAction::LaunchAgentRun`, `Ctrl+Alt+A` (the established `Ctrl+Alt+<letter>`
+  shape — `P`, `M`, `T` already taken, `A` for Agent), `Candidate` status. Checked
+  mechanically, not by inspection, the same way every other candidate binding in this file
+  is: `launch_agent_run_shortcut_is_a_candidate_that_collides_with_no_other_rule` enumerates
+  every *other* rule's binding and asserts none match, so a future `Reserved` addition would
+  be caught here too, not only a hand-picked one.
+- `launch_agent_run_with_runtime` de-gated: `#[cfg(test)] pub(crate)` → `pub`. This alone
+  does not satisfy "first production caller" — the internal tests already called it under
+  `#[cfg(test)]` visibility before this slice. What makes the claim true is the new,
+  non-test caller below.
+
+**The profile: `AiCliProfile::claude_code_linux_default()`, pointed at a real, genuinely
+installed AI CLI.** `claude` (Claude Code), confirmed installed on the reference dev machine
+at `~/.local/bin/claude` (a symlink) — not found via bare `which`/`command -v` in the
+sandboxed test shell's own `PATH`, confirming `~/.local/bin` needed to be an explicit
+`ExecutableLookupPath`, not assumed reachable via inherited `PATH` search (which this
+profile type deliberately does not do at all — `AiCliExecutable::PathLookup` walks an
+explicit, reviewed list, never `$PATH`). Lookup order: `$HOME/.local/bin`, `/usr/local/bin`,
+`/usr/bin`; `$HOME` unavailable degrades to the last two only, never substituting anything
+silently — both shapes proven by
+`claude_code_profile_lookup_paths_prefer_home_local_bin_when_home_is_set` and
+`claude_code_profile_falls_back_to_system_paths_only_without_home`.
+
+`compatibility_level: Supervised` — no adapter protocol needed, matching response 218's own
+reasoning (`Managed`/command approval remains reachable only through the reference adapter;
+this profile does not attempt to change that, and RFC-022's own claim-narrowing consequence
+is the architect's to record, not this slice's to solve).
+
+`workspace_discovery_policy: MayDiscoverWorkspaceFiles`, not `NoKnownWorkspaceDiscovery` —
+the honest choice, not the convenient one: Claude Code genuinely reads project files as part
+of normal operation, and profile.rs's `evidence()`/`validate_workspace_discovery_policy`
+(`agent/launch.rs`) treat this as a real declaration, not free-text description. Restated
+here because it has a real, load-bearing consequence below.
+
+`transcript_policy` left at `AiCliProfile::new`'s default — confirmed by reading
+`validate_transcript_policy` (`agent/launch.rs`) that this field is purely descriptive and
+never consulted by launch validation; only `AgentRunLaunchRequest`'s own
+`transcript_capture_mode`/`transcript_state_root` matter, and those are set by the GUI's
+launch call, not the profile.
+
+**A finding response 218 did not anticipate, found while trying to test the "no AI CLI
+found" case it named as the common first-run state.** `MayDiscoverWorkspaceFiles`'s honest
+consequence is that `validate_workspace_discovery_policy` refuses in any `Restricted`
+project — and **every project defaults to `Restricted`** (`WorkspaceTrust::Restricted`,
+`ProjectSession::new`), and **nothing in the shipped GUI, anywhere, grants trust.**
+`grep`-confirmed: no call to `grant_trust`/`revoke_trust`/any construction of
+`WorkspaceTrust::Trusted` exists in `crates/tekstide/src` at all. `grant_trust` itself is
+`pub(crate)` to `tekstide-core`, unreachable even from this crate's own tests.
+
+The consequence: **`Ctrl+Alt+A`, as built, refuses with `WorkspaceDiscoveryBlocked` for
+every real user, every time, regardless of whether Claude Code is installed.** "No AI CLI
+found" — the message response 218 called "the common, honest first-run state" — is
+currently unreachable through the real keybinding, not common. This is not a bug in the
+executable-resolution logic (proven separately below, with a controlled test profile) and
+not something this slice should route around by weakening the profile's honest disclosure —
+that would repeat exactly the mistake response 218 corrected in the pack's own Option B
+framing, dishonesty dressed as a workaround. It is a real gap one RFC boundary over from this
+one (RFC-014's trust system has no GUI-reachable grant path yet, a fact this slice's own
+launch profile is the first thing to make load-bearing), and I'm recording it rather than
+silently building around it, the same discipline response 218 itself modelled when it
+recorded RFC-022's own claim-narrowing consequence rather than quietly absorbing it.
+
+Proven, not asserted:
+`agent_run_launch_shell_input_switches_to_terminal_immersion_and_shows_the_real_trust_refusal`
+drives the real `Ctrl+Alt+A` dispatch path (`update` → `app_command_for` →
+`attempt_agent_run_launch`, the real, hardcoded-to-`claude_code_linux_default` production
+function) against a freshly opened, never-trusted project and gets exactly
+`WorkspaceDiscoveryBlocked` — the actual, current, disclosed behaviour of this keybinding
+today, not a gap in the test.
+
+**A related, smaller, non-blocking gap in the same family:** `agent_run_limit` is enforced
+in core now, but `ProjectResourceLimits` has no setter reachable from the GUI crate either —
+a real user cannot configure a finite limit, only a code-level default (`None`, unlimited)
+applies. Same shape `terminal_session_limit`'s already-shipped default of 6 has always had
+(not user-configurable either); not a regression this slice introduces, just newly visible
+because this slice is the first to give `agent_run_limit` a reader at all.
+
+**The production spawn plumbing itself, proven correct against a controlled test profile —
+deliberately never against the real, live Claude Code CLI.** Spawning the real product in an
+automated test would mean real interactive auth, real network calls, and an unbounded hang
+waiting on stdin; unsafe and unbounded, not merely slow. Every real-process test in this
+slice (both crates) instead points a profile built the same way `built_in_profile` already
+does at a short, in-repo shell script — the established "real spawn machinery, controlled
+test artifact" shape this whole RFC's test suite already uses for the reference adapter.
+
+- `a_trusted_project_launches_a_real_claude_code_profile_through_the_production_spawn_path`
+  (`tekstide-core`): a **trusted** project (`grant_trust`, reachable inside `tekstide-core`'s
+  own tests only), a `claude_code_from_env` profile pointed at a fake `$HOME/.local/bin/claude`
+  script, validated and launched through the de-gated, now-`pub`
+  `ProjectSession::launch_agent_run_with_runtime` — the exact entry point the GUI's
+  production caller below also calls. Confirms the profile, once trusted, genuinely resolves
+  and launches: `Running` status, a real terminal id, `selected_agent_run` set.
+- `attempt_agent_run_launch_with_profile_spawns_registers_and_selects_a_real_run`
+  (`tekstide`): the GUI-side counterpart, proving `attempt_agent_run_launch`'s full
+  downstream chain (`AppState::launch_agent_run_with_runtime` → `TerminalPane::from_launched`
+  → pane registration) with a fake, `NoKnownWorkspaceDiscovery`-policy profile (bypassing the
+  trust gate proven separately above, since this crate cannot grant trust at all) pointed at
+  a controlled executable. **Ablated twice**: (1) disabled the `not-found` refusal-symbol
+  mapping — `agent_run_launch_refusal_text_renders_the_not_found_reason_honestly` failed,
+  rendering the generic "Couldn't start an agent run" instead of "No AI CLI found"; restored.
+  (2) removed the `state.terminal_panes.push(pane)` call —
+  `attempt_agent_run_launch_with_profile_spawns_registers_and_selects_a_real_run` failed,
+  `terminal_panes.len()` `0` where `1` was expected; restored.
+
+**`TerminalPane::from_launched`, not a second construction path.** Rather than build a
+parallel agent-run pane/rendering/subscription pipeline, `launch()` was refactored to share
+its tail (spawn the reader thread, build the emulator fields) with a new `from_launched`
+constructor that wraps an *already-launched* runtime/handle. This means an agent run's
+terminal is picked up by the exact same `state.terminal_panes`/wake-subscription/
+`handle_terminal_woke` machinery a plain terminal already uses, with no new subscription code
+— which also closes a real correctness concern, not just an implementation-convenience one:
+an undrained `TerminalReader` channel (bounded, capacity 8) would otherwise eventually block
+the reader thread and, via PTY backpressure, stall the agent's own process. Reusing the
+existing wake-driven drain path means this happens "for free," the same way it already does
+for every plain terminal pane.
+
+**Route.** `AppCommand::LaunchAgentRun` reuses `open_active_project_terminal_workspace()` —
+the same `TerminalImmersion` landing `LaunchTerminal` uses — since an agent run is a real PTY
+session the user should be able to see, not a new route. `NavigationAction::OpenCurrentAgentRunDetail`
+now maps to `AppCommand::OpenActiveProjectSurface(ProjectOpenSurface::AgentRunDetail)`
+(previously `None`, i.e. wired to nothing at all) — the route half of the gate's "reach a
+run's detail" requirement; no detail *view* content is built, confirmed out of scope for this
+slice by the pack's own text.
+
+**Refusal type.** `AgentRunLaunchRefusal` mirrors `TerminalLaunchRefusal`'s established shape
+exactly: a private enum, a `_symbol` fn to a compile-time literal, a `_text` fn doing one
+Fluent lookup (`agent-run-launch-refused` in `en.ftl`), a `State` field cleared at the start
+of every attempt, rendered conditionally in `terminal_workspace_view` alongside the existing
+terminal/paste notices. `not-found` and `workspace-blocked` get their own select arms because
+those are the two outcomes response 218's own text asked to be distinguishable from a
+generic failure; everything else in `AgentRunLaunchValidationError` falls to the same
+`*[error]` arm `TerminalLaunchRefusal` already uses for its own rarer cases.
+
+**State root.** Agent-run transcript capture reuses `AppStatePathProvider::linux_default()`
+— the exact resolution `open_real_audit_store` already uses (RFC-013's own "one resolution,
+N consumers" convention) — as a third consumer, rather than inventing new XDG resolution
+logic in the GUI crate. Degrades to "no transcript capture for this launch" on failure, not a
+launch refusal: the default `TranscriptCaptureMode::LocalBounded`
+(`AgentRunLaunchRequest::new`'s default) does not reject launch when unavailable, only
+`RequiredLocalBounded` does, and this slice does not ask for that.
+
+**Gates.** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features
+-- -D warnings`, full workspace suite, `git diff --check` — all clean.
+
+- `tekstide-core`: 578 (up from 573 — the five tests named above).
+- `tekstide`: 215 (up from 212 — the three tests named above).
+
+**What this slice does not claim.** It does not make `Ctrl+Alt+A` actually launch anything
+for a real user today — see the trust-gating finding above. It does not build any
+trust-granting UI (RFC-014's territory, undecided whether it belongs to this RFC's own
+closeout or a separate one). It does not change `Managed`/command-approval reachability,
+which response 218 already recorded as the architect's own consequence to carry, not this
+slice's.
 
 ## PR-022-E - The approval dialog
 

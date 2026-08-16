@@ -1,6 +1,7 @@
+use crate::agent::AgentRunLaunchPlan;
 use crate::close::{CloseAssessment, assess_close};
 use crate::content::{ExternalChangeDecision, SaveDecision, TextCursor};
-use crate::domain::{OwnershipError, TerminalId, TerminalSession, VisibleSlot};
+use crate::domain::{AgentRunId, OwnershipError, TerminalId, TerminalSession, VisibleSlot};
 use crate::project::recent::{
     RECENT_PROJECT_STATE_VERSION, RecentProject, RecentProjectAvailability, RecentProjectState,
     RestoredRecentProject, Timestamp, assess_recent_project_availability,
@@ -9,9 +10,10 @@ use crate::project::root::{
     ProjectRootValidationError, ProjectRootValidator, SymlinkPolicy, ValidProjectRoot,
 };
 use crate::project::{
-    ProjectContentError, ProjectId, ProjectMode, ProjectOpenSurface, ProjectSession,
-    ProjectTerminalError,
+    ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectId,
+    ProjectMode, ProjectOpenSurface, ProjectSession, ProjectTerminalError,
 };
+use crate::runtime::terminal::{LinuxTerminalRuntime, TerminalRuntimeEvent};
 
 #[derive(Debug, Default)]
 pub struct AppState {
@@ -234,6 +236,27 @@ impl AppState {
                 OwnershipError::MissingProject,
             ))?;
         project.add_terminal_session(terminal)
+    }
+
+    /// RFC-022 PR-022-D: the same "missing lifecycle glue" gap
+    /// `attach_terminal_session` closed for a plain terminal --
+    /// `ProjectSession::launch_agent_run_with_runtime` existed with no
+    /// caller outside `tekstide-core` itself until this slice. No active
+    /// project maps onto the same `OwnershipError::MissingProject` shape
+    /// `attach_terminal_session` uses, wrapped in `ProjectAgentLaunchError::Ownership`
+    /// so it fits `ProjectAgentRuntimeLaunchError`'s existing `Launch`
+    /// variant rather than adding a second "missing project" case.
+    pub fn launch_agent_run_with_runtime(
+        &mut self,
+        plan: AgentRunLaunchPlan,
+        runtime: &mut LinuxTerminalRuntime,
+    ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
+        let project = self
+            .active_project_mut()
+            .ok_or(ProjectAgentRuntimeLaunchError::Launch(
+                ProjectAgentLaunchError::Ownership(OwnershipError::MissingProject),
+            ))?;
+        project.launch_agent_run_with_runtime(plan, runtime)
     }
 
     /// The other half of the same gap: assigning which slot (`Primary`,

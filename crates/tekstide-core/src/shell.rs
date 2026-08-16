@@ -68,6 +68,11 @@ impl ApplicationShell {
                     self.route = AppRoute::ActiveProjectWorkspace;
                 }
             }
+            AppCommand::LaunchAgentRun => {
+                if self.state.open_active_project_terminal_workspace() {
+                    self.route = AppRoute::ActiveProjectWorkspace;
+                }
+            }
         }
     }
 
