@@ -476,6 +476,20 @@ pub struct State {
     /// Reset to `0` every time a scan succeeds, so it can never point
     /// past the end of a freshly-replaced row list.
     explorer_highlight: usize,
+    /// Response 234: the `ApprovalHistory` surface's own keyboard cursor
+    /// -- the direct analogue of `explorer_highlight` for a second,
+    /// independent list in the same `MainArea` zone. A separate field
+    /// rather than reusing `explorer_highlight`: the two lists render in
+    /// different zones simultaneously reachable in the same Content
+    /// mode session (sidebar explorer vs. main-area history), and their
+    /// row counts are unrelated, so sharing one index would let
+    /// switching surfaces leave a stale, out-of-range highlight behind.
+    /// Not reset when the underlying list's *contents* change between
+    /// key presses (a proposal arriving or expiring while the user is
+    /// browsing) -- the same limitation `explorer_highlight` already
+    /// has relative to a background rescan, clamped defensively on
+    /// every read rather than tracked by id.
+    approval_history_highlight: usize,
     /// RFC-022 PR-022-E ("the arrival model"): the live, security-critical
     /// coordinator. Lives here, not in `tekstide-core::project::ProjectSession`
     /// -- see `ApprovalDialog`'s own doc comment and response 224:
@@ -591,6 +605,7 @@ impl State {
             agent_run_launch_notice: None,
             terminal_paste_notice: None,
             explorer_highlight: 0,
+            approval_history_highlight: 0,
             approval_coordinator: tekstide_core::approval::ApprovalCoordinator::new(),
             approval_channels: Vec::new(),
             approval_proposal_ids: std::collections::HashMap::new(),
@@ -802,8 +817,19 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // the next text is (append-only, see its own doc comment for
             // why); this arm only decides *whether* a key reaches it at
             // all.
+            //
+            // Response 234: `ApprovalHistory` is a third `MainArea`
+            // consumer, and mutually exclusive with the editor -- both
+            // `handle_editor_key` and `handle_approval_history_key`
+            // check `open_surface` themselves rather than this call site
+            // deciding once and dispatching, so neither can silently
+            // read a key meant for the other (an active document left
+            // open underneath a surface switch must not keep editing
+            // from stray keystrokes the user is aiming at the history
+            // list instead).
             if surface_input.target() == FocusZone::MainArea {
                 handle_editor_key(state, surface_input.key());
+                handle_approval_history_key(state, surface_input.key());
             }
         }
         Message::Input(RoutedInput::Terminal(text_stream)) => {
@@ -1661,11 +1687,25 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
 /// doing nothing if it returns `None` -- not an edit key, or nothing to
 /// remove). A no-op outside Content mode or without an active document,
 /// the same shape [`handle_explorer_key`] uses for its own zone.
+///
+/// **Response 234**: also a no-op when `open_surface` is
+/// `ApprovalHistory` -- without this, a document left open from an
+/// earlier `TextEditor` visit would keep silently absorbing keystrokes
+/// the user is aiming at the history list after switching surfaces,
+/// since this function previously had no way to know any other surface
+/// existed (`open_surface` had no real reader anywhere before this
+/// response's own `content_mode_view`). Written as an explicit
+/// exclusion rather than requiring `open_surface == TextEditor`, so the
+/// six still-dormant surfaces keep falling through to the editor
+/// exactly as `content_mode_view`'s own exhaustive match does for them.
 fn handle_editor_key(state: &mut State, key: &input::KeyPress) {
     let Some(project) = state.app_shell.state().active_project() else {
         return;
     };
     if project.mode() != ProjectMode::Content {
+        return;
+    }
+    if project.open_surface() == ProjectOpenSurface::ApprovalHistory {
         return;
     }
     let Some(document) = project.content_workspace().active_document() else {
@@ -1690,6 +1730,79 @@ fn handle_editor_key(state: &mut State, key: &input::KeyPress) {
     if let Some(new_cursor) = crate::surface::editor::navigate_cursor(&text, cursor, &key.key) {
         let _ = state.app_shell.set_active_project_cursor(new_cursor);
     }
+}
+
+/// Response 234: keyboard access for the `ApprovalHistory` surface --
+/// the same Up/Down-moves-highlight, Enter-activates shape
+/// [`handle_explorer_key`] already establishes for the sidebar's own
+/// list, so this crate's one interaction model (Tab/focus-marker/Enter)
+/// covers the history list too, not only its mouse button.
+///
+/// **Why this was required, not optional polish**: RFC-022's own
+/// design (`what-the-dialog-must-not-lie-about.md`, response 231) keeps
+/// `Low`/`Medium` proposals off the promoted-modal path specifically
+/// because *some genuinely are answerable* if the user reaches them
+/// inside the adapter's window -- "reachable" assumed a working
+/// interaction model. A mouse-only list makes every non-promoted
+/// proposal unanswerable in principle for a keyboard user, silently
+/// re-imposing the relabel-as-history design the owner rejected, for
+/// most of this application's own interaction model. Response 234
+/// named this a precedent decision, not a detail.
+///
+/// A no-op outside Content mode, off the `ApprovalHistory` surface, or
+/// with nothing retained to navigate -- the same guard shape
+/// [`handle_explorer_key`] uses for its own zone and list.
+fn handle_approval_history_key(state: &mut State, key: &input::KeyPress) {
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    if project.mode() != ProjectMode::Content
+        || project.open_surface() != ProjectOpenSurface::ApprovalHistory
+    {
+        return;
+    }
+    let row_count = project.approval_requests().len();
+    if row_count == 0 {
+        return;
+    }
+    state.approval_history_highlight = state.approval_history_highlight.min(row_count - 1);
+
+    match &key.key {
+        keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
+            state.approval_history_highlight =
+                (state.approval_history_highlight + 1).min(row_count - 1);
+        }
+        keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
+            state.approval_history_highlight = state.approval_history_highlight.saturating_sub(1);
+        }
+        keyboard::Key::Named(keyboard::key::Named::Enter) => {
+            let Some(project) = state.app_shell.state().active_project() else {
+                return;
+            };
+            let Some(highlighted) = project
+                .approval_requests()
+                .get(state.approval_history_highlight)
+            else {
+                return;
+            };
+            let is_expired = project.expired_approval_ids().contains(&highlighted.id);
+            if approval_request_is_live(highlighted, is_expired) {
+                let approval_id = highlighted.id.clone();
+                open_approval_history_entry(state, &approval_id);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Shared between [`handle_approval_history_key`]'s Enter handling and
+/// [`approval_history_entry_view`]'s own control-vs-plain-text decision
+/// -- one definition of "live," not two that could drift apart.
+fn approval_request_is_live(
+    request: &tekstide_core::domain::ApprovalRequest,
+    is_expired: bool,
+) -> bool {
+    request.decision == tekstide_core::domain::ApprovalDecision::Pending && !is_expired
 }
 
 /// RFC-019 PR-019-D: `Ctrl+S`'s real handler. status-mapping-honesty-fixes
@@ -3817,9 +3930,15 @@ fn approval_history_view(state: &State) -> Element<'_, Message> {
                 .into(),
         );
     } else {
-        for request in requests {
+        let highlight = state.approval_history_highlight.min(requests.len() - 1);
+        for (index, request) in requests.iter().enumerate() {
             let is_expired = project.expired_approval_ids().contains(&request.id);
-            lines.push(approval_history_entry_view(state, request, is_expired));
+            lines.push(approval_history_entry_view(
+                state,
+                request,
+                is_expired,
+                index == highlight,
+            ));
         }
     }
 
@@ -3835,20 +3954,24 @@ fn approval_history_view(state: &State) -> Element<'_, Message> {
 /// is plain, unclickable text -- there is nothing left to decide about
 /// an already-decided or expired entry, and offering a control that
 /// cannot work is the same defect RFC-022 names for expiry itself
-/// ("visibly unanswerable, not merely fail when acted on").
+/// ("visibly unanswerable, not merely fail when acted on"). `highlighted`
+/// marks the row `handle_approval_history_key`'s Up/Down currently sits
+/// on, with the same `focus_marker` convention (`"> "`/`"  "`) every
+/// other keyboard-navigable list and modal in this crate already uses --
+/// a textual channel, not colour alone (`NFR-UX-002`).
 fn approval_history_entry_view<'a>(
     state: &'a State,
     request: &'a tekstide_core::domain::ApprovalRequest,
     is_expired: bool,
+    highlighted: bool,
 ) -> Element<'a, Message> {
-    let body = text(approval_history_entry_body(
-        &state.catalog,
-        request,
-        is_expired,
+    let body = text(format!(
+        "{}{}",
+        focus_marker(highlighted),
+        approval_history_entry_body(&state.catalog, request, is_expired)
     ))
     .size(state.theme.font_size_status());
-    let is_live =
-        request.decision == tekstide_core::domain::ApprovalDecision::Pending && !is_expired;
+    let is_live = approval_request_is_live(request, is_expired);
 
     let content: Element<'_, Message> = if is_live {
         column![

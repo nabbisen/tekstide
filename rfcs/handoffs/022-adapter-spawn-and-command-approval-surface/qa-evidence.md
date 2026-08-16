@@ -1159,11 +1159,56 @@ manually and decided for real through the same coordinator),
 no-bulk-approval (priority item 5 -- satisfied by omission today, no multi-select UI exists to
 violate it, but nothing fails by name if one is added later); the active-project-change
 promotion-re-evaluation trigger (priority item 6, still blocked on project-switching existing
-at all anywhere in the GUI); keyboard navigation for the history list's own entries.
+at all anywhere in the GUI).
 
 Full gate clean: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
 --all-features -- -D warnings`, full workspace suite (`tekstide` 235, up from 229 -- six new
 tests; `tekstide-core` 594, unchanged), `git diff --check`.
+
+### Keyboard access for the history list (response 234, not blocking but required before closeout)
+
+Response 234 accepted the surface but named the mouse-only list as more than an accessibility
+note: every other interactive control in this crate is keyboard-driven (Tab/focus-marker/
+Enter), so a mouse-only history list made every non-promoted proposal unanswerable *in
+principle* for a keyboard user -- silently re-imposing the relabel-as-history design the owner
+had already rejected (response 231: "some genuinely are answerable" assumed a working
+interaction model), for most of this application's own interaction model. Called a precedent
+decision, not a detail, and required before PR-022-F could close.
+
+**Built**: `handle_approval_history_key`, the same Up/Down-moves-highlight, Enter-activates
+shape `handle_explorer_key` already establishes for the sidebar's own list. A new
+`state.approval_history_highlight: usize` field (the direct analogue of `explorer_highlight`,
+kept separate since the two lists live in different zones with unrelated row counts). Wired
+into `FocusZone::MainArea`'s existing `RoutedInput::Surface` handling alongside
+`handle_editor_key`. `approval_history_entry_view` renders the same `focus_marker` convention
+(`"> "`/`"  "`) every other keyboard-navigable list and modal in this crate already uses on the
+currently-highlighted row.
+
+**A second real defect found while wiring this, before it could ship**: `handle_editor_key`
+had no way to know any surface other than the editor existed (`open_surface` had no real
+reader before response 233's own work), so a document left open from an earlier `TextEditor`
+visit kept silently absorbing keystrokes after switching to `ApprovalHistory` -- a key not
+handled by the history list's own Up/Down/Enter (an ordinary character, say) would fall
+through and edit the hidden document instead of doing nothing. **Fixed**: `handle_editor_key`
+now returns immediately when `open_surface() == ApprovalHistory`, written as an explicit
+exclusion (not "require `TextEditor`") so the six still-dormant surfaces keep falling through
+to the editor exactly as `content_mode_view`'s own exhaustive match already treats them.
+**Ablated**: reverted the guard, reran
+`switching_to_approval_history_stops_the_hidden_document_from_absorbing_keystrokes` -- failed
+with the document text becoming `"!hello"` instead of staying `"hello"`, confirming the exact
+leak. Restored, reran clean.
+
+**Four new tests, all real routing** (`crate::input::surface_input_for_test`, not
+`apply_edit_key`/`handle_approval_history_key` called directly): `arrow_keys_move_the_approval_history_highlight`
+(two real, retained requests -- one alone would leave nothing for Down to move to; also proves
+clamping at both ends), `enter_on_the_highlighted_live_entry_opens_the_real_dialog` (the
+keyboard equivalent of the mouse control, same real dialog and coordinator),
+`enter_on_a_decided_highlighted_entry_does_nothing` (Enter must not act on a request with
+nothing left to decide, the same property the mouse control's own conditional rendering
+already enforces), `switching_to_approval_history_stops_the_hidden_document_from_absorbing_keystrokes`
+(the leak fix above, ablated as described).
+
+Full gate clean: `tekstide` 239 (up from 235), `tekstide-core` 594 (unchanged).
 
 ## PR-022-F - Closeout
 

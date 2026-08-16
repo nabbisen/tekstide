@@ -2685,6 +2685,220 @@ fn manually_opening_an_entry_does_not_replace_an_already_open_modal() {
     }
 }
 
+fn press(key: iced::keyboard::Key) -> crate::input::KeyPress {
+    crate::input::KeyPress {
+        key,
+        modifiers: iced::keyboard::Modifiers::empty(),
+    }
+}
+
+fn send_main_area_key(state: &mut State, key: iced::keyboard::Key) {
+    let routed = crate::input::RoutedInput::Surface(crate::input::surface_input_for_test(
+        FocusZone::MainArea,
+        press(key),
+    ));
+    let _ = super::update(state, Message::Input(routed));
+}
+
+/// Response 234: the reviewer's own required change -- every other
+/// interactive list in this crate (the explorer) is keyboard-navigable,
+/// and a mouse-only history list silently re-imposes the "some
+/// non-promoted proposals are unanswerable" design the owner rejected,
+/// for every keyboard user. Proves Up/Down actually move
+/// `state.approval_history_highlight`, the same real-routing shape
+/// `a_typed_key_edits_the_real_active_document_through_real_routing`
+/// already establishes for the editor's own zone.
+#[test]
+fn arrow_keys_move_the_approval_history_highlight() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-history-arrow-nav");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    // Two real, retained requests -- one launch alone would leave
+    // nothing for Down to move *to*.
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| project.approval_requests().len() == 2)
+    });
+
+    state.app_shell.dispatch(
+        tekstide_core::command::AppCommand::OpenActiveProjectSurface(
+            tekstide_core::project::ProjectOpenSurface::ApprovalHistory,
+        ),
+    );
+    assert_eq!(state.approval_history_highlight, 0, "test precondition");
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown),
+    );
+    assert_eq!(
+        state.approval_history_highlight, 1,
+        "ArrowDown must move the highlight to the second retained request"
+    );
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown),
+    );
+    assert_eq!(
+        state.approval_history_highlight, 1,
+        "ArrowDown must clamp at the last row, not run past it"
+    );
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
+    );
+    assert_eq!(
+        state.approval_history_highlight, 0,
+        "ArrowUp must move the highlight back up"
+    );
+}
+
+/// Enter on the highlighted row is the keyboard equivalent of the
+/// mouse control `manually_opening_a_low_risk_live_entry_bypasses_the_promotion_predicate`
+/// already proves -- same real dialog, same real coordinator, reached
+/// by a different input this time.
+#[test]
+fn enter_on_the_highlighted_live_entry_opens_the_real_dialog() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-history-enter-live");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    let request_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .id
+        .clone();
+
+    state.app_shell.dispatch(
+        tekstide_core::command::AppCommand::OpenActiveProjectSurface(
+            tekstide_core::project::ProjectOpenSurface::ApprovalHistory,
+        ),
+    );
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+
+    match state.modal {
+        Some(ModalContent::Approval(ref dialog)) => {
+            assert_eq!(dialog.request.id, request_id);
+        }
+        ref other => panic!("Enter on a live, highlighted entry must open the dialog: {other:?}"),
+    }
+}
+
+/// The keyboard path must respect "nothing left to decide" exactly the
+/// way the mouse control does (no button rendered at all for a
+/// non-live entry) -- Enter on a decided entry must not open anything.
+#[test]
+fn enter_on_a_decided_highlighted_entry_does_nothing() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-history-enter-decided");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    let request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    let proposal_id = state.approval_proposal_ids[&request.id].clone();
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog::for_test(
+        request.clone(),
+        proposal_id,
+        ApprovalDialogButton::Reject,
+    ))));
+    let _ = super::update(&mut state, Message::ModalActivate);
+    assert!(
+        state.modal.is_none(),
+        "test precondition: decided and closed"
+    );
+
+    state.app_shell.dispatch(
+        tekstide_core::command::AppCommand::OpenActiveProjectSurface(
+            tekstide_core::project::ProjectOpenSurface::ApprovalHistory,
+        ),
+    );
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+
+    assert!(
+        state.modal.is_none(),
+        "Enter on a decided entry must not open anything -- there is nothing left to decide"
+    );
+}
+
+/// Response 234's own required fix, proven directly: a document left
+/// open from an earlier `TextEditor` visit must not keep absorbing
+/// keystrokes once the surface has switched to `ApprovalHistory`. `!`
+/// is not one of `handle_approval_history_key`'s own keys
+/// (Up/Down/Enter only) -- if `handle_editor_key`'s new guard were
+/// missing, this exact key would silently reach the hidden document.
+#[test]
+fn switching_to_approval_history_stops_the_hidden_document_from_absorbing_keystrokes() {
+    let (mut state, _dir) = state_with_an_open_document("approval-history-editor-leak", "hello");
+    let before = active_document_text(&state);
+
+    state.app_shell.dispatch(
+        tekstide_core::command::AppCommand::OpenActiveProjectSurface(
+            tekstide_core::project::ProjectOpenSurface::ApprovalHistory,
+        ),
+    );
+    send_main_area_key(&mut state, iced::keyboard::Key::Character("!".into()));
+
+    assert_eq!(
+        active_document_text(&state),
+        before,
+        "a key aimed at the ApprovalHistory surface must not edit a document hidden behind it"
+    );
+}
+
 /// Response 228 Required 2, the other pruning route. Deliberately uses
 /// an **expired**, not decided, first entry: `decide_approval` already
 /// prunes its own entry immediately (proven above), so a decided entry
