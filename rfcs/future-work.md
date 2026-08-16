@@ -244,6 +244,24 @@ Status: substrate decided, application shell, and mode switching implemented by 
 
   **Until then**, the honest public statement stands unchanged: command approval is implemented, unreachable, and cooperative rather than enforced.
 
+- **The Tekstide state root lives on the transcript subsystem, and other subsystems have to
+  reach through it.** Found 2026-08-16 by RFC-022 PR-022-C (review request 216, response
+  216). `prepare_adapter_approval` needs somewhere to bind an approval socket, and the only
+  available answer was `spec.transcript_capture.state_root` — so the approval channel now
+  depends on transcript configuration for a value that has nothing to do with transcripts.
+
+  **The immediate consequence** (required fix in that slice): `without_transcript_capture()`
+  clears `transcript_state_root`, and `prepare_adapter_approval` requires it, so a `Managed`
+  run that opts out of transcript capture cannot launch. It fails **closed**, which is the
+  correct direction, and there is a defensible argument that an approved run should have a
+  record — **but nobody made that argument.** The policy emerged from one field serving two
+  purposes, and RFC-011 offers per-run opt-out as a documented privacy control.
+
+  **The structural point outlives the fix.** The state root is conceptually *Tekstide's*,
+  not the transcript subsystem's. The next subsystem needing app-level state will face the
+  same reach-through, and the one after that. Whoever restructures it should expect the
+  transcript field to have accumulated dependents by then.
+
 - **RFC-021's approval protocol has no client surface, and no adapter can be written
   against it.** Found 2026-08-16 by RFC-022 PR-022-B — the first thing ever to speak the
   protocol from outside `approval::channel` (review request 215, response 215).
