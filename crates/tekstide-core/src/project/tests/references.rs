@@ -25,7 +25,9 @@ fn approval_requests_reject_missing_agent_run_references() {
 
     assert_eq!(
         project.add_approval_request(approval),
-        Err(OwnershipError::MissingReference)
+        Err(crate::project::ProjectApprovalError::Ownership(
+            OwnershipError::MissingReference
+        ))
     );
     assert!(project.approval_requests().is_empty());
 }

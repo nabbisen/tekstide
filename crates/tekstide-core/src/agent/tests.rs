@@ -1015,6 +1015,7 @@ fn a_real_adapter_completes_a_real_approval_round_trip_through_the_production_sp
         &project_root,
         &state_root,
         accepted,
+        crate::approval::ApprovalQueueLimits::default(),
         &mut audit.coordinator(),
     );
     assert!(
@@ -1180,6 +1181,7 @@ fn a_managed_launch_can_bind_its_approval_channel_without_transcript_capture() {
         &project_root,
         &approval_state_root,
         accepted,
+        crate::approval::ApprovalQueueLimits::default(),
         &mut audit.coordinator(),
     );
     assert!(
@@ -1801,6 +1803,7 @@ fn agent_run_limit_is_enforced_with_a_typed_refusal() {
         terminal_session_limit: None,
         agent_run_limit: Some(1),
         approval_request_limit: None,
+        agent_run_approval_limit: None,
     });
     let profile = built_in_profile(&executable);
 

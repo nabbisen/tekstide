@@ -26,7 +26,10 @@ pub use channel::{
     ApprovalChannelPathRequest, ApprovalChannelPathResolver, ServeShutdown,
     inject_token_into_environment,
 };
-pub use coordinator::{ApprovalCoordinator, DecideOutcome, ReceiveOutcome, SimpleDecision};
+pub use coordinator::{
+    ApprovalCoordinator, ApprovalQueueLimitScope, ApprovalQueueLimits, DecideOutcome,
+    ReceiveOutcome, SimpleDecision,
+};
 pub use protocol::{
     CommandDecision, CommandProposal, DecisionOutcome, DecisionValidationError,
     DecisionValidationErrorReason, MAX_ARGV_ENTRIES, MAX_ARGV_ENTRY_LEN, MAX_ARGV_TOTAL_LEN,

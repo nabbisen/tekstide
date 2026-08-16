@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use crate::agent::VerifiedCwd;
 use crate::approval::{
-    AcceptedProposal, ApprovalCoordinator, CommandProposal, DecideOutcome, ReceiveOutcome,
-    SimpleDecision, classify,
+    AcceptedProposal, ApprovalCoordinator, ApprovalQueueLimitScope, ApprovalQueueLimits,
+    CommandProposal, DecideOutcome, ReceiveOutcome, SimpleDecision, classify,
 };
 use crate::audit::{
     AuditCoordinator, AuditHealth, AuditPathRequest, AuditPathResolver, AuditStore,
@@ -76,6 +76,29 @@ fn receive(
     command_proposal: &CommandProposal,
     audit: &mut AuditCoordinator,
 ) -> (ReceiveOutcome, UnixStream) {
+    receive_with_limits(
+        coordinator,
+        agent_run_id,
+        verified_cwd,
+        command_proposal,
+        ApprovalQueueLimits::default(),
+        audit,
+    )
+}
+
+/// RFC-022 PR-022-E: [`receive`] with an explicit
+/// [`ApprovalQueueLimits`] -- `receive` itself passes `::default()`
+/// (both bounds `None`, i.e. unlimited), which is what every
+/// pre-existing test in this file wants; only the queue-limit tests
+/// need this fuller form.
+fn receive_with_limits(
+    coordinator: &mut ApprovalCoordinator,
+    agent_run_id: &AgentRunId,
+    verified_cwd: &str,
+    command_proposal: &CommandProposal,
+    limits: ApprovalQueueLimits,
+    audit: &mut AuditCoordinator,
+) -> (ReceiveOutcome, UnixStream) {
     let (accepted, peer) = AcceptedProposal::for_test(command_proposal.clone());
     let outcome = coordinator.receive_proposal(
         ProjectId::for_test(1),
@@ -84,6 +107,7 @@ fn receive(
         Path::new(PROJECT_ROOT),
         Path::new(STATE_ROOT),
         accepted,
+        limits,
         audit,
     );
     (outcome, peer)
@@ -367,6 +391,196 @@ fn is_still_answerable_is_false_for_unknown_and_already_decided_requests() {
         !coordinator.is_still_answerable(&agent_run_id, &proposal_id),
         "an already-decided request is not still answerable, even though its connection \
          is still open"
+    );
+}
+
+/// RFC-022 PR-022-E ("the arrival model"), response 224: "a looping
+/// adapter must exhaust its own budget, not starve another agent's
+/// proposals." Two live proposals admitted under a limit of two; a third
+/// refused with the real limit named. **Live only**: expiring one of the
+/// two (dropping its peer) frees a slot for a new one, proving the bound
+/// counts open connections, not history -- the fd-exhaustion rationale
+/// response 224 gave for why this bound exists at all.
+#[test]
+fn agent_run_queue_limit_is_enforced_and_only_counts_live_entries() {
+    let mut coordinator = ApprovalCoordinator::new();
+    let agent_run_id = AgentRunId::for_test(1);
+    let mut test_audit = TestAudit::new("agent-run-queue-limit");
+    let limits = ApprovalQueueLimits {
+        per_agent_run: Some(2),
+        per_project: None,
+    };
+
+    let first = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let (outcome, first_peer) = receive_with_limits(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &first,
+        limits,
+        &mut test_audit.coordinator(),
+    );
+    assert!(matches!(outcome, ReceiveOutcome::Created { .. }));
+
+    let second = proposal("proposal-2", &["git", "diff"], PROJECT_ROOT);
+    let (outcome, _second_peer) = receive_with_limits(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &second,
+        limits,
+        &mut test_audit.coordinator(),
+    );
+    assert!(matches!(outcome, ReceiveOutcome::Created { .. }));
+
+    let third = proposal("proposal-3", &["git", "log"], PROJECT_ROOT);
+    let (outcome, _third_peer) = receive_with_limits(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &third,
+        limits,
+        &mut test_audit.coordinator(),
+    );
+    assert!(
+        matches!(
+            outcome,
+            ReceiveOutcome::QueueLimitExceeded {
+                scope: ApprovalQueueLimitScope::PerAgentRun,
+                limit: 2
+            }
+        ),
+        "a third live proposal under a limit of two must be refused, naming the real limit: \
+         {outcome:?}"
+    );
+
+    // Expire the first proposal -- its slot must now be free.
+    drop(first_peer);
+    let fourth = proposal("proposal-4", &["git", "log", "-1"], PROJECT_ROOT);
+    let (outcome, _fourth_peer) = receive_with_limits(
+        &mut coordinator,
+        &agent_run_id,
+        PROJECT_ROOT,
+        &fourth,
+        limits,
+        &mut test_audit.coordinator(),
+    );
+    assert!(
+        matches!(outcome, ReceiveOutcome::Created { .. }),
+        "an expired entry must not continue occupying the live budget: {outcome:?}"
+    );
+}
+
+/// The project-wide half of the same requirement -- one project, two
+/// different `AgentRun`s, a per-project ceiling lower than what either
+/// run's own per-run budget alone would allow.
+#[test]
+fn project_wide_queue_limit_is_enforced_across_agent_runs() {
+    let mut coordinator = ApprovalCoordinator::new();
+    let run_a = AgentRunId::for_test(1);
+    let run_b = AgentRunId::for_test(2);
+    let mut test_audit = TestAudit::new("project-queue-limit");
+    let limits = ApprovalQueueLimits {
+        per_agent_run: None,
+        per_project: Some(2),
+    };
+
+    let first = proposal("proposal-1", &["git", "status"], PROJECT_ROOT);
+    let (outcome, _peer) = receive_with_limits(
+        &mut coordinator,
+        &run_a,
+        PROJECT_ROOT,
+        &first,
+        limits,
+        &mut test_audit.coordinator(),
+    );
+    assert!(matches!(outcome, ReceiveOutcome::Created { .. }));
+
+    let second = proposal("proposal-2", &["git", "diff"], PROJECT_ROOT);
+    let (outcome, _peer) = receive_with_limits(
+        &mut coordinator,
+        &run_b,
+        PROJECT_ROOT,
+        &second,
+        limits,
+        &mut test_audit.coordinator(),
+    );
+    assert!(
+        matches!(outcome, ReceiveOutcome::Created { .. }),
+        "the project-wide budget is shared across agent runs, not per-run: {outcome:?}"
+    );
+
+    let third = proposal("proposal-3", &["git", "log"], PROJECT_ROOT);
+    let (outcome, _peer) = receive_with_limits(
+        &mut coordinator,
+        &run_a,
+        PROJECT_ROOT,
+        &third,
+        limits,
+        &mut test_audit.coordinator(),
+    );
+    assert!(
+        matches!(
+            outcome,
+            ReceiveOutcome::QueueLimitExceeded {
+                scope: ApprovalQueueLimitScope::PerProject,
+                limit: 2
+            }
+        ),
+        "a third live proposal for the project must be refused regardless of which run sent \
+         it: {outcome:?}"
+    );
+}
+
+/// Response 224's required guard: a flat, `AgentRunId`-keyed coordinator
+/// means cross-project data lives in one structure, so nothing about
+/// this data model may let one project's queue pressure affect another's.
+/// Project A held at its own per-project ceiling; project B's proposal
+/// (a different `ProjectId`, arriving on a run of its own) must still be
+/// admitted normally.
+#[test]
+fn queue_limits_do_not_cross_project_boundaries() {
+    let mut coordinator = ApprovalCoordinator::new();
+    let run_in_project_a = AgentRunId::for_test(1);
+    let run_in_project_b = AgentRunId::for_test(2);
+    let mut test_audit = TestAudit::new("cross-project-queue-limit");
+    let limits = ApprovalQueueLimits {
+        per_agent_run: None,
+        per_project: Some(1),
+    };
+
+    let (accepted_a, _peer_a) =
+        AcceptedProposal::for_test(proposal("proposal-a-1", &["git", "status"], PROJECT_ROOT));
+    let outcome_a = coordinator.receive_proposal(
+        ProjectId::for_test(1),
+        run_in_project_a,
+        &VerifiedCwd::for_test(PROJECT_ROOT),
+        Path::new(PROJECT_ROOT),
+        Path::new(STATE_ROOT),
+        accepted_a,
+        limits,
+        &mut test_audit.coordinator(),
+    );
+    assert!(matches!(outcome_a, ReceiveOutcome::Created { .. }));
+
+    // Project A is now at its own limit of 1. Project B, a different
+    // `ProjectId`, must be unaffected.
+    let (accepted_b, _peer_b) =
+        AcceptedProposal::for_test(proposal("proposal-b-1", &["git", "status"], PROJECT_ROOT));
+    let outcome_b = coordinator.receive_proposal(
+        ProjectId::for_test(2),
+        run_in_project_b,
+        &VerifiedCwd::for_test(PROJECT_ROOT),
+        Path::new(PROJECT_ROOT),
+        Path::new(STATE_ROOT),
+        accepted_b,
+        limits,
+        &mut test_audit.coordinator(),
+    );
+    assert!(
+        matches!(outcome_b, ReceiveOutcome::Created { .. }),
+        "project B's proposal must not be refused by project A's own queue pressure: \
+         {outcome_b:?}"
     );
 }
 

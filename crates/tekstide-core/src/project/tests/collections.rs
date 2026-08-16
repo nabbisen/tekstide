@@ -215,6 +215,169 @@ fn agent_approval_and_change_collections_feed_project_runtime_summary() {
     assert_eq!(run.change_set_ids, vec![change_set_id]);
 }
 
+/// RFC-022 PR-022-E ("the arrival model"): "expired proposals stop
+/// counting toward `pending_approvals`" -- proven against the real
+/// field, not asserted about the concept. `decision` staying `Pending`
+/// is the point: nobody decided, and `mark_approval_expired` must not
+/// change that, only what counts toward attention.
+#[test]
+fn mark_approval_expired_excludes_it_from_pending_approvals_without_changing_its_decision() {
+    let mut project = project_session(1);
+    let approval = ApprovalRequest::pending(
+        project.id().clone(),
+        None,
+        "command",
+        "cargo test",
+        RiskLevel::Medium,
+        Vec::new(),
+        "/workspace/project-1",
+    );
+    let approval_id = approval.id.clone();
+    project.add_approval_request(approval).unwrap();
+    assert_eq!(project.runtime_summary().pending_approvals, 1);
+
+    project.mark_approval_expired(&approval_id).unwrap();
+
+    assert_eq!(
+        project.runtime_summary().pending_approvals,
+        0,
+        "an expired request must stop counting toward pending_approvals"
+    );
+    let stored = project
+        .approval_requests()
+        .iter()
+        .find(|request| request.id == approval_id)
+        .expect("the expired request must still be retained, not removed");
+    assert_eq!(
+        stored.decision,
+        crate::domain::ApprovalDecision::Pending,
+        "nobody decided -- expiry must not change that"
+    );
+    assert!(project.expired_approval_ids().contains(&approval_id));
+}
+
+/// RFC-022 PR-022-E: `approval_requests` retention is bounded by
+/// `approval_request_limit`, the same field that bounds
+/// `ApprovalCoordinator`'s live queue (response 224) -- but here it
+/// evicts the oldest **terminal** (decided or expired) entry to make
+/// room, rather than refusing outright, since refusing would silently
+/// desync this registry from whatever `ApprovalCoordinator` already
+/// accepted.
+#[test]
+fn approval_request_retention_limit_evicts_the_oldest_terminal_entry() {
+    let mut project = project_session(1);
+    project.set_resource_limits(crate::project::ProjectResourceLimits {
+        visible_terminal_limit: None,
+        terminal_session_limit: None,
+        agent_run_limit: None,
+        approval_request_limit: Some(2),
+        agent_run_approval_limit: None,
+    });
+
+    let first = ApprovalRequest::pending(
+        project.id().clone(),
+        None,
+        "command",
+        "first",
+        RiskLevel::Low,
+        Vec::new(),
+        "/workspace/project-1",
+    );
+    let first_id = first.id.clone();
+    let second = ApprovalRequest::pending(
+        project.id().clone(),
+        None,
+        "command",
+        "second",
+        RiskLevel::Low,
+        Vec::new(),
+        "/workspace/project-1",
+    );
+    let second_id = second.id.clone();
+    project.add_approval_request(first).unwrap();
+    project.add_approval_request(second).unwrap();
+    assert_eq!(project.approval_requests().len(), 2);
+
+    // Mark the first (oldest) as expired -- now evictable.
+    project.mark_approval_expired(&first_id).unwrap();
+
+    let third = ApprovalRequest::pending(
+        project.id().clone(),
+        None,
+        "command",
+        "third",
+        RiskLevel::Low,
+        Vec::new(),
+        "/workspace/project-1",
+    );
+    let third_id = third.id.clone();
+    project
+        .add_approval_request(third)
+        .expect("at capacity, but the expired entry should be evicted to make room");
+
+    assert_eq!(
+        project.approval_requests().len(),
+        2,
+        "the retained total must stay at the limit, not grow past it"
+    );
+    let ids: Vec<_> = project
+        .approval_requests()
+        .iter()
+        .map(|request| request.id.clone())
+        .collect();
+    assert!(
+        !ids.contains(&first_id),
+        "the oldest, now-expired entry must be the one evicted"
+    );
+    assert!(
+        ids.contains(&second_id),
+        "the still-live entry must survive"
+    );
+    assert!(ids.contains(&third_id), "the new entry must be admitted");
+}
+
+/// The backstop half: if every retained entry is genuinely still live
+/// (nothing terminal to evict), a new one at capacity is refused rather
+/// than silently dropping an answerable request from view.
+#[test]
+fn approval_request_retention_limit_refuses_when_nothing_is_evictable() {
+    let mut project = project_session(1);
+    project.set_resource_limits(crate::project::ProjectResourceLimits {
+        visible_terminal_limit: None,
+        terminal_session_limit: None,
+        agent_run_limit: None,
+        approval_request_limit: Some(1),
+        agent_run_approval_limit: None,
+    });
+
+    let first = ApprovalRequest::pending(
+        project.id().clone(),
+        None,
+        "command",
+        "first",
+        RiskLevel::Low,
+        Vec::new(),
+        "/workspace/project-1",
+    );
+    project.add_approval_request(first).unwrap();
+
+    let second = ApprovalRequest::pending(
+        project.id().clone(),
+        None,
+        "command",
+        "second",
+        RiskLevel::Low,
+        Vec::new(),
+        "/workspace/project-1",
+    );
+    assert_eq!(
+        project.add_approval_request(second),
+        Err(crate::project::ProjectApprovalError::RetentionLimitExceeded { limit: 1 }),
+        "with the one retained entry still live, there is nothing to evict"
+    );
+    assert_eq!(project.approval_requests().len(), 1);
+}
+
 #[test]
 fn changeset_review_transition_updates_project_runtime_counts_without_file_effects() {
     let mut project = project_session(1);
@@ -305,7 +468,9 @@ fn project_collections_reject_cross_project_entities() {
     );
     assert_eq!(
         project.add_approval_request(approval),
-        Err(OwnershipError::CrossProject)
+        Err(crate::project::ProjectApprovalError::Ownership(
+            OwnershipError::CrossProject
+        ))
     );
     assert_eq!(
         project.add_transcript(transcript),
@@ -356,6 +521,7 @@ fn terminal_session_limit_is_enforced_with_a_typed_refusal() {
         terminal_session_limit: Some(2),
         agent_run_limit: None,
         approval_request_limit: None,
+        agent_run_approval_limit: None,
     });
 
     for index in 0..2 {

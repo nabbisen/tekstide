@@ -120,16 +120,53 @@ pub enum ReceiveOutcome {
     /// `AcceptedProposal` is not retained), so no decision can ever be
     /// sent back over it either.
     DuplicateRejected { proposal_id: ProposalId },
+    /// RFC-022 PR-022-E ("the arrival model"): the queue this proposal
+    /// would join is already at its bound -- see [`ApprovalQueueLimits`]
+    /// and [`ApprovalQueueLimitScope`]. Same shape as `DuplicateRejected`:
+    /// no `ApprovalRequest` is created or returned, and the connection
+    /// this proposal arrived on is dropped along with it, so nothing can
+    /// later send a decision back over it either. "The queue" here means
+    /// *live* entries only -- `Pending` and still connected (checked via
+    /// [`AcceptedProposal::is_connection_still_open`]) -- an expired
+    /// entry holds no file descriptor and is not counted against either
+    /// bound, matching the fd-exhaustion rationale both limits exist for.
+    QueueLimitExceeded {
+        scope: ApprovalQueueLimitScope,
+        limit: u32,
+    },
+}
+
+/// RFC-022 PR-022-E: which of [`ApprovalQueueLimits`]'s two bounds a
+/// [`ReceiveOutcome::QueueLimitExceeded`] refusal hit -- carried so a
+/// caller (a queue-full notice, an audit anomaly) can say which,
+/// rather than a bare "queue full."
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ApprovalQueueLimitScope {
+    PerAgentRun,
+    PerProject,
+}
+
+/// RFC-022 PR-022-E ("the arrival model"), response 224: the two bounds
+/// `receive_proposal` enforces, sourced by the caller from
+/// `ProjectResourceLimits` (`agent_run_approval_limit`/
+/// `approval_request_limit` respectively) -- this module has no
+/// dependency on `tekstide-core::project` otherwise, so the caller
+/// passes the two numbers rather than the whole limits struct.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
+pub struct ApprovalQueueLimits {
+    pub per_agent_run: Option<u32>,
+    pub per_project: Option<u32>,
 }
 
 impl ReceiveOutcome {
     /// The created request, if this is a fresh receipt. Deliberately
-    /// `None` for `DuplicateRejected` -- there is no request to return,
-    /// not merely one this accessor withholds.
+    /// `None` for `DuplicateRejected`/`QueueLimitExceeded` -- there is no
+    /// request to return, not merely one this accessor withholds.
     pub fn request(&self) -> Option<&ApprovalRequest> {
         match self {
             ReceiveOutcome::Created { request, .. } => Some(request.as_ref()),
-            ReceiveOutcome::DuplicateRejected { .. } => None,
+            ReceiveOutcome::DuplicateRejected { .. }
+            | ReceiveOutcome::QueueLimitExceeded { .. } => None,
         }
     }
 
@@ -139,22 +176,24 @@ impl ReceiveOutcome {
                 command_request_audit,
                 ..
             } => Some(*command_request_audit),
-            ReceiveOutcome::DuplicateRejected { .. } => None,
+            ReceiveOutcome::DuplicateRejected { .. }
+            | ReceiveOutcome::QueueLimitExceeded { .. } => None,
         }
     }
 
     /// `Some` only when a mismatch was actually detected and an anomaly
-    /// record attempted; `None` for `DuplicateRejected` *and* for a
-    /// `Created` outcome where the claim and `verified_cwd` agreed --
-    /// these are not distinguished here because a caller checking audit
-    /// health only cares whether a write was attempted and failed, not
-    /// why none was attempted.
+    /// record attempted; `None` for `DuplicateRejected`/`QueueLimitExceeded`
+    /// *and* for a `Created` outcome where the claim and `verified_cwd`
+    /// agreed -- these are not distinguished here because a caller
+    /// checking audit health only cares whether a write was attempted
+    /// and failed, not why none was attempted.
     pub fn cwd_mismatch_audit(&self) -> Option<crate::audit::AuditObservationStatus> {
         match self {
             ReceiveOutcome::Created {
                 cwd_mismatch_audit, ..
             } => *cwd_mismatch_audit,
-            ReceiveOutcome::DuplicateRejected { .. } => None,
+            ReceiveOutcome::DuplicateRejected { .. }
+            | ReceiveOutcome::QueueLimitExceeded { .. } => None,
         }
     }
 
@@ -330,6 +369,7 @@ impl ApprovalCoordinator {
         project_root: &Path,
         state_root: &Path,
         accepted: AcceptedProposal,
+        limits: ApprovalQueueLimits,
         audit: &mut AuditCoordinator,
     ) -> ReceiveOutcome {
         let key = (
@@ -342,6 +382,40 @@ impl ApprovalCoordinator {
             // nothing can later send a decision back over it either.
             return ReceiveOutcome::DuplicateRejected {
                 proposal_id: accepted.proposal.proposal_id().clone(),
+            };
+        }
+
+        // RFC-022 PR-022-E: checked before any classification/audit work
+        // below, and before this proposal is stored -- "live" means
+        // `Pending` and still connected, so an expired entry (no file
+        // descriptor held) never counts against either bound, matching
+        // the fd-exhaustion rationale both limits exist for (response
+        // 224). Per-run checked first: a single looping adapter should
+        // hit its own budget before it can ever contribute meaningfully
+        // to the project-wide one.
+        let live = |scope_matches: &dyn Fn(&PendingRequest) -> bool| {
+            self.requests
+                .values()
+                .filter(|pending| scope_matches(pending))
+                .filter(|pending| pending.request.decision == ApprovalDecision::Pending)
+                .filter(|pending| pending.accepted.is_connection_still_open())
+                .count() as u32
+        };
+        if let Some(limit) = limits.per_agent_run
+            && live(&|pending| pending.request.agent_run_id.as_ref() == Some(&agent_run_id))
+                >= limit
+        {
+            return ReceiveOutcome::QueueLimitExceeded {
+                scope: ApprovalQueueLimitScope::PerAgentRun,
+                limit,
+            };
+        }
+        if let Some(limit) = limits.per_project
+            && live(&|pending| pending.request.project_id == project_id) >= limit
+        {
+            return ReceiveOutcome::QueueLimitExceeded {
+                scope: ApprovalQueueLimitScope::PerProject,
+                limit,
             };
         }
 

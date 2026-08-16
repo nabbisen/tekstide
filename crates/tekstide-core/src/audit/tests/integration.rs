@@ -739,6 +739,7 @@ fn edit_and_approve_audit_block_leaves_the_stored_request_describing_the_origina
         Path::new(PROJECT_ROOT),
         Path::new(STATE_ROOT),
         accepted,
+        crate::approval::ApprovalQueueLimits::default(),
         &mut AuditCoordinator::with_writer(&mut writer, &mut health),
     )
     else {

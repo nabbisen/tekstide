@@ -71,7 +71,32 @@ pub struct ProjectResourceLimits {
     pub visible_terminal_limit: Option<u32>,
     pub terminal_session_limit: Option<u32>,
     pub agent_run_limit: Option<u32>,
+    /// RFC-022 PR-022-E ("the arrival model"), response 224: **per
+    /// project**, matching this struct's other two limits and its own
+    /// name -- not per `AgentRun`, which response 224 corrected after I
+    /// initially proposed reading it that way (the same shape of defect
+    /// response 216 found in PR-022-C: reusing a field for a different
+    /// scope than its container because the name happened to fit).
+    /// Bounds two things with the same real quantity underneath: how
+    /// many of a project's approval requests `ApprovalCoordinator` will
+    /// hold *live* (`Pending`, connection still open) at once across all
+    /// of that project's `AgentRun`s, and how many `ApprovalRequest`s
+    /// `ProjectSession.approval_requests` retains in total. The
+    /// justification is `AcceptedProposal` holding a live `UnixStream`
+    /// per pending entry (response 224): the real ceiling this protects
+    /// is process file-descriptor exhaustion, which does not degrade
+    /// approvals gracefully -- it takes down PTYs, the audit store, and
+    /// transcript writers with it, since they all draw on the same
+    /// per-process limit.
     pub approval_request_limit: Option<u32>,
+    /// RFC-022 PR-022-E ("the arrival model"), response 224: the
+    /// genuinely per-`AgentRun` bound the gate asks for ("a looping
+    /// adapter must exhaust its own budget, not starve another agent's
+    /// proposals") -- a distinct field from `approval_request_limit`
+    /// rather than reusing it, since the two have different scopes and
+    /// this struct's own convention is one field per scope, not one
+    /// field meaning something different from its neighbours.
+    pub agent_run_approval_limit: Option<u32>,
 }
 
 impl Default for ProjectResourceLimits {
@@ -122,7 +147,25 @@ impl Default for ProjectResourceLimits {
             // underlying wake mechanism changes again.
             terminal_session_limit: Some(6),
             agent_run_limit: None,
-            approval_request_limit: None,
+            // RFC-022 PR-022-E: reasoned, not measured (unlike
+            // `terminal_session_limit` above) -- this bounds simultaneous
+            // open file descriptors, not throughput, so a benchmark does
+            // not apply. `50` live per project is generously above any
+            // legitimate burst (RFC-021's own reference adapter makes one
+            // proposal per invocation), and a Linux process's default
+            // soft `RLIMIT_NOFILE` (1024 on most distributions) is shared
+            // with every PTY, the audit store, and every transcript
+            // writer this project also holds open -- a low, explicit cap
+            // here protects those unrelated subsystems from a single
+            // project's approval backlog, not just approvals themselves.
+            approval_request_limit: Some(50),
+            // A looping or malfunctioning adapter must exhaust its own
+            // budget well before it could meaningfully contribute to the
+            // project-wide ceiling above -- `20` leaves room for several
+            // agent runs to each hold a real, if unusually large, burst
+            // without any single one being able to consume the whole
+            // project's budget alone.
+            agent_run_approval_limit: Some(20),
         }
     }
 }

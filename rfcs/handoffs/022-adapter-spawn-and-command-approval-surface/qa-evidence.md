@@ -607,15 +607,106 @@ the same check exposed standalone, for a queue view to ask without attempting a 
 - `tekstide-core`: 581 (up from 578 -- the three tests named above).
 - `tekstide`: 220 (unchanged -- no GUI changes this round).
 
-**Not yet built, and next**: the bounded queue (per-run and app-wide), the promotion decision
-(`High`/`Destructive`, active project, no modal open), expiry's integration with
-`pending_approvals`/`AttentionState::ApprovalNeeded`, the four non-optional UI constraints
-(no bulk approval, visibly-unanswerable expired entries, focus-defaults-to-Reject, the
-post-promotion input-ignore window), the classifier-limitation disclosure, and the entire GUI
-wiring (a long-lived `ApprovalCoordinator`/endpoint ownership -- currently nowhere in
-production, the same "wired with no caller" shape response 219 found for `launch_agent_run_with_runtime`
--- the poll/subscription path, `ModalContent::Approval`, a new queue-viewing surface, and the
-`command_approval` audit family's first real producer).
+**Response 224 reviewed the plan above and corrected one of four structural decisions before
+more code was built on it** -- full exchange in
+`.git-exclude/review-request/224-rfc022-pr-022e-undeliverable-decision-and-arrival-model-plan.md`
+and `.git-exclude/reviewed/tekstide-review-request-224-arrival-model-plan-response.md`.
+Accepted as planned: the coordinator living on the GUI's `State`, not `ProjectSession`
+(`TerminalPane`'s own precedent); "app-wide ceiling" read as per-project (no cross-project
+limits infrastructure exists anywhere, and this is not the RFC to invent it); the queue as a
+view over `ProjectSession.approval_requests`, not new parallel bookkeeping. **Corrected**:
+`approval_request_limit` stays **per-project**, matching its container and its two sibling
+fields (`terminal_session_limit`, `agent_run_limit`) -- reading it as per-`AgentRun`, which I
+had proposed, would have repeated response 216's PR-022-C defect (reusing a field for a
+different scope than its container because the name happened to fit). A new, explicitly
+per-run field was added instead. The reviewer also supplied the stronger justification for
+the app-wide/per-project ceiling I had reasoned to a weaker one: every pending proposal holds
+a live file descriptor (`AcceptedProposal.stream`), so the real thing being protected is
+process fd exhaustion, which takes down PTYs, the audit store, and transcript writers with
+it, not merely approvals themselves.
+
+**The queue bound, both tiers, built and proven in `tekstide-core` alone -- no GUI needed to
+test either.**
+
+`ProjectResourceLimits` gained `agent_run_approval_limit: Option<u32>` (new, per-run, default
+`Some(20)`) alongside the existing `approval_request_limit: Option<u32>` (now documented as
+per-project, default raised from `None` to `Some(50)` since this slice gives it real
+enforcement for the first time) -- both reasoned from the fd-exhaustion rationale above, not
+measured, since this bounds simultaneous open descriptors, not throughput.
+
+`ApprovalCoordinator::receive_proposal` gained an `ApprovalQueueLimits { per_agent_run,
+per_project }` parameter, sourced by the caller from those two fields. **"Live" only**: each
+bound counts entries that are `Pending` *and* still connected
+(`AcceptedProposal::is_connection_still_open`, built for the undeliverable-decision fix
+above) -- an expired entry holds no file descriptor and does not count against either bound,
+matching the fd-exhaustion rationale exactly. `ReceiveOutcome::QueueLimitExceeded { scope,
+limit }` is the new refusal, mirroring `DuplicateRejected`'s shape (nothing stored, the
+connection dropped).
+
+**Proven, including the cross-project guard response 224 required explicitly:**
+
+- `agent_run_queue_limit_is_enforced_and_only_counts_live_entries` -- two live proposals
+  admitted at a limit of two, a third refused naming the real limit; expiring one (dropping
+  its peer) frees the slot for a fourth. **Ablated**: disabled the guard, reran -- the third
+  proposal was wrongly admitted. Restored, reran clean.
+- `project_wide_queue_limit_is_enforced_across_agent_runs` -- the same shape, shared across
+  two different `AgentRun`s within one project, proving the budget is project-wide, not
+  per-run.
+- `queue_limits_do_not_cross_project_boundaries` -- **response 224's required guard**: project
+  A held at its own per-project ceiling, project B's proposal (different `ProjectId`) still
+  admitted normally. **Ablated**: replaced the per-project filter with "count everything
+  regardless of project," reran -- project B's proposal was wrongly refused by project A's
+  own pressure (`QueueLimitExceeded { scope: PerProject, limit: 1 }`). Restored, reran clean.
+
+**`ProjectSession`'s own retention/expiry tracking -- decision 3's open question, answered.**
+Response 224 asked directly: are expired entries removed from `approval_requests`, or
+retained and excluded from the count? **Retained, per the arrival model's own disclosure
+requirement** -- but bounded, since "retained forever" is exactly the unbounded growth the
+reviewer flagged. `expired_approval_ids: HashSet<ApprovalId>` (a new `ProjectSession` field)
+tracks expiry separately from `ApprovalRequest.decision`, which stays `Pending` by design
+(nobody decided). `mark_approval_expired` sets it; `pending_approvals`'s computation now
+excludes ids in the set. `add_approval_request` reuses `approval_request_limit` (the same
+field bounding the coordinator's live queue, since it names the same real quantity for a
+project) to bound total retained history: at capacity, the **oldest terminal** (decided or
+expired) entry is evicted to make room, never a still-live entry -- silently dropping an
+answerable request from view would be worse than the audit trail's own "the absence is the
+record" principle, which is about decided requests, not deleted live ones. If nothing is
+evictable (every retained entry is genuinely still live), the new one is refused
+(`ProjectApprovalError::RetentionLimitExceeded`) -- a backstop, since the coordinator's own
+live-queue bound already prevents that many simultaneously-live proposals from existing.
+
+**Proven:**
+
+- `mark_approval_expired_excludes_it_from_pending_approvals_without_changing_its_decision` --
+  against the real `pending_approvals` field, and confirms `decision` stays `Pending`.
+  **Ablated**: removed the exclusion filter, reran -- the expired request kept counting.
+  Restored, reran clean.
+- `approval_request_retention_limit_evicts_the_oldest_terminal_entry` -- at capacity with one
+  expired, one live entry retained, a new arrival evicts the expired one and is admitted; the
+  live entry survives untouched.
+- `approval_request_retention_limit_refuses_when_nothing_is_evictable` -- the backstop case,
+  a single still-live entry at a limit of one refuses the second with the typed error.
+  **Both ablated together**: disabled the eviction guard, reran both -- the first grew past
+  its limit (3 retained where 2 was the cap) and the second wrongly succeeded (`Ok(())` where
+  `RetentionLimitExceeded` was expected). Restored, reran clean.
+
+**Gates.** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features
+-- -D warnings`, full workspace suite, `git diff --check` -- all clean.
+
+- `tekstide-core`: 587 (up from 581 -- the six tests named above).
+- `tekstide`: 220 (unchanged -- no GUI changes this round).
+
+**Not yet built, and next**: the promotion decision itself (`High`/`Destructive`, active
+project, no modal open) and *its own* cross-project guard (a GUI-level property --
+`state.active_project_id` deciding whether a project-A proposal may promote while project B
+is on screen -- which cannot be tested inside `tekstide-core` alone the way the queue bound's
+guard could); the four non-optional UI constraints (no bulk approval, visibly-unanswerable
+expired entries, focus-defaults-to-Reject, the post-promotion input-ignore window); the
+classifier-limitation disclosure; and the entire GUI wiring -- a long-lived
+`ApprovalCoordinator`/endpoint ownership on `State` (currently nowhere in production, the same
+"wired with no caller" shape response 219 found for `launch_agent_run_with_runtime`), the
+poll/subscription path, `ModalContent::Approval`, the new `ProjectOpenSurface` variant and its
+queue-viewing surface, and the `command_approval` audit family's first real producer.
 
 ## PR-022-F - Closeout
 

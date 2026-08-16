@@ -70,6 +70,18 @@ pub struct ProjectSession {
     /// *different*, already-running run is the future detail view's
     /// concern (RFC-020's report surface), not this slice's.
     selected_agent_run: Option<AgentRunId>,
+    /// RFC-022 PR-022-E ("the arrival model"): which of `approval_requests`
+    /// are known to have expired (their adapter's connection closed
+    /// before a decision was made) -- tracked separately from
+    /// `ApprovalRequest.decision`, which stays `Pending` for an expired
+    /// request by design (nobody decided; recording anything else would
+    /// be false, and `ApprovalCoordinator`'s own domain model is
+    /// unchanged by this RFC). `pending_approvals` excludes ids in this
+    /// set, per the gate's own requirement that expired proposals stop
+    /// counting toward `AttentionState::ApprovalNeeded`. Set via
+    /// `mark_approval_expired`; nothing removes an id from it (an
+    /// expired request does not un-expire).
+    expired_approval_ids: std::collections::HashSet<ApprovalId>,
 }
 
 impl ProjectSession {
@@ -104,6 +116,7 @@ impl ProjectSession {
             change_sets: Vec::new(),
             audit_events: Vec::new(),
             selected_agent_run: None,
+            expired_approval_ids: std::collections::HashSet::new(),
         }
     }
 
@@ -202,6 +215,11 @@ impl ProjectSession {
         self.selected_agent_run.as_ref()
     }
 
+    /// Every approval request this project has ever received. Includes
+    /// decided and expired entries (see [`Self::add_approval_request`]'s
+    /// own doc comment for the retention/eviction policy) -- a caller
+    /// distinguishing "still answerable" from "expired" or "decided"
+    /// reads `decision`/[`Self::expired_approval_ids`] alongside this.
     pub fn approval_requests(&self) -> &[ApprovalRequest] {
         &self.approval_requests
     }
@@ -501,25 +519,99 @@ impl ProjectSession {
         Ok(())
     }
 
+    /// RFC-022 PR-022-E ("the arrival model"): `approval_requests` only
+    /// ever grows -- nothing removes a decided or expired entry, since
+    /// the whole point of retaining them is an honest, visible history
+    /// (`ApprovalCoordinator`'s own map has the identical shape, for the
+    /// identical reason). Left unbounded, that is unbounded growth in
+    /// `ProjectSession` over a long session. `approval_request_limit`
+    /// bounds it here too (the same field that bounds
+    /// `ApprovalCoordinator`'s *live* queue, response 224's fd-exhaustion
+    /// rationale) -- at capacity, the oldest **terminal** entry (already
+    /// decided, or marked expired via `mark_approval_expired`) is evicted
+    /// to make room; a still-`Pending`-and-live entry is never evicted,
+    /// since silently dropping an answerable request from view would be
+    /// worse than the audit trail's own "the absence is the record"
+    /// principle, which is about decided requests, not about deleting
+    /// live ones. If no terminal entry exists to evict (every retained
+    /// entry is genuinely still live), the new one is refused --
+    /// `ApprovalCoordinator`'s own per-project live-queue bound (the same
+    /// number) already prevents that many simultaneously-live proposals
+    /// from existing in the first place, so this is a backstop, not the
+    /// primary enforcement.
     pub fn add_approval_request(
         &mut self,
         approval: ApprovalRequest,
-    ) -> Result<(), OwnershipError> {
-        self.ensure_project_member(&approval.project_id)?;
+    ) -> Result<(), ProjectApprovalError> {
+        self.ensure_project_member(&approval.project_id)
+            .map_err(ProjectApprovalError::Ownership)?;
         if let Some(agent_run_id) = &approval.agent_run_id {
-            self.ensure_agent_run_exists(agent_run_id)?;
+            self.ensure_agent_run_exists(agent_run_id)
+                .map_err(ProjectApprovalError::Ownership)?;
         }
         if self
             .approval_requests
             .iter()
             .any(|existing| existing.id == approval.id)
         {
-            return Err(OwnershipError::DuplicateAttachment);
+            return Err(ProjectApprovalError::Ownership(
+                OwnershipError::DuplicateAttachment,
+            ));
+        }
+        if let Some(limit) = self.resource_limits.approval_request_limit
+            && self.approval_requests.len() as u32 >= limit
+            && !self.evict_oldest_terminal_approval_request()
+        {
+            return Err(ProjectApprovalError::RetentionLimitExceeded { limit });
         }
         self.approval_requests.push(approval);
         self.record_activity();
         self.refresh_runtime_summary_from_collections();
         Ok(())
+    }
+
+    /// RFC-022 PR-022-E: marks a stored approval request as expired --
+    /// its adapter's connection is gone, matching what
+    /// `ApprovalCoordinator::is_still_answerable` would now report for
+    /// it. Does not touch `ApprovalRequest.decision`, which stays
+    /// `Pending`: nobody decided, and recording anything else would be
+    /// false. `pending_approvals` (and therefore
+    /// `AttentionState::ApprovalNeeded`) excludes ids in this set from
+    /// the moment this is called.
+    pub fn mark_approval_expired(
+        &mut self,
+        approval_id: &ApprovalId,
+    ) -> Result<(), OwnershipError> {
+        if !self
+            .approval_requests
+            .iter()
+            .any(|request| request.id == *approval_id)
+        {
+            return Err(OwnershipError::MissingReference);
+        }
+        self.expired_approval_ids.insert(approval_id.clone());
+        self.refresh_runtime_summary_from_collections();
+        Ok(())
+    }
+
+    /// The subset of [`Self::approval_requests`]'s ids known to have
+    /// expired -- see [`Self::mark_approval_expired`].
+    pub fn expired_approval_ids(&self) -> &std::collections::HashSet<ApprovalId> {
+        &self.expired_approval_ids
+    }
+
+    fn evict_oldest_terminal_approval_request(&mut self) -> bool {
+        let index = self.approval_requests.iter().position(|request| {
+            request.decision != ApprovalDecision::Pending
+                || self.expired_approval_ids.contains(&request.id)
+        });
+        match index {
+            Some(index) => {
+                self.approval_requests.remove(index);
+                true
+            }
+            None => false,
+        }
     }
 
     pub fn add_transcript(&mut self, transcript: Transcript) -> Result<(), OwnershipError> {
@@ -1181,10 +1273,15 @@ impl ProjectSession {
     fn refresh_runtime_summary_from_collections(&mut self) {
         let terminal_count = len_as_u32(self.terminal_sessions.len());
         let agent_run_count = len_as_u32(self.agent_runs.len());
+        // RFC-022 PR-022-E: an expired request stays `decision: Pending`
+        // (nobody decided) but must not keep a project in
+        // `AttentionState::ApprovalNeeded` forever -- the gate's own
+        // "expired proposals stop counting toward pending_approvals."
         let pending_approvals = len_as_u32(
             self.approval_requests
                 .iter()
                 .filter(|approval| approval.decision == ApprovalDecision::Pending)
+                .filter(|approval| !self.expired_approval_ids.contains(&approval.id))
                 .count(),
         );
         let review_ready_changes = len_as_u32(
@@ -1271,6 +1368,21 @@ pub enum ProjectChangeSetError {
     BaselineMismatch,
     DetectionNotComplete(ChangeDetectionStatus),
     InvalidChangedPath(ChangedPathValidationError),
+}
+
+/// RFC-022 PR-022-E ("the arrival model"): errors from
+/// [`ProjectSession::add_approval_request`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProjectApprovalError {
+    Ownership(OwnershipError),
+    /// `approval_requests` is at `approval_request_limit`, and no
+    /// terminal (decided or expired) entry exists to evict to make
+    /// room -- every retained entry is genuinely still live. See
+    /// `add_approval_request`'s own doc comment for why this is a
+    /// backstop rather than the primary enforcement.
+    RetentionLimitExceeded {
+        limit: u32,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

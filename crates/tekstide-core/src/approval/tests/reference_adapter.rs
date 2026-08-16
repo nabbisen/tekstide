@@ -16,8 +16,8 @@ use crate::agent::VerifiedCwd;
 use crate::approval::{
     APPROVAL_SOCKET_PATH_ENV_VAR, APPROVAL_TOKEN_ENV_VAR, ApprovalChannelDirectory,
     ApprovalChannelEndpoint, ApprovalChannelErrorReason, ApprovalChannelPathRequest,
-    ApprovalChannelPathResolver, ApprovalCoordinator, DecideOutcome, ReceiveOutcome,
-    SimpleDecision,
+    ApprovalChannelPathResolver, ApprovalCoordinator, ApprovalQueueLimits, DecideOutcome,
+    ReceiveOutcome, SimpleDecision,
 };
 use crate::audit::{
     AuditCoordinator, AuditHealth, AuditPathRequest, AuditPathResolver, AuditStore,
@@ -202,6 +202,7 @@ fn a_real_adapter_process_completes_a_full_approve_round_trip() {
         std::path::Path::new(PROJECT_ROOT),
         channel.directory.state_root(),
         accepted,
+        ApprovalQueueLimits::default(),
         &mut audit.coordinator(),
     );
     assert!(
@@ -264,6 +265,7 @@ fn a_real_adapter_process_completes_a_full_reject_round_trip() {
         std::path::Path::new(PROJECT_ROOT),
         channel.directory.state_root(),
         accepted,
+        ApprovalQueueLimits::default(),
         &mut audit.coordinator(),
     );
 
@@ -422,6 +424,7 @@ fn deciding_a_proposal_whose_real_adapter_process_has_already_exited_is_undelive
         std::path::Path::new(PROJECT_ROOT),
         channel.directory.state_root(),
         accepted,
+        ApprovalQueueLimits::default(),
         &mut audit.coordinator(),
     );
     assert!(
