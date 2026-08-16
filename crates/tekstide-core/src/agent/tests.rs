@@ -21,10 +21,11 @@ use crate::transcript::{
 };
 
 use super::{
-    AgentRunLaunchPlan, AgentRunLaunchRequest, AgentRunLaunchValidationError,
-    AgentRunLaunchValidator, AgentRunTranscriptCaptureError, AiCliAdapterCapabilities,
-    AiCliEnvironmentPolicy, AiCliExecutable, AiCliExecutableProvenance, AiCliProfile,
-    AiCliProfileSource, AiCliPromptPolicy, AiCliWorkspaceDiscoveryPolicy, ExecutableLookupPath,
+    AgentAdapterApprovalError, AgentRunLaunchPlan, AgentRunLaunchRequest,
+    AgentRunLaunchValidationError, AgentRunLaunchValidator, AgentRunTranscriptCaptureError,
+    AiCliAdapterCapabilities, AiCliEnvironmentPolicy, AiCliExecutable, AiCliExecutableProvenance,
+    AiCliProfile, AiCliProfileSource, AiCliPromptPolicy, AiCliWorkspaceDiscoveryPolicy,
+    ExecutableLookupPath,
 };
 
 #[test]
@@ -1099,6 +1100,164 @@ fn a_real_adapter_completes_a_real_approval_round_trip_through_the_production_sp
     drop(reader);
     cleanup_root(root);
     cleanup_root(state_root);
+}
+
+/// RFC-022 PR-022-C response 216 (required change): a `Managed` launch
+/// that opts out of transcript capture must still be able to bind its
+/// approval channel via `AgentRunLaunchRequest::with_approval_channel`.
+/// The first version of `prepare_adapter_approval` reused
+/// `transcript_state_root` outright, which made this combination
+/// impossible -- `without_transcript_capture()` zeroed the only root the
+/// approval channel could reach, coupling an RFC-011 privacy control to
+/// RFC-022 command approval without either RFC deciding that. Proven
+/// here by actually launching (not just constructing a plan and
+/// inspecting it): no transcript file is written, no
+/// `AgentRunTranscriptCaptureError` occurs, and the real bound endpoint
+/// still accepts a real proposal from a really-spawned adapter.
+#[test]
+fn a_managed_launch_can_bind_its_approval_channel_without_transcript_capture() {
+    let root = test_root("agent-adapter-no-transcript-root");
+    let approval_state_root = std::env::temp_dir().join(format!("ta-noxs-{}", std::process::id()));
+    std::fs::create_dir_all(&approval_state_root).expect("approval state root should be creatable");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+
+    let mut profile = built_in_profile(&reference_adapter_binary_path());
+    profile.compatibility_level = AgentCompatibilityLevel::Managed;
+    profile.adapter_capabilities = AiCliAdapterCapabilities {
+        structured_action_approval: true,
+    };
+    let request = AgentRunLaunchRequest::new(project.id().clone(), &profile.id, "prompt")
+        .without_transcript_capture()
+        .with_approval_channel(approval_state_root.clone());
+    assert_eq!(
+        request.transcript_state_root, None,
+        "the request must genuinely have no transcript state root, or this test would not \
+         be exercising the case response 216 found broken"
+    );
+    let validation = AgentRunLaunchValidator
+        .validate(&project, &profile, &request)
+        .expect("Managed profile with an explicit approval channel should validate");
+    let mut plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
+        .expect("validated Managed launch should produce a launch plan");
+
+    let endpoint = project
+        .prepare_agent_run_launch(&mut plan)
+        .expect(
+            "a Managed launch with no transcript capture but an explicit approval channel \
+             must still prepare successfully -- this is the exact combination response 216 \
+             found impossible",
+        )
+        .expect("a Managed launch must bind a real approval channel endpoint");
+    let verified_cwd = plan.spec().verified_cwd().clone();
+    let project_root = plan.spec().project_root().to_path_buf();
+    assert!(
+        plan.transcript_storage_path().is_none(),
+        "no transcript capture was configured, so no transcript storage path should exist"
+    );
+
+    let mut runtime = LinuxTerminalRuntime::new();
+    let (agent_run_id, _events) = project
+        .launch_prepared_agent_run_with_runtime(plan, &mut runtime)
+        .expect("prepared Managed launch should spawn the real adapter binary");
+    let terminal_id = project.agent_runs()[0]
+        .terminal_id
+        .clone()
+        .expect("runtime-launched AgentRun should have a terminal id");
+    let handle = TerminalRuntimeHandle::new(terminal_id.clone(), project.id().clone());
+
+    let accepted = endpoint.accept_proposal().expect(
+        "the real adapter's proposal should authenticate and parse even without transcript \
+         capture configured",
+    );
+    let proposal_id = accepted.proposal.proposal_id().clone();
+
+    let mut coordinator = ApprovalCoordinator::new();
+    let mut audit = RoundTripAudit::new("adapter-no-transcript");
+    let receive_outcome = coordinator.receive_proposal(
+        project.id().clone(),
+        agent_run_id.clone(),
+        &verified_cwd,
+        &project_root,
+        &approval_state_root,
+        accepted,
+        &mut audit.coordinator(),
+    );
+    assert!(
+        matches!(receive_outcome, ReceiveOutcome::Created { .. }),
+        "the real adapter's proposal should be accepted as Created: {receive_outcome:?}"
+    );
+    let decide_outcome = coordinator.decide(
+        &agent_run_id,
+        &proposal_id,
+        SimpleDecision::ApprovedOnce,
+        &mut audit.coordinator(),
+    );
+    let DecideOutcome::Decided { sent, .. } = decide_outcome else {
+        panic!("deciding a freshly-created proposal should reach Decided: {decide_outcome:?}");
+    };
+    sent.expect("sending the decision back over the real connection should succeed");
+
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against the real adapter's PTY master");
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("waiting on the real adapter's exit should not fail")
+        .expect("the real adapter should have exited");
+    assert_eq!(
+        outcome,
+        TerminationOutcome::Exited { exit_status: 0 },
+        "the reference adapter's own exit-code contract: 0 means approved_once"
+    );
+    project
+        .apply_agent_terminal_outcome(&agent_run_id, &terminal_id, &outcome)
+        .expect("adapter run cleanup outcome should apply");
+
+    drop(reader);
+    cleanup_root(root);
+    cleanup_root(approval_state_root);
+}
+
+/// The other half of response 216's fix: a `Managed` launch with **no**
+/// state root configured by either route (no transcript capture, no
+/// explicit approval channel) must still fail closed. Decoupling the two
+/// controls must not silently turn a required-infrastructure check into
+/// an optional one -- `StateRootMissing` now means "neither route
+/// configured a location," a real, complete absence.
+#[test]
+fn a_managed_launch_still_fails_closed_with_no_state_root_configured_at_all() {
+    let root = test_root("agent-adapter-no-state-root-at-all");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let mut profile = built_in_profile(&reference_adapter_binary_path());
+    profile.compatibility_level = AgentCompatibilityLevel::Managed;
+    profile.adapter_capabilities = AiCliAdapterCapabilities {
+        structured_action_approval: true,
+    };
+    let request = AgentRunLaunchRequest::new(project.id().clone(), &profile.id, "prompt")
+        .without_transcript_capture();
+    let validation = AgentRunLaunchValidator
+        .validate(&project, &profile, &request)
+        .expect("Managed profile should validate independent of state-root availability");
+    let mut plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
+        .expect("validated Managed launch should produce a launch plan");
+
+    let result = project.prepare_agent_run_launch(&mut plan);
+    let Err(error) = result else {
+        panic!(
+            "a Managed launch with no state root configured by either route must still fail \
+             closed"
+        );
+    };
+    assert!(matches!(
+        error,
+        ProjectAgentRuntimeLaunchError::AdapterApproval(
+            AgentAdapterApprovalError::StateRootMissing
+        )
+    ));
+    assert!(project.terminal_sessions().is_empty());
+    assert!(project.agent_runs().is_empty());
+
+    cleanup_root(root);
 }
 
 #[test]

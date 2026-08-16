@@ -199,6 +199,33 @@ launched a Managed profile with no state root at all; updated to supply one, a
 removal-driven change this slice's own new requirement made necessary, not an unrelated bent
 assertion.
 
+**Correction (response 216, required change): the reuse above created a policy nobody
+decided, and it is fixed, not merely disclosed.** `AgentRunLaunchRequest::without_transcript_capture()`
+sets `transcript_state_root = None`, and the reused-field design above made
+`prepare_adapter_approval` require that same field to be `Some` — so a `Managed` run that
+opted out of RFC-011's documented per-run transcript retention control could not launch at
+all, and the error it hit (`StateRootMissing`) named a mechanism, not the policy that had
+accidentally coupled two unrelated RFCs. **Fixed by decoupling**, per the response's own
+framing of the choice ("either the error names it... or the state root becomes separable...
+State which and why"): `AgentRunLaunchRequest` gained `approval_state_root` (set via a new
+`with_approval_channel` builder), independent of transcript configuration.
+`prepare_adapter_approval` now reads `approval_state_root`, falling back to
+`transcript_capture.state_root` only when the former is unset — preserving the common case
+(both artifacts in the same place, one field to set) while making the two controls
+genuinely independent. Chosen over the alternative (an explicit but still-blocking error)
+because the reviewer's own framing made the deeper problem clear: a documented privacy
+opt-out should not silently forfeit command approval, and there is no reason it must.
+
+Proven both directions, not just the one this response asked for:
+`a_managed_launch_can_bind_its_approval_channel_without_transcript_capture` launches a real
+adapter through the full production chain with transcript capture explicitly disabled and
+an explicit approval channel configured — no transcript file, a real bound endpoint, a real
+completed round trip.
+`a_managed_launch_still_fails_closed_with_no_state_root_configured_at_all` confirms
+decoupling did not weaken the fail-closed behaviour: with neither route configured, the
+launch still refuses with the same `StateRootMissing`, now honestly meaning "neither route
+configured a location" rather than "the wrong field was empty."
+
 **One more real socket-bind-length finding, same class as PR-022-B's, found again
 independently.** The pre-existing Managed-launch test's own `test_root` helper (shared
 across many unrelated tests in this file) produces a name too long once combined with a

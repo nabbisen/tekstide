@@ -32,6 +32,21 @@ pub struct AgentRunLaunchRequest {
     pub transcript_capture_mode: TranscriptCaptureMode,
     pub transcript_state_root: Option<PathBuf>,
     pub transcript_retention_limits: TranscriptRetentionLimits,
+    /// RFC-022 PR-022-C response 216 (required change): the approval
+    /// channel's own state root, independent of `transcript_state_root`.
+    /// **Required, not a convenience default**: the first version of
+    /// `prepare_adapter_approval` reused `transcript_state_root` for
+    /// this, which meant `without_transcript_capture()` silently made a
+    /// `Managed` launch impossible -- RFC-011's documented per-run
+    /// transcript opt-out and RFC-022's command approval had become
+    /// accidentally coupled, a policy nobody decided. `None` here falls
+    /// back to `transcript_state_root` (`prepare_adapter_approval`'s own
+    /// doc comment states this explicitly) purely for the common case
+    /// where a caller wants both artifacts in the same place -- it does
+    /// not reintroduce the coupling, since `Some` here always takes
+    /// priority and a caller can set this without transcript capture at
+    /// all.
+    pub approval_state_root: Option<PathBuf>,
 }
 
 impl AgentRunLaunchRequest {
@@ -48,12 +63,24 @@ impl AgentRunLaunchRequest {
             transcript_capture_mode: TranscriptCaptureMode::LocalBounded,
             transcript_state_root: None,
             transcript_retention_limits: TranscriptRetentionLimits::agent_run_default(),
+            approval_state_root: None,
         }
     }
 
     pub fn without_transcript_capture(mut self) -> Self {
         self.transcript_capture_mode = TranscriptCaptureMode::Disabled;
         self.transcript_state_root = None;
+        self
+    }
+
+    /// RFC-022 PR-022-C response 216: sets the approval channel's own
+    /// state root, independent of transcript capture. A `Managed`
+    /// profile that also wants `without_transcript_capture()` must call
+    /// this too -- without it, a `Managed` launch with no transcript
+    /// state root configured has nowhere to bind its approval channel
+    /// either, and fails closed with `AgentAdapterApprovalError::StateRootMissing`.
+    pub fn with_approval_channel(mut self, state_root: impl Into<PathBuf>) -> Self {
+        self.approval_state_root = Some(state_root.into());
         self
     }
 
@@ -138,6 +165,7 @@ pub struct AgentRunLaunchValidation {
     terminal_environment_policy: TerminalEnvironmentPolicy,
     workspace_discovery_summary: AgentLaunchSummary,
     transcript_capture: AgentRunTranscriptCapture,
+    approval_state_root: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -154,6 +182,7 @@ pub struct AgentRunLaunchSpec {
     terminal_environment_policy: TerminalEnvironmentPolicy,
     workspace_discovery_summary: AgentLaunchSummary,
     transcript_capture: AgentRunTranscriptCapture,
+    approval_state_root: Option<PathBuf>,
 }
 
 impl AgentRunLaunchValidation {
@@ -208,6 +237,10 @@ impl AgentRunLaunchValidation {
     pub fn transcript_capture(&self) -> &AgentRunTranscriptCapture {
         &self.transcript_capture
     }
+
+    pub fn approval_state_root(&self) -> Option<&Path> {
+        self.approval_state_root.as_deref()
+    }
 }
 
 impl From<AgentRunLaunchValidation> for AgentRunLaunchSpec {
@@ -225,6 +258,7 @@ impl From<AgentRunLaunchValidation> for AgentRunLaunchSpec {
             terminal_environment_policy: validation.terminal_environment_policy,
             workspace_discovery_summary: validation.workspace_discovery_summary,
             transcript_capture: validation.transcript_capture,
+            approval_state_root: validation.approval_state_root,
         }
     }
 }
@@ -367,13 +401,22 @@ impl AgentRunLaunchPlan {
     /// validation, so `launch_project_adapter` only ever needs to read
     /// what is already on the spec.
     ///
-    /// Reuses `self.spec.transcript_capture.state_root` as the approval
-    /// channel's own state root too, rather than adding a second,
-    /// separately-configured root field: both name the same conceptual
-    /// "Tekstide state root" for this run, and a launch with a Managed
-    /// profile but no state root configured has nowhere to put either the
-    /// transcript or the approval socket -- `StateRootMissing` covers
-    /// both honestly rather than pretending only one of them needs it.
+    /// **Response 216 (required change): the state root is
+    /// `self.spec.approval_state_root`, independent of
+    /// `transcript_capture.state_root`, falling back to the latter only
+    /// when the former is unset.** The first version of this method
+    /// reused `transcript_capture.state_root` outright, which meant
+    /// `AgentRunLaunchRequest::without_transcript_capture()` silently made
+    /// a `Managed` launch impossible -- RFC-011's documented per-run
+    /// transcript opt-out and RFC-022's command approval had become
+    /// accidentally coupled, a policy nobody decided. The fallback exists
+    /// only for the common case where a caller wants both artifacts in
+    /// the same place; a caller who sets `approval_state_root` explicitly
+    /// (`AgentRunLaunchRequest::with_approval_channel`) gets a `Managed`
+    /// launch regardless of transcript capture. `StateRootMissing` now
+    /// means "no approval-channel location was ever configured, by
+    /// either route" -- a real, complete absence, not a side effect of
+    /// an unrelated opt-out.
     ///
     /// Returns the bound endpoint (not stored on `self`): this plan
     /// object already carries the token and socket path on
@@ -391,9 +434,9 @@ impl AgentRunLaunchPlan {
         }
         let state_root = self
             .spec
-            .transcript_capture
-            .state_root
+            .approval_state_root
             .as_ref()
+            .or(self.spec.transcript_capture.state_root.as_ref())
             .ok_or(AgentAdapterApprovalError::StateRootMissing)?;
         let directory = ApprovalChannelPathResolver
             .resolve(ApprovalChannelPathRequest::new(
@@ -477,6 +520,10 @@ impl AgentRunLaunchSpec {
 
     pub fn transcript_capture(&self) -> &AgentRunTranscriptCapture {
         &self.transcript_capture
+    }
+
+    pub fn approval_state_root(&self) -> Option<&Path> {
+        self.approval_state_root.as_deref()
     }
 }
 
@@ -653,6 +700,7 @@ impl AgentRunLaunchValidator {
                 state_root: request.transcript_state_root.clone(),
                 retention_limits: request.transcript_retention_limits,
             },
+            approval_state_root: request.approval_state_root.clone(),
         })
     }
 }
