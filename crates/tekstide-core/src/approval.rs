@@ -14,11 +14,13 @@
 //! PR-021-E2 (this slice): the `CommandDecision` round trip, audit-family
 //! wiring, edit-and-approve reclassification.
 
+mod arrival;
 mod channel;
 mod coordinator;
 mod protocol;
 mod risk;
 
+pub use arrival::should_promote_to_modal;
 pub use channel::{
     APPROVAL_SOCKET_PATH_ENV_VAR, APPROVAL_TOKEN_ENV_VAR, AcceptedProposal,
     ApprovalChannelDirectory, ApprovalChannelEndpoint, ApprovalChannelError,

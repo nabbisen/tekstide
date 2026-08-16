@@ -749,17 +749,58 @@ GUI-wiring increment inherits the requirement rather than rediscovering it.
 Re-verified after the fix: `tekstide-core` 587 (unchanged -- no tests added, two tests'
 resource-limit setup corrected to the right field), `tekstide` 220, all gates clean.
 
-**Not yet built, and next**: the promotion decision itself (`High`/`Destructive`, active
-project, no modal open) and *its own* cross-project guard (a GUI-level property --
-`state.active_project_id` deciding whether a project-A proposal may promote while project B
-is on screen -- which cannot be tested inside `tekstide-core` alone the way the queue bound's
-guard could); the four non-optional UI constraints (no bulk approval, visibly-unanswerable
-expired entries, focus-defaults-to-Reject, the post-promotion input-ignore window); the
-classifier-limitation disclosure; and the entire GUI wiring -- a long-lived
-`ApprovalCoordinator`/endpoint ownership on `State` (currently nowhere in production, the same
-"wired with no caller" shape response 219 found for `launch_agent_run_with_runtime`), the
-poll/subscription path, `ModalContent::Approval`, the new `ProjectOpenSurface` variant and its
-queue-viewing surface, and the `command_approval` audit family's first real producer.
+**The promotion decision, built as its own pure function** (`approval::should_promote_to_modal`,
+new `approval/arrival.rs` module, named after RFC-022's own "the arrival model" section) --
+`High`/`Destructive`, no modal open, belongs to the active project; `Low`/`Medium` never
+promote (habituation). Deliberately in `tekstide-core`, not the GUI crate: this is security
+policy directly derived from `RiskLevel`, the same reasoning that already puts
+`approval::risk::classify` here rather than in `crates/tekstide`.
+
+**Proven exhaustively, not spot-checked**: `promotion_requires_high_or_destructive_no_modal_and_the_active_project`
+sweeps all 4×2×2 = 16 combinations of risk level, modal state, and project membership against
+the same boolean expression the function itself computes, so no corner of this three-input
+policy is untested. Two further tests name the two properties the gate calls out explicitly
+(the cross-project guard; the open-modal guard) as their own, separately-labelled tests, not
+only rows of the sweep. **Ablated three times**: removed the modal/project guards together
+(two of the four tests failed, including the exhaustive sweep); removed only the
+`belongs_to_active_project` check (the cross-project test failed on its own). All three
+restored, reran clean. `tekstide-core`: 591 (up from 587).
+
+**A real defect found while planning the endpoint's GUI-side lifecycle, not yet fixed.**
+Tracing how a bound `ApprovalChannelEndpoint` would reach a long-lived GUI-side
+`ApprovalCoordinator` surfaced that `ProjectSession::launch_agent_run_with_runtime`
+(`session.rs:425-432`, the exact production entry point PR-022-D's `attempt_agent_run_launch`
+calls) discards it:
+
+```rust
+pub fn launch_agent_run_with_runtime(...) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ...> {
+    self.prepare_agent_run_launch(&mut plan)?;   // <- Option<ApprovalChannelEndpoint> dropped here
+    self.launch_prepared_agent_run_with_runtime(plan, runtime)
+}
+```
+
+`prepare_agent_run_launch` returns `Result<Option<ApprovalChannelEndpoint>, ...>` specifically
+so its own caller can decide where the endpoint lives (its own doc comment says so). This
+convenience wrapper calls it in statement position (`?;`) -- propagating the error, discarding
+the `Ok` value -- so for a real `Managed` launch through this one-shot path, the socket is
+bound and then immediately dropped before anything can `accept_proposal`/`serve_concurrently`
+on it. **PR-022-D's own real caller is unaffected** (`claude_code_linux_default` is
+`Supervised`, which never binds an endpoint at all), which is why this shipped without
+tripping any existing test -- every test that exercises a real `Managed` round trip
+(PR-022-C's own suite) calls `prepare_agent_run_launch`/`launch_prepared_agent_run_with_runtime`
+as two separate steps precisely to keep the endpoint alive itself, never through this
+convenience wrapper. Not a design ambiguity -- a mechanical fix (widen the return type to
+include the endpoint) -- but recorded here rather than silently folded into the next commit,
+since it is a real gap in already-reviewed PR-022-C/D code, not new work this slice invented.
+
+**Not yet built, and next**: the endpoint-discarding fix above; the four non-optional UI
+constraints (no bulk approval, visibly-unanswerable expired entries, focus-defaults-to-Reject,
+the post-promotion input-ignore window); the classifier-limitation disclosure; and the entire
+GUI wiring -- a long-lived `ApprovalCoordinator`/endpoint ownership on `State` (currently
+nowhere in production, the same "wired with no caller" shape response 219 found for
+`launch_agent_run_with_runtime`), the poll/subscription path, `ModalContent::Approval`, the
+new `ProjectOpenSurface` variant and its queue-viewing surface, and the `command_approval`
+audit family's first real producer.
 
 ## PR-022-F - Closeout
 

@@ -1,3 +1,4 @@
+mod arrival;
 mod channel;
 mod coordinator;
 mod protocol;
