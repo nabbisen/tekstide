@@ -11,19 +11,31 @@
 //! # Usage
 //!
 //! ```text
-//! reference_adapter <socket-path> <argv...>
+//! reference_adapter [argv...]
 //! ```
 //!
 //! Reads its capability token from `TEKSTIDE_APPROVAL_TOKEN`
-//! (`tekstide_core::approval::APPROVAL_TOKEN_ENV_VAR`) -- the one
-//! sanctioned delivery channel RFC-021/RFC-022 define. Connects to
-//! `<socket-path>`, this program's own first CLI argument: RFC-022 does
-//! not yet define how a spawned adapter learns the socket's path in
-//! production (that is PR-022-C's job, not this one's), so this test-and-
-//! proof artifact takes it explicitly rather than guessing at a delivery
-//! mechanism nobody has decided yet. Sends a single `CommandProposal` for
-//! `<argv...>`, waits for the resulting `CommandDecision`, prints it, and
-//! exits with a code identifying what happened.
+//! (`tekstide_core::approval::APPROVAL_TOKEN_ENV_VAR`) and the endpoint's
+//! socket path from `TEKSTIDE_APPROVAL_SOCKET_PATH`
+//! (`tekstide_core::approval::APPROVAL_SOCKET_PATH_ENV_VAR`) -- the two
+//! sanctioned delivery channels RFC-021/RFC-022 define (PR-022-C decided
+//! the socket path also travels this way, matching the token, rather
+//! than inventing a second delivery *class* for it -- see
+//! `APPROVAL_SOCKET_PATH_ENV_VAR`'s own doc comment). Both are how a real
+//! `spawn_adapter`-launched child learns them; this program takes neither
+//! as a CLI argument, so it can be spawned identically by the production
+//! path and by a test harness alike.
+//!
+//! `[argv...]`, if given, becomes the proposed command; if empty, this
+//! program proposes a fixed default (`DEFAULT_PROPOSAL_ARGV`) instead. A
+//! real AI CLI decides its own actions -- it does not take "the command
+//! to propose" as a launch argument -- so the production spawn path never
+//! passes any; PR-022-B's own tests pass one explicitly, to control what
+//! gets proposed.
+//!
+//! Sends a single `CommandProposal`, waits for the resulting
+//! `CommandDecision`, prints it, and exits with a code identifying what
+//! happened.
 //!
 //! # Exit codes
 //!
@@ -34,7 +46,7 @@
 //! | 4 | decision received: `edited_and_approved` |
 //! | 2 | `TEKSTIDE_APPROVAL_TOKEN` was not set -- a defined failure, not left to whatever the socket happens to do |
 //! | 3 | connect/send/read failed, or the response was malformed. This also covers a wrong or rejected token: the server closes the connection silently on an auth failure, per RFC-021's fail-closed-without-a-dialog rule, rather than replying with anything a client could distinguish from any other connection failure -- so this program cannot, and does not try to, tell "wrong token" apart from "server not listening" from the outside. |
-//! | 64 | usage error (missing arguments) |
+//! | 5 | `TEKSTIDE_APPROVAL_SOCKET_PATH` was not set -- the same defined-not-guessed treatment as a missing token |
 //!
 //! # The wire shapes below are RFC-021's protocol, not this program's own invention
 //!
@@ -62,14 +74,21 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use tekstide_core::approval::{APPROVAL_TOKEN_ENV_VAR, PROTOCOL_VERSION};
+use tekstide_core::approval::{
+    APPROVAL_SOCKET_PATH_ENV_VAR, APPROVAL_TOKEN_ENV_VAR, PROTOCOL_VERSION,
+};
 
 const EXIT_APPROVED: u8 = 0;
 const EXIT_REJECTED: u8 = 1;
 const EXIT_MISSING_TOKEN: u8 = 2;
 const EXIT_PROTOCOL_FAILURE: u8 = 3;
 const EXIT_EDITED_AND_APPROVED: u8 = 4;
-const EXIT_USAGE: u8 = 64;
+const EXIT_MISSING_SOCKET_PATH: u8 = 5;
+
+/// Used when no `argv` is given on the command line -- the production
+/// spawn path never passes one (see this file's own module doc), so
+/// this program still has something real to propose.
+const DEFAULT_PROPOSAL_ARGV: &[&str] = &["echo", "tekstide-reference-adapter-default-proposal"];
 
 /// A generous bound on how long this program will wait for a decision
 /// once its proposal is sent, so a genuine regression on the server side
@@ -102,16 +121,15 @@ struct DecisionWire {
 }
 
 fn main() -> ExitCode {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 3 {
-        eprintln!(
-            "usage: {} <socket-path> <argv...>",
-            args.first().map_or("reference_adapter", String::as_str)
-        );
-        return ExitCode::from(EXIT_USAGE);
-    }
-    let socket_path = &args[1];
-    let argv: Vec<String> = args[2..].to_vec();
+    let args: Vec<String> = env::args().skip(1).collect();
+    let argv: Vec<String> = if args.is_empty() {
+        DEFAULT_PROPOSAL_ARGV
+            .iter()
+            .map(|entry| (*entry).to_string())
+            .collect()
+    } else {
+        args
+    };
 
     let token = match env::var(APPROVAL_TOKEN_ENV_VAR) {
         Ok(token) => token,
@@ -123,8 +141,18 @@ fn main() -> ExitCode {
             return ExitCode::from(EXIT_MISSING_TOKEN);
         }
     };
+    let socket_path = match env::var(APPROVAL_SOCKET_PATH_ENV_VAR) {
+        Ok(socket_path) => socket_path,
+        Err(_) => {
+            eprintln!(
+                "{APPROVAL_SOCKET_PATH_ENV_VAR} is not set -- refusing to propose without \
+                 knowing where the approval channel is"
+            );
+            return ExitCode::from(EXIT_MISSING_SOCKET_PATH);
+        }
+    };
 
-    match propose_and_await_decision(socket_path, &token, argv) {
+    match propose_and_await_decision(&socket_path, &token, argv) {
         Ok(outcome) => outcome.into_exit_code(),
         Err(message) => {
             eprintln!("{message}");

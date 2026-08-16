@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::approval::RunCapabilityToken;
 use crate::domain::{
     AgentCompatibilityLevel, TerminalId, TerminalKind, TerminalStatus, VisibleSlot,
 };
@@ -17,7 +18,23 @@ pub struct TerminalLaunchSpec {
     pub kind: TerminalKind,
     pub dimensions: TerminalDimensions,
     transcript_writer_config: Option<TranscriptWriterConfig>,
+    adapter_approval_config: Option<AdapterApprovalConfig>,
     launch_authority: TerminalLaunchAuthority,
+}
+
+/// RFC-022 PR-022-C: the token and socket path a `spawn_adapter` launch
+/// delivers to the child process, carried on `TerminalLaunchSpec` the same
+/// way `TranscriptWriterConfig` is -- set only through
+/// `set_adapter_approval_config`, `None` for every plain-shell launch.
+/// `Some` here is what `launch_project_adapter` (as opposed to
+/// `launch_project_shell`) actually reads to build the child's
+/// environment; nothing about `TerminalKind` or `environment_policy`
+/// alone selects the spawn path -- the caller decides which `launch_*`
+/// method to call, and this field is what that path needs once chosen.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct AdapterApprovalConfig {
+    pub(crate) socket_path: PathBuf,
+    pub(crate) token: RunCapabilityToken,
 }
 
 impl TerminalLaunchSpec {
@@ -38,6 +55,7 @@ impl TerminalLaunchSpec {
             kind: TerminalKind::Plain,
             dimensions: TerminalDimensions::default(),
             transcript_writer_config: None,
+            adapter_approval_config: None,
             launch_authority: TerminalLaunchAuthority::PlainShell,
         }
     }
@@ -66,6 +84,14 @@ impl TerminalLaunchSpec {
 
     pub(crate) fn transcript_writer_config(&self) -> Option<&TranscriptWriterConfig> {
         self.transcript_writer_config.as_ref()
+    }
+
+    pub(crate) fn set_adapter_approval_config(&mut self, config: Option<AdapterApprovalConfig>) {
+        self.adapter_approval_config = config;
+    }
+
+    pub(crate) fn adapter_approval_config(&self) -> Option<&AdapterApprovalConfig> {
+        self.adapter_approval_config.as_ref()
     }
 }
 

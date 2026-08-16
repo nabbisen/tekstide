@@ -113,7 +113,100 @@ approval-channel socket in a test.
 
 ## PR-022-C - Spawn path and token delivery
 
-*Not started.*
+**A spawn path distinct from `spawn_shell`, inside RFC-009's boundary.** `spawn_adapter`
+(`runtime/terminal/launch.rs`) is a new function, not a branch inside `spawn_shell` itself —
+`spawn_shell` is untouched at the call-site level; only its shared PTY/session-setup
+mechanics (fd duplication, `setsid`/`TIOCSCTTY`, spawn, cleanup) were extracted into a new
+`spawn_pty_child` helper both functions call, a pure extraction verified by the full existing
+test suite passing unchanged. `launch_project_adapter` (new, on `LinuxTerminalRuntime`) is a
+**duplicate** of `launch_project_shell`'s orchestration shape, not a refactor of it — the only
+two differences are an approval-config check and which `spawn_*` function runs, and
+`launch_project_shell` is already-reviewed, security-adjacent code this slice had no reason
+to touch. `validate_launch_spec` itself **is** shared and unmodified, so RFC-009's existing
+gates (cross-project, cwd containment, executable-is-file, environment policy) apply to the
+adapter path exactly as they do to the shell path, by construction, not by copying the
+checks — proven, not assumed:
+`runtime_launch_rejects_non_minimal_environment_policy_for_the_adapter_path_too` re-runs the
+pre-existing `ExplicitAllowlist`-rejection test's exact shape through `launch_project_adapter`
+specifically and gets the identical rejection.
+
+**`.env_clear()` preserved; the token is one additional `.env(...)`.** `spawn_adapter` sets
+the same five fixed variables `spawn_shell` sets (RFC-022's own text: token delivery is "a
+sixth" call on top of the existing set, not a redesigned environment), then
+`inject_token_into_environment` (a sixth) and `APPROVAL_SOCKET_PATH_ENV_VAR` (a seventh, see
+below). Nothing inherited. **`ExplicitAllowlist` stays rejected**, pinned by the test named
+above — a genuine re-proof, not an assumption that the shared check must still apply.
+
+**`inject_token_into_environment` gains its first production caller**, and the enumeration
+proving it is exact:
+`inject_token_into_environment_has_exactly_one_production_call_site`
+(`approval/tests/channel.rs`) names `runtime/terminal/launch.rs`'s one call site. The needle
+is `"inject_token_into_environment(&mut command"`, not the bare function name — found live,
+by running the test before choosing the needle: the bare form also matched the function's
+own multi-line definition (`command: &mut std::process::Command`, name before type — the
+reverse of a call site's `&mut command`), which would have miscounted this file's own
+definition as a second call site. Ablated for real: added a second call, watched the
+assertion fail with the exact count (`[("runtime/terminal/launch.rs", 2)]`), reverted.
+
+**The socket path needed a delivery decision RFC-022's own text does not make**, and this
+slice makes it, disclosed rather than left implicit: `APPROVAL_SOCKET_PATH_ENV_VAR`
+(`TEKSTIDE_APPROVAL_SOCKET_PATH`), delivered the same way as the token — one more `.env(...)`
+call, nothing inherited — rather than a CLI argument. Reasoning stated on the constant's own
+doc comment: everything this spawn path delivers to the adapter goes through the same
+mechanism, and a value with the same lifecycle as the token (generated fresh per bind,
+meaningless once the endpoint is gone) gains nothing from a second delivery *class*. This
+changed the reference adapter's own contract from PR-022-B's `<socket-path>` CLI argument to
+this env var — PR-022-B's own tests were updated to match (a mechanical, disclosed interface
+change anticipated by that slice's own doc comment: "RFC-022 does not yet define how a
+spawned adapter learns the socket's path in production -- that is PR-022-C's job"), and a
+new `a_real_adapter_process_refuses_to_run_without_a_socket_path` test gives the missing case
+the same defined-not-guessed treatment PR-022-B already gave a missing token.
+
+**A real spawned adapter completes a real approval round trip, end to end, headless.**
+`a_real_adapter_completes_a_real_approval_round_trip_through_the_production_spawn_path`
+(`agent/tests.rs`) is the slice's central proof: the reference adapter launched through the
+*full* production chain (`AgentRunLaunchValidator::validate` → `AgentRunLaunchPlan::from_validation`
+→ `prepare_agent_run_launch` → `launch_prepared_agent_run_with_runtime` →
+`launch_project_adapter` → `spawn_adapter`), not the bare `Command` PR-022-B's own tests use
+and not a hand-built `TerminalLaunchSpec` bypassing validation. The decision travels back
+over the **PTY**, not a piped `Stdio` — `spawn_adapter` goes through the same PTY machinery
+`spawn_shell` does — so the test reads it via `runtime.spawn_output_reader`, the same
+consumer path a real terminal pane uses, and asserts on what the real adapter process
+actually printed after parsing the decision it received over the wire.
+
+**Transcript capture, exercised for the first time by a production `Managed` `AgentRun`.**
+`prepare_transcript_capture` (already non-test code before this slice, just never reached
+outside a test) is called via the same `prepare_agent_run_launch` this slice's headless test
+drives for real. **What this proves**: the mechanism (RFC-011 Amendment 2's writer-in-the-
+reader-thread design) reaches this specific, real, production-shaped spawn path — the
+transcript file is read back from disk after the run and shown to contain the same
+`approved_once` text the channel carried, not merely configured and assumed to work.
+**What this does not prove**: RFC-011 Amendment 2's own byte-identical, ordering, and
+failure-policy guarantees — those are that amendment's own evidence (RFC-011 Amendment 2
+PR-A2-A/B), re-exercised here for the first time in a production context, not re-proven from
+scratch by this one test.
+
+**A design decision the review gate did not resolve, disclosed:** `prepare_adapter_approval`
+(`AgentRunLaunchPlan`) reuses `AgentRunLaunchRequest`'s existing `transcript_state_root`
+field as the approval channel's own state root too, rather than adding a second,
+separately-configured root. Both name the same conceptual "Tekstide state root" for a run; a
+`Managed` launch with no state root configured has nowhere to put either the transcript or
+the approval socket, so `StateRootMissing` covers both honestly. This discharges the review
+gate's implicit assumption that a Managed launch is always configured with a real state
+root — the pre-existing `project_session_launches_validated_managed_agent_run_through_terminal_runtime`
+test (PR-021-era, predating this slice) needed exactly this fixed, since it previously
+launched a Managed profile with no state root at all; updated to supply one, a
+removal-driven change this slice's own new requirement made necessary, not an unrelated bent
+assertion.
+
+**One more real socket-bind-length finding, same class as PR-022-B's, found again
+independently.** The pre-existing Managed-launch test's own `test_root` helper (shared
+across many unrelated tests in this file) produces a name too long once combined with a
+*real* (UUID-based, 46-character) `agent_run.id` and the real socket suffix — worse than
+PR-022-B's own finding, since a production `AgentRunId` is far longer than the short
+`for_test` form used elsewhere. Fixed the same way: a short, purpose-built temp directory for
+this one test rather than widening `test_root` itself (shared by many other tests with no
+reason to shrink their own names).
 
 ## PR-022-D - AgentRun creation and route
 

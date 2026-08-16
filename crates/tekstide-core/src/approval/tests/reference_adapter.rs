@@ -14,9 +14,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::agent::VerifiedCwd;
 use crate::approval::{
-    APPROVAL_TOKEN_ENV_VAR, ApprovalChannelDirectory, ApprovalChannelEndpoint,
-    ApprovalChannelErrorReason, ApprovalChannelPathRequest, ApprovalChannelPathResolver,
-    ApprovalCoordinator, DecideOutcome, ReceiveOutcome, SimpleDecision,
+    APPROVAL_SOCKET_PATH_ENV_VAR, APPROVAL_TOKEN_ENV_VAR, ApprovalChannelDirectory,
+    ApprovalChannelEndpoint, ApprovalChannelErrorReason, ApprovalChannelPathRequest,
+    ApprovalChannelPathResolver, ApprovalCoordinator, DecideOutcome, ReceiveOutcome,
+    SimpleDecision,
 };
 use crate::audit::{
     AuditCoordinator, AuditHealth, AuditPathRequest, AuditPathResolver, AuditStore,
@@ -132,20 +133,31 @@ fn reference_adapter_binary_path() -> PathBuf {
     candidate
 }
 
-/// Spawns the real compiled adapter binary. `token: None` omits
-/// `TEKSTIDE_APPROVAL_TOKEN` entirely (the missing-token case); `Some`
-/// sets it to exactly that value, whether or not it is the real one (the
-/// wrong-token case reuses this same helper).
-fn spawn_adapter(socket_path: &PathBuf, token: Option<&str>, argv: &[&str]) -> std::process::Child {
+/// Spawns the real compiled adapter binary. `token`/`socket_path`:
+/// `None` omits the corresponding env var entirely (the missing-token
+/// and missing-socket-path cases); `Some` sets it to exactly that value,
+/// whether or not it is the real one (the wrong-token case reuses this
+/// same helper). Both travel through the environment, matching PR-022-C's
+/// production spawn path exactly -- this binary takes neither as a CLI
+/// argument, so a test spawning it directly and the production
+/// `spawn_adapter` (`runtime::terminal::launch`) exercise the identical
+/// contract.
+fn spawn_adapter(
+    socket_path: Option<&PathBuf>,
+    token: Option<&str>,
+    argv: &[&str],
+) -> std::process::Child {
     let mut command = Command::new(reference_adapter_binary_path());
     command
-        .arg(socket_path)
         .args(argv)
         .env_clear()
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(token) = token {
         command.env(APPROVAL_TOKEN_ENV_VAR, token);
+    }
+    if let Some(socket_path) = socket_path {
+        command.env(APPROVAL_SOCKET_PATH_ENV_VAR, socket_path);
     }
     command
         .spawn()
@@ -174,7 +186,7 @@ fn a_real_adapter_process_completes_a_full_approve_round_trip() {
     let agent_run_id = AgentRunId::for_test(1);
     let (endpoint, raw_token, socket_path) = channel.bind(&agent_run_id);
 
-    let child = spawn_adapter(&socket_path, Some(&raw_token), &["git", "status"]);
+    let child = spawn_adapter(Some(&socket_path), Some(&raw_token), &["git", "status"]);
 
     let accepted = endpoint
         .accept_proposal()
@@ -233,7 +245,7 @@ fn a_real_adapter_process_completes_a_full_reject_round_trip() {
     let (endpoint, raw_token, socket_path) = channel.bind(&agent_run_id);
 
     let child = spawn_adapter(
-        &socket_path,
+        Some(&socket_path),
         Some(&raw_token),
         &["rm", "-rf", "/nonexistent"],
     );
@@ -290,7 +302,7 @@ fn a_real_adapter_process_refuses_to_run_without_a_token() {
     let agent_run_id = AgentRunId::for_test(3);
     let (_endpoint, _raw_token, socket_path) = channel.bind(&agent_run_id);
 
-    let child = spawn_adapter(&socket_path, None, &["echo", "hi"]);
+    let child = spawn_adapter(Some(&socket_path), None, &["echo", "hi"]);
     let output = finish(child);
 
     assert_eq!(
@@ -307,6 +319,29 @@ fn a_real_adapter_process_refuses_to_run_without_a_token() {
     );
 }
 
+/// The same treatment for the other required variable, added when
+/// PR-022-C moved the socket path from a CLI argument to
+/// `APPROVAL_SOCKET_PATH_ENV_VAR`: a missing value must be a defined,
+/// immediate refusal, not an attempt to connect to nothing.
+#[test]
+fn a_real_adapter_process_refuses_to_run_without_a_socket_path() {
+    let child = spawn_adapter(None, Some(&"t".repeat(64)), &["echo", "hi"]);
+    let output = finish(child);
+
+    assert_eq!(
+        output.status.code(),
+        Some(5),
+        "a missing TEKSTIDE_APPROVAL_SOCKET_PATH must exit with the defined \
+         missing-socket-path code, not hang or attempt to connect; stdout: {}, stderr: {}",
+        stdout_text(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(APPROVAL_SOCKET_PATH_ENV_VAR),
+        "the failure message should name the missing variable, not just fail silently"
+    );
+}
+
 /// "Behaviour on a ... wrong token is defined and tested." The server
 /// rejects a bad token by silently dropping the connection (fail-closed
 /// without a dialog, per `approval::channel`'s own design) -- so the
@@ -318,7 +353,7 @@ fn a_real_adapter_process_exits_distinctly_on_a_rejected_token() {
     let agent_run_id = AgentRunId::for_test(4);
     let (endpoint, _raw_token, socket_path) = channel.bind(&agent_run_id);
 
-    let child = spawn_adapter(&socket_path, Some(&"w".repeat(64)), &["echo", "hi"]);
+    let child = spawn_adapter(Some(&socket_path), Some(&"w".repeat(64)), &["echo", "hi"]);
 
     let server_result = endpoint.accept_proposal();
     assert_eq!(

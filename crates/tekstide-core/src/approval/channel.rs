@@ -350,6 +350,17 @@ fn generate_capability_token() -> String {
 /// to spawn the process).
 pub const APPROVAL_TOKEN_ENV_VAR: &str = "TEKSTIDE_APPROVAL_TOKEN";
 
+/// The environment variable through which a bound `ApprovalChannelEndpoint`'s socket path
+/// reaches a spawned adapter process (RFC-022 PR-022-C). Unlike `APPROVAL_TOKEN_ENV_VAR`,
+/// the path is not a secret -- it is the address the adapter must connect to before it can
+/// even attempt to use the token -- but it is still delivered only through the
+/// environment, for the same reason RFC-022 gives for the token itself: every alternative
+/// (a CLI argument, a well-known file) still bootstraps through the environment or an
+/// equally-transparent-to-a-same-user-process channel, and a value with the same lifecycle
+/// as the token (generated fresh per bind, meaningless once the endpoint is gone) gains
+/// nothing from a second delivery *class*.
+pub const APPROVAL_SOCKET_PATH_ENV_VAR: &str = "TEKSTIDE_APPROVAL_SOCKET_PATH";
+
 /// Sets `APPROVAL_TOKEN_ENV_VAR` on `command` to `token`'s value -- the
 /// single sanctioned way a `RunCapabilityToken` may be delivered to a
 /// spawned adapter process. This exists so there is exactly one, tested
@@ -358,19 +369,16 @@ pub const APPROVAL_TOKEN_ENV_VAR: &str = "TEKSTIDE_APPROVAL_TOKEN";
 /// search of this crate when this was written could confirm, anywhere
 /// else in it) writes the token to a file, a log, or any other channel.
 ///
-/// **Known limitation, disclosed rather than worked around:** as of this
-/// slice, no code path in `runtime::terminal` spawns a distinct "adapter"
-/// process to call this against. `runtime::terminal::launch::spawn_shell`
-/// always launches a plain interactive shell with a fixed, hard-coded
-/// environment (`env_clear()` plus five literal `.env()` calls), and
-/// `TerminalEnvironmentPolicy::ExplicitAllowlist` is not yet applied by
-/// the Linux runtime (`launch.rs`'s own `unsupported_environment_policy_
-/// summary` rejects that policy outright, before a process is ever
-/// spawned). This function therefore has no production caller yet. It is
-/// built and tested now, ahead of that caller existing, so the one
-/// correct way to deliver this specific secret is already established
-/// and verified rather than improvised later under the same kind of time
-/// pressure that left the caller itself unbuilt.
+/// **RFC-022 PR-022-C gives this its first production caller**:
+/// `runtime::terminal::launch::spawn_adapter`, a spawn path distinct from
+/// `spawn_shell` (which still only ever launches a plain interactive
+/// shell with its own fixed, hard-coded environment and never calls this
+/// function). `TerminalEnvironmentPolicy::ExplicitAllowlist` remains
+/// rejected by the Linux runtime regardless -- delivering this token sets
+/// one value Tekstide generated; it does not inherit anything, and
+/// `ExplicitAllowlist` could only ever express inheriting names, not
+/// setting a generated value, so the two are orthogonal by construction,
+/// not by policy this slice had to add.
 pub fn inject_token_into_environment(
     command: &mut std::process::Command,
     token: &RunCapabilityToken,

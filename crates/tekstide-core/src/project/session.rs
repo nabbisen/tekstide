@@ -1,5 +1,7 @@
+use crate::agent::AgentAdapterApprovalError;
 use crate::agent::AgentRunLaunchPlan;
 use crate::agent::AgentRunTranscriptCaptureError;
+use crate::approval::ApprovalChannelEndpoint;
 use crate::runtime::terminal::{
     LinuxTerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntimeEvent,
     TerminationOutcome,
@@ -382,26 +384,46 @@ impl ProjectSession {
         self.launch_prepared_agent_run_with_runtime(plan, runtime)
     }
 
+    /// Returns the bound `ApprovalChannelEndpoint` when `plan`'s profile
+    /// is `Managed` (RFC-022 PR-022-C), `None` for `Plain`/`Supervised` --
+    /// see `AgentRunLaunchPlan::prepare_adapter_approval`'s own doc
+    /// comment for why the endpoint is handed back rather than stored:
+    /// this method's own callers decide where it lives from here.
     pub(crate) fn prepare_agent_run_launch(
         &mut self,
         plan: &mut AgentRunLaunchPlan,
-    ) -> Result<(), ProjectAgentRuntimeLaunchError> {
+    ) -> Result<Option<ApprovalChannelEndpoint>, ProjectAgentRuntimeLaunchError> {
         self.validate_agent_launch_plan_before_runtime(plan)?;
         self.ensure_agent_launch_active_file_safety()?;
         plan.prepare_transcript_capture()?;
-        Ok(())
+        Ok(plan.prepare_adapter_approval()?)
     }
 
+    /// RFC-022 PR-022-C: branches on `plan.terminal_launch_spec()`'s own
+    /// `adapter_approval_config` -- set only by a preceding
+    /// `prepare_adapter_approval()` call for a `Managed` profile -- to
+    /// launch via `runtime.launch_project_adapter` instead of
+    /// `launch_project_shell`. `TerminalLaunchSpec` itself, not
+    /// `compatibility_level` read separately, is the single source of
+    /// truth for which spawn path runs, so this can never disagree with
+    /// what `prepare_adapter_approval` actually configured.
     pub(crate) fn launch_prepared_agent_run_with_runtime(
         &mut self,
         mut plan: AgentRunLaunchPlan,
         runtime: &mut LinuxTerminalRuntime,
     ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
         let transcript_storage_path = plan.transcript_storage_path().cloned();
+        let is_adapter_launch = plan
+            .terminal_launch_spec()
+            .adapter_approval_config()
+            .is_some();
 
         plan.transition_agent_run_to(AgentRunStatus::Preparing)?;
-        let (terminal, events) =
-            runtime.launch_project_shell(self, plan.terminal_launch_spec_for_runtime())?;
+        let (terminal, events) = if is_adapter_launch {
+            runtime.launch_project_adapter(self, plan.terminal_launch_spec_for_runtime())?
+        } else {
+            runtime.launch_project_shell(self, plan.terminal_launch_spec_for_runtime())?
+        };
         let terminal_id = terminal.id.clone();
         plan.transition_agent_run_to(AgentRunStatus::Running)?;
 
@@ -1240,6 +1262,7 @@ pub enum ProjectAgentRuntimeLaunchError {
     Terminal(ProjectTerminalError),
     ActiveFile(ProjectAgentActiveFileLaunchError),
     TranscriptCapture(AgentRunTranscriptCaptureError),
+    AdapterApproval(AgentAdapterApprovalError),
     InvalidAgentRunTransition(AgentRunTransitionError),
     AgentTerminalMismatch,
 }
@@ -1277,6 +1300,12 @@ impl From<ProjectAgentActiveFileLaunchError> for ProjectAgentRuntimeLaunchError 
 impl From<AgentRunTranscriptCaptureError> for ProjectAgentRuntimeLaunchError {
     fn from(error: AgentRunTranscriptCaptureError) -> Self {
         Self::TranscriptCapture(error)
+    }
+}
+
+impl From<AgentAdapterApprovalError> for ProjectAgentRuntimeLaunchError {
+    fn from(error: AgentAdapterApprovalError) -> Self {
+        Self::AdapterApproval(error)
     }
 }
 

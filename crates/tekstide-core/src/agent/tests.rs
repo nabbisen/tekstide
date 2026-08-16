@@ -2,6 +2,7 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::approval::{ApprovalCoordinator, DecideOutcome, ReceiveOutcome, SimpleDecision};
 use crate::content::{SaveDecision, TextDocumentState};
 use crate::domain::{
     AgentCompatibilityLevel, AgentRunId, AgentRunStatus, OwnershipError, TerminalId, TerminalKind,
@@ -15,7 +16,9 @@ use crate::runtime::terminal::{
     BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError,
     TerminalRuntimeEvent, TerminalRuntimeHandle, TerminationOutcome, TerminationSignal,
 };
-use crate::transcript::{TranscriptCaptureMode, TranscriptRetentionLimits};
+use crate::transcript::{
+    TranscriptCaptureMode, TranscriptPathRequest, TranscriptPathResolver, TranscriptRetentionLimits,
+};
 
 use super::{
     AgentRunLaunchPlan, AgentRunLaunchRequest, AgentRunLaunchValidationError,
@@ -871,13 +874,36 @@ fn local_bounded_transcript_capture_disables_when_path_preflight_fails() {
 #[test]
 fn project_session_launches_validated_managed_agent_run_through_terminal_runtime() {
     let root = test_root("agent-runtime-managed-root");
+    // Deliberately not `test_root`: this test binds a real
+    // `ApprovalChannelEndpoint` socket under this root, and a Unix
+    // `sun_path` is bounded to ~107 bytes. The real (UUID-based)
+    // `agent_run.id` this launch generates already spends 46 of that
+    // budget on its own (`agent-run-<uuid>`), and `test_root`'s own
+    // `tekstide-{name}-{pid}-{nanos}` scheme is descriptive enough to
+    // blow the rest even with a short `name` -- see
+    // `approval::tests::reference_adapter`'s own `unique_temp_dir` doc
+    // comment for the same finding, made first there.
+    let state_root = std::env::temp_dir().join(format!("ta-mg-{}", std::process::id()));
+    std::fs::create_dir_all(&state_root).expect("approval state root should be creatable");
     let mut project = restricted_project(ProjectId::for_test(1), &root);
     let mut profile = built_in_profile(Path::new("/bin/sh"));
     profile.compatibility_level = AgentCompatibilityLevel::Managed;
     profile.adapter_capabilities = AiCliAdapterCapabilities {
         structured_action_approval: true,
     };
-    let plan = launch_plan_for(&project, &profile);
+    // RFC-022 PR-022-C: a `Managed` launch now also binds a real
+    // `ApprovalChannelEndpoint`, which needs a real state root the same
+    // way transcript capture does -- `request_for`'s bare default (no
+    // state root at all) stopped being a complete `Managed` request the
+    // moment that became true, so this test supplies one explicitly
+    // rather than relying on the shared helper's plain-shell-era default.
+    let request = AgentRunLaunchRequest::new(project.id().clone(), &profile.id, "prompt")
+        .with_local_bounded_transcript(state_root.clone());
+    let validation = AgentRunLaunchValidator
+        .validate(&project, &profile, &request)
+        .expect("Managed profile should validate before launch plan creation");
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Built-in AI")
+        .expect("validated Managed launch should produce a launch plan");
     let mut runtime = LinuxTerminalRuntime::new();
 
     let (agent_run_id, _) = project
@@ -909,6 +935,170 @@ fn project_session_launches_validated_managed_agent_run_through_terminal_runtime
         .expect("Managed AgentRun cleanup outcome should apply");
 
     cleanup_root(root);
+    cleanup_root(state_root);
+}
+
+/// RFC-022 PR-022-C: the adapter spawn path proven for real, end to end,
+/// headless -- the reference adapter (PR-022-B) launched through the
+/// *production* spawn path (`prepare_agent_run_launch` ->
+/// `launch_prepared_agent_run_with_runtime` -> `launch_project_adapter` ->
+/// `spawn_adapter`), not the bare `Command` PR-022-B's own tests use,
+/// completing a real approval round trip against a real, production-bound
+/// `ApprovalChannelEndpoint` and `ApprovalCoordinator`.
+///
+/// **What this proves.** `spawn_adapter`'s environment wiring
+/// (`.env_clear()`, the token, the socket path) is correct against a
+/// real client that only knows the two sanctioned env vars, not a
+/// test-only shortcut. `inject_token_into_environment`'s first
+/// production caller really delivers a token the real channel accepts.
+/// Transcript capture, configured via `prepare_transcript_capture`
+/// (already non-test code, now reached for the first time by a
+/// `Managed` production `AgentRun`) really writes the adapter's own PTY
+/// output to disk -- read back below and checked, not assumed.
+///
+/// **What this does not prove.** That a real AI CLI behaves this way --
+/// nothing speaks this protocol except what this project wrote (RFC-022's
+/// own scope). Nor a GUI-triggered launch or the dialog -- PR-022-D/E's
+/// job, not this test's.
+#[test]
+fn a_real_adapter_completes_a_real_approval_round_trip_through_the_production_spawn_path() {
+    let root = test_root("agent-adapter-roundtrip-root");
+    // Deliberately not `test_root` -- see the previous test's own
+    // comment on why: a real socket bind needs a short state root.
+    let state_root = std::env::temp_dir().join(format!("ta-rt-{}", std::process::id()));
+    std::fs::create_dir_all(&state_root)
+        .expect("approval/transcript state root should be creatable");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+
+    let mut profile = built_in_profile(&reference_adapter_binary_path());
+    profile.compatibility_level = AgentCompatibilityLevel::Managed;
+    profile.adapter_capabilities = AiCliAdapterCapabilities {
+        structured_action_approval: true,
+    };
+    let request = AgentRunLaunchRequest::new(project.id().clone(), &profile.id, "prompt")
+        .with_local_bounded_transcript(state_root.clone());
+    let validation = AgentRunLaunchValidator
+        .validate(&project, &profile, &request)
+        .expect("Managed reference-adapter profile should validate");
+    let mut plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
+        .expect("validated Managed launch should produce a launch plan");
+
+    let endpoint = project
+        .prepare_agent_run_launch(&mut plan)
+        .expect("prepare should succeed for a Managed profile with a real state root")
+        .expect("a Managed launch must bind a real approval channel endpoint");
+    let verified_cwd = plan.spec().verified_cwd().clone();
+    let project_root = plan.spec().project_root().to_path_buf();
+
+    let mut runtime = LinuxTerminalRuntime::new();
+    let (agent_run_id, _events) = project
+        .launch_prepared_agent_run_with_runtime(plan, &mut runtime)
+        .expect("prepared Managed launch should spawn the real adapter binary");
+    let terminal_id = project.agent_runs()[0]
+        .terminal_id
+        .clone()
+        .expect("runtime-launched AgentRun should have a terminal id");
+    let handle = TerminalRuntimeHandle::new(terminal_id.clone(), project.id().clone());
+
+    let accepted = endpoint
+        .accept_proposal()
+        .expect("the real, production-spawned adapter's proposal should authenticate and parse");
+    let proposal_id = accepted.proposal.proposal_id().clone();
+
+    let mut coordinator = ApprovalCoordinator::new();
+    let mut audit = RoundTripAudit::new("adapter-roundtrip");
+    let receive_outcome = coordinator.receive_proposal(
+        project.id().clone(),
+        agent_run_id.clone(),
+        &verified_cwd,
+        &project_root,
+        &state_root,
+        accepted,
+        &mut audit.coordinator(),
+    );
+    assert!(
+        matches!(receive_outcome, ReceiveOutcome::Created { .. }),
+        "the real adapter's first proposal should be accepted as Created: {receive_outcome:?}"
+    );
+
+    let decide_outcome = coordinator.decide(
+        &agent_run_id,
+        &proposal_id,
+        SimpleDecision::ApprovedOnce,
+        &mut audit.coordinator(),
+    );
+    let DecideOutcome::Decided { sent, .. } = decide_outcome else {
+        panic!("deciding a freshly-created proposal should reach Decided: {decide_outcome:?}");
+    };
+    sent.expect(
+        "sending the decision back over the real production-spawned connection should succeed",
+    );
+
+    // The decision travels back over the PTY, not a piped `Stdio` --
+    // `spawn_adapter` goes through the same PTY machinery `spawn_shell`
+    // does, unlike PR-022-B's own tests, which spawn the adapter as a
+    // bare `Command` outside any terminal at all.
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against the real adapter's PTY master");
+    let mut drained = Vec::new();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !String::from_utf8_lossy(&drained).contains("approved_once")
+        && std::time::Instant::now() < deadline
+    {
+        let drain = reader.drain_available();
+        drained.extend_from_slice(drain.bytes());
+        if drain.bytes().is_empty() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    assert!(
+        String::from_utf8_lossy(&drained).contains("approved_once"),
+        "the real adapter should have printed the decision it actually received over the PTY; \
+         captured: {}",
+        String::from_utf8_lossy(&drained)
+    );
+
+    let outcome = runtime
+        .wait_for_exit(&handle, Duration::from_secs(5))
+        .expect("waiting on the real adapter's exit should not fail")
+        .expect("the real adapter should have exited");
+    assert_eq!(
+        outcome,
+        TerminationOutcome::Exited { exit_status: 0 },
+        "the reference adapter's own exit-code contract: 0 means approved_once"
+    );
+    project
+        .apply_agent_terminal_outcome(&agent_run_id, &terminal_id, &outcome)
+        .expect("adapter run cleanup outcome should apply");
+
+    // Transcript capture, exercised for the first time by a production
+    // `Managed` `AgentRun` (RFC-011 Amendment 2's first real production
+    // exercise) -- read back from disk, not assumed from configuration
+    // alone. Proves the mechanism reached this specific, real spawn path;
+    // it does not re-prove Amendment 2's own byte-identical/ordering
+    // guarantees, which are that amendment's own evidence, not this
+    // test's.
+    let transcript_storage = TranscriptPathResolver
+        .resolve_agent_run(TranscriptPathRequest::new(
+            &state_root,
+            &root,
+            project.id().clone(),
+            agent_run_id.clone(),
+        ))
+        .expect("the same transcript path production code resolved should resolve again");
+    let transcript_bytes = std::fs::read(transcript_storage.transcript_file())
+        .expect("the transcript file production code wrote to should be readable");
+    assert!(
+        String::from_utf8_lossy(&transcript_bytes).contains("approved_once"),
+        "the transcript must contain the same real adapter output the channel carried; \
+         transcript: {}",
+        String::from_utf8_lossy(&transcript_bytes)
+    );
+
+    drop(reader);
+    cleanup_root(root);
+    cleanup_root(state_root);
 }
 
 #[test]
@@ -1193,6 +1383,53 @@ fn runtime_launch_rejects_non_minimal_environment_policy_without_project_mutatio
     assert!(project.agent_runs().is_empty());
 
     cleanup_root(root);
+}
+
+/// RFC-022 PR-022-C: the same rejection, proven again for the *adapter*
+/// spawn path specifically -- the review gate's own wording ("nothing
+/// inherited -- `ExplicitAllowlist` stays rejected, and a test pins that
+/// it is still rejected") is about this path, not the shell one the
+/// test above already covers. `launch_project_adapter` calls the same,
+/// unmodified `validate_launch_spec` `launch_project_shell` does, so
+/// this is a real re-proof that the shared check still reaches the new
+/// path, not an assumption that it must.
+#[test]
+fn runtime_launch_rejects_non_minimal_environment_policy_for_the_adapter_path_too() {
+    let root = test_root("agent-runtime-env-reject-adapter-root");
+    let state_root = std::env::temp_dir().join(format!("ta-envrej-{}", std::process::id()));
+    std::fs::create_dir_all(&state_root)
+        .expect("approval/transcript state root should be creatable");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let mut profile = built_in_profile(&reference_adapter_binary_path());
+    profile.compatibility_level = AgentCompatibilityLevel::Managed;
+    profile.adapter_capabilities = AiCliAdapterCapabilities {
+        structured_action_approval: true,
+    };
+    profile.environment_policy = AiCliEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned()]);
+    let request = AgentRunLaunchRequest::new(project.id().clone(), &profile.id, "prompt")
+        .with_local_bounded_transcript(state_root.clone());
+    let validation = AgentRunLaunchValidator
+        .validate(&project, &profile, &request)
+        .expect("Managed profile should validate before launch plan creation");
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
+        .expect("validated Managed launch should produce a launch plan");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let error = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect_err("the adapter path must reject unsupported env policy before process launch");
+
+    assert!(matches!(
+        error,
+        ProjectAgentRuntimeLaunchError::TerminalLaunch(
+            TerminalLaunchError::UnsupportedEnvironmentPolicy { .. }
+        )
+    ));
+    assert!(project.terminal_sessions().is_empty());
+    assert!(project.agent_runs().is_empty());
+
+    cleanup_root(root);
+    cleanup_root(state_root);
 }
 
 #[test]
@@ -1499,6 +1736,61 @@ fn test_root(name: &str) -> PathBuf {
 
 fn cleanup_root(root: PathBuf) {
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// `CARGO_BIN_EXE_<name>` is only guaranteed for genuine integration test
+/// targets (`tests/*.rs`), not a lib's own `#[cfg(test)]` unit tests --
+/// duplicated from `approval::tests::reference_adapter`'s own identically-
+/// named, identically-documented helper rather than shared across test
+/// modules, matching this crate's established convention for small test-
+/// only infrastructure.
+fn reference_adapter_binary_path() -> PathBuf {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_reference_adapter") {
+        return PathBuf::from(path);
+    }
+    let test_exe = std::env::current_exe().expect("current_exe should resolve for a running test");
+    let profile_dir = test_exe
+        .parent()
+        .and_then(Path::parent)
+        .expect("test binary should live under target/<profile>/deps");
+    let candidate = profile_dir.join("reference_adapter");
+    assert!(
+        candidate.is_file(),
+        "expected the reference_adapter binary at {}; the [[bin]] target may not have built",
+        candidate.display()
+    );
+    candidate
+}
+
+/// A real, sqlite-backed `AuditStore` -- duplicated from
+/// `approval::tests::coordinator`'s own `TestAudit` (private to a sibling
+/// module tree), same reasoning as `reference_adapter_binary_path` above.
+struct RoundTripAudit {
+    store: crate::audit::AuditStore,
+    health: crate::audit::AuditHealth,
+}
+
+impl RoundTripAudit {
+    fn new(name: &str) -> Self {
+        let state_root =
+            std::env::temp_dir().join(format!("ta-audit-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&state_root).expect("create temp audit state root");
+        let state_root = state_root
+            .canonicalize()
+            .expect("canonicalize temp audit state root");
+        let storage_path = crate::audit::AuditPathResolver
+            .resolve(crate::audit::AuditPathRequest::new(state_root, Vec::new()))
+            .expect("resolve audit storage path");
+        let store = crate::audit::AuditStore::open(storage_path).expect("open a real audit store");
+        Self {
+            store,
+            health: crate::audit::AuditHealth::default(),
+        }
+    }
+
+    fn coordinator(&mut self) -> crate::audit::AuditCoordinator<'_> {
+        crate::audit::AuditCoordinator::new(&mut self.store, &mut self.health)
+    }
 }
 
 fn read_until_contains(

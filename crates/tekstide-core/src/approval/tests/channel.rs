@@ -894,6 +894,93 @@ fn inject_token_into_environment_sets_the_sanctioned_variable_on_a_real_child_pr
     );
 }
 
+/// RFC-022 PR-022-C's own gate: "`inject_token_into_environment` gains
+/// its first production caller; the enumeration naming that call site
+/// fails by name if a second appears." Scans every non-test `.rs` file
+/// under `tekstide-core/src/` for the literal call and asserts the exact,
+/// closed list -- one production call site,
+/// `runtime/terminal/launch.rs`'s `spawn_adapter`.
+///
+/// Needle is `"inject_token_into_environment(&mut command"`, not the bare
+/// function name followed by `(` -- found live, by running this test
+/// before choosing the needle: the bare form also matches this function's
+/// own multi-line `pub fn inject_token_into_environment(` *definition*
+/// (`&mut command` is textually absent there -- the parameter is written
+/// `command: &mut std::process::Command`, name before type, the reverse
+/// of a call site's `&mut command`), which would have made this file
+/// itself count as a second "call site" it is not.
+///
+/// Excludes `/tests/`-directory files, not merely files literally named
+/// `tests.rs` (the narrower filter an earlier enumeration in this crate
+/// used, `reader/tests.rs`'s `count_occurrences_in_crate`) -- this
+/// function's own existing test call site
+/// (`inject_token_into_environment_sets_the_sanctioned_variable_on_a_real_child_process`,
+/// above) lives at `approval/tests/channel.rs`, which the narrower filter
+/// would not have excluded.
+#[test]
+fn inject_token_into_environment_has_exactly_one_production_call_site() {
+    let occurrences = count_occurrences_in_crate("inject_token_into_environment(&mut command");
+    assert_eq!(
+        occurrences,
+        vec![("runtime/terminal/launch.rs".to_string(), 1)],
+        "exactly this one production call site may ever call inject_token_into_environment -- \
+         a second appearing, or this one disappearing, means the token's single sanctioned \
+         delivery choke point changed without this test being updated to say so: {occurrences:?}"
+    );
+}
+
+/// Total occurrences of `needle` across `tekstide-core`'s production
+/// `.rs` files, any file under a `tests/` directory or literally named
+/// `tests.rs` excluded -- mirrors `project::diff::tests`'s own broader
+/// filter (`relative.contains("/tests/") || relative.ends_with("tests.rs")`),
+/// not `reader/tests.rs`'s narrower one, per this test's own doc comment
+/// above on why the broader filter is required here.
+fn count_occurrences_in_crate(needle: &str) -> Vec<(String, usize)> {
+    let mut files = Vec::new();
+    collect_rs_files(&crate_src_dir(), &mut files);
+
+    let mut counts: Vec<(String, usize)> = files
+        .into_iter()
+        .filter_map(|path| {
+            let relative = relative_to_src(&path);
+            if relative.contains("/tests/") || relative.ends_with("tests.rs") {
+                return None;
+            }
+            let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
+            let count = source.matches(needle).count();
+            (count > 0).then_some((relative, count))
+        })
+        .collect();
+    counts.sort();
+    counts
+}
+
+fn crate_src_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")
+}
+
+fn relative_to_src(path: &std::path::Path) -> String {
+    path.strip_prefix(crate_src_dir())
+        .expect("file must be under src/")
+        .to_str()
+        .expect("path must be valid UTF-8")
+        .replace(std::path::MAIN_SEPARATOR, "/")
+}
+
+fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rs_files(&path, out);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            out.push(path);
+        }
+    }
+}
+
 fn which_python3() -> Result<String, ()> {
     let output = Command::new("which")
         .arg("python3")

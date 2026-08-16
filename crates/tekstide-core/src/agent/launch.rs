@@ -2,9 +2,15 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use crate::approval::{
+    ApprovalChannelEndpoint, ApprovalChannelErrorReason, ApprovalChannelPathError,
+    ApprovalChannelPathRequest, ApprovalChannelPathResolver, validate_token,
+};
 use crate::domain::{AgentCompatibilityLevel, AgentRun, AgentRunStatus, AgentRunTransitionError};
 use crate::project::{ProjectId, ProjectSession, WorkspaceTrust};
-use crate::runtime::terminal::{TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec};
+use crate::runtime::terminal::{
+    AdapterApprovalConfig, TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec,
+};
 use crate::security::is_restricted_mode;
 use crate::transcript::{
     TranscriptCaptureMode, TranscriptCapturePolicy, TranscriptPathError, TranscriptPathRequest,
@@ -351,6 +357,63 @@ impl AgentRunLaunchPlan {
         self.transcript_storage_path.as_ref()
     }
 
+    /// RFC-022 PR-022-C: for a `Managed` profile (the only compatibility
+    /// level RFC-022 governs -- `Plain`/`Supervised` return `Ok(None)`
+    /// immediately, nothing about them involves an adapter), binds a real
+    /// `ApprovalChannelEndpoint` for this run and attaches its socket
+    /// path plus a validated capability token to `terminal_launch_spec`.
+    /// Mirrors `prepare_transcript_capture`'s own shape: resolve real
+    /// infrastructure now, using state already gathered during
+    /// validation, so `launch_project_adapter` only ever needs to read
+    /// what is already on the spec.
+    ///
+    /// Reuses `self.spec.transcript_capture.state_root` as the approval
+    /// channel's own state root too, rather than adding a second,
+    /// separately-configured root field: both name the same conceptual
+    /// "Tekstide state root" for this run, and a launch with a Managed
+    /// profile but no state root configured has nowhere to put either the
+    /// transcript or the approval socket -- `StateRootMissing` covers
+    /// both honestly rather than pretending only one of them needs it.
+    ///
+    /// Returns the bound endpoint (not stored on `self`): this plan
+    /// object already carries the token and socket path on
+    /// `terminal_launch_spec` for the spawn path to use, and the endpoint
+    /// itself -- the live listener a caller must `accept_proposal`/
+    /// `serve_concurrently` on to actually answer requests -- has a
+    /// different lifetime than the plan does. Handing it back lets the
+    /// caller decide where it lives (a headless test, for now; a longer-
+    /// lived home is PR-022-D/E's question, not this method's).
+    pub(crate) fn prepare_adapter_approval(
+        &mut self,
+    ) -> Result<Option<ApprovalChannelEndpoint>, AgentAdapterApprovalError> {
+        if self.spec.compatibility_level != AgentCompatibilityLevel::Managed {
+            return Ok(None);
+        }
+        let state_root = self
+            .spec
+            .transcript_capture
+            .state_root
+            .as_ref()
+            .ok_or(AgentAdapterApprovalError::StateRootMissing)?;
+        let directory = ApprovalChannelPathResolver
+            .resolve(ApprovalChannelPathRequest::new(
+                state_root.clone(),
+                vec![self.spec.project_root.clone()],
+            ))
+            .map_err(AgentAdapterApprovalError::Path)?;
+        let (endpoint, raw_token) =
+            ApprovalChannelEndpoint::bind(&directory, &self.agent_run.id)
+                .map_err(|error| AgentAdapterApprovalError::Bind(error.reason))?;
+        let socket_path = directory.socket_path(&self.agent_run.id);
+        let token = validate_token(raw_token).expect(
+            "bind() already validated this exact raw token internally, so re-validating the \
+             identical string here cannot fail",
+        );
+        self.terminal_launch_spec
+            .set_adapter_approval_config(Some(AdapterApprovalConfig { socket_path, token }));
+        Ok(Some(endpoint))
+    }
+
     pub(crate) fn transition_agent_run_to(
         &mut self,
         status: AgentRunStatus,
@@ -444,6 +507,19 @@ pub enum AgentRunTranscriptCaptureError {
     StateRootMissing,
     PolicyDoesNotPermitBytes,
     Path(TranscriptPathError),
+}
+
+/// RFC-022 PR-022-C. `Bind` carries only `ApprovalChannelErrorReason`
+/// (`Copy`, content-free), not the full `ApprovalChannelError` -- that
+/// type holds an `Option<io::Error>` and does not derive `Clone`/`Eq`,
+/// matching `runtime::terminal::launch::TerminalLaunchError`'s own
+/// established pattern of carrying a bounded reason rather than a raw OS
+/// error in a domain-level error type.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AgentAdapterApprovalError {
+    StateRootMissing,
+    Path(ApprovalChannelPathError),
+    Bind(ApprovalChannelErrorReason),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

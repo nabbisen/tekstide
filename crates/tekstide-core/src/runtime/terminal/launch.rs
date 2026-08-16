@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::approval::{APPROVAL_SOCKET_PATH_ENV_VAR, inject_token_into_environment};
 use crate::domain::{TerminalId, TerminalSession, TerminalStatus};
 use crate::project::{ProjectId, ProjectSession};
 use crate::transcript::{
@@ -16,6 +17,7 @@ use crate::transcript::{
 
 use super::pty::{OpenPty, close_fd, resize_master};
 use super::reader::{TerminalReader, TranscriptCapture};
+use super::types::AdapterApprovalConfig;
 use super::{
     BoundedRuntimeSummary, TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec,
     TerminalOutputSummary, TerminalRuntimeEvent, TerminalRuntimeHandle,
@@ -62,6 +64,90 @@ impl LinuxTerminalRuntime {
         );
         let handle = TerminalRuntimeHandle::new(terminal.id.clone(), spec.project_id.clone());
         let child = spawn_shell(&spec, &mut pty)?;
+
+        terminal
+            .transition_to(TerminalStatus::Running)
+            .map_err(|error| TerminalLaunchError::UnexpectedLifecycleTransition {
+                summary: BoundedRuntimeSummary::new(format!(
+                    "failed to mark launched terminal running: {error:?}"
+                )),
+            })?;
+
+        self.sessions.insert(
+            terminal.id.clone(),
+            RunningTerminal {
+                project_id: spec.project_id,
+                process_group_id: child.id() as libc::pid_t,
+                child,
+                master: pty.into_master(),
+                transcript_writer,
+                transcript_capture_mode,
+            },
+        );
+
+        Ok((
+            terminal,
+            vec![
+                TerminalRuntimeEvent::LaunchAccepted {
+                    handle: handle.clone(),
+                },
+                TerminalRuntimeEvent::ProcessStarted { handle },
+            ],
+        ))
+    }
+
+    /// RFC-022 PR-022-C: launches `spec.shell` as an approval-token-bearing
+    /// adapter rather than a plain shell -- see `spawn_adapter`'s own doc
+    /// comment for exactly what that changes about the child's
+    /// environment. `spec.adapter_approval_config()` must be `Some`:
+    /// this method's whole purpose is spawning something with an
+    /// approval channel to talk to, so a spec without one is a caller
+    /// error (`MissingAdapterApprovalConfig`), not a runtime condition to
+    /// tolerate.
+    ///
+    /// Deliberately a **duplicate** of `launch_project_shell`'s own
+    /// orchestration shape rather than a shared refactor of it: the only
+    /// two differences are the approval-config check and which `spawn_*`
+    /// function runs, and `launch_project_shell` is already-reviewed,
+    /// security-adjacent code this slice has no reason to touch at all.
+    /// `validate_launch_spec` itself *is* shared, unmodified -- so
+    /// `ExplicitAllowlist` rejection, cross-project checks, and cwd
+    /// containment all apply to this path exactly as they do to
+    /// `launch_project_shell`'s, for free, by construction.
+    pub fn launch_project_adapter(
+        &mut self,
+        project: &ProjectSession,
+        spec: TerminalLaunchSpec,
+    ) -> Result<(TerminalSession, Vec<TerminalRuntimeEvent>), TerminalLaunchError> {
+        validate_launch_spec(project, &spec)?;
+        let approval = spec
+            .adapter_approval_config()
+            .ok_or(TerminalLaunchError::MissingAdapterApprovalConfig)?
+            .clone();
+
+        let (transcript_writer, transcript_capture_mode) = match spec.transcript_writer_config() {
+            Some(config) => {
+                let mode = config.mode;
+                let writer = BoundedTranscriptWriter::create(config.clone()).map_err(|error| {
+                    TerminalLaunchError::TranscriptWriterUnavailable {
+                        summary: transcript_write_error_summary(&error),
+                    }
+                })?;
+                (Some(writer), Some(mode))
+            }
+            None => (None, None),
+        };
+        let mut pty = OpenPty::new(spec.dimensions)
+            .map_err(|summary| TerminalLaunchError::PtyUnavailable { summary })?;
+        let mut terminal = TerminalSession::new(
+            spec.project_id.clone(),
+            spec.kind,
+            spec.title.clone(),
+            spec.cwd.clone(),
+            spec.command_line_summary.clone(),
+        );
+        let handle = TerminalRuntimeHandle::new(terminal.id.clone(), spec.project_id.clone());
+        let child = spawn_adapter(&spec, &mut pty, &approval)?;
 
         terminal
             .transition_to(TerminalStatus::Running)
@@ -347,6 +433,11 @@ pub enum TerminalLaunchError {
     UnexpectedLifecycleTransition {
         summary: BoundedRuntimeSummary,
     },
+    /// RFC-022 PR-022-C: `launch_project_adapter` was called with a
+    /// `TerminalLaunchSpec` that never had `set_adapter_approval_config`
+    /// applied to it -- a caller error (this method has no other use for
+    /// a spec without one), not a runtime condition.
+    MissingAdapterApprovalConfig,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -463,6 +554,72 @@ fn canonical_existing_dir(path: &Path) -> Result<PathBuf, String> {
 }
 
 fn spawn_shell(spec: &TerminalLaunchSpec, pty: &mut OpenPty) -> Result<Child, TerminalLaunchError> {
+    let mut command = Command::new(&spec.shell);
+    command
+        .current_dir(&spec.cwd)
+        .env_clear()
+        .env("TERM", "xterm-256color")
+        .env("LANG", "C.UTF-8")
+        .env("LC_ALL", "C.UTF-8")
+        .env("PATH", "/usr/bin:/bin")
+        .env("PS1", "tekstide$ ");
+    spawn_pty_child(command, pty)
+}
+
+/// RFC-022 PR-022-C: a spawn path distinct from `spawn_shell`, launching
+/// an AI CLI as an adapter rather than a plain interactive shell. Reuses
+/// `spawn_pty_child` for the PTY/session mechanics common to both --
+/// fd duplication, `setsid`/`TIOCSCTTY`, spawn, cleanup -- since none of
+/// that depends on what is being launched or how its environment is
+/// built. `spec.shell` names the adapter's own executable here (the
+/// field is shared with `spawn_shell`'s use of it, not renamed, since it
+/// genuinely is "the executable this terminal launches" in both cases).
+///
+/// **`.env_clear()` plus the same five fixed variables `spawn_shell`
+/// sets, unchanged** -- RFC-022's own text describes token delivery as
+/// "a sixth" `.env(...)` call *on top of* that existing set, not a
+/// redesigned one, so this does not invent a different fixed environment
+/// for adapters. The token (`inject_token_into_environment` -- this is
+/// that function's first production caller) and the socket path
+/// (`APPROVAL_SOCKET_PATH_ENV_VAR`) are the sixth and seventh. Nothing is
+/// inherited: `ExplicitAllowlist` is not consulted here at all, and
+/// `validate_launch_spec` (shared, unmodified, run before either spawn
+/// path) still rejects it before any process exists.
+///
+/// No `argv` is passed to the adapter. A real AI CLI decides its own
+/// actions; it does not take "the command to propose" as a launch
+/// argument. The reference adapter (PR-022-B) falls back to its own
+/// fixed default proposal when spawned with none -- see its own doc
+/// comment.
+fn spawn_adapter(
+    spec: &TerminalLaunchSpec,
+    pty: &mut OpenPty,
+    approval: &AdapterApprovalConfig,
+) -> Result<Child, TerminalLaunchError> {
+    let mut command = Command::new(&spec.shell);
+    command
+        .current_dir(&spec.cwd)
+        .env_clear()
+        .env("TERM", "xterm-256color")
+        .env("LANG", "C.UTF-8")
+        .env("LC_ALL", "C.UTF-8")
+        .env("PATH", "/usr/bin:/bin")
+        .env("PS1", "tekstide$ ");
+    inject_token_into_environment(&mut command, &approval.token);
+    command.env(APPROVAL_SOCKET_PATH_ENV_VAR, &approval.socket_path);
+    spawn_pty_child(command, pty)
+}
+
+/// The PTY/process-group mechanics `spawn_shell` and `spawn_adapter`
+/// share: duplicate the slave four ways (stdin/stdout/stderr plus a
+/// fourth held only long enough to make it the controlling terminal),
+/// wire the first three onto `command`, `setsid()` plus `TIOCSCTTY` in
+/// the child before exec, spawn, then close every fd this function
+/// itself does not hand off. `command` arrives with its program,
+/// environment, and `current_dir` already set -- this function adds
+/// nothing about *what* is launched, only *how* it is attached to the
+/// PTY.
+fn spawn_pty_child(mut command: Command, pty: &mut OpenPty) -> Result<Child, TerminalLaunchError> {
     let stdin_fd = pty
         .duplicate_slave("duplicate PTY slave for stdin")
         .map_err(|summary| TerminalLaunchError::PtyUnavailable { summary })?;
@@ -476,15 +633,7 @@ fn spawn_shell(spec: &TerminalLaunchSpec, pty: &mut OpenPty) -> Result<Child, Te
         .duplicate_slave("duplicate PTY slave for controlling terminal")
         .map_err(|summary| TerminalLaunchError::PtyUnavailable { summary })?;
 
-    let mut command = Command::new(&spec.shell);
     command
-        .current_dir(&spec.cwd)
-        .env_clear()
-        .env("TERM", "xterm-256color")
-        .env("LANG", "C.UTF-8")
-        .env("LC_ALL", "C.UTF-8")
-        .env("PATH", "/usr/bin:/bin")
-        .env("PS1", "tekstide$ ")
         .stdin(unsafe { Stdio::from_raw_fd(stdin_fd) })
         .stdout(unsafe { Stdio::from_raw_fd(stdout_fd) })
         .stderr(unsafe { Stdio::from_raw_fd(stderr_fd) });
@@ -505,7 +654,7 @@ fn spawn_shell(spec: &TerminalLaunchSpec, pty: &mut OpenPty) -> Result<Child, Te
     let spawn_result = command.spawn();
     close_fd(ctty_fd);
     let child = spawn_result.map_err(|error| TerminalLaunchError::SpawnFailed {
-        summary: BoundedRuntimeSummary::new(format!("failed to spawn PTY shell: {error}")),
+        summary: BoundedRuntimeSummary::new(format!("failed to spawn PTY child: {error}")),
     })?;
     pty.close_slave();
 

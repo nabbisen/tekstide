@@ -20,10 +20,11 @@ mod protocol;
 mod risk;
 
 pub use channel::{
-    APPROVAL_TOKEN_ENV_VAR, AcceptedProposal, ApprovalChannelDirectory, ApprovalChannelEndpoint,
-    ApprovalChannelError, ApprovalChannelErrorReason, ApprovalChannelPathError,
-    ApprovalChannelPathErrorReason, ApprovalChannelPathRequest, ApprovalChannelPathResolver,
-    ServeShutdown, inject_token_into_environment,
+    APPROVAL_SOCKET_PATH_ENV_VAR, APPROVAL_TOKEN_ENV_VAR, AcceptedProposal,
+    ApprovalChannelDirectory, ApprovalChannelEndpoint, ApprovalChannelError,
+    ApprovalChannelErrorReason, ApprovalChannelPathError, ApprovalChannelPathErrorReason,
+    ApprovalChannelPathRequest, ApprovalChannelPathResolver, ServeShutdown,
+    inject_token_into_environment,
 };
 pub use coordinator::{ApprovalCoordinator, DecideOutcome, ReceiveOutcome, SimpleDecision};
 pub use protocol::{
@@ -34,6 +35,21 @@ pub use protocol::{
     UntrustedEffectsHint,
 };
 pub use risk::{RiskAssessment, RiskReason, classify};
+
+/// RFC-022 PR-022-C: `ApprovalChannelEndpoint::bind` returns the freshly
+/// generated token as a raw `String` (its own doc comment: delivering it
+/// is the *caller's* job, not this module's), but `inject_token_into_environment`
+/// takes a validated `RunCapabilityToken`. A production caller outside
+/// `approval` -- `agent::launch`, binding a channel as part of preparing
+/// an adapter launch -- needs to bridge that gap. `protocol::validate_token`
+/// already does exactly this (it is what `ApprovalChannelEndpoint::bind`
+/// itself calls internally to build its own `expected_token`), but
+/// `protocol` is a private submodule, so `pub(crate)` on the function
+/// alone was not reachable from outside `approval` -- every segment of a
+/// path must be visible, not just the final item. Re-exported at
+/// `pub(crate)` here, one hop wider than before, not `pub`: still
+/// unreachable from outside this crate.
+pub(crate) use protocol::validate_token;
 
 #[cfg(test)]
 mod tests;

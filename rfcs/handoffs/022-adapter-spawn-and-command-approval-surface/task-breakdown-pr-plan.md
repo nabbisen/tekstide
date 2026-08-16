@@ -40,9 +40,14 @@ Review gate:
 - **Named and documented as a test-and-proof artifact**, not a product feature. Its own
   doc comment says so.
 
-## PR-022-C — The adapter spawn path, and token delivery
+## PR-022-C — The adapter spawn path, and token delivery [Implemented — pending review]
 
 Core. Launches PR-022-B's adapter for real.
+
+See [`qa-evidence.md`](./qa-evidence.md#pr-022-c---spawn-path-and-token-delivery) for the
+full evidence record, including the socket-path delivery decision this slice had to make
+(RFC-022's own text decides token delivery but not socket-path delivery) and the resulting
+change to the reference adapter's own contract from PR-022-B.
 
 Review gate:
 
