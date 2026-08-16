@@ -924,11 +924,23 @@ fn clear_stale_socket(bind_path: &Path, removal_path: &Path) -> Result<(), Appro
         Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
             fs::remove_file(removal_path).map_err(ApprovalChannelError::io)
         }
-        Err(_) => {
+        Err(error) => {
             // Any other error (permission denied, etc.) is treated the
             // same as "do not touch it" -- only a confirmed stale
             // listener is cleared.
-            Err(ApprovalChannelError::new(ApprovalChannelErrorReason::Io))
+            //
+            // Response 231: this was `ApprovalChannelError::new(..Io)`,
+            // discarding `error` -- the real errno a caller would need to
+            // tell "permission denied" apart from "too many open files"
+            // apart from anything else. That is the exact site
+            // `bind_recovers_from_a_stale_socket_file`'s own flake panic
+            // (`ApprovalChannelError { reason: Io, source: None }`) comes
+            // from: every *other* `Io`-reason error in `bind()`'s call
+            // chain already goes through the source-preserving
+            // `ApprovalChannelError::io`, so this was the one place the
+            // evidence a repeated flake needed was thrown away before it
+            // could ever reach the panic that reported it.
+            Err(ApprovalChannelError::io(error))
         }
     }
 }

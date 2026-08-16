@@ -235,6 +235,34 @@ Status: substrate decided, application shell, and mode switching implemented by 
   raises exposure rather than lowering it. Not root-caused or fixed in this pass — recording
   the second failure mode here so it is not lost the way response 213 warned "the count varies
   between runs" could hide before this file's cause-found note existed.
+  **The `fd exhaustion` hypothesis is disconfirmed for the `bind_recovers_from_a_stale_socket_file`
+  half, found 2026-08-17** (review response 231 named `EMFILE`/`ENFILE` in the preserved errno
+  as the thing that would confirm it). `ApprovalChannelError`'s `Io`-reason `bind()` failure
+  had one call site (`clear_stale_socket`'s catch-all `Err(_)` branch, `channel.rs`) still
+  using the non-source-preserving `ApprovalChannelError::new` instead of `::io`, discarding
+  the real `io::Error` at the exact site the flake's panic comes from -- fixed to preserve it
+  (`ApprovalChannelError::io(error)`). Re-ran the sweep with temporary diagnostics in every
+  branch of `clear_stale_socket` (180 further runs, 2 more reproductions): **the errno was
+  never populated because no `io::Error` occurs at all** -- the diagnostic that fired
+  immediately before the panic both times was `"connect unexpectedly succeeded"`
+  (`UnixStream::connect(bind_path)` returning `Ok` when the abandoned raw listener was
+  expected to have already made it fail with `ConnectionRefused`). That is a **connection
+  succeeding**, not a resource-exhaustion failure -- `EMFILE`/`ENFILE` cannot be the mechanism
+  for this specific flake, since there is no failed syscall carrying either errno anywhere in
+  the reproduced path. The real, permanent fix (preserving the errno for the one case that
+  genuinely can produce one) is committed regardless, since a future *different* failure mode
+  through this same branch would otherwise still lose its errno.
+  **The queue-limit test's own reproduction is the same shape from the other side**: its
+  panic (`an expired entry must not continue occupying the live budget`,
+  `coordinator.rs:468`) means `is_connection_still_open`'s `recv(MSG_PEEK|MSG_DONTWAIT)` probe
+  did not observe an already-`drop`ped peer's closure. Both reproductions are therefore the
+  same shape -- a real, synchronous, same-thread `close()` not being observed as closed by a
+  liveness check moments later, under concurrent suite load -- with no confirmed kernel-level
+  mechanism yet. Genuinely stranger than ordinary fork-window pressure: `close()` on a Unix
+  domain socket is not supposed to leave a window where a fresh `connect()`/`recv()` can still
+  observe the old, torn-down state as live. Further root-causing would need OS-level syscall
+  tracing with precise timestamps under load, a materially bigger investigation than fits a
+  review-response cycle -- left here rather than attempted further.
 - **Terminal spawn latency as a function of already-open terminals: never measured, plausibly not constant.** Surfaced 2026-08-16 while diagnosing a test-concurrency flake whose mechanism is `fork()` cost scaling with the forking process's thread count. Tekstide now runs **one reader thread per terminal** (RFC-017 Amendment 1) and `terminal_session_limit` is **6**, so launching the sixth terminal may be measurably slower than the first. RFC-017 Amendment 1 PR-A1-D's N-pane benchmark measured **throughput**, not **spawn latency** — it drained existing panes, it did not time creating them. Deliberately not measured in the slice that found it.
 - **No `NavigationAction` reaches `AppCommand::OpenActiveProjectWorkspace` directly.**
   Found during RFC-019 PR-019-C's GUI evidence work (response 181, 2026-08-11):

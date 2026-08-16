@@ -1012,6 +1012,42 @@ clean.
 Full gate clean again after both: `tekstide` 229 (up from 228), `tekstide-core` 594 (up from
 593, the source-scan guard).
 
+### The flake investigation (responses 230/231), and a real fix found along the way
+
+Response 230 reported one `tekstide-core` failure in ten runs and asked it be characterized
+before closeout rather than left unmentioned. Sampled 150 full-suite runs: 3 failures (2%).
+Two were the already-known `approval::tests::channel::bind_recovers_from_a_stale_socket_file`
+(RFC-021, response 213's own flake, confirmed still live). The third was a **different**,
+pre-existing test failing the same way under the same kind of load:
+`approval::tests::coordinator::agent_run_queue_limit_is_enforced_and_only_counts_live_entries`
+(commit `375d256`, predates this window). Neither reproduced across 40 isolated single-test
+reruns -- both need concurrent suite pressure, matching the known fork-window shape. Recorded
+in `rfcs/future-work.md`'s existing socket-flake entry rather than opened as a new one.
+
+Response 231 pointed out the panic's own `ApprovalChannelError { reason: Io, source: None }`
+was destroyed evidence, not missing evidence: `clear_stale_socket`'s catch-all `Err(_)` branch
+used the non-source-preserving `ApprovalChannelError::new` where every other `Io`-reason site
+in `bind()`'s call chain already uses the source-preserving `::io`. **Fixed**
+(`ApprovalChannelError::io(error)`), a real, permanent correctness improvement independent of
+whether it explains this specific flake.
+
+**Re-ran the sweep with temporary per-branch diagnostics (180 further runs, 2 more
+reproductions) to find out.** Both times, the diagnostic that fired immediately before the
+panic was `"connect unexpectedly succeeded"` -- `UnixStream::connect` returning `Ok` where an
+abandoned listener was expected to produce `ConnectionRefused`. **This disconfirms the
+fd-exhaustion (`EMFILE`/`ENFILE`) hypothesis for this specific flake**: a successful connect
+carries no errno to preserve, so the errno fix could not and did not surface one -- correctly,
+since none exists on this path. Diagnostics removed after use; the real fix stays. Full detail
+and the queue-limit test's own matching-shape reproduction (`is_connection_still_open`'s
+`recv` probe not observing an already-`drop`ped peer's closure) recorded in
+`rfcs/future-work.md`, since a genuine kernel-level root cause is a materially bigger
+investigation than fits inside this review cycle.
+
+Full gate clean after the fix: `cargo fmt --all --check`, `cargo clippy --workspace
+--all-targets --all-features -- -D warnings`, full workspace suite (`tekstide` 229, unchanged;
+`tekstide-core` 594, unchanged -- a correctness fix to an existing error path, not a new test),
+`git diff --check`.
+
 ## PR-022-F - Closeout
 
 *Not started.*
