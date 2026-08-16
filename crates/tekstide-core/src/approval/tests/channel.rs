@@ -11,6 +11,7 @@ use crate::approval::{
     CommandDecision, DecisionOutcome,
 };
 use crate::domain::AgentRunId;
+use crate::test_support::RealProcessLimiter;
 
 /// Deliberately short: a Unix `sun_path` is bounded (~108 bytes on
 /// Linux), and this module's own socket paths are `<state_root>/approval/
@@ -343,6 +344,10 @@ fn oversized_declared_length_is_rejected_before_reading_the_body() {
 /// distinguish the two.
 #[test]
 fn cross_process_impersonation_with_wrong_token_is_rejected() {
+    // Response 232: real `fork()`+exec, twice (`which`, then the python3
+    // impersonator child) -- see the other `RealProcessLimiter::acquire`
+    // call in this file for why this is bound first.
+    let _real_process_slot = RealProcessLimiter::acquire();
     let Ok(python) = which_python3() else {
         eprintln!(
             "skipping cross_process_impersonation_with_wrong_token_is_rejected: python3 not found"
@@ -866,6 +871,15 @@ fn serve_concurrently_refuses_connections_beyond_the_concurrency_cap() {
 /// environment -- not merely asserting the `Command` builder was called.
 #[test]
 fn inject_token_into_environment_sets_the_sanctioned_variable_on_a_real_child_process() {
+    // Response 232: this test's own real `fork()`+exec is exactly the
+    // mechanism diagnosed for the RFC-021/RFC-022 socket flakes (a
+    // forked-not-yet-exec'd child inherits every fd open in the whole
+    // process, including sockets another concurrently running test has
+    // already `close()`d from its own thread's point of view). Sharing
+    // `runtime::terminal::reader::tests`' own limiter narrows how many
+    // real spawns can be in flight process-wide at once, not just within
+    // this file.
+    let _real_process_slot = RealProcessLimiter::acquire();
     let token_value = "a-real-looking-capability-token-0123456789";
     let proposal = crate::approval::CommandProposal::decode(
         crate::approval::PROTOCOL_VERSION,

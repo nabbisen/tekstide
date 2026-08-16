@@ -263,6 +263,46 @@ Status: substrate decided, application shell, and mode switching implemented by 
   observe the old, torn-down state as live. Further root-causing would need OS-level syscall
   tracing with precise timestamps under load, a materially bigger investigation than fits a
   review-response cycle -- left here rather than attempted further.
+  **The mechanism, named 2026-08-17** (review response 232): `fork()`, not scheduling.
+  `Command::spawn` on Linux is fork-then-exec whenever it sets environment variables or a
+  working directory (every adapter/terminal spawn here does), and between the fork and the
+  exec the child holds a duplicate of every fd open in the *whole parent process* --
+  `CLOEXEC` closes fds at exec, not at fork, so the window exists regardless of it. A socket
+  another thread has just `close()`d is still open in a forked-not-yet-exec'd child, so the
+  kernel has not torn the connection down from that child's point of view: `connect()` to the
+  abandoned listener's path succeeds (case 1) or `recv(MSG_PEEK|MSG_DONTWAIT)` on the
+  surviving half of a closed pair returns `EAGAIN` instead of `0`/EOF (case 2) -- both of this
+  file's two reproductions, explained by one mechanism, no failed syscall anywhere, and
+  load-dependent in exactly the measured way (more concurrent real-process spawns means more
+  fork windows overlapping socket teardown). Neither reproducing in isolation (40 runs each)
+  is the confirming experiment already run, in hindsight: no concurrent forks, no window. This
+  is also almost certainly what RFC-021's own originally-diagnosed "fork window" flake
+  actually was -- the diagnosis was right, what was missing was that the mechanism is fd
+  inheritance, not scheduling contention as such.
+  **Mitigation applied and re-measured, same day.** `RealProcessLimiter`
+  (`runtime::terminal::reader::tests`, response 212's own cap, previously scoped to that one
+  file) lifted to a shared `crate::test_support` module and applied to every real-process
+  spawn in `approval::tests::channel`/`approval::tests::reference_adapter`, so the cap is
+  process-wide rather than two independent per-module pools. Re-sampled 150 further full-suite
+  runs (matching the original sample size) under the shared limiter: **2 failures, versus 3 in
+  the original 150** -- a small decrease, directionally consistent with the fd-inheritance
+  hypothesis (fewer concurrent real spawns should mean fewer fork windows), but **not
+  statistically distinguishable from noise at this sample size** (2 vs. 3 events is not a
+  reliable signal either way). Reporting it as inconclusive-but-consistent rather than
+  claiming confirmation a sample this small cannot support. A materially larger sample (several
+  hundred runs) would be needed to detect a difference this small reliably, and was judged not
+  worth the wall-clock time against the size of the effect being measured -- the mechanism
+  itself is the valuable, load-bearing finding; the mitigation's exact magnitude is not.
+  **Production implication, recorded rather than dismissed as test-only**: the same mechanism
+  is not purely a test artifact -- spawning a terminal or adapter (a fork) while an unrelated
+  approval socket is mid-teardown could transiently keep that socket alive in the forked
+  child, in production too. Impact assessed as low (the window is microseconds, the listener
+  is genuinely gone once the child execs, and `bind`'s own stale-file recovery exists
+  precisely for leftovers like this), but not impossible, and not something a future closeout
+  should describe as inapplicable to the shipped product.
+  Not pursued further per its own scoping (extend the limiter, re-measure, record -- then
+  move on): no OS-level syscall tracing attempted, no further mitigation attempted beyond the
+  shared limiter.
 - **Terminal spawn latency as a function of already-open terminals: never measured, plausibly not constant.** Surfaced 2026-08-16 while diagnosing a test-concurrency flake whose mechanism is `fork()` cost scaling with the forking process's thread count. Tekstide now runs **one reader thread per terminal** (RFC-017 Amendment 1) and `terminal_session_limit` is **6**, so launching the sixth terminal may be measurably slower than the first. RFC-017 Amendment 1 PR-A1-D's N-pane benchmark measured **throughput**, not **spawn latency** — it drained existing panes, it did not time creating them. Deliberately not measured in the slice that found it.
 - **No `NavigationAction` reaches `AppCommand::OpenActiveProjectWorkspace` directly.**
   Found during RFC-019 PR-019-C's GUI evidence work (response 181, 2026-08-11):

@@ -24,6 +24,7 @@ use crate::audit::{
 };
 use crate::domain::AgentRunId;
 use crate::project::ProjectId;
+use crate::test_support::RealProcessLimiter;
 
 const PROJECT_ROOT: &str = "/home/user/project";
 /// Short by design -- see `unique_temp_dir`'s doc comment.
@@ -182,6 +183,7 @@ fn stdout_text(output: &Output) -> String {
 /// anything on the server side alone.
 #[test]
 fn a_real_adapter_process_completes_a_full_approve_round_trip() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let channel = TestChannel::new("approve");
     let agent_run_id = AgentRunId::for_test(1);
     let (endpoint, raw_token, socket_path) = channel.bind(&agent_run_id);
@@ -241,6 +243,7 @@ fn a_real_adapter_process_completes_a_full_approve_round_trip() {
 /// this time.
 #[test]
 fn a_real_adapter_process_completes_a_full_reject_round_trip() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let channel = TestChannel::new("reject");
     let agent_run_id = AgentRunId::for_test(2);
     let (endpoint, raw_token, socket_path) = channel.bind(&agent_run_id);
@@ -300,6 +303,7 @@ fn a_real_adapter_process_completes_a_full_reject_round_trip() {
 /// one and letting the socket decide what happens.
 #[test]
 fn a_real_adapter_process_refuses_to_run_without_a_token() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let channel = TestChannel::new("missing-token");
     let agent_run_id = AgentRunId::for_test(3);
     let (_endpoint, _raw_token, socket_path) = channel.bind(&agent_run_id);
@@ -327,6 +331,7 @@ fn a_real_adapter_process_refuses_to_run_without_a_token() {
 /// immediate refusal, not an attempt to connect to nothing.
 #[test]
 fn a_real_adapter_process_refuses_to_run_without_a_socket_path() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let child = spawn_adapter(None, Some(&"t".repeat(64)), &["echo", "hi"]);
     let output = finish(child);
 
@@ -351,6 +356,7 @@ fn a_real_adapter_process_refuses_to_run_without_a_socket_path() {
 /// must not hang waiting for a reply that will never come.
 #[test]
 fn a_real_adapter_process_exits_distinctly_on_a_rejected_token() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let channel = TestChannel::new("wrong-token");
     let agent_run_id = AgentRunId::for_test(4);
     let (endpoint, _raw_token, socket_path) = channel.bind(&agent_run_id);
@@ -393,6 +399,7 @@ fn a_real_adapter_process_exits_distinctly_on_a_rejected_token() {
 /// that should exist).
 #[test]
 fn deciding_a_proposal_whose_real_adapter_process_has_already_exited_is_undeliverable() {
+    let _real_process_slot = RealProcessLimiter::acquire();
     let channel = TestChannel::new("undeliverable");
     // A real UUID-shaped id, not `AgentRunId::for_test` -- this test
     // queries a real store afterward, and `from_persisted` (the decode

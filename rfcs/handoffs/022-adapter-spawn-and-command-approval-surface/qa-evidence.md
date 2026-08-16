@@ -1048,6 +1048,36 @@ Full gate clean after the fix: `cargo fmt --all --check`, `cargo clippy --worksp
 `tekstide-core` 594, unchanged -- a correctness fix to an existing error path, not a new test),
 `git diff --check`.
 
+### The flake's named mechanism, and the mitigation's measured (inconclusive) effect
+
+Response 232 named the mechanism: `fork()`, not scheduling. `Command::spawn` on Linux is
+fork-then-exec whenever it sets env vars or a cwd (every spawn in this codebase does), and
+between fork and exec the child holds a duplicate of every fd open in the whole parent
+process. A socket another thread has just closed is still open in a forked-not-yet-exec'd
+child, so a `connect()`/`recv()` against it observes the old, live state -- explaining both
+reproductions (a stale-listener `connect()` unexpectedly succeeding; an already-closed peer's
+`recv()` not observing EOF) with one mechanism and no failed syscall anywhere. Full reasoning
+in `rfcs/future-work.md`'s socket-flake entry, not duplicated here.
+
+**Mitigation**: `RealProcessLimiter` (previously private to `runtime::terminal::reader::tests`,
+response 212's own measured cap) lifted to a new shared `crate::test_support` module
+(`crates/tekstide-core/src/test_support.rs`) so the cap is genuinely process-wide. Applied to
+every real-process spawn in `approval::tests::channel`
+(`inject_token_into_environment_sets_the_sanctioned_variable_on_a_real_child_process`,
+`cross_process_impersonation_with_wrong_token_is_rejected`) and all six real-adapter-spawning
+tests in `approval::tests::reference_adapter`.
+
+**Re-measured**: 150 further full-suite runs (matching the original sample size) under the
+shared limiter -- 2 failures, versus 3 in the original 150. A small decrease, directionally
+consistent with the hypothesis, but not statistically distinguishable from noise at this
+sample size (2 vs. 3 events). Reported as inconclusive-but-consistent, not confirmed -- a
+claim this sample cannot support was not made. Not pursued further (no syscall tracing, no
+further mitigation) per the review response's own scoping: extend the limiter, re-measure,
+record, then move on.
+
+Full gate clean: `tekstide` 229 (unchanged), `tekstide-core` 594 (unchanged -- existing tests
+moved/wrapped, none added or removed).
+
 ## PR-022-F - Closeout
 
 *Not started.*
