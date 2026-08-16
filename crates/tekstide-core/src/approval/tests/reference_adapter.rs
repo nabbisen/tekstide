@@ -1,0 +1,340 @@
+//! RFC-022 PR-022-B: the reference adapter's own review gate.
+//!
+//! Every test here spawns the *compiled* `reference_adapter` binary
+//! (`src/bin/reference_adapter.rs`) as a real child process and drives it
+//! against the real, unmodified `ApprovalChannelEndpoint` and
+//! `ApprovalCoordinator` -- never a mock, never a reimplementation of
+//! either side's own logic. `reference_adapter_binary_path()` locates
+//! that exact compiled artifact (see its own doc comment for why this is
+//! not simply `env!("CARGO_BIN_EXE_reference_adapter")`).
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::agent::VerifiedCwd;
+use crate::approval::{
+    APPROVAL_TOKEN_ENV_VAR, ApprovalChannelDirectory, ApprovalChannelEndpoint,
+    ApprovalChannelErrorReason, ApprovalChannelPathRequest, ApprovalChannelPathResolver,
+    ApprovalCoordinator, DecideOutcome, ReceiveOutcome, SimpleDecision,
+};
+use crate::audit::{
+    AuditCoordinator, AuditHealth, AuditPathRequest, AuditPathResolver, AuditStore,
+};
+use crate::domain::AgentRunId;
+use crate::project::ProjectId;
+
+const PROJECT_ROOT: &str = "/home/user/project";
+/// Short by design -- see `unique_temp_dir`'s doc comment.
+const STATE_ROOT_LABEL_PREFIX: &str = "ta";
+
+/// A real, sqlite-backed `AuditStore` -- mirrors `coordinator.rs`'s own
+/// `TestAudit` (that one is private to a sibling test file, so this is a
+/// duplicate rather than a reuse; both construct the same real, public
+/// path production code uses).
+struct TestAudit {
+    store: AuditStore,
+    health: AuditHealth,
+}
+
+impl TestAudit {
+    fn new(name: &str) -> Self {
+        let state_root = unique_temp_dir(&format!("audit-{name}"));
+        std::fs::create_dir_all(&state_root).expect("create temp audit state root");
+        let state_root = state_root
+            .canonicalize()
+            .expect("canonicalize temp audit state root");
+        let storage_path = AuditPathResolver
+            .resolve(AuditPathRequest::new(state_root, Vec::new()))
+            .expect("resolve audit storage path");
+        let store = AuditStore::open(storage_path).expect("open a real audit store");
+        Self {
+            store,
+            health: AuditHealth::default(),
+        }
+    }
+
+    fn coordinator(&mut self) -> AuditCoordinator<'_> {
+        AuditCoordinator::new(&mut self.store, &mut self.health)
+    }
+}
+
+/// Deliberately short: a Unix `sun_path` is bounded (~107 usable bytes,
+/// `ApprovalChannelEndpoint::bind`'s own `max_socket_path_len`), and the
+/// full socket path is `<this>/approval/<agent-run-id>.sock` --
+/// `AgentRunId::for_test`'s own format (`agent-run-` plus 12 hex digits)
+/// already spends 22 of that budget before this directory name is even
+/// considered. A timestamp-plus-nanoseconds label (tried first) blew the
+/// budget outright; pid-plus-counter is unique enough for one test binary
+/// run and comfortably shorter.
+fn unique_temp_dir(label: &str) -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "{STATE_ROOT_LABEL_PREFIX}-{label}-{}-{sequence}",
+        std::process::id()
+    ))
+}
+
+struct TestChannel {
+    directory: ApprovalChannelDirectory,
+    base: PathBuf,
+}
+
+impl TestChannel {
+    fn new(label: &str) -> Self {
+        let base = unique_temp_dir(label);
+        std::fs::create_dir_all(&base).expect("create temp channel state root");
+        let directory = ApprovalChannelPathResolver
+            .resolve(ApprovalChannelPathRequest::new(base.clone(), Vec::new()))
+            .expect("resolve approval channel directory");
+        Self { directory, base }
+    }
+
+    fn bind(&self, agent_run_id: &AgentRunId) -> (ApprovalChannelEndpoint, String, PathBuf) {
+        let (endpoint, raw_token) = ApprovalChannelEndpoint::bind(&self.directory, agent_run_id)
+            .expect("bind a real approval channel endpoint");
+        let socket_path = self.directory.socket_path(agent_run_id);
+        (endpoint, raw_token, socket_path)
+    }
+}
+
+impl Drop for TestChannel {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.base);
+    }
+}
+
+/// `CARGO_BIN_EXE_<name>` is only guaranteed for genuine integration test
+/// targets (`tests/*.rs`), not for a lib's own `#[cfg(test)]` unit tests
+/// like this module -- checked directly (it is simply absent here, not a
+/// configuration mistake). Falls back to deriving the path from this test
+/// binary's own location: Cargo places every crate's test binary at
+/// `target/<profile>/deps/<crate>-<hash>` and every `[[bin]]` target
+/// (including `reference_adapter`) as a sibling of `deps/` itself, at
+/// `target/<profile>/<bin-name>` -- so `current_exe()`'s grandparent
+/// directory is exactly where to look.
+fn reference_adapter_binary_path() -> PathBuf {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_reference_adapter") {
+        return PathBuf::from(path);
+    }
+    let test_exe = std::env::current_exe().expect("current_exe should resolve for a running test");
+    let profile_dir = test_exe
+        .parent() // .../target/<profile>/deps
+        .and_then(Path::parent) // .../target/<profile>
+        .expect("test binary should live under target/<profile>/deps");
+    let candidate = profile_dir.join("reference_adapter");
+    assert!(
+        candidate.is_file(),
+        "expected the reference_adapter binary at {}; the [[bin]] target may not have built",
+        candidate.display()
+    );
+    candidate
+}
+
+/// Spawns the real compiled adapter binary. `token: None` omits
+/// `TEKSTIDE_APPROVAL_TOKEN` entirely (the missing-token case); `Some`
+/// sets it to exactly that value, whether or not it is the real one (the
+/// wrong-token case reuses this same helper).
+fn spawn_adapter(socket_path: &PathBuf, token: Option<&str>, argv: &[&str]) -> std::process::Child {
+    let mut command = Command::new(reference_adapter_binary_path());
+    command
+        .arg(socket_path)
+        .args(argv)
+        .env_clear()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(token) = token {
+        command.env(APPROVAL_TOKEN_ENV_VAR, token);
+    }
+    command
+        .spawn()
+        .expect("reference_adapter binary should spawn")
+}
+
+fn finish(child: std::process::Child) -> Output {
+    child
+        .wait_with_output()
+        .expect("reference_adapter binary should exit")
+}
+
+fn stdout_text(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// The full happy path: a real spawned adapter process, a real accepted
+/// connection, a real coordinator classifying and deciding, and the
+/// decision travelling back over the same real socket to a process that
+/// is not this test -- proven by exit code and by what the adapter itself
+/// printed after parsing the decision it received, not by inspecting
+/// anything on the server side alone.
+#[test]
+fn a_real_adapter_process_completes_a_full_approve_round_trip() {
+    let channel = TestChannel::new("approve");
+    let agent_run_id = AgentRunId::for_test(1);
+    let (endpoint, raw_token, socket_path) = channel.bind(&agent_run_id);
+
+    let child = spawn_adapter(&socket_path, Some(&raw_token), &["git", "status"]);
+
+    let accepted = endpoint
+        .accept_proposal()
+        .expect("the real adapter's proposal should authenticate and parse");
+
+    let mut coordinator = ApprovalCoordinator::new();
+    let mut audit = TestAudit::new("approve");
+    let proposal_id = accepted.proposal.proposal_id().clone();
+    let outcome = coordinator.receive_proposal(
+        ProjectId::for_test(1),
+        agent_run_id.clone(),
+        &VerifiedCwd::for_test(PROJECT_ROOT),
+        std::path::Path::new(PROJECT_ROOT),
+        channel.directory.state_root(),
+        accepted,
+        &mut audit.coordinator(),
+    );
+    assert!(
+        matches!(outcome, ReceiveOutcome::Created { .. }),
+        "a first-time proposal from a real adapter should be accepted as Created: {outcome:?}"
+    );
+
+    let decide_outcome = coordinator.decide(
+        &agent_run_id,
+        &proposal_id,
+        SimpleDecision::ApprovedOnce,
+        &mut audit.coordinator(),
+    );
+    let DecideOutcome::Decided { sent, .. } = decide_outcome else {
+        panic!("deciding a freshly-created proposal should reach Decided: {decide_outcome:?}");
+    };
+    sent.expect("sending the decision back over the real connection should succeed");
+
+    let output = finish(child);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "an approved_once decision should exit 0; stdout: {}, stderr: {}",
+        stdout_text(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout_text(&output).contains("approved_once"),
+        "the adapter should report the decision it actually received: {}",
+        stdout_text(&output)
+    );
+}
+
+/// The other half of "both decisions exercised" -- covering only approve
+/// proves the easier one. Same real round trip, `SimpleDecision::Rejected`
+/// this time.
+#[test]
+fn a_real_adapter_process_completes_a_full_reject_round_trip() {
+    let channel = TestChannel::new("reject");
+    let agent_run_id = AgentRunId::for_test(2);
+    let (endpoint, raw_token, socket_path) = channel.bind(&agent_run_id);
+
+    let child = spawn_adapter(
+        &socket_path,
+        Some(&raw_token),
+        &["rm", "-rf", "/nonexistent"],
+    );
+
+    let accepted = endpoint
+        .accept_proposal()
+        .expect("the real adapter's proposal should authenticate and parse");
+
+    let mut coordinator = ApprovalCoordinator::new();
+    let mut audit = TestAudit::new("reject");
+    let proposal_id = accepted.proposal.proposal_id().clone();
+    coordinator.receive_proposal(
+        ProjectId::for_test(1),
+        agent_run_id.clone(),
+        &VerifiedCwd::for_test(PROJECT_ROOT),
+        std::path::Path::new(PROJECT_ROOT),
+        channel.directory.state_root(),
+        accepted,
+        &mut audit.coordinator(),
+    );
+
+    let decide_outcome = coordinator.decide(
+        &agent_run_id,
+        &proposal_id,
+        SimpleDecision::Rejected,
+        &mut audit.coordinator(),
+    );
+    let DecideOutcome::Decided { sent, .. } = decide_outcome else {
+        panic!("deciding a freshly-created proposal should reach Decided: {decide_outcome:?}");
+    };
+    sent.expect("sending the decision back over the real connection should succeed");
+
+    let output = finish(child);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a rejected decision should exit 1; stdout: {}, stderr: {}",
+        stdout_text(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout_text(&output).contains("rejected"),
+        "the adapter should report the decision it actually received: {}",
+        stdout_text(&output)
+    );
+}
+
+/// "Behaviour on a missing ... token is defined and tested" -- the
+/// adapter must refuse to propose at all rather than connecting without
+/// one and letting the socket decide what happens.
+#[test]
+fn a_real_adapter_process_refuses_to_run_without_a_token() {
+    let channel = TestChannel::new("missing-token");
+    let agent_run_id = AgentRunId::for_test(3);
+    let (_endpoint, _raw_token, socket_path) = channel.bind(&agent_run_id);
+
+    let child = spawn_adapter(&socket_path, None, &["echo", "hi"]);
+    let output = finish(child);
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a missing TEKSTIDE_APPROVAL_TOKEN must exit with the defined missing-token code, not \
+         hang or attempt to connect; stdout: {}, stderr: {}",
+        stdout_text(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(APPROVAL_TOKEN_ENV_VAR),
+        "the failure message should name the missing variable, not just fail silently"
+    );
+}
+
+/// "Behaviour on a ... wrong token is defined and tested." The server
+/// rejects a bad token by silently dropping the connection (fail-closed
+/// without a dialog, per `approval::channel`'s own design) -- so the
+/// adapter cannot distinguish this from any other connection failure, and
+/// must not hang waiting for a reply that will never come.
+#[test]
+fn a_real_adapter_process_exits_distinctly_on_a_rejected_token() {
+    let channel = TestChannel::new("wrong-token");
+    let agent_run_id = AgentRunId::for_test(4);
+    let (endpoint, _raw_token, socket_path) = channel.bind(&agent_run_id);
+
+    let child = spawn_adapter(&socket_path, Some(&"w".repeat(64)), &["echo", "hi"]);
+
+    let server_result = endpoint.accept_proposal();
+    assert_eq!(
+        server_result.err().map(|error| error.reason),
+        Some(ApprovalChannelErrorReason::TokenMismatch),
+        "the server side should independently observe the wrong token as a real rejection, \
+         not a fluke of the client's own behaviour"
+    );
+
+    let output = finish(child);
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "a rejected token must surface as the defined protocol-failure exit code, not a hang \
+         or a panic; stdout: {}, stderr: {}",
+        stdout_text(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

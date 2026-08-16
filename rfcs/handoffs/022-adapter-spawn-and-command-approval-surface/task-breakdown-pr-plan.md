@@ -18,11 +18,14 @@ Granted 2026-08-16 with the pack. RFC-022's open question 1 is answered in the R
 (no shipping AI CLI speaks this protocol; the first adapter is ours). Questions 2 and 3
 remain the owner's and are not blocking until PR-022-E.
 
-## PR-022-B — The reference adapter
+## PR-022-B — The reference adapter [Implemented — pending review]
 
 First, because nothing else is demonstrable without it, and because it can be built and
 proven **headlessly** against RFC-021's existing socket code with no GUI involved. That
 makes it the cheapest place to discover that the protocol does not work as assumed.
+
+See [`qa-evidence.md`](./qa-evidence.md#pr-022-b---the-reference-adapter) for the full
+evidence record.
 
 Review gate:
 
