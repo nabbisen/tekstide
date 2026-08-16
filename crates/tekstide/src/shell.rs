@@ -513,6 +513,15 @@ pub struct State {
     /// early would desync this map from a request that can still be
     /// looked up (`sweep_expired_approvals` itself, before it marks an
     /// entry expired) until eviction actually removes it.
+    ///
+    /// **Response 229: the bound this map now has is real but
+    /// indirect, worth stating rather than leaving for a reader to
+    /// derive.** This map is not bounded by anything of its own --
+    /// eviction pruning is what bounds it, eviction itself is bounded by
+    /// `approval_history_limit` (`ProjectResourceLimits`), and every
+    /// entry here corresponds to exactly one `ApprovalRequest`
+    /// `ProjectSession` retains. So this map's size is bounded
+    /// transitively, through that limit, not by any check of its own.
     approval_proposal_ids: std::collections::HashMap<
         tekstide_core::domain::ApprovalId,
         tekstide_core::approval::ProposalId,

@@ -469,3 +469,52 @@ fn deciding_a_proposal_whose_real_adapter_process_has_already_exited_is_undelive
          got: {records:?}"
     );
 }
+
+/// Response 229's suggestion: pins the property
+/// `a_genuinely_destructive_real_proposal_is_classified_and_promoted_end_to_end`
+/// (`crates/tekstide/src/shell/tests.rs`) depends on for its own safety --
+/// that this binary only ever *proposes* the argv it is given, never
+/// *runs* it. That test hardcodes a real `rm -rf` argv into a wrapper
+/// script and trusts nothing here executes it; this is what makes that
+/// trust checkable by name rather than by inspection each time. Same
+/// source-scan-for-absence shape `crates/tekstide/src/shell/tests.rs`
+/// already uses for `no_raw_color_construction_anywhere_in_the_crate`.
+///
+/// Scans for the concrete Rust APIs that would actually execute a
+/// process (`std::process::Command`, the `exec`/`execvp`/`posix_spawn`
+/// libc family, `fork`) rather than a broader lexical net -- narrow
+/// enough that this test does not fail on unrelated future code (a
+/// string that happens to contain "exec", say), wide enough to catch
+/// every ordinary way this file could gain a real spawn path. Not a
+/// sandbox: a `#[no_mangle]` FFI trick or an `unsafe` raw syscall built
+/// by hand would not match any of these substrings. Proportionate to
+/// what a reference/demo binary in this codebase would plausibly grow,
+/// not to an adversarial rewrite of it.
+#[test]
+fn reference_adapter_binary_never_executes_the_argv_it_proposes() {
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bin/reference_adapter.rs");
+    let source = std::fs::read_to_string(&source_path)
+        .expect("reference_adapter.rs must be readable from tekstide-core's own crate root");
+
+    for forbidden in [
+        "std::process::Command",
+        "Command::new",
+        "process::Command",
+        ".exec(",
+        "execvp",
+        "execv(",
+        "execve",
+        "execl",
+        "posix_spawn",
+        "libc::fork",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "reference_adapter.rs must never execute the argv it proposes -- found a process-\
+             spawning call site (`{forbidden}`) that a real GUI test \
+             (a_genuinely_destructive_real_proposal_is_classified_and_promoted_end_to_end) \
+             trusts does not exist, since it hardcodes a real `rm -rf` argv on the assumption \
+             nothing here runs it"
+        );
+    }
+}

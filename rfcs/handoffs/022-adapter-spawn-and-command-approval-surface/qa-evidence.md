@@ -963,6 +963,55 @@ Full gate clean: `cargo fmt --all --check`, `cargo clippy --workspace --all-targ
 593, unchanged -- the two new assertions extend existing tests rather than adding new ones),
 `git diff --check`.
 
+### Response 229's suggestion, and priority item 2
+
+**Response 229's suggestion (not blocking, taken)**: `a_genuinely_destructive_real_proposal_is_classified_and_promoted_end_to_end`'s
+safety depends on the reference adapter never executing the argv it proposes -- a property
+that was, until now, unstated and unpinned in code. New test
+`reference_adapter_binary_never_executes_the_argv_it_proposes`
+(`crates/tekstide-core/src/approval/tests/reference_adapter.rs`) source-scans
+`reference_adapter.rs` for the concrete Rust APIs that would actually spawn a process
+(`std::process::Command`/`Command::new`/`.exec(`/`execvp`/`execv`/`execve`/`execl`/
+`posix_spawn`/`libc::fork`) and fails by name if any appear -- narrow enough not to false-fire
+on unrelated future code, wide enough to catch every ordinary way this file could grow a real
+spawn path. Cross-referenced directly from the GUI test's own doc comment, so the dependency is
+visible from either direction. **Ablated**: added a throwaway
+`std::process::Command::new("true")` call inside `reference_adapter.rs`, reran -- failed
+naming the exact forbidden string found. Reverted, reran clean. Also added the transitive-bound
+note response 229 asked for to `approval_proposal_ids`'s own doc comment: the map is not
+bounded by anything of its own, only through `approval_history_limit` via eviction pruning.
+
+**Priority item 2: the `command_approval` audit family's first real producer, queried and
+asserted rather than implied.** New test
+`command_approval_family_produces_real_durable_audit_records_through_the_pipeline` runs a real
+receive (through the real reference adapter) followed by a real `ApprovedOnce` decision
+(through real `update()`/`ModalActivate` routing), then opens the real audit store and queries
+it, filtering by this run's own `AgentRunId`. Asserts, by exact `action_kind`/`outcome`/
+`approval_id` rather than "a record exists somewhere":
+
+- A `CommandRequest` record with `outcome: Requested` and `approval_id` matching the received
+  request (`AuditCoordinator::record_command_request`, called from `receive_approval_proposal`).
+- **Two** `CommandApprove` records, not one -- `authorize_command_decision` writes an
+  `Authorized` record first (the real authorization gate: its own doc comment says a failure
+  here must block the decision entirely), then `record_command_decision_outcome` writes a
+  second, best-effort record confirming whether the decision was actually delivered back to the
+  adapter (`Applied`) or not (`Failed`). Asserting both, not just "a `CommandApprove` record
+  exists," is what proves the real socket delivery happened, not only that the decision was
+  authorized in principle -- this was found by reading `audit/integration.rs` directly rather
+  than assumed, after an initial draft asserted only a single `Authorized` record and would
+  have been fragile to which of the two `query()` returned first.
+- Both records' `approval_id` matches the request's own id, tying every record unambiguously
+  to the one proposal this test actually drove through the real pipeline.
+
+**Ablated**: temporarily replaced `decide_approval`'s body with an unconditional early return
+(no decision sent, nothing recorded), reran -- failed at the test's own precondition check
+(`stored.decision` stayed `Pending` instead of reaching `ApprovedOnce`), confirming the test
+depends on the real pipeline actually running rather than passing regardless. Restored, reran
+clean.
+
+Full gate clean again after both: `tekstide` 229 (up from 228), `tekstide-core` 594 (up from
+593, the source-scan guard).
+
 ## PR-022-F - Closeout
 
 *Not started.*

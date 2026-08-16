@@ -8,8 +8,8 @@ use super::{
     ModalButton, ModalContent, PasteConfirmButton, State, TerminalPasteRefusal,
     agent_run_launch_refusal_text, attempt_agent_run_launch_with_profile, content_within_bound,
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
-    poll_approval_channels, sidebar_label, status_bar_summary, terminal_paste_refusal_text,
-    trusted_ui_state, zone_style,
+    open_real_audit_store, poll_approval_channels, sidebar_label, status_bar_summary,
+    terminal_paste_refusal_text, trusted_ui_state, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -2059,6 +2059,12 @@ fn launch_real_managed_agent_run_with_executable(
 /// `reference_adapter` binary with it. Pointing a profile's executable
 /// at this script reaches the real classifier with a real `Destructive`
 /// command through the unmodified production spawn path.
+///
+/// **This safety claim is pinned, not just asserted here in prose**:
+/// `reference_adapter_binary_never_executes_the_argv_it_proposes`
+/// (`crates/tekstide-core/src/approval/tests/reference_adapter.rs`)
+/// fails by name if the reference adapter ever grows a real
+/// `Command`/`exec` call site, per response 229.
 fn destructive_reference_adapter_wrapper_path() -> std::path::PathBuf {
     let script_path = std::env::temp_dir().join(format!(
         "tekstide-destructive-reference-adapter-wrapper-{}-{}.sh",
@@ -2349,6 +2355,124 @@ fn deciding_the_promoted_dialog_sends_a_real_decision_and_updates_the_stored_req
         !state.approval_proposal_ids.contains_key(&request.id),
         "response 228 Required 2: the ApprovalId -> ProposalId bridge entry must be pruned \
          once a decision is real, not left to outlive its own usefulness"
+    );
+}
+
+/// Response 229, priority item 2: the `command_approval` audit family
+/// (`CommandRequest`/`CommandApprove`/`CommandEditAndApprove`/
+/// `CommandReject`/`CommandCwdMismatch`, `AuditActionKind`) has been
+/// wired with no producer since RFC-021 -- `receive_approval_proposal`/
+/// `decide_approval` passing a real `AuditCoordinator` *implies* this
+/// pipeline is its first real one, but nothing before this test queried
+/// the real store and checked. This does: a real receive (through the
+/// real reference adapter) followed by a real `ApprovedOnce` decision
+/// (through real `update()`/`ModalActivate` routing, the same path a
+/// user's own click drives) must each leave their own durable record
+/// behind, identifiable by this run's own `AgentRunId` and the
+/// request's own `ApprovalId` -- not just "a record exists somewhere,"
+/// which a record for an unrelated action would also satisfy.
+#[test]
+fn command_approval_family_produces_real_durable_audit_records_through_the_pipeline() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-audit-records");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let agent_run_id = launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    let request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    let proposal_id = state.approval_proposal_ids[&request.id].clone();
+
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog::for_test(
+        request.clone(),
+        proposal_id,
+        ApprovalDialogButton::ApproveOnce,
+    ))));
+    let _ = super::update(&mut state, Message::ModalActivate);
+    let stored = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    assert_eq!(
+        stored.decision,
+        tekstide_core::domain::ApprovalDecision::ApprovedOnce,
+        "this test's own records assertion below depends on a real Decided outcome having \
+         happened -- got {stored:?}"
+    );
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let records = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .expect("querying the real audit store must succeed")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .filter(|record| record.agent_run_id.as_ref() == Some(&agent_run_id))
+        .collect::<Vec<_>>();
+
+    let request_record = records
+        .iter()
+        .find(|record| record.action_kind == tekstide_core::audit::AuditActionKind::CommandRequest)
+        .unwrap_or_else(|| {
+            panic!("expected a real CommandRequest record for this agent run: {records:?}")
+        });
+    assert_eq!(request_record.approval_id, Some(request.id.clone()));
+    assert_eq!(
+        request_record.outcome,
+        tekstide_core::audit::AuditOutcome::Requested,
+        "a proposal's arrival must be recorded as Requested -- got {:?}",
+        request_record.outcome
+    );
+
+    // `AuditCoordinator::authorize_command_decision` writes an
+    // `Authorized` record first (the actual authorization gate -- a
+    // failure here must block the decision entirely, per its own doc
+    // comment), then `record_command_decision_outcome` writes a second,
+    // best-effort record confirming whether the decision was actually
+    // delivered back to the adapter (`Applied`) or not (`Failed`). Both
+    // share `action_kind: CommandApprove` for an `ApprovedOnce` decision
+    // -- asserting on both, not just "a CommandApprove record exists,"
+    // is what proves the real socket delivery happened, not only that
+    // the decision was authorized in principle.
+    let approve_records: Vec<_> = records
+        .iter()
+        .filter(|record| {
+            record.action_kind == tekstide_core::audit::AuditActionKind::CommandApprove
+        })
+        .collect();
+    assert!(
+        approve_records.iter().any(|record| {
+            record.outcome == tekstide_core::audit::AuditOutcome::Authorized
+                && record.approval_id == Some(request.id.clone())
+        }),
+        "expected a real, Authorized CommandApprove record for this decision: {records:?}"
+    );
+    assert!(
+        approve_records.iter().any(|record| {
+            record.outcome == tekstide_core::audit::AuditOutcome::Applied
+                && record.approval_id == Some(request.id.clone())
+        }),
+        "expected a real, Applied CommandApprove record confirming the decision was actually \
+         delivered back to the real adapter over the real socket, not just authorized: \
+         {records:?}"
     );
 }
 
