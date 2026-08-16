@@ -202,6 +202,65 @@ pub(crate) struct ExternalChangeModal {
     focus: ExternalChangeButton,
 }
 
+/// RFC-022 PR-022-E: which button the approval dialog's focus is on.
+/// `ApproveOnce`/`Reject` only -- `task-breakdown-pr-plan.md`'s own
+/// PR-022-E review gate names Approve/Reject and the cooperative-limit
+/// wording, not an edit-argv flow (`ApprovalCoordinator::decide_with_edited_argv`
+/// exists in `tekstide-core` but has no caller from this slice's own
+/// gate), so this type does not carry a third button for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ApprovalDialogButton {
+    ApproveOnce,
+    Reject,
+}
+
+#[allow(dead_code)]
+impl ApprovalDialogButton {
+    const ORDER: [ApprovalDialogButton; 2] = [
+        ApprovalDialogButton::ApproveOnce,
+        ApprovalDialogButton::Reject,
+    ];
+
+    fn next(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + 1) % Self::ORDER.len()]
+    }
+
+    fn previous(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + Self::ORDER.len() - 1) % Self::ORDER.len()]
+    }
+}
+
+/// RFC-022 PR-022-E: the security surface -- see
+/// `what-the-dialog-must-not-lie-about.md` and response 221. Holds the
+/// full `ApprovalRequest` rather than a handful of extracted fields the
+/// way `ExternalChangeModal` does: this dialog genuinely needs nearly
+/// every field (`display_command`/`cwd` to render, `risk_level`/
+/// `risk_reasons` to disclose, `id`/`agent_run_id` to call `decide`
+/// against once a decision is made), so extracting a subset would just
+/// be a second, partial copy of the same struct.
+///
+/// **Not yet wired into `ModalContent`.** Review request 220 (open
+/// question 3: does this dialog interrupt whatever the user is doing)
+/// is still open -- the trigger path (when/how `state.modal` becomes
+/// `Some(ModalContent::Approval(..))`) is exactly what that answer
+/// decides, so it is deliberately not built yet. This struct and its
+/// rendering are provable and correct independent of that answer, which
+/// is why they are built now rather than waiting.
+#[derive(Debug)]
+#[allow(dead_code)]
+pub(crate) struct ApprovalDialog {
+    request: tekstide_core::domain::ApprovalRequest,
+    focus: ApprovalDialogButton,
+}
+
 /// RFC-018 PR-018-C: `state.modal` must remain the *one* value
 /// `input::ModalAbsent`/`SubscriptionMode::for_modal` gate on, so a
 /// second real modal kind has to live inside this same type rather than
@@ -2856,6 +2915,104 @@ pub(crate) fn external_change_dialog_body(
             .untrusted("path", &path)
             .trusted_symbol("reason", reason),
     )
+}
+
+/// RFC-022 PR-022-E: a compile-time literal symbol for `RiskLevel`, the
+/// same `trusted_symbol` division of labour every other symbol-driven
+/// Fluent lookup in this file uses -- the words live in `en.ftl`'s
+/// `approval-dialog-risk` select expression, not here. `RiskLevel` is
+/// Tekstide's own classification output (`approval::risk::classify`),
+/// never adapter-supplied text, so this needs no escaping -- only
+/// `display_command`/`cwd` do (response 221).
+fn risk_level_symbol(level: tekstide_core::domain::RiskLevel) -> &'static str {
+    use tekstide_core::domain::RiskLevel;
+    match level {
+        RiskLevel::Low => "low",
+        RiskLevel::Medium => "medium",
+        RiskLevel::High => "high",
+        RiskLevel::Destructive => "destructive",
+    }
+}
+
+/// RFC-022 PR-022-E: the dialog body's escaping, per response 221's
+/// corrected split.
+///
+/// **`display_command` is isolation-wrapped, not re-escaped.**
+/// `ApprovalRequest.display_command` is already escaped by the model
+/// (`approval::coordinator::display_argv`/`display_entry`, RFC-021
+/// response 114/115's own ten-probe suite) -- `quote_untrusted` here
+/// only adds the bidi isolation wrap a value needs to embed safely in
+/// trusted chrome. Running `escape_untrusted_chars` again on an
+/// already-escaped string is a proven no-op: it acts only on control and
+/// format characters, and none survive in `display_command` (they were
+/// already replaced with `<U+XXXX>` marker text, itself plain ASCII).
+/// This is cited, not re-proven -- re-testing it here would test
+/// RFC-021, not this slice.
+///
+/// **`cwd` is escaped here, for the first time.** It arrives on
+/// `ApprovalRequest` raw, straight from the adapter's proposal
+/// (`domain/approval.rs`) -- response 221 identified it as the actual
+/// live attack surface `what-the-dialog-must-not-lie-about.md` §1
+/// originally (and wrongly) named `argv` for: a user reads the command
+/// carefully but skims the directory to confirm context, which is
+/// exactly what a rendering attack targets.
+///
+/// `environment_summary` is checked and found, not rendered: it is
+/// `ApprovalRequest`'s third field response 221 asked about, and it has
+/// no writer anywhere in this codebase (`ApprovalRequest::pending` sets
+/// it to `None` and nothing since RFC-021 has ever set it to `Some`) --
+/// nothing adapter-derived is in it today, so there is nothing to
+/// escape or to render.
+pub(crate) fn approval_dialog_body(
+    catalog: &Catalog,
+    request: &tekstide_core::domain::ApprovalRequest,
+) -> String {
+    let command = tekstide_core::text_safety::quote_untrusted(&request.display_command);
+    let cwd = tekstide_core::text_safety::quote_untrusted(&request.cwd.display().to_string());
+    catalog.get_with_args(
+        "approval-dialog-body",
+        &CatalogArgs::new()
+            .untrusted("command", &command)
+            .untrusted("cwd", &cwd)
+            .trusted_symbol("risk", risk_level_symbol(request.risk_level)),
+    )
+}
+
+/// Not yet called from `view()` -- see [`ApprovalDialog`]'s own doc
+/// comment for why the trigger wiring waits on response 220.
+/// `#[allow(dead_code)]` rather than a throwaway caller: this function,
+/// [`approval_dialog_body`], and [`risk_level_symbol`] are exercised
+/// directly by `shell::tests` today, which proves them correct ahead of
+/// the wiring that will make them reachable from `main` for real.
+#[allow(dead_code)]
+fn approval_dialog_view<'a>(state: &'a State, dialog: &'a ApprovalDialog) -> Element<'a, Message> {
+    let button_line = |target: ApprovalDialogButton, label_key: &str| {
+        let marker = if dialog.focus == target { "> " } else { "  " };
+        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+    };
+
+    let lines: Vec<Element<'_, Message>> = vec![
+        text(state.catalog.get("approval-dialog-title"))
+            .size(state.theme.font_size_heading())
+            .into(),
+        text(approval_dialog_body(&state.catalog, &dialog.request))
+            .size(state.theme.font_size_body())
+            .into(),
+        // what-the-dialog-must-not-lie-about.md §2: "the highest-consequence
+        // sentence in this RFC" -- rendered as its own line, not folded
+        // into the body text above, so it cannot be missed by a reader
+        // skimming for the command and cwd alone.
+        text(state.catalog.get("approval-dialog-cooperative-notice"))
+            .size(state.theme.font_size_body())
+            .into(),
+        button_line(ApprovalDialogButton::ApproveOnce, "approval-dialog-approve").into(),
+        button_line(ApprovalDialogButton::Reject, "approval-dialog-reject").into(),
+        text(state.catalog.get("approval-dialog-hint"))
+            .size(state.theme.font_size_status())
+            .into(),
+    ];
+
+    modal_dialog_box(state, column(lines).spacing(10).into())
 }
 
 fn external_change_modal_view<'a>(

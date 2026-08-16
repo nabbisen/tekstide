@@ -3314,6 +3314,155 @@ fn external_change_dialog_body_does_not_claim_discarded_changes_without_local_ed
     );
 }
 
+fn approval_request_fixture(
+    display_command: impl Into<String>,
+    cwd: impl Into<PathBuf>,
+    risk_level: tekstide_core::domain::RiskLevel,
+) -> tekstide_core::domain::ApprovalRequest {
+    tekstide_core::domain::ApprovalRequest::pending(
+        tekstide_core::project::ProjectId::new_uuid(),
+        None,
+        "command_execution",
+        display_command,
+        risk_level,
+        Vec::new(),
+        cwd,
+    )
+}
+
+/// **response 221's own finding, tested**: `cwd` arrives on
+/// `ApprovalRequest` raw, straight from the adapter, and is the field
+/// this slice's own widget escapes for the first time -- `argv`'s
+/// escaping is RFC-021's, already proven by its own ten-probe suite,
+/// cited rather than repeated here.
+///
+/// **Ablated**: temporarily replaced `approval_dialog_body`'s
+/// `quote_untrusted(&request.cwd.display().to_string())` call with a raw
+/// `request.cwd.display().to_string()`, ran this test -- it failed, with
+/// the raw override character present in the panic's own printed body
+/// text, confirming the assertion actually exercises the escaping path
+/// rather than passing vacuously. Reverted before commit.
+#[test]
+fn approval_dialog_body_escapes_a_bidi_override_in_the_cwd() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let request = approval_request_fixture(
+        "cat notes.txt",
+        "/home/user/proj\u{202E}gpj",
+        tekstide_core::domain::RiskLevel::Low,
+    );
+
+    let body = super::approval_dialog_body(&catalog, &request);
+
+    assert!(
+        body.contains("<U+202E>"),
+        "expected the escaped marker in {body:?}"
+    );
+    assert!(
+        !body.contains('\u{202E}'),
+        "the raw override character must never reach the approval dialog, got {body:?}"
+    );
+}
+
+/// **No double-escaping (`what-the-dialog-must-not-lie-about.md` §1)**:
+/// a `cwd` containing the *literal* text `<U+202E>` (no real override
+/// character anywhere in it) must pass through unchanged, not be further
+/// mangled by a second escaping pass -- `text_safety::escape_untrusted_chars`
+/// never touches `<`, `U`, `+`, hex digits, or `>`, so this is a real
+/// idempotency property of the escaping function, not merely hoped for.
+#[test]
+fn approval_dialog_body_does_not_double_escape_literal_marker_text_in_the_cwd() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let request = approval_request_fixture(
+        "cat notes.txt",
+        "/home/user/<U+202E>-literally-not-an-override",
+        tekstide_core::domain::RiskLevel::Low,
+    );
+
+    let body = super::approval_dialog_body(&catalog, &request);
+
+    assert!(
+        body.contains("<U+202E>-literally-not-an-override"),
+        "literal marker-shaped text must survive unmangled, got {body:?}"
+    );
+}
+
+/// **`argv`'s escaping is inherited from RFC-021, not re-derived here**
+/// (response 221): `display_command` arrives on `ApprovalRequest`
+/// already escaped by `approval::coordinator::display_argv`. This proves
+/// the widget's isolation-wrapping does not corrupt that already-escaped
+/// text -- a marker `display_argv` itself produced must survive
+/// unchanged through `approval_dialog_body`, the same
+/// no-double-escaping property proven for `cwd` above, applied to the
+/// field that already carried it in.
+#[test]
+fn approval_dialog_body_does_not_mangle_argvs_already_escaped_marker() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let request = approval_request_fixture(
+        "rm -rf impor<U+200B>tant.txt",
+        "/home/user/project",
+        tekstide_core::domain::RiskLevel::Destructive,
+    );
+
+    let body = super::approval_dialog_body(&catalog, &request);
+
+    assert!(
+        body.contains("impor<U+200B>tant.txt"),
+        "an already-escaped marker from the model must survive unmangled, got {body:?}"
+    );
+}
+
+/// The four `RiskLevel` variants each render as their own, distinct
+/// word -- a `Destructive` proposal must not be able to read as `Low`
+/// because a selector arm was missed.
+#[test]
+fn approval_dialog_body_renders_each_risk_level_distinguishably() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let levels = [
+        (tekstide_core::domain::RiskLevel::Low, "Low"),
+        (tekstide_core::domain::RiskLevel::Medium, "Medium"),
+        (tekstide_core::domain::RiskLevel::High, "High"),
+        (tekstide_core::domain::RiskLevel::Destructive, "Destructive"),
+    ];
+    let mut rendered = Vec::new();
+    for (level, word) in levels {
+        let request = approval_request_fixture("ls", "/home/user/project", level);
+        let body = super::approval_dialog_body(&catalog, &request);
+        assert!(
+            body.contains(word),
+            "RiskLevel::{level:?} must render as {word:?}, got {body:?}"
+        );
+        rendered.push(body);
+    }
+    let unique: std::collections::HashSet<_> = rendered.iter().collect();
+    assert_eq!(
+        unique.len(),
+        rendered.len(),
+        "all four risk levels must render distinguishably from each other: {rendered:?}"
+    );
+}
+
+/// **`what-the-dialog-must-not-lie-about.md` §2**: "the highest-consequence
+/// sentence in this RFC." Asserts the two things this dialog must never
+/// let a user assume by omission are actually stated in words, not only
+/// documented: that a decision here does not stop execution, and that
+/// approving does not make the command safe.
+#[test]
+fn approval_dialog_cooperative_notice_states_both_required_non_claims() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let notice = catalog.get("approval-dialog-cooperative-notice");
+
+    assert!(
+        notice.to_lowercase().contains("cannot stop"),
+        "must state that a decision here does not stop execution: {notice:?}"
+    );
+    assert!(
+        notice
+            .to_lowercase()
+            .contains("does not make the command safe"),
+        "must state that approving does not make the command safe: {notice:?}"
+    );
+}
+
 /// **The real, end-to-end proof the unit test above cannot give alone**:
 /// a document with no local edits, changed externally, saved for real
 /// via a real `Ctrl+S` through `update` -- the modal must open with the

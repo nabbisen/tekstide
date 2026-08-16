@@ -520,6 +520,19 @@ fn generic_args() -> CatalogArgs<'static> {
         // RFC-006 Amendment 1: `editor-cursor`'s two trusted numbers.
         .number("line", 1u32)
         .number("column", 1u32)
+        // RFC-022 PR-022-E: `approval-dialog-body`'s untrusted command/cwd
+        // and trusted risk-level selector. `command`/`cwd` go through the
+        // real `quote_untrusted` here too, matching `name`/`message`/`path`
+        // above -- `CatalogArgs::untrusted` only accepts a `DisplayText`.
+        .untrusted(
+            "command",
+            &tekstide_core::text_safety::quote_untrusted("fixture-command"),
+        )
+        .untrusted(
+            "cwd",
+            &tekstide_core::text_safety::quote_untrusted("/fixture/cwd"),
+        )
+        .trusted_symbol("risk", "low")
 }
 
 fn shipped_additional_locales() -> Vec<String> {

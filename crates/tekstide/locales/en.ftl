@@ -325,3 +325,31 @@ external-change-dialog-body = { $path } changed on disk since it was opened. { $
 external-change-dialog-reload = Reload
 external-change-dialog-dismiss = Dismiss
 external-change-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always dismisses.
+
+# RFC-022 PR-022-E: `$command` is `ApprovalRequest.display_command`,
+# already escaped by the model (RFC-021's ten-probe suite) and
+# isolation-wrapped here; `$cwd` is `ApprovalRequest.cwd`, raw from the
+# adapter and escaped for the first time at this widget (response 221 --
+# it is the sharper attack surface, since a user skims the directory to
+# confirm context rather than reading it as carefully as the command).
+# `$risk` is Tekstide's own classification, never adapter text, so it
+# needs no escaping.
+approval-dialog-title = Command Approval Requested
+approval-dialog-body = An AI CLI is asking to run:
+    { $command }
+    in { $cwd }.
+    Risk: { $risk ->
+        [low] Low
+        [medium] Medium
+        [high] High
+       *[destructive] Destructive
+    }
+# what-the-dialog-must-not-lie-about.md §2: "the highest-consequence
+# sentence in this RFC." States plainly, in the words a user actually
+# reads (not only in documentation), the two things this dialog must
+# never let a user assume by omission: that a decision here is
+# enforced, and that approving means the command is safe.
+approval-dialog-cooperative-notice = This choice is advisory, not a safeguard: Tekstide sends it to the AI CLI, but the AI CLI decides whether to actually run the command. Approving does not make the command safe, and rejecting cannot stop the AI CLI from running it anyway.
+approval-dialog-approve = Approve Once
+approval-dialog-reject = Reject
+approval-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape leaves this request pending.

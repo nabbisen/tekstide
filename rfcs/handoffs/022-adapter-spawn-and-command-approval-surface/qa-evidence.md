@@ -426,7 +426,93 @@ slice's.
 
 ## PR-022-E - The approval dialog
 
-*Not started.*
+**In progress, deliberately partial.** Two research questions were raised before any dialog
+code (review requests 220, 221) -- 221 is answered (response 221); 220 (open question 3:
+does this dialog interrupt whatever the user is doing) is still open. Everything below is the
+half response 221 unblocked -- the escaping widget, proven correct -- and none of it depends
+on 220's answer. **Not built yet, and waiting on 220**: `state.modal`'s new variant, the
+poll/subscription path that detects an inbound proposal, the `OpenPendingApproval` dispatch
+wiring, the undeliverable-decision handling, and the `command_approval` audit family's first
+real producer (recording a decision is exactly where that producer call belongs, and it has
+nowhere to go until the dialog can actually be reached).
+
+**Response 221 corrected `what-the-dialog-must-not-lie-about.md` §1, and the correction
+changes what this slice escapes.** Full trace in
+`.git-exclude/review-request/221-rfc022-pr-022e-escaping-source-question.md` and
+`.git-exclude/reviewed/tekstide-review-request-221-escaping-source-response.md`; the doc
+itself was amended in place (commit `54bdb30`, not mine). Summary: `ApprovalRequest.display_command`
+(the argv) is already escaped **in the model** by `approval::coordinator::display_argv`/
+`display_entry` (RFC-021, response 114/115's own ten-probe suite) -- re-escaping it at the
+widget would be redundant, not additionally safe, since `text_safety::escape_untrusted_chars`
+only touches control/format characters and none survive in an already-escaped string.
+`ApprovalRequest.cwd`, by contrast, is **raw**, straight from the adapter's proposal, and
+nothing had ever escaped it -- the actual live attack surface, and arguably the sharper one:
+a user reads the command carefully but skims the directory to confirm context, exactly what a
+rendering attack targets. `environment_summary` was checked and found dead: no writer exists
+anywhere in the codebase (`ApprovalRequest::pending` sets it to `None`, nothing since RFC-021
+has ever set it to `Some`) -- nothing adapter-derived is in it today, so nothing was built to
+render it.
+
+**What was built**: `approval_dialog_body` (`shell.rs`) -- isolation-wraps `display_command`
+(citing RFC-021's escaping, not re-proving it) and escapes `cwd` for the first time via
+`text_safety::quote_untrusted`, both fed through `CatalogArgs::untrusted` into the
+`approval-dialog-body` Fluent template (`en.ftl`), the same `.untrusted(...)`/`DisplayText`
+division of labour every other untrusted-text render site in this crate already uses
+(`explorer.rs`, `editor.rs`, `board.rs`, `external_change_dialog_body`). `risk_level_symbol`
+renders `RiskLevel` (Tekstide's own classification output, never adapter text) through a
+`trusted_symbol` select expression, no escaping needed. `ApprovalDialogButton`
+(`ApproveOnce`/`Reject` -- no edit-argv button; the gate names neither an edit flow nor does
+`decide_with_edited_argv` have a caller from this slice) and `ApprovalDialog` (holding the
+full `ApprovalRequest` plus focus) exist as real types with a real `approval_dialog_view`,
+`#[allow(dead_code)]`'d rather than half-wired into `ModalContent` -- see the type's own doc
+comment for why building the render layer now, ahead of the trigger wiring, is deliberate
+rather than premature.
+
+**Proven, not asserted, with the same rigor RFC-021's own escaping work used:**
+
+- `approval_dialog_body_escapes_a_bidi_override_in_the_cwd` -- the falsifiable claim §1 asks
+  for, now aimed at the field that actually needed it. **Ablated**: temporarily replaced the
+  real `quote_untrusted(&request.cwd...)` call with an empty escaped value plus the raw cwd
+  string appended after the templated body (the same "swap the escaping call for a raw
+  `format!`" shape the pre-existing `external_change_dialog_body_escapes_a_bidi_override_in_the_path`
+  test's own doc comment documents) -- failed with the real `\u{202e}` override character
+  present in the panic's own printed body text. Restored, reran clean.
+- `approval_dialog_body_does_not_double_escape_literal_marker_text_in_the_cwd` -- a `cwd`
+  containing the literal text `<U+202E>` (no real override character anywhere in it) survives
+  unmangled, proving `escape_untrusted_chars`'s idempotency claim rather than assuming it.
+- `approval_dialog_body_does_not_mangle_argvs_already_escaped_marker` -- the argv side of the
+  same property: a marker `display_argv` itself already produced survives the widget's
+  isolation-wrapping unchanged, so citing RFC-021's escaping instead of re-running it is
+  provably harmless, not merely argued to be.
+- `approval_dialog_body_renders_each_risk_level_distinguishably` -- all four `RiskLevel`
+  variants render as four distinct words; a `Destructive` proposal cannot read as `Low`
+  because a selector arm was missed.
+- `approval_dialog_cooperative_notice_states_both_required_non_claims` -- asserts the actual
+  rendered copy states both non-claims §2 requires (a decision here does not stop execution;
+  approving does not make the command safe), not merely that some text exists at that key.
+
+**The cooperative-limit wording, chosen and justified, per §2's own instruction to do both:**
+"This choice is advisory, not a safeguard: Tekstide sends it to the AI CLI, but the AI CLI
+decides whether to actually run the command. Approving does not make the command safe, and
+rejecting cannot stop the AI CLI from running it anyway." Rendered as its own line in the
+dialog, not folded into the command/cwd body text, so it cannot be missed by a reader skimming
+for the command and directory alone -- the same reasoning that keeps it out of documentation-only
+per §2's own complaint about dialogs that "look like a security control while being an honour
+system." Does not restate the third non-claim (that the shown command is all the adapter will
+do) in the notice itself, since that is a property of the interaction pattern (one dialog per
+proposal) rather than a sentence about this one decision; worth a second look once 220's
+answer determines whether proposals can queue.
+
+**`i18n::enforcement` tests required two additions, not zero**: `every_source_locale_key_resolves_in_every_shipped_locale`
+failed on `approval-dialog-body` until `generic_args()` (`i18n/enforcement.rs`) gained
+`command`/`cwd`/`risk` fixture values -- a real gap the test caught immediately, not a
+formality passed by construction.
+
+**Gates.** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features
+-- -D warnings`, full workspace suite, `git diff --check` -- all clean.
+
+- `tekstide-core`: 578 (unchanged -- no core changes this round).
+- `tekstide`: 220 (up from 215 -- the five tests named above).
 
 ## PR-022-F - Closeout
 
