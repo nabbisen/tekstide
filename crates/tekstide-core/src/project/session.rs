@@ -576,10 +576,18 @@ impl ProjectSession {
     /// (though the two bounds are independent numbers now, not
     /// guaranteed equal, so this backstop is not purely theoretical the
     /// way it was when both reused one field).
+    /// Response 228 Required 2: returns the `ApprovalId` of whatever
+    /// entry `approval_history_limit` eviction removed to make room, if
+    /// any -- `Ok(None)` covers both "no eviction was needed" and "no
+    /// limit is configured." A caller maintaining its own index keyed by
+    /// `ApprovalId` (the GUI's `approval_proposal_ids` bridge; see
+    /// `crates/tekstide/src/shell.rs`) needs this to know which entry
+    /// just stopped existing here -- this module has no visibility into
+    /// that caller's own map to prune it directly.
     pub fn add_approval_request(
         &mut self,
         approval: ApprovalRequest,
-    ) -> Result<(), ProjectApprovalError> {
+    ) -> Result<Option<ApprovalId>, ProjectApprovalError> {
         self.ensure_project_member(&approval.project_id)
             .map_err(ProjectApprovalError::Ownership)?;
         if let Some(agent_run_id) = &approval.agent_run_id {
@@ -595,16 +603,19 @@ impl ProjectSession {
                 OwnershipError::DuplicateAttachment,
             ));
         }
+        let mut evicted = None;
         if let Some(limit) = self.resource_limits.approval_history_limit
             && self.approval_requests.len() as u32 >= limit
-            && !self.evict_oldest_terminal_approval_request()
         {
-            return Err(ProjectApprovalError::RetentionLimitExceeded { limit });
+            evicted = self.evict_oldest_terminal_approval_request();
+            if evicted.is_none() {
+                return Err(ProjectApprovalError::RetentionLimitExceeded { limit });
+            }
         }
         self.approval_requests.push(approval);
         self.record_activity();
         self.refresh_runtime_summary_from_collections();
-        Ok(())
+        Ok(evicted)
     }
 
     /// RFC-022 PR-022-E: marks a stored approval request as expired --
@@ -661,18 +672,12 @@ impl ProjectSession {
         Ok(())
     }
 
-    fn evict_oldest_terminal_approval_request(&mut self) -> bool {
+    fn evict_oldest_terminal_approval_request(&mut self) -> Option<ApprovalId> {
         let index = self.approval_requests.iter().position(|request| {
             request.decision != ApprovalDecision::Pending
                 || self.expired_approval_ids.contains(&request.id)
-        });
-        match index {
-            Some(index) => {
-                self.approval_requests.remove(index);
-                true
-            }
-            None => false,
-        }
+        })?;
+        Some(self.approval_requests.remove(index).id)
     }
 
     pub fn add_transcript(&mut self, transcript: Transcript) -> Result<(), OwnershipError> {

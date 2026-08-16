@@ -364,7 +364,11 @@ fn approval_request_retention_limit_evicts_the_oldest_terminal_entry() {
         "/workspace/project-1",
     );
     let second_id = second.id.clone();
-    project.add_approval_request(first).unwrap();
+    assert_eq!(
+        project.add_approval_request(first).unwrap(),
+        None,
+        "admitting under capacity evicts nothing"
+    );
     project.add_approval_request(second).unwrap();
     assert_eq!(project.approval_requests().len(), 2);
 
@@ -381,9 +385,15 @@ fn approval_request_retention_limit_evicts_the_oldest_terminal_entry() {
         "/workspace/project-1",
     );
     let third_id = third.id.clone();
-    project
+    let evicted = project
         .add_approval_request(third)
         .expect("at capacity, but the expired entry should be evicted to make room");
+    assert_eq!(
+        evicted,
+        Some(first_id.clone()),
+        "the evicted id must be reported so a caller-side index (the GUI's \
+         approval_proposal_ids bridge) can prune the same entry"
+    );
 
     assert_eq!(
         project.approval_requests().len(),

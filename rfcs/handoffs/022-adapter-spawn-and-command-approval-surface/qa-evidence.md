@@ -915,6 +915,54 @@ in the GUI (the logic itself, `evaluate_promotion`, is unconditionally correct r
 caller -- this is a one-line addition once a real call site exists, not a design question);
 closing the `approval_proposal_ids` bridge's own small leak.
 
+### Response 228's two required items
+
+**Required 1: a real, unmirrored `Destructive` proposal, classified and promoted end to end.**
+Every existing promotion test overrode only the GUI-mirrored `ApprovalRequest.risk_level`,
+since the production launch path has no mechanism to inject a custom argv into the adapter's
+own command line (`spawn_adapter` calls `Command::new(&spec.shell)` with no `.arg`/`.args` at
+all). The reviewer's fix: the profile's *executable* is test-controlled even though its argv
+is not. New test `a_genuinely_destructive_real_proposal_is_classified_and_promoted_end_to_end`
+launches a profile pointed at a tiny generated `#!/bin/sh` wrapper
+(`destructive_reference_adapter_wrapper_path`) that hardcodes `exec <reference_adapter>
+rm -rf /nonexistent/tekstide-test-destructive-marker` -- the reference adapter only ever
+proposes and prints a decision, never executes the argv it sends, so nothing destructive
+actually runs. This reaches the real `approval::risk::classify` with a real `rm -rf` argv over
+the real socket, and asserts the *received, unoverridden* `ApprovalRequest.risk_level` is
+`Destructive` before calling `evaluate_promotion` on it. **Verified the test is not vacuously
+true**: temporarily swapped the wrapper's hardcoded argv for `echo hello-ablation-check` and
+reran -- failed with the real classifier correctly reporting `Low` instead
+(`assertion left == right failed ... left: Low, right: Destructive`), confirming the assertion
+tracks the real argv rather than passing regardless. Restored and reran clean. The existing
+override-based tests are unchanged, as the reviewer said they could remain -- this is the one
+test proving the seam itself, not a replacement for the rest.
+
+**Required 2: `approval_proposal_ids` is pruned rather than left to leak.** `ProjectSession::add_approval_request`
+now returns `Result<Option<ApprovalId>, ProjectApprovalError>` -- `Some(evicted_id)` when
+`approval_history_limit` eviction removed an entry to make room (`evict_oldest_terminal_approval_request`
+now returns the evicted `ApprovalId` instead of a bare `bool`). `receive_approval_proposal`
+removes that id from the bridge on eviction; `decide_approval` removes its own entry
+immediately on a real `Decided` outcome (nothing ever looks up a decided request's
+`ProposalId` again). Expiry deliberately does **not** prune -- an expired request stays
+`Pending` and retained until it is later decided or evicted, so pruning at expiry time would
+desync the bridge from a request `sweep_expired_approvals` might still need to look up before
+that happens; this is recorded directly on the field's own doc comment, not left implicit.
+
+**Both routes ablated independently, since a decided entry is already pruned before it could
+ever reach eviction** -- the new eviction test therefore marks its first entry **expired**, not
+decided (`mark_approval_expired` directly, matching `approval_proposal_ids`'s own documented
+reason expiry doesn't already remove it), specifically so the eviction-side branch is the only
+thing that can account for its later removal. Reverting `receive_approval_proposal`'s
+eviction-prune line reproduced the expected failure (`the evicted (first) entry's bridge
+mapping must not reappear or persist`); reverting `decide_approval`'s decide-time removal line
+reproduced its own expected failure on the pre-existing decide test, now extended with this
+exact assertion. Both restored, reran clean.
+
+Full gate clean: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
+--all-features -- -D warnings`, full workspace suite (`tekstide` 228, up from 226; `tekstide-core`
+593, unchanged -- the two new assertions extend existing tests rather than adding new ones),
+`git diff --check`.
+
 ## PR-022-F - Closeout
 
 *Not started.*

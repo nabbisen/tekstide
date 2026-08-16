@@ -499,15 +499,20 @@ pub struct State {
     /// does not widen it for GUI-only convenience. This is the bridge:
     /// populated on every `ReceiveOutcome::Created`, read whenever a
     /// rendered `ApprovalRequest.id` needs to become a real
-    /// `decide`/`is_still_answerable` call. **Known, disclosed gap**:
-    /// entries are never removed, including once `ProjectSession.approval_requests`
-    /// evicts the matching `ApprovalRequest` under `approval_history_limit`
-    /// -- this map can outlive the record it points at. Not unbounded
-    /// (grows only as fast as real proposals arrive, the same rate
-    /// `ApprovalCoordinator`'s own never-shrinking map already grows
-    /// at), but a real, small leak relative to the eviction policy
-    /// already built; worth closing in a follow-up rather than blocking
-    /// this slice on it.
+    /// `decide`/`is_still_answerable` call.
+    ///
+    /// **Response 228 Required 2**: pruned on both routes an entry can
+    /// stop existing elsewhere -- `receive_approval_proposal` removes the
+    /// evicted id `ProjectSession::add_approval_request` reports when
+    /// `approval_history_limit` eviction fires, and `decide_approval`
+    /// removes its own entry the moment a `Decided` outcome is real
+    /// (nothing ever looks up a decided request's `ProposalId` again).
+    /// Expiry deliberately does not prune: an expired request is neither
+    /// evicted nor decided, stays `Pending`, and remains retained until
+    /// one of those two things eventually happens to it -- pruning here
+    /// early would desync this map from a request that can still be
+    /// looked up (`sweep_expired_approvals` itself, before it marks an
+    /// entry expired) until eviction actually removes it.
     approval_proposal_ids: std::collections::HashMap<
         tekstide_core::domain::ApprovalId,
         tekstide_core::approval::ProposalId,
@@ -3349,8 +3354,16 @@ fn receive_approval_proposal(
     };
     let approval_id = request.id.clone();
     state.approval_proposal_ids.insert(approval_id, proposal_id);
-    if let Some(project) = state.app_shell.state_mut().project_mut(&serving.project_id) {
-        let _ = project.add_approval_request(*request);
+    if let Some(project) = state.app_shell.state_mut().project_mut(&serving.project_id)
+        && let Ok(Some(evicted_id)) = project.add_approval_request(*request)
+    {
+        // Response 228 Required 2: `approval_history_limit` eviction just
+        // removed `evicted_id` from `ProjectSession` to make room for the
+        // one just inserted above -- the bridge entry for it is now
+        // unreachable from anywhere real (nothing decides or sweeps an
+        // entry that no longer exists), so it is pruned here rather than
+        // left to grow unbounded for the life of the session.
+        state.approval_proposal_ids.remove(&evicted_id);
     }
 }
 
@@ -3509,6 +3522,14 @@ fn decide_approval(
         return;
     };
     let project_id = dialog.request.project_id.clone();
+    // Response 228 Required 2: a `Decided` outcome is always a real,
+    // final decision (`decide` only reaches this arm by actually
+    // recording one) -- nothing will ever look up this `ApprovalId`'s
+    // `ProposalId` again (`sweep_expired_approvals` only checks still-
+    // `Pending` requests), so the bridge entry is pruned here rather
+    // than left to outlive its own usefulness for the rest of the
+    // session.
+    state.approval_proposal_ids.remove(&dialog.request.id);
     if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
         let _ = project.replace_approval_request(request);
     }

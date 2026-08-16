@@ -1998,13 +1998,34 @@ fn reference_adapter_binary_path() -> std::path::PathBuf {
 /// classification is adjusted, so `is_still_answerable` (what
 /// `evaluate_promotion` itself re-checks before promoting) still answers
 /// truthfully.
+///
+/// **Response 228 Required 1**: this override methodology proves
+/// promotion reads the mirrored `risk_level` correctly, but never joins
+/// real classification to real promotion in the same test -- see
+/// `launch_real_managed_agent_run_with_executable` and
+/// `a_genuinely_destructive_real_proposal_is_classified_and_promoted_end_to_end`
+/// for the one test that does.
 fn launch_real_managed_agent_run(state: &mut State) -> tekstide_core::domain::AgentRunId {
+    launch_real_managed_agent_run_with_executable(state, reference_adapter_binary_path())
+}
+
+/// The same real, production `Managed` launch path as
+/// `launch_real_managed_agent_run`, but pointed at a caller-chosen
+/// executable rather than always the plain `reference_adapter` binary --
+/// what `a_genuinely_destructive_real_proposal_is_classified_and_promoted_end_to_end`
+/// uses to launch a thin wrapper script instead, so the adapter's own
+/// argv (and therefore the real classifier's input) is test-controlled
+/// without touching any production spawn code.
+fn launch_real_managed_agent_run_with_executable(
+    state: &mut State,
+    executable_path: std::path::PathBuf,
+) -> tekstide_core::domain::AgentRunId {
     let mut profile = tekstide_core::agent::AiCliProfile::new(
         "reference-adapter",
         "Reference Adapter (test-only)",
         tekstide_core::agent::AiCliProfileSource::BuiltIn,
         tekstide_core::agent::AiCliExecutable::Absolute {
-            path: reference_adapter_binary_path(),
+            path: executable_path,
             provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
         },
         tekstide_core::domain::AgentCompatibilityLevel::Managed,
@@ -2023,6 +2044,38 @@ fn launch_real_managed_agent_run(state: &mut State) -> tekstide_core::domain::Ag
         .expect("a resolvable Managed profile should launch the real reference adapter");
     let project = state.app_shell.state().active_project().unwrap();
     project.agent_runs().last().unwrap().id.clone()
+}
+
+/// Response 228 Required 1: the production launch path never appends
+/// arguments to the profile's executable (`spawn_adapter` in
+/// `tekstide-core`'s `runtime/terminal/launch.rs` calls
+/// `Command::new(&spec.shell)` with no `.arg`/`.args`), so there is no
+/// way to inject a custom proposal argv through it directly. What *is*
+/// test-controlled is which executable the profile names at all -- this
+/// writes a tiny `#!/bin/sh` wrapper that hardcodes a genuinely
+/// destructive argv (`rm -rf <marker-path>`, never actually executed:
+/// the reference adapter only ever proposes and prints the decision, it
+/// never runs the argv it sends) and `exec`s the real
+/// `reference_adapter` binary with it. Pointing a profile's executable
+/// at this script reaches the real classifier with a real `Destructive`
+/// command through the unmodified production spawn path.
+fn destructive_reference_adapter_wrapper_path() -> std::path::PathBuf {
+    let script_path = std::env::temp_dir().join(format!(
+        "tekstide-destructive-reference-adapter-wrapper-{}-{}.sh",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let script = format!(
+        "#!/bin/sh\nexec {} rm -rf /nonexistent/tekstide-test-destructive-marker\n",
+        reference_adapter_binary_path().display()
+    );
+    std::fs::write(&script_path, script).expect("writing the wrapper script should succeed");
+    std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o700))
+        .expect("marking the wrapper script executable should succeed");
+    script_path
 }
 
 /// The real, freshly spawned adapter needs a moment to connect and send
@@ -2164,6 +2217,73 @@ fn a_destructive_risk_level_promotes_with_focus_defaulting_to_reject() {
     }
 }
 
+/// Response 228 Required 1: every other promotion test overrides only
+/// the GUI-mirrored `ApprovalRequest.risk_level`, leaving the
+/// coordinator's own copy at whatever the adapter's unconfigurable
+/// default (`Low`) actually is -- proving promotion reads the mirror
+/// correctly, but never proving the real classifier and the real
+/// promotion predicate are joined end to end, and constructing a state
+/// (mirror `Destructive`, coordinator `Low`) that can never occur in
+/// production. This test does not override anything: a wrapper script
+/// (`destructive_reference_adapter_wrapper_path`) makes the real
+/// reference adapter propose a real `rm -rf` argv over the real socket,
+/// the real `ApprovalCoordinator::receive_proposal` classifies it
+/// through the real `approval::risk::classify`, and `evaluate_promotion`
+/// promotes from that real, received value alone.
+#[test]
+fn a_genuinely_destructive_real_proposal_is_classified_and_promoted_end_to_end() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-real-destructive");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    launch_real_managed_agent_run_with_executable(
+        &mut state,
+        destructive_reference_adapter_wrapper_path(),
+    );
+    let received = poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    assert!(
+        received,
+        "the wrapped adapter should send its rm -rf proposal within the poll window"
+    );
+
+    let request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    assert_eq!(
+        request.risk_level,
+        tekstide_core::domain::RiskLevel::Destructive,
+        "the real classifier must reach Destructive for a real `rm -rf` argv, with nothing \
+         in this test overriding the mirrored copy -- got {:?}",
+        request.risk_level
+    );
+
+    evaluate_promotion(&mut state);
+
+    match state.modal {
+        Some(ModalContent::Approval(ref dialog)) => {
+            assert_eq!(
+                dialog.focus,
+                ApprovalDialogButton::Reject,
+                "focus must default to Reject"
+            );
+        }
+        ref other => panic!("expected a promoted approval dialog, got {other:?}"),
+    }
+}
+
 /// RFC-022 PR-022-E: the real `decide` round trip -- `ModalActivate`,
 /// driven through the real `update()`, must send a real decision over
 /// the real socket and mirror the coordinator's own authoritative
@@ -2225,6 +2345,117 @@ fn deciding_the_promoted_dialog_sends_a_real_decision_and_updates_the_stored_req
          got {stored:?}"
     );
     assert!(stored.decided_at.is_some());
+    assert!(
+        !state.approval_proposal_ids.contains_key(&request.id),
+        "response 228 Required 2: the ApprovalId -> ProposalId bridge entry must be pruned \
+         once a decision is real, not left to outlive its own usefulness"
+    );
+}
+
+/// Response 228 Required 2, the other pruning route. Deliberately uses
+/// an **expired**, not decided, first entry: `decide_approval` already
+/// prunes its own entry immediately (proven above), so a decided entry
+/// would already be gone from the bridge before eviction ever ran,
+/// exercising nothing new. Expiry is the one path that leaves a bridge
+/// entry in place on purpose (see `approval_proposal_ids`'s own doc
+/// comment) while still marking the underlying request terminal/
+/// evictable -- so it is the only real way to prove the eviction-side
+/// pruning branch specifically, independent of the decide-side one.
+#[test]
+fn approval_proposal_ids_bridge_entry_is_pruned_when_history_eviction_removes_it() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-bridge-eviction");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .id()
+        .clone();
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    let first_request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    assert!(state.approval_proposal_ids.contains_key(&first_request.id));
+
+    {
+        let project = state
+            .app_shell
+            .state_mut()
+            .project_mut(&project_id)
+            .unwrap();
+        project.mark_approval_expired(&first_request.id).unwrap();
+    }
+    assert!(
+        state.approval_proposal_ids.contains_key(&first_request.id),
+        "expiry deliberately does not prune the bridge entry -- confirming the test's own \
+         premise before eviction is exercised"
+    );
+
+    // Force the very next admission to evict: at capacity 1, with the
+    // one retained entry now expired (terminal), a second arrival must
+    // evict it to make room.
+    {
+        let project = state
+            .app_shell
+            .state_mut()
+            .project_mut(&project_id)
+            .unwrap();
+        project.set_resource_limits(tekstide_core::project::ProjectResourceLimits {
+            approval_history_limit: Some(1),
+            ..project.resource_limits()
+        });
+    }
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| {
+                project.approval_requests().len() == 1
+                    && project.approval_requests()[0].id != first_request.id
+            })
+    });
+
+    let second_request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    assert_ne!(second_request.id, first_request.id);
+    assert!(
+        !state.approval_proposal_ids.contains_key(&first_request.id),
+        "the evicted (first) entry's bridge mapping must not reappear or persist"
+    );
+    assert!(
+        state.approval_proposal_ids.contains_key(&second_request.id),
+        "the admitted (second) entry's bridge mapping must be present"
+    );
+    assert_eq!(
+        state.approval_proposal_ids.len(),
+        1,
+        "the bridge must not grow past what is actually retained"
+    );
 }
 
 /// RFC-022 PR-022-E, response 224's own required guard, extended to
