@@ -134,6 +134,18 @@ Full reasoning in RFC-022 §"The arrival model". Gate items:
   project**. A promotion from a background project would show a command and `cwd` from a
   project not on screen — the confusion the escaped `cwd` exists to prevent, by the front
   door.
+- **Promotion is re-evaluated, not decided once.** *(Added 2026-08-16, response 227 — a gap
+  in the arrival model as originally written, not in the implementation.)* The predicate is
+  point-in-time: a `Destructive` proposal arriving while another modal is open returns
+  `false` and stays queued. If nothing re-runs it, that proposal never promotes and is
+  silently downgraded to the `Low` tier by **arrival timing**, which is arbitrary and
+  invisible. **Re-evaluate when a modal closes and when the active project changes** — both
+  can flip the predicate from `false` to `true`. **Oldest qualifying proposal first**, so
+  ordering is defined rather than incidental. Same predicate, same guards, called again —
+  not a second policy.
+- **The input-ignore window applies to the re-evaluation path too**, and matters more there:
+  dismissing a paste dialog can immediately raise an approval dialog, and the user's
+  dismissing keystroke is by definition already in flight.
 - **Focus defaults to Reject.** One stray keystroke can only reject; approving needs focus
   movement *and* activation. Prove both halves.
 - **A promoted dialog ignores input briefly after appearing**, so promotion does not eat
