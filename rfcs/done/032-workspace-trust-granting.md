@@ -1,6 +1,18 @@
 # RFC-032: Workspace Trust Granting
 
-Status: **Accepted by the human owner 2026-08-17.** Both open questions below remain unanswered and **bind before implementation**, not during — see §Open questions.
+Status: **Implemented 2026-08-17.** Trust is now grantable and revocable through a real,
+reachable route (`Ctrl+Alt+U` → the `TrustSettings` surface → the confirmation dialog, focus
+defaulting to not-granting, two deliberate acts required to grant) — proven end to end from a
+real key event: a profile requiring workspace discovery, refused with `WorkspaceDiscoveryBlocked`
+in a fresh `Restricted` project, launches for real once trust is granted through that route.
+Both open questions below were answered by the owner before implementation, per their own
+binding requirement; the decisions and reasoning are canonical in
+`docs/src/contributors/security-decisions.md`. **Does not claim** that a trusted project is safe,
+or that granting trust makes any other gated surface reachable — RFC-022's `ApprovalHistory`
+surface has its own, independently found reachability gap (a stale
+`KeybindingStatus::Configurable`/`None` binding, corrected in that RFC's own record), unrelated
+to this one. See `../handoffs/032-workspace-trust-granting/qa-evidence.md` for the full,
+per-slice evidence.
 Target milestone: M11
 Date: 2026-08-17
 

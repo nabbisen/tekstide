@@ -1,8 +1,8 @@
 ---
 title: "RFC-032 — What the trust dialog must say: implementation handoff"
 rfc: "RFC-032"
-rfc_file: "../../proposed/032-workspace-trust-granting.md"
-status: "Required reading before any RFC-032 code"
+rfc_file: "../../done/032-workspace-trust-granting.md"
+status: "Discharged — every item below is implemented and evidenced; see qa-evidence.md's PR-032-D section"
 created: "2026-08-17"
 ---
 

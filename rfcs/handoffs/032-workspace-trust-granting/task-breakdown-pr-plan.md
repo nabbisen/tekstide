@@ -1,8 +1,8 @@
 ---
 title: "RFC-032: Workspace Trust Granting — Task Breakdown / PR Plan"
 rfc: "RFC-032"
-rfc_file: "../../proposed/032-workspace-trust-granting.md"
-status: "Ready for implementation"
+rfc_file: "../../done/032-workspace-trust-granting.md"
+status: "Done — all five PRs implemented and closed 2026-08-17"
 target_milestone: "M11"
 created: "2026-08-17"
 ---

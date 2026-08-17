@@ -1,8 +1,8 @@
 ---
 title: "RFC-032: Workspace Trust Granting — handoff pack"
 rfc: "RFC-032"
-rfc_file: "../../proposed/032-workspace-trust-granting.md"
-status: "Ready for implementation — accepted by the owner 2026-08-17, both open questions answered"
+rfc_file: "../../done/032-workspace-trust-granting.md"
+status: "Implemented and closed 2026-08-17 — see qa-evidence.md for the full record"
 target_milestone: "M11"
 created: "2026-08-17"
 ---

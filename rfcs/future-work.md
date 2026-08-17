@@ -407,6 +407,22 @@ Status: substrate decided, application shell, and mode switching implemented by 
   it persists across sessions, whether it is revocable, and what its scope is. A security
   dialog with real consequences.
 
+  **Discharged 2026-08-17 by RFC-032.** Trust is grantable and revocable through a real,
+  reachable route (`Ctrl+Alt+U` → `TrustSettings` → the confirmation dialog, focus defaulting
+  to not-granting, two deliberate acts required to grant; revoking is one direct action, no
+  dialog) — proven end to end from a real key event, not a dispatched message: a profile
+  requiring workspace discovery, refused with `WorkspaceDiscoveryBlocked` in a fresh
+  `Restricted` project, launches for real once trust is granted through that route. Persists
+  across sessions, bound to the canonical path (proven against a real, redirected symlink); the
+  audit store, not the user-writable recent-projects cache, is authoritative for restored trust
+  (a cache-restored `Trusted` is confirmed against a real, applied `TrustGrant` before it is
+  honoured, and survives a later interrupted re-grant rather than being silently undone by a
+  dangling record). The design this entry asked for landed exactly as scoped: what is
+  authorised, persistence, revocability, and scope are all stated in the dialog's own copy, not
+  left implicit. **Not claimed**: that a trusted project is safe, or that this makes any other
+  gated surface reachable — RFC-022's `ApprovalHistory` has its own, independently found and
+  separately corrected reachability gap, unrelated to this one (see the entry above).
+
 - **The systemic pattern behind four separate findings: core capability, no GUI route,
   nothing fails.** Recorded 2026-08-16 rather than logging a fourth instance. Within RFC-022
   alone: no shipping AI CLI speaks RFC-021's protocol (response 218), no code-defined
@@ -522,7 +538,7 @@ Status: active after `0.1.0`.
 
   | Capability | Module | Consequence |
   |---|---|---|
-  | `grant_project_trust` / `revoke_project_trust` | `audit::integration` | Already known (2026-08-16): no project can ever leave `Restricted` mode. |
+  | `grant_project_trust` / `revoke_project_trust` | `audit::integration` | **Discharged 2026-08-17 by RFC-032** — see this file's "Workspace trust is a one-state machine" entry above for the full record. Already known (2026-08-16): no project could ever leave `Restricted` mode; both now have real, reachable production callers. |
   | `switch_active_project` | `app` | Already known (RFC-022): no way to switch which project is active in a session. |
   | `add_detected_generated_change_set` | `project::session` | Already known (item 5, re-verified): a generated change is never attached to a project session in production. |
   | `set_resource_limits` | `project::session` | **New.** No code path, anywhere, can change a project's resource limits after creation — every limit this project has spent real design effort tuning (`approval_request_limit`, `agent_run_approval_limit`, `approval_history_limit`, `terminal_session_limit`, and the rest) is fixed forever at whatever `ProjectResourceLimits::default()` produces. Not user-configurable, not project-specific, not overridable by anything shipped. |
@@ -554,8 +570,10 @@ Status: active after `0.1.0`.
   1. **`resize`** — **discharged 2026-08-17**, see the row above. Was small and well-defined
      once the severity was pinned to "permanently 24×80," not a corruption risk; is now a real
      caller at both launch and live-resize, accepted with full review-gate evidence.
-  2. **Trust granting** (`grant_project_trust`) — unchanged as the RFC-sized priority ahead of
-     everything this audit found. It remains the single blocker on the whole agent-run chain.
+  2. **Trust granting** (`grant_project_trust`) — **discharged 2026-08-17 by RFC-032**, see the
+     row above. Was the RFC-sized priority ahead of everything else this audit found, and the
+     single blocker on the whole agent-run chain; is now a real, reachable production caller
+     with full review-gate evidence, proven end to end from a real key event.
   3. **`set_resource_limits`** — fold into RFC-023 (Configuration System) rather than fixing
      standalone, since a real configuration surface is where this setter belongs anyway, and
      confirms RFC-023's own scope is larger than "a file format and a parser": the setter it

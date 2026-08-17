@@ -1,8 +1,8 @@
 ---
 title: "RFC-032: Workspace Trust Granting - QA Evidence"
 rfc: "RFC-032"
-rfc_file: "../../proposed/032-workspace-trust-granting.md"
-status: "In progress -- PR-032-B/C/D done, PR-032-E (closeout) remaining"
+rfc_file: "../../done/032-workspace-trust-granting.md"
+status: "Closed 2026-08-17 -- all five PRs (A-E) implemented and evidenced"
 target_milestone: "M11"
 created: "2026-08-17"
 ---
@@ -319,6 +319,12 @@ present-and-future clause, and the "does not undo" clause all present and readab
 via `niri msg action screenshot-window` + `wl-paste` (this niri config copies to the clipboard
 rather than writing to disk); the scratch project directory and test process were removed after.
 
+**What this capture does not prove** (response 249): the path fits on one line at the captured
+window width. At a narrower width it would wrap, and a wrap landing inside `<U+202E>` would
+split the marker across lines -- the same legibility failure this capture exists to rule out,
+reappearing at a size not captured. Not fixed, not re-captured -- stated as what this evidence
+covers and does not, the same convention every other capture in this codebase already follows.
+
 ### Gates run
 
 `cargo fmt --all --check` clean. `cargo clippy --workspace --all-targets --all-features -- -D
@@ -334,7 +340,108 @@ response 248's screenshot evidence specifically.
 
 ## PR-032-E - Closeout
 
-*Not started.*
+### The claim statement, checked against the RFC and the decisions page
+
+**What may be claimed**: workspace trust is grantable and revocable through a real, reachable
+GUI route (`Ctrl+Alt+U` -> `TrustSettings` -> the confirmation dialog), proven end to end from a
+real key event -- not from a dispatched `AppCommand`/`Message`, after response 248 found the
+first version of this proof started one step after the step that did not exist. A profile
+requiring workspace discovery, refused with `WorkspaceDiscoveryBlocked` in a fresh `Restricted`
+project, launches for real once trust is granted through that route: a real controlled test
+executable spawns, registers, and reaches `AgentRunStatus::Running`.
+
+Persistence and binding match RFC-032's own two decisions, both the owner's, both reasoned in
+`docs/src/contributors/security-decisions.md`: trust persists across sessions (restored on
+reopen, bound to the *canonical* path -- proven against a real, redirected symlink, not a
+synthesised path string) and does not follow a redirected symlink to a different real folder.
+The audit store, not the user-writable recent-projects cache, is authoritative for what
+"persists" actually means: a cache-restored `Trusted` is confirmed against a real, applied
+`TrustGrant` before it is honoured (`verify_restored_trust`), and a completed grant survives an
+interrupted later re-grant attempt rather than being silently undone by a dangling record.
+
+**What may not be claimed, checked against §What the dialog may not claim and RFC-032's own
+§Risks**:
+
+- **Not that a trusted project is safe.** The dialog's own copy states what trust authorises
+  ("Files inside the trusted folder may configure Tekstide and cause programs to run") and
+  never characterises that as safe or acceptable -- whether it is depends on the folder, which
+  Tekstide cannot assess, exactly as the RFC's own text says.
+- **Not that Tekstide polices what runs.** Nothing here intercepts execution; granting removes
+  a restriction, it does not add supervision. No claim to the contrary appears anywhere in the
+  dialog or the surface.
+- **Not that revoking undoes what already ran.** Stated as the negative explicitly, in the
+  dialog's own body ("Revoking stops it from loading again; it does not undo anything that has
+  already run") -- the one claim the dialog-copy handoff itself named as "easy to imply by
+  omission and the one a user would most want to be true," so it is said plainly rather than
+  left to silence.
+- **Not that granting trust makes any other gated surface reachable.** RFC-022's
+  `ApprovalHistory` surface has its own, entirely independent reachability gap (a stale
+  `KeybindingStatus::Configurable`/`None` binding, found during this RFC's own review at
+  response 248 and corrected in RFC-022's record separately, not here) -- granting workspace
+  trust does nothing to that gap, and this pack does not imply otherwise.
+- **Not that the real Claude Code CLI has been exercised.** Every real-process test in this
+  slice, like every one before it in this codebase, uses a controlled test executable -- the
+  live product needs interactive auth and makes real network calls, unsafe and unbounded for an
+  automated test.
+
+### The three requirements, confirmed shipped
+
+Persistence is acceptable *because* of these (RFC-032's own framing) -- each is a requirement,
+not an intention, and each is shipped:
+
+1. **Revoking is always available.** One direct action from the `TrustSettings` surface, no
+   confirmation dialog -- revocation is never gated behind the grant dialog's own two-act
+   requirement.
+2. **Trust state is visible on the project board.** `active_project_row` reads the live
+   `trust_state()`; `recent_project_row` reads the real cached value (fixed this slice, was
+   hardcoded `"Restricted"`), suppressed back to `Restricted` specifically when the canonical
+   path has changed since it was cached.
+3. **The dialog says the folder's contents, present and future.** `trust-grant-dialog-body`
+   states explicitly that the grant covers files not yet written, including an AI agent run's
+   own output, across every future session until revoked.
+
+### What this unblocks, stated precisely (per response 249's own emphasis)
+
+Trust becomes grantable, so `validate_workspace_discovery_policy` stops refusing a profile that
+honestly declares it may discover workspace files, so an agent run using such a profile can
+launch in a trusted project -- proven from a real key event, not merely that the trust flag
+changed. **This is not the same as RFC-020's surfaces being reachable**, and this project has
+made exactly that overstatement before (RFC-022's own closeout, corrected afterward). RFC-032
+unblocks one gate in the agent-run launch validator; it does not build, wire, or make reachable
+anything downstream of a launched run.
+
+### Gates run
+
+`cargo fmt --all --check` clean. `cargo clippy --workspace --all-targets --all-features -- -D
+warnings` clean. `cargo test --workspace --all-targets --all-features`: 884 passed, 0 failed,
+run three times for stability across every slice in this RFC. `git diff --check` clean.
+
+### Documents updated in this closeout
+
+- `rfcs/proposed/032-workspace-trust-granting.md` -> moved to `rfcs/done/`; `Status` rewritten
+  to the closed, precise claim above, matching RFC-021/022's own closed-status convention.
+- `rfcs/README.md`: the stale Proposed-table row removed; a new Implemented-table row added.
+- This pack's other four documents (`README.md`, `task-breakdown-pr-plan.md`,
+  `what-the-trust-dialog-must-say.md`, `acceptance-qa-checklist.md`): `status`/`rfc_file` front
+  matter all updated -- `rfc_file` was pointing at `proposed/`, now stale after the move to
+  `done/`, in every one of them (RFC-022's own closeout found four of five stale; checked
+  directly here rather than assumed fixed by precedent).
+- `acceptance-qa-checklist.md`: 27 substantive items ticked by the implementer, matching the
+  precedent RFC-022's closeout established (response 237); "Final Acceptance Decision" and
+  "Reviewer notes" left for the architect.
+- `rfcs/future-work.md`: the "Workspace trust is a one-state machine" theme marked discharged;
+  the reachability audit's own `grant_project_trust`/`revoke_project_trust` row and priority
+  section updated to match (see below).
+
+### A lesson carried forward, not re-learned
+
+This RFC's own review cycle found the same failure class twice, at two different layers: the
+dialog and mechanics were correct but the *route* to them did not exist (response 248), and
+separately, RFC-022's `ApprovalHistory` surface has had the identical gap since its own closeout,
+missed until this RFC's review found it by comparison. Both times the actual defect was
+`KeybindingStatus::Configurable` with a `None` binding, which *reads* as "a user can bind this"
+and *means* "dead until RFC-023 exists." `future-work.md` now names this as a category error
+independent of either RFC, so a future closeout does not have to rediscover it a third time.
 
 ## Known limitations going in
 
