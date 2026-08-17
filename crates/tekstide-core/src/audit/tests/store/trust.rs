@@ -70,6 +70,46 @@ fn has_applied_trust_grant_is_false_for_an_authorization_with_no_applied_record(
     assert_eq!(store.has_applied_trust_grant(&project_id), Ok(false));
 }
 
+/// **Response 246's required correction, as its own regression test.**
+/// A completed grant, then a *later* re-grant attempt (a retry, a
+/// double action) that writes its `Authorized` record and is
+/// interrupted before its `Applied` one -- the newest row is now a
+/// dangling authorization, but the project was and still is
+/// legitimately trusted from the earlier, completed grant. Querying the
+/// newest row of *any* outcome would answer `false` here and silently
+/// demote a real, standing trust decision; querying the newest
+/// **`Applied`** row answers the question that actually matters ("what
+/// was the last completed decision") and correctly still says `true`.
+#[test]
+fn has_applied_trust_grant_survives_a_later_interrupted_re_grant() {
+    let dirs = TestAuditDirs::new("trust-grant-interrupted-regrant");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let project_id = ProjectId::new_uuid();
+
+    let first_authorization = trust_authorized(project_id.clone(), AuditOperationId::new_uuid());
+    store.append(&first_authorization).unwrap();
+    store.append(&trust_applied(&first_authorization)).unwrap();
+    assert_eq!(
+        store.has_applied_trust_grant(&project_id),
+        Ok(true),
+        "test precondition: the first grant must have completed"
+    );
+
+    // A later re-grant, interrupted after its own Authorized write --
+    // the process died, or was retried, before the matching Applied
+    // record landed. This is now the newest TrustChange row of any
+    // outcome, but it is not a completed decision.
+    let interrupted_reauthorization =
+        trust_authorized(project_id.clone(), AuditOperationId::new_uuid());
+    store.append(&interrupted_reauthorization).unwrap();
+
+    assert_eq!(
+        store.has_applied_trust_grant(&project_id),
+        Ok(true),
+        "a dangling authorization following a completed grant must not silently undo it"
+    );
+}
+
 /// The query is project-scoped -- a real grant recorded for a
 /// *different* project must not confirm this one.
 #[test]

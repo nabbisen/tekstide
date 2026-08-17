@@ -122,9 +122,14 @@ preference: make the audit store authoritative, restoring trust only when a matc
 **What changed:**
 
 - `AuditStore::has_applied_trust_grant(&self, project_id)` (`audit/store.rs`): queries the
-  newest `TrustChange` record for a project and confirms it is `TrustGrant`/`Applied` -- a later
-  `TrustRevoke` correctly supersedes an earlier grant, since both share the one query ordered by
-  sequence.
+  newest **`Applied`** `TrustChange` record for a project and confirms its `action_kind` is
+  `TrustGrant` -- a later `TrustRevoke` correctly supersedes an earlier grant, since both share
+  the one query ordered by sequence. **Corrected in response 246**: the first version queried
+  the newest row of *any* outcome, which meant a later re-grant attempt interrupted after its
+  `Authorized` write (a retry, a crash) but before its `Applied` one would silently demote a
+  project that was still legitimately trusted from an earlier, completed grant. Filtering to
+  `Applied` rows asks "what was the last *completed* decision," not "what was the last row
+  written" -- dangling authorizations are ignored rather than treated as decisions.
 - `ProjectSession::deny_unverified_trust` (`project/session.rs`, `pub`): demotes back to
   `Restricted`, pushing no `AuditEvent` -- the same reasoning as `restore_trust_state`, this is
   not a new decision, it is declining to honour one the durable record does not confirm.
@@ -140,12 +145,24 @@ preference: make the audit store authoritative, restoring trust only when a matc
   cached `Trusted` if `grant_project_trust` ran for it at some point, and that call already
   created the store itself, so this is never a *new* reason to create it.
 
+- `only_one_production_call_site_ever_restores_a_projects_trust_state`
+  (`app/tests.rs`): response 246's second requirement -- restoration and verification are two
+  separate steps (`restore_trust_state` then, later, `verify_restored_trust`), safe today only
+  because `AppState::add_project_session` is the one and only caller of the former. Pins that
+  count by source-scan enumeration (the same shape
+  `only_two_named_production_call_sites_ever_append_to_a_transcript_writer` already uses), so a
+  second call site fails this test **by name** rather than silently restoring an unverified
+  decision. Ablated manually: a throwaway second call site added, confirmed this test failed
+  naming both files, removed.
+
 **Evidence:**
 
-- `crates/tekstide-core/src/audit/tests/store/trust.rs` (5 tests): `has_applied_trust_grant` is
+- `crates/tekstide-core/src/audit/tests/store/trust.rs` (6 tests): `has_applied_trust_grant` is
   true after a real two-phase grant, false with no records, false after a later revoke
   supersedes an earlier grant, false for an authorization with no matching applied record (a
-  grant that never completed), and correctly project-scoped (no cross-project leak).
+  grant that never completed), **true across a later interrupted re-grant** (response 246's own
+  regression test -- a completed grant followed by a dangling authorization from an interrupted
+  retry must not silently undo it), and correctly project-scoped (no cross-project leak).
 - `crates/tekstide/src/shell/tests.rs` (4 tests, real temp-dir-backed `AuditStore`, not a mock):
   a real recorded grant keeps the cache-restored trust standing; a cache says `Trusted` with no
   matching record in the store and is demoted (**the fix's own regression test**); an unopenable
@@ -153,7 +170,9 @@ preference: make the audit store authoritative, restoring trust only when a matc
   never even opens the store (proven with a closure that panics if called, not just by checking
   the end state).
 
-`cargo test -p tekstide-core --lib audit::tests::store::trust::` -- 5/5.
+`cargo test -p tekstide-core --lib audit::tests::store::trust::` -- 6/6.
+`cargo test -p tekstide-core --lib app::tests::only_one_production_call_site_ever_restores_a_projects_trust_state`
+-- 1/1.
 `cargo test -p tekstide --bin tekstide shell::tests::verify_restored_trust` -- 4/4.
 
 ### Not done yet

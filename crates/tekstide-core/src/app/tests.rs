@@ -820,3 +820,79 @@ impl Drop for TestSandbox {
         let _ = fs::remove_dir_all(&self.root);
     }
 }
+
+/// **Response 246**: verification (`crates/tekstide`'s
+/// `verify_restored_trust`) and restoration (`restore_trust_state`) are
+/// separated -- safe today only because `add_project_session` is
+/// `restore_trust_state`'s one and only caller, so every restoration is
+/// followed by verification at the next `State::new`. A second
+/// production call site would restore trust nothing has verified, with
+/// no compile error and no obviously-failing test to notice. Pinning
+/// the count here means a second call site fails *this* test, by name,
+/// forcing whoever adds it to decide about verification rather than
+/// silently inherit the gap -- the same shape
+/// `only_two_named_production_call_sites_ever_append_to_a_transcript_writer`
+/// (`runtime::terminal::reader::tests`) already uses for exactly this
+/// reason.
+#[test]
+fn only_one_production_call_site_ever_restores_a_projects_trust_state() {
+    // Leading `.`, matching call syntax (`project.restore_trust_state(...)`)
+    // specifically -- without it, this would also match `session.rs`'s own
+    // `fn restore_trust_state(&mut self, ...)` definition line, which is
+    // not a call.
+    let occurrences = count_occurrences_in_crate(".restore_trust_state(");
+    assert_eq!(
+        occurrences,
+        vec![("app.rs".to_string(), 1)],
+        "exactly this one file may ever call ProjectSession::restore_trust_state -- a second \
+         call site restores a cache-sourced trust decision with no corresponding \
+         verify_restored_trust pass unless that caller is deliberately made to run through one: \
+         {occurrences:?}"
+    );
+}
+
+fn count_occurrences_in_crate(needle: &str) -> Vec<(String, usize)> {
+    let mut files = Vec::new();
+    collect_rs_files(&crate_src_dir(), &mut files);
+
+    let mut counts: Vec<(String, usize)> = files
+        .into_iter()
+        .filter_map(|path| {
+            let relative = relative_to_src(&path);
+            if relative.contains("/tests/") || relative.ends_with("tests.rs") {
+                return None;
+            }
+            let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
+            let count = source.matches(needle).count();
+            (count > 0).then_some((relative, count))
+        })
+        .collect();
+    counts.sort();
+    counts
+}
+
+fn crate_src_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")
+}
+
+fn relative_to_src(path: &std::path::Path) -> String {
+    path.strip_prefix(crate_src_dir())
+        .expect("file must be under src/")
+        .to_str()
+        .expect("path must be valid UTF-8")
+        .replace(std::path::MAIN_SEPARATOR, "/")
+}
+
+fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rs_files(&path, out);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            out.push(path);
+        }
+    }
+}

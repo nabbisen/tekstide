@@ -200,30 +200,35 @@ impl AuditStore {
     /// is the check that makes the audit store, not the cache,
     /// authoritative.
     ///
-    /// The newest `TrustChange` row decides it: a grant writes
-    /// `TrustGrant`/`Applied` (after `TrustGrant`/`Authorized`, the same
-    /// operation, an earlier sequence); a later revoke writes a single,
-    /// later-sequenced `TrustRevoke`/`Applied` that supersedes it.
-    /// `false` on no rows, a `TrustRevoke` as the newest row, or any row
-    /// whose outcome is not `Applied` (an authorization with no matching
-    /// applied record is a grant that never actually completed --
-    /// `grant_project_trust`'s own fail-closed `append_required` means
-    /// this should not happen in practice, but this query does not
-    /// assume that).
+    /// The newest **completed** (`Applied`) `TrustChange` row decides
+    /// it, not the newest row of any outcome -- response 246's required
+    /// correction. A grant writes `TrustGrant`/`Applied` (after
+    /// `TrustGrant`/`Authorized`, the same operation, an earlier
+    /// sequence, filtered out here since it is not `Applied`); a later
+    /// revoke writes a single, later-sequenced `TrustRevoke`/`Applied`
+    /// that supersedes it. Querying only `Applied` rows and asking "what
+    /// was the last *completed* trust decision" is deliberately not the
+    /// same question as "what was the last row written": a re-grant
+    /// interrupted after its `Authorized` write but before its `Applied`
+    /// one (a retry, a crash) would otherwise make the newest row a
+    /// dangling authorization and silently demote a project that is
+    /// still legitimately trusted from its earlier, completed grant.
+    /// `false` on no `Applied` rows at all, or a `TrustRevoke` as the
+    /// newest one.
     pub fn has_applied_trust_grant(&self, project_id: &ProjectId) -> Result<bool, AuditStoreError> {
         let page = self.query(&AuditQuery {
             project_id: Some(project_id.clone()),
             family: Some(AuditEventFamily::TrustChange),
-            outcome: None,
+            outcome: Some(AuditOutcome::Applied),
             operation_id: None,
             before_sequence: None,
             limit: 1,
         })?;
 
-        Ok(page.records.first().is_some_and(|sequenced| {
-            sequenced.record.action_kind == AuditActionKind::TrustGrant
-                && sequenced.record.outcome == AuditOutcome::Applied
-        }))
+        Ok(page
+            .records
+            .first()
+            .is_some_and(|sequenced| sequenced.record.action_kind == AuditActionKind::TrustGrant))
     }
 }
 
