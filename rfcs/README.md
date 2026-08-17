@@ -19,6 +19,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | RFC | Title | Status |
 | --- | --- | --- |
 | 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | **Accepted — the spine of `0.8.0`, ready for implementation 2026-08-15.** Both prerequisites met: RFC-024 (content access) implemented and closed, RFC-011 Amendment 1 authorises the bounded transcript reader (which does not exist yet — PR-020-B builds it). [Handoff pack](./handoffs/020-diff-review-and-agentrun-report/README.md) complete; all four open questions answered there |
+| 032 | [Workspace Trust Granting](./proposed/032-workspace-trust-granting.md) | **Authored 2026-08-17, awaiting owner acceptance.** No project can currently leave `Restricted` — `grant_project_trust` and `revoke_trust` both exist, are audited, and have no production caller, so RFC-004's Restricted Mode is the only state and RFC-022's whole agent-run chain is unreachable behind it. **Two open questions for the owner**: whether trust persists across sessions, and whether it binds to the path, the canonical path, or the project identity |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 
 ### Reserved numbers — check this before authoring
