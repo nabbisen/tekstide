@@ -78,6 +78,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | — | [Terminal resize](./handoffs/terminal-resize.md) — no RFC; priority 1 from the audit, scheduled 2026-08-17 |
 | — | [Change detection wiring](./handoffs/change-detection-wiring.md) — no RFC; the last structural blocker on RFC-020, scheduled 2026-08-17 |
 | — | [Theme contrast verification](./handoffs/theme-contrast-verification.md) — no RFC; a measured WCAG 1.4.11 failure in `border_default` plus the gate that should have caught it, scheduled 2026-08-17 |
+| 022 | [Approval-history binding](./handoffs/approval-history-binding.md) — the remedy for RFC-022's corrected record; the last `Configurable`/`None` action whose surface actually exists, scheduled 2026-08-17 |
 | 032 | [Workspace Trust Granting](./handoffs/032-workspace-trust-granting/README.md) |
 | 021 | [Command Approval Model and Adapter Capability](./handoffs/021-command-approval-model-and-adapter-capability/README.md) |
 | 023 | [Configuration System](./handoffs/023-configuration-system/README.md) |

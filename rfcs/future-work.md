@@ -375,9 +375,9 @@ Text contrast is excellent — comfortably past AAA. **`border_default` fails WC
   expired-entry disclosure, and the "visibly unanswerable" constraint are all unreachable.
   Consequence is narrower than RFC-032's equivalent gap was, because `High`/`Destructive`
   promotion still functions without the history surface. **Remedy**: a real `Candidate`
-  default binding plus keyboard navigation on the surface, the same shape RFC-032 landed for
-  `OpenTrustSettings` (`Ctrl+Alt+U`, `handle_trust_settings_key`) — a small, well-precedented
-  slice, not an RFC.
+  default binding — the key handler already exists (`handle_approval_history_key`, RFC-022
+  PR-022-E), so the binding is the whole of it. **Scheduled 2026-08-17** as
+  `handoffs/approval-history-binding.md`.
 - **The category error behind both of the above, worth naming once**: `KeybindingStatus::Configurable`
   with a `None` binding *reads* as "a user can bind this" and in fact means "**dead** until
   RFC-023 exists." Configuration is unimplemented, so there is no user who can bind anything.
