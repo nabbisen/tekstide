@@ -328,6 +328,98 @@ fn ablation_without_target_in_the_ignore_list_it_reappears_and_truncates_the_sca
     );
 }
 
+/// Change-detection-wiring handoff, Slice B (D4): real wall-clock cost
+/// against a real repository with a real `.git/` and a populated
+/// `target/` -- this repository, `tekstide-git` itself -- rather than
+/// reasoned from entry counts alone. Report the numbers with the entry
+/// count and machine they were taken on (see review response 251 and
+/// `rfcs/future-work.md`, which already carry the entry-count side of
+/// this measurement: 64,415 full walk, 1,506 after the three
+/// exclusions). This feeds the decision Slice C needs before it can be
+/// built: whether detection has to move off the UI thread.
+///
+/// The only assertions are generous, order-of-magnitude regression
+/// guards -- this is a diagnostic report, not a tight performance
+/// acceptance test, and a tight bound here would be flaky against
+/// ordinary machine noise.
+#[test]
+fn real_repository_filesystem_scan_cost_headless_benchmark() {
+    let repo_root = fs::canonicalize(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("tekstide-core sits at <repo>/crates/tekstide-core"),
+    )
+    .expect("this repository's own root must exist and be canonicalizable");
+    assert!(
+        repo_root.join(".git").is_dir(),
+        "must be measuring a real repository with a real .git/, found none at {repo_root:?}"
+    );
+
+    let project = ProjectSession::new(
+        ProjectId::for_test(9999),
+        "tekstide-git (self, for real-repository measurement)",
+        repo_root.clone(),
+        repo_root,
+    );
+
+    // The default policy: the three exclusions this slice ships with.
+    let excluded_started = std::time::Instant::now();
+    let excluded_baseline =
+        GeneratedChangeDetector::default().capture_filesystem_baseline(&project);
+    let excluded_elapsed = excluded_started.elapsed();
+
+    // No exclusions at all, uncapped: reproduces the "wired as-is, before
+    // this slice" shape precisely, for comparison -- nothing in
+    // production would ever run change detection this way.
+    let full_walk_policy = GeneratedChangeDetectionPolicy {
+        max_entries: usize::MAX,
+        max_changed_paths: usize::MAX,
+        ignored_directory_names: &[],
+    };
+    let full_started = std::time::Instant::now();
+    let full_baseline =
+        GeneratedChangeDetector::new(full_walk_policy).capture_filesystem_baseline(&project);
+    let full_elapsed = full_started.elapsed();
+
+    let detect_started = std::time::Instant::now();
+    let detected =
+        GeneratedChangeDetector::default().detect_filesystem_changes(&project, &excluded_baseline);
+    let detect_elapsed = detect_started.elapsed();
+
+    eprintln!(
+        "real_repository_filesystem_scan_cost_headless_benchmark \
+         excluded_entries={} excluded_status={:?} excluded_capture_ms={} \
+         full_entries={} full_status={:?} full_capture_ms={} \
+         detect_status={:?} detect_ms={}",
+        excluded_baseline.entries.len(),
+        excluded_baseline.status,
+        excluded_elapsed.as_millis(),
+        full_baseline.entries.len(),
+        full_baseline.status,
+        full_elapsed.as_millis(),
+        detected.status,
+        detect_elapsed.as_millis(),
+    );
+
+    assert_eq!(
+        excluded_baseline.status,
+        ChangeDetectionStatus::Complete,
+        "the default policy's max_entries (4096) must still be comfortably above this \
+         repository's excluded entry count -- if this is Partial, the cap needs revisiting, \
+         not silently tolerated"
+    );
+    assert!(
+        excluded_elapsed < std::time::Duration::from_secs(2),
+        "a real, excluded-noise repository scan blew past a generous 2s bound: {excluded_elapsed:?}"
+    );
+    assert!(
+        detect_elapsed < std::time::Duration::from_secs(2),
+        "detecting changes against an unchanged real repository blew past a generous 2s bound: \
+         {detect_elapsed:?}"
+    );
+}
+
 /// D1's own "one shared definition, not a second literal list"
 /// requirement, checked directly rather than trusted by construction --
 /// the explorer's `collapsed_directory_names` and change detection's
