@@ -1,5 +1,98 @@
 # Changelog
 
+## 0.10.0 - Trust, and the First Reachable Agent Run
+
+Status: released on 2026-08-17.
+
+**The release where the product's premise becomes reachable.** Every previous release
+shipped an application in which no project could *ever* leave Restricted Mode — there
+was no code path anywhere that granted trust — so AgentRun launch, the thing Tekstide
+exists to do, was blocked for every user, permanently. This release grants trust,
+launches the run, and sizes the terminal it runs in.
+
+### Added
+
+- **Workspace trust granting and revocation** (RFC-032). `Ctrl+Alt+U` opens a Workspace
+  Trust surface showing the project's real state. Granting opens a confirmation dialog
+  whose focus defaults to **Cancel** — granting takes two deliberate acts, revoking
+  takes one, because revoking is the safe direction. The path shown is the **canonical**
+  path, which is what trust binds to; a symlinked project also shows the path you opened
+  it by, so a redirected symlink cannot quietly bind trust somewhere else. Trust
+  persists across sessions, and the **audit store** — not the user-writable
+  recent-projects cache — is what restores it, queried for an *applied* grant
+  specifically so an interrupted grant does not come back as trust.
+
+  The dialog says three things it would be easy to leave implied: that the grant covers
+  files not yet written, including anything an AI agent run writes there; that it lasts
+  for this session and every session after; and that revoking stops future loading but
+  does **not** undo anything that has already run. It does not claim that trusting is
+  safe, or that Tekstide polices what runs.
+
+- **AgentRun launch, reachable for the first time.** With trust granted, `Ctrl+Alt+A`
+  launches a real Claude Code session in a project-owned terminal. Proven end to end
+  from a real key press: a profile that honestly declares it may discover workspace
+  files is refused in a fresh Restricted project, and launches for real once trust is
+  granted through the GUI route.
+
+- **The adapter-spawn pathway and a rendered command-approval dialog** (RFC-022):
+  per-run Unix domain socket, capability-token delivery, structural risk classification,
+  promotion re-evaluated rather than decided once, a bounded approval queue with expiry
+  tracking, and an approval-history surface. All built and proven against production
+  code. See *Known limitations* for why no user can reach it.
+
+### Fixed
+
+- **Terminals were permanently 24×80.** `ROWS`/`COLS` were fixed constants shared by the
+  spawned PTY and the rendered grid, and nothing in the application called terminal
+  resize at all — so every terminal ignored the window regardless of size. Terminals now
+  follow a live window drag, and a pane launched before you ever resize the window gets
+  the real size immediately rather than starting wrong. One computed size is applied to
+  the PTY, the emulator grid, and the render path together.
+
+- **A completed trust grant could be undone by a later interrupted one**, and trust was
+  restored from the user-writable recent-projects cache rather than the audit store.
+
+### Known limitations
+
+- **You still cannot see what an agent run changed.** There is no diff review or
+  AgentRun report surface, and the reason is structural rather than scheduling: nothing
+  in the shipped application runs change detection, so no change set can exist for
+  either surface to render. This is the next theme.
+- **The real Claude Code CLI has never been exercised by this project's tests.** Every
+  automated proof uses a controlled test executable, because the live product needs
+  interactive authentication and makes real network calls. The launch pathway is proven;
+  the real binary's behaviour under it is not.
+- **Command approval remains unreachable, for a new reason.** It is no longer missing
+  machinery — it is missing an ecosystem. No shipping AI CLI speaks RFC-021's protocol,
+  so `Managed` mode can only ever be exercised by this project's own reference adapter,
+  a test artifact. Approval also remains **cooperative, not enforced**: Tekstide does not
+  intercept process execution and cannot withhold it from an adapter that ignores a
+  rejection.
+- **The approval-history surface cannot be opened.** It is implemented and tested, but no
+  key is bound to it — a defect found while reviewing RFC-032 and recorded rather than
+  quietly fixed. The underlying cause is now named: a navigation action marked
+  *configurable* with no default binding is **dead**, not pending, because there is no
+  configuration system yet to bind it with.
+- **`NFR-PERF-004` (terminal input latency, 16 ms p95) remains unverified**, unchanged
+  from `0.8.0`. The structural cause is gone and proven gone; bounding the true
+  end-to-end path needs presentation timing this project has no non-perturbing way to
+  measure.
+- No screen-reader support, no cross-platform evidence beyond Linux, no safe-close
+  dialog, no file watcher, no editor undo.
+
+### Also in this cycle
+
+- **A reachability audit** across 132 candidate capabilities, using compiler-enforced
+  deprecation markers rather than grep. **104 were dormant** — correct, reviewed, tested
+  code with no route from the GUI — of which 30 have no caller anywhere, a floor rather
+  than a count. Two of its priority items are discharged in this release (terminal
+  resize; trust granting). The rest is recorded in `rfcs/future-work.md`.
+- `ARCHITECTURE.md` gained two conventions learned the hard way this cycle:
+  **reachability comes before correctness** (name the user's path and the production
+  producer before scheduling a surface), and **latency criteria stop the clock at state
+  change, not pixels**.
+
+
 ## 0.9.0 - Transcript Capture, Re-homed
 
 Status: released on 2026-08-16.

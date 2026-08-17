@@ -13,7 +13,7 @@ This crate is the headless core whose scope boundary was set by RFC-013; the des
 - metadata-only generated-change detection and review-state tracking;
 - durable local SQLite audit storage with schema identity, migration harness, corruption diagnostics, restart-safe recovery, and explicit purge.
 
-This crate does not itself contain the desktop GUI, the rendered terminal surface, the app/UI terminal launcher, or rendered command-approval dialogs — those are the `tekstide` crate's. Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked root/symlink access, audit-store recovery outcomes, plain-terminal session starts and terminations, and paste refusals; command-approval, restricted-feature, safe-close, configuration-change, transcript-purge, and project-added producers are defined in the audit schema but not yet wired.
+This crate does not itself contain the desktop GUI, the rendered terminal surface, the app/UI terminal launcher, or rendered command-approval dialogs — those are the `tekstide` crate's. Durable audit currently records trust decisions (including workspace-trust grants and revocations made by a real user, as of `0.10.0`), managed AgentRun lifecycle, blocked root/symlink access, audit-store recovery outcomes, plain-terminal session starts and terminations, paste refusals, and command-approval decisions; restricted-feature, safe-close, configuration-change, transcript-purge, and project-added producers are defined in the audit schema but not yet wired.
 
 Repository documentation:
 
