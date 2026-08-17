@@ -1,7 +1,7 @@
 ---
 title: "RFC-022: Adapter Spawn and the Command Approval Surface - QA Evidence"
 rfc: "RFC-022"
-rfc_file: "../../proposed/022-adapter-spawn-and-command-approval-surface.md"
+rfc_file: "../../done/022-adapter-spawn-and-command-approval-surface.md"
 status: "In progress - PR-022-A through PR-022-D implemented, PR-022-D pending review"
 target_milestone: "M11"
 created: "2026-08-16"
@@ -1263,7 +1263,115 @@ Full gate clean: `tekstide` 240 (up from 239), `tekstide-core` 594 (unchanged).
 
 ## PR-022-F - Closeout
 
-*Not started.*
+### What this delivered, versus what RFC-022 originally promised
+
+Quoting RFC-022's own corrected summary (response 218, 2026-08-16) rather than paraphrasing
+it, since a paraphrase is exactly where a claim this project has already gotten wrong once
+would drift back up:
+
+> This section originally read *"Make command approval reachable."* **It does not, for a real
+> user, and cannot.** ... So **`Managed` — and therefore command approval — can only ever be
+> exercised by the reference adapter**, which is a test artifact. What a real user gets from
+> this RFC is an AgentRun at `Plain` or `Supervised`: a real AI CLI in a project-owned
+> terminal, with transcript capture and audit, and no approval protocol involved.
+>
+> **What this RFC delivers, stated honestly:** the approval pathway exists and is proven end
+> to end; AgentRuns become reachable; command approval becomes reachable *the day a real
+> adapter exists*, which is not this RFC's to produce.
+
+Everything built across PR-022-B through E matches that corrected promise, not the original
+one: a real reference adapter speaking RFC-021's protocol against the real socket and
+coordinator; a real, distinct spawn path (`spawn_adapter`) delivering a real per-run
+capability token; a real `AgentRun` route a user can actually launch from the GUI; the full
+arrival model (bounded queue, severity-gated promotion, connection-based expiry, the
+`ApprovalHistory` surface with real keyboard and mouse access); and `command_approval`'s first
+real, queried-and-asserted audit producer. All of it proven against real production code --
+no mock adapter, no synthesised socket, anywhere in this slice's own tests.
+
+**The four non-claims, held throughout:**
+
+- **No claim of enforcement.** Nothing intercepts execution; a rejected adapter can run the
+  command anyway. `approval-dialog-cooperative-notice`'s own wording states this to the user
+  directly, not only in documentation, and is tested for exactly that (response 221/222,
+  `what-the-dialog-must-not-lie-about.md`).
+- **No claim that real AI CLIs are supported.** The reference adapter proves the pathway, not
+  the ecosystem -- its own module doc says so, and it is never presented as evidence that a
+  shipping AI CLI speaks this protocol.
+- **No claim that the token is a security boundary.** It authenticates which run is asking,
+  not that the asker is trustworthy, and is worthless against a hostile same-user process.
+- **What this unblocks for RFC-020, stated precisely**: its two surfaces (diff review,
+  AgentRun report) become *reachable* -- a real `AgentRun` route exists to build against --
+  which is not the same as *done*. `AgentRunDetail`'s own "selected-run concept" question is
+  RFC-020's to answer, deliberately not decided here (see the acceptance checklist's own
+  stated reason).
+
+### Two real, shipped defects found and fixed by building the first reader of dormant state
+
+Both surfaced only because `ApprovalHistory` gave `ProjectSession::open_surface()` its first
+real reader anywhere in the GUI crate -- confirmed by direct search before any of this slice's
+GUI-wiring work began (`grep -rn "open_surface()" crates/tekstide/src`, no non-test matches).
+
+- **`open_surface` clobbering, silently breaking `OpenCurrentAgentRunDetail` since PR-022-D.**
+  `ensure_explorer_scanned`'s incidental, background explorer-cache priming set `open_surface`
+  back to `TextEditor` as an unrelated side effect of `scan_content_explorer_directory`, so
+  every `OpenActiveProjectSurface(surface)` for any surface other than `TextEditor` was
+  overwritten one line after `dispatch` set it correctly, whenever a project's explorer had
+  not been scanned yet. This means `OpenCurrentAgentRunDetail` has been broken by this exact
+  mechanism the entire time it has existed, invisibly, because nothing ever read `open_surface`
+  to notice. Fixed (`ensure_explorer_scanned` now restores the surface it found), ablated,
+  and the render/absorb decision this defect lived in was further unified into one shared
+  predicate (`surface_renders_editor`) so the same two-readers-can-disagree shape cannot
+  recur silently for a future surface.
+- **The editor keystroke leak.** A document left open from an earlier `TextEditor` visit kept
+  silently absorbing keystrokes aimed at `ApprovalHistory` after switching surfaces, since
+  `handle_editor_key` had no way to know any other surface existed before this slice.
+  Ablated to the exact wrong value (`"!hello"` against `"hello"`) before being fixed.
+
+Both are recorded here directly, not only cross-referenced to a review response, because they
+are the most useful thing this slice learned about the reachability pattern: seven instances
+of `tekstide-core` state or capability with no GUI reader had, until this slice, only ever
+been found as *dormant* -- untested, but inert. These two are the first confirmation that
+dormant state is not merely untested; it is actively corrupting, because nothing audits its
+writers until something finally reads it.
+
+### The flake: named mechanism, mitigation applied, effect not proven at this sample size
+
+The RFC-021 socket flake (`bind_recovers_from_a_stale_socket_file`, response 213) and a second
+test sharing its shape (`agent_run_queue_limit_is_enforced_and_only_counts_live_entries`,
+found by this slice) are both explained by one mechanism, named this slice: `Command::spawn`
+on Linux is fork-then-exec whenever it sets environment variables or a working directory
+(every spawn in this codebase does), and between fork and exec a child holds a duplicate of
+every fd open in the whole parent process -- so a socket another thread has just closed can
+still appear open to a probe running moments later, in a forked-not-yet-exec'd child
+elsewhere in the same test binary. An initial fd-exhaustion (`EMFILE`/`ENFILE`) hypothesis was
+tested directly and **disconfirmed** (both reproductions showed a *successful* syscall, not a
+failed one). The mitigation (`RealProcessLimiter` lifted to a shared, process-wide
+`crate::test_support` module, applied to every real-process spawn in the approval test
+modules) was applied and re-measured against the original 150-run sample: 2 failures versus 3.
+**Directionally consistent with the mechanism, not statistically proven at this sample size**
+-- reported as such, not overclaimed. Full reasoning in `rfcs/future-work.md`'s socket-flake
+entry.
+
+### Item 6: the active-project-change re-evaluation trigger, disclosed as blocked
+
+RFC-022's promotion re-evaluation (`evaluate_promotion`) is wired for two of its three named
+triggers -- a new arrival, and a modal closing -- but not the third, an active-project change,
+because nothing in the shipped GUI switches which project is active during a session at all
+(`AppState::switch_active_project` has zero production callers anywhere in this crate;
+`NavigationAction::SwitchActiveProject` itself maps to no `AppCommand`). The re-evaluation
+logic itself is unconditionally correct regardless of what calls it, so wiring the real
+trigger once project-switching exists anywhere in the GUI is a one-line addition, not a
+design question left open by this RFC. Not built here because there is nowhere in the shipped
+product to build it against yet -- the same reachability-pattern shape this closeout's own
+"two real defects" section describes, found a sixth and seventh time across this slice's
+history (responses 233/234 both independently re-confirmed `switch_active_project`'s own
+absence of a caller).
+
+### Gates
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D
+warnings`, full workspace suite, `git diff --check` -- all clean. `tekstide`: 240.
+`tekstide-core`: 594.
 
 ## Known limitations going in
 

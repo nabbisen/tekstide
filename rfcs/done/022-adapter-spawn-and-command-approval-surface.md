@@ -1,6 +1,14 @@
 # RFC-022: Adapter Spawn and the Command Approval Surface
 
-Status: **Accepted by the human owner 2026-08-16.** Open question 1 answered by the architect the same day — see below; it adds a scope item rather than changing the design.
+Status: **Implemented 2026-08-17, with documented limitations — not reachable by any real
+user; cooperative, not enforced.** The pathway (spawn, token delivery, the arrival model's
+dialog and `ApprovalHistory` surface) is built and proven end to end against production code;
+`Managed` — and therefore command approval — can only ever be exercised by the reference
+adapter, a test artifact, since no shipping AI CLI speaks RFC-021's protocol. See PR-022-F's
+closeout in the [handoff pack's QA evidence](../handoffs/022-adapter-spawn-and-command-approval-surface/qa-evidence.md)
+for the full accounting. Accepted by the human owner 2026-08-16; open question 1 answered by
+the architect the same day — see below; it added a scope item rather than changing the
+design.
 Target milestone: M11
 Date: 2026-08-16
 

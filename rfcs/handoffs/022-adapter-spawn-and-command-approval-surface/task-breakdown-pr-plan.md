@@ -1,7 +1,7 @@
 ---
 title: "RFC-022: Adapter Spawn and the Command Approval Surface — Task Breakdown / PR Plan"
 rfc: "RFC-022"
-rfc_file: "../../proposed/022-adapter-spawn-and-command-approval-surface.md"
+rfc_file: "../../done/022-adapter-spawn-and-command-approval-surface.md"
 status: "Ready for implementation"
 target_milestone: "M11"
 created: "2026-08-16"

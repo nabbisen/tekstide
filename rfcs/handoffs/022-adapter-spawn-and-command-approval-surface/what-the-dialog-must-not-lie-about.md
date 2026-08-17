@@ -1,7 +1,7 @@
 ---
 title: "RFC-022 — What the dialog must not lie about: implementation handoff"
 rfc: "RFC-022"
-rfc_file: "../../proposed/022-adapter-spawn-and-command-approval-surface.md"
+rfc_file: "../../done/022-adapter-spawn-and-command-approval-surface.md"
 status: "Required reading before any RFC-022 code"
 created: "2026-08-16"
 ---

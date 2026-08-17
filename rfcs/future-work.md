@@ -334,6 +334,35 @@ Status: substrate decided, application shell, and mode switching implemented by 
 
   **Until then**, the honest public statement stands unchanged: command approval is implemented, unreachable, and cooperative rather than enforced.
 
+  **Discharged 2026-08-17 by RFC-022 (PR-022-B through F) — and the prediction above about
+  *why* was wrong, kept rather than rewritten.** The pathway this theme described as missing
+  now exists and is proven end to end: `spawn_adapter` (`runtime/terminal/launch.rs`) is the
+  real, distinct spawn path for a `Managed` adapter; `AdapterApprovalConfig`/
+  `inject_token_into_environment` deliver the per-run capability token to it; the arrival
+  model (bounded queue, promotion, expiry) and the `ApprovalHistory` surface answer real
+  proposals over a real socket, decided through the real coordinator, with `command_approval`
+  audited for the first time.
+
+  **The blocker this theme predicted never had to be resolved, because RFC-022 never took
+  that path.** `ExplicitAllowlist` is still rejected today, untouched, exactly as this theme
+  said it was — pinned by its own test (`agent/tests.rs`). Token delivery instead goes
+  through the dedicated `AdapterApprovalConfig` mechanism above, independent of the general
+  `TerminalEnvironmentPolicy` system entirely. The boundary-change decision this theme said
+  an owner would need to make was never needed. Recorded here, not silently corrected away,
+  because it is the second time a wrong prediction about which prerequisite actually blocks
+  something has had to be unwound in this project's history (the first: the delivery plan's
+  own 2026-08-16 correction) — a pattern worth a future reader seeing, not just this one
+  instance of it.
+
+  **What is still true, and is the corrected public statement**: `Managed` — and therefore
+  command approval — can only ever be exercised by the reference adapter, a test artifact.
+  No shipping AI CLI speaks RFC-021's protocol (RFC-022's own open question 1, answered by
+  the architect 2026-08-16). A real user gets an AgentRun at `Plain` or `Supervised`: a real
+  AI CLI in a project-owned terminal, with transcript capture and audit, and no approval
+  protocol involved. Command approval becomes reachable *the day a real adapter exists*,
+  which is not RFC-022's to produce and remains unscheduled, the same "resolve themes as they
+  come" model this theme was always tracked under.
+
 - **Workspace trust is a one-state machine: no project in the shipped app can ever leave
   `Restricted`.** Found 2026-08-16 by RFC-022 PR-022-D — the first thing that ever tried to
   pass through the trust gate (review request 219, response 219).
