@@ -2,7 +2,7 @@
 title: "RFC-022: Adapter Spawn and the Command Approval Surface - Acceptance / QA Checklist"
 rfc: "RFC-022"
 rfc_file: "../../done/022-adapter-spawn-and-command-approval-surface.md"
-status: "Closeout submitted 2026-08-17 — awaiting reviewer's Final Acceptance Decision"
+status: "Accepted — 2026-08-17, response 239"
 target_milestone: "M11"
 created: "2026-08-16"
 ---
