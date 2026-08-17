@@ -1,6 +1,6 @@
 # RFC-032: Workspace Trust Granting
 
-Status: Proposed
+Status: **Accepted by the human owner 2026-08-17.** Both open questions below remain unanswered and **bind before implementation**, not during — see §Open questions.
 Target milestone: M11
 Date: 2026-08-17
 
@@ -121,6 +121,29 @@ to the granting action.
   how trust prompts become meaningless.
 - **Changing what Restricted blocks.** RFC-004's nine features are unchanged.
 - **Making trust a prerequisite for anything it does not already gate.**
+
+## What RFC-004 already decides, and what it deliberately left open
+
+Checked before asking, because a question answerable from the repository is not the owner's:
+
+- **Decided (RFC-004 §2, line 64):** *"Trust must be explicitly granted by the user. Opening a
+  folder must not imply trust."* This RFC does not reopen it.
+- **Deferred (RFC-004 line 198):** *"GUI trust dialogs"* is listed among RFC-004's own
+  out-of-scope items. **This RFC is the discharge of that deferral**, not a new idea.
+- **Left open by RFC-004 itself (line 208):** *"Should Trusted state expire when project root
+  Git remote changes?"* — an **invalidation** question RFC-004 raised and never resolved.
+  Open question 2 below is its direct descendant: RFC-004 asked when trust should stop being
+  valid, and never said what it was valid *for* in the first place.
+
+So neither open question is answerable from the repository. Both are genuinely the owner's,
+and the second one has been open since RFC-004.
+
+**One interaction the answers must resolve together.** If trust persists, then re-opening a
+previously trusted folder grants its capabilities without an explicit act *this session* —
+which sits close enough to *"opening a folder must not imply trust"* that a reader will
+wonder. My reading is that persistence remembers an explicit decision rather than inferring
+one from the act of opening, and so does not violate the rule. **That reading needs stating
+in the RFC rather than left implicit**, whichever way the owner decides.
 
 ## Open questions for the owner
 
