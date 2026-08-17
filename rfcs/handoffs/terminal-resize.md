@@ -1,7 +1,7 @@
 ---
 title: "Terminal resize: implementation handoff"
 owning_rfcs: "RFC-017 (renderer, grid), RFC-008 (PTY lifecycle)"
-status: "Scheduled 2026-08-17 — priority 1 from the reachability audit"
+status: "Implementation complete 2026-08-17, pending review — review request 243"
 created: "2026-08-17"
 ---
 

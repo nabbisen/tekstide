@@ -6,20 +6,25 @@
 //! ([`super::font_metrics`]), not from a fixed fraction of the window.
 //!
 //! **Why the minimum is [`super::COLS`], not some smaller practical
-//! number.** Each pane's own emulator grid is a fixed 80 columns
-//! ([`super::COLS`]) -- this slice does not reflow a live `Term` to an
-//! arbitrary width (a materially larger feature: live PTY resize plus
-//! emulator reflow, not asked for by this slice's review gate). Given
-//! that, the only way a two-pane split can render its full grid content
-//! without clipping is if each pane's measured column capacity is at
-//! least that fixed width -- so that is the refusal threshold, not a
-//! smaller number that would just move the clipping bug from "obvious"
-//! to "occasionally, on narrower displays."
+//! number.** [`super::COLS`] is the launch-time default every pane
+//! starts at; the terminal-resize handoff gives each pane its own real,
+//! independently-resized grid after launch (`TerminalPane::resize`), but
+//! that is a *per-pane* size, not this module's concern -- this module
+//! only decides *whether to split at all* ("the existing split policy"
+//! the resize handoff's own scope explicitly leaves alone). Using
+//! [`super::COLS`] as the refusal threshold means a split is only
+//! offered when each pane would start out able to render a full,
+//! unclipped grid -- so that is the refusal threshold, not a smaller
+//! number that would just move the clipping bug from "obvious" to
+//! "occasionally, on narrower displays."
 
 use tekstide_core::navigation::TerminalLayoutClass;
 
-/// Gap between two side-by-side panes, logical pixels.
-const PANE_GAP_PX: f32 = 8.0;
+/// Gap between two side-by-side panes, logical pixels. `pub(crate)`
+/// (terminal resize handoff): `shell.rs`'s geometry function needs this
+/// to compute each pane's own share of the available width, the same
+/// number [`layout_class_from_glyph_advance`] already subtracts here.
+pub(crate) const PANE_GAP_PX: f32 = 8.0;
 /// Padding `grid_colors::view`'s caller applies around a single pane's
 /// own content -- matches the RFC-014 spike's own `terminal_pane_view`
 /// convention, kept in sync here rather than duplicated as a second
@@ -50,6 +55,40 @@ fn layout_class_from_glyph_advance(
     } else {
         TerminalLayoutClass::Narrow
     }
+}
+
+/// Terminal resize handoff: the one function that turns a pane's real
+/// available content area into a real grid size -- the row-count/
+/// column-count analogue of [`layout_class_for`], using the same real
+/// font metrics rather than a guessed ratio. Called from both
+/// `shell.rs`'s `update()` (to drive [`super::TerminalPane::resize`])
+/// and, indirectly, from rendering (a pane's stored `rows`/`cols`, which
+/// this function is what last set them to) -- one formula, not two that
+/// could drift apart, matching response 242's requirement.
+///
+/// Clamps to [`super::MIN_COLS`]/[`super::MIN_ROWS`] rather than
+/// returning a zero or negative grid -- a too-small pane shows a small
+/// terminal, not an error.
+pub(crate) fn pane_dimensions_for_area(
+    available_width_px: f32,
+    available_height_px: f32,
+    font_size: f32,
+) -> (u16, u16) {
+    let glyph_advance_px = super::font_metrics::monospace_glyph_advance_px(font_size);
+    let line_height_px = super::font_metrics::line_height_px(font_size);
+
+    let cols = super::font_metrics::columns_for_width(
+        available_width_px,
+        glyph_advance_px,
+        PANE_PADDING_PX,
+    );
+    let rows =
+        super::font_metrics::rows_for_height(available_height_px, line_height_px, PANE_PADDING_PX);
+
+    let cols = u16::try_from(cols).unwrap_or(u16::MAX).max(super::MIN_COLS);
+    let rows = u16::try_from(rows).unwrap_or(u16::MAX).max(super::MIN_ROWS);
+
+    (cols, rows)
 }
 
 #[cfg(test)]

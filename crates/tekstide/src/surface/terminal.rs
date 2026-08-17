@@ -37,11 +37,12 @@
 //!
 //! **P2 (no side channels).** `Term::grid_mut()` is not called anywhere
 //! in this module; the only non-byte input this pane's own `Term`
-//! receives is its fixed construction-time dimensions, not a live
-//! resize -- this slice's split decides *how many* panes to show and
-//! *whether* to show them, not a live reflow of any one pane's own grid
-//! (see [`layout`]'s module doc for why that is a deliberately smaller
-//! claim than "real per-pane resize"). **RFC-017 Amendment 1, PR-A1-B**:
+//! receives is its dimensions, via [`TerminalPane::resize`] (terminal-
+//! resize handoff) -- a real `Size`, computed from window geometry and
+//! font metrics, never terminal output. [`layout`]'s own split decision
+//! (*how many* panes to show, *whether* to show them) is a separate,
+//! smaller claim than per-pane resize and is unaffected by it (see
+//! [`layout`]'s module doc). **RFC-017 Amendment 1, PR-A1-B**:
 //! `TerminalPane.reader` is a `TerminalReader`'s only owner, and
 //! `TerminalReader` is not `Clone` -- a second consumer of its channel
 //! is unrepresentable by the type, and `poll` is the only place in this
@@ -116,8 +117,9 @@ mod grid_colors;
 mod layout;
 pub mod session_bar;
 
+pub(crate) use font_metrics::line_height_px;
 pub use grid_colors::view;
-pub(crate) use layout::layout_class_for;
+pub(crate) use layout::{PANE_GAP_PX, layout_class_for, pane_dimensions_for_area};
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -131,17 +133,30 @@ use tekstide_core::domain::TerminalSession;
 use tekstide_core::project::{ProjectId, ProjectSession};
 use tekstide_core::runtime::terminal::{
     BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalDimensions, TerminalLaunchError,
-    TerminalLaunchSpec, TerminalReader, TerminalRuntimeHandle, TerminationOutcome,
+    TerminalLaunchSpec, TerminalReader, TerminalRuntimeError, TerminalRuntimeHandle,
+    TerminationOutcome,
 };
 
 use filter::SecurityFilter;
 
-/// Fixed for this slice -- see the module doc's P2 note for why a live
-/// per-pane reflow is a deliberately separate, larger claim this slice
-/// does not make. 80x24 matches the spike's own choice and every
-/// existing `TerminalPanePolicy` default.
+/// Terminal resize handoff: the launch-time default, used until the
+/// first real resize is computed (`state.window_size` is `None` until
+/// `iced::window::resize_events()` fires once -- see `shell.rs`'s
+/// `terminal_workspace_geometry`) and as the floor every later resize
+/// clamps to (`MIN_ROWS`/`MIN_COLS` below are smaller; this is only the
+/// *starting* size, not a bound on where a real resize can go). 80x24
+/// matches the spike's own choice and every existing `TerminalPanePolicy`
+/// default.
 pub(crate) const ROWS: usize = 24;
 pub(crate) const COLS: usize = 80;
+
+/// Terminal resize handoff (response 242): a grid below roughly this is
+/// not a usable terminal, and zero or a negative dimension is an ioctl
+/// that fails or a `Term` that panics. Every resize clamps to this floor
+/// rather than refusing -- a too-small pane shows a small terminal, not
+/// an error.
+pub(crate) const MIN_ROWS: u16 = 2;
+pub(crate) const MIN_COLS: u16 = 20;
 
 /// Chosen well below `alacritty_terminal`'s own 10,000-line default:
 /// bounded specifically so sustained adversarial output cannot grow the
@@ -149,20 +164,28 @@ pub(crate) const COLS: usize = 80;
 /// to be useful. Tested under sustained output, not merely asserted.
 const SCROLLBACK_LINES: usize = 2_000;
 
+/// Terminal resize handoff: was a zero-field unit struct reading the
+/// (then-fixed) global `ROWS`/`COLS` constants -- every pane shared one
+/// size because there was only ever one size. Now per-instance: each
+/// `TerminalPane` has its own real, independently resizable dimensions,
+/// so this has to carry them rather than read a constant.
 #[derive(Clone, Copy)]
-struct PaneSize;
+struct PaneSize {
+    rows: usize,
+    cols: usize,
+}
 
 impl Dimensions for PaneSize {
     fn total_lines(&self) -> usize {
-        ROWS
+        self.rows
     }
 
     fn screen_lines(&self) -> usize {
-        ROWS
+        self.rows
     }
 
     fn columns(&self) -> usize {
-        COLS
+        self.cols
     }
 }
 
@@ -201,6 +224,22 @@ pub struct TerminalPane {
     /// in-app throughput, the precondition check for whether a flood
     /// run actually reached rate inside the application at all.
     bytes_read_total: u64,
+    /// Terminal resize handoff: this pane's current, real dimensions --
+    /// what `self.term`, the PTY, and the render path all agree on right
+    /// now. Only [`Self::resize`] may change these, and it changes them
+    /// together with the other two, never alone.
+    rows: u16,
+    cols: u16,
+    /// Terminal resize handoff: test-only instrumentation counting how
+    /// many times [`Self::resize`] has actually done real work (the PTY
+    /// ioctl plus `Term::resize`), as opposed to hitting its no-op
+    /// early-return -- the resize-storm-bound proof
+    /// (`terminal::tests::many_resize_calls_collapsing_to_the_same_grid_touch_the_pty_only_once`)
+    /// needs a way to observe that redundant calls really do nothing,
+    /// not just that the end state looks right. Compiled only for tests,
+    /// the same shape `bytes_read_total` is for production measurement.
+    #[cfg(test)]
+    real_resize_count: u32,
 }
 
 impl TerminalPane {
@@ -269,17 +308,90 @@ impl TerminalPane {
             handle,
             reader,
             processor: Processor::new(),
-            term: Term::new(pane_config(), &PaneSize, VoidListener),
+            term: Term::new(
+                pane_config(),
+                &PaneSize {
+                    rows: ROWS,
+                    cols: COLS,
+                },
+                VoidListener,
+            ),
             bytes_read_total: 0,
+            rows: ROWS as u16,
+            cols: COLS as u16,
+            #[cfg(test)]
+            real_resize_count: 0,
         })
+    }
+
+    /// Terminal resize handoff: the one function that updates the PTY
+    /// (`TIOCSWINSZ`, via `runtime.resize`), the emulator grid
+    /// (`Term::resize`), and this pane's own stored `rows`/`cols`
+    /// together -- the "no path updates one without the others" shape
+    /// the handoff's review gate requires. Clamps to
+    /// [`MIN_ROWS`]/[`MIN_COLS`] rather than refusing a too-small
+    /// request: a too-small pane shows a small terminal, not an error.
+    ///
+    /// A no-op (no ioctl, no `Term::resize`) when the clamped size
+    /// equals this pane's current size -- callers are expected to call
+    /// this on every computed geometry change without pre-checking
+    /// themselves, and this is the resize-storm bound: many geometry
+    /// events collapse to the same clamped grid until a real glyph/line
+    /// boundary is crossed, so most calls here do nothing.
+    pub fn resize(&mut self, rows: u16, cols: u16) -> Result<(), TerminalRuntimeError> {
+        let rows = rows.max(MIN_ROWS);
+        let cols = cols.max(MIN_COLS);
+
+        if rows == self.rows && cols == self.cols {
+            return Ok(());
+        }
+
+        self.runtime
+            .resize(&self.handle, TerminalDimensions { rows, cols })?;
+
+        self.term.resize(PaneSize {
+            rows: rows as usize,
+            cols: cols as usize,
+        });
+
+        self.rows = rows;
+        self.cols = cols;
+        #[cfg(test)]
+        {
+            self.real_resize_count += 1;
+        }
+
+        Ok(())
+    }
+
+    /// Terminal resize handoff: how many of [`Self::resize`]'s calls
+    /// have actually reached the PTY/`Term`, as opposed to its no-op
+    /// early return -- see the field's own doc comment.
+    #[cfg(test)]
+    pub(super) fn real_resize_count(&self) -> u32 {
+        self.real_resize_count
+    }
+
+    /// This pane's current row/column count -- what [`Self::resize`]
+    /// last set, or the launch-time default if it has never been
+    /// called. The render path ([`grid_colors::styled_rows`]) reads
+    /// this rather than the global [`ROWS`]/[`COLS`] constants, so a
+    /// resized pane renders at its own real size.
+    pub(super) fn dimensions(&self) -> (u16, u16) {
+        (self.rows, self.cols)
     }
 
     /// Drains whatever PTY output the reader thread has buffered so far
     /// (never blocks) and advances the filtered emulator. **The only
-    /// place in this crate `Processor::advance` is called, and the only
-    /// place `self.term` is mutably borrowed outside construction** --
-    /// P1's re-enumeration. Callers must not skip `poll()` for a hidden
-    /// pane -- see the module doc's hidden-session decision.
+    /// place in this crate `Processor::advance` is called** -- P1's
+    /// re-enumeration (`only_one_call_site_ever_advances_a_terminal_processor_in_the_crate`).
+    /// Terminal resize handoff: [`Self::resize`] is a second place
+    /// `self.term` is mutably borrowed outside construction, but it never
+    /// calls `Processor::advance` -- it only calls `Term::resize`, which
+    /// changes dimensions, not content, so P1's actual claim (untrusted
+    /// bytes reach `self.term` through exactly one, filtered path) is
+    /// unaffected. Callers must not skip `poll()` for a hidden pane --
+    /// see the module doc's hidden-session decision.
     ///
     /// RFC-017 Amendment 1, PR-A1-C: called from `shell.rs`'s
     /// `handle_terminal_woke`, triggered by this pane's own
@@ -366,7 +478,7 @@ impl TerminalPane {
     /// must be reachable from `shell`'s own module tree, not just this
     /// one.
     pub(crate) fn rendered_text(&self) -> String {
-        grid_colors::styled_rows(&self.term)
+        grid_colors::styled_rows(&self.term, self.rows as usize)
             .into_iter()
             .flat_map(|runs| runs.into_iter().map(|(text, _)| text))
             .collect()

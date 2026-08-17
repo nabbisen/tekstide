@@ -540,6 +540,16 @@ pub struct State {
         tekstide_core::domain::ApprovalId,
         tekstide_core::approval::ProposalId,
     >,
+    /// Terminal resize handoff: the window's real logical size, as of
+    /// the most recent `iced::window::resize_events()` firing --
+    /// `None` until the first one arrives (every tracked pane keeps
+    /// [`crate::surface::terminal::ROWS`]/[`crate::surface::terminal::COLS`]
+    /// until then). `Message::WindowResized`'s handler is the only writer;
+    /// [`terminal_workspace_content_size`] is the only reader, and it is
+    /// the one place this becomes a real grid size -- see that
+    /// function's own doc for why a computed size, not a second live
+    /// measurement, is what response 242 chose.
+    window_size: Option<iced::Size>,
 }
 
 impl State {
@@ -609,6 +619,7 @@ impl State {
             approval_coordinator: tekstide_core::approval::ApprovalCoordinator::new(),
             approval_channels: Vec::new(),
             approval_proposal_ids: std::collections::HashMap::new(),
+            window_size: None,
         }
     }
 
@@ -720,6 +731,16 @@ pub enum Message {
     /// decision UI -- "one decision, one command, read individually"
     /// must hold regardless of how the dialog was reached.
     OpenApprovalHistoryEntry(tekstide_core::domain::ApprovalId),
+    /// Terminal resize handoff (response 242): the window's logical size
+    /// changed. `iced::window::resize_events()` is genuinely event-driven
+    /// (filters `Event::Window(Event::Resized(_))`), not a per-frame
+    /// subscription -- fires on discrete geometry changes only, which is
+    /// also why applying every one of these directly, with no further
+    /// coalescing, does not produce a syscall storm: many of them during
+    /// a drag collapse to the same computed grid size until a real
+    /// glyph/line boundary is crossed (`apply_terminal_geometry`'s own
+    /// no-op-when-unchanged check, backed by `TerminalPane::resize`'s).
+    WindowResized(iced::Size),
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -1131,8 +1152,111 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::OpenApprovalHistoryEntry(approval_id) => {
             open_approval_history_entry(state, &approval_id);
         }
+        Message::WindowResized(size) => {
+            state.window_size = Some(size);
+            apply_terminal_geometry(state);
+        }
     }
     Task::none()
+}
+
+/// Terminal resize handoff: the layout constants
+/// [`terminal_workspace_content_size`]'s chrome subtraction is built
+/// from, named rather than duplicated as bare literals -- each mirrors
+/// the real value the corresponding view function already uses
+/// ([`top_bar`]'s `padding(8)`, [`status_bar`]'s `padding(6)`,
+/// [`sidebar_view`]'s fixed `220.0`, [`main_area_view`]'s `padding(16)`,
+/// [`terminal_workspace_view`]'s own `column(...).spacing(8)`, and
+/// `session_bar::view`'s `padding(4)` around `iced`'s own default text
+/// size, `Pixels(16.0)`, since that view specifies no explicit
+/// `.size(...)`). Kept next to this comment specifically so a chrome
+/// change and this function are easy to notice out of sync -- response
+/// 242 disclosed that kind of drift as cosmetic (a gap or a clip), not a
+/// correctness risk, because every consumer of the *result* still agrees
+/// with the others; see [`crate::surface::terminal::TerminalPane::resize`].
+const TOP_BAR_PADDING_PX: f32 = 8.0;
+const STATUS_BAR_PADDING_PX: f32 = 6.0;
+const SIDEBAR_WIDTH_PX: f32 = 220.0;
+const MAIN_AREA_PADDING_PX: f32 = 16.0;
+const WORKSPACE_ROW_SPACING_PX: f32 = 8.0;
+const SESSION_BAR_PADDING_PX: f32 = 4.0;
+const SESSION_BAR_TEXT_SIZE_PX: f32 = 16.0;
+
+/// Terminal resize handoff: the width/height available to
+/// `terminal_workspace_view`'s `panes_view` row, computed from
+/// `state.window_size` and the named chrome constants above rather than
+/// read from `iced`'s own live layout measurement -- `None` until the
+/// first `Message::WindowResized` arrives (see `state.window_size`'s own
+/// doc). This is the one function both [`apply_terminal_geometry`]
+/// (`update()`, real I/O) and [`terminal_workspace_view`] (`view()`,
+/// the split decision) call -- one formula, not two that could drift
+/// apart, matching response 242's requirement.
+fn terminal_workspace_content_size(state: &State) -> Option<(f32, f32)> {
+    let window_size = state.window_size?;
+
+    let top_bar_height = 2.0 * TOP_BAR_PADDING_PX
+        + crate::surface::terminal::line_height_px(state.theme.font_size_heading());
+    let status_bar_height = 2.0 * STATUS_BAR_PADDING_PX
+        + crate::surface::terminal::line_height_px(state.theme.font_size_status());
+    let content_area_height = (window_size.height - top_bar_height - status_bar_height).max(0.0);
+
+    let main_area_width = (window_size.width - SIDEBAR_WIDTH_PX).max(0.0);
+    let main_area_inner_width = (main_area_width - 2.0 * MAIN_AREA_PADDING_PX).max(0.0);
+    let main_area_inner_height = (content_area_height - 2.0 * MAIN_AREA_PADDING_PX).max(0.0);
+
+    let notice_count = [
+        state.terminal_launch_notice.is_some(),
+        state.terminal_paste_notice.is_some(),
+        state.agent_run_launch_notice.is_some(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count();
+    let notice_height = crate::surface::terminal::line_height_px(state.theme.font_size_body());
+    let notices_height = notice_count as f32 * (notice_height + WORKSPACE_ROW_SPACING_PX);
+
+    let session_bar_height = 2.0 * SESSION_BAR_PADDING_PX
+        + crate::surface::terminal::line_height_px(SESSION_BAR_TEXT_SIZE_PX);
+
+    let panes_width = main_area_inner_width;
+    let panes_height =
+        (main_area_inner_height - notices_height - session_bar_height - WORKSPACE_ROW_SPACING_PX)
+            .max(0.0);
+
+    Some((panes_width, panes_height))
+}
+
+/// Terminal resize handoff: the single point where a computed window
+/// geometry becomes a real PTY resize -- called from
+/// `Message::WindowResized`'s handler only. Applies the same computed
+/// `(rows, cols)` to **every** tracked pane, visible or hidden
+/// (`state.terminal_panes`, not just the currently-shown slots) --
+/// response 242: "a computed size needs no measurement, so a hidden pane
+/// can be sized on the same basis as a visible one." `TerminalPane::resize`
+/// is itself a no-op when the clamped size is unchanged, which is the
+/// resize-storm bound this handoff's review gate asks for: many
+/// `WindowResized` events during a drag collapse to the same character
+/// grid until a real glyph/line boundary is crossed, so most calls here
+/// touch neither the PTY nor `Term`.
+fn apply_terminal_geometry(state: &mut State) {
+    let Some((panes_width, panes_height)) = terminal_workspace_content_size(state) else {
+        return;
+    };
+    let font_size = state.theme.font_size_body();
+
+    let per_pane_width = match crate::surface::terminal::layout_class_for(panes_width, font_size) {
+        tekstide_core::navigation::TerminalLayoutClass::Wide => {
+            (panes_width - crate::surface::terminal::PANE_GAP_PX) / 2.0
+        }
+        tekstide_core::navigation::TerminalLayoutClass::Narrow => panes_width,
+    };
+
+    let (cols, rows) =
+        crate::surface::terminal::pane_dimensions_for_area(per_pane_width, panes_height, font_size);
+
+    for pane in &mut state.terminal_panes {
+        let _ = pane.resize(rows, cols);
+    }
 }
 
 /// RFC-017 Amendment 1, PR-A1-C: the per-pane replacement for the old
@@ -2598,8 +2722,17 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     // was set), so this changes nothing about the routing above for any
     // normal run -- the same "checked but usually absent" shape the
     // measurement branch above already uses.
+    //
+    // Terminal resize handoff: `resize_events()` is batched in alongside
+    // the wake subscriptions, gated the same way -- nothing to resize
+    // without a tracked pane. Genuinely event-driven (filters
+    // `Event::Window(Event::Resized(_))`), not a per-frame subscription
+    // like `window::frames()` -- see `Message::WindowResized`'s own doc.
     let mut subscriptions = if !state.terminal_panes.is_empty() {
-        terminal_wake_subscriptions(&state.terminal_panes)
+        let mut subscriptions = terminal_wake_subscriptions(&state.terminal_panes);
+        subscriptions
+            .push(iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size)));
+        subscriptions
     } else {
         Vec::new()
     };
@@ -3223,24 +3356,34 @@ fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
         })
         .collect();
 
+    // Terminal resize handoff (response 242): the split decision now
+    // reads the same computed width `apply_terminal_geometry` uses to
+    // drive the real resize, rather than a second, `responsive`-measured
+    // width of its own -- one formula, not two that could disagree about
+    // whether a two-pane split fits. Falls back to `Wide` (both panes
+    // shown) when `state.window_size` is still `None` (before the first
+    // `WindowResized` event) -- the launch-time default already renders
+    // this way (see `main`'s initial window request), and this only
+    // matters for the handful of frames before that first event.
     let panes_view: Element<'_, Message> = if visible_panes.is_empty() {
         column![].into()
     } else {
-        iced::widget::responsive(move |size| {
-            let shown: Vec<&crate::surface::terminal::TerminalPane> =
-                match crate::surface::terminal::layout_class_for(size.width, font_size) {
-                    tekstide_core::navigation::TerminalLayoutClass::Wide => visible_panes.clone(),
-                    tekstide_core::navigation::TerminalLayoutClass::Narrow => {
-                        visible_panes.first().copied().into_iter().collect()
-                    }
-                };
-            row(shown
-                .into_iter()
-                .map(|pane| crate::surface::terminal::view(pane, font_size))
-                .collect::<Vec<Element<'_, Message>>>())
-            .spacing(8)
-            .into()
-        })
+        let class = terminal_workspace_content_size(state)
+            .map(|(panes_width, _panes_height)| {
+                crate::surface::terminal::layout_class_for(panes_width, font_size)
+            })
+            .unwrap_or(tekstide_core::navigation::TerminalLayoutClass::Wide);
+        let shown: Vec<&crate::surface::terminal::TerminalPane> = match class {
+            tekstide_core::navigation::TerminalLayoutClass::Wide => visible_panes,
+            tekstide_core::navigation::TerminalLayoutClass::Narrow => {
+                visible_panes.into_iter().take(1).collect()
+            }
+        };
+        row(shown
+            .into_iter()
+            .map(|pane| crate::surface::terminal::view(pane, font_size))
+            .collect::<Vec<Element<'_, Message>>>())
+        .spacing(8)
         .into()
     };
 

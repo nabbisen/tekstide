@@ -18,20 +18,28 @@ use iced::widget::text::Span;
 use iced::widget::{column, rich_text};
 use iced::{Color, Element};
 
-use super::{ROWS, TerminalPane};
+use super::TerminalPane;
 
 /// Groups each visible row's cells into runs of consecutive identical
 /// resolved foreground colour, using the same `renderable_content()`/
 /// `Colors` API a real renderer uses -- ported from the RFC-014 spike's
 /// `styled_rows`, unchanged in shape.
-pub(super) fn styled_rows(term: &Term<VoidListener>) -> Vec<Vec<(String, [f32; 3])>> {
+///
+/// Terminal resize handoff: `row_count` is the pane's own current row
+/// count ([`TerminalPane::dimensions`]), not the global `ROWS`
+/// constant -- a resized pane must render at its own real size, not the
+/// launch-time default every pane used to share.
+pub(super) fn styled_rows(
+    term: &Term<VoidListener>,
+    row_count: usize,
+) -> Vec<Vec<(String, [f32; 3])>> {
     let content = term.renderable_content();
     let colors = content.colors;
 
-    let mut rows: Vec<Vec<(char, [f32; 3])>> = vec![Vec::new(); ROWS];
+    let mut rows: Vec<Vec<(char, [f32; 3])>> = vec![Vec::new(); row_count];
     for indexed in content.display_iter {
         let point = indexed.point;
-        if point.line.0 < 0 || point.line.0 as usize >= ROWS {
+        if point.line.0 < 0 || point.line.0 as usize >= row_count {
             continue;
         }
         let rgb = resolve_color(indexed.cell.fg, colors);
@@ -60,7 +68,8 @@ pub(super) fn styled_rows(term: &Term<VoidListener>) -> Vec<Vec<(String, [f32; 3
 /// would corrupt the grid the way it must not for `surface::board`'s
 /// trusted-chrome fields.
 pub fn view<'a, Message: 'a>(pane: &TerminalPane, font_size: f32) -> Element<'a, Message> {
-    let rows = styled_rows(&pane.term);
+    let (row_count, _cols) = pane.dimensions();
+    let rows = styled_rows(&pane.term, row_count as usize);
     column(
         rows.into_iter()
             .map(|runs| {

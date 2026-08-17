@@ -61,6 +61,42 @@ pub(super) fn columns_for_width(
     (usable / glyph_advance_px).floor() as u32
 }
 
+/// Terminal resize handoff: real measured line height, in logical
+/// pixels, at `font_size` -- the row-count analogue of
+/// [`monospace_glyph_advance_px`], not a guessed constant. Measured the
+/// same way (`min_bounds()` on a real `Paragraph`), because a guessed
+/// line-height-to-font-size ratio is exactly the "two sources of truth"
+/// risk this module's own doc already names for glyph width, and there
+/// is no reason row height would be exempt from it.
+pub(crate) fn line_height_px(font_size: f32) -> f32 {
+    let text = Text {
+        content: "M",
+        bounds: Size::new(f32::INFINITY, f32::INFINITY),
+        size: Pixels(font_size),
+        line_height: LineHeight::Relative(1.0),
+        font: Font::MONOSPACE,
+        align_x: Alignment::Default,
+        align_y: iced::alignment::Vertical::Top,
+        shaping: Shaping::Basic,
+        wrapping: Wrapping::None,
+    };
+
+    let paragraph = GraphicsParagraph::with_text(text);
+    paragraph.min_bounds().height
+}
+
+/// Row count that fits in `available_height_px` (logical pixels) of pane
+/// body, after subtracting `pane_padding_px` on both top and bottom --
+/// the row-count analogue of [`columns_for_width`].
+pub(super) fn rows_for_height(
+    available_height_px: f32,
+    line_height_px: f32,
+    pane_padding_px: f32,
+) -> u32 {
+    let usable = (available_height_px - 2.0 * pane_padding_px).max(0.0);
+    (usable / line_height_px).floor() as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,6 +130,41 @@ mod tests {
             columns_for_width(4.0, 10.0, 8.0),
             0,
             "a width narrower than the padding must yield zero columns, not underflow"
+        );
+    }
+
+    /// The row-count analogue of `glyph_advance_is_positive_and_plausible_for_a_monospace_font`.
+    #[test]
+    fn line_height_is_positive_and_plausible_for_a_monospace_font() {
+        let height = line_height_px(14.0);
+        assert!(
+            height > 0.0 && height < 28.0,
+            "a line height at 14px should be positive and within a plausible multiple of the \
+             font size, got {height}"
+        );
+    }
+
+    /// The row-count analogue of `a_larger_font_size_measures_a_wider_glyph_advance`.
+    #[test]
+    fn a_larger_font_size_measures_a_taller_line_height() {
+        let small = line_height_px(10.0);
+        let large = line_height_px(20.0);
+        assert!(
+            large > small,
+            "measuring at a larger font size must yield a taller line height -- proves this \
+             function actually uses its font_size argument, not a hardcoded value (small: \
+             {small}, large: {large})"
+        );
+    }
+
+    /// The row-count analogue of `columns_for_width_floors_and_never_goes_negative`.
+    #[test]
+    fn rows_for_height_floors_and_never_goes_negative() {
+        assert_eq!(rows_for_height(100.0, 10.0, 8.0), 8);
+        assert_eq!(
+            rows_for_height(4.0, 10.0, 8.0),
+            0,
+            "a height narrower than the padding must yield zero rows, not underflow"
         );
     }
 }

@@ -17,7 +17,9 @@ use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
 use tekstide_core::project::{ProjectId, ProjectSession};
 
-use super::{COLS, PaneSize, ROWS, SCROLLBACK_LINES, TerminalPane, pane_config};
+use super::{
+    COLS, MIN_COLS, MIN_ROWS, PaneSize, ROWS, SCROLLBACK_LINES, TerminalPane, pane_config,
+};
 
 fn feed(term: &mut Term<VoidListener>, bytes: &[u8]) {
     let mut processor = Processor::<StdSyncHandler>::new();
@@ -30,8 +32,8 @@ fn feed(term: &mut Term<VoidListener>, bytes: &[u8]) {
 /// cursor position, serialized so a regression anywhere in the grid --
 /// not just the row a narrower test happened to check -- shows up as a
 /// diff.
-fn snapshot(term: &Term<VoidListener>) -> String {
-    let rows = super::grid_colors::styled_rows(term);
+fn snapshot(term: &Term<VoidListener>, row_count: usize) -> String {
+    let rows = super::grid_colors::styled_rows(term, row_count);
     let cursor = term.renderable_content().cursor.point;
     let mut out = String::new();
     for (index, runs) in rows.iter().enumerate() {
@@ -43,7 +45,14 @@ fn snapshot(term: &Term<VoidListener>) -> String {
 
 #[test]
 fn renders_full_grid_plus_cursor_snapshot_for_known_output() {
-    let mut term = Term::new(pane_config(), &PaneSize, VoidListener);
+    let mut term = Term::new(
+        pane_config(),
+        &PaneSize {
+            rows: ROWS,
+            cols: COLS,
+        },
+        VoidListener,
+    );
     feed(
         &mut term,
         b"Tekstide terminal pane\r\n\x1b[32mgreen text\x1b[0m\r\n",
@@ -67,7 +76,7 @@ fn renders_full_grid_plus_cursor_snapshot_for_known_output() {
         )
     );
     let row1_tail = format!("{:?}", (" ".repeat(COLS - 10), default_fg));
-    let actual = snapshot(&term);
+    let actual = snapshot(&term, ROWS);
     let mut expected =
         format!("00: [{row0}]\n01: [(\"green text\", [0.0, 0.75, 0.0]), {row1_tail}]\n");
     for row in 2..ROWS {
@@ -85,10 +94,24 @@ fn renders_full_grid_plus_cursor_snapshot_for_known_output() {
 
 #[test]
 fn bounded_scrollback_holds_under_sustained_output() {
-    let mut narrow = Term::new(pane_config(), &PaneSize, VoidListener);
+    let mut narrow = Term::new(
+        pane_config(),
+        &PaneSize {
+            rows: ROWS,
+            cols: COLS,
+        },
+        VoidListener,
+    );
     let mut wide_config = pane_config();
     wide_config.scrolling_history = SCROLLBACK_LINES * 2;
-    let mut wide = Term::new(wide_config, &PaneSize, VoidListener);
+    let mut wide = Term::new(
+        wide_config,
+        &PaneSize {
+            rows: ROWS,
+            cols: COLS,
+        },
+        VoidListener,
+    );
 
     // Must outgrow BOTH configured bounds, or the smaller one (narrow)
     // saturates while the larger one (wide) merely reflects the natural,
@@ -144,7 +167,8 @@ impl ScratchPane {
     }
 
     fn rendered_text(&self) -> String {
-        super::grid_colors::styled_rows(&self.pane.term)
+        let (row_count, _cols) = self.pane.dimensions();
+        super::grid_colors::styled_rows(&self.pane.term, row_count as usize)
             .into_iter()
             .flat_map(|runs| runs.into_iter().map(|(text, _)| text))
             .collect()
@@ -159,6 +183,33 @@ impl ScratchPane {
             std::thread::sleep(Duration::from_millis(20));
         }
         false
+    }
+
+    /// Terminal resize handoff: each row's own text, *not* flattened
+    /// across rows the way [`Self::rendered_text`] is -- needed to check
+    /// where a real line actually wrapped, which
+    /// [`Self::rendered_text`]'s row-boundary-erasing concatenation
+    /// cannot show.
+    fn row_texts(&self) -> Vec<String> {
+        let (row_count, _cols) = self.pane.dimensions();
+        super::grid_colors::styled_rows(&self.pane.term, row_count as usize)
+            .into_iter()
+            .map(|runs| runs.into_iter().map(|(text, _)| text).collect::<String>())
+            .collect()
+    }
+
+    /// Terminal resize handoff: longest run of consecutive `needle`
+    /// characters found within any single row -- the wrap-boundary
+    /// proof. A run that spans a row boundary is, by construction, two
+    /// separate runs (one per row), so this is exactly "how many
+    /// contiguous columns did the emulator actually place before
+    /// wrapping."
+    fn longest_run_in_any_row(&self, needle: char) -> usize {
+        self.row_texts()
+            .iter()
+            .flat_map(|row| row.split(|c| c != needle).map(str::len))
+            .max()
+            .unwrap_or(0)
     }
 }
 
@@ -229,6 +280,262 @@ fn a_launched_pane_blocks_a_disallowed_sequence_at_the_real_call_site() {
         rendered.contains("PRIMARY_SCREEN_017C"),
         "switching to the alternate screen must be blocked at this crate's real call site -- \
          if the marker disappeared, the filter was bypassed and the grid actually swapped"
+    );
+}
+
+/// Terminal resize handoff: parses `stty size`'s own real, kernel-
+/// reported "ROWS COLS" (`TIOCGWINSZ` under the hood, the read-side
+/// counterpart of the `TIOCSWINSZ` `resize_master` issues) out of
+/// `rendered`, which is the *flattened* concatenation
+/// [`ScratchPane::rendered_text`] returns -- every cell in a row is
+/// present (blank cells are real space characters), so the two numbers
+/// are followed immediately by that row's own trailing padding, not a
+/// newline.
+///
+/// `marker` appears **twice**: once in the shell's own canonical-mode
+/// echo of the literal command as typed (containing the literal `%s`,
+/// not a real number), and once in the command's real output. Taking
+/// the text after the *last* occurrence, not the first, is what skips
+/// the echoed command and lands on the real printed numbers.
+fn parse_stty_size_after(rendered: &str, marker: &str) -> Option<(u16, u16)> {
+    let after = rendered.rsplit(marker).next()?;
+    let mut tokens = after.split_whitespace();
+    let rows: u16 = tokens.next()?.parse().ok()?;
+    let cols: u16 = tokens.next()?.parse().ok()?;
+    Some((rows, cols))
+}
+
+/// Terminal resize handoff review gate, item 1: **the three sizes
+/// proven to agree after a resize, not asserted** -- checked
+/// independently against three different sources, not three reads of
+/// the same stored field:
+///
+/// 1. **The PTY**: a real child (`/bin/sh`) runs `stty size`, which
+///    calls `TIOCGWINSZ` on its own controlling terminal -- the kernel's
+///    own record of what `resize_master`'s `TIOCSWINSZ` set, read back
+///    through a completely different code path than the one that wrote
+///    it.
+/// 2. **The emulator**: `alacritty_terminal::Term`'s own
+///    `Dimensions::columns`/`screen_lines`, not this crate's stored
+///    `rows`/`cols` -- `Term`'s internal grid state, asked directly.
+/// 3. **The render path**: [`TerminalPane::dimensions`] (what
+///    `grid_colors::view` actually renders at) and the real row count
+///    [`ScratchPane::row_texts`] returns from `styled_rows`.
+#[test]
+fn resize_makes_the_pty_the_emulator_and_the_render_path_agree() {
+    let mut scratch = ScratchPane::launch();
+    scratch.pane.write_input(b"printf 'READY_017E\\n'\n");
+    assert!(
+        scratch.poll_until("READY_017E"),
+        "the shell must be responsive before this test starts changing its terminal size out \
+         from under it"
+    );
+
+    scratch
+        .pane
+        .resize(30, 55)
+        .expect("resizing to a real, in-range grid must succeed");
+
+    // 2. The emulator's own grid.
+    assert_eq!(
+        (
+            alacritty_terminal::grid::Dimensions::screen_lines(&scratch.pane.term),
+            alacritty_terminal::grid::Dimensions::columns(&scratch.pane.term)
+        ),
+        (30, 55),
+        "Term::resize must have actually changed the emulator's own grid dimensions"
+    );
+
+    // 3. The render path: the pane's own stored dimensions, and the
+    // real number of rows `styled_rows` renders.
+    assert_eq!(
+        scratch.pane.dimensions(),
+        (30, 55),
+        "the pane's stored dimensions -- what grid_colors::view renders at -- must match"
+    );
+    assert_eq!(
+        scratch.row_texts().len(),
+        30,
+        "styled_rows must render exactly the new row count, not the launch-time default"
+    );
+
+    // 1. The PTY, read back through a real child process, a completely
+    // different path than the one that wrote it.
+    scratch
+        .pane
+        .write_input(b"printf 'RESIZE_CHECK_017E:%s\\n' \"$(stty size)\"\n");
+    assert!(
+        scratch.poll_until("RESIZE_CHECK_017E:"),
+        "the real child must be able to observe and report its own resized PTY"
+    );
+    let (pty_rows, pty_cols) =
+        parse_stty_size_after(&scratch.rendered_text(), "RESIZE_CHECK_017E:")
+            .expect("stty size output must parse as two whitespace-separated numbers");
+    assert_eq!(
+        (pty_rows, pty_cols),
+        (30, 55),
+        "the real PTY, queried by a real child process via TIOCGWINSZ, must report the same \
+         size the emulator and the render path already agreed on"
+    );
+}
+
+/// Terminal resize handoff review gate, item 2: **ablate it** -- update
+/// one of the three (here, `Term`'s own grid, reached directly rather
+/// than through [`TerminalPane::resize`]) without the others, and show
+/// the specific divergence this slice's whole job is to prevent. If this
+/// test ever started passing without the deliberate bypass below, it
+/// would mean [`TerminalPane::resize`] had stopped being the only path
+/// that changes `self.term`'s size -- which is exactly the bug class
+/// this handoff exists to keep out.
+#[test]
+fn bypassing_terminalpane_resize_produces_the_exact_divergence_this_slice_prevents() {
+    let mut scratch = ScratchPane::launch();
+
+    // Deliberately reach `Term::resize` directly, bypassing
+    // `TerminalPane::resize` -- production code has no path that does
+    // this (see `TerminalPane::resize`'s own doc comment), so this is
+    // the ablation, not a regression waiting to happen.
+    scratch.pane.term.resize(PaneSize { rows: 10, cols: 15 });
+
+    let term_dimensions = (
+        alacritty_terminal::grid::Dimensions::screen_lines(&scratch.pane.term),
+        alacritty_terminal::grid::Dimensions::columns(&scratch.pane.term),
+    );
+    let (stored_rows, stored_cols) = scratch.pane.dimensions();
+    let stored_dimensions = (stored_rows as usize, stored_cols as usize);
+
+    assert_eq!(
+        term_dimensions,
+        (10, 15),
+        "the direct bypass must have actually changed Term's own grid"
+    );
+    assert_ne!(
+        term_dimensions, stored_dimensions,
+        "updating only Term, not through TerminalPane::resize, must produce a real divergence \
+         from the pane's own stored dimensions ({stored_dimensions:?}) -- proving the three \
+         sizes do NOT stay consistent for free, and that TerminalPane::resize's job (updating \
+         all three together) is load-bearing, not redundant caution"
+    );
+}
+
+/// Terminal resize handoff review gate, item 3: **real output across a
+/// resize** -- a real child writes the same fixed-width text before and
+/// after a resize, and it must wrap at the *new* column count, not the
+/// old one. Against a real PTY child (`/bin/sh` plus `printf`), not a
+/// synthesised byte stream -- the same standard the P1/P2 filter corpus
+/// above already holds itself to.
+#[test]
+fn real_output_wraps_at_the_new_column_count_not_the_old_one() {
+    let mut scratch = ScratchPane::launch();
+    scratch.pane.write_input(b"printf 'READY_017E\\n'\n");
+    assert!(scratch.poll_until("READY_017E"));
+
+    // 30 non-whitespace characters. At the launch-time default (80
+    // columns), this fits entirely inside one row.
+    let marker_line = "Q".repeat(30);
+    scratch
+        .pane
+        .write_input(format!("printf '{marker_line}\\n'\n").as_bytes());
+    assert!(scratch.poll_until(&marker_line));
+    assert_eq!(
+        scratch.longest_run_in_any_row('Q'),
+        30,
+        "at the launch-time 80-column width, 30 characters must fit on one row unwrapped"
+    );
+
+    // Narrow the pane to fewer columns than the marker is wide.
+    scratch.pane.resize(24, 20).expect("resize must succeed");
+
+    scratch
+        .pane
+        .write_input(format!("printf '{marker_line}\\n'\n").as_bytes());
+    // Poll until the *second* occurrence has rendered, not merely a
+    // fresh call returning true on scrollback from the first -- the
+    // longest-run measurement below already only cares about the
+    // present grid, but the write must have actually landed first.
+    for _ in 0..200 {
+        scratch.pane.poll();
+        if scratch.rendered_text().matches(&marker_line).count() >= 1
+            && scratch.longest_run_in_any_row('Q') <= 20
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    assert_eq!(
+        scratch.longest_run_in_any_row('Q'),
+        20,
+        "the same 30-character line must now wrap at the new 20-column width, not the old \
+         80-column one -- proving the emulator is actually using the resized grid, not a \
+         stale one"
+    );
+}
+
+/// Terminal resize handoff review gate, item 5: **minimum size
+/// honoured** -- a request below [`MIN_ROWS`]/[`MIN_COLS`] must clamp,
+/// not produce a zero/negative grid (an ioctl that fails, or a `Term`
+/// that panics) and not be refused outright (a too-small pane must
+/// still show a small terminal).
+#[test]
+fn resize_below_the_minimum_clamps_rather_than_refusing_or_going_to_zero() {
+    let mut scratch = ScratchPane::launch();
+
+    scratch
+        .pane
+        .resize(0, 0)
+        .expect("a below-minimum request must clamp, not error");
+
+    assert_eq!(
+        scratch.pane.dimensions(),
+        (MIN_ROWS, MIN_COLS),
+        "a zero/zero request must clamp to the documented floor, not to zero and not be refused"
+    );
+    assert_eq!(
+        alacritty_terminal::grid::Dimensions::screen_lines(&scratch.pane.term),
+        MIN_ROWS as usize,
+        "Term's own grid must reflect the clamped floor, not the requested zero"
+    );
+}
+
+/// Terminal resize handoff review gate, item 4: **a resize storm does
+/// not produce a syscall storm.** Simulates a window-drag: many calls
+/// computing the *same* clamped grid size (what many `WindowResized`
+/// events collapse to before a real glyph/line boundary is crossed),
+/// interleaved with the occasional call that actually changes the
+/// target. Only the calls that change the target may reach the real PTY
+/// ioctl/`Term::resize` -- proven by [`TerminalPane::real_resize_count`],
+/// test-only instrumentation on the exact branch that does real work,
+/// not an assumption about timing.
+#[test]
+fn many_resize_calls_collapsing_to_the_same_grid_touch_the_pty_only_once() {
+    let mut scratch = ScratchPane::launch();
+    assert_eq!(
+        scratch.pane.real_resize_count(),
+        0,
+        "launch must not itself count as a resize -- it is the starting size, not a resize to it"
+    );
+
+    // A drag: 500 events all computing the identical clamped grid.
+    for _ in 0..500 {
+        scratch.pane.resize(30, 55).expect("resize must succeed");
+    }
+    assert_eq!(
+        scratch.pane.real_resize_count(),
+        1,
+        "500 calls to the same target size must touch the PTY/Term exactly once, not 500 times"
+    );
+
+    // A real glyph/line boundary is crossed once, then the drag
+    // continues at the new size.
+    for _ in 0..500 {
+        scratch.pane.resize(31, 55).expect("resize must succeed");
+    }
+    assert_eq!(
+        scratch.pane.real_resize_count(),
+        2,
+        "a genuine size change must still go through exactly once, and only once, no matter how \
+         many further calls repeat it"
     );
 }
 
