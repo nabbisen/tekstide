@@ -493,7 +493,7 @@ Status: active after `0.1.0`.
 
   **28 of 132 reachable** — a genuine production call site in `crates/tekstide/src`, mostly `ApplicationShell`'s and `AppState`'s own facade methods plus RFC-022's approval/terminal plumbing. Not listed individually here; they are the ones already known to work.
 
-  **104 of 132 dormant** — zero call sites in `crates/tekstide/src`. Of those, a secondary (heuristic, not compiler-verified) check found **30 with zero callers anywhere in `tekstide-core` either** — genuinely unreachable at every layer, not merely wrapped behind an already-reachable higher-level function. Those 30 are the priority list; the other 74 are called by *something* else in `tekstide-core` and need a caller-by-caller trace this pass did not do to know whether that something itself eventually reaches the GUI (most are plausibly legitimate internal layering — e.g. `ProjectSession::launch_agent_run_with_runtime` is dormant-by-direct-call only because `AppState::launch_agent_run_with_runtime`, which *is* reachable, delegates to it — not a gap) or are orphaned two layers deep instead of one. **Not traced further in this pass — a real limit of what one audit sitting can verify, disclosed rather than guessed at.**
+  **104 of 132 dormant** — zero call sites in `crates/tekstide/src`. Of those, a secondary (heuristic, not compiler-verified) check found **30 with zero callers anywhere in `tekstide-core` either** — genuinely unreachable at every layer, not merely wrapped behind an already-reachable higher-level function. **30 is a lower bound on true orphans, not a count**: the other 74 are called by *something* else in `tekstide-core`, and a function called only by another dormant function is still dormant — this pass did not trace those 74 call chains to their own root, so some unknown number of them may turn out to be orphaned two (or more) layers deep rather than reachable (most are plausibly legitimate internal layering — e.g. `ProjectSession::launch_agent_run_with_runtime` is dormant-by-direct-call only because `AppState::launch_agent_run_with_runtime`, which *is* reachable, delegates to it — not a gap — but this pass did not confirm that reasoning for all 74). **Not traced further in this pass — a real limit of what one audit sitting can verify, disclosed rather than guessed at.** Read the 30 below as a floor, not the whole answer.
 
   **The 30 true orphans, with what a user consequently cannot do:**
 
@@ -503,7 +503,7 @@ Status: active after `0.1.0`.
   | `switch_active_project` | `app` | Already known (RFC-022): no way to switch which project is active in a session. |
   | `add_detected_generated_change_set` | `project::session` | Already known (item 5, re-verified): a generated change is never attached to a project session in production. |
   | `set_resource_limits` | `project::session` | **New.** No code path, anywhere, can change a project's resource limits after creation — every limit this project has spent real design effort tuning (`approval_request_limit`, `agent_run_approval_limit`, `approval_history_limit`, `terminal_session_limit`, and the rest) is fixed forever at whatever `ProjectResourceLimits::default()` produces. Not user-configurable, not project-specific, not overridable by anything shipped. |
-  | `runtime::terminal::launch::resize` | `runtime::terminal::launch` | **New, likely user-visible.** No code anywhere calls terminal resize — a PTY, once created, is never resized again even if the window or pane it renders into changes size. |
+  | `runtime::terminal::launch::resize` | `runtime::terminal::launch` | **New, user-visible, severity checked and corrected (response 240).** No code anywhere calls terminal resize — but this is not a size-mismatch/corruption risk: `ROWS`/`COLS` (`surface/terminal.rs:143-144`) are fixed constants used identically for both the spawned PTY's dimensions (`:230-233`) and the rendered grid (`:157-165`), so the child's idea of the terminal and the GUI's rendering always agree. The real, precise consequence: **every terminal is permanently 24×80, whatever the window size.** A user with a large window gets a small, fixed terminal; anything full-screen (`less`, `vim`, and similar) renders into 24×80 forever. A real limitation on a feature users can reach today, smaller and better-defined than "resize is broken." |
   | `runtime::terminal::termination::request_terminate` | `runtime::terminal::termination` | **New.** No code explicitly requests a terminal's termination through this API — whatever *does* end a terminal session goes through process exit or `Drop`, not an explicit terminate request; there may be no way to kill a hung terminal from the GUI. Worth checking against `SafeCloseDialog`'s own termination path specifically, not assumed. |
   | `purge_project_records` / `purge_all_records` | `audit::integration` | **New.** No user can ever purge audit records, at any granularity. RFC-013's own purge machinery has no GUI trigger. |
   | `purge_agent_run_transcripts` / `purge_project_transcripts` | `project::session` | **New.** Same shape, narrower granularity — RFC-011's retention/purge model has no route at the agent-run or project transcript level either. |
@@ -524,7 +524,24 @@ Status: active after `0.1.0`.
   | `add_approval` | `domain::agent` (`AgentRun`) | **New, likely benign.** A domain-level attachment method; approvals plausibly reach `AgentRun` bookkeeping through `ProjectSession`'s own route instead. Not confirmed either way. |
   | `set_runtime_summary` | `project::session` | **Audit candidate-list error, not a finding.** `#[cfg(test)]`-gated — not part of the real production API at all, so "dormant" is meaningless for it. Included here only so the correction is on the record rather than silently dropped. |
 
-  **Not done in this pass, and why**: fixing any of the above (out of scope — "do not fix anything you find," per the handoff); tracing the 74 non-true-orphan dormant functions' own call chains to their root (a second pass's work, not this one's); auditing `crates/tekstide`'s own public surface against `tekstide-core`'s consumption of it (the handoff's own stated scope was one direction only). If this audit is repeated, start from `set_resource_limits`, `resize`, and the audit purge/recovery pair — the highest-consequence findings that were not already known before this pass.
+  **Not done in this pass, and why**: fixing any of the above (out of scope — "do not fix anything you find," per the handoff); tracing the 74 non-true-orphan dormant functions' own call chains to their root (a second pass's work, not this one's); auditing `crates/tekstide`'s own public surface against `tekstide-core`'s consumption of it (the handoff's own stated scope was one direction only).
+
+  **Priority, per response 240's own re-ordering** (not simply "highest consequence first" — weighted by what a real user can reach today):
+
+  1. **`resize`** — small and well-defined now that the severity is pinned to "permanently
+     24×80," not a corruption risk. It improves something users can reach *today*; everything
+     else on this list improves things nobody can reach yet.
+  2. **Trust granting** (`grant_project_trust`) — unchanged as the RFC-sized priority ahead of
+     everything this audit found. It remains the single blocker on the whole agent-run chain.
+  3. **`set_resource_limits`** — fold into RFC-023 (Configuration System) rather than fixing
+     standalone, since a real configuration surface is where this setter belongs anyway, and
+     confirms RFC-023's own scope is larger than "a file format and a parser": the setter it
+     would need to drive has never been wired at all. Any doc comment elsewhere claiming a
+     limit is already per-project configurable is currently false and worth a grep when this
+     is picked up.
+
+  Purge and audit-recovery are already disclosed elsewhere as absent (known gaps, not
+  surprises), so they can wait behind the three above.
 
 ## Milestone Roadmap
 
