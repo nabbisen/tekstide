@@ -129,7 +129,7 @@ Status: substrate decided, application shell, and mode switching implemented by 
 | **2.63:1** | **`border_default` on `background`** |
 | **2.37:1** | **`border_default` on `surface_elevated`** |
 
-Text contrast is excellent — comfortably past AAA. **`border_default` fails WCAG 2.1 SC 1.4.11 (Non-text Contrast, AA), which requires 3:1 for UI component boundaries.** Focus indication is unaffected (`border_focused` is the accent at 6.38:1, and `NFR-UX-002` already pairs it with a non-colour channel), so this is the *unfocused* pane boundary being hard to see for a low-vision user, not a focus defect. **`theme/tests.rs` could never have caught it**: it asserts channels are "in range" and that heading is the largest font — type checks wearing the costume of quality checks. Fix belongs with the accessibility slice below, not with typography.
+Text contrast is excellent — comfortably past AAA. **`border_default` fails WCAG 2.1 SC 1.4.11 (Non-text Contrast, AA), which requires 3:1 for UI component boundaries.** Focus indication is unaffected (`border_focused` is the accent at 6.38:1, and `NFR-UX-002` already pairs it with a non-colour channel), so this is the *unfocused* pane boundary being hard to see for a low-vision user, not a focus defect. **`theme/tests.rs` could never have caught it**: it asserts channels are "in range" and that heading is the largest font — type checks wearing the costume of quality checks. **Scheduled 2026-08-17** as `handoffs/theme-contrast-verification.md` — the gate first (landing red), then the fix; typography deliberately left out of it, per the owner.
 
 **Recommendation: still decline the dependency, on better grounds than the first pass gave.**
 
