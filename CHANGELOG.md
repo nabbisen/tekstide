@@ -582,7 +582,13 @@ remains a GUI shell over the headless core, not the full AI CLI workbench.
 
 ## 0.3.0 - AgentRun, Transcript, Review, and Durable Audit
 
-Status: released on 2026-07-28.
+Status: released on 2026-07-28. **Git tag re-pointed 2026-08-17** — the original `0.3.0`
+tag pointed at commit `1f5100b5`, which a later rewrite (stripping `Co-Authored-By`
+trailers) left on an orphaned line of history that no branch contains. The tag now points
+at `de40d648`, that rewrite's content-identical replacement: same tree `5291a6b1`, same
+message, same author date, reachable from `main`. **What `0.3.0` marks is unchanged**;
+only the pointer was repaired. The `0.3.0` package on crates.io still records the old
+hash in its own `.cargo_vcs_info.json`, which is not editable after publication.
 
 Tekstide `0.3.0` consolidates three milestones — M5 AgentRun launch, M6 transcript
 and review foundations, and M7 durable audit — covering RFC-010 through RFC-013.
