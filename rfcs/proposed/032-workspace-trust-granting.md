@@ -145,7 +145,23 @@ wonder. My reading is that persistence remembers an explicit decision rather tha
 one from the act of opening, and so does not violate the rule. **That reading needs stating
 in the RFC rather than left implicit**, whichever way the owner decides.
 
-## Open questions for the owner
+## Decisions (answering the questions below)
+
+**Both answered by the owner 2026-08-17. The decisions and their reasoning live in
+[`docs/src/contributors/security-decisions.md`](../../docs/src/contributors/security-decisions.md)
+— the canonical home — and are summarised here in one line each rather than restated, so
+there is one wording to keep true.**
+
+1. **Trust persists across sessions.** Accepted with its costs recorded: a trusted folder's
+   contents can change afterwards, an agent's own output inherits the trust, and trust
+   accumulates. Three requirements make that acceptable — revocation always available, trust
+   state visible on the board, and the dialog naming the folder's contents *present and
+   future*. All three are scope items, not intentions.
+2. **Trust binds to the canonical path**, not the path as opened. A literal-path binding would
+   let a redirected symlink inherit an existing grant silently; the canonical binding costs
+   only re-granting after a legitimate move.
+
+## The questions as originally posed
 
 1. **Does trust persist across sessions?** Recent projects persist, so a per-session grant
    means re-granting on every launch — which trains users to click through it, the

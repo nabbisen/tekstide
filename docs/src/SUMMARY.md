@@ -9,6 +9,7 @@
 # For contributors
 
 - [Architecture](./contributors/architecture.md)
+- [Security decisions](./contributors/security-decisions.md)
 - [Delivery plan](./contributors/delivery-plan.md)
 - [Deferred work](./contributors/future-work.md)
 
