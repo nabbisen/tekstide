@@ -1,7 +1,7 @@
 ---
 title: "Terminal resize: implementation handoff"
 owning_rfcs: "RFC-017 (renderer, grid), RFC-008 (PTY lifecycle)"
-status: "Implementation complete 2026-08-17, pending review — review request 243"
+status: "Implemented 2026-08-17 — accepted, review request 244"
 created: "2026-08-17"
 ---
 
@@ -78,3 +78,41 @@ sites that cannot be reached independently, or equivalent.
 
 `set_resource_limits` is the audit's other standout and stays with RFC-023. This slice is
 terminal geometry only.
+
+## Closeout (2026-08-17, review requests 243/244)
+
+Implemented in two passes. The first (request 243) wired the review gate's five items against
+`Message::WindowResized`, sourced from `iced::window::resize_events()`, and passed all five —
+but only reacted to a live drag. Response 243 found the gap: a pane launched before the user
+ever resized the window (the common case) stayed at the `ROWS`/`COLS` launch default forever,
+because `boot()` cannot know the real window size (no window is open yet when it runs) and
+nothing else populated `state.window_size` until a drag happened to fire one. The second pass
+(request 244) closed it: `iced::window::open_events()` (subscribed unconditionally, not gated on
+a pane existing) triggers a real `iced::window::size` query the moment the window opens, fed
+through the same `WindowResized` path a live resize already uses, and both production
+pane-launch call sites now re-apply the computed geometry immediately after pushing a new pane.
+
+**Review-gate evidence** (`crates/tekstide/src/surface/terminal/tests.rs`, real `/bin/sh` PTY
+children, not synthesized streams): the three sizes (PTY via a real child's `stty size`, `Term`'s
+own grid, the render path's stored dimensions) proven to agree after a resize; a direct `Term`
+bypass shown to produce the exact divergence the slice exists to prevent; a real child's output
+shown to wrap at the new column count, not the old one, across a resize; 500 redundant resize
+calls shown to touch the PTY/`Term` exactly once via `TerminalPane::resize`'s own no-op
+early-return; a below-minimum request shown to clamp to 2×20 rather than refusing or going to
+zero. `SIGWINCH` is not sent anywhere; the kernel delivers it on `TIOCSWINSZ`.
+
+**Launch-path evidence** (`crates/tekstide/src/shell/tests.rs`): a pane launched before any
+window size is known stays at the launch default (precondition); `WindowResized` resizes an
+already-tracked pane; a pane launched *after* the window size is already known is sized
+immediately, with no second resize event required (the regression test for the bug itself); a
+second pane launched later lands on the same computed size as the first, proving
+`apply_terminal_geometry`'s "every tracked pane" behaviour holds from a launch site too.
+
+**Disclosed, not fixed — the one seam these tests do not exercise directly** (response 244):
+every launch-path test enters at `Message::WindowResized` directly, the same way this file's
+existing `TerminalPasteResolved` tests enter past `iced::clipboard::read()`'s own I/O rather than
+exercising it. That is the right trade for something needing a live `iced` runtime, but it means
+the first link — `Message::WindowOpened` firing, then `iced::window::size(id)` actually
+resolving to a real size — is verified by reading the `update` handler (an explicit `return`, not
+a dropped `Task`) rather than by a running test. If that link ever breaks, no test in this suite
+would catch it; the failure mode would be silent and would show up as "the launch bug is back."
