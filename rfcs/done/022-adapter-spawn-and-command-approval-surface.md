@@ -9,6 +9,23 @@ closeout in the [handoff pack's QA evidence](../handoffs/022-adapter-spawn-and-c
 for the full accounting. Accepted by the human owner 2026-08-16; open question 1 answered by
 the architect the same day — see below; it added a scope item rather than changing the
 design.
+
+**Correction, 2026-08-17 — a second, independent unreachability the closeout missed.**
+`NavigationAction::OpenApprovalHistory` is `KeybindingStatus::Configurable` with a **`None`
+binding**, and that mapping is the only route to `ProjectOpenSurface::ApprovalHistory`. There
+is no other button, menu, or default key, and configuration is RFC-023, which does not exist.
+`Configurable`-with-`None` reads as *"a user can bind this"* and in fact means *"dead until
+RFC-023 exists"* — a category error found during RFC-032's review. So the `ApprovalHistory`
+surface — the queue, the expired-entry disclosure, the "visibly unanswerable" constraint —
+**cannot be opened by any user**, on top of and separate from the protocol limitation above:
+even a real `Managed` adapter would not make it openable. The consequence is narrower than
+RFC-032's equivalent gap, because `High`/`Destructive` promotion still functions without the
+history surface, but the disclosure surface the arrival model depends on is unreachable. The
+architect closed this RFC as complete without catching it. **Remedy**: a real `Candidate`
+default binding plus keyboard navigation on the surface, of the same shape RFC-032 landed for
+`OpenTrustSettings` (`Ctrl+Alt+U`) — tracked in [`future-work.md`](../future-work.md), not
+reopened here.
+
 Target milestone: M11
 Date: 2026-08-16
 

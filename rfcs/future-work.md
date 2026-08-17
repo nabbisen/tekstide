@@ -312,6 +312,29 @@ Status: substrate decided, application shell, and mode switching implemented by 
   succeeding — a real gap, not a documented non-goal, and one a future keybinding pass
   (RFC-023) should close directly rather than leaving every workspace entry point to
   borrow a side effect from an unrelated command.
+- **`OpenApprovalHistory` is `Configurable`/`None`, so RFC-022's `ApprovalHistory` surface
+  cannot be opened by any user.** Found 2026-08-17 during RFC-032's review (response 248),
+  **after** the architect had already closed RFC-022 as complete — his miss, corrected in
+  that RFC's record and in `rfcs/README.md` rather than by reopening it. That mapping is the
+  only route to `ProjectOpenSurface::ApprovalHistory`: no other button, no menu, no default
+  key. This is **independent of** RFC-022's already-disclosed protocol limitation — even a
+  real `Managed` adapter would not make the surface openable — so the queue, the
+  expired-entry disclosure, and the "visibly unanswerable" constraint are all unreachable.
+  Consequence is narrower than RFC-032's equivalent gap was, because `High`/`Destructive`
+  promotion still functions without the history surface. **Remedy**: a real `Candidate`
+  default binding plus keyboard navigation on the surface, the same shape RFC-032 landed for
+  `OpenTrustSettings` (`Ctrl+Alt+U`, `handle_trust_settings_key`) — a small, well-precedented
+  slice, not an RFC.
+- **The category error behind both of the above, worth naming once**: `KeybindingStatus::Configurable`
+  with a `None` binding *reads* as "a user can bind this" and in fact means "**dead** until
+  RFC-023 exists." Configuration is unimplemented, so there is no user who can bind anything.
+  Only six actions have real `Candidate` bindings — `OpenProjectBoard`, `ToggleProjectMode`,
+  `LaunchTerminal`, `PasteIntoTerminal`, `SaveActiveDocument`, `LaunchAgentRun` — plus
+  `OpenTrustSettings` as of RFC-032. **Every other navigation action is unreachable, not
+  pending**, and a closeout that reads `Configurable` as "deferred by design" will keep
+  shipping surfaces no one can open. A keybinding pass (RFC-023) should either give each
+  action a default or mark it explicitly dead; the current state makes the two
+  indistinguishable at a glance, which is exactly how both misses above happened.
 - **The `no_count_display_or_attention_label_is_called_anywhere_in_the_crate` scan matches
   only the literal substring `.label()`, so it cannot catch a hardcoded-English *free
   function* (one not called as a method).** Raised at RFC-019's own design stage (its
