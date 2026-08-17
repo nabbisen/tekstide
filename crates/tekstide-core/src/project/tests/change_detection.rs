@@ -257,6 +257,35 @@ fn filesystem_scan_skips_ignored_directories_entirely() {
     );
 }
 
+/// Review response 251, finding 1: the ignore rule must match
+/// **directories** named e.g. `target`, not any entry of that name. A
+/// file named `target` is something an agent could plausibly create or
+/// edit, and before this fix it would vanish from change detection
+/// exactly like the real `target/` build directory does.
+#[test]
+fn a_file_named_like_an_ignored_directory_is_not_skipped() {
+    let sandbox = TestSandbox::new("change-detection-ignore-name-vs-kind");
+    let project = sandbox.project_session(1);
+    sandbox.create_file_with_contents("project/target", b"not a directory\n");
+    sandbox.create_file_with_contents("project/.git", b"also not a directory\n");
+
+    let detector = GeneratedChangeDetector::default();
+    let baseline = detector.capture_filesystem_baseline(&project);
+
+    assert_eq!(baseline.status, ChangeDetectionStatus::Complete);
+    assert_eq!(
+        baseline
+            .entries
+            .iter()
+            .map(|entry| entry.relative_path.clone())
+            .collect::<Vec<_>>(),
+        vec![PathBuf::from(".git"), PathBuf::from("target")],
+        "files named like ignored directories must still be scanned -- only a real directory by \
+         that name is skipped: {:?}",
+        baseline.entries
+    );
+}
+
 /// The handoff's own required ablation shape: remove one entry from the
 /// ignore list and watch the specific, named directory it used to
 /// exclude reappear -- proving the mechanism above is real, not that it

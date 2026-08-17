@@ -25,8 +25,12 @@ pub struct GeneratedChangeDetectionPolicy {
     /// `FileExplorerScanPolicy::linux_mvp` builds its own
     /// `collapsed_directory_names` from -- one shared definition of
     /// project-wide scan noise, not two that could disagree. Matched by
-    /// exact entry name at any depth, the same rule the explorer already
-    /// uses.
+    /// exact name against **directory** entries only, at any depth --
+    /// the same directory-only rule the explorer already uses (a file or
+    /// symlink named `.git`/`target`/`node_modules` is scanned
+    /// normally). Known limitation: excluding `.git/` means change
+    /// review never surfaces an agent writing into it (e.g.
+    /// `.git/hooks/`, `.git/config`) -- see `rfcs/future-work.md`.
     pub ignored_directory_names: &'static [&'static str],
 }
 
@@ -284,19 +288,31 @@ fn scan_filesystem(
     FilesystemScan { entries, status }
 }
 
-/// Change-detection-wiring handoff, D1: an entry whose name is in
-/// `policy.ignored_directory_names` is skipped **entirely** -- not
-/// pushed as a `ReviewBaselineEntry`, not recursed into, not counted
-/// against `max_entries`. Checked before the first `stat` call on the
-/// entry (`fs::symlink_metadata`, below), so an ignored `.git`/`target`
-/// tree costs nothing beyond the one `read_dir` name it appears as here.
-/// Matched by exact name, at any depth -- the same rule
-/// `FileExplorerScanPolicy::should_collapse` already uses, both sourced
-/// from `IGNORED_DIRECTORY_NAMES`.
-fn is_ignored(file_name: &std::ffi::OsStr, policy: &GeneratedChangeDetectionPolicy) -> bool {
-    file_name
-        .to_str()
-        .is_some_and(|name| policy.ignored_directory_names.contains(&name))
+/// Change-detection-wiring handoff, D1, corrected per review response 251
+/// finding 1: an entry is ignored only when it is a **directory** whose
+/// name is in `policy.ignored_directory_names` -- not any entry of that
+/// name. A file or symlink named `target`, `.git`, or `node_modules` is
+/// scanned normally; only a directory by that name is skipped entirely
+/// (not pushed as a `ReviewBaselineEntry`, not recursed into). This is
+/// the same directory-only rule
+/// `FileExplorerScanPolicy::should_collapse` already applies, both
+/// sourced from `IGNORED_DIRECTORY_NAMES` -- the list was already
+/// shared, this makes the *rule* for applying it shared too.
+///
+/// Checked against `file_type` from the one `symlink_metadata` call the
+/// scan already needs to classify the entry, so telling a directory
+/// apart from a same-named file costs nothing extra; the canonicalize
+/// call in `ensure_canonical_inside_root` and any recursion are still
+/// skipped for a matched directory.
+fn is_ignored(
+    file_name: &std::ffi::OsStr,
+    file_type: &fs::FileType,
+    policy: &GeneratedChangeDetectionPolicy,
+) -> bool {
+    file_type.is_dir()
+        && file_name
+            .to_str()
+            .is_some_and(|name| policy.ignored_directory_names.contains(&name))
 }
 
 fn scan_directory(
@@ -317,15 +333,16 @@ fn scan_directory(
 
         let entry = entry.map_err(|_| ChangeDetectionFailureReason::MetadataReadFailed)?;
         let file_name = entry.file_name();
-        if is_ignored(&file_name, policy) {
-            continue;
-        }
-
         let relative_path = relative_directory.join(&file_name);
         let absolute_path = entry.path();
         let metadata = fs::symlink_metadata(&absolute_path)
             .map_err(|_| ChangeDetectionFailureReason::MetadataReadFailed)?;
         let file_type = metadata.file_type();
+
+        if is_ignored(&file_name, &file_type, policy) {
+            continue;
+        }
+
         let kind = if file_type.is_symlink() {
             ChangePathKind::Symlink
         } else if file_type.is_file() {
