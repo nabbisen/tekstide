@@ -366,9 +366,12 @@ impl TerminalPane {
 
     /// Terminal resize handoff: how many of [`Self::resize`]'s calls
     /// have actually reached the PTY/`Term`, as opposed to its no-op
-    /// early return -- see the field's own doc comment.
+    /// early return -- see the field's own doc comment. `pub(crate)`,
+    /// not `pub(super)`: `shell::tests` (response 243's launch-site
+    /// integration tests) needs this too, not only `surface::terminal`'s
+    /// own tests.
     #[cfg(test)]
-    pub(super) fn real_resize_count(&self) -> u32 {
+    pub(crate) fn real_resize_count(&self) -> u32 {
         self.real_resize_count
     }
 
@@ -376,8 +379,11 @@ impl TerminalPane {
     /// last set, or the launch-time default if it has never been
     /// called. The render path ([`grid_colors::styled_rows`]) reads
     /// this rather than the global [`ROWS`]/[`COLS`] constants, so a
-    /// resized pane renders at its own real size.
-    pub(super) fn dimensions(&self) -> (u16, u16) {
+    /// resized pane renders at its own real size. `pub(crate)`, not
+    /// `pub(super)`: `shell::tests` needs to observe a real pane's
+    /// dimensions to prove response 243's launch-site fix actually sizes
+    /// a freshly launched pane, not only `surface::terminal`'s own tests.
+    pub(crate) fn dimensions(&self) -> (u16, u16) {
         (self.rows, self.cols)
     }
 

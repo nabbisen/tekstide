@@ -740,7 +740,27 @@ pub enum Message {
     /// a drag collapse to the same computed grid size until a real
     /// glyph/line boundary is crossed (`apply_terminal_geometry`'s own
     /// no-op-when-unchanged check, backed by `TerminalPane::resize`'s).
+    ///
+    /// Response 243's required fix: also the message a real, queried
+    /// window size arrives as (see `Message::WindowOpened`'s handler) --
+    /// `apply_terminal_geometry` does not care whether the size it is
+    /// given came from a drag or from the one-time query that primes
+    /// `state.window_size` after boot; either way, it is a real size to
+    /// apply to every tracked pane.
     WindowResized(iced::Size),
+    /// Response 243's required fix: `iced::window::open_events()` fired
+    /// -- a window (in practice, this application's one and only window)
+    /// now exists. `boot()` cannot know the real window size (no window
+    /// is open yet when it runs -- see its own doc comment), so
+    /// `state.window_size` starts `None` and every pane launched before
+    /// the first real `WindowResized` event used to stay at the
+    /// launch-time `ROWS`/`COLS` default until the user happened to drag
+    /// the window edge. This message's handler asks `iced` for the real
+    /// size directly (`iced::window::size`) and feeds it through the
+    /// same `Message::WindowResized` path a live resize uses -- one
+    /// formula, one application point, whether the size came from
+    /// opening or from resizing.
+    WindowOpened(iced::window::Id),
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -1156,6 +1176,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.window_size = Some(size);
             apply_terminal_geometry(state);
         }
+        Message::WindowOpened(id) => {
+            return iced::window::size(id).map(Message::WindowResized);
+        }
     }
     Task::none()
 }
@@ -1227,8 +1250,7 @@ fn terminal_workspace_content_size(state: &State) -> Option<(f32, f32)> {
 }
 
 /// Terminal resize handoff: the single point where a computed window
-/// geometry becomes a real PTY resize -- called from
-/// `Message::WindowResized`'s handler only. Applies the same computed
+/// geometry becomes a real PTY resize. Applies the same computed
 /// `(rows, cols)` to **every** tracked pane, visible or hidden
 /// (`state.terminal_panes`, not just the currently-shown slots) --
 /// response 242: "a computed size needs no measurement, so a hidden pane
@@ -1238,6 +1260,19 @@ fn terminal_workspace_content_size(state: &State) -> Option<(f32, f32)> {
 /// `WindowResized` events during a drag collapse to the same character
 /// grid until a real glyph/line boundary is crossed, so most calls here
 /// touch neither the PTY nor `Term`.
+///
+/// **Response 243's required fix**: called from three places, not only
+/// `Message::WindowResized`'s handler -- also from `Message::WindowOpened`'s
+/// handler (indirectly, once the real size it queried arrives as a
+/// `WindowResized`) and from both production pane-launch call sites
+/// (`attempt_terminal_launch`, `attempt_agent_run_launch_with_profile`),
+/// right after the new pane is pushed. Without the launch-site calls, a
+/// pane launched between boot and the first live resize -- the common
+/// case, since most sessions never drag the window edge -- stayed at the
+/// `ROWS`/`COLS` launch default forever; a `None` `state.window_size`
+/// (before the very first size arrives) makes this a no-op, so a pane
+/// launched in that narrow window still self-corrects the moment it
+/// does.
 fn apply_terminal_geometry(state: &mut State) {
     let Some((panes_width, panes_height)) = terminal_workspace_content_size(state) else {
         return;
@@ -1672,6 +1707,10 @@ fn attempt_agent_run_launch_with_profile(
     let pane = crate::surface::terminal::TerminalPane::from_launched(runtime, handle)
         .map_err(AgentRunLaunchRefusal::Registration)?;
     state.terminal_panes.push(pane);
+    // Response 243's required fix: size the freshly launched pane
+    // immediately from whatever geometry is already known, rather than
+    // leaving it at the launch-time default until the next live resize.
+    apply_terminal_geometry(state);
     Ok(())
 }
 
@@ -2010,6 +2049,10 @@ fn attempt_terminal_launch(state: &mut State) -> Result<(), TerminalLaunchRefusa
         &mut audit_health,
     )?;
     state.terminal_panes.push(pane);
+    // Response 243's required fix: size the freshly launched pane
+    // immediately from whatever geometry is already known, rather than
+    // leaving it at the launch-time default until the next live resize.
+    apply_terminal_geometry(state);
     Ok(())
 }
 
@@ -2718,6 +2761,17 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         input::SubscriptionMode::Modal => modal_subscription(),
     };
 
+    // Terminal resize handoff, response 243's required fix: unconditional,
+    // unlike the wake/resize-event subscriptions below -- `state.window_size`
+    // must end up populated even if no pane exists yet at boot (the demo
+    // panes `State::new` may already have launched, and whatever the user
+    // launches next, both need a real size the first time
+    // `apply_terminal_geometry` runs, not only after a live drag).
+    // `open_events()` fires once for this application's one window;
+    // `Message::WindowOpened`'s handler is what turns that into a real,
+    // queried size.
+    let mut subscriptions = vec![iced::window::open_events().map(Message::WindowOpened)];
+
     // RFC-017 PR-017-C: only added when a demo pane exists (the env var
     // was set), so this changes nothing about the routing above for any
     // normal run -- the same "checked but usually absent" shape the
@@ -2728,14 +2782,11 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     // without a tracked pane. Genuinely event-driven (filters
     // `Event::Window(Event::Resized(_))`), not a per-frame subscription
     // like `window::frames()` -- see `Message::WindowResized`'s own doc.
-    let mut subscriptions = if !state.terminal_panes.is_empty() {
-        let mut subscriptions = terminal_wake_subscriptions(&state.terminal_panes);
+    if !state.terminal_panes.is_empty() {
+        subscriptions.extend(terminal_wake_subscriptions(&state.terminal_panes));
         subscriptions
             .push(iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size)));
-        subscriptions
-    } else {
-        Vec::new()
-    };
+    }
     // RFC-022 PR-022-E ("the arrival model"): polled regardless of modal
     // state -- a new proposal must still enter the queue while a
     // *different* modal is open (it just cannot promote until that modal
