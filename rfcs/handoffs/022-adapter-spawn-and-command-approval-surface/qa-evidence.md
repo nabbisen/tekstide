@@ -1237,6 +1237,30 @@ wildcard), not something a runtime test would add confidence to.
 
 Full gate clean, unchanged: `tekstide` 239, `tekstide-core` 594.
 
+### Priority item 5: no-bulk-approval, enumerated
+
+New test `no_bulk_approval_or_multi_select_construct_exists_anywhere_in_the_crate`
+source-scans the whole `tekstide` crate (`scannable_source_files()`, the same helper
+`no_raw_color_construction_anywhere_in_the_crate` uses) for the concrete building blocks a
+bulk-decide surface would plausibly reach for first: a `checkbox` widget, a
+`Vec<ApprovalId>`/`&[ApprovalId]`-shaped decide entry point, or (scanning `en.ftl` separately)
+an "approve all"/"select all"/"decide all" catalog key. Fails by name if any appear.
+
+**Disclosed as a denylist, not proof of absence** -- the same limitation already disclosed for
+`reference_adapter_binary_never_executes_the_argv_it_proposes`'s own scan (response 230's
+convention). It cannot prove no bulk mechanism could ever be built by some other shape
+entirely; it can and does fail loudly on the obvious ones.
+
+**Ablated three times, one per denylist entry**: added a `// ABLATION PROBE: Vec<ApprovalId>`
+comment to `shell.rs` (source-scans see comment text, not only code -- the same shape
+`no_raw_color_construction_anywhere_in_the_crate`'s own scan already relies on), reran --
+failed naming the exact string. Reverted. Added `approval-history-approve-all = Approve All`
+to `en.ftl`, reran -- failed naming `"approve-all"`. Reverted, reran clean. (The checkbox
+branch was not separately ablated -- same mechanical shape as the other two, and the string
+match is unconditional regardless of which of the three literals is present.)
+
+Full gate clean: `tekstide` 240 (up from 239), `tekstide-core` 594 (unchanged).
+
 ## PR-022-F - Closeout
 
 *Not started.*

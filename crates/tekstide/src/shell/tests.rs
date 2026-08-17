@@ -607,6 +607,60 @@ fn no_raw_color_construction_anywhere_in_the_crate() {
     }
 }
 
+/// RFC-022's own explicit, non-optional constraint: "no bulk approval
+/// and no multi-select... one decision, one command, read
+/// individually" -- a list with risk labels invites triage by label
+/// instead of reading commands, the same habituation failure promotion
+/// severity already guards against by a different route.
+/// `ApprovalHistory`'s own control renders one decision at a time by
+/// construction (`Message::OpenApprovalHistoryEntry` takes a single
+/// `ApprovalId`, not a collection), but nothing before this test failed
+/// by name if a future change reached for the obvious building blocks
+/// of a multi-select surface anyway.
+///
+/// **This is a denylist, not proof of absence** -- the same limitation
+/// `reference_adapter_binary_never_executes_the_argv_it_proposes`
+/// already discloses for its own scan. It names the concrete shapes a
+/// bulk-decide surface would plausibly reach for first (a checkbox
+/// widget, a `Vec`-of-ids-shaped decide entry point, an "approve all"/
+/// "select all"/"decide all" catalog key) and fails loudly if any
+/// appear; it cannot prove no bulk mechanism could ever be built by
+/// some other shape entirely.
+#[test]
+fn no_bulk_approval_or_multi_select_construct_exists_anywhere_in_the_crate() {
+    for path in scannable_source_files() {
+        let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
+        assert!(
+            !source.contains("widget::checkbox") && !source.contains("checkbox("),
+            "{} must not introduce a checkbox widget -- RFC-022 requires no multi-select \
+             surface for approval decisions",
+            path.display()
+        );
+        for forbidden in [
+            "Vec<ApprovalId>",
+            "Vec<tekstide_core::domain::ApprovalId>",
+            "&[ApprovalId]",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{}: found `{forbidden}` -- a collection-of-ids-shaped decide entry point is \
+                 exactly the bulk-approval mechanism RFC-022 forbids",
+                path.display()
+            );
+        }
+    }
+
+    let en_ftl = std::fs::read_to_string(real_locales_dir().join("en.ftl"))
+        .expect("en.ftl must be readable");
+    for forbidden in ["approve-all", "select-all", "decide-all", "approve all"] {
+        assert!(
+            !en_ftl.to_lowercase().contains(forbidden),
+            "en.ftl: found {forbidden:?} -- no bulk-decide affordance may exist, in copy or \
+             in code"
+        );
+    }
+}
+
 /// RFC-018 PR-018-G's own review gate: "a test that the scrim is present
 /// whenever the paste modal is open, at the layer where the two are
 /// bound together, so a future modal added without a scrim fails by
