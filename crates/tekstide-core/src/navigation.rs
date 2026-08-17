@@ -45,6 +45,11 @@ pub enum NavigationAction {
     /// has found was this exact action having no `app_command_for` arm
     /// at all until this response.
     OpenApprovalHistory,
+    /// RFC-032: opens the active project's `TrustSettings` surface,
+    /// where granting and revoking workspace trust actually happen --
+    /// the second real `open_surface`-conditional dispatch after
+    /// `OpenApprovalHistory`.
+    OpenTrustSettings,
     OpenDiffReview,
     OpenSafeCloseDialog,
     OpenCommandPalette,
@@ -167,6 +172,11 @@ impl KeybindingPolicy {
                 ),
                 KeybindingRule::new(
                     NavigationAction::OpenApprovalHistory,
+                    None,
+                    KeybindingStatus::Configurable,
+                ),
+                KeybindingRule::new(
+                    NavigationAction::OpenTrustSettings,
                     None,
                     KeybindingStatus::Configurable,
                 ),

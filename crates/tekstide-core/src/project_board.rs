@@ -236,8 +236,30 @@ fn recent_project_row(restored: &RestoredRecentProject) -> ProjectBoardRow {
         RecentProjectAvailability::PathChanged => BoardRowKind::RecentPathChanged,
     };
 
-    let security_summary =
-        RestrictedModeSummary::from_trust(crate::project::WorkspaceTrust::Restricted);
+    // RFC-032: was hardcoded `WorkspaceTrust::Restricted` regardless of
+    // what `recent_project.trust_state` (PR-032-B) actually held --
+    // flagged in that slice's own evidence as a real, separate gap
+    // deliberately left for this one. Reads the real cached value,
+    // **except when `availability` is already `PathChanged`**: that
+    // means the canonical path this entry was saved against no longer
+    // matches what it resolves to now, so `AppState::add_project_session`'s
+    // own canonical-path-keyed lookup (PR-032-B) would *not* carry the
+    // cached trust over on reopen -- showing it here would claim a grant
+    // reopening will not honour.
+    //
+    // **Disclosed, not fixed**: this is still the *cached* value, not
+    // one confirmed against the durable audit store the way
+    // `verify_restored_trust` confirms an already-*open* project's trust
+    // (PR-032-C, response 245/246) -- that confirmation only runs once a
+    // project is actually reopened. A recent-but-unopened row's label is
+    // a last-known snapshot, the same status every other recent-only
+    // field here already is (`branch_status`, the `Unknown` counts
+    // below), not a live, audit-verified fact.
+    let trust_state = match restored.availability {
+        RecentProjectAvailability::PathChanged => crate::project::WorkspaceTrust::Restricted,
+        _ => recent_project.trust_state,
+    };
+    let security_summary = RestrictedModeSummary::from_trust(trust_state);
 
     ProjectBoardRow {
         project_id: recent_project.project_id.clone(),
@@ -246,9 +268,9 @@ fn recent_project_row(restored: &RestoredRecentProject) -> ProjectBoardRow {
         secondary_path_hint: (recent_project.root_path != recent_project.canonical_root_path)
             .then(|| recent_project.canonical_root_path.display().to_string()),
         availability_label,
-        trust_label: "Restricted".to_owned(),
-        security_mode_label: "Restricted Mode".to_owned(),
-        restricted_mode: true,
+        trust_label: trust_state.label().to_owned(),
+        security_mode_label: security_summary.mode_label.to_owned(),
+        restricted_mode: security_summary.restricted_mode,
         blocked_automation_count: len_as_u32(security_summary.blocked_features.len()),
         blocked_automation_labels: security_summary
             .blocked_feature_labels()

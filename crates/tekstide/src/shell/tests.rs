@@ -5,11 +5,12 @@ use tekstide_core::shell::ApplicationShell;
 
 use super::{
     AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ExternalChangeButton, Message,
-    ModalButton, ModalContent, PasteConfirmButton, State, TerminalPasteRefusal,
+    ModalButton, ModalContent, PasteConfirmButton, State, TerminalPasteRefusal, TrustGrantButton,
     agent_run_launch_refusal_text, attempt_agent_run_launch_with_profile, content_within_bound,
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
     open_real_audit_store, poll_approval_channels, sidebar_label, status_bar_summary,
-    terminal_paste_refusal_text, trusted_ui_state, verify_restored_trust_against, zone_style,
+    terminal_paste_refusal_text, trust_grant_dialog_body, trusted_ui_state,
+    verify_restored_trust_against, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -2184,16 +2185,20 @@ fn apply_terminal_geometry_resizes_every_tracked_pane_when_called_from_a_launch_
 }
 
 /// RFC-022 PR-022-D: the real `Ctrl+Alt+A` path against a freshly opened
-/// project -- `WorkspaceTrust::Restricted` by default, and nothing in
-/// this crate (production or test) can grant trust yet (`grant_trust` is
-/// `pub(crate)` to `tekstide-core` alone). `claude_code_linux_default`'s
-/// honest `MayDiscoverWorkspaceFiles` policy is therefore refused here
-/// every time, regardless of whether an AI CLI happens to be installed
-/// on the machine running this suite -- the real, current, disclosed
-/// behaviour of this keybinding today, not a gap in this test. Still
-/// switches to Terminal Immersion, the same "refused but still lands
-/// where the notice is visible" shape `launch_terminal`'s own dispatch
-/// arm uses.
+/// project -- `WorkspaceTrust::Restricted` by default, and this test
+/// never grants it. `claude_code_linux_default`'s honest
+/// `MayDiscoverWorkspaceFiles` policy is therefore refused here every
+/// time, regardless of whether an AI CLI happens to be installed on the
+/// machine running this suite. Still switches to Terminal Immersion, the
+/// same "refused but still lands where the notice is visible" shape
+/// `launch_terminal`'s own dispatch arm uses.
+///
+/// **RFC-032 PR-032-C**: trust can now be genuinely granted through the
+/// real GUI route (`Message::OpenTrustGrantDialog`/`ModalActivate`) --
+/// see `granting_trust_through_the_real_route_unblocks_a_real_agent_run_launch`
+/// below for the other side of this exact refusal, proven to actually
+/// clear once trust is granted for real, not merely that the trust flag
+/// changed.
 #[test]
 fn agent_run_launch_shell_input_switches_to_terminal_immersion_and_shows_the_real_trust_refusal() {
     let mut app_shell = ApplicationShell::new();
@@ -2242,6 +2247,549 @@ fn agent_run_launch_shell_input_switches_to_terminal_immersion_and_shows_the_rea
         notice_text.to_lowercase().contains("trust"),
         "the refusal a user sees must say this is a trust problem, not a generic error: \
          {notice_text:?}"
+    );
+}
+
+// --- RFC-032 PR-032-C/D: grant, revoke, the route, and the dialog -----
+
+/// Response 246's enumeration shape (`only_one_production_call_site_ever_restores_a_projects_trust_state`,
+/// `tekstide-core`), applied here to this crate's own production call
+/// site. Needle has the leading `.` for the same reason that one does:
+/// matching call syntax specifically, not `AuditCoordinator::grant_project_trust`'s
+/// own `pub fn grant_project_trust(` definition line.
+#[test]
+fn only_one_production_call_site_ever_grants_workspace_trust() {
+    let occurrences = count_occurrences_in_crate(".grant_project_trust(");
+    assert_eq!(
+        occurrences,
+        vec![("shell.rs".to_string(), 1)],
+        "exactly this one file may ever call AuditCoordinator::grant_project_trust: {occurrences:?}"
+    );
+}
+
+#[test]
+fn only_one_production_call_site_ever_revokes_workspace_trust() {
+    let occurrences = count_occurrences_in_crate(".revoke_project_trust(");
+    assert_eq!(
+        occurrences,
+        vec![("shell.rs".to_string(), 1)],
+        "exactly this one file may ever call AuditCoordinator::revoke_project_trust: {occurrences:?}"
+    );
+}
+
+/// RFC-032: the same needle-counting scan
+/// `only_one_production_call_site_ever_restores_a_projects_trust_state`
+/// (`tekstide-core`) uses, built on this file's own pre-existing
+/// `crate_src_dir`/`collect_rs_files` walk (the "Mechanical seam scans"
+/// section above) rather than a second copy of that directory walk.
+fn count_occurrences_in_crate(needle: &str) -> Vec<(String, usize)> {
+    let mut files = Vec::new();
+    collect_rs_files(&crate_src_dir(), &mut files);
+
+    let mut counts: Vec<(String, usize)> = files
+        .into_iter()
+        .filter_map(|path| {
+            let relative = relative_to_src(&path);
+            if relative.contains("/tests/") || relative.ends_with("tests.rs") {
+                return None;
+            }
+            let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
+            let count = source.matches(needle).count();
+            (count > 0).then_some((relative, count))
+        })
+        .collect();
+    counts.sort();
+    counts
+}
+
+fn relative_to_src(path: &Path) -> String {
+    path.strip_prefix(crate_src_dir())
+        .expect("file must be under src/")
+        .to_str()
+        .expect("path must be valid UTF-8")
+        .replace(std::path::MAIN_SEPARATOR, "/")
+}
+
+/// The route: `NavigationAction::OpenTrustSettings`, dispatched the real
+/// way (through `update`'s `Shell` arm, not a bypass), reaches
+/// `ProjectOpenSurface::TrustSettings` and lands in Content mode -- the
+/// second real `open_surface`-conditional route after `OpenApprovalHistory`.
+#[test]
+fn open_trust_settings_shell_input_routes_to_the_trust_settings_surface() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("open-trust-settings");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenTrustSettings,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    assert_eq!(
+        project.open_surface(),
+        tekstide_core::project::ProjectOpenSurface::TrustSettings
+    );
+    assert_eq!(project.mode(), tekstide_core::project::ProjectMode::Content);
+}
+
+fn state_with_a_real_project(label: &str) -> (State, tekstide_core::project::ProjectId) {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir(label);
+    let project_id = match app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root")
+    {
+        tekstide_core::app::AddProjectOutcome::Added(id) => id,
+        tekstide_core::app::AddProjectOutcome::FocusedExisting(id) => id,
+    };
+    (state_with(app_shell), project_id)
+}
+
+/// `Message::OpenTrustGrantDialog` opens the real dialog, focus
+/// defaulting to `Cancel` -- `what-the-trust-dialog-must-say.md` §2, the
+/// larger asymmetry than the paste dialog's own default. Activating it
+/// on `Cancel` (the default, i.e. Escape's equivalent reachable via
+/// Enter too) grants nothing and simply closes.
+#[test]
+fn trust_grant_dialog_defaults_focus_to_cancel_and_activating_it_grants_nothing() {
+    let (mut state, project_id) = state_with_a_real_project("trust-dialog-cancel-default");
+
+    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    match state.modal.as_ref() {
+        Some(ModalContent::TrustGrant(modal)) => {
+            assert_eq!(modal.focus, TrustGrantButton::Cancel);
+        }
+        other => panic!("expected an open TrustGrant dialog, got {other:?}"),
+    }
+
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert!(state.modal.is_none(), "activating must close the dialog");
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Restricted",
+        "activating on the default Cancel focus must not grant anything"
+    );
+}
+
+/// The other half: granting needs **two deliberate acts** -- moving
+/// focus (`ModalFocusNext`, Tab's real handler) and then activating
+/// (`ModalActivate`, Enter's) -- not one. Only then does the real,
+/// audited grant happen.
+#[test]
+fn trust_grant_dialog_requires_moving_focus_and_activating_to_grant() {
+    let (mut state, project_id) = state_with_a_real_project("trust-dialog-grant-two-acts");
+
+    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    match state.modal.as_ref() {
+        Some(ModalContent::TrustGrant(modal)) => {
+            assert_eq!(modal.focus, TrustGrantButton::Grant);
+        }
+        other => panic!("expected an open TrustGrant dialog, got {other:?}"),
+    }
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert!(state.modal.is_none(), "activating must close the dialog");
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "moving focus to Grant and activating must grant trust for real"
+    );
+}
+
+/// `open_approval_history_entry`'s own "never replace an open modal"
+/// rule, applied to this dialog's own manual-open call site.
+#[test]
+fn open_trust_grant_dialog_does_not_replace_an_already_open_modal() {
+    let (mut state, _project_id) = state_with_a_real_project("trust-dialog-modal-exclusivity");
+    state.modal = Some(ModalContent::LayerDemo {
+        focus: ModalButton::Dismiss,
+    });
+
+    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+
+    assert!(
+        matches!(state.modal, Some(ModalContent::LayerDemo { .. })),
+        "an already-open modal must not be replaced"
+    );
+}
+
+/// **Audit records queried and asserted, not implied**
+/// (`task-breakdown-pr-plan.md`'s own PR-032-C gate item, "the way
+/// RFC-022's `command_approval` assertion did"): a real grant through
+/// the real route writes both the `Authorized` and `Applied`
+/// `TrustGrant` records, sharing one `operation_id`, in that order.
+#[test]
+fn granting_trust_through_the_real_route_records_both_audit_records() {
+    let (mut state, project_id) = state_with_a_real_project("trust-grant-audit-records");
+
+    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let mut records = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .expect("querying the real audit store must succeed")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .filter(|record| record.project_id.as_ref() == Some(&project_id))
+        .collect::<Vec<_>>();
+    // Ascending by the order they were written, since `latest` returns
+    // newest-first.
+    records.reverse();
+
+    assert_eq!(
+        records.len(),
+        2,
+        "a real grant must write exactly two records for this project: {records:?}"
+    );
+    assert_eq!(
+        records[0].family,
+        tekstide_core::audit::AuditEventFamily::TrustChange
+    );
+    assert_eq!(
+        records[0].action_kind,
+        tekstide_core::audit::AuditActionKind::TrustGrant
+    );
+    assert_eq!(
+        records[0].outcome,
+        tekstide_core::audit::AuditOutcome::Authorized
+    );
+    assert_eq!(
+        records[1].action_kind,
+        tekstide_core::audit::AuditActionKind::TrustGrant
+    );
+    assert_eq!(
+        records[1].outcome,
+        tekstide_core::audit::AuditOutcome::Applied
+    );
+    assert_eq!(
+        records[0].operation_id, records[1].operation_id,
+        "the authorization and its application must share one operation_id"
+    );
+    assert!(records[0].operation_id.is_some());
+}
+
+/// The revoke half: a single `Applied` `TrustRevoke` record, no
+/// `Authorized` phase (`revoke_project_trust`'s own single-phase shape,
+/// `valid_trust_change`'s own requirement that a `TrustRevoke` record
+/// carry no `operation_id`).
+#[test]
+fn revoking_trust_through_the_real_route_records_a_single_applied_record() {
+    let (mut state, project_id) = state_with_a_real_project("trust-revoke-audit-records");
+    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let _ = super::update(&mut state, Message::ModalActivate);
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "test precondition: the project must be trusted before revoking it"
+    );
+
+    let _ = super::update(&mut state, Message::RevokeWorkspaceTrust);
+
+    assert_ne!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "revocation must actually take effect"
+    );
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let revoke_records = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .expect("querying the real audit store must succeed")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .filter(|record| {
+            record.project_id.as_ref() == Some(&project_id)
+                && record.action_kind == tekstide_core::audit::AuditActionKind::TrustRevoke
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        revoke_records.len(),
+        1,
+        "revoking must write exactly one record: {revoke_records:?}"
+    );
+    assert_eq!(
+        revoke_records[0].outcome,
+        tekstide_core::audit::AuditOutcome::Applied
+    );
+    assert!(
+        revoke_records[0].operation_id.is_none(),
+        "a TrustRevoke record must carry no operation_id"
+    );
+}
+
+/// **Comparably reachable** (`what-the-trust-dialog-must-say.md` §5):
+/// both controls live on the one `TrustSettings` surface, so both are
+/// exactly one `NavigationAction::OpenTrustSettings` away -- never both
+/// visible at once (nothing to grant while already trusted, nothing to
+/// revoke while not), proving the surface actually switches which
+/// control it offers rather than requiring a deeper path for one than
+/// the other.
+#[test]
+fn trust_settings_surface_offers_grant_when_restricted_and_revoke_when_trusted() {
+    let (mut state, project_id) = state_with_a_real_project("trust-settings-comparable-reach");
+
+    // `trust_settings_view` returns an `iced::Element`, not inspectable
+    // text directly -- assert on the catalog-rendered strings its own
+    // buttons are built from instead, the same "assert on the resolved
+    // text, not the widget tree" shape this crate's other dialog tests
+    // already use.
+    assert_eq!(
+        state.catalog.get("trust-settings-grant-button"),
+        "Grant Trust…"
+    );
+    assert_eq!(
+        state.catalog.get("trust-settings-revoke-button"),
+        "Revoke Trust"
+    );
+
+    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let _ = super::update(&mut state, Message::ModalActivate);
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted"
+    );
+    // Both controls are reached through the identical
+    // `NavigationAction::OpenTrustSettings` route -- one action, either
+    // direction -- confirmed by dispatching it again post-grant and
+    // finding the same surface still open (RFC-032's own "comparably
+    // reachable" requirement is about navigation depth to the surface,
+    // not about the grant dialog's own two-act confirmation, which is a
+    // deliberate asymmetry in the *action*, not the *path*).
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenTrustSettings,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .open_surface(),
+        tekstide_core::project::ProjectOpenSurface::TrustSettings
+    );
+}
+
+fn trust_grant_modal_fixture(root_path: &str, canonical_root_path: &str) -> super::TrustGrantModal {
+    super::TrustGrantModal {
+        project_id: tekstide_core::project::ProjectId::new_uuid(),
+        root_path: PathBuf::from(root_path),
+        canonical_root_path: PathBuf::from(canonical_root_path),
+        focus: TrustGrantButton::Cancel,
+    }
+}
+
+/// **The falsifiable claim `what-the-trust-dialog-must-say.md` §1 owes
+/// evidence for**: a project directory name containing a bidi override
+/// renders visibly as an escape marker.
+///
+/// **Ablated**: temporarily replaced `trust_grant_dialog_paths`'s
+/// `quote_untrusted(&modal.canonical_root_path.display().to_string())`
+/// call with a raw `.display().to_string()`, ran this test -- it failed,
+/// with the raw override character present in the panic's own printed
+/// output, confirming the assertion actually exercises the escaping path.
+/// Reverted before commit.
+#[test]
+fn trust_grant_dialog_escapes_a_bidi_override_in_the_canonical_path() {
+    let modal = trust_grant_modal_fixture(
+        "/home/user/work/safe-project",
+        "/home/user/work/safe-project\u{202E}gpj",
+    );
+
+    let (canonical, _secondary) = super::trust_grant_dialog_paths(&modal);
+
+    assert!(
+        canonical.as_str().contains("<U+202E>"),
+        "expected the escaped marker in {canonical:?}"
+    );
+    assert!(
+        !canonical.as_str().contains('\u{202E}'),
+        "the raw override character must never reach the dialog, got {canonical:?}"
+    );
+}
+
+/// No double-escaping: literal marker-shaped text (not a real override
+/// character) must survive unmangled, the same idempotency property
+/// `approval_dialog_body_does_not_double_escape_literal_marker_text_in_the_cwd`
+/// already proves for a different dialog.
+#[test]
+fn trust_grant_dialog_body_does_not_double_escape_literal_marker_text() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let modal = trust_grant_modal_fixture(
+        "/home/user/<U+202E>-literally-not-an-override",
+        "/home/user/<U+202E>-literally-not-an-override",
+    );
+
+    let body = trust_grant_dialog_body(&catalog, &modal);
+
+    assert!(
+        body.contains("<U+202E>-literally-not-an-override"),
+        "literal marker-shaped text must survive unmangled, got {body:?}"
+    );
+}
+
+/// "Show both when they differ": a symlinked project (root path !=
+/// canonical path) must show both, escaped independently.
+#[test]
+fn trust_grant_dialog_paths_shows_both_when_root_and_canonical_differ() {
+    let modal = trust_grant_modal_fixture("/home/user/work/link", "/mnt/data/work/real-project");
+
+    let (canonical, secondary) = super::trust_grant_dialog_paths(&modal);
+
+    assert_eq!(
+        canonical.as_str(),
+        format!("{ISOLATE_START}/mnt/data/work/real-project{ISOLATE_END}")
+    );
+    assert_eq!(
+        secondary.map(|root| root.as_str().to_string()),
+        Some(format!("{ISOLATE_START}/home/user/work/link{ISOLATE_END}"))
+    );
+}
+
+#[test]
+fn trust_grant_dialog_paths_shows_only_the_canonical_path_when_they_match() {
+    let modal = trust_grant_modal_fixture("/home/user/work/project", "/home/user/work/project");
+
+    let (_canonical, secondary) = super::trust_grant_dialog_paths(&modal);
+
+    assert_eq!(
+        secondary, None,
+        "an unsymlinked project must not show a second, identical path"
+    );
+}
+
+/// `what-the-trust-dialog-must-say.md` §3: the canonical sentence,
+/// reproduced verbatim from `docs/src/contributors/security-decisions.md`
+/// -- "use it, or improve it and change the page too; do not let a
+/// second, weaker wording exist alongside it."
+#[test]
+fn trust_grant_dialog_body_contains_the_canonical_sentence_verbatim() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let modal = trust_grant_modal_fixture("/home/user/project", "/home/user/project");
+
+    let body = trust_grant_dialog_body(&catalog, &modal);
+
+    assert!(
+        body.contains(
+            "Files inside the trusted folder may configure Tekstide and cause programs to run."
+        ),
+        "the canonical sentence must appear verbatim, got {body:?}"
+    );
+}
+
+/// `what-the-trust-dialog-must-say.md` §4: the grant covers files not
+/// yet written, including an AI agent's own output, across every future
+/// session -- the one consequence a reasonable person would not infer,
+/// stated rather than left implicit.
+#[test]
+fn trust_grant_dialog_body_states_the_present_and_future_consequence() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let modal = trust_grant_modal_fixture("/home/user/project", "/home/user/project");
+
+    let body = trust_grant_dialog_body(&catalog, &modal);
+
+    assert!(
+        body.to_lowercase().contains("future")
+            && body.to_lowercase().contains("agent")
+            && body.to_lowercase().contains("every session"),
+        "must name that the grant covers future files (including an agent's own output) across \
+         every future session, got {body:?}"
+    );
+}
+
+/// `what-the-trust-dialog-must-say.md` §3: "do not enumerate the nine
+/// features in the dialog." None of `RestrictedModeFeature::ALL`'s own
+/// words appear.
+#[test]
+fn trust_grant_dialog_body_does_not_enumerate_the_nine_restricted_features() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let modal = trust_grant_modal_fixture("/home/user/project", "/home/user/project");
+
+    let body = trust_grant_dialog_body(&catalog, &modal).to_lowercase();
+
+    for feature in tekstide_core::security::RestrictedModeFeature::ALL {
+        assert!(
+            !body.contains(&feature.label().to_lowercase()),
+            "the dialog must not enumerate individual restricted features -- found {:?} in \
+             {body:?}",
+            feature.label()
+        );
+    }
+}
+
+/// `what-the-trust-dialog-must-say.md` §6: none of the three forbidden
+/// claims -- that trusting is safe, that Tekstide polices what runs, or
+/// that revoking undoes what already ran.
+#[test]
+fn trust_grant_dialog_body_makes_none_of_the_three_forbidden_claims() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let modal = trust_grant_modal_fixture("/home/user/project", "/home/user/project");
+
+    let body = trust_grant_dialog_body(&catalog, &modal).to_lowercase();
+
+    assert!(
+        !body.contains("is safe") && !body.contains("safely"),
+        "must not claim trusting is safe: {body:?}"
+    );
+    assert!(
+        !body.contains("tekstide will police")
+            && !body.contains("tekstide polices")
+            && !body.contains("intercept"),
+        "must not claim Tekstide polices what runs: {body:?}"
+    );
+    assert!(
+        body.contains("does not undo"),
+        "must state plainly that revoking does not undo what already ran, got {body:?}"
     );
 }
 
@@ -2366,6 +2914,118 @@ fn attempt_agent_run_launch_with_profile_spawns_registers_and_selects_a_real_run
         project.selected_agent_run(),
         Some(&run.id),
         "the just-launched run must become the selected one"
+    );
+}
+
+/// **Response 247's required proof**: not "the trust flag changed," but
+/// the actual chain trust was blocking -- grant trust through the real
+/// production route (`Message::OpenTrustGrantDialog`/`ModalActivate`,
+/// the same as every other test in this section), then launch a
+/// profile whose `workspace_discovery_policy` is `MayDiscoverWorkspaceFiles`
+/// (the same shape `claude_code_linux_default`'s own honest policy uses,
+/// which is what `agent_run_launch_shell_input_switches_to_terminal_immersion_and_shows_the_real_trust_refusal`
+/// above proves refuses in a fresh, untrusted project) and confirm a
+/// real process actually spawns.
+///
+/// **Before** granting: refused with `WorkspaceDiscoveryBlocked`, the
+/// exact same refusal the sibling test above proves for the real
+/// `claude_code_linux_default` profile -- this test's own custom profile
+/// reaches the identical gate, not a different one, before diverging
+/// only in what happens *after* a real grant.
+///
+/// **After** granting: `attempt_agent_run_launch_with_profile`'s own
+/// full production chain (validate, spawn, register, select) succeeds
+/// against a real, controlled test executable -- the same "real spawn
+/// machinery, controlled test artifact" shape
+/// `attempt_agent_run_launch_with_profile_spawns_registers_and_selects_a_real_run`
+/// above already uses, not the live product (interactive auth, real
+/// network calls, unsafe for an automated test).
+#[test]
+fn granting_trust_through_the_real_route_unblocks_a_real_agent_run_launch() {
+    let (mut state, project_id) = state_with_a_real_project("trust-unblocks-agent-run");
+
+    let bin_dir = fresh_project_dir("trust-unblocks-agent-run-bin");
+    let executable = bin_dir.join("fake-ai-cli");
+    std::fs::write(&executable, "#!/bin/sh\n").expect("test executable should be written");
+    let mut permissions = std::fs::metadata(&executable)
+        .expect("test executable metadata should be readable")
+        .permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions)
+        .expect("test executable permissions should be set");
+
+    let mut profile = tekstide_core::agent::AiCliProfile::new(
+        "fake-ai-cli-workspace-discovery",
+        "Fake AI CLI (workspace discovery)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: executable,
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+    // The one field that makes this profile trust-gated -- everything
+    // else (`source: BuiltIn`, `prompt_policy: Interactive`,
+    // `environment_policy: Minimal`, all `AiCliProfile::new`'s own
+    // defaults) already passes `validate_profile_source`/
+    // `validate_prompt_policy`/`validate_environment_policy` regardless
+    // of trust, so this is genuinely isolating the one gate this test
+    // means to prove, not incidentally exercising others too.
+    profile.workspace_discovery_policy =
+        tekstide_core::agent::AiCliWorkspaceDiscoveryPolicy::MayDiscoverWorkspaceFiles {
+            summary: "test fixture: reads workspace files".to_owned(),
+        };
+
+    let refusal = attempt_agent_run_launch_with_profile(&mut state, profile.clone())
+        .expect_err("an untrusted project must still refuse this profile");
+    assert!(
+        matches!(
+            refusal,
+            AgentRunLaunchRefusal::Validation(
+                tekstide_core::agent::AgentRunLaunchValidationError::WorkspaceDiscoveryBlocked { .. }
+            )
+        ),
+        "test precondition: must refuse with WorkspaceDiscoveryBlocked before granting, got \
+         {refusal:?}"
+    );
+    assert_eq!(
+        state.terminal_panes.len(),
+        0,
+        "a refusal must not add a pane"
+    );
+
+    // The real grant, through the real route -- not `grant_trust` called
+    // directly, not a test-only bypass.
+    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let _ = super::update(&mut state, Message::ModalActivate);
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "test precondition: the real grant must have taken effect"
+    );
+
+    attempt_agent_run_launch_with_profile(&mut state, profile)
+        .expect("the identical profile must now launch for real, once trust is granted");
+
+    assert_eq!(
+        state.terminal_panes.len(),
+        1,
+        "a real grant must genuinely unblock a real launch, not merely flip the trust flag"
+    );
+    let project = state.app_shell.state().active_project().unwrap();
+    assert_eq!(project.agent_runs().len(), 1);
+    assert_eq!(
+        project.agent_runs()[0].status,
+        tekstide_core::domain::AgentRunStatus::Running,
+        "the run the previously-blocking gate now allows must actually be running, not just \
+         validated"
     );
 }
 

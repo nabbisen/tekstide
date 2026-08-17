@@ -108,14 +108,71 @@ fn restored_stale_recent_project_is_displayed_without_active_session() {
         view_model.rows[0].availability_label.as_deref(),
         Some("Folder missing")
     );
+    // RFC-032: `recent_project_row` now reads the real cached
+    // `trust_state` (was hardcoded `Restricted` regardless of input --
+    // PR-032-B's own evidence flagged this as a real, separate gap left
+    // for this slice). This fixture's project is `Trusted` and its
+    // availability is `FolderMissing`, not `PathChanged`, so the cached
+    // value carries through -- a folder being missing says nothing about
+    // whether its canonical path would still match on reopen, unlike a
+    // detected redirect.
+    assert_eq!(view_model.rows[0].trust_label, "Trusted");
+    assert_eq!(view_model.rows[0].security_mode_label, "Trusted Mode");
+    assert!(!view_model.rows[0].restricted_mode);
+    assert_eq!(view_model.rows[0].blocked_automation_labels.len(), 0);
+    assert_eq!(view_model.rows[0].row_kind, BoardRowKind::RecentMissing);
+}
+
+/// RFC-032: the one case the real cached `trust_state` must **not**
+/// carry through to the board -- a cached `Trusted` project whose
+/// canonical path no longer matches (`PathChanged`) is a project
+/// `AppState::add_project_session`'s own canonical-path-keyed lookup
+/// (PR-032-B) would *not* restore trust for on reopen. Showing "Trusted"
+/// here would claim a grant reopening will not actually honour.
+#[test]
+fn a_cached_trusted_recent_project_with_a_changed_canonical_path_shows_restricted() {
+    let root = std::env::temp_dir().join(format!(
+        "tekstide-project-board-test-path-changed-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+
+    let mut state = AppState::default();
+    state.restore_recent_projects(RecentProjectState {
+        state_version: 1,
+        projects: vec![RecentProject::new(
+            ProjectId::for_test(1),
+            "Redirected Project",
+            root.clone(),
+            // A canonical path this real directory does not actually
+            // resolve to -- the same synthesized-mismatch shape
+            // `recent::tests::availability_reports_path_changed` already
+            // uses to trigger `RecentProjectAvailability::PathChanged`
+            // without needing a real symlink redirect for this
+            // display-only property.
+            root.join("stale-canonical-path"),
+            Timestamp::from_persisted("2026-07-04T00:00:00Z"),
+            WorkspaceTrust::Trusted,
+        )],
+    });
+
+    let view_model = ProjectBoardViewModel::from_app_state(&state);
+
+    assert_eq!(view_model.rows.len(), 1);
+    assert_eq!(
+        view_model.rows[0].availability_label.as_deref(),
+        Some("Path changed"),
+        "test precondition: the mismatch must actually trigger PathChanged"
+    );
     assert_eq!(view_model.rows[0].trust_label, "Restricted");
     assert_eq!(view_model.rows[0].security_mode_label, "Restricted Mode");
     assert!(view_model.rows[0].restricted_mode);
-    assert_eq!(
-        view_model.rows[0].blocked_automation_labels.len(),
-        RestrictedModeFeature::ALL.len()
-    );
-    assert_eq!(view_model.rows[0].row_kind, BoardRowKind::RecentMissing);
+
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 /// **status-mapping-honesty-fixes, Fix 1: `recent_project_row`'s own

@@ -145,6 +145,52 @@ pub(crate) struct PasteConfirmationModal {
     focus: PasteConfirmButton,
 }
 
+/// RFC-032, `what-the-trust-dialog-must-say.md` §2: "the safe thing here
+/// is not granting, and the asymmetry is larger [than the paste
+/// dialog's]." Same two-item cycle shape as `PasteConfirmButton` and the
+/// same reason for a distinct type: "Grant"/"Cancel" do not describe
+/// what another dialog's buttons decide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrustGrantButton {
+    Grant,
+    Cancel,
+}
+
+impl TrustGrantButton {
+    const ORDER: [TrustGrantButton; 2] = [TrustGrantButton::Grant, TrustGrantButton::Cancel];
+
+    fn next(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + 1) % Self::ORDER.len()]
+    }
+
+    fn previous(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + Self::ORDER.len() - 1) % Self::ORDER.len()]
+    }
+}
+
+/// RFC-032: the project a trust-grant dialog is deciding about.
+/// `root_path`/`canonical_root_path` are captured once, at open time,
+/// from the same `ProjectSession` fields the board and every other path
+/// display already reads -- not re-read live while the dialog is open,
+/// so what the user reads is exactly what `AuditCoordinator::grant_project_trust`
+/// is asked to authorise, the same "captured, not re-read" shape
+/// `ExternalChangeModal.relative_path` already uses.
+#[derive(Debug)]
+pub(crate) struct TrustGrantModal {
+    project_id: tekstide_core::project::ProjectId,
+    root_path: std::path::PathBuf,
+    canonical_root_path: std::path::PathBuf,
+    focus: TrustGrantButton,
+}
+
 /// RFC-019 PR-019-D: the reload/dismiss targets of the real external-
 /// change conflict dialog -- the same two-item cycle shape as
 /// `PasteConfirmButton`, a distinct type for the same reason: "Reload"/
@@ -391,6 +437,15 @@ pub(crate) enum ModalContent {
     // full `ApprovalRequest`, the same reason `ReceiveOutcome::Created`
     // boxes its own copy.
     Approval(Box<ApprovalDialog>),
+    /// RFC-032: "the most consequential single click in this
+    /// application" (`what-the-trust-dialog-must-say.md`). Always
+    /// opened manually, from a control on the `TrustSettings` surface
+    /// (`Message::OpenTrustGrantDialog`) -- never automatically, unlike
+    /// `Approval` above. Only `Grant` is a real decision; `Cancel`, like
+    /// `ModalDismiss`/Escape, closes without granting anything -- the
+    /// paste dialog's shape, not the approval dialog's (both of that
+    /// one's buttons are real decisions).
+    TrustGrant(TrustGrantModal),
 }
 
 impl Default for ModalContent {
@@ -770,6 +825,20 @@ pub enum Message {
     /// formula, one application point, whether the size came from
     /// opening or from resizing.
     WindowOpened(iced::window::Id),
+    /// RFC-032: fired by the `TrustSettings` surface's own "Grant"
+    /// control -- opens the real confirmation dialog. No I/O here; the
+    /// real grant only happens on `ModalActivate` with focus on `Grant`
+    /// (see `TrustGrantModal`'s own doc for why this dialog is not
+    /// folded into `AppCommand::OpenActiveProjectSurface` the way
+    /// opening the surface itself is).
+    OpenTrustGrantDialog,
+    /// RFC-032: fired by the `TrustSettings` surface's own "Revoke"
+    /// control. Unlike granting, revocation has no confirmation dialog
+    /// of its own -- `what-the-trust-dialog-must-say.md` §5 requires
+    /// revoking to be *reachable*, not gated the way the RFC's own
+    /// larger, harder-to-undo grant is; this is the direct, one-action
+    /// path that makes it so.
+    RevokeWorkspaceTrust,
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -991,6 +1060,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::PasteConfirmation(modal)) => modal.focus = modal.focus.next(),
             Some(ModalContent::ExternalChange(modal)) => modal.focus = modal.focus.next(),
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.next(),
+            Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.next(),
             None => {}
         },
         Message::ModalFocusPrevious => match state.modal.as_mut() {
@@ -998,6 +1068,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::PasteConfirmation(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::ExternalChange(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.previous(),
+            Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.previous(),
             None => {}
         },
         // RFC-018 PR-018-C: the layer-demo placeholder still has no
@@ -1048,9 +1119,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     };
                     decide_approval(state, *dialog, decision);
                 }
+                // RFC-032: the paste dialog's shape, not the approval
+                // dialog's -- only `Grant` is a real decision. Any other
+                // focus (`Cancel`), or `ModalDismiss` (Escape) below,
+                // closes without granting anything.
+                Some(ModalContent::TrustGrant(modal)) if modal.focus == TrustGrantButton::Grant => {
+                    apply_workspace_trust_grant(state, &modal);
+                }
                 Some(ModalContent::LayerDemo { .. })
                 | Some(ModalContent::PasteConfirmation(_))
                 | Some(ModalContent::ExternalChange(_))
+                | Some(ModalContent::TrustGrant(_))
                 | None => {}
             }
             // RFC-022 PR-022-E, response 227: re-evaluate after every
@@ -1187,6 +1266,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::WindowOpened(id) => {
             return iced::window::size(id).map(Message::WindowResized);
+        }
+        Message::OpenTrustGrantDialog => {
+            open_trust_grant_dialog(state);
+        }
+        Message::RevokeWorkspaceTrust => {
+            revoke_workspace_trust(state);
         }
     }
     Task::none()
@@ -2200,9 +2285,13 @@ fn trusted_ui_state(state: &State) -> TerminalTrustedUiState {
         // variant, defined by RFC-021 ahead of this dialog actually
         // existing.
         Some(ModalContent::Approval(_)) => TerminalTrustedUiState::ApprovalActive,
-        Some(ModalContent::LayerDemo { .. }) | Some(ModalContent::ExternalChange(_)) => {
-            TerminalTrustedUiState::SecurityDialogActive
-        }
+        // RFC-032: the trust-grant dialog falls into the same generic
+        // bucket `LayerDemo`/`ExternalChange` already share -- it is not
+        // a terminal-paste concern any more than those are, but modal
+        // exclusivity still needs it to read as active, not `Inactive`.
+        Some(ModalContent::LayerDemo { .. })
+        | Some(ModalContent::ExternalChange(_))
+        | Some(ModalContent::TrustGrant(_)) => TerminalTrustedUiState::SecurityDialogActive,
     }
 }
 
@@ -2696,6 +2785,15 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         NavigationAction::OpenApprovalHistory => Some(AppCommand::OpenActiveProjectSurface(
             ProjectOpenSurface::ApprovalHistory,
         )),
+        // RFC-032: the second real `open_surface`-conditional dispatch,
+        // the same "no I/O, no `update` special-case" shape as
+        // `OpenApprovalHistory` immediately above -- granting/revoking
+        // themselves are the I/O, dispatched from controls *within* the
+        // `TrustSettings` surface (`Message::OpenTrustGrantDialog`/
+        // `Message::RevokeWorkspaceTrust`), not from opening the surface.
+        NavigationAction::OpenTrustSettings => Some(AppCommand::OpenActiveProjectSurface(
+            ProjectOpenSurface::TrustSettings,
+        )),
         // RFC-018 PR-018-B: paste needs no core route/mode change --
         // `update`'s `Shell` arm special-cases it directly, the same
         // shape `LaunchTerminal` uses for the half of its own work that
@@ -2777,6 +2875,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
                 external_change_modal_view(state, external_change_modal)
             }
             ModalContent::Approval(dialog) => approval_dialog_view(state, dialog),
+            ModalContent::TrustGrant(modal) => trust_grant_dialog_view(state, modal),
         };
         let scrim = center(modal_view).style(modal_scrim_style(state.theme));
         stack![base, opaque(scrim)].into()
@@ -3339,6 +3438,11 @@ fn content_mode_view(state: &State) -> Element<'_, Message> {
         .active_project()
         .map(tekstide_core::project::ProjectSession::open_surface);
     match open_surface {
+        // RFC-032: the second real `open_surface`-conditional arm, after
+        // `ApprovalHistory` -- `surface_renders_editor` still decides
+        // *whether* a surface is one of these (response 235's one
+        // predicate, unchanged); this inner match decides *which* one.
+        Some(ProjectOpenSurface::TrustSettings) => trust_settings_view(state),
         Some(surface) if !surface_renders_editor(surface) => approval_history_view(state),
         Some(_) | None => content_mode_editor_view(state),
     }
@@ -4100,6 +4204,80 @@ fn decide_approval(
     }
 }
 
+/// RFC-032: manual open from the `TrustSettings` surface --
+/// `Message::OpenTrustGrantDialog`'s handler. The same "never replace an
+/// open modal" correctness rule `open_approval_history_entry` checks
+/// first, for the same reason: the user's place in another decision is
+/// not this surface's to discard. Captures the active project's paths
+/// at open time (`TrustGrantModal`'s own doc explains why), and defaults
+/// focus to `Cancel` -- `what-the-trust-dialog-must-say.md` §2, the
+/// larger asymmetry than the paste dialog's own default-to-Reject.
+fn open_trust_grant_dialog(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    state.modal = Some(ModalContent::TrustGrant(TrustGrantModal {
+        project_id: project.id().clone(),
+        root_path: project.root_path().clone(),
+        canonical_root_path: project.canonical_root_path().clone(),
+        focus: TrustGrantButton::Cancel,
+    }));
+}
+
+/// RFC-032: `ModalActivate`'s handler when a trust-grant dialog's focus
+/// is on `Grant` -- the real, audited grant, through
+/// `AuditCoordinator::grant_project_trust`'s first production caller.
+/// Re-resolves the project by `modal.project_id` rather than assuming
+/// the active project is still the same one the dialog was opened
+/// against (nothing currently lets the active project change while a
+/// modal is open -- modal exclusivity precludes it -- but this does not
+/// rely on that holding, the same defensive-lookup shape `decide_approval`
+/// already uses for its own project id). A project that has since closed
+/// (or the audit store being unavailable) is a silent no-op: there is
+/// nothing left to grant trust *to*, matching `decide_approval`'s own
+/// "cannot record either way, leave state as it was" precedent.
+fn apply_workspace_trust_grant(state: &mut State, modal: &TrustGrantModal) {
+    let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
+        return;
+    };
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    let mut audit =
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health);
+    if let Some(project) = state.app_shell.state_mut().project_mut(&modal.project_id) {
+        let _ = audit.grant_project_trust(project);
+    }
+}
+
+/// RFC-032: `Message::RevokeWorkspaceTrust`'s handler -- the direct,
+/// undialogued path `what-the-trust-dialog-must-say.md` §5 requires for
+/// revocation, reached from the same `TrustSettings` surface granting is
+/// (comparable navigation depth; the *action* itself is deliberately
+/// simpler than granting's two-deliberate-acts dialog, since revoking is
+/// the safe direction). `AuditCoordinator::revoke_project_trust`'s first
+/// production caller.
+fn revoke_workspace_trust(state: &mut State) {
+    let Some(project_id) = state
+        .app_shell
+        .state()
+        .active_project()
+        .map(|project| project.id().clone())
+    else {
+        return;
+    };
+    let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
+        return;
+    };
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    let mut audit =
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health);
+    if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
+        let _ = audit.revoke_project_trust(project);
+    }
+}
+
 /// RFC-022 PR-022-E: a compile-time literal symbol for `RiskLevel`, the
 /// same `trusted_symbol` division of labour every other symbol-driven
 /// Fluent lookup in this file uses -- the words live in `en.ftl`'s
@@ -4204,6 +4382,74 @@ fn approval_dialog_view<'a>(state: &'a State, dialog: &'a ApprovalDialog) -> Ele
 /// constraint): each still-live entry gets its own, individual open
 /// control; nothing here selects more than one at a time or exposes a
 /// "decide all" action of any kind.
+/// RFC-032: `ProjectOpenSurface::TrustSettings`'s real view -- the
+/// active project's current trust state, and the one control that
+/// actually changes it: "Grant" (opens the confirmation dialog) when not
+/// `Trusted`, "Revoke" (direct, no dialog) when it is. Never both at
+/// once -- there is nothing to grant while already trusted, and nothing
+/// to revoke while not.
+fn trust_settings_view(state: &State) -> Element<'_, Message> {
+    let Some(project) = state.app_shell.state().active_project() else {
+        // Unreachable while routed to `ActiveProjectWorkspace`, the same
+        // "fail visible, not panic" fallback every other surface here
+        // uses for this case.
+        return text(state.catalog.get("trust-settings-empty"))
+            .size(state.theme.font_size_body())
+            .into();
+    };
+
+    let trust_state = project.trust_state();
+    let is_trusted = trust_state == tekstide_core::project::WorkspaceTrust::Trusted;
+
+    let mut lines: Vec<Element<'_, Message>> = vec![
+        text(state.catalog.get("trust-settings-heading"))
+            .size(state.theme.font_size_heading())
+            .into(),
+        text(state.catalog.get_with_args(
+            "trust-settings-current-state",
+            &CatalogArgs::new().trusted_symbol("state", trust_state_symbol(trust_state)),
+        ))
+        .size(state.theme.font_size_body())
+        .into(),
+    ];
+
+    if is_trusted {
+        lines.push(
+            button(
+                text(state.catalog.get("trust-settings-revoke-button"))
+                    .size(state.theme.font_size_body()),
+            )
+            .on_press(Message::RevokeWorkspaceTrust)
+            .into(),
+        );
+    } else {
+        lines.push(
+            button(
+                text(state.catalog.get("trust-settings-grant-button"))
+                    .size(state.theme.font_size_body()),
+            )
+            .on_press(Message::OpenTrustGrantDialog)
+            .into(),
+        );
+    }
+
+    column(lines).spacing(12).into()
+}
+
+/// A compile-time literal symbol for `WorkspaceTrust`, the same
+/// `trusted_symbol` division of labour `risk_level_symbol` already uses
+/// -- the words live in `en.ftl`'s `trust-settings-current-state` select
+/// expression, not here.
+fn trust_state_symbol(trust: tekstide_core::project::WorkspaceTrust) -> &'static str {
+    use tekstide_core::project::WorkspaceTrust;
+    match trust {
+        WorkspaceTrust::Unknown => "unknown",
+        WorkspaceTrust::Restricted => "restricted",
+        WorkspaceTrust::Trusted => "trusted",
+        WorkspaceTrust::Revoked => "revoked",
+    }
+}
+
 fn approval_history_view(state: &State) -> Element<'_, Message> {
     let Some(project) = state.app_shell.state().active_project() else {
         // Unreachable while routed to `ActiveProjectWorkspace` (core
@@ -4353,6 +4599,84 @@ fn approval_history_entry_state_symbol(
         ApprovalDecision::Rejected => "rejected",
         ApprovalDecision::EditedAndApproved => "edited-and-approved",
     }
+}
+
+/// RFC-032, `what-the-trust-dialog-must-say.md` §1: escapes the paths
+/// this dialog renders at the widget (`text_safety::quote_untrusted`,
+/// the same primitive every other untrusted-text site in this crate
+/// uses -- no second one). Factored out from [`trust_grant_dialog_body`]
+/// so both are directly testable without going through `iced`'s
+/// `Element` tree, the same shape `paste_preview`/`approval_dialog_body`
+/// already use.
+///
+/// Returns the escaped **canonical** path -- what trust actually binds
+/// to (`docs/src/contributors/security-decisions.md`) -- and, only when
+/// it differs from the escaped root path, the escaped root path too:
+/// "show both when they differ," per that same handoff item, for the
+/// symlinked-project case.
+fn trust_grant_dialog_paths(
+    modal: &TrustGrantModal,
+) -> (
+    tekstide_core::text_safety::DisplayText,
+    Option<tekstide_core::text_safety::DisplayText>,
+) {
+    let canonical = tekstide_core::text_safety::quote_untrusted(
+        &modal.canonical_root_path.display().to_string(),
+    );
+    let secondary = (modal.root_path != modal.canonical_root_path).then(|| {
+        tekstide_core::text_safety::quote_untrusted(&modal.root_path.display().to_string())
+    });
+    (canonical, secondary)
+}
+
+fn trust_grant_dialog_body(catalog: &Catalog, modal: &TrustGrantModal) -> String {
+    let (canonical, secondary) = trust_grant_dialog_paths(modal);
+    let mut body = catalog.get_with_args(
+        "trust-grant-dialog-body",
+        &CatalogArgs::new().untrusted("path", &canonical),
+    );
+    if let Some(root) = secondary {
+        body.push('\n');
+        body.push_str(&catalog.get_with_args(
+            "trust-grant-dialog-symlink-notice",
+            &CatalogArgs::new().untrusted("root_path", &root),
+        ));
+    }
+    body
+}
+
+/// RFC-032: the real trust-grant confirmation dialog --
+/// `what-the-trust-dialog-must-say.md`'s own review gate, item by item:
+/// the path is escaped at the widget and the canonical one is what's
+/// shown ([`trust_grant_dialog_paths`]); focus defaults to `Cancel`
+/// (`TrustGrantModal`'s own construction); the canonical sentence and
+/// the present-and-future consequence are in `trust-grant-dialog-body`
+/// verbatim, not paraphrased; the nine restricted-mode features are not
+/// enumerated anywhere here.
+fn trust_grant_dialog_view<'a>(
+    state: &'a State,
+    modal: &'a TrustGrantModal,
+) -> Element<'a, Message> {
+    let button_line = |target: TrustGrantButton, label_key: &str| {
+        let marker = if modal.focus == target { "> " } else { "  " };
+        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+    };
+
+    let lines: Vec<Element<'_, Message>> = vec![
+        text(state.catalog.get("trust-grant-dialog-title"))
+            .size(state.theme.font_size_heading())
+            .into(),
+        text(trust_grant_dialog_body(&state.catalog, modal))
+            .size(state.theme.font_size_body())
+            .into(),
+        button_line(TrustGrantButton::Grant, "trust-grant-dialog-grant").into(),
+        button_line(TrustGrantButton::Cancel, "trust-grant-dialog-cancel").into(),
+        text(state.catalog.get("trust-grant-dialog-hint"))
+            .size(state.theme.font_size_status())
+            .into(),
+    ];
+
+    modal_dialog_box(state, column(lines).spacing(10).into())
 }
 
 fn external_change_modal_view<'a>(

@@ -410,3 +410,44 @@ approval-history-entry = { $command }
        *[unknown] Unknown
     }
 approval-history-entry-open = Open
+
+# RFC-032: `ProjectOpenSurface::TrustSettings`'s own view. `$state` is a
+# compile-time literal symbol (`trust_state_symbol`), never
+# `WorkspaceTrust`'s own `Debug` text.
+trust-settings-empty = No active project.
+trust-settings-heading = Workspace Trust
+trust-settings-current-state = Current state: { $state ->
+    [trusted] Trusted
+    [revoked] Revoked (not currently trusted)
+   *[restricted] Restricted
+}
+trust-settings-grant-button = Grant Trust…
+trust-settings-revoke-button = Revoke Trust
+
+# RFC-032 `what-the-trust-dialog-must-say.md`: `$path` is the project's
+# **canonical** path -- what trust actually binds to
+# (`docs/src/contributors/security-decisions.md`) -- escaped via
+# `text_safety::quote_untrusted` before it ever reaches
+# `CatalogArgs::untrusted`, the same primitive every other untrusted-text
+# site in this crate uses. The canonical sentence (§3) is reproduced
+# verbatim from the decisions page, not paraphrased; the present-and-
+# future consequence (§4) and what revoking does and does not undo (§6)
+# are both stated explicitly rather than left to be inferred by
+# omission. The nine restricted-mode features are deliberately not
+# listed anywhere in this message (§3): nobody weighs a nine-item list
+# at a decision point.
+trust-grant-dialog-title = Grant Workspace Trust?
+trust-grant-dialog-body = { $path }
+
+    Files inside the trusted folder may configure Tekstide and cause programs to run.
+
+    This covers files written to this folder in the future too -- including anything an AI agent run here writes -- for this session and every session after, until you revoke it.
+
+    Revoking stops it from loading again; it does not undo anything that has already run.
+# Appended to `trust-grant-dialog-body` only when the project's root
+# path (as opened) differs from its canonical path -- `$root_path` is
+# escaped the same way `$path` above is.
+trust-grant-dialog-symlink-notice = You opened this project at { $root_path }, which resolves to the folder above.
+trust-grant-dialog-grant = Grant Trust
+trust-grant-dialog-cancel = Cancel
+trust-grant-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.

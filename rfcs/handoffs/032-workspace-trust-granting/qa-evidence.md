@@ -2,7 +2,7 @@
 title: "RFC-032: Workspace Trust Granting - QA Evidence"
 rfc: "RFC-032"
 rfc_file: "../../proposed/032-workspace-trust-granting.md"
-status: "In progress -- PR-032-B done, PR-032-C/D/E remaining"
+status: "In progress -- PR-032-B/C/D done, PR-032-E (closeout) remaining"
 target_milestone: "M11"
 created: "2026-08-17"
 ---
@@ -106,9 +106,8 @@ run three times for stability. `git diff --check` clean.
 
 ## PR-032-C - Grant, revoke, route
 
-**In progress. First increment done: the audit-authority fix response 245 required. Still
-pending: `grant_project_trust`/`revoke_trust`'s first production callers, the route through
-`ProjectOpenSurface::TrustSettings`, and the board reflecting trust state.**
+**Done, in two increments: the audit-authority fix (responses 245/246), then grant/revoke's
+production callers, the route, and the board (response 247's remaining scope, below).**
 
 ### The audit-authority fix (response 245)
 
@@ -175,16 +174,113 @@ preference: make the audit store authoritative, restoring trust only when a matc
 -- 1/1.
 `cargo test -p tekstide --bin tekstide shell::tests::verify_restored_trust` -- 4/4.
 
-### Not done yet
+### Grant, revoke, the route, and the board (response 247's remaining scope)
 
-`grant_project_trust`/`revoke_trust`'s first production callers, the route through
-`ProjectOpenSurface::TrustSettings`, "granting and revoking comparably reachable," and the board
-reflecting trust state (`ProjectBoardRow::trust_label` for a *recent*, not-yet-opened project
-still hardcodes `"Restricted"` -- flagged in PR-032-B's own evidence, owned here).
+Built together with PR-032-D's dialog (below) rather than as two separate commits -- response
+247 required proving the full chain end to end "in this slice," which needs a real, working
+confirmation dialog to exist, not only the mechanical plumbing around it.
+
+**Route**: `NavigationAction::OpenTrustSettings` (new, `Configurable`/`None` binding, the same
+shape every other navigation action without a default binding uses today) -> `AppCommand::OpenActiveProjectSurface(ProjectOpenSurface::TrustSettings)`
+-> `content_mode_view` now matches `TrustSettings` before falling back to
+`surface_renders_editor`'s boolean check, routing to a new `trust_settings_view` -- the second
+real `open_surface`-conditional dispatch after `ApprovalHistory`, reusing the one predicate
+rather than adding a parallel list.
+
+**Grant**: `trust_settings_view`'s "Grant Trust…" button fires `Message::OpenTrustGrantDialog`,
+which opens `ModalContent::TrustGrant` (focus defaulting to `Cancel`) -- guarded by the same
+"never replace an open modal" rule `open_approval_history_entry` already uses.
+`Message::ModalActivate`'s new arm only acts when focus is on `Grant`; any other focus, or
+`ModalDismiss`, closes without granting -- the paste dialog's shape (one real decision, one
+inert dismiss), not the approval dialog's (both buttons are decisions). The real grant goes
+through `AuditCoordinator::grant_project_trust`, its first production caller.
+
+**Revoke**: `trust_settings_view`'s "Revoke Trust" button fires `Message::RevokeWorkspaceTrust`
+directly -- no confirmation dialog, per `what-the-trust-dialog-must-say.md` §5 ("revoking must be
+as reachable as granting," not "as gated as granting" -- revocation is the safe direction).
+`AuditCoordinator::revoke_project_trust`'s first production caller.
+
+**Comparably reachable, stated precisely**: both controls live on the *same* `TrustSettings`
+surface, so reaching either starts from the identical one action
+(`NavigationAction::OpenTrustSettings`). From there: **Revoke is one further action** (click).
+**Grant is three** (open the dialog, move focus to `Grant`, activate) -- a real, deliberate
+asymmetry inside the security-sensitive action itself, not a difference in how deep either
+control is buried. Never both offered at once (nothing to grant while already trusted, nothing
+to revoke while not).
+
+**Board**: `recent_project_row` (`project_board.rs`) no longer hardcodes `"Restricted"` --
+reads the real cached `RecentProject.trust_state` (PR-032-B), except when `availability` is
+`PathChanged`, where it correctly shows `Restricted` regardless of the cached value (a
+canonical-path mismatch means reopening would not restore that cached trust either -- see
+`AppState::add_project_session`'s own lookup). Disclosed, not silently assumed complete: this is
+still the *cached* value for an unopened row, not one confirmed against the audit store the way
+`verify_restored_trust` confirms an *open* project's -- a last-known snapshot, the same status
+every other recent-only field already carries.
+
+### Evidence
+
+`crates/tekstide-core/src/project_board.rs`/`project_board/tests.rs`: the two stale fixtures
+PR-032-B's own evidence flagged (constructing a `Trusted` recent entry, asserting the old
+hardcoded `"Restricted"` label) now assert the real label; a new test proves the `PathChanged`
+suppression specifically, with a real-directory fixture.
+
+`crates/tekstide/src/shell/tests.rs` (23 new tests):
+
+- **Enumeration, both directions**: `only_one_production_call_site_ever_grants_workspace_trust`/
+  `..._revokes_workspace_trust` (response 246's own shape). **Ablated**: a throwaway second call
+  site added to each, confirmed both failed naming both files, reverted.
+- **The route**: `open_trust_settings_shell_input_routes_to_the_trust_settings_surface`.
+- **Modal exclusivity**: `open_trust_grant_dialog_does_not_replace_an_already_open_modal`.
+- **Focus defaults to `Cancel`; activating it grants nothing**:
+  `trust_grant_dialog_defaults_focus_to_cancel_and_activating_it_grants_nothing`.
+- **Granting needs both deliberate acts**:
+  `trust_grant_dialog_requires_moving_focus_and_activating_to_grant`.
+- **Audit records queried and asserted, not implied** (the gate's own words, "the way RFC-022's
+  `command_approval` assertion did"): `granting_trust_through_the_real_route_records_both_audit_records`
+  (Authorized then Applied, sharing one `operation_id`) and
+  `revoking_trust_through_the_real_route_records_a_single_applied_record` (one `Applied` record,
+  no `operation_id`).
+- **Comparable reachability**: `trust_settings_surface_offers_grant_when_restricted_and_revoke_when_trusted`.
+- **The dialog's own review gate, `what-the-trust-dialog-must-say.md` item by item**:
+  - §1, escaping: `trust_grant_dialog_escapes_a_bidi_override_in_the_canonical_path` (falsifiable
+    claim, **ablated** -- the real `quote_untrusted` call temporarily replaced with a raw one,
+    confirmed this test fails with the raw override character in the panic output, reverted).
+  - §1, no double-escaping: `trust_grant_dialog_body_does_not_double_escape_literal_marker_text`.
+  - §1, canonical path shown, both shown when they differ:
+    `trust_grant_dialog_paths_shows_both_when_root_and_canonical_differ`/
+    `..._shows_only_the_canonical_path_when_they_match`.
+  - §3, the canonical sentence verbatim:
+    `trust_grant_dialog_body_contains_the_canonical_sentence_verbatim`.
+  - §3, the nine features not enumerated:
+    `trust_grant_dialog_body_does_not_enumerate_the_nine_restricted_features` (checks every
+    `RestrictedModeFeature::ALL` label's absence, not a sample).
+  - §4, present and future: `trust_grant_dialog_body_states_the_present_and_future_consequence`.
+  - §6, none of the three forbidden claims:
+    `trust_grant_dialog_body_makes_none_of_the_three_forbidden_claims`.
+  - Modal exclusivity: covered by the same structural mechanism (`input::ModalAbsent`) every
+    other modal in this crate already proves against, unchanged by this addition -- `ModalContent::TrustGrant`
+    is one more arm inside the one type that mechanism gates on, not a parallel path.
+- **The chain, not the link** (response 247's own required addition):
+  `granting_trust_through_the_real_route_unblocks_a_real_agent_run_launch` -- refuses with
+  `WorkspaceDiscoveryBlocked` before granting (against a custom profile reaching the identical
+  gate `claude_code_linux_default` does), grants trust through the real dispatch chain (not
+  `grant_trust` called directly), then the *same* profile launches for real: a real controlled
+  test executable spawns, registers, and reaches `AgentRunStatus::Running` -- not merely that
+  `trust_state()` changed.
+
+`cargo test -p tekstide --bin tekstide shell::tests::` -- all passing (274 total in this crate).
+
+### Gates run
+
+`cargo fmt --all --check` clean. `cargo clippy --workspace --all-targets --all-features -- -D
+warnings` clean. `cargo test --workspace --all-targets --all-features`: 881 passed, 0 failed, run
+three times for stability. `git diff --check` clean. Orphaned test-spawned processes and scratch
+directories cleaned up after each run.
 
 ## PR-032-D - The dialog
 
-*Not started.*
+Built together with PR-032-C above -- see that section's evidence for the full,
+item-by-item accounting against `what-the-trust-dialog-must-say.md`'s own review gate.
 
 ## PR-032-E - Closeout
 

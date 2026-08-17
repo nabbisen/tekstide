@@ -170,10 +170,17 @@ const CORE_BLANKET_EXEMPT_FILES: &[&str] = &["shell.rs"];
 ///   `project_board.rs` at all.** For an *open* project, `trust_label`
 ///   is `project.trust_state().label()` --
 ///   `tekstide_core::project::metadata::WorkspaceTrust::label()`, a file
-///   the four-site table does not name. For a *recent, unopened*
-///   project, `recent_project_row` hardcodes `"Restricted"` directly.
-///   Both feed the same rendered field through two independent literal
-///   sources -- fixing one without the other would not close the gap.
+///   the four-site table does not name. **RFC-032 PR-032-C**: a *recent,
+///   unopened* project's `recent_project_row` used to hardcode
+///   `"Restricted"` directly regardless of the project's real cached
+///   trust state -- fixed to read `RecentProject.trust_state.label()`
+///   the same way `active_project_row` reads the live field, so both
+///   paths now go through the one producer
+///   (`WorkspaceTrust::label()`) instead of two independent literal
+///   sources that could disagree. `security_mode_label`'s literal
+///   (`"Restricted Mode"`/`"Trusted Mode"`) similarly now comes from
+///   `RestrictedModeSummary::from_trust` (`security.rs`, not one of this
+///   scan's target files) rather than being hardcoded here either.
 /// - **A fifth core site, not in the table**:
 ///   `ProjectBoardViewModel::from_app_state`'s `ProjectBoardEmptyState`
 ///   construction (`"No projects yet."`, `"Add Project"`,
@@ -190,10 +197,14 @@ const CORE_BLANKET_EXEMPT_FILES: &[&str] = &["shell.rs"];
 ///   catalog key directly from the `ProjectMode` enum, never calling
 ///   `.label()`, so neither producer is live.
 ///
-/// These corrections are raised as an open scope question in
-/// `qa-evidence.md`, per the handoff's own instruction for site 4 ("raise
-/// it as a scope question rather than absorbing it here") -- extended to
-/// cover what direct inspection actually found, not fixed in this slice.
+/// These corrections were raised as an open scope question in the
+/// RFC-016 handoff's own `qa-evidence.md`, per its instruction for site
+/// 4 ("raise it as a scope question rather than absorbing it here").
+/// The `trust_label`/`security_mode_label` two-literal-sources gap is
+/// now closed (RFC-032 PR-032-C, above); the remaining dormant/
+/// not-yet-live corrections (`CountDisplay`/`AttentionState` labels, the
+/// empty-state strings, `ProjectOpenSurface`/`ProjectMode::label()`)
+/// are unrelated to trust and still not fixed here.
 const CORE_EXEMPT_LITERALS: &[CoreExemptSite] = &[
     // project_board.rs -- CountDisplay::label. Dormant: response 130's
     // scan (`no_count_display_or_attention_label_is_called_anywhere_in_
@@ -223,14 +234,12 @@ const CORE_EXEMPT_LITERALS: &[CoreExemptSite] = &[
     CoreExemptSite::dormant("project_board.rs", "Folder missing"),
     CoreExemptSite::dormant("project_board.rs", "Cannot read folder"),
     CoreExemptSite::dormant("project_board.rs", "Path changed"),
-    // project_board.rs -- `recent_project_row`'s `trust_label` /
-    // `security_mode_label`. `trust_label`'s value here IS rendered
-    // (`board.rs:141`, for recent-but-unopened projects);
-    // `security_mode_label` is constructed alongside it but not read.
-    // Live, tracked, not fixed here -- see the open scope question
-    // above.
-    CoreExemptSite::live("project_board.rs", "Restricted"),
-    CoreExemptSite::live("project_board.rs", "Restricted Mode"),
+    // project_board.rs -- RFC-032 PR-032-C fixed both of
+    // `recent_project_row`'s hardcoded literals (`"Restricted"` /
+    // `"Restricted Mode"`) to read the real `RecentProject.trust_state`/
+    // `RestrictedModeSummary::from_trust` output instead, so neither
+    // literal exists in this file to exempt any more -- see the
+    // corrected bullet above.
     // project/metadata.rs -- WorkspaceTrust::label. The literal that
     // actually reaches a user for an *open* project's `trust_label`.
     // Live, tracked, not fixed here.
@@ -542,6 +551,13 @@ fn generic_args() -> CatalogArgs<'static> {
             &tekstide_core::text_safety::quote_untrusted("/fixture/cwd"),
         )
         .trusted_symbol("risk", "low")
+        // RFC-032: `trust-grant-dialog-symlink-notice`'s untrusted root
+        // path -- `trust-grant-dialog-body`'s own `$path` reuses the
+        // `path` arg already above, no new entry needed for it.
+        .untrusted(
+            "root_path",
+            &tekstide_core::text_safety::quote_untrusted("/fixture/root-path"),
+        )
 }
 
 fn shipped_additional_locales() -> Vec<String> {
