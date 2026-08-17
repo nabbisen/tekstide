@@ -432,9 +432,27 @@ by the reference adapter — a test artifact. The pathway is proven; the ecosyst
 exist. Anyone reading "command approval shipped" into this is reading more than the record
 says.
 
-**What it unblocks, precisely:** RFC-020's two surfaces become *reachable* rather than done —
-a real `AgentRun` can now be created, so the report and change-review surfaces have inputs
-that can exist. That is the blocker response 200 found, discharged.
+**What it unblocks — corrected 2026-08-17, hours after being written wrong.** The sentence
+here originally read that RFC-020's two surfaces become reachable because "a real `AgentRun`
+can now be created." **Both halves are false, and checking took one grep:**
+
+- **`add_detected_generated_change_set` still has zero production callers.** Nothing runs
+  change detection, so no `ChangeSet` can exist and RFC-020's change-review surface is
+  **still blocked**, exactly as response 200 found it.
+- **No `AgentRun` can be launched by a real user either.** `Ctrl+Alt+A` refuses with
+  `WorkspaceDiscoveryBlocked` for every project, because the Claude Code profile honestly
+  declares `MayDiscoverWorkspaceFiles` and every project is permanently `Restricted` —
+  `grant_project_trust` still has **zero production callers** (PR-022-D's finding,
+  re-verified).
+
+**So RFC-022 discharged a prerequisite without making anything user-reachable.** What it
+genuinely unblocked is narrower and worth stating exactly: the *machinery* for an `AgentRun`
+exists and is proven, so RFC-020's report surface has a code path that can produce inputs —
+once something can grant trust.
+
+This is the fourth time in this project that a claim about what is reachable was written
+without checking it against the code, and the third by this document's own author. The check
+is always cheap; the habit of writing the optimistic reading first is the defect.
 
 **Still open, and recorded rather than carried silently:**
 
