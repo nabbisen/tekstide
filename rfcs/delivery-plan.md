@@ -363,6 +363,16 @@ the previous "not met" only ever needed a *lower* one. See `future-work.md`
 criterion we cannot verify under our own measurement discipline should be restated in terms
 we can bound (RFC-015's `input-to-state-change`) or accepted as permanently unverified.
 
+**Corrected 2026-08-17: there was no open owner question, and the paragraph above states
+the boundary wrongly.** `NFR-PERF-004` already excludes compositor and GPU present time —
+its own text says so, made explicit 2026-08-15 by RFC-017 Amendment 1, and
+`ARCHITECTURE.md` §Evidence conventions applies the same rule to every `NFR-PERF-*`
+figure. The "upper bound on the end-to-end path" framing describes a superseded reading of
+the criterion. What remains is **a measurement**, on a machine that is not swapping, under
+the bounded-output load the requirement names — not a decision, and nothing from the
+owner. The stale note in `future-work.md` is corrected there too; both are kept rather
+than deleted because the correction is the record.
+
 **Decision 2 (adapter-spawn as M11 priority) has gained a hard prerequisite**, found while
 this work was underway: `TerminalReader` has no transcript hook, and the path that had one
 is no longer on the ingress. Recorded in `future-work.md` as blocking. Do not start
