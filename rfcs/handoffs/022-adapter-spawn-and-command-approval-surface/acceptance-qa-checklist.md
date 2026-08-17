@@ -73,8 +73,46 @@ Every unchecked line at closeout carries a stated reason.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted
+- [x] **Accepted** — 2026-08-17, response 239.
 - [ ] Accepted with required follow-up
 - [ ] Rejected
 
 Reviewer notes:
+
+**What was delivered, and what was not.** All six scope items are built and proven end to end
+against production code. **Command approval is not reachable by a real user, and cannot be** —
+no shipping AI CLI speaks RFC-021's protocol, so `Managed` is exercisable only by the
+reference adapter, a test artifact. That limitation is stated in the RFC's own Status, the
+pack's README, and the closeout, and it must not erode into "command approval works."
+
+**Accepted rather than accepted-with-follow-up** because the one unchecked line — PR-022-D's
+selected-run concept — is deliberately RFC-020's, not deferred work this RFC owes. The
+implementer declined to force it onto an unrelated line when the reviewer predicted two other
+gaps that turned out not to exist as checklist items; that correction is recorded rather than
+smoothed over.
+
+**Item 6** (the active-project-change promotion trigger) is blocked on project-switching
+existing anywhere in the GUI, re-verified rather than assumed, and the logic it would trigger
+is already unconditionally correct.
+
+**Two real shipped defects were found and fixed by building the first reader of dormant
+state** — `open_surface` clobbering, which had silently broken `OpenCurrentAgentRunDetail`
+since PR-022-D, and an editor keystroke leak into a hidden document. Neither was findable by
+inspection. That is the most transferable thing this RFC learned: dormant state is not merely
+untested, it is *actively corrupting*, because nothing audits its writers until something
+finally reads it.
+
+**The suite flake** is named (fork-then-exec fd inheritance), mitigated, and honestly recorded
+as statistically inconclusive at the sample taken. A reviewer hypothesis (fd exhaustion) was
+tested and **disproved**, and the disconfirmation is recorded as plainly as a confirmation
+would have been.
+
+**Non-claims held throughout**: no enforcement; no real-AI-CLI support; the capability token
+is not a security boundary; RFC-020's surfaces become *reachable*, not done.
+
+**On the review itself.** Four of five pack documents described themselves as unfinished at
+the first closeout attempt, including the evidence file that contained the closeout. Neither
+implementer nor reviewer checked front matter until the third pass — after the reviewer had
+named stale claims as the specific thing to look for. The lesson is recorded in the closeout:
+status metadata is what nobody re-reads, because it sits above the content people open the
+file for.
