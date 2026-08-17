@@ -24,7 +24,17 @@ This checklist applies before creating a tag or package for a Tekstide release.
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings`
 - [ ] `cargo build --release --locked`
 - [ ] `cargo package -p tekstide-core --locked`
-- [ ] `cargo package -p tekstide --locked`
+- [ ] `cargo package -p tekstide --locked --no-verify` — **`--no-verify` is required, not
+      optional.** Without it this gate **cannot pass** for any release that adds
+      `tekstide-core` API. The dependency is declared `version = "0"` (deliberately, for
+      development cost), so packaging `tekstide` alone resolves core from crates.io — the
+      *previous* release — and compiles the new binary against the old library. `0.10.0`
+      produced 31 errors this way, every one of them naming API that release had just
+      added. It is an artifact of the version range, not a defect, and the only thing
+      this gate can honestly check is package **contents**. Pairing is checked by the
+      workspace dry-run below, which is why that is the real gate. Do **not** "fix" a
+      failure here by pinning the dependency to the current minor version — that trade
+      was considered and rejected by the owner.
 - [ ] `cargo publish --workspace --dry-run --locked`
 
 For crates.io releases, use the workspace publish flow:
