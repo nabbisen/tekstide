@@ -76,6 +76,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | — | [Minimal user documentation](./handoffs/minimal-user-documentation.md) — no RFC; pulled forward from RFC-029 to M9 |
 | — | [The reachability audit](./handoffs/reachability-audit.md) — no RFC; scheduled 2026-08-17 |
 | — | [Terminal resize](./handoffs/terminal-resize.md) — no RFC; priority 1 from the audit, scheduled 2026-08-17 |
+| — | [Change detection wiring](./handoffs/change-detection-wiring.md) — no RFC; the last structural blocker on RFC-020, scheduled 2026-08-17 |
 | 032 | [Workspace Trust Granting](./handoffs/032-workspace-trust-granting/README.md) |
 | 021 | [Command Approval Model and Adapter Capability](./handoffs/021-command-approval-model-and-adapter-capability/README.md) |
 | 023 | [Configuration System](./handoffs/023-configuration-system/README.md) |
