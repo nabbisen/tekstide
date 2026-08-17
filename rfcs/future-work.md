@@ -113,11 +113,42 @@ Status: implemented by RFC-013 with documented limitations; three of twelve v1 e
 
 Status: substrate decided, application shell, and mode switching implemented by RFC-014/RFC-015 (`0.4.0`/`0.4.1`, RFC-015 now closed); remaining product surfaces deferred.
 
-**snora evaluated and declined as a dependency, 2026-08-17 — the idea taken, the framework not.** The owner asked whether adopting `snora` (an iced-based framework, release 0.33.1 supplied as a tarball) would improve typography and readability. **Recommendation: no**, and the reason is that its 0.33.1 release is *documentation only* by its own statement — "No API, no rendering change, no behaviour change." What it documents is a six-role text scale (six size + line-height numbers) and the fact that `iced::widget::text(..).line_height(LineHeight::Relative(x))` works on iced 0.14. **Both are plain iced.** We already depend on iced 0.14 and already centralise sizing in `crate::theme::Theme` (`font_size_body`/`font_size_status`/`font_size_heading`, with the "never a literal `.size(13)`" rule stated in that module). Taking a framework dependency to obtain six constants and one method call we can already reach is not proportionate, and it would put a second opinionated widget layer between this project and the substrate RFC-014 deliberately chose.
+**snora evaluated against the full repository and declined as a dependency, 2026-08-17 — the ideas taken, and the evaluation found a real defect of ours.** The owner asked whether adopting `snora` (`github.com/nabbisen/snora`, an iced-based framework by the same author) would improve typography and readability.
 
-Also checked, because it was the one thing that could have changed the answer: **snora does not help our largest accessibility gap.** Its own `semantic-accessibility.md` states there is "no accessibility tree, no AccessKit," and its checklist lists full screen-reader semantics as out of scope "beyond what iced exposes" — the identical position, and the identical gap, we already document.
+**First pass was wrong on the central fact and is corrected here.** It judged snora from the 0.33.1 release notes alone and called adoption "a framework dependency for six constants." The actual crate layering is nothing like that: `snora-design` (~1,093 LOC) has **zero dependencies — not even iced**, enforced by the project's own CI gate, and `snora-style` depends on only `iced` + `snora-design`. Adopting typography would never have meant adopting the framework. That correction matters more than the conclusion it did not change.
 
-**What is worth taking, as in-house work rather than a dependency:** every `line_height` call in this codebase is in the terminal grid (`surface/terminal/font_metrics.rs`, deliberately `LineHeight::Relative(1.0)` so cells align) or in layout arithmetic derived from it. **No chrome or dialog text sets line-height at all**, so all wrapping prose in the product renders at iced's default. The strongest case is the workspace-trust dialog: the longest wrapping prose we ship, and a surface a user must read to make a security decision. A small typography slice — line-height on wrapping chrome prose, a `title` role alongside the existing three, and a stated minimum size — is cheap and needs nothing external. **Hard constraint on any such slice: the terminal grid must stay at `LineHeight::Relative(1.0)`**, and that should become a tested invariant before anything else moves, because `font_metrics::rows_for_height` derives terminal geometry from it and `0.10.0` has only just fixed terminal sizing.
+**What `snora-design` actually contains** is well beyond typography: renderer-independent colour, spacing, radius, focus and variant vocabulary; a six-role text scale with line-heights; **four presets — light, dark, high-contrast light, high-contrast dark**; and an 81-LOC pure-Rust `contrast` module (`relative_luminance`, `contrast_ratio`, `composite_over`) with the palettes WCAG-tested automatically.
+
+**So the real gap it exposes is accessibility, not typography — and it found one in this product.** Measured 2026-08-17 against `Theme::default`'s compiled palette:
+
+| ratio | pair |
+| --- | --- |
+| 14.62:1 | `foreground` on `background` |
+| 13.21:1 | `foreground` on `surface_elevated` |
+| 6.38:1 | `accent` on `background` |
+| **2.63:1** | **`border_default` on `background`** |
+| **2.37:1** | **`border_default` on `surface_elevated`** |
+
+Text contrast is excellent — comfortably past AAA. **`border_default` fails WCAG 2.1 SC 1.4.11 (Non-text Contrast, AA), which requires 3:1 for UI component boundaries.** Focus indication is unaffected (`border_focused` is the accent at 6.38:1, and `NFR-UX-002` already pairs it with a non-colour channel), so this is the *unfocused* pane boundary being hard to see for a low-vision user, not a focus defect. **`theme/tests.rs` could never have caught it**: it asserts channels are "in range" and that heading is the largest font — type checks wearing the costume of quality checks. Fix belongs with the accessibility slice below, not with typography.
+
+**Recommendation: still decline the dependency, on better grounds than the first pass gave.**
+
+- **The value on offer is data plus one small pure function**, not code we cannot write — the whole contrast module is 81 LOC and three functions, and the presets are colour values.
+- **Release churn is disqualifying for now**: `0.28.1` through `0.33.1` — six minor releases — all landed on 2026-08-15, and under pre-1.0 SemVer (which snora's own versioning policy states) removing a public item is a *minor*, while cargo treats `0.33` and `0.34` as incompatible. Tekstide would inherit that cadence into its own release process.
+- **`crate::theme::Theme` is a designated seam, not an accident.** Its own doc names RFC-023 as the configuration source that will supply these values, and its roles carry project-specific reasoning — `scrim`'s translucency is RFC-018 PR-018-G evidence about spoofing, not a generic token. Substituting `snora_design::Tokens` would either reopen shipped RFC-015 work or wrap it in a second vocabulary.
+- **`snora-widgets` is firmly out**: header/sidebar/footer/menu/tab overlap surfaces this project already built with untrusted-text escaping, focus routing and i18n wired through them. Re-basing those is re-doing reviewed security work for appearance.
+- Checked because it could have reversed the answer: **snora does not help the screen-reader gap.** Its own `semantic-accessibility.md` states "no accessibility tree, no AccessKit," and its checklist puts full screen-reader semantics out of scope "beyond what iced exposes" — our position and our gap exactly.
+
+**What to schedule instead — one small accessibility-and-readability slice, in-house:**
+
+1. **A contrast test over `Theme`**, modelled on snora's (relative luminance → ratio, plus `composite_over` so the translucent `scrim` can be checked against what is behind it). Assert real thresholds — 4.5:1 text, 3:1 non-text — not channel ranges.
+2. **Fix `border_default`** to clear 3:1 on both `background` and `surface_elevated`. The test above must fail before the fix and pass after.
+3. **Line-height on wrapping chrome prose.** Every `line_height` call we have today is in the terminal grid (`surface/terminal/font_metrics.rs`, deliberately `LineHeight::Relative(1.0)` so cells align) or layout arithmetic derived from it; **no chrome or dialog text sets it at all**, so all wrapping prose renders at iced's default. The workspace-trust dialog is the strongest case — the longest prose we ship, on a surface a user must read to make a security decision.
+4. Optionally a `title` role and a stated minimum text size.
+
+**Hard constraint on any of this: the terminal grid must stay at `LineHeight::Relative(1.0)`**, and that should become a tested invariant *before* anything else moves — `font_metrics::rows_for_height` derives terminal geometry from it, and `0.10.0` has only just fixed terminal sizing.
+
+**What would reopen the dependency question**: snora reaching 1.0 (churn stops, and cargo compatibility stops breaking every minor), or this project genuinely needing a full design system — light/dark/high-contrast across many surfaces, with spacing and radius scales — rather than the four ideas above.
 
 - Desktop GUI substrate selected (`iced`, RFC-014) and application shell implemented: window/chrome/content/modal layer composition, keyboard focus and input routing, i18n-backed text, a compiled theme, and a Project Board surface rendering real `ApplicationShell` state with untrusted names and paths escaped (RFC-015 `0.4.0`).
 - Content ↔ Terminal mode switching, a visible chrome-level focus indicator, and the `NFR-PERF-002` mode-switch latency measurement all implemented in `0.4.1` (RFC-015 PR-015-E) — both against Content/Terminal-mode placeholders, since neither RFC-017's terminal grid nor RFC-019's editor exists yet. `NFR-PERF-002` needs re-checking once either does (RFC-017's own handoff carries this obligation).
