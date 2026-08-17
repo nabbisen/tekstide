@@ -55,8 +55,32 @@ Every unchecked line at closeout carries a stated reason.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted
+- [x] Accepted
 - [ ] Accepted with required follow-up
 - [ ] Rejected
 
-Reviewer notes:
+Reviewer notes: Accepted 2026-08-17 (review request 250, response 250). Suite re-run by the
+reviewer: **884 passed, 0 failed**.
+
+RFC-032 did what it was scheduled to do — before it, no project in the shipped application
+could ever leave `Restricted`, and RFC-022's entire agent-run chain sat behind that. It is now
+grantable and revocable through a route a user can actually reach, proven end to end from a
+real key event rather than a dispatched command.
+
+Two things this RFC's own review cycle is worth remembering for:
+
+1. **It found the reachability failure twice, at two layers.** The dialog and mechanics were
+   correct while the route to them did not exist (response 248), and the identical defect was
+   sitting in RFC-022's already-closed record. Both were `KeybindingStatus::Configurable` with
+   a `None` binding — which reads as "bindable" and means "dead until RFC-023 exists." Named
+   as a category error in `future-work.md` so it is not rediscovered a third time.
+2. **The capture earned its place.** This dialog is almost entirely a rendered path, and
+   escaping mangles paths. A test proves the override renders as a marker; only the capture
+   showed the escaped path is *legible* enough to decide from — and it states what it does not
+   cover (legibility at narrower widths, where a wrap could split the marker).
+
+One closeout gap, fixed by the reviewer rather than sent back: `delivery-plan.md` had no
+RFC-032 row at all, and still asserted `grant_project_trust` has "zero production callers" —
+a stale reachability claim sitting inside the passage complaining about stale reachability
+claims. **`delivery-plan.md` now belongs in the closeout gate** alongside the RFC, `rfcs/README.md`,
+the pack, and `future-work.md`.

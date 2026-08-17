@@ -98,7 +98,8 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | 020 | Diff Review and AgentRun Report Surfaces | M10 | 015, 024, **adapter-spawn** | no | **Model complete, both surfaces BLOCKED** (2026-08-15, response 200). The transcript reader landed and is reviewed. Neither surface can be built: nothing in production creates an `AgentRun` (`launch_agent_run_with_runtime` and `add_agent_run` have no production caller) or a `ChangeSet` (`crates/tekstide` has zero references to change sets, baselines, or detection). Both would render nothing, forever. Real prerequisite is the adapter-spawn pathway, below |
 | 021 | Command Approval Model and Adapter Capability | M11 | — | **yes** | **Implemented headless and fully closed 2026-07-30. Moved to `done/`. Not reachable by any user until the adapter-spawn slice lands** |
 | 022 | Adapter Spawn and the Command Approval Surface | M11 | 015, 021 | no | **Implemented and closed 2026-08-17.** Moved to `done/`. Retitled from the reserved "Security Dialogs and Audit Producer Completion" — the dialog and the spawn pathway proved inseparable (an adapter whose requests nobody can answer is useless or dangerous), and audit-producer completion split out to RFC-031. **Not reachable by any real user**: no shipping AI CLI speaks RFC-021's protocol, so `Managed` is exercisable only by the reference adapter, a test artifact |
-| 023 | Configuration System | M12 | — | **yes** | **Authored — ready for implementation.** Headless: shipping it alone would repeat the zero-reachable-surface failure `0.7.0` nearly hit |
+| 032 | Workspace Trust Granting | M11 | 004, 013, 022 | no | **Implemented and closed 2026-08-17.** Moved to `done/`. Authored just-in-time 2026-08-17 after RFC-022's closeout found that `grant_project_trust` had no production caller, so every project was permanently `Restricted` and RFC-022's whole agent-run chain was unreachable behind it. **Added to this queue retroactively at Final Acceptance** — it was authored, implemented and closed without ever appearing here, the same bookkeeping gap that produced the RFC-024/030 collision |
+| 023 | Configuration System | M12 | — | **yes** | **Authored — ready for implementation.** Headless: shipping it alone would repeat the zero-reachable-surface failure `0.7.0` nearly hit. **Carries two now-named gaps**: `OpenTrustSettings` aside, every navigation action with `KeybindingStatus::Configurable` and a `None` binding is *dead*, not pending — `OpenApprovalHistory` and `SwitchActiveProject` among them (see `future-work.md`) |
 | 024 | Diff Preview Policy | M10 | 012 | **yes** | **Implemented and closed 2026-08-11** (`0.7.0`). Authored out of order as RFC-020's content-access prerequisite; carried RFC-012 Amendment 1, a breaking change |
 | 030 | Git Integration | M12 | — | **yes** | Queued (parallel-ready). **Renumbered from 024** 2026-08-12: this row still claimed a number RFC-024 (Diff Preview Policy) had taken on 2026-08-11, so an M12 item was left unaddressable. 025-029 could not absorb the shift — RFC-029 is referenced from closed RFCs (013, 016) and from `handoffs/minimal-user-documentation.md`, and closed documents are not edited to match a later state |
 | 025 | Notifications | M12 | 023 | partly | Queued |
@@ -443,7 +444,16 @@ can now be created." **Both halves are false, and checking took one grep:**
   `WorkspaceDiscoveryBlocked` for every project, because the Claude Code profile honestly
   declares `MayDiscoverWorkspaceFiles` and every project is permanently `Restricted` —
   `grant_project_trust` still has **zero production callers** (PR-022-D's finding,
-  re-verified).
+  re-verified). **Superseded 2026-08-17 by RFC-032**, authored in direct response to this
+  bullet: trust is now grantable through `Ctrl+Alt+U` → `TrustSettings` → the confirmation
+  dialog, so this gate is passable and an agent run using such a profile launches for real
+  in a trusted project. The bullet is kept rather than deleted because the *other* half —
+  no `ChangeSet` — still stands, and because the correction history above is the point.
+  **Noted at RFC-032's own Final Acceptance**: this paragraph sat false for the length of
+  RFC-032's implementation, inside the very passage complaining that reachability claims
+  get written without checking. The closeout that fixed the underlying gap updated the RFC,
+  `rfcs/README.md`, the handoff pack and `future-work.md` — and not this file. **Updating
+  `delivery-plan.md` belongs in the closeout gate**, alongside those four.
 
 **So RFC-022 discharged a prerequisite without making anything user-reachable.** What it
 genuinely unblocked is narrower and worth stating exactly: the *machinery* for an `AgentRun`
@@ -462,7 +472,11 @@ is always cheap; the habit of writing the optimistic reading first is the defect
   capability in `tekstide-core` with no route from `crates/tekstide`. RFC-022 alone found
   four, and building the first reader of one of them surfaced **two real shipped defects**.
   That is the strongest evidence yet that the audit is worth scheduling rather than
-  discovering the eighth the same way.
+  discovering the eighth the same way. **Run 2026-08-17** (`handoffs/reachability-audit.md`):
+  **104 of 132 candidates dormant**, of which 30 are compiler-plausible true orphans — a
+  floor, not a count, since the remaining 74 call chains were not traced to their roots. Its
+  two priority items are discharged (terminal `resize`; trust granting, as RFC-032). The rest
+  stands open in `future-work.md`.
 - **RFC-021's protocol has no client surface**, and a rejected adapter cannot tell why. Both
   become real the moment anyone writes a genuine adapter, which is what RFC-022 was building
   toward.
