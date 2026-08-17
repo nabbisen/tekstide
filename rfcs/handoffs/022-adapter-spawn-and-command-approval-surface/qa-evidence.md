@@ -2,7 +2,7 @@
 title: "RFC-022: Adapter Spawn and the Command Approval Surface - QA Evidence"
 rfc: "RFC-022"
 rfc_file: "../../done/022-adapter-spawn-and-command-approval-surface.md"
-status: "In progress - PR-022-A through PR-022-D implemented, PR-022-D pending review"
+status: "Implemented — PR-022-A through PR-022-F complete, closed 2026-08-17"
 target_milestone: "M11"
 created: "2026-08-16"
 ---
@@ -1366,6 +1366,23 @@ product to build it against yet -- the same reachability-pattern shape this clos
 "two real defects" section describes, found a sixth and seventh time across this slice's
 history (responses 233/234 both independently re-confirmed `switch_active_project`'s own
 absence of a caller).
+
+### A closeout lesson: status metadata is the layer nobody re-reads
+
+Response 238 checked every `status:` line in this pack after the substance above was already
+written and found four of five still describing the work as in progress or awaiting
+acceptance -- `qa-evidence.md`'s own front matter said *"PR-022-D pending review"* in the same
+file this closeout section was just added to, and the pack's `README.md` still opened with
+*"This makes command approval reachable,"* the exact claim response 218 corrected inside the
+RFC itself. Neither the flake investigation, nor the review responses, nor this closeout's own
+verification pass against `qa-evidence.md`'s *content* had checked the pack's front matter --
+a third layer of the same failure this project has now hit at every level: an RFC's own Status
+field (RFC-017), an index row (`rfcs/README.md`, response 218's own omission), a standing
+theme (`future-work.md`, this closeout's own finding above), and now a handoff pack's
+`status:` lines. **The generalisable lesson is not "check more files" -- it is that status
+metadata sits above the content people actually open for, so it drifts silently while the
+content underneath it gets corrected.** A closeout is not complete until every document in the
+pack agrees it is closed, front matter included, not only the prose each one contains.
 
 ### Gates
 

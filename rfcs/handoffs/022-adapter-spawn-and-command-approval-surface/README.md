@@ -2,19 +2,24 @@
 title: "RFC-022: Adapter Spawn and the Command Approval Surface — handoff pack"
 rfc: "RFC-022"
 rfc_file: "../../done/022-adapter-spawn-and-command-approval-surface.md"
-status: "Ready for implementation — accepted by the owner 2026-08-16"
+status: "Implemented — closed 2026-08-17. Not reachable by any real user; cooperative, not enforced."
 target_milestone: "M11"
 created: "2026-08-16"
 ---
 
 # Start here
 
-This makes command approval reachable, and unblocks four capabilities that are currently
-correct, reviewed, and invisible: RFC-021's approval model, RFC-024's diff content,
-RFC-011 Amendment 1's transcript reader, and RFC-020's two surfaces.
+**Closed 2026-08-17.** This built the adapter-spawn pathway and the approval surface, proven
+end to end against production code — but **it does not make command approval reachable by a
+real user, and cannot**: no shipping AI CLI speaks RFC-021's protocol, so `Managed` (and
+therefore command approval) can only ever be exercised by the reference adapter, a test
+artifact. See RFC-022's own Status field and `qa-evidence.md`'s PR-022-F section for the full
+accounting. What it does unblock, precisely: RFC-021's approval model, RFC-024's diff content,
+RFC-011 Amendment 1's transcript reader, and RFC-020's two surfaces all become *reachable* —
+not the same as *done*.
 
-It is the largest single piece of work in the project's remaining plan, and the first that
-adds a new artifact type — a reference adapter.
+It was the largest single piece of work in the project's remaining plan at the time it was
+authored, and the first that added a new artifact type — a reference adapter.
 
 ## Reading order
 
