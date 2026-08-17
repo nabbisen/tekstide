@@ -1688,16 +1688,21 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
 /// remove). A no-op outside Content mode or without an active document,
 /// the same shape [`handle_explorer_key`] uses for its own zone.
 ///
-/// **Response 234**: also a no-op when `open_surface` is
-/// `ApprovalHistory` -- without this, a document left open from an
-/// earlier `TextEditor` visit would keep silently absorbing keystrokes
-/// the user is aiming at the history list after switching surfaces,
-/// since this function previously had no way to know any other surface
-/// existed (`open_surface` had no real reader anywhere before this
-/// response's own `content_mode_view`). Written as an explicit
-/// exclusion rather than requiring `open_surface == TextEditor`, so the
-/// six still-dormant surfaces keep falling through to the editor
-/// exactly as `content_mode_view`'s own exhaustive match does for them.
+/// **Response 234**: also a no-op when `open_surface` does not render
+/// the editor -- without this, a document left open from an earlier
+/// `TextEditor` visit would keep silently absorbing keystrokes the user
+/// is aiming at a different surface after switching, since this
+/// function previously had no way to know any other surface existed
+/// (`open_surface` had no real reader anywhere before response 233's
+/// own `content_mode_view`).
+///
+/// **Response 235**: this guard and `content_mode_view`'s own render
+/// decision used to be two separate, hand-written lists with nothing
+/// keeping them in agreement -- both now defer to
+/// [`surface_renders_editor`], the one place that answers "does this
+/// surface show the editor," so the two questions cannot silently
+/// diverge again the way they did between this function's first
+/// version and response 235's fix.
 fn handle_editor_key(state: &mut State, key: &input::KeyPress) {
     let Some(project) = state.app_shell.state().active_project() else {
         return;
@@ -1705,7 +1710,7 @@ fn handle_editor_key(state: &mut State, key: &input::KeyPress) {
     if project.mode() != ProjectMode::Content {
         return;
     }
-    if project.open_surface() == ProjectOpenSurface::ApprovalHistory {
+    if !surface_renders_editor(project.open_surface()) {
         return;
     }
     let Some(document) = project.content_workspace().active_document() else {
@@ -3049,16 +3054,24 @@ fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Messa
 /// (`grep -rn "open_surface()" crates/tekstide/src`, no non-test
 /// matches) before writing this function, not assumed.
 ///
-/// Deliberately exhaustive, no `_ =>` catch-all: the six still-dormant
-/// variants are named individually, each explicitly falling to today's
-/// behaviour (the plain editor view, unconditional on `open_surface`
-/// exactly as it always has been) rather than to a wildcard. A
-/// catch-all would let a future variant silently render the wrong
-/// surface with nothing failing to compile; naming every arm means
-/// adding an eighth variant fails to compile here until someone decides
-/// what it renders. Building only `ApprovalHistory`'s real arm is the
-/// intended scope of this response -- not building six more surfaces to
-/// prove the mechanism works for one.
+/// The six still-dormant variants all fall to today's behaviour (the
+/// plain editor view, unconditional on `open_surface` exactly as it
+/// always has been) -- building only `ApprovalHistory`'s real arm is
+/// the intended scope of this response, not building six more surfaces
+/// to prove the mechanism works for one.
+///
+/// **Response 235**: originally written as its own exhaustive match
+/// naming all seven dormant variants individually, so a new variant
+/// failed to compile here until someone decided what it renders. Moved
+/// that exhaustiveness into [`surface_renders_editor`] instead, shared
+/// with [`handle_editor_key`] -- the same review found that this
+/// function's own exhaustive match had no mechanism keeping
+/// `handle_editor_key`'s separate, hand-written exclusion in agreement
+/// with it, and a fix that updated only one of the two (which is
+/// exactly what happened earlier in that response) would have silently
+/// reintroduced a hidden document absorbing keystrokes the next time a
+/// dormant surface gets a real render arm. One exhaustive predicate,
+/// not two lists that can drift apart.
 fn content_mode_view(state: &State) -> Element<'_, Message> {
     let open_surface = state
         .app_shell
@@ -3066,15 +3079,38 @@ fn content_mode_view(state: &State) -> Element<'_, Message> {
         .active_project()
         .map(tekstide_core::project::ProjectSession::open_surface);
     match open_surface {
-        Some(ProjectOpenSurface::ApprovalHistory) => approval_history_view(state),
-        Some(ProjectOpenSurface::ProjectDashboard)
-        | Some(ProjectOpenSurface::TextEditor)
-        | Some(ProjectOpenSurface::GitStatus)
-        | Some(ProjectOpenSurface::AgentRunDetail)
-        | Some(ProjectOpenSurface::DiffReview)
-        | Some(ProjectOpenSurface::HandoffReport)
-        | Some(ProjectOpenSurface::TrustSettings)
-        | None => content_mode_editor_view(state),
+        Some(surface) if !surface_renders_editor(surface) => approval_history_view(state),
+        Some(_) | None => content_mode_editor_view(state),
+    }
+}
+
+/// Response 235: the one predicate deciding whether a given
+/// `ProjectOpenSurface` renders as the plain editor -- used here by
+/// [`content_mode_view`] to pick its render arm, and by
+/// [`handle_editor_key`] to decide whether a keystroke should be
+/// absorbed. Before this response the two questions were answered by
+/// two separate, hand-written lists that had no mechanism keeping them
+/// in agreement: `content_mode_view`'s own exhaustive match decided
+/// what renders, `handle_editor_key`'s exclusion decided what absorbs
+/// keys, and the fix earlier in this response updated only the second
+/// -- exactly the shape that would silently reintroduce a hidden
+/// document absorbing keystrokes the moment a future surface (RFC-020's
+/// `AgentRunDetail`, say) gets a real render arm here without someone
+/// remembering to also touch the other function. One exhaustive match,
+/// not two: a ninth `ProjectOpenSurface` variant fails to compile right
+/// here until someone decides which side of this predicate it falls on,
+/// and both call sites inherit that decision automatically rather than
+/// needing their own separate update.
+fn surface_renders_editor(surface: ProjectOpenSurface) -> bool {
+    match surface {
+        ProjectOpenSurface::ApprovalHistory => false,
+        ProjectOpenSurface::ProjectDashboard
+        | ProjectOpenSurface::TextEditor
+        | ProjectOpenSurface::GitStatus
+        | ProjectOpenSurface::AgentRunDetail
+        | ProjectOpenSurface::DiffReview
+        | ProjectOpenSurface::HandoffReport
+        | ProjectOpenSurface::TrustSettings => true,
     }
 }
 

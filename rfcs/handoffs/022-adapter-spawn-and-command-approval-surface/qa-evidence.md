@@ -1210,6 +1210,33 @@ already enforces), `switching_to_approval_history_stops_the_hidden_document_from
 
 Full gate clean: `tekstide` 239 (up from 235), `tekstide-core` 594 (unchanged).
 
+### The two-readers-that-can-disagree fix (response 235's non-blocking suggestion, taken)
+
+Response 235 accepted the keyboard-access work and pointed out a structural gap it left
+behind: `content_mode_view`'s exhaustive match decided which surface renders; the leak fix's
+own exclusion in `handle_editor_key` separately decided which surfaces the editor absorbs keys
+for. Nothing kept the two in agreement -- exactly the shape response 235 itself named as the
+recurring cost of dormant state (two real bugs this response alone found from one reader
+waking up), now reproduced one level deeper: two independent decision points instead of one.
+
+**Fixed**: factored `surface_renders_editor(surface: ProjectOpenSurface) -> bool`, a single
+exhaustive match (`ApprovalHistory => false`, every other variant => `true`, no `_ =>`), used
+by both `content_mode_view` (to pick its render arm) and `handle_editor_key` (to decide
+whether to absorb a keystroke). `content_mode_view`'s own match simplified to branch on this
+predicate rather than naming all seven dormant variants itself -- the exhaustiveness guarantee
+moved into the one shared function rather than being duplicated per call site. A ninth
+`ProjectOpenSurface` variant now fails to compile in exactly one place until someone decides
+which side of the predicate it falls on, and both call sites inherit that decision
+automatically.
+
+No new tests: the existing real-routing tests (`opening_approval_history_from_navigation_...`,
+`switching_to_approval_history_stops_the_hidden_document_from_absorbing_keystrokes`) already
+exercise both call sites' real behavior through both branches of the predicate; the
+exhaustiveness property itself is a compiler guarantee (non-exhaustive match with no
+wildcard), not something a runtime test would add confidence to.
+
+Full gate clean, unchanged: `tekstide` 239, `tekstide-core` 594.
+
 ## PR-022-F - Closeout
 
 *Not started.*
