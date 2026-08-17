@@ -294,6 +294,29 @@ impl ProjectSession {
         self.trust_state = trust_state;
     }
 
+    /// RFC-032 PR-032-C, response 245: the audit-store-authoritative
+    /// half of [`Self::restore_trust_state`] -- the recent-projects
+    /// cache is ordinary user-writable state, so a `Trusted` restored
+    /// from it must still be confirmed against a real, applied
+    /// `TrustGrant` in the durable audit store before it means anything
+    /// security-relevant. Demotes back to `Restricted` when that
+    /// confirmation fails. Pushes no `AuditEvent`, the same reasoning as
+    /// `restore_trust_state`: this is not a new decision, it is refusing
+    /// to honour one the durable record does not confirm was ever made.
+    ///
+    /// `pub`, not `pub(crate)`: the caller (`crates/tekstide`'s
+    /// `verify_restored_trust`) lives outside this crate. Deliberately
+    /// not folded into `AppState::add_project_session` itself --
+    /// `add_project_session` stays synchronous and I/O-free (it is
+    /// exercised by dozens of tests against synthetic, non-existent
+    /// paths that a real `AuditStore::open` would fail against), and the
+    /// verification instead happens once, at the one real boundary that
+    /// already opens the audit store for every other trust-related
+    /// operation.
+    pub fn deny_unverified_trust(&mut self) {
+        self.trust_state = WorkspaceTrust::Restricted;
+    }
+
     /// Terminal launch UX handoff: `terminal_session_limit` is enforced
     /// **here**, not by any caller -- a limit enforced at the call site
     /// is a limit the next caller forgets. Checked after the existing

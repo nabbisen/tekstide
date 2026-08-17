@@ -9,7 +9,7 @@ use super::{
     agent_run_launch_refusal_text, attempt_agent_run_launch_with_profile, content_within_bound,
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
     open_real_audit_store, poll_approval_channels, sidebar_label, status_bar_summary,
-    terminal_paste_refusal_text, trusted_ui_state, zone_style,
+    terminal_paste_refusal_text, trusted_ui_state, verify_restored_trust_against, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -1420,6 +1420,194 @@ fn record_plain_terminal_started_persists_against_a_real_store() {
     );
     assert_eq!(records[0].record.project_id, Some(project_id));
     assert_eq!(records[0].record.terminal_id, Some(terminal_id));
+}
+
+// --- RFC-032 PR-032-C, response 245: the audit store is authoritative -
+//
+// PR-032-B restores a `Trusted` project from the user-writable
+// recent-projects cache on reopen. `verify_restored_trust_against`
+// (`shell.rs`) is the gate that confirms it against a real, applied
+// `TrustGrant` in the durable audit store before that restoration means
+// anything security-relevant.
+
+fn cached_trusted_recent_project(
+    project_id: tekstide_core::project::ProjectId,
+    canonical_root: PathBuf,
+) -> tekstide_core::project::recent::RecentProjectState {
+    tekstide_core::project::recent::RecentProjectState {
+        state_version: tekstide_core::project::recent::RECENT_PROJECT_STATE_VERSION,
+        projects: vec![tekstide_core::project::recent::RecentProject::new(
+            project_id,
+            "trust-verify-project",
+            canonical_root.clone(),
+            canonical_root,
+            tekstide_core::project::recent::Timestamp::now_utc(),
+            tekstide_core::project::WorkspaceTrust::Trusted,
+        )],
+    }
+}
+
+/// The positive case: a real, applied `TrustGrant` genuinely exists in
+/// the store for this project -- the restored `Trusted` state must
+/// survive verification.
+#[test]
+fn verify_restored_trust_keeps_trust_when_a_real_grant_is_recorded() {
+    let project_dir = fresh_project_dir("verify-trust-confirmed");
+    let mut app_shell = ApplicationShell::new();
+    app_shell.restore_recent_projects(cached_trusted_recent_project(
+        tekstide_core::project::ProjectId::new_uuid(),
+        std::fs::canonicalize(&project_dir).unwrap(),
+    ));
+    let outcome = app_shell
+        .add_project_from_path(&project_dir)
+        .expect("cached project should reopen");
+    assert_eq!(
+        app_shell
+            .state()
+            .project(outcome.project_id())
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "test precondition: PR-032-B's own restoration must have run first"
+    );
+
+    let audit_state_dir = temp_audit_state_dir("verify-trust-confirmed");
+    let mut store = super::open_audit_store(&audit_state_dir, Vec::new())
+        .expect("open a real, temp-dir-backed audit store");
+    let project_id = outcome.project_id().clone();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    let mut project = app_shell
+        .state()
+        .project(&project_id)
+        .cloned()
+        .expect("project must exist to grant trust against");
+    tekstide_core::audit::AuditCoordinator::new(&mut store, &mut health)
+        .grant_project_trust(&mut project)
+        .expect("a real grant against a real store must succeed");
+    drop(store);
+
+    verify_restored_trust_against(&mut app_shell, |_shell| {
+        super::open_audit_store(&audit_state_dir, Vec::new())
+    });
+
+    assert_eq!(
+        app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "a real, applied TrustGrant in the store must let the restored trust stand"
+    );
+}
+
+/// **The finding response 245 required a fix for.** The cache says
+/// `Trusted`; the audit store has no record of it at all (as if the
+/// cache file had been edited directly, or the grant never actually
+/// completed). Verification must demote back to `Restricted`.
+#[test]
+fn verify_restored_trust_demotes_when_the_store_has_no_matching_grant() {
+    let project_dir = fresh_project_dir("verify-trust-unconfirmed");
+    let mut app_shell = ApplicationShell::new();
+    app_shell.restore_recent_projects(cached_trusted_recent_project(
+        tekstide_core::project::ProjectId::new_uuid(),
+        std::fs::canonicalize(&project_dir).unwrap(),
+    ));
+    let outcome = app_shell
+        .add_project_from_path(&project_dir)
+        .expect("cached project should reopen");
+    let project_id = outcome.project_id().clone();
+    assert_eq!(
+        app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "test precondition: PR-032-B's own restoration must have run first"
+    );
+
+    let audit_state_dir = temp_audit_state_dir("verify-trust-unconfirmed");
+    // A real store, opened and left genuinely empty of any TrustChange
+    // record for this project -- not a missing store, the more common
+    // and more important failure mode.
+    let _ = super::open_audit_store(&audit_state_dir, Vec::new())
+        .expect("open a real, temp-dir-backed audit store");
+
+    verify_restored_trust_against(&mut app_shell, |_shell| {
+        super::open_audit_store(&audit_state_dir, Vec::new())
+    });
+
+    assert_eq!(
+        app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Restricted",
+        "a cache-restored Trusted with no confirming record in the durable store must be denied \
+         -- this is the security fix response 245 required"
+    );
+}
+
+/// Fail-closed half of the same requirement: if the store cannot even
+/// be opened, every currently-`Trusted` project must still be demoted,
+/// not left trusted on the assumption that "no answer" means "yes."
+#[test]
+fn verify_restored_trust_demotes_when_the_store_cannot_be_opened() {
+    let project_dir = fresh_project_dir("verify-trust-no-store");
+    let mut app_shell = ApplicationShell::new();
+    app_shell.restore_recent_projects(cached_trusted_recent_project(
+        tekstide_core::project::ProjectId::new_uuid(),
+        std::fs::canonicalize(&project_dir).unwrap(),
+    ));
+    let outcome = app_shell
+        .add_project_from_path(&project_dir)
+        .expect("cached project should reopen");
+    let project_id = outcome.project_id().clone();
+
+    verify_restored_trust_against(&mut app_shell, |_shell| None);
+
+    assert_eq!(
+        app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Restricted",
+        "an unopenable audit store must never be treated as silent confirmation"
+    );
+}
+
+/// The no-op path: nothing is cached as `Trusted`, so verification must
+/// not even attempt to open the store -- the "ordinary use does not
+/// create this file" discipline `verify_restored_trust`'s own doc names.
+/// Proven by passing a closure that panics if called at all, not merely
+/// by checking the end state.
+#[test]
+fn verify_restored_trust_never_opens_the_store_when_nothing_is_cached_trusted() {
+    let project_dir = fresh_project_dir("verify-trust-nothing-cached");
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    assert_eq!(
+        app_shell.state().projects()[0].trust_state().label(),
+        "Restricted",
+        "test precondition: an ordinary, never-cached project starts Restricted"
+    );
+
+    verify_restored_trust_against(
+        &mut app_shell,
+        |_shell| -> Option<tekstide_core::audit::AuditStore> {
+            panic!("must not open the audit store when nothing is cached as Trusted")
+        },
+    );
 }
 
 /// **RFC-017 PR-017-F's required sentinel test.** Matching RFC-021

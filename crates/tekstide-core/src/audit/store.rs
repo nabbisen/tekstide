@@ -191,6 +191,40 @@ impl AuditStore {
             next_before_sequence,
         })
     }
+
+    /// RFC-032 PR-032-C, response 245: whether the durable record itself
+    /// -- not the user-writable recent-projects cache PR-032-B restores
+    /// trust from on reopen -- currently shows `project_id` as trusted.
+    /// Anything that can write that cache file can otherwise mark a
+    /// project `Trusted` with no corresponding `TrustGrant` here; this
+    /// is the check that makes the audit store, not the cache,
+    /// authoritative.
+    ///
+    /// The newest `TrustChange` row decides it: a grant writes
+    /// `TrustGrant`/`Applied` (after `TrustGrant`/`Authorized`, the same
+    /// operation, an earlier sequence); a later revoke writes a single,
+    /// later-sequenced `TrustRevoke`/`Applied` that supersedes it.
+    /// `false` on no rows, a `TrustRevoke` as the newest row, or any row
+    /// whose outcome is not `Applied` (an authorization with no matching
+    /// applied record is a grant that never actually completed --
+    /// `grant_project_trust`'s own fail-closed `append_required` means
+    /// this should not happen in practice, but this query does not
+    /// assume that).
+    pub fn has_applied_trust_grant(&self, project_id: &ProjectId) -> Result<bool, AuditStoreError> {
+        let page = self.query(&AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(AuditEventFamily::TrustChange),
+            outcome: None,
+            operation_id: None,
+            before_sequence: None,
+            limit: 1,
+        })?;
+
+        Ok(page.records.first().is_some_and(|sequenced| {
+            sequenced.record.action_kind == AuditActionKind::TrustGrant
+                && sequenced.record.outcome == AuditOutcome::Applied
+        }))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

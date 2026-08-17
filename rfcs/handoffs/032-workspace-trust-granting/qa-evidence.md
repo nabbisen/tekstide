@@ -106,7 +106,62 @@ run three times for stability. `git diff --check` clean.
 
 ## PR-032-C - Grant, revoke, route
 
-*Not started.*
+**In progress. First increment done: the audit-authority fix response 245 required. Still
+pending: `grant_project_trust`/`revoke_trust`'s first production callers, the route through
+`ProjectOpenSurface::TrustSettings`, and the board reflecting trust state.**
+
+### The audit-authority fix (response 245)
+
+Response 245 accepted PR-032-B and found a real gap: `recent-projects.json` is ordinary
+user-writable state, so anything that can write it could mark a project `Trusted` with no
+corresponding `TrustGrant` in the durable audit store -- an auditor reading the durable record
+would see a project that was never granted trust, operating as trusted. The response's stated
+preference: make the audit store authoritative, restoring trust only when a matching applied
+`TrustGrant` genuinely exists, failing closed otherwise.
+
+**What changed:**
+
+- `AuditStore::has_applied_trust_grant(&self, project_id)` (`audit/store.rs`): queries the
+  newest `TrustChange` record for a project and confirms it is `TrustGrant`/`Applied` -- a later
+  `TrustRevoke` correctly supersedes an earlier grant, since both share the one query ordered by
+  sequence.
+- `ProjectSession::deny_unverified_trust` (`project/session.rs`, `pub`): demotes back to
+  `Restricted`, pushing no `AuditEvent` -- the same reasoning as `restore_trust_state`, this is
+  not a new decision, it is declining to honour one the durable record does not confirm.
+- `verify_restored_trust`/`verify_restored_trust_against` (`crates/tekstide/src/shell.rs`):
+  called once, inside `State::new`, for every boot-time project. Confirms each currently-`Trusted`
+  project against the real store and demotes the ones it cannot confirm. **Deliberately not
+  folded into `AppState::add_project_session`** (`tekstide-core`) -- that function stays
+  synchronous and I/O-free, exercised by dozens of tests against synthetic paths a real
+  `AuditStore::open` would fail against; verification instead happens once, at the one real
+  boundary that already opens the audit store for every other trust-related operation.
+- **Opens the audit store only when something is cached `Trusted`** -- preserves "ordinary use
+  does not create this file" (README, `open_real_audit_store`'s own doc): a project can only be
+  cached `Trusted` if `grant_project_trust` ran for it at some point, and that call already
+  created the store itself, so this is never a *new* reason to create it.
+
+**Evidence:**
+
+- `crates/tekstide-core/src/audit/tests/store/trust.rs` (5 tests): `has_applied_trust_grant` is
+  true after a real two-phase grant, false with no records, false after a later revoke
+  supersedes an earlier grant, false for an authorization with no matching applied record (a
+  grant that never completed), and correctly project-scoped (no cross-project leak).
+- `crates/tekstide/src/shell/tests.rs` (4 tests, real temp-dir-backed `AuditStore`, not a mock):
+  a real recorded grant keeps the cache-restored trust standing; a cache says `Trusted` with no
+  matching record in the store and is demoted (**the fix's own regression test**); an unopenable
+  store demotes every currently-`Trusted` project (fail-closed); and nothing cached as `Trusted`
+  never even opens the store (proven with a closure that panics if called, not just by checking
+  the end state).
+
+`cargo test -p tekstide-core --lib audit::tests::store::trust::` -- 5/5.
+`cargo test -p tekstide --bin tekstide shell::tests::verify_restored_trust` -- 4/4.
+
+### Not done yet
+
+`grant_project_trust`/`revoke_trust`'s first production callers, the route through
+`ProjectOpenSurface::TrustSettings`, "granting and revoking comparably reachable," and the board
+reflecting trust state (`ProjectBoardRow::trust_label` for a *recent*, not-yet-opened project
+still hardcodes `"Restricted"` -- flagged in PR-032-B's own evidence, owned here).
 
 ## PR-032-D - The dialog
 

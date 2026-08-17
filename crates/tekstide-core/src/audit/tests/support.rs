@@ -80,6 +80,22 @@ pub fn trust_applied(authorization: &DurableAuditRecordV1) -> DurableAuditRecord
     record
 }
 
+/// The single-phase shape `AuditCoordinator::revoke_project_trust`
+/// actually writes -- unlike `trust_authorized`/`trust_applied`, no
+/// `operation_id` (`valid_trust_change` requires `TrustRevoke` records
+/// to have none).
+pub fn trust_revoked(project_id: ProjectId) -> DurableAuditRecordV1 {
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::TrustChange,
+        AuditOutcome::Applied,
+        AuditActionKind::TrustRevoke,
+        AuditActorKind::User,
+        AuditActionSource::TrustedUi,
+    );
+    record.project_id = Some(project_id);
+    record
+}
+
 pub fn managed_authorized(
     project_id: ProjectId,
     operation_id: AuditOperationId,

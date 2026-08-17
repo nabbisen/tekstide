@@ -554,6 +554,15 @@ pub struct State {
 
 impl State {
     pub fn new(mut app_shell: ApplicationShell, catalog: Catalog) -> Self {
+        // RFC-032 PR-032-C, response 245: the audit store, not the
+        // user-writable recent-projects cache, is authoritative for
+        // whether a boot-time (CLI-argument) project is really trusted.
+        // Must run before anything reads `trust_state()` for a security
+        // decision -- currently nothing does yet (RFC-032's own dialog
+        // and restricted-mode gates are still ahead), but this is the
+        // one place every boot-time project is in place before the
+        // event loop starts.
+        verify_restored_trust(&mut app_shell);
         let measurement = Measurement::from_env();
         let typing_doc = if matches!(
             measurement.as_ref().map(Measurement::criterion),
@@ -2446,6 +2455,73 @@ fn open_real_audit_store(app_shell: &ApplicationShell) -> Option<tekstide_core::
         .map(|project| project.canonical_root_path().clone())
         .collect();
     open_audit_store(path_provider.state_dir(), project_roots)
+}
+
+/// RFC-032 PR-032-C, response 245: the audit store, not the
+/// user-writable recent-projects cache, is authoritative for trust.
+/// `AppState::add_project_session` (`tekstide-core`) optimistically
+/// restores `Trusted` from that cache on reopen (PR-032-B) -- anything
+/// that can write the cache file could otherwise mark a project trusted
+/// with no corresponding `TrustGrant` in the durable record. This
+/// confirms every currently-`Trusted` project against a real, applied
+/// grant and demotes the ones the store does not confirm
+/// (`ProjectSession::deny_unverified_trust`, no `AuditEvent` -- see its
+/// own doc for why).
+///
+/// **Opens the audit store only when there is something to verify**
+/// (`trusted_project_ids` non-empty) -- the same "ordinary use does not
+/// create this file" discipline [`open_real_audit_store`]'s own doc
+/// documents for `launch_terminal_demo_panes`. This is never a *new*
+/// reason to create the file: a project can only be cached `Trusted` if
+/// `grant_project_trust` ran for it at some point, and that call
+/// already created the store itself (`append_required`'s own write) --
+/// so by the time this function would open it, it already exists.
+///
+/// **Fails closed on a store that will not even open** -- an
+/// unreadable, corrupt, or (implausibly, given the point above) missing
+/// store must not be treated as silent confirmation; every currently-
+/// `Trusted` project is demoted in that case, the same as one the store
+/// opens but genuinely has no record for.
+fn verify_restored_trust(app_shell: &mut ApplicationShell) {
+    verify_restored_trust_against(app_shell, open_real_audit_store);
+}
+
+/// Factored out from [`verify_restored_trust`], the same reason
+/// [`open_audit_store`] is factored out from [`open_real_audit_store`]:
+/// so a test can supply a real, temp-dir-backed store instead of the
+/// real `XDG_STATE_HOME`/`HOME`-resolved one, without duplicating this
+/// function's own demotion logic against a mock.
+fn verify_restored_trust_against(
+    app_shell: &mut ApplicationShell,
+    open_store: impl FnOnce(&ApplicationShell) -> Option<tekstide_core::audit::AuditStore>,
+) {
+    let trusted_project_ids: Vec<_> = app_shell
+        .state()
+        .projects()
+        .iter()
+        .filter(|project| project.trust_state() == tekstide_core::project::WorkspaceTrust::Trusted)
+        .map(tekstide_core::project::ProjectSession::id)
+        .cloned()
+        .collect();
+    if trusted_project_ids.is_empty() {
+        return;
+    }
+
+    let Some(store) = open_store(app_shell) else {
+        for project_id in &trusted_project_ids {
+            if let Some(project) = app_shell.state_mut().project_mut(project_id) {
+                project.deny_unverified_trust();
+            }
+        }
+        return;
+    };
+
+    for project_id in &trusted_project_ids {
+        let confirmed = store.has_applied_trust_grant(project_id).unwrap_or(false);
+        if !confirmed && let Some(project) = app_shell.state_mut().project_mut(project_id) {
+            project.deny_unverified_trust();
+        }
+    }
 }
 
 /// Factored out from [`open_real_audit_store`] so tests can open a
