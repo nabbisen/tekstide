@@ -97,7 +97,7 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | 019 | Editor and Explorer Surfaces | M10 | 015 | no | **Implemented and closed 2026-08-11** (`0.6.0`) |
 | 020 | Diff Review and AgentRun Report Surfaces | M10 | 015, 024, **adapter-spawn** | no | **Model complete, both surfaces BLOCKED** (2026-08-15, response 200). The transcript reader landed and is reviewed. Neither surface can be built: nothing in production creates an `AgentRun` (`launch_agent_run_with_runtime` and `add_agent_run` have no production caller) or a `ChangeSet` (`crates/tekstide` has zero references to change sets, baselines, or detection). Both would render nothing, forever. Real prerequisite is the adapter-spawn pathway, below |
 | 021 | Command Approval Model and Adapter Capability | M11 | — | **yes** | **Implemented headless and fully closed 2026-07-30. Moved to `done/`. Not reachable by any user until the adapter-spawn slice lands** |
-| 022 | Security Dialogs and Audit Producer Completion | M11 | 015, 021 | no | Blocked |
+| 022 | Adapter Spawn and the Command Approval Surface | M11 | 015, 021 | no | **Implemented and closed 2026-08-17.** Moved to `done/`. Retitled from the reserved "Security Dialogs and Audit Producer Completion" — the dialog and the spawn pathway proved inseparable (an adapter whose requests nobody can answer is useless or dangerous), and audit-producer completion split out to RFC-031. **Not reachable by any real user**: no shipping AI CLI speaks RFC-021's protocol, so `Managed` is exercisable only by the reference adapter, a test artifact |
 | 023 | Configuration System | M12 | — | **yes** | **Authored — ready for implementation.** Headless: shipping it alone would repeat the zero-reachable-surface failure `0.7.0` nearly hit |
 | 024 | Diff Preview Policy | M10 | 012 | **yes** | **Implemented and closed 2026-08-11** (`0.7.0`). Authored out of order as RFC-020's content-access prerequisite; carried RFC-012 Amendment 1, a breaking change |
 | 030 | Git Integration | M12 | — | **yes** | Queued (parallel-ready). **Renumbered from 024** 2026-08-12: this row still claimed a number RFC-024 (Diff Preview Policy) had taken on 2026-08-11, so an M12 item was left unaddressable. 025-029 could not absorb the shift — RFC-029 is referenced from closed RFCs (013, 016) and from `handoffs/minimal-user-documentation.md`, and closed documents are not edited to match a later state |
@@ -419,3 +419,32 @@ scheduled as `0.8.0`'s spine.
 **Next release is `0.9.0`, not `0.8.1`** — `TranscriptWriterConfig` gained a public `mode`
 field, a breaking change to `tekstide-core`. Field additions are how this gets missed, since
 the reflex is to look for removals.
+
+### RFC-022 closed, 2026-08-17 — what M11 now has, and what it does not
+
+RFC-022 is implemented and closed. The adapter-spawn pathway, token delivery, the approval
+dialog, the arrival model and the `ApprovalHistory` surface are all built and proven end to
+end against production code.
+
+**It does not make command approval reachable by a real user**, and the RFC says so in its own
+Status. No shipping AI CLI speaks RFC-021's protocol, so `Managed` can only ever be exercised
+by the reference adapter — a test artifact. The pathway is proven; the ecosystem does not
+exist. Anyone reading "command approval shipped" into this is reading more than the record
+says.
+
+**What it unblocks, precisely:** RFC-020's two surfaces become *reachable* rather than done —
+a real `AgentRun` can now be created, so the report and change-review surfaces have inputs
+that can exist. That is the blocker response 200 found, discharged.
+
+**Still open, and recorded rather than carried silently:**
+
+- **The active-project-change promotion trigger**, blocked on project-switching existing
+  anywhere in the GUI — `switch_active_project` still has no production caller.
+- **The reachability audit** (`future-work.md`): seven instances of a correct, reviewed
+  capability in `tekstide-core` with no route from `crates/tekstide`. RFC-022 alone found
+  four, and building the first reader of one of them surfaced **two real shipped defects**.
+  That is the strongest evidence yet that the audit is worth scheduling rather than
+  discovering the eighth the same way.
+- **RFC-021's protocol has no client surface**, and a rejected adapter cannot tell why. Both
+  become real the moment anyone writes a genuine adapter, which is what RFC-022 was building
+  toward.
