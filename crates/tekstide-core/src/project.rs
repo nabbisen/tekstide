@@ -2,6 +2,7 @@ mod change_detection;
 mod content;
 mod diff;
 mod identity;
+mod ignored_directories;
 mod metadata;
 pub mod recent;
 pub mod root;
@@ -25,6 +26,7 @@ pub use diff::{
     gate_diff_content_read, read_diff_content,
 };
 pub use identity::ProjectId;
+pub use ignored_directories::IGNORED_DIRECTORY_NAMES;
 pub use metadata::{
     ProjectFileState, ProjectGitDisplayStatus, ProjectGitSummary, ProjectMetadataCountStatus,
     ProjectMode, ProjectOpenSurface, ProjectProviderState, ProjectResourceLimits, ProjectWarning,

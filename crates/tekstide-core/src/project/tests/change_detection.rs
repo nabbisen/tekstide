@@ -198,11 +198,133 @@ fn detector_reports_partial_status_when_entry_limit_is_hit() {
     let detector = GeneratedChangeDetector::new(GeneratedChangeDetectionPolicy {
         max_entries: 1,
         max_changed_paths: 8,
+        ignored_directory_names: crate::project::IGNORED_DIRECTORY_NAMES,
     });
     let baseline = detector.capture_filesystem_baseline(&project);
 
     assert_eq!(baseline.entries.len(), 1);
     assert_eq!(baseline.status, ChangeDetectionStatus::Partial { limit: 1 });
+}
+
+/// Change-detection-wiring handoff, D1: the exact failure mode the
+/// handoff's own "positive control" section warns about, made concrete
+/// -- `.git/`, `target/`, and `node_modules/` each hold more entries
+/// than `max_entries`, but the ignore list means none of them are ever
+/// walked at all, so the real project tree is scanned to completion
+/// regardless.
+#[test]
+fn filesystem_scan_skips_ignored_directories_entirely() {
+    let sandbox = TestSandbox::new("change-detection-ignored-directories");
+    let project = sandbox.project_session(1);
+    sandbox.create_file_with_contents("project/src/lib.rs", b"fn main() {}\n");
+    for index in 0..20 {
+        sandbox.create_file_with_contents(
+            &format!("project/.git/objects/{index:02}"),
+            b"git internals\n",
+        );
+        sandbox.create_file_with_contents(
+            &format!("project/target/debug/build-{index:02}"),
+            b"build output\n",
+        );
+        sandbox.create_file_with_contents(
+            &format!("project/node_modules/pkg/file-{index:02}.js"),
+            b"node stuff\n",
+        );
+    }
+
+    let detector = GeneratedChangeDetector::new(GeneratedChangeDetectionPolicy {
+        max_entries: 10,
+        max_changed_paths: 100,
+        ignored_directory_names: crate::project::IGNORED_DIRECTORY_NAMES,
+    });
+    let baseline = detector.capture_filesystem_baseline(&project);
+
+    assert_eq!(
+        baseline.status,
+        ChangeDetectionStatus::Complete,
+        "with the ignored directories skipped entirely, a max_entries of 10 must still be \
+         enough to scan the one real file this project has -- if this is Partial, an ignored \
+         directory is still being walked"
+    );
+    assert_eq!(
+        baseline
+            .entries
+            .iter()
+            .map(|entry| entry.relative_path.clone())
+            .collect::<Vec<_>>(),
+        vec![PathBuf::from("src"), PathBuf::from("src/lib.rs")],
+        "the baseline must contain only the real project tree, none of .git/target/node_modules"
+    );
+}
+
+/// The handoff's own required ablation shape: remove one entry from the
+/// ignore list and watch the specific, named directory it used to
+/// exclude reappear -- proving the mechanism above is real, not that it
+/// merely looks unreachable because nothing tries to defeat it.
+#[test]
+fn ablation_without_target_in_the_ignore_list_it_reappears_and_truncates_the_scan() {
+    let sandbox = TestSandbox::new("change-detection-ignore-ablation");
+    let project = sandbox.project_session(1);
+    sandbox.create_file_with_contents("project/src/lib.rs", b"fn main() {}\n");
+    for index in 0..20 {
+        sandbox.create_file_with_contents(
+            &format!("project/target/debug/build-{index:02}"),
+            b"build output\n",
+        );
+    }
+
+    // Deliberately omits "target" -- the ablation.
+    let detector = GeneratedChangeDetector::new(GeneratedChangeDetectionPolicy {
+        max_entries: 10,
+        max_changed_paths: 100,
+        ignored_directory_names: &[".git", "node_modules"],
+    });
+    let baseline = detector.capture_filesystem_baseline(&project);
+
+    assert_eq!(
+        baseline.status,
+        ChangeDetectionStatus::Partial { limit: 10 },
+        "without 'target' in the ignore list, its own contents must reappear and truncate the \
+         scan before the real project tree is even reached -- proving the ignore list is what \
+         keeps the sibling test's scan Complete, not an accident of the fixture"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.relative_path.starts_with("target")),
+        "the reappeared entries must specifically be inside target/, naming the directory that \
+         came back: {:?}",
+        baseline.entries
+    );
+}
+
+/// D1's own "one shared definition, not a second literal list"
+/// requirement, checked directly rather than trusted by construction --
+/// the explorer's `collapsed_directory_names` and change detection's
+/// `ignored_directory_names` must name the exact same directories, in
+/// the same order, because both are built from the one
+/// `IGNORED_DIRECTORY_NAMES` array. A future edit to one without the
+/// other -- the defect this slice exists to prevent -- fails here by
+/// name, not just by behaviour drifting apart silently.
+#[test]
+fn explorer_and_change_detection_share_the_exact_same_ignored_directory_list() {
+    let explorer_list =
+        crate::project::root::FileExplorerScanPolicy::linux_mvp().collapsed_directory_names;
+    let detector_list: Vec<String> = GeneratedChangeDetectionPolicy::default()
+        .ignored_directory_names
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+
+    assert_eq!(explorer_list, detector_list);
+    assert_eq!(
+        explorer_list,
+        crate::project::IGNORED_DIRECTORY_NAMES
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -212,6 +334,7 @@ fn detector_suppresses_changed_paths_when_changed_path_limit_is_hit() {
     let detector = GeneratedChangeDetector::new(GeneratedChangeDetectionPolicy {
         max_entries: 8,
         max_changed_paths: 1,
+        ignored_directory_names: crate::project::IGNORED_DIRECTORY_NAMES,
     });
     let baseline = detector.capture_filesystem_baseline(&project);
     sandbox.create_file_with_contents("project/a.txt", b"a\n");
@@ -331,6 +454,7 @@ fn projectsession_refuses_changeset_creation_from_non_complete_detection() {
     let detector = GeneratedChangeDetector::new(GeneratedChangeDetectionPolicy {
         max_entries: 8,
         max_changed_paths: 1,
+        ignored_directory_names: crate::project::IGNORED_DIRECTORY_NAMES,
     });
     let baseline = detector.capture_filesystem_baseline(&project);
     sandbox.create_file_with_contents("project/a.txt", b"a\n");

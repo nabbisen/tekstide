@@ -18,6 +18,16 @@ pub const DEFAULT_CHANGED_PATH_LIMIT: usize = 4096;
 pub struct GeneratedChangeDetectionPolicy {
     pub max_entries: usize,
     pub max_changed_paths: usize,
+    /// Change-detection-wiring handoff, D1: directory names a filesystem
+    /// scan skips entirely -- not recorded as an entry, not recursed
+    /// into, not counted against `max_entries`. Defaults to
+    /// `super::IGNORED_DIRECTORY_NAMES`, the same list
+    /// `FileExplorerScanPolicy::linux_mvp` builds its own
+    /// `collapsed_directory_names` from -- one shared definition of
+    /// project-wide scan noise, not two that could disagree. Matched by
+    /// exact entry name at any depth, the same rule the explorer already
+    /// uses.
+    pub ignored_directory_names: &'static [&'static str],
 }
 
 impl Default for GeneratedChangeDetectionPolicy {
@@ -25,6 +35,7 @@ impl Default for GeneratedChangeDetectionPolicy {
         Self {
             max_entries: DEFAULT_CHANGE_DETECTOR_ENTRY_LIMIT,
             max_changed_paths: DEFAULT_CHANGED_PATH_LIMIT,
+            ignored_directory_names: super::IGNORED_DIRECTORY_NAMES,
         }
     }
 }
@@ -143,7 +154,7 @@ impl GeneratedChangeDetector {
         agent_run_id: Option<AgentRunId>,
     ) -> ReviewBaseline {
         let captured_at = DomainTimestamp::now_utc();
-        let scan = scan_filesystem(project, self.policy.max_entries);
+        let scan = scan_filesystem(project, &self.policy);
         let entry_count = scan.entries.len();
         ReviewBaseline {
             project_id: project.id().clone(),
@@ -178,7 +189,7 @@ impl GeneratedChangeDetector {
             };
         }
 
-        let scan = scan_filesystem(project, self.policy.max_entries);
+        let scan = scan_filesystem(project, &self.policy);
         let mut status = combine_status(baseline.status, scan.status);
         let scanned_entry_count = scan.entries.len();
         let changed_paths = if status == ChangeDetectionStatus::Complete {
@@ -245,7 +256,10 @@ struct FilesystemScan {
     status: ChangeDetectionStatus,
 }
 
-fn scan_filesystem(project: &ProjectSession, max_entries: usize) -> FilesystemScan {
+fn scan_filesystem(
+    project: &ProjectSession,
+    policy: &GeneratedChangeDetectionPolicy,
+) -> FilesystemScan {
     let root = project.canonical_root_path();
     if fs::metadata(root).is_err() {
         return FilesystemScan {
@@ -257,8 +271,10 @@ fn scan_filesystem(project: &ProjectSession, max_entries: usize) -> FilesystemSc
     }
 
     let mut entries = Vec::new();
-    let status = match scan_directory(root, Path::new(""), &mut entries, max_entries) {
-        Ok(true) => ChangeDetectionStatus::Partial { limit: max_entries },
+    let status = match scan_directory(root, Path::new(""), &mut entries, policy) {
+        Ok(true) => ChangeDetectionStatus::Partial {
+            limit: policy.max_entries,
+        },
         Ok(false) => ChangeDetectionStatus::Complete,
         Err(reason) => ChangeDetectionStatus::Failed { reason },
     };
@@ -268,11 +284,26 @@ fn scan_filesystem(project: &ProjectSession, max_entries: usize) -> FilesystemSc
     FilesystemScan { entries, status }
 }
 
+/// Change-detection-wiring handoff, D1: an entry whose name is in
+/// `policy.ignored_directory_names` is skipped **entirely** -- not
+/// pushed as a `ReviewBaselineEntry`, not recursed into, not counted
+/// against `max_entries`. Checked before the first `stat` call on the
+/// entry (`fs::symlink_metadata`, below), so an ignored `.git`/`target`
+/// tree costs nothing beyond the one `read_dir` name it appears as here.
+/// Matched by exact name, at any depth -- the same rule
+/// `FileExplorerScanPolicy::should_collapse` already uses, both sourced
+/// from `IGNORED_DIRECTORY_NAMES`.
+fn is_ignored(file_name: &std::ffi::OsStr, policy: &GeneratedChangeDetectionPolicy) -> bool {
+    file_name
+        .to_str()
+        .is_some_and(|name| policy.ignored_directory_names.contains(&name))
+}
+
 fn scan_directory(
     root: &Path,
     relative_directory: &Path,
     entries: &mut Vec<ReviewBaselineEntry>,
-    max_entries: usize,
+    policy: &GeneratedChangeDetectionPolicy,
 ) -> Result<bool, ChangeDetectionFailureReason> {
     let absolute_directory = root.join(relative_directory);
     let read_dir = fs::read_dir(&absolute_directory)
@@ -280,12 +311,17 @@ fn scan_directory(
     let mut partial = false;
 
     for entry in read_dir {
-        if entries.len() >= max_entries {
+        if entries.len() >= policy.max_entries {
             return Ok(true);
         }
 
         let entry = entry.map_err(|_| ChangeDetectionFailureReason::MetadataReadFailed)?;
-        let relative_path = relative_directory.join(entry.file_name());
+        let file_name = entry.file_name();
+        if is_ignored(&file_name, policy) {
+            continue;
+        }
+
+        let relative_path = relative_directory.join(&file_name);
         let absolute_path = entry.path();
         let metadata = fs::symlink_metadata(&absolute_path)
             .map_err(|_| ChangeDetectionFailureReason::MetadataReadFailed)?;
@@ -315,7 +351,7 @@ fn scan_directory(
         });
 
         if kind == ChangePathKind::Directory {
-            partial |= scan_directory(root, &relative_path, entries, max_entries)?;
+            partial |= scan_directory(root, &relative_path, entries, policy)?;
         }
     }
 
