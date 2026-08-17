@@ -66,7 +66,7 @@ impl AppState {
                     project.canonical_root_path().clone(),
                     Timestamp::from_domain(project.last_opened_at()),
                     Timestamp::from_domain(project.last_activity_at()),
-                    project.trust_state().label(),
+                    project.trust_state(),
                 ),
             );
         }
@@ -126,12 +126,25 @@ impl AppState {
         let project_id = self
             .recent_project_id_by_canonical_root(&canonical_root_path)
             .unwrap_or_else(ProjectId::new_uuid);
-        let project = ProjectSession::new(
+        // RFC-032: restores a *previous* session's trust decision, bound
+        // to the exact same canonical-path key `recent_project_id_by_canonical_root`
+        // just used to reuse `project_id` -- if a symlink was redirected
+        // since this entry was saved, the freshly-computed
+        // `canonical_root_path` here no longer matches the stored one,
+        // this lookup finds nothing, and the project below keeps
+        // `ProjectSession::new`'s own `Restricted` default. Trust never
+        // silently follows a path that no longer resolves to what was
+        // trusted.
+        let restored_trust = self.recent_trust_by_canonical_root(&canonical_root_path);
+        let mut project = ProjectSession::new(
             project_id.clone(),
             display_name,
             root_path,
             canonical_root_path,
         );
+        if let Some(trust_state) = restored_trust {
+            project.restore_trust_state(trust_state);
+        }
 
         if self.active_project_id.is_none() {
             self.active_project_id = Some(project_id.clone());
@@ -459,6 +472,21 @@ impl AppState {
             .map(|restored| restored.recent_project.project_id.clone())
     }
 
+    /// RFC-032: the trust-restoration analogue of
+    /// `recent_project_id_by_canonical_root` -- same key, same match,
+    /// deliberately not folded into one lookup returning both, so each
+    /// caller's intent (reuse an id vs. restore a trust decision) stays
+    /// separately named and separately testable.
+    fn recent_trust_by_canonical_root(
+        &self,
+        canonical_root_path: &std::path::Path,
+    ) -> Option<crate::project::WorkspaceTrust> {
+        self.recent_projects
+            .iter()
+            .find(|restored| restored.recent_project.canonical_root_path == canonical_root_path)
+            .map(|restored| restored.recent_project.trust_state)
+    }
+
     fn upsert_open_project_recent(&mut self, project_id: ProjectId) {
         let Some(project) = self.project(&project_id) else {
             return;
@@ -470,7 +498,7 @@ impl AppState {
             project.canonical_root_path().clone(),
             Timestamp::from_domain(project.last_opened_at()),
             Timestamp::from_domain(project.last_activity_at()),
-            project.trust_state().label(),
+            project.trust_state(),
         );
 
         if let Some(restored) = self.recent_projects.iter_mut().find(|restored| {

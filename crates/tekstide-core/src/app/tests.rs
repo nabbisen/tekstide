@@ -216,7 +216,7 @@ fn restored_recent_project_id_is_reused_when_project_is_added_again() {
             project_dir.clone(),
             canonical,
             Timestamp::from_persisted("2026-07-04T00:00:00Z"),
-            "Trusted",
+            crate::project::WorkspaceTrust::Trusted,
         )],
     });
 
@@ -230,8 +230,220 @@ fn restored_recent_project_id_is_reused_when_project_is_added_again() {
     assert_eq!(state.recent_projects().len(), 1);
     assert_eq!(
         state.projects()[0].trust_state().label(),
+        "Trusted",
+        "RFC-032: reopening at the exact same canonical path a prior session trusted must \
+         restore that trust, not silently drop back to Restricted -- persistence bound to the \
+         canonical path is the whole point of this slice"
+    );
+}
+
+// --- RFC-032 PR-032-B: persistence, bound to the canonical path -------
+//
+// The review gate's own words: proven against a **real symlink**,
+// redirected for real between sessions -- not a synthesised path
+// string. `restored_recent_project_id_is_reused_when_project_is_added_again`
+// above already proves the mechanism for an unchanged, non-symlinked
+// path; these four prove the actual binding decision RFC-032 makes.
+
+/// **Positive control, required before the negative case means
+/// anything.** Without this, `a_redirected_symlink_is_not_trusted_on_reopen`
+/// passing would be equally consistent with "nothing is ever trusted on
+/// reopen" as with "redirection specifically breaks trust."
+#[cfg(unix)]
+#[test]
+fn an_unredirected_symlinked_project_is_still_trusted_on_reopen() {
+    let sandbox = TestSandbox::new("trust-unredirected");
+    let target = sandbox.create_dir("target");
+    let link = sandbox.path("link");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+
+    let mut first_session = AppState::default();
+    let outcome = first_session
+        .add_project_from_path_with_symlink_policy(&link, SymlinkPolicy::AllowCanonicalTarget)
+        .expect("symlinked root should be added with explicit confirmation");
+    first_session
+        .project_mut(outcome.project_id())
+        .unwrap()
+        .grant_trust("test grant");
+    let persisted = first_session.recent_project_state();
+
+    let mut second_session = AppState::default();
+    second_session.restore_recent_projects(persisted);
+    let reopened = second_session
+        .add_project_from_path_with_symlink_policy(&link, SymlinkPolicy::AllowCanonicalTarget)
+        .expect("reopening the same, unredirected symlink should validate");
+
+    assert_eq!(
+        second_session
+            .project(reopened.project_id())
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "a symlink still resolving to the same real folder must keep its trust across sessions"
+    );
+}
+
+/// **The review gate's own falsifiable claim**: a real symlink,
+/// redirected for real to a *different* real folder between the grant
+/// and the reopen, must not carry the old grant over -- the fresh
+/// canonical resolution no longer matches what the persisted entry was
+/// keyed by, so the lookup finds nothing and the reopened session keeps
+/// `ProjectSession::new`'s own `Restricted` default.
+#[cfg(unix)]
+#[test]
+fn a_redirected_symlink_is_not_trusted_on_reopen() {
+    let sandbox = TestSandbox::new("trust-redirected");
+    let original_target = sandbox.create_dir("original-target");
+    let redirected_target = sandbox.create_dir("redirected-target");
+    let link = sandbox.path("link");
+    std::os::unix::fs::symlink(&original_target, &link).unwrap();
+
+    let mut first_session = AppState::default();
+    let outcome = first_session
+        .add_project_from_path_with_symlink_policy(&link, SymlinkPolicy::AllowCanonicalTarget)
+        .expect("symlinked root should be added with explicit confirmation");
+    first_session
+        .project_mut(outcome.project_id())
+        .unwrap()
+        .grant_trust("test grant");
+    let persisted = first_session.recent_project_state();
+    assert_eq!(
+        persisted.projects[0].trust_state,
+        crate::project::WorkspaceTrust::Trusted,
+        "test precondition: the grant must actually be in the persisted snapshot"
+    );
+
+    // Redirect the *same* link path to a genuinely different real folder
+    // -- a real filesystem operation, not a second, synthesised
+    // canonical-path string standing in for one.
+    fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(&redirected_target, &link).unwrap();
+    assert_ne!(
+        fs::canonicalize(&link).unwrap(),
+        fs::canonicalize(&original_target).unwrap(),
+        "test precondition: the redirect must actually change what the link resolves to"
+    );
+
+    let mut second_session = AppState::default();
+    second_session.restore_recent_projects(persisted);
+    let reopened = second_session
+        .add_project_from_path_with_symlink_policy(&link, SymlinkPolicy::AllowCanonicalTarget)
+        .expect("reopening the redirected symlink should still validate as a project root");
+
+    assert_eq!(
+        second_session
+            .project(reopened.project_id())
+            .unwrap()
+            .trust_state()
+            .label(),
         "Restricted",
-        "display-only trust summary must not restore trust"
+        "a symlink redirected to a different real folder must not inherit the old grant -- an \
+         entirely different folder's contents must not run with the trust granted to something \
+         else"
+    );
+}
+
+/// **Ablation, per the review gate**: if trust were bound to the
+/// literal path (what `RecentProject::root_path` stores, "as opened")
+/// rather than the canonical path, the exact redirected-symlink scenario
+/// above *would* inherit the old grant, because the literal path string
+/// (the symlink itself) never changes -- only what it resolves to does.
+/// This does not exercise production code (which correctly uses
+/// `canonical_root_path`, proven above) -- it exercises the same lookup
+/// shape keyed on the wrong field, against the same real, redirected
+/// fixture, to show the specific divergence the real implementation
+/// avoids.
+#[cfg(unix)]
+#[test]
+fn ablation_binding_trust_to_the_literal_path_would_inherit_a_redirected_symlinks_trust() {
+    let sandbox = TestSandbox::new("trust-ablation");
+    let original_target = sandbox.create_dir("original-target");
+    let redirected_target = sandbox.create_dir("redirected-target");
+    let link = sandbox.path("link");
+    std::os::unix::fs::symlink(&original_target, &link).unwrap();
+
+    let mut first_session = AppState::default();
+    let outcome = first_session
+        .add_project_from_path_with_symlink_policy(&link, SymlinkPolicy::AllowCanonicalTarget)
+        .expect("symlinked root should be added with explicit confirmation");
+    first_session
+        .project_mut(outcome.project_id())
+        .unwrap()
+        .grant_trust("test grant");
+    let persisted = first_session.recent_project_state();
+
+    fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(&redirected_target, &link).unwrap();
+
+    // The wrong lookup: keyed on `root_path` (the literal path as
+    // opened -- here, the symlink itself, which is unchanged by the
+    // redirect) instead of `canonical_root_path`.
+    let literal_path_trust = persisted
+        .projects
+        .iter()
+        .find(|project| project.root_path == link)
+        .map(|project| project.trust_state);
+
+    assert_eq!(
+        literal_path_trust,
+        Some(crate::project::WorkspaceTrust::Trusted),
+        "binding by the literal path would find the old grant even after the redirect -- this \
+         is the specific failure canonical-path binding exists to prevent, demonstrated here \
+         rather than assumed"
+    );
+}
+
+/// **Revocation must clear persisted state, not only the in-memory
+/// one — proven across a reopen**, not merely by reading the in-memory
+/// `trust_state()` right after `revoke_trust` is called.
+#[test]
+fn revoking_trust_persists_and_survives_a_reopen() {
+    let sandbox = TestSandbox::new("trust-revoke");
+    let project_dir = sandbox.create_dir("project");
+
+    let mut first_session = AppState::default();
+    let outcome = first_session
+        .add_project_from_path(&project_dir)
+        .expect("plain project root should be added");
+    first_session
+        .project_mut(outcome.project_id())
+        .unwrap()
+        .grant_trust("test grant");
+    let trusted_snapshot = first_session.recent_project_state();
+    assert_eq!(
+        trusted_snapshot.projects[0].trust_state,
+        crate::project::WorkspaceTrust::Trusted,
+        "test precondition: the grant must actually be in the persisted snapshot"
+    );
+
+    first_session
+        .project_mut(outcome.project_id())
+        .unwrap()
+        .revoke_trust("test revocation");
+    let revoked_snapshot = first_session.recent_project_state();
+    assert_ne!(
+        revoked_snapshot.projects[0].trust_state,
+        crate::project::WorkspaceTrust::Trusted,
+        "the persisted snapshot must reflect the revocation, not the stale grant -- this is the \
+         in-memory half; the reopen below is the half that actually crosses a session boundary"
+    );
+
+    let mut second_session = AppState::default();
+    second_session.restore_recent_projects(revoked_snapshot);
+    let reopened = second_session
+        .add_project_from_path(&project_dir)
+        .expect("reopening the same project should validate");
+
+    assert_ne!(
+        second_session
+            .project(reopened.project_id())
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "a revoked project reopened in a fresh session must not come back trusted -- revocation \
+         that only lasts until the next restart is not revocation"
     );
 }
 
@@ -430,7 +642,7 @@ fn stale_recent_project_removal_only_removes_recent_metadata() {
             missing_path.clone(),
             missing_path,
             Timestamp::from_persisted("2026-07-04T00:00:00Z"),
-            "Restricted",
+            crate::project::WorkspaceTrust::Restricted,
         )],
     });
 

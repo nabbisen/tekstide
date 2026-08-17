@@ -4,7 +4,7 @@ use super::{
 use crate::app::AppState;
 use crate::domain::{TerminalKind, TerminalSession, TerminalStatus};
 use crate::project::recent::{RecentProject, RecentProjectState, Timestamp};
-use crate::project::{ProjectId, ProjectRuntimeSummary};
+use crate::project::{ProjectId, ProjectRuntimeSummary, WorkspaceTrust};
 use crate::security::RestrictedModeFeature;
 
 #[test]
@@ -95,7 +95,7 @@ fn restored_stale_recent_project_is_displayed_without_active_session() {
             "/missing/project",
             "/missing/project",
             Timestamp::from_persisted("2026-07-04T00:00:00Z"),
-            "Trusted",
+            WorkspaceTrust::Trusted,
         )],
     });
 
@@ -135,7 +135,7 @@ fn a_recent_unopened_project_reports_unknown_counts_not_not_implemented() {
             "/recent/project",
             "/recent/project",
             Timestamp::from_persisted("2026-07-04T00:00:00Z"),
-            "Trusted",
+            WorkspaceTrust::Trusted,
         )],
     });
 
@@ -351,7 +351,7 @@ fn rows_sort_by_attention_then_active_recent_status_then_name() {
             "/missing/recent",
             "/missing/recent",
             Timestamp::from_persisted("2026-07-04T00:00:00Z"),
-            "Restricted",
+            WorkspaceTrust::Restricted,
         )],
     });
 

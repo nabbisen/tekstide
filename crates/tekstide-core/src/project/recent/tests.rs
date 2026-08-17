@@ -2,7 +2,7 @@ use super::{
     AppStatePathProvider, RecentProject, RecentProjectAvailability, RecentProjectState,
     RecentProjectStore, Timestamp, assess_recent_project_availability,
 };
-use crate::project::ProjectId;
+use crate::project::{ProjectId, WorkspaceTrust};
 use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
@@ -22,7 +22,7 @@ fn serializes_versioned_recent_project_json() {
     assert!(json.contains("\"project_id\": \"00000000-0000-4000-8000-000000000001\""));
     assert!(json.contains("\"root_path\": \"/selected/project\""));
     assert!(json.contains("\"canonical_root_path\": \"/canonical/project\""));
-    assert!(json.contains("\"last_trust_state_summary\": \"Restricted\""));
+    assert!(json.contains("\"trust_state\": \"Restricted\""));
 }
 
 #[test]
@@ -38,7 +38,7 @@ fn parses_known_schema_and_ignores_unknown_fields() {
       "canonical_root_path": "/canonical/project",
       "last_opened_at": "2026-07-04T00:00:00Z",
       "last_activity": "2026-07-04T00:00:00Z",
-      "last_trust_state_summary": "Trusted",
+      "trust_state": "Trusted",
       "future_field": "ignored",
       "future_flag": true,
       "future_null": null
@@ -51,11 +51,41 @@ fn parses_known_schema_and_ignores_unknown_fields() {
     assert_eq!(state.state_version, 1);
     assert_eq!(state.projects.len(), 1);
     assert_eq!(state.projects[0].display_name, "tekstide");
-    assert_eq!(state.projects[0].last_trust_state_summary, "Trusted");
+    assert_eq!(state.projects[0].trust_state, WorkspaceTrust::Trusted);
 }
 
+/// RFC-032: `trust_state` is deliberately **not** covered by this test --
+/// it is the one field allowed to be missing (`#[serde(default)]`, see
+/// `RecentProject::trust_state`'s own doc comment), covered separately by
+/// [`missing_trust_state_defaults_to_restricted`] below.
 #[test]
 fn rejects_missing_required_fields() {
+    let json = r#"{
+  "state_version": 1,
+  "projects": [
+    {
+      "project_id": "00000000-0000-4000-8000-000000000001",
+      "display_name": "tekstide",
+      "root_path": "/selected/project",
+      "last_opened_at": "2026-07-04T00:00:00Z",
+      "last_activity": "2026-07-04T00:00:00Z",
+      "trust_state": "Restricted"
+    }
+  ]
+}"#;
+
+    let error = RecentProjectState::from_json(json).expect_err("missing field should be rejected");
+
+    assert!(error.contains("canonical_root_path"));
+}
+
+/// RFC-032: the fail-closed default -- a pre-RFC-032 on-disk record has
+/// no `trust_state` field at all (the field did not exist), and must
+/// still parse, defaulting to `Restricted` rather than being rejected as
+/// malformed. Correct as more than parser leniency: nothing could
+/// genuinely have been trusted before this field existed.
+#[test]
+fn missing_trust_state_defaults_to_restricted() {
     let json = r#"{
   "state_version": 1,
   "projects": [
@@ -70,9 +100,10 @@ fn rejects_missing_required_fields() {
   ]
 }"#;
 
-    let error = RecentProjectState::from_json(json).expect_err("missing field should be rejected");
+    let state = RecentProjectState::from_json(json)
+        .expect("a record with no trust_state field must still parse");
 
-    assert!(error.contains("last_trust_state_summary"));
+    assert_eq!(state.projects[0].trust_state, WorkspaceTrust::Restricted);
 }
 
 #[test]
@@ -87,7 +118,7 @@ fn rejects_invalid_timestamp() {
       "canonical_root_path": "/canonical/project",
       "last_opened_at": "not-a-timestamp",
       "last_activity": "2026-07-04T00:00:00Z",
-      "last_trust_state_summary": "Restricted"
+      "trust_state": "Restricted"
     }
   ]
 }"#;
@@ -109,7 +140,7 @@ fn rejects_duplicate_project_id() {
       "canonical_root_path": "/canonical/one",
       "last_opened_at": "2026-07-04T00:00:00Z",
       "last_activity": "2026-07-04T00:00:00Z",
-      "last_trust_state_summary": "Restricted"
+      "trust_state": "Restricted"
     },
     {
       "project_id": "00000000-0000-4000-8000-000000000001",
@@ -118,7 +149,7 @@ fn rejects_duplicate_project_id() {
       "canonical_root_path": "/canonical/two",
       "last_opened_at": "2026-07-04T00:00:00Z",
       "last_activity": "2026-07-04T00:00:00Z",
-      "last_trust_state_summary": "Restricted"
+      "trust_state": "Restricted"
     }
   ]
 }"#;
@@ -140,7 +171,7 @@ fn rejects_duplicate_canonical_root_path() {
       "canonical_root_path": "/canonical/shared",
       "last_opened_at": "2026-07-04T00:00:00Z",
       "last_activity": "2026-07-04T00:00:00Z",
-      "last_trust_state_summary": "Restricted"
+      "trust_state": "Restricted"
     },
     {
       "project_id": "00000000-0000-4000-8000-000000000002",
@@ -149,7 +180,7 @@ fn rejects_duplicate_canonical_root_path() {
       "canonical_root_path": "/canonical/shared",
       "last_opened_at": "2026-07-04T00:00:00Z",
       "last_activity": "2026-07-04T00:00:00Z",
-      "last_trust_state_summary": "Restricted"
+      "trust_state": "Restricted"
     }
   ]
 }"#;
@@ -172,7 +203,7 @@ fn rejects_non_uuid_project_id() {
       "canonical_root_path": "/canonical/project",
       "last_opened_at": "2026-07-04T00:00:00Z",
       "last_activity": "2026-07-04T00:00:00Z",
-      "last_trust_state_summary": "Restricted"
+      "trust_state": "Restricted"
     }
   ]
 }"#;
@@ -318,7 +349,7 @@ fn sample_project(
         root_path,
         canonical_root_path,
         Timestamp::from_persisted("2026-07-04T00:00:00Z"),
-        "Restricted",
+        WorkspaceTrust::Restricted,
     )
 }
 

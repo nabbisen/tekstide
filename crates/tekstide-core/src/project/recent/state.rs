@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::project::ProjectId;
+use crate::project::{ProjectId, WorkspaceTrust};
 
 use super::Timestamp;
 
@@ -32,7 +32,18 @@ pub struct RecentProject {
     pub canonical_root_path: PathBuf,
     pub last_opened_at: Timestamp,
     pub last_activity: Timestamp,
-    pub last_trust_state_summary: String,
+    /// RFC-032: a real, typed trust value -- was `last_trust_state_summary:
+    /// String`, a write-only display label nothing ever read back. This
+    /// is the record `AppState::add_project_session` restores from on
+    /// reopen, keyed by `canonical_root_path` matching (never `root_path`
+    /// -- a redirected symlink must not inherit the old canonical
+    /// entry's trust, see `app.rs`'s `recent_trust_by_canonical_root`).
+    /// `#[serde(default)]`: a pre-RFC-032 on-disk record lacks this
+    /// field entirely; defaulting to `WorkspaceTrust::Restricted` is
+    /// correct, not merely convenient, since nothing could have been
+    /// trusted before `grant_project_trust` had a production caller.
+    #[serde(default)]
+    pub trust_state: WorkspaceTrust,
 }
 
 impl RecentProjectState {
@@ -82,7 +93,7 @@ impl RecentProject {
         root_path: impl Into<PathBuf>,
         canonical_root_path: impl Into<PathBuf>,
         now: Timestamp,
-        last_trust_state_summary: impl Into<String>,
+        trust_state: WorkspaceTrust,
     ) -> Self {
         Self {
             project_id,
@@ -91,7 +102,7 @@ impl RecentProject {
             canonical_root_path: canonical_root_path.into(),
             last_opened_at: now.clone(),
             last_activity: now,
-            last_trust_state_summary: last_trust_state_summary.into(),
+            trust_state,
         }
     }
 
@@ -102,7 +113,7 @@ impl RecentProject {
         canonical_root_path: impl Into<PathBuf>,
         last_opened_at: Timestamp,
         last_activity: Timestamp,
-        last_trust_state_summary: impl Into<String>,
+        trust_state: WorkspaceTrust,
     ) -> Self {
         Self {
             project_id,
@@ -111,7 +122,7 @@ impl RecentProject {
             canonical_root_path: canonical_root_path.into(),
             last_opened_at,
             last_activity,
-            last_trust_state_summary: last_trust_state_summary.into(),
+            trust_state,
         }
     }
 }

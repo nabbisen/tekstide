@@ -129,7 +129,7 @@ fn status_bar_project_count_matches_the_board_row_count_including_recent_project
         "/tmp/recent-only-project",
         "/tmp/recent-only-project",
         tekstide_core::project::recent::Timestamp::now_utc(),
-        "Restricted",
+        tekstide_core::project::WorkspaceTrust::Restricted,
     );
     app_shell.restore_recent_projects(tekstide_core::project::recent::RecentProjectState {
         state_version: tekstide_core::project::recent::RECENT_PROJECT_STATE_VERSION,

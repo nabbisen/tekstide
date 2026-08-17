@@ -280,6 +280,20 @@ impl ProjectSession {
             .expect("trust audit event should be present after push")
     }
 
+    /// RFC-032: reconstructs a *previous* session's trust decision on
+    /// reopen -- not a new decision, so unlike `grant_trust`/`revoke_trust`
+    /// this pushes no `AuditEvent` and does not touch `record_activity`.
+    /// The original grant already has its own `TrustGrant` authorization
+    /// record in the durable audit store from when it actually happened;
+    /// synthesizing a second "trust granted" event here would misrepresent
+    /// this moment as a new decision the user did not make. The one and
+    /// only caller (`AppState::add_project_session`) is responsible for
+    /// the canonical-path match this restoration is conditioned on --
+    /// this method itself does not check it, and trusts its caller.
+    pub(crate) fn restore_trust_state(&mut self, trust_state: WorkspaceTrust) {
+        self.trust_state = trust_state;
+    }
+
     /// Terminal launch UX handoff: `terminal_session_limit` is enforced
     /// **here**, not by any caller -- a limit enforced at the call site
     /// is a limit the next caller forgets. Checked after the existing
