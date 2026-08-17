@@ -115,9 +115,12 @@ application runs change detection**, so no change set can exist for either
 surface to render. Launching an agent run works; reviewing what it did does
 not. There is also no Git-based change detection, file watcher, or
 overwrite-confirmation UI, no safe-close dialog, and no cross-platform
-evidence beyond Linux. The **approval-history surface** built in `0.10.0` is
-implemented and tested but has no key bound to it, so it cannot currently be
-opened. **Terminal input latency is not verified against its
+evidence beyond Linux. The **approval-history surface** built in `0.10.0` now opens
+(`Ctrl+Alt+H`), but that makes only the *surface* reachable, not command
+approval itself: no shipping AI CLI speaks RFC-021's protocol, so
+`Managed` command approval is still exercisable only by this project's own
+reference adapter, and a real user opening this surface today will see it
+empty — correctly, not as a bug. **Terminal input latency is not verified against its
 16 ms p95 target.** `0.8.0` removed the structural cause of the previous
 failure — a 50 ms polling interval that put the floor near 47.5 ms — but
 removing a known cause is not the same as measuring the result, and the
@@ -207,6 +210,7 @@ The shell is keyboard-navigable by design. These bindings exist today
 | `Ctrl+Alt+T` | Launch a real terminal in the active project (switches to Terminal mode) |
 | `Ctrl+Alt+A` | Launch an AI CLI (Claude Code) run in the active project — refused unless the project is trusted |
 | `Ctrl+Alt+U` | Open the Workspace Trust surface for the active project (grant or revoke) |
+| `Ctrl+Alt+H` | Open the Approval History surface for the active project |
 | `Ctrl+Shift+V` | Paste the clipboard into the focused terminal, subject to RFC-009's policy |
 | `Ctrl+S` | Save the active document in Content mode |
 | `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |

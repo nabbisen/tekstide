@@ -170,10 +170,24 @@ impl KeybindingPolicy {
                     None,
                     KeybindingStatus::Configurable,
                 ),
+                // approval-history-binding handoff: `Configurable` with a
+                // `None` binding reads as "a user can bind this" but
+                // actually means "unreachable until RFC-023 exists" -- the
+                // same category error response 248 named and RFC-032 fixed
+                // for `OpenTrustSettings`. `ApprovalHistory` is RFC-022
+                // PR-022-E's own surface, already built and tested, with
+                // no other route to open it. `Ctrl+Alt+H`, following the
+                // existing `Ctrl+Alt+<letter>` shape (`P`, `M`, `T`, `A`,
+                // `U` above) -- `H` for History, unused by any other rule
+                // here and not `Ctrl+Shift+P`'s `Reserved` command-palette
+                // binding, so it collides with nothing (checked
+                // mechanically by
+                // `open_approval_history_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone).
                 KeybindingRule::new(
                     NavigationAction::OpenApprovalHistory,
-                    None,
-                    KeybindingStatus::Configurable,
+                    Some("Ctrl+Alt+H"),
+                    KeybindingStatus::Candidate,
                 ),
                 // RFC-032, response 248's required fix: `Configurable`
                 // with a `None` binding reads as "a user can bind this"

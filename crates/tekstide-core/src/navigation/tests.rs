@@ -171,6 +171,36 @@ fn open_trust_settings_shortcut_is_a_candidate_that_collides_with_no_other_rule(
     );
 }
 
+/// approval-history-binding handoff: `ApprovalHistory` is RFC-022
+/// PR-022-E's own surface, already built and tested, with no other route
+/// to open it -- a `Configurable`/`None` binding here would leave it
+/// unreachable by any real user input, the same category error response
+/// 248 named for `OpenTrustSettings`. Checked mechanically, not by
+/// inspection alone, the same shape every other real binding above
+/// already uses.
+#[test]
+fn open_approval_history_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::OpenApprovalHistory)
+        .expect("Open Approval History should have a keyboard policy");
+
+    assert_eq!(rule.default_binding, Some("Ctrl+Alt+H"));
+    assert_eq!(rule.status, KeybindingStatus::Candidate);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::OpenApprovalHistory)
+        .filter(|other| other.default_binding == rule.default_binding)
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Alt+H must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
 #[test]
 fn primary_navigation_workflows_have_keyboard_policy_entries() {
     let policy = KeybindingPolicy::linux_mvp();

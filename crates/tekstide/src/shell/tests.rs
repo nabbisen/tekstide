@@ -3923,10 +3923,17 @@ fn arrow_keys_move_the_approval_history_highlight() {
             .is_some_and(|project| project.approval_requests().len() == 2)
     });
 
-    state.app_shell.dispatch(
-        tekstide_core::command::AppCommand::OpenActiveProjectSurface(
-            tekstide_core::project::ProjectOpenSurface::ApprovalHistory,
-        ),
+    // approval-history-binding handoff: opened through the real
+    // `Ctrl+Alt+H` route (`shell_input_for_test`, dispatched the same way
+    // a real key press reaches `update`), not a directly-dispatched
+    // `AppCommand` -- the same lesson response 248 established for
+    // `press_trust_settings_action` below.
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenApprovalHistory,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
     );
     assert_eq!(state.approval_history_highlight, 0, "test precondition");
 

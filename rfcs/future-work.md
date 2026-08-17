@@ -377,13 +377,19 @@ Text contrast is excellent — comfortably past AAA. **`border_default` fails WC
   promotion still functions without the history surface. **Remedy**: a real `Candidate`
   default binding — the key handler already exists (`handle_approval_history_key`, RFC-022
   PR-022-E), so the binding is the whole of it. **Scheduled 2026-08-17** as
-  `handoffs/approval-history-binding.md`.
+  `handoffs/approval-history-binding.md`. **Discharged 2026-08-18**: `OpenApprovalHistory` now
+  has a real `Candidate` binding (`Ctrl+Alt+H`), mechanically checked to collide with nothing,
+  and the surface's own reachability test opens it through that real key press rather than a
+  dispatched `AppCommand`. Makes the *surface* openable only — RFC-022's protocol limitation is
+  untouched, so a real user sees it empty.
 - **The category error behind both of the above, worth naming once**: `KeybindingStatus::Configurable`
   with a `None` binding *reads* as "a user can bind this" and in fact means "**dead** until
   RFC-023 exists." Configuration is unimplemented, so there is no user who can bind anything.
   Only six actions have real `Candidate` bindings — `OpenProjectBoard`, `ToggleProjectMode`,
   `LaunchTerminal`, `PasteIntoTerminal`, `SaveActiveDocument`, `LaunchAgentRun` — plus
-  `OpenTrustSettings` as of RFC-032. **Every other navigation action is unreachable, not
+  `OpenTrustSettings` as of RFC-032 and `OpenApprovalHistory` as of the
+  `approval-history-binding` handoff (2026-08-18), the last case where a binding alone made an
+  already-built surface reachable. **Every other navigation action is unreachable, not
   pending**, and a closeout that reads `Configurable` as "deferred by design" will keep
   shipping surfaces no one can open. A keybinding pass (RFC-023) should either give each
   action a default or mark it explicitly dead; the current state makes the two

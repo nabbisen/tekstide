@@ -26,6 +26,14 @@ default binding plus keyboard navigation on the surface, of the same shape RFC-0
 `OpenTrustSettings` (`Ctrl+Alt+U`) — tracked in [`future-work.md`](../future-work.md), not
 reopened here.
 
+**Remedy landed 2026-08-18** — `rfcs/handoffs/approval-history-binding.md`.
+`NavigationAction::OpenApprovalHistory` now has a real `Candidate` binding (`Ctrl+Alt+H`,
+mechanically checked to collide with no other rule), and the surface's own reachability test
+(`arrow_keys_move_the_approval_history_highlight`) opens it through that real key press rather
+than a directly-dispatched `AppCommand`. This makes the *surface* openable; it does not touch
+the protocol limitation above — `Managed` is still exercisable only by the reference adapter,
+so a real user opening this surface today sees it empty, correctly.
+
 Target milestone: M11
 Date: 2026-08-16
 

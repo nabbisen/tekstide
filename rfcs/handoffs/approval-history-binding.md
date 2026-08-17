@@ -1,6 +1,6 @@
 ---
 title: "A default binding for OpenApprovalHistory — the last unreachable built surface"
-status: "Scheduled 2026-08-17, awaiting implementation"
+status: "Implemented 2026-08-18, awaiting review"
 rfc_file: "../done/022-adapter-spawn-and-command-approval-surface.md"
 target_milestone: "M11"
 created: "2026-08-17"
