@@ -270,17 +270,67 @@ suppression specifically, with a real-directory fixture.
 
 `cargo test -p tekstide --bin tekstide shell::tests::` -- all passing (274 total in this crate).
 
+### Response 248's required corrections: the surface was unreachable
+
+Response 248 found that everything above was correct but sat on a surface no user could open --
+`NavigationAction::OpenTrustSettings` was `Configurable`/`None`, and `Configurable`-with-`None`
+"reads as pending, actually means dead" until RFC-023 (configuration/keybinding) exists.
+`grant_project_trust` had a production caller no real key press could reach.
+
+**Fixed:**
+
+- **A real default binding**: `Ctrl+Alt+U`, `KeybindingStatus::Candidate` -- the same shape the
+  six actually-reachable actions use, checked mechanically against every other rule
+  (`open_trust_settings_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+  `crates/tekstide-core/src/navigation/tests.rs`), not by inspection.
+- **Keyboard navigation on the surface itself**: `handle_trust_settings_key`
+  (`crates/tekstide/src/shell.rs`), wired as a fourth `FocusZone::MainArea` consumer alongside
+  the editor/approval-history/(now) trust-settings key handlers, each still checking
+  `open_surface` itself. No highlight index, unlike `handle_approval_history_key`'s list --
+  `TrustSettings` shows exactly one control at a time (never both), so Enter always activates
+  whichever one `trust_settings_view` is currently rendering, with nothing to move a cursor
+  between.
+- **Every test in this section rebuilt to start from a real key event**: a new helper,
+  `press_trust_settings_action` (`Ctrl+Alt+U` via `shell_input_for_test`, then a real Enter via
+  `send_main_area_key` -- the same helper `arrow_keys_move_the_approval_history_highlight`
+  already established for that surface's own keyboard access), replaces every direct
+  `Message::OpenTrustGrantDialog`/`Message::RevokeWorkspaceTrust` dispatch throughout this file,
+  including the end-to-end chain proof. Two new tests cover `handle_trust_settings_key`'s own
+  guard (`trust_settings_key_is_a_no_op_off_the_trust_settings_surface`,
+  `trust_settings_key_ignores_keys_other_than_enter`).
+
+**Also noted, not fixed here**: response 248 found `NavigationAction::OpenApprovalHistory` has
+the identical `Configurable`/`None` gap (RFC-022, closed without catching it) -- the architect's
+own record to correct separately; RFC-022's own consequence is smaller (`High`/`Destructive`
+promotion still works without the history surface) but real. Out of this RFC's scope.
+
+**The screenshot** (response 248's "one specific reason": escaping mangling legibility, not
+rendering at all, is the actual risk for a dialog that is almost entirely a rendered path) --
+`rfcs/handoffs/032-workspace-trust-granting/evidence/pr-032-d/trust-grant-dialog-bidi-override.png`.
+A real, running Tekstide, launched against a real directory named
+`safe-project<U+202E actual override, not the literal text>gpj`, navigated with real input the
+whole way: `Ctrl+Alt+U` from the Project Board (the project opened via CLI arg becomes active by
+default, and `OpenActiveProjectSurface` routes into the workspace on its own -- no separate
+"enter workspace" step needed) lands on `TrustSettings` ("Current state: Restricted", one "Grant
+Trust…" button); real Enter opens the dialog. The capture shows: the escaped path rendered as
+`<U+202E>` inline and fully legible, not wrapped or truncated into something unreadable; focus
+marked on `Cancel` (`> Cancel`, `Grant Trust` unmarked); the canonical sentence, the
+present-and-future clause, and the "does not undo" clause all present and readable in full. Taken
+via `niri msg action screenshot-window` + `wl-paste` (this niri config copies to the clipboard
+rather than writing to disk); the scratch project directory and test process were removed after.
+
 ### Gates run
 
 `cargo fmt --all --check` clean. `cargo clippy --workspace --all-targets --all-features -- -D
-warnings` clean. `cargo test --workspace --all-targets --all-features`: 881 passed, 0 failed, run
+warnings` clean. `cargo test --workspace --all-targets --all-features`: 884 passed, 0 failed, run
 three times for stability. `git diff --check` clean. Orphaned test-spawned processes and scratch
 directories cleaned up after each run.
 
 ## PR-032-D - The dialog
 
 Built together with PR-032-C above -- see that section's evidence for the full,
-item-by-item accounting against `what-the-trust-dialog-must-say.md`'s own review gate.
+item-by-item accounting against `what-the-trust-dialog-must-say.md`'s own review gate, and for
+response 248's screenshot evidence specifically.
 
 ## PR-032-E - Closeout
 

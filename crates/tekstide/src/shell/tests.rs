@@ -2194,8 +2194,9 @@ fn apply_terminal_geometry_resizes_every_tracked_pane_when_called_from_a_launch_
 /// `launch_terminal`'s own dispatch arm uses.
 ///
 /// **RFC-032 PR-032-C**: trust can now be genuinely granted through the
-/// real GUI route (`Message::OpenTrustGrantDialog`/`ModalActivate`) --
-/// see `granting_trust_through_the_real_route_unblocks_a_real_agent_run_launch`
+/// real GUI route (`Ctrl+Alt+U` -> Enter -> Tab -> Enter,
+/// `press_trust_settings_action`) -- see
+/// `granting_trust_through_the_real_route_unblocks_a_real_agent_run_launch`
 /// below for the other side of this exact refusal, proven to actually
 /// clear once trust is granted for real, not merely that the trust flag
 /// changed.
@@ -2352,6 +2353,114 @@ fn state_with_a_real_project(label: &str) -> (State, tekstide_core::project::Pro
     (state_with(app_shell), project_id)
 }
 
+/// Response 248's required fix, this file's own real-input helper: the
+/// exact key sequence a real keyboard user presses to reach `TrustSettings`
+/// and act on it -- `Ctrl+Alt+U` (the real, collision-checked global
+/// binding, dispatched through `shell_input_for_test` the same way
+/// `LaunchAgentRun`'s own tests reach that action) to open the surface,
+/// then Enter (`handle_trust_settings_key`'s own real key, routed
+/// through `send_main_area_key` -- the identical helper
+/// `arrow_keys_move_the_approval_history_highlight` already uses for
+/// that surface's own keyboard access). Which of grant/revoke Enter
+/// performs depends on the project's current trust state, exactly as
+/// `handle_trust_settings_key`'s own body decides -- this helper does
+/// not choose, the same way a real keypress would not either.
+///
+/// Every test below that needs to reach or act on this surface goes
+/// through this helper rather than dispatching `Message::OpenTrustGrantDialog`/
+/// `Message::RevokeWorkspaceTrust` directly -- response 248's own
+/// finding was that a proof starting one step after the step that does
+/// not exist (the missing route) is not a proof of reachability at all.
+fn press_trust_settings_action(state: &mut State) {
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenTrustSettings,
+    );
+    let _ = super::update(
+        state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+    send_main_area_key(
+        state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+}
+
+/// `handle_trust_settings_key`'s own guard: a no-op while a project is
+/// open but its `open_surface` is anything other than `TrustSettings`
+/// (`ProjectDashboard`, the real default, here) -- the same guard shape
+/// `handle_approval_history_key` already uses for its own zone.
+#[test]
+fn trust_settings_key_is_a_no_op_off_the_trust_settings_surface() {
+    let (mut state, project_id) = state_with_a_real_project("trust-settings-key-wrong-surface");
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .open_surface(),
+        tekstide_core::project::ProjectOpenSurface::ProjectDashboard,
+        "test precondition: not on the TrustSettings surface"
+    );
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+
+    assert!(
+        state.modal.is_none(),
+        "Enter must do nothing off this surface"
+    );
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Restricted",
+        "nothing must be granted from the wrong surface"
+    );
+}
+
+/// A key other than Enter, on the real `TrustSettings` surface, must do
+/// nothing -- `handle_trust_settings_key` only handles one key, by
+/// design (there is no list to move a cursor through, unlike
+/// `handle_approval_history_key`'s Up/Down).
+#[test]
+fn trust_settings_key_ignores_keys_other_than_enter() {
+    let (mut state, project_id) = state_with_a_real_project("trust-settings-key-other-keys");
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenTrustSettings,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown),
+    );
+
+    assert!(
+        state.modal.is_none(),
+        "a non-Enter key must not open the dialog"
+    );
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Restricted"
+    );
+}
+
 /// `Message::OpenTrustGrantDialog` opens the real dialog, focus
 /// defaulting to `Cancel` -- `what-the-trust-dialog-must-say.md` §2, the
 /// larger asymmetry than the paste dialog's own default. Activating it
@@ -2361,7 +2470,7 @@ fn state_with_a_real_project(label: &str) -> (State, tekstide_core::project::Pro
 fn trust_grant_dialog_defaults_focus_to_cancel_and_activating_it_grants_nothing() {
     let (mut state, project_id) = state_with_a_real_project("trust-dialog-cancel-default");
 
-    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    press_trust_settings_action(&mut state);
     match state.modal.as_ref() {
         Some(ModalContent::TrustGrant(modal)) => {
             assert_eq!(modal.focus, TrustGrantButton::Cancel);
@@ -2393,7 +2502,7 @@ fn trust_grant_dialog_defaults_focus_to_cancel_and_activating_it_grants_nothing(
 fn trust_grant_dialog_requires_moving_focus_and_activating_to_grant() {
     let (mut state, project_id) = state_with_a_real_project("trust-dialog-grant-two-acts");
 
-    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    press_trust_settings_action(&mut state);
     let _ = super::update(&mut state, Message::ModalFocusNext);
     match state.modal.as_ref() {
         Some(ModalContent::TrustGrant(modal)) => {
@@ -2426,7 +2535,7 @@ fn open_trust_grant_dialog_does_not_replace_an_already_open_modal() {
         focus: ModalButton::Dismiss,
     });
 
-    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    press_trust_settings_action(&mut state);
 
     assert!(
         matches!(state.modal, Some(ModalContent::LayerDemo { .. })),
@@ -2443,7 +2552,7 @@ fn open_trust_grant_dialog_does_not_replace_an_already_open_modal() {
 fn granting_trust_through_the_real_route_records_both_audit_records() {
     let (mut state, project_id) = state_with_a_real_project("trust-grant-audit-records");
 
-    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    press_trust_settings_action(&mut state);
     let _ = super::update(&mut state, Message::ModalFocusNext);
     let _ = super::update(&mut state, Message::ModalActivate);
 
@@ -2500,7 +2609,7 @@ fn granting_trust_through_the_real_route_records_both_audit_records() {
 #[test]
 fn revoking_trust_through_the_real_route_records_a_single_applied_record() {
     let (mut state, project_id) = state_with_a_real_project("trust-revoke-audit-records");
-    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    press_trust_settings_action(&mut state);
     let _ = super::update(&mut state, Message::ModalFocusNext);
     let _ = super::update(&mut state, Message::ModalActivate);
     assert_eq!(
@@ -2515,7 +2624,7 @@ fn revoking_trust_through_the_real_route_records_a_single_applied_record() {
         "test precondition: the project must be trusted before revoking it"
     );
 
-    let _ = super::update(&mut state, Message::RevokeWorkspaceTrust);
+    press_trust_settings_action(&mut state);
 
     assert_ne!(
         state
@@ -2582,7 +2691,7 @@ fn trust_settings_surface_offers_grant_when_restricted_and_revoke_when_trusted()
         "Revoke Trust"
     );
 
-    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    press_trust_settings_action(&mut state);
     let _ = super::update(&mut state, Message::ModalFocusNext);
     let _ = super::update(&mut state, Message::ModalActivate);
     assert_eq!(
@@ -2917,10 +3026,14 @@ fn attempt_agent_run_launch_with_profile_spawns_registers_and_selects_a_real_run
     );
 }
 
-/// **Response 247's required proof**: not "the trust flag changed," but
-/// the actual chain trust was blocking -- grant trust through the real
-/// production route (`Message::OpenTrustGrantDialog`/`ModalActivate`,
-/// the same as every other test in this section), then launch a
+/// **Response 247's required proof, and response 248's correction to
+/// it**: not "the trust flag changed," but the actual chain trust was
+/// blocking -- and not from a dispatched `AppCommand`/`Message`, but
+/// from the real key sequence a keyboard user presses
+/// (`press_trust_settings_action`: the real `Ctrl+Alt+U` global binding,
+/// then the real Enter key `handle_trust_settings_key` handles), the
+/// same as every other test in this section since response 248 found
+/// the route itself was unreachable. Then launch a
 /// profile whose `workspace_discovery_policy` is `MayDiscoverWorkspaceFiles`
 /// (the same shape `claude_code_linux_default`'s own honest policy uses,
 /// which is what `agent_run_launch_shell_input_switches_to_terminal_immersion_and_shows_the_real_trust_refusal`
@@ -2996,7 +3109,7 @@ fn granting_trust_through_the_real_route_unblocks_a_real_agent_run_launch() {
 
     // The real grant, through the real route -- not `grant_trust` called
     // directly, not a test-only bypass.
-    let _ = super::update(&mut state, Message::OpenTrustGrantDialog);
+    press_trust_settings_action(&mut state);
     let _ = super::update(&mut state, Message::ModalFocusNext);
     let _ = super::update(&mut state, Message::ModalActivate);
     assert_eq!(

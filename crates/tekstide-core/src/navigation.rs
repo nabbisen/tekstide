@@ -175,10 +175,27 @@ impl KeybindingPolicy {
                     None,
                     KeybindingStatus::Configurable,
                 ),
+                // RFC-032, response 248's required fix: `Configurable`
+                // with a `None` binding reads as "a user can bind this"
+                // but actually means "unreachable until RFC-023 exists"
+                // -- the category error response 248 named directly.
+                // `TrustSettings` is the *only* route to granting trust
+                // at all, so a `None` binding here would leave the
+                // entire chain RFC-032 exists to unblock unreachable by
+                // any real user input. `Ctrl+Alt+U`, following the
+                // existing `Ctrl+Alt+<letter>` shape (`P`, `M`, `T`, `A`
+                // above) -- `U` for trUst (the other natural letters,
+                // `T`/`G`/`R`, are already `LaunchTerminal`/free-but-
+                // less-mnemonic/free-but-ambiguous-with-Reload), unused
+                // by any other rule here and not `Ctrl+Shift+P`'s
+                // `Reserved` command-palette binding, so it collides
+                // with nothing (checked mechanically by
+                // `open_trust_settings_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone).
                 KeybindingRule::new(
                     NavigationAction::OpenTrustSettings,
-                    None,
-                    KeybindingStatus::Configurable,
+                    Some("Ctrl+Alt+U"),
+                    KeybindingStatus::Candidate,
                 ),
                 KeybindingRule::new(
                     NavigationAction::OpenDiffReview,

@@ -949,6 +949,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if surface_input.target() == FocusZone::MainArea {
                 handle_editor_key(state, surface_input.key());
                 handle_approval_history_key(state, surface_input.key());
+                // RFC-032, response 248's required fix: a fourth
+                // `MainArea` consumer, the same "each checks
+                // `open_surface` itself" mutual-exclusion shape the
+                // comment above already establishes for the other three.
+                handle_trust_settings_key(state, surface_input.key());
             }
         }
         Message::Input(RoutedInput::Terminal(text_stream)) => {
@@ -2054,6 +2059,42 @@ fn handle_approval_history_key(state: &mut State, key: &input::KeyPress) {
             }
         }
         _ => {}
+    }
+}
+
+/// RFC-032, response 248's required fix: keyboard access for the
+/// `TrustSettings` surface -- without this, "Grant Trust…"/"Revoke
+/// Trust" were `button(...)` with no key handler at all, mouse-only
+/// exactly as `ApprovalHistory` was before response 234's fix. Worse
+/// here: this surface is the *only* route to granting trust
+/// (`app_command_for`'s mapping is `TrustSettings`'s one path in), so
+/// mouse-only would have meant a keyboard user could not grant trust at
+/// all, leaving the entire chain RFC-032 exists to unblock unreachable
+/// for them.
+///
+/// No highlight index, unlike [`handle_approval_history_key`]'s list --
+/// this surface shows exactly one control at a time (never both: nothing
+/// to grant while already trusted, nothing to revoke while not), so
+/// there is nothing to move a cursor between. Enter activates whichever
+/// one is currently shown, mirroring `trust_settings_view`'s own
+/// `is_trusted` branch exactly, so what Enter does always matches what
+/// is rendered.
+fn handle_trust_settings_key(state: &mut State, key: &input::KeyPress) {
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    if project.mode() != ProjectMode::Content
+        || project.open_surface() != ProjectOpenSurface::TrustSettings
+    {
+        return;
+    }
+    if !matches!(key.key, keyboard::Key::Named(keyboard::key::Named::Enter)) {
+        return;
+    }
+    if project.trust_state() == tekstide_core::project::WorkspaceTrust::Trusted {
+        revoke_workspace_trust(state);
+    } else {
+        open_trust_grant_dialog(state);
     }
 }
 

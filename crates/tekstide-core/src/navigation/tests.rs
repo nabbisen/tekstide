@@ -142,6 +142,35 @@ fn launch_agent_run_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
     );
 }
 
+/// RFC-032, response 248's required fix: `OpenTrustSettings` is the
+/// *only* route to granting trust at all -- a `Configurable`/`None`
+/// binding here would have left it unreachable by any real user input,
+/// the exact "reads as pending, actually means dead" category error
+/// response 248 named. Checked mechanically, not by inspection alone,
+/// the same shape every other real binding above already uses.
+#[test]
+fn open_trust_settings_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::OpenTrustSettings)
+        .expect("Open Trust Settings should have a keyboard policy");
+
+    assert_eq!(rule.default_binding, Some("Ctrl+Alt+U"));
+    assert_eq!(rule.status, KeybindingStatus::Candidate);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::OpenTrustSettings)
+        .filter(|other| other.default_binding == rule.default_binding)
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Alt+U must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
 #[test]
 fn primary_navigation_workflows_have_keyboard_policy_entries() {
     let policy = KeybindingPolicy::linux_mvp();
