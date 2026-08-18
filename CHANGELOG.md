@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.11.1 - Transcript Disclosure Correction
+
+Status: released on 2026-08-18.
+
+**A documentation-only release, published for one reason: the privacy claim it corrects is
+wrong on the page people read.** crates.io serves the README of the published version, so
+correcting it in the repository changes nothing for a user until a release carries it. No
+code changed.
 
 ### Corrections
 
