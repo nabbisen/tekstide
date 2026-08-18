@@ -117,8 +117,42 @@ These may never be applied silently, may never be hot-reloaded, and may never co
 - Transcript retention and purge policy.
 - Audit store location and retention.
 - Plugin restrictions, when plugins exist.
+- **Workspace trust defaults (added 2026-08-19).** This list was written before RFC-032
+  existed. See below — for this one, security-sensitive treatment is **not sufficient**.
 
 Changing any of these requires explicit user confirmation and produces an audit event. A change that cannot be confirmed is not applied.
+
+### `default_trust` is the one setting confirmation does not make safe
+
+PR-023-B's typed model added `[projects].default_trust`, from the external design's worked
+example. **Confirm-once-and-audit-the-change is weaker than what RFC-032 requires**, and the
+gap is not a detail:
+
+| RFC-032's granting design | what a `default_trust = "trusted"` setting gives instead |
+| --- | --- |
+| a confirmation dialog **per project** | one confirmation, when the setting changes |
+| **two deliberate acts**, focus defaulting to Cancel | none, thereafter |
+| bound to the project's **canonical path** | bound to nothing |
+| a `TrustGrant` audit record **per grant** | one `sensitive_config_changed` record, ever |
+
+So a setting that can express "trusted" is a **trust-granting mechanism that bypasses the
+trust-granting design**, and RFC-023's own security-sensitive machinery does not close it,
+because the machinery governs *changing the setting*, not the grants the setting then performs
+silently forever.
+
+**There is a concrete escalation path**, which is what makes this more than tidiness. An agent
+run in a trusted project executes with the user's own permissions and can write
+`~/.config/tekstide/config.toml` — user-global configuration is trusted by this RFC's own load
+order and is not protected from the user's own processes. An agent that writes
+`default_trust = "trusted"` has arranged for **every future project to be trusted at creation**,
+which is precisely the state RFC-032 exists to make a deliberate act.
+
+**Decision: `default_trust` may only ever express the more restricted state.** Either drop the
+field, or validate it to a single accepted value (`"restricted"`) so it is inert by
+construction and the vocabulary is reserved for a future design that actually reasons about
+it. **Do not make it a two-valued setting governed by confirmation.** The same test applies to
+any future setting: if flipping it would grant a capability that some other RFC requires a
+deliberate per-use act for, confirmation-on-change is the wrong control.
 
 ## AI CLI Profiles From Configuration
 
