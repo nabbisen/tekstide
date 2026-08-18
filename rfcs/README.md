@@ -20,6 +20,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | --- | --- | --- |
 | 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | **Accepted, partially implemented.** PR-020-B (transcript reader + AgentRun report surface) implemented in full 2026-08-18, `Ctrl+Alt+R` reachable from a real key press. PR-020-C (change review surface) and PR-020-D (closeout) remain, PR-020-C blocked on its own `DetectedChanges` projection. [Handoff pack](./handoffs/020-diff-review-and-agentrun-report/README.md); PR-020-B's own slice handoff and evidence in the same pack |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
+| 031 | [Audit Producer Completion](./proposed/031-audit-producer-completion.md) | **Proposed 2026-08-18**, authored against the number reserved 2026-08-16. Scoped to the two families with live triggers (`restricted_mode_blocked`, `project_added`); `safe_close_decision` is blocked on a dialog that does not exist. No producer method exists for any of the three, so this is not a wiring slice. The security core is what goes in the free-text `summary` |
 | 033 | [Transcript Lifecycle Controls](./proposed/033-transcript-lifecycle-controls.md) | **Proposed 2026-08-18.** Per-run opt-out, purge, and retained-data visibility — all designed by RFC-011, none reachable. Authored because `0.11.1` had to publish "there is no in-app way to turn capture off or to purge it" as a standing limitation |
 | 034 | [Change Review Actions and Review State](./proposed/034-change-review-actions-and-review-state.md) | **Proposed 2026-08-18.** Gives `transition_change_set_review_state` a route, and decides the question RFC-020's Q3 deferred: whether a review decision is a record or an operation. Blocked on RFC-020 |
 | 035 | [Change Detection Coverage and Disclosure](./proposed/035-change-detection-coverage-and-disclosure.md) | **Proposed 2026-08-18.** The `.git/hooks/` supervision hole and `max_changed_paths` discarding a computed list; the exit-only trigger and non-persistent baseline recorded and deferred |
@@ -33,7 +34,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 
 | RFC | Title | Milestone |
 | --- | --- | --- |
-| 031 | Audit Producer Completion (`safe_close_decision`, `restricted_mode_blocked`, `project_added`) — split from the original 022 reservation 2026-08-16 | M11 |
 | 025 | Notifications | M12 |
 | 026 | File Watcher and Multi-Document Model | M13 |
 | 027 | Crash Recovery and Unsaved Buffer Persistence | M13 |
