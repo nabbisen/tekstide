@@ -3815,6 +3815,107 @@ fn a_real_agent_run_exit_creates_a_real_change_set_from_a_real_file_change() {
     );
 }
 
+/// change-detection-wiring handoff, Slice D (D2): the property the
+/// handoff's own finding names directly -- a truncated scan and a
+/// genuinely clean one both produce **zero** entries in
+/// `project.change_sets()` for their run, so that collection alone
+/// cannot tell them apart. `state.agent_run_change_detection_status`
+/// must be able to, or a truncated result reads as "nothing changed"
+/// exactly like the defect the handoff describes for `detect_filesystem_changes`'s
+/// own `Vec::new()` -- one layer up, where Slice C's `let _ =` used to
+/// discard the distinction silently.
+///
+/// Two real, separately launched agent runs in the same project, so a
+/// stale entry from one could not accidentally satisfy an assertion
+/// meant for the other:
+///
+/// - Run A's real baseline is overwritten with a hand-crafted `Partial`
+///   one before detection runs -- forcing genuine truncation would mean
+///   creating 16,384+ real files, which this test does not need to do
+///   to prove the recording behaviour itself. `attempt_generated_change_detection`
+///   is called directly, the same production function
+///   `record_terminal_exit` calls after a real exit -- this test's job
+///   is the new D2 distinction, not re-proving reachability, which the
+///   test above already does from a real key press.
+/// - Run B's baseline is the real one Slice C's launch path captures,
+///   untouched, with no file changes made -- a genuinely clean,
+///   `Complete` scan.
+#[test]
+fn truncated_and_clean_detections_are_distinguishable_though_both_produce_no_change_set() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("change-detection-truncation-honesty"))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let run_a = launch_real_managed_agent_run(&mut state);
+    let run_b = launch_real_managed_agent_run(&mut state);
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .id()
+        .clone();
+
+    let truncated_baseline = tekstide_core::project::ReviewBaseline {
+        project_id,
+        agent_run_id: Some(run_a.clone()),
+        captured_at: tekstide_core::domain::DomainTimestamp::now_utc(),
+        source: tekstide_core::domain::ChangeDetectionSource::FilesystemSnapshot,
+        baseline_snapshot_ref: "filesystem-snapshot:truncation-honesty-test:0".to_owned(),
+        entries: Vec::new(),
+        status: tekstide_core::domain::ChangeDetectionStatus::Partial { limit: 1 },
+    };
+    state
+        .agent_run_change_baselines
+        .insert(run_a.clone(), truncated_baseline);
+
+    super::attempt_generated_change_detection(&mut state, &run_a);
+    super::attempt_generated_change_detection(&mut state, &run_b);
+
+    assert_eq!(
+        state.agent_run_change_detection_status.get(&run_a),
+        Some(&tekstide_core::domain::ChangeDetectionStatus::Partial { limit: 1 }),
+        "the truncated run's status must be recorded exactly, not silently dropped"
+    );
+    assert_eq!(
+        state.agent_run_change_detection_status.get(&run_b),
+        Some(&tekstide_core::domain::ChangeDetectionStatus::Complete),
+        "the clean run's status must record Complete -- if this is anything else, the contrast \
+         below proves nothing"
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    assert!(
+        project
+            .change_sets()
+            .iter()
+            .all(|change_set| change_set.agent_run_id.as_ref() != Some(&run_a)),
+        "a truncated scan must not produce a ChangeSet: {:?}",
+        project.change_sets()
+    );
+    assert!(
+        project
+            .change_sets()
+            .iter()
+            .all(|change_set| change_set.agent_run_id.as_ref() != Some(&run_b)),
+        "a genuinely clean scan must also not produce a ChangeSet -- there is nothing to \
+         review: {:?}",
+        project.change_sets()
+    );
+
+    // The property D2 exists for: both runs produced zero ChangeSets
+    // (asserted identically above), and yet their recorded statuses
+    // differ -- so a future reader consulting the status map, not just
+    // `change_sets()`, can tell "unknown" apart from "genuinely clean."
+    assert_ne!(
+        state.agent_run_change_detection_status.get(&run_a),
+        state.agent_run_change_detection_status.get(&run_b),
+        "truncated and clean must never be recorded identically"
+    );
+}
+
 /// Response 233: the real navigation-to-dispatch path for
 /// `ProjectOpenSurface::ApprovalHistory`, the same shape
 /// `a_toggle_project_mode_shell_input_dispatches_the_real_app_command`

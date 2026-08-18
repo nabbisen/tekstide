@@ -1,6 +1,6 @@
 ---
 title: "Change detection wiring — giving RFC-020 something to render"
-status: "Slices A-C implemented 2026-08-18, awaiting review. Slice D (truncation honesty, D2) and closeout remaining."
+status: "Implemented 2026-08-18 (Slices A-D), awaiting review. Makes diff review buildable, not reachable -- RFC-020's own surfaces remain unbuilt."
 rfc_file: "none — this is a wiring slice, not an RFC (see 'Why this is not an RFC')"
 target_milestone: "M11"
 created: "2026-08-17"

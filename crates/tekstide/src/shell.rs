@@ -620,6 +620,23 @@ pub struct State {
         tekstide_core::domain::AgentRunId,
         tekstide_core::project::ReviewBaseline,
     >,
+    /// change-detection-wiring handoff, Slice D (D2): the outcome of the
+    /// most recent detection attempt for each run, recorded whether or
+    /// not it produced a `ChangeSet`. **The reason this map exists**:
+    /// `project.change_sets()` alone cannot tell a caller "this run's
+    /// changes are unknown, the scan was truncated" apart from "this run
+    /// genuinely touched nothing" -- both look identical, zero entries.
+    /// `Some(ChangeDetectionStatus::Complete)` with no change set for a
+    /// run means the second, honestly; anything else
+    /// (`Partial`/`Failed`/`Unavailable`/`Unsupported`) means the first,
+    /// and must never be presented as though it were the second. No
+    /// renderer reads this yet (RFC-020 does not exist) -- this is the
+    /// data that must already be honest before one does, not a rendered
+    /// state itself.
+    agent_run_change_detection_status: std::collections::HashMap<
+        tekstide_core::domain::AgentRunId,
+        tekstide_core::domain::ChangeDetectionStatus,
+    >,
 }
 
 impl State {
@@ -700,6 +717,7 @@ impl State {
             approval_proposal_ids: std::collections::HashMap::new(),
             window_size: None,
             agent_run_change_baselines: std::collections::HashMap::new(),
+            agent_run_change_detection_status: std::collections::HashMap::new(),
         }
     }
 
@@ -1563,6 +1581,13 @@ fn record_terminal_exit(
 /// reachable.** RFC-020's own surface still renders nothing -- see the
 /// handoff's own gate for why that distinction is stated explicitly
 /// rather than left implicit.
+///
+/// **D2**: always records `detected.status` in
+/// `state.agent_run_change_detection_status`, whether or not a
+/// `ChangeSet` results -- a truncated or failed scan must stay
+/// distinguishable from a genuinely clean one (`Complete`, zero
+/// changes), never collapse into the same "no `ChangeSet` for this run"
+/// shape both currently produce in `project.change_sets()` alone.
 fn attempt_generated_change_detection(
     state: &mut State,
     agent_run_id: &tekstide_core::domain::AgentRunId,
@@ -1576,6 +1601,9 @@ fn attempt_generated_change_detection(
     let detector =
         tekstide_core::project::GeneratedChangeDetector::new(generated_change_detection_policy());
     let detected = detector.detect_filesystem_changes(project, &baseline);
+    state
+        .agent_run_change_detection_status
+        .insert(agent_run_id.clone(), detected.status);
     // Not localized: nothing renders a `ChangeSet.summary` in production
     // yet (RFC-020 does not exist) -- see the handoff's own reachability
     // note. Revisit once a real surface reads this field.
@@ -1865,27 +1893,37 @@ fn attempt_agent_run_launch_with_profile(
     // now rather than re-derived later).
     let verified_cwd = plan.spec().verified_cwd().clone();
     let project_root = plan.spec().project_root().to_path_buf();
+
+    // change-detection-wiring handoff, Slice D (review response 258,
+    // Slice D item 1): captured *before* the process is spawned below,
+    // not merely "as early as possible after" it (Slice C's original
+    // shape) -- a filesystem scan is not atomic with respect to a
+    // concurrent writer, so a baseline taken while the agent process is
+    // already live could observe a file mid-write and read it as
+    // unchanged forever after. This closes that race by construction
+    // rather than shrinking the window: nothing has run yet. Carries no
+    // `agent_run_id` until one exists a few lines below --
+    // `detected_change_association` requires an exact match for a
+    // `Strong` association, so that assignment is load-bearing, not
+    // cosmetic. Best-effort: no active project here would mean the
+    // launch below could not succeed either, so this is not expected to
+    // be skipped in practice, but a missing baseline is not fatal to a
+    // launch that goes on to succeed anyway -- see
+    // `attempt_generated_change_detection`'s own doc for what a missing
+    // baseline means at the other end.
+    let pre_launch_baseline = state.app_shell.state().active_project().map(|project| {
+        tekstide_core::project::GeneratedChangeDetector::new(generated_change_detection_policy())
+            .capture_filesystem_baseline(project)
+    });
+
     let mut runtime = LinuxTerminalRuntime::new();
     let (agent_run_id, _events, approval_endpoint) = state
         .app_shell
         .state_mut()
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .map_err(AgentRunLaunchRefusal::Runtime)?;
-    // change-detection-wiring handoff, Slice C: capture the filesystem
-    // baseline as early as possible after this run starts, before the
-    // agent has had time to act -- the wider the gap between launch and
-    // this capture, the more of what an agent does becomes invisible to
-    // detection later. Best-effort: no active project here would mean
-    // the launch above could not have succeeded either, so this branch
-    // is not expected to be skipped in practice, but a missing baseline
-    // is not fatal to the launch that already happened -- see
-    // `attempt_generated_change_detection`'s own doc for what a missing
-    // baseline means at the other end.
-    if let Some(project) = state.app_shell.state().active_project() {
-        let baseline = tekstide_core::project::GeneratedChangeDetector::new(
-            generated_change_detection_policy(),
-        )
-        .capture_agent_run_filesystem_baseline(project, agent_run_id.clone());
+    if let Some(mut baseline) = pre_launch_baseline {
+        baseline.agent_run_id = Some(agent_run_id.clone());
         state
             .agent_run_change_baselines
             .insert(agent_run_id.clone(), baseline);
