@@ -169,3 +169,105 @@ Under Option B, with the amendments landed first:
    shape (Option A/B, iced's own update/view cycle) before or during whichever slice first
    calls `read_diff_content`, rather than inheriting the owned form by default because it
    was already there.
+
+---
+
+## Scoping, 2026-08-18 — the two surfaces are not equally blocked, and the slice order inverts
+
+Scoped at the owner's request after `0.11.0` wired change detection and `0.11.1` corrected the
+transcript disclosure. Both prerequisites this RFC named — RFC-024 and RFC-011 Amendment 1 —
+shipped long ago. What follows is what actually exists behind each surface, checked against the
+code rather than against this document's own assumptions.
+
+**The headline: this RFC's own ordering is wrong.** PR-020-B (change review) is listed first
+and is the blocked one; PR-020-C (the AgentRun report) is listed second and is ready now.
+
+### The AgentRun report surface is fully unblocked
+
+Every link exists and is reached in production:
+
+| link | where |
+| --- | --- |
+| a transcript is written for every AI CLI run | `runtime/terminal/launch.rs:47` |
+| registered on the project | `project/session.rs:540` → `attach_agent_run_transcript` |
+| discoverable from the run | `AgentRun.transcript_ref` → `Transcript.storage_path` |
+| path reconstructable | `TranscriptPathResolver::resolve_agent_run` |
+| bounded reader | `transcript::reader::read_window` (RFC-011 Amendment 1) |
+
+This RFC assumed the opposite — that transcripts "are written and never read back," and that
+nothing produced them from the GUI. Both were true when it was written and neither is true now.
+**The `0.11.1` correction is what surfaced it**: the same investigation that found the false
+privacy claim found that this surface's producer had been complete since `0.10.0`.
+
+### The change review surface is blocked on a lossy projection, not on rendering
+
+`read_diff_content` takes `&DetectedChanges`. Its gate refuses any path not present in it —
+`DiffGateRefusal::PathNotDetected`, which is RFC-024's security boundary: content may be read
+only for paths detection actually observed.
+
+`DetectedChanges` carries, per path: **`relative_path`, `kind`, `lifecycle`**.
+A stored `ChangeSet` carries: **`changed_files: Vec<PathBuf>`**.
+
+**`kind` and `lifecycle` are dropped at that boundary**, and the `DetectedChanges` itself is
+discarded once `add_detected_generated_change_set` returns. So a stored `ChangeSet` cannot
+reconstruct the input `read_diff_content` requires — the surface cannot even say whether a path
+was added, modified or deleted, let alone read its content.
+
+**Fabricating a `DetectedChanges` from `changed_files` is not an option**, and this is the part
+worth being explicit about: `PathNotDetected` exists to ensure content reads are confined to
+what detection saw. Synthesising a gate's input from the very thing that was derived from it
+defeats the gate. It would compile, pass, and remove the boundary RFC-024 was written to add.
+
+**Recommended: retain the real `DetectedChanges` in the shell**, keyed by `ChangeSetId`, the
+same session-scoped shape `agent_run_change_baselines` and `agent_run_change_detection_status`
+already use. It preserves the gate (the genuine object is passed), costs no domain change, and
+its lifetime matches reality — `ProjectSession::change_sets` is an in-memory `Vec` that does not
+survive a restart either, so nothing is lost that currently persists.
+
+**The eventual shape is different and should be recorded, not built now**: if change sets ever
+persist, `ChangeSet` needs `kind` and `lifecycle` per path so the model is self-sufficient. That
+is an RFC-012 domain change, and it should be made when persistence is designed rather than
+speculatively.
+
+### Neither surface is reachable, and both gaps differ
+
+- **`OpenDiffReview` maps to no `AppCommand` at all** — it falls to `None` in `app_command_for`.
+  It needs a command, a render arm, and a binding.
+- **`OpenCurrentAgentRunDetail` has a real `AppCommand`** (`ProjectOpenSurface::AgentRunDetail`)
+  and **no render arm** — `content_mode_view` falls through to the plain editor — and **no
+  binding** (`Configurable`/`None`).
+
+Naming this here because this project's own convention requires it before scheduling: a binding
+alone would make `AgentRunDetail` silently render an editor, which is worse than dead.
+
+### The scope correction still holds, and matters more now
+
+This RFC's own §Scope correction stands unchanged: under filesystem-snapshot detection there is
+**no two-sided diff for a modified file**. The before-bytes were never captured. `DiffContent`
+says so in its own variant docs — `Modified { bytes, .. }` is *current content, explicitly not a
+diff*.
+
+The surface must say this **where the user reads it**. A reviewer shown current content under a
+heading implying a diff will believe they have seen what changed, and the common case is exactly
+the modified one.
+
+### Open questions, answered against the real code
+
+- **Q3 — does the change surface offer actions?** **Recommend read-only.**
+  `transition_change_set_review_state` exists with no route; giving it one is a second decision
+  with its own model questions, and read-only is the smaller, safer first answer this RFC
+  already suggested.
+- **Q4 — owned or borrowed `DiffContent`?** This RFC is the consumer the question was deferred
+  to. **Recommend keeping it owned.** iced's update/view cycle means a surface holds its state
+  across frames by construction; a borrow tied to a request-scoped buffer would force rendering
+  inside the borrow and shape the whole surface around a retention risk that
+  `DiffPreviewPolicy::max_input_bytes` already bounds. Decide it explicitly here rather than
+  inheriting the owned form by default — which is what RFC-024 asked for.
+
+### Revised slice order
+
+1. **PR-020-C first — the AgentRun report surface.** Unblocked, real producer, bounded reader.
+   Needs a render arm and a binding.
+2. **PR-020-B second — the change review surface**, preceded by retaining `DetectedChanges`.
+3. Closeout, with the no-two-sided-diff limitation stated on the surface and the bidi-visibility
+   claim checked as this RFC already requires.
