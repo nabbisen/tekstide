@@ -99,23 +99,45 @@ switching. It includes:
   makes real network calls. The launch pathway is proven end to end against
   production code; the specific behaviour of the real binary under it is not.
   You still cannot **see what a run changed** — there is no diff review or
-  AgentRun report surface (RFC-020), and nothing runs change detection.
+  AgentRun report surface (RFC-020) — but as of `0.11.0` the change set
+  itself is real; see below.
 - **The adapter-spawn pathway and the command-approval dialog** (`0.10.0`,
   RFC-022) — built, audited, and proven end to end. Reachable only by this
   project's own reference adapter, for the reason given under *Command
-  approval* below.
+  approval* below. As of `0.11.0` its **approval-history surface** opens with
+  `Ctrl+Alt+H`; see the caveat below about what that does and does not reach.
+- **Real change detection for agent runs (`0.11.0`).** Launching a run captures
+  a filesystem baseline of the project **before the agent's process starts**,
+  and when that run's terminal exits the two are compared, producing a real
+  change set naming the files the run actually touched. `.git/`, `target/` and
+  `node_modules/` are excluded by design — build output and VCS metadata would
+  drown the result — which means **a change an agent makes inside those
+  directories is not reported**, git hooks included. A scan that hits its entry
+  limit is recorded as *truncated*, never as "nothing changed": those are
+  different facts and the product does not collapse them. Two further limits
+  are deliberate and disclosed: detection runs only at exit, so a long-lived
+  interactive session reports nothing until it ends, and the baseline lives in
+  memory, so it does not survive the application closing mid-run.
+- **A WCAG contrast gate over the theme (`0.11.0`)**, with the failure it
+  caught. Unfocused pane borders measured **2.63:1** against the background,
+  below the 3:1 that WCAG 2.1 SC 1.4.11 requires for UI component boundaries;
+  the border is now 3.85:1. Text contrast was never the problem — it sits above
+  14:1 — and focus indication was unaffected. The test asserting this measures
+  real ratios, including compositing the translucent modal scrim over its
+  backdrop before measuring it; the previous suite checked only that colour
+  channels were within `0.0..=1.0`, which no plausible colour can fail.
 
 It is not yet the full AI CLI workbench. The editor has no undo (a mid-buffer
 edit is unrecoverable within the session past what Backspace can still
 reach), no syntax highlighting, language server, multi-cursor, or search,
 and files above 4 MiB are not editable. There is no diff/review surface or
-AgentRun report surface yet (RFC-020, M10's second half) — and the reason is
-worth stating plainly rather than as a date: **nothing in the shipped
-application runs change detection**, so no change set can exist for either
-surface to render. Launching an agent run works; reviewing what it did does
-not. There is also no Git-based change detection, file watcher, or
-overwrite-confirmation UI, no safe-close dialog, and no cross-platform
-evidence beyond Linux. The **approval-history surface** built in `0.10.0` now opens
+AgentRun report surface yet (RFC-020, M10's second half), so **you still
+cannot review what an agent run changed**. What `0.11.0` changed is the
+reason: change detection now runs for real, so the change set those surfaces
+need exists rather than being structurally impossible. Diff review is
+**buildable, not reachable** — the input is there, the surfaces are not. There
+is also no Git-based change detection, file watcher, or overwrite-confirmation
+UI, no safe-close dialog, and no cross-platform evidence beyond Linux. The **approval-history surface** built in `0.10.0` now opens
 (`Ctrl+Alt+H`), but that makes only the *surface* reachable, not command
 approval itself: no shipping AI CLI speaks RFC-021's protocol, so
 `Managed` command approval is still exercisable only by this project's own

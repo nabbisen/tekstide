@@ -1,5 +1,73 @@
 # Changelog
 
+## 0.11.0 - What the Agent Changed
+
+Status: released on 2026-08-18.
+
+`0.10.0` made an agent run launchable. This release makes what it did **detectable** — and
+fixes an accessibility defect found by measuring something nobody had measured before.
+
+### Added
+
+- **Change detection for agent runs.** Launching a run captures a filesystem baseline of the
+  project **before the agent's process is spawned**, and when that run's terminal exits the
+  two are compared, producing a real change set naming the files the run actually touched.
+  Four capabilities that had been implemented, reviewed and dormant since RFC-012 —
+  `capture_agent_run_filesystem_baseline`, `detect_filesystem_changes`,
+  `add_detected_generated_change_set`, and `apply_agent_terminal_outcome` — have production
+  callers for the first time.
+
+  **This does not give you a way to look at the result.** There is still no diff review or
+  AgentRun report surface. What changed is that the change set those surfaces need now
+  exists rather than being structurally impossible: diff review is **buildable, not
+  reachable**.
+
+- **The approval-history surface opens**, with `Ctrl+Alt+H`. It was built and tested in
+  `0.10.0` and had no key bound to it, so nothing could open it. This makes the *surface*
+  reachable, not command approval itself — no shipping AI CLI speaks the protocol, so a real
+  user will see the surface empty, which is correct rather than a bug.
+
+- **A WCAG contrast gate over the theme**, asserting real ratios: 4.5:1 for text pairs, 3:1
+  for non-text UI boundaries, and the translucent modal scrim composited over its backdrop
+  before being measured. The suite it replaces checked that colour channels were within
+  `0.0..=1.0` — a bound no plausible colour can fail.
+
+### Fixed
+
+- **Unfocused pane borders failed WCAG 2.1 SC 1.4.11.** They measured **2.63:1** against the
+  background and 2.37:1 against elevated surfaces, below the 3:1 required for the visual
+  boundary of a UI component; they are now 3.85:1 and 3.48:1. Text contrast was never the
+  problem — it sits above 14:1 — and focus indication was unaffected, since the focused
+  border is the accent at 6.38:1 and carries a second, non-colour channel. The gate above was
+  written first and **observed failing at those exact ratios** before the colour changed.
+
+### Known limitations
+
+- **Change detection excludes `.git/`, `target/` and `node_modules/`** by design; build
+  output and VCS metadata would otherwise drown the result and exceed the scan limit on any
+  real project. The consequence is stated rather than left implied: **a change an agent makes
+  inside those directories is not reported**, git hooks included.
+- **Detection runs only when a run's terminal exits.** A long-lived interactive session
+  reports nothing until it ends.
+- **The baseline is held in memory.** If the application closes while a run is live, that
+  run produces no change set — indistinguishable, from outside, from an agent that changed
+  nothing.
+- **A truncated scan is recorded as truncated, not as "no changes."** Those are different
+  facts and the product does not collapse them — but no surface renders either yet.
+- Unchanged from `0.10.0`: no screen-reader support, no cross-platform evidence beyond
+  Linux, the real Claude Code CLI still never exercised by the test suite, and
+  `NFR-PERF-004` still unverified.
+
+### Also in this cycle
+
+- An evaluation of the `snora` GUI framework at the owner's request, declined as a
+  dependency with the reasoning recorded. It is what prompted measuring our own contrast in
+  the first place, and the resulting exchange found defects in both projects.
+- The `0.3.0` git tag, which had pointed into an orphaned line of history since a trailer
+  rewrite, was re-pointed at its content-identical replacement; `0.4.0` and `0.4.1`, which
+  had never been pushed, now exist on the remote.
+
+
 ## 0.10.0 - Trust, and the First Reachable Agent Run
 
 Status: released on 2026-08-17.
