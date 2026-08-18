@@ -1,7 +1,6 @@
 # RFC-031: Audit Producer Completion
 
-Status: **Proposed — awaiting the human owner's acceptance.** Authored 2026-08-18 against the
-number reserved for it 2026-08-16.
+Status: **Accepted by the human owner 2026-08-18.** Scoped to `restricted_mode_blocked` and `project_added`; `safe_close_decision` stays blocked on a surface that does not exist.
 Target milestone: M11 — the last M11 item
 Date: 2026-08-18
 

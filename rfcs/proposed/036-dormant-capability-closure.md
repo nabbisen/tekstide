@@ -1,6 +1,6 @@
 # RFC-036: Dormant Capability Closure
 
-Status: **Proposed — awaiting the human owner's acceptance.** Authored 2026-08-18.
+Status: **Accepted by the human owner 2026-08-18.** Deletion of published API is on the table deliberately, batched into one release.
 Target milestone: M12
 Date: 2026-08-18
 

@@ -1,6 +1,7 @@
 # RFC-023: Configuration System
 
-Status: Proposed
+Status: **Accepted by the human owner 2026-08-18.** Authored earlier and held while its
+prerequisites landed; accepted alongside RFC-031/033/034/035/036 in one decision.
 Target milestone: M12 (headless model may be implemented earlier — see Scheduling)
 Date: 2026-07-28
 

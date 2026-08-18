@@ -1,6 +1,6 @@
 # RFC-034: Change Review Actions and Review State
 
-Status: **Proposed — awaiting the human owner's acceptance.** Authored 2026-08-18.
+Status: **Accepted by the human owner 2026-08-18.** Blocked on RFC-020: a user cannot act on a change set they cannot see.
 Target milestone: M12
 Date: 2026-08-18
 

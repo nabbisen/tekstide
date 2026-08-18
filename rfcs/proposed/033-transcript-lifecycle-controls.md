@@ -1,8 +1,6 @@
 # RFC-033: Transcript Lifecycle Controls
 
-Status: **Proposed — awaiting the human owner's acceptance.** Authored 2026-08-18 after
-`0.11.1` corrected a false privacy claim and, in correcting it, had to publish two
-limitations as permanent-sounding facts.
+Status: **Accepted by the human owner 2026-08-18.** Closes a limitation `0.11.1` had to publish on a privacy claim.
 Target milestone: M11
 Date: 2026-08-18
 
