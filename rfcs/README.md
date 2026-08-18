@@ -20,6 +20,10 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 | --- | --- | --- |
 | 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | **Accepted — the spine of `0.8.0`, ready for implementation 2026-08-15.** Both prerequisites met: RFC-024 (content access) implemented and closed, RFC-011 Amendment 1 authorises the bounded transcript reader (which does not exist yet — PR-020-B builds it). [Handoff pack](./handoffs/020-diff-review-and-agentrun-report/README.md) complete; all four open questions answered there |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
+| 033 | [Transcript Lifecycle Controls](./proposed/033-transcript-lifecycle-controls.md) | **Proposed 2026-08-18.** Per-run opt-out, purge, and retained-data visibility — all designed by RFC-011, none reachable. Authored because `0.11.1` had to publish "there is no in-app way to turn capture off or to purge it" as a standing limitation |
+| 034 | [Change Review Actions and Review State](./proposed/034-change-review-actions-and-review-state.md) | **Proposed 2026-08-18.** Gives `transition_change_set_review_state` a route, and decides the question RFC-020's Q3 deferred: whether a review decision is a record or an operation. Blocked on RFC-020 |
+| 035 | [Change Detection Coverage and Disclosure](./proposed/035-change-detection-coverage-and-disclosure.md) | **Proposed 2026-08-18.** The `.git/hooks/` supervision hole and `max_changed_paths` discarding a computed list; the exit-only trigger and non-persistent baseline recorded and deferred |
+| 036 | [Dormant Capability Closure](./proposed/036-dormant-capability-closure.md) | **Proposed 2026-08-18.** Wire / delete / document, per orphan from the reachability audit. Separates `recover` and `purge_all_records` as worse than dormant — recovery and deletion paths never exercised from the application |
 
 ### Reserved numbers — check this before authoring
 
