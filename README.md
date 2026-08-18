@@ -99,8 +99,10 @@ switching. It includes:
   makes real network calls. The launch pathway is proven end to end against
   production code; the specific behaviour of the real binary under it is not.
   You still cannot **see what a run changed** — there is no diff review or
-  AgentRun report surface (RFC-020) — but as of `0.11.0` the change set
-  itself is real; see below.
+  change-review surface (RFC-020's PR-020-C, still blocked) — but as of
+  `0.11.0` the change set itself is real, and you can now read **what the
+  run said**: see the AgentRun report entry below. What it said and what
+  it changed remain two different, separately-reachable things.
 - **The adapter-spawn pathway and the command-approval dialog** (`0.10.0`,
   RFC-022) — built, audited, and proven end to end. Reachable only by this
   project's own reference adapter, for the reason given under *Command
@@ -136,16 +138,32 @@ switching. It includes:
   not only a number. The check itself is swept continuously across that range
   rather than sampled at a few points, since sampling is exactly what let this
   one hide.
+- **The AgentRun report surface** (`Ctrl+Alt+R`) — real transcript content for
+  the most recently launched run in the active project, escaped at render
+  (a Unicode directionality override in what an AI CLI printed shows as a
+  visible marker, never as an invisible reordering — the same policy every
+  other untrusted-text surface in this project uses). Unlike change
+  detection, this is reachable **while a run is still active**, not only
+  after it exits — the surface says so, distinctly from a finished run's
+  transcript. It shows what the run **said**, not what it **changed**; there
+  is still no way to see the latter (above). The window is a bounded tail
+  (1 MiB) of the real transcript, not the whole thing, and RFC-011's own
+  writer-side truncation (if a transcript hit its own retention limit) is a
+  separate, independently-shown fact from "this is only a partial view" —
+  conflating the two was the specific failure this surface was built not to
+  repeat.
 
 It is not yet the full AI CLI workbench. The editor has no undo (a mid-buffer
 edit is unrecoverable within the session past what Backspace can still
 reach), no syntax highlighting, language server, multi-cursor, or search,
-and files above 4 MiB are not editable. There is no diff/review surface or
-AgentRun report surface yet (RFC-020, M10's second half), so **you still
-cannot review what an agent run changed**. What `0.11.0` changed is the
-reason: change detection now runs for real, so the change set those surfaces
-need exists rather than being structurally impossible. Diff review is
-**buildable, not reachable** — the input is there, the surfaces are not. There
+and files above 4 MiB are not editable. There is still no diff/review surface
+(RFC-020's PR-020-C, M10's second half), so **you still cannot review what an
+agent run changed**. The **AgentRun report surface** (`Ctrl+Alt+R`) does now
+exist — real, escaped transcript content for the most recently launched run,
+what it *said*, not what it *changed*; see the caveat below about what that
+does and does not reach. What `0.11.0`'s change detection changed is the
+reason diff review is now **buildable, not reachable** — the input is there,
+the change-review surface itself is not. There
 is also no Git-based change detection, file watcher, or overwrite-confirmation
 UI, no safe-close dialog, and no cross-platform evidence beyond Linux. The **approval-history surface** built in `0.10.0` now opens
 (`Ctrl+Alt+H`), but that makes only the *surface* reachable, not command
@@ -243,6 +261,7 @@ The shell is keyboard-navigable by design. These bindings exist today
 | `Ctrl+Alt+A` | Launch an AI CLI (Claude Code) run in the active project — refused unless the project is trusted |
 | `Ctrl+Alt+U` | Open the Workspace Trust surface for the active project (grant or revoke) |
 | `Ctrl+Alt+H` | Open the Approval History surface for the active project |
+| `Ctrl+Alt+R` | Open the AgentRun Report for the most recently launched run in the active project |
 | `Ctrl+Shift+V` | Paste the clipboard into the focused terminal, subject to RFC-009's policy |
 | `Ctrl+S` | Save the active document in Content mode |
 | `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |

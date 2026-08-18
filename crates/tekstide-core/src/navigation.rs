@@ -165,10 +165,34 @@ impl KeybindingPolicy {
                     None,
                     KeybindingStatus::Configurable,
                 ),
+                // pr-020-b-report-surface.md: `Configurable` with a
+                // `None` binding reads as "a user can bind this" but
+                // actually means "unreachable until RFC-023 exists" --
+                // the same category error response 248 named and this
+                // project has now fixed three times (`OpenTrustSettings`,
+                // `OpenApprovalHistory`, this one). `AgentRunDetail` is
+                // this slice's own real render arm
+                // (`content_mode_view`), with no other route to open it.
+                // Order matters, per the handoff's own instruction: the
+                // render arm landed first, so this binding never exists
+                // in a state where it silently opens the plain editor
+                // instead. `Ctrl+Alt+R`, following the existing
+                // `Ctrl+Alt+<letter>` shape (`P`, `M`, `T`, `A`, `U`,
+                // `H` above) -- `R` for Report. Considered and rejected
+                // as ambiguous with a hypothetical "Reload" when `U` was
+                // chosen for `OpenTrustSettings` (response 248's own
+                // comment on that binding) -- there is no `Reload`
+                // action anywhere in this policy today, so that concern
+                // does not block it here; unused by any other rule and
+                // not `Ctrl+Shift+P`'s `Reserved` command-palette
+                // binding, so it collides with nothing (checked
+                // mechanically by
+                // `open_current_agent_run_detail_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone).
                 KeybindingRule::new(
                     NavigationAction::OpenCurrentAgentRunDetail,
-                    None,
-                    KeybindingStatus::Configurable,
+                    Some("Ctrl+Alt+R"),
+                    KeybindingStatus::Candidate,
                 ),
                 // approval-history-binding handoff: `Configurable` with a
                 // `None` binding reads as "a user can bind this" but

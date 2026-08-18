@@ -4096,6 +4096,253 @@ fn a_plain_terminal_launch_writes_no_transcript() {
     );
 }
 
+/// pr-020-b-report-surface.md: the gate's own required shape -- **a
+/// real key press** (`Ctrl+Alt+R`), through the real `update` dispatch,
+/// not a shortcut into `ProjectSession`'s own state -- opens the real
+/// surface, and the same production function the view calls
+/// (`agent_run_transcript_window`) reaches **a real transcript from a
+/// real run**, using the exact seam `transcript-capture-evidence.md`
+/// added (`attempt_agent_run_launch_with_profile_and_state_root`, a
+/// marker script, a temporary state root) rather than a hand-written
+/// fixture file.
+#[test]
+fn a_real_key_press_opens_the_report_surface_and_reaches_a_real_transcript() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("agent-run-report-reachability"))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let state_root = fresh_state_root_dir();
+
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "transcript-marker-script",
+        "Transcript Marker Script (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: transcript_marker_script_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+    attempt_agent_run_launch_with_profile_and_state_root(
+        &mut state,
+        profile,
+        Some(state_root.clone()),
+    )
+    .expect("a resolvable Supervised profile should launch the real marker script");
+
+    let terminal_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .agent_runs()
+        .last()
+        .unwrap()
+        .terminal_id
+        .clone()
+        .expect("a launched run has a real terminal id");
+
+    // Wait for the marker to actually land on disk through the exact
+    // production lookup the view itself calls -- the same real
+    // exit-detection loop `a_real_agent_run_launch_writes_a_real_transcript_with_real_content`
+    // already establishes, driving the terminal reader thread that
+    // writes the transcript.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        let project = state.app_shell.state().active_project().unwrap();
+        let run = project.agent_runs().last().unwrap();
+        if let Ok((_, window)) = super::agent_run_transcript_window_with_state_root(
+            project,
+            run,
+            Some(state_root.clone()),
+        ) && String::from_utf8_lossy(window.content())
+            .contains("TEKSTIDE-TRANSCRIPT-CAPTURE-EVIDENCE-MARKER")
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the real marker never landed in the real transcript within the poll window"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // The real key press.
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenCurrentAgentRunDetail,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    assert_eq!(
+        project.open_surface(),
+        tekstide_core::project::ProjectOpenSurface::AgentRunDetail,
+        "OpenCurrentAgentRunDetail must reach the real AppCommand and set the real surface"
+    );
+    assert_eq!(project.mode(), tekstide_core::project::ProjectMode::Content);
+
+    let run = project.agent_runs().last().unwrap();
+    let (_, window) =
+        super::agent_run_transcript_window_with_state_root(project, run, Some(state_root.clone()))
+            .expect("the same production lookup the view calls must still succeed");
+    let escaped = super::agent_run_detail_transcript_body(window.content());
+    assert!(
+        escaped
+            .as_str()
+            .contains("TEKSTIDE-TRANSCRIPT-CAPTURE-EVIDENCE-MARKER"),
+        "the escaped body must still contain the real marker -- plain ASCII text is untouched \
+         by escaping: {:?}",
+        escaped.as_str()
+    );
+}
+
+/// `the-window-boundary.md` §2's own required evidence. **What this
+/// cannot prove, and does not claim to**: that the two cases render as
+/// *different visible text* -- they cannot. `escape_untrusted_chars`
+/// passes plain ASCII through unchanged, so a literal 8-character
+/// `<U+202E>` string and an escaped real override necessarily produce
+/// the identical marker text `<U+202E>`. That is `quote_untrusted`'s
+/// own already-proven contract (`text_safety`'s own suite), not
+/// something a caller could or should change.
+///
+/// **What this proves instead, mechanically**: a real override
+/// actually becomes a visible marker rather than surviving as a raw
+/// directionality control, literal marker-shaped text survives
+/// unmodified rather than being stripped or re-escaped, and -- the
+/// concrete, checkable shape "double escaping" would take here -- the
+/// isolate wrapping (`quote_untrusted`'s own FSI/PDI marks) is never
+/// itself visible as escaped text, which is what a second escaping
+/// pass over already-escaped content would produce, since FSI/PDI are
+/// themselves Unicode Format characters and exactly what this module
+/// escapes.
+#[test]
+fn transcript_body_escapes_a_real_override_and_does_not_double_escape_literal_marker_text() {
+    let real_override = "before \u{202E} after".as_bytes();
+    let escaped_override = super::agent_run_detail_transcript_body(real_override);
+    assert!(
+        escaped_override.as_str().contains("<U+202E>"),
+        "a real override character must become a visible marker: {:?}",
+        escaped_override.as_str()
+    );
+    assert!(
+        !escaped_override.as_str().contains('\u{202E}'),
+        "the real override character itself must never survive into the rendered text: {:?}",
+        escaped_override.as_str()
+    );
+
+    let literal_marker_text = "before <U+202E> after".as_bytes();
+    let escaped_literal = super::agent_run_detail_transcript_body(literal_marker_text);
+    assert!(
+        escaped_literal.as_str().contains("before <U+202E> after"),
+        "literal ASCII text that already looks like a marker must pass through unchanged, not \
+         be re-escaped or stripped: {:?}",
+        escaped_literal.as_str()
+    );
+
+    for rendered in [escaped_override.as_str(), escaped_literal.as_str()] {
+        assert!(
+            !rendered.contains("<U+2068>") && !rendered.contains("<U+2069>"),
+            "the isolate marks must never themselves be visible as escaped text -- that would \
+             mean this content was escaped more than once: {rendered:?}"
+        );
+    }
+}
+
+/// `the-window-boundary.md`'s own required distinction: a **reader
+/// window** (`TranscriptWindow::delivered_start() > 0` -- this is a
+/// tail slice of a possibly-larger file) and **writer truncation**
+/// (`Transcript.truncation_state` -- RFC-011's own bounded writer
+/// stopped capturing before the run's real output ended) are
+/// independent facts about the user's data, and must render as
+/// independent, never-conflated notices.
+#[test]
+fn reader_window_and_writer_truncation_render_as_distinct_notices() {
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let mut transcript = tekstide_core::domain::Transcript::metadata(
+        tekstide_core::project::ProjectId::new_uuid(),
+        tekstide_core::domain::TerminalId::new_uuid(),
+        None,
+        "/tmp/agent-run-detail-notice-fixture",
+        "local-bounded-agent-run",
+    );
+
+    let full_clean_window = tekstide_core::transcript::TranscriptWindow::Complete {
+        content: b"hello".to_vec(),
+        requested_start: 0,
+        delivered_start: 0,
+        total_len: 5,
+    };
+    let clean_notices = super::agent_run_detail_notices(&catalog, &transcript, &full_clean_window);
+    assert_eq!(
+        clean_notices.len(),
+        2,
+        "a Complete, untruncated, full window must produce exactly the status and window \
+         notices, no truncation notice: {clean_notices:?}"
+    );
+
+    let partial_window = tekstide_core::transcript::TranscriptWindow::Complete {
+        content: b"tail".to_vec(),
+        requested_start: 4,
+        delivered_start: 4,
+        total_len: 100,
+    };
+    let partial_notices = super::agent_run_detail_notices(&catalog, &transcript, &partial_window);
+    assert_eq!(partial_notices.len(), 2);
+    assert_ne!(
+        partial_notices[1], clean_notices[1],
+        "a partial reader window must render a different notice than a full one: {partial_notices:?}"
+    );
+
+    transcript.truncation_state = tekstide_core::domain::TruncationState::Truncated;
+    let truncated_and_partial =
+        super::agent_run_detail_notices(&catalog, &transcript, &partial_window);
+    assert_eq!(
+        truncated_and_partial.len(),
+        3,
+        "writer truncation must add its own, third notice, not fold into the window notice: \
+         {truncated_and_partial:?}"
+    );
+    assert_ne!(
+        truncated_and_partial[1], truncated_and_partial[2],
+        "the reader-window notice and the writer-truncation notice must be textually distinct \
+         -- conflating them is the exact failure `the-window-boundary.md` names: {truncated_and_partial:?}"
+    );
+}
+
+/// The precondition [`agent_run_detail_view`]'s own no-runs branch
+/// depends on, confirmed reachable for a genuinely fresh project rather
+/// than assumed -- this project's own "positive control" discipline,
+/// applied at the same level every sibling surface's empty state is
+/// checked at (`approval_history_view`/`trust_settings_view` have no
+/// deeper test of their own empty-state branches either; `iced`'s
+/// `Element` tree is not introspected anywhere in this suite).
+#[test]
+fn a_freshly_created_project_has_no_agent_runs_to_show() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("agent-run-report-no-runs"))
+        .expect("a freshly created directory is a valid project root");
+    let state = state_with(app_shell);
+
+    assert!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .agent_runs()
+            .last()
+            .is_none(),
+        "a fresh project must have no agent runs -- the no-runs branch must be reachable, not \
+         dead code"
+    );
+}
+
 /// Response 233: the real navigation-to-dispatch path for
 /// `ProjectOpenSurface::ApprovalHistory`, the same shape
 /// `a_toggle_project_mode_shell_input_dispatches_the_real_app_command`

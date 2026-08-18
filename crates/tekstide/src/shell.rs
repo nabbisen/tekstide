@@ -3674,6 +3674,13 @@ fn content_mode_view(state: &State) -> Element<'_, Message> {
         // *whether* a surface is one of these (response 235's one
         // predicate, unchanged); this inner match decides *which* one.
         Some(ProjectOpenSurface::TrustSettings) => trust_settings_view(state),
+        // PR-020-B report surface: its own explicit arm, the same shape
+        // `TrustSettings` above already uses, rather than falling into
+        // the generic `!surface_renders_editor` arm below -- that arm
+        // is `approval_history_view`'s own, not a dispatch over which
+        // non-editor surface applies, so a second surface joining that
+        // classification would have silently rendered as the wrong one.
+        Some(ProjectOpenSurface::AgentRunDetail) => agent_run_detail_view(state),
         Some(surface) if !surface_renders_editor(surface) => approval_history_view(state),
         Some(_) | None => content_mode_editor_view(state),
     }
@@ -3698,11 +3705,17 @@ fn content_mode_view(state: &State) -> Element<'_, Message> {
 /// needing their own separate update.
 fn surface_renders_editor(surface: ProjectOpenSurface) -> bool {
     match surface {
-        ProjectOpenSurface::ApprovalHistory => false,
+        // PR-020-B report surface: classified `false`, the same side as
+        // `ApprovalHistory` -- a pure read-only report with no
+        // interactive elements of its own, so a document left open in
+        // the background must not keep absorbing keystrokes underneath
+        // it. Not `TrustSettings`'s side: that surface has real Enter-
+        // driven actions of its own reachable while a background
+        // document is still technically "open," this one has none.
+        ProjectOpenSurface::ApprovalHistory | ProjectOpenSurface::AgentRunDetail => false,
         ProjectOpenSurface::ProjectDashboard
         | ProjectOpenSurface::TextEditor
         | ProjectOpenSurface::GitStatus
-        | ProjectOpenSurface::AgentRunDetail
         | ProjectOpenSurface::DiffReview
         | ProjectOpenSurface::HandoffReport
         | ProjectOpenSurface::TrustSettings => true,
@@ -4830,6 +4843,253 @@ fn approval_history_entry_state_symbol(
         ApprovalDecision::Rejected => "rejected",
         ApprovalDecision::EditedAndApproved => "edited-and-approved",
     }
+}
+
+/// PR-020-B: why a real key press reaches transcript content the way
+/// it does -- "the most recently launched run in the active project"
+/// (`pr-020-b-report-surface.md`'s own answer to the pack's unanswered
+/// question: matches `OpenCurrentAgentRunDetail`'s own name,
+/// `agent_run_limit` bounds how many could exist, and a selector is a
+/// second surface with its own navigation decisions this slice is not
+/// for). An empty project renders its own message rather than empty
+/// chrome, per the handoff's own "zero-reachable-surface rule, one
+/// layer in."
+fn agent_run_detail_view(state: &State) -> Element<'_, Message> {
+    let Some(project) = state.app_shell.state().active_project() else {
+        // Unreachable while routed to `ActiveProjectWorkspace`, the same
+        // "fail visible, not panic" fallback every other surface here
+        // uses for this case.
+        return text(state.catalog.get("agent-run-detail-empty"))
+            .size(state.theme.font_size_body())
+            .into();
+    };
+    let Some(run) = project.agent_runs().last() else {
+        return text(state.catalog.get("agent-run-detail-no-runs"))
+            .size(state.theme.font_size_body())
+            .into();
+    };
+
+    let mut lines: Vec<Element<'_, Message>> = vec![
+        text(state.catalog.get("agent-run-detail-heading"))
+            .size(state.theme.font_size_heading())
+            .into(),
+    ];
+
+    match agent_run_transcript_window(project, run) {
+        Ok((transcript, window)) => {
+            for notice in agent_run_detail_notices(&state.catalog, transcript, &window) {
+                lines.push(text(notice).size(state.theme.font_size_status()).into());
+            }
+            lines.push(
+                text(
+                    agent_run_detail_transcript_body(window.content())
+                        .as_str()
+                        .to_string(),
+                )
+                .size(state.theme.font_size_body())
+                .into(),
+            );
+        }
+        Err(reason) => {
+            lines.push(
+                text(state.catalog.get(agent_run_detail_unavailable_key(reason)))
+                    .size(state.theme.font_size_body())
+                    .into(),
+            );
+        }
+    }
+
+    scrollable(column(lines).spacing(12))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+/// PR-020-B: why the transcript for `run` may not be readable -- kept
+/// distinct from a generic `bool`/`Option` so [`agent_run_detail_view`]
+/// can render an honest reason rather than one flattened "unavailable"
+/// message. None of these are expected to fire on the real launch path
+/// (a transcript is written for every AI CLI run, per this handoff's
+/// own reachability chain) -- they exist because "unreachable in
+/// practice" is not "impossible," the same discipline every other
+/// best-effort fallback in this module already follows.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AgentRunTranscriptUnavailable {
+    NoTranscriptRef,
+    TranscriptRecordMissing,
+    StateRootUnavailable,
+    PathResolutionFailed,
+    ReadFailed,
+}
+
+fn agent_run_detail_unavailable_key(reason: AgentRunTranscriptUnavailable) -> &'static str {
+    match reason {
+        AgentRunTranscriptUnavailable::NoTranscriptRef
+        | AgentRunTranscriptUnavailable::TranscriptRecordMissing => {
+            "agent-run-detail-no-transcript"
+        }
+        AgentRunTranscriptUnavailable::StateRootUnavailable
+        | AgentRunTranscriptUnavailable::PathResolutionFailed
+        | AgentRunTranscriptUnavailable::ReadFailed => "agent-run-detail-read-error",
+    }
+}
+
+/// PR-020-B: the real production entry point -- resolves the real
+/// `$XDG_STATE_HOME`-derived state root, the same one a real launch
+/// used to capture this transcript in the first place. See
+/// [`agent_run_transcript_window_with_state_root`] for the chain
+/// itself and why the state root is a parameter there rather than
+/// resolved internally.
+fn agent_run_transcript_window<'a>(
+    project: &'a tekstide_core::project::ProjectSession,
+    run: &tekstide_core::domain::AgentRun,
+) -> Result<
+    (
+        &'a tekstide_core::domain::Transcript,
+        tekstide_core::transcript::TranscriptWindow,
+    ),
+    AgentRunTranscriptUnavailable,
+> {
+    agent_run_transcript_window_with_state_root(project, run, open_real_agent_run_state_root())
+}
+
+/// PR-020-B: the full chain the handoff's own reachability table names
+/// -- transcript reference, discoverable transcript record, real state
+/// root, reconstructed storage path (`TranscriptPathResolver::resolve_agent_run`,
+/// the same resolution the writer used, re-derived rather than trusting
+/// the stored `Transcript.storage_path` raw -- re-validates containment
+/// on every read, the reader's own defense-in-depth), bounded window
+/// read. `still_being_written` mirrors `ProjectSession`'s own private
+/// `agent_run_status_is_active` set exactly (`Preparing`/`Running`/
+/// `AwaitingApproval`) -- not accessible from this crate, so restated
+/// here rather than widened to `pub` for one caller.
+///
+/// `state_root` is a parameter, the same testability split
+/// `attempt_agent_run_launch_with_profile_and_state_root` already
+/// established -- found necessary, not merely convenient, while writing
+/// this slice's own reachability test: an earlier version of this
+/// function called `open_real_agent_run_state_root()` internally, which
+/// always re-resolves the developer's real `$XDG_STATE_HOME` regardless
+/// of what state root a test's own launch used, and silently failed
+/// every read (`ReadFailed`, the real path simply never existing)
+/// against a transcript captured under an injected test root. The real
+/// production path still resolves the real root, through
+/// [`agent_run_transcript_window`]'s own one line -- this split changes
+/// nothing about production, only what a test can control.
+fn agent_run_transcript_window_with_state_root<'a>(
+    project: &'a tekstide_core::project::ProjectSession,
+    run: &tekstide_core::domain::AgentRun,
+    state_root: Option<std::path::PathBuf>,
+) -> Result<
+    (
+        &'a tekstide_core::domain::Transcript,
+        tekstide_core::transcript::TranscriptWindow,
+    ),
+    AgentRunTranscriptUnavailable,
+> {
+    let transcript_id = run
+        .transcript_ref
+        .as_ref()
+        .ok_or(AgentRunTranscriptUnavailable::NoTranscriptRef)?;
+    let transcript = project
+        .transcripts()
+        .iter()
+        .find(|transcript| &transcript.id == transcript_id)
+        .ok_or(AgentRunTranscriptUnavailable::TranscriptRecordMissing)?;
+    let state_root = state_root.ok_or(AgentRunTranscriptUnavailable::StateRootUnavailable)?;
+
+    let request = tekstide_core::transcript::TranscriptPathRequest::new(
+        state_root,
+        project.canonical_root_path().clone(),
+        project.id().clone(),
+        run.id.clone(),
+    );
+    let storage_path = tekstide_core::transcript::TranscriptPathResolver
+        .resolve_agent_run(request)
+        .map_err(|_| AgentRunTranscriptUnavailable::PathResolutionFailed)?;
+
+    let still_being_written = matches!(
+        run.status,
+        tekstide_core::domain::AgentRunStatus::Preparing
+            | tekstide_core::domain::AgentRunStatus::Running
+            | tekstide_core::domain::AgentRunStatus::AwaitingApproval
+    );
+    let window = tekstide_core::transcript::read_window(
+        &storage_path,
+        tekstide_core::transcript::TranscriptReadPolicy::default(),
+        still_being_written,
+    )
+    .map_err(|_| AgentRunTranscriptUnavailable::ReadFailed)?;
+
+    Ok((transcript, window))
+}
+
+/// `the-window-boundary.md` §2: escaping happens **at the widget**,
+/// using `text_safety::quote_untrusted` -- the one primitive every
+/// other escaped surface in this crate uses, never a second one.
+/// `TranscriptWindow::content()` is raw bytes (D3, `transcript::reader`'s
+/// own doc), not guaranteed valid UTF-8 -- lossy decoding first, the
+/// same treatment invalid UTF-8 gets everywhere else untrusted bytes
+/// become displayed text in this project. Factored out from
+/// [`agent_run_detail_view`] for the same testability reason
+/// `approval_history_entry_body`/`trust_grant_dialog_paths` already
+/// are: a test can assert on the escaped string directly, without an
+/// `iced` widget tree and without a real file on disk.
+fn agent_run_detail_transcript_body(content: &[u8]) -> tekstide_core::text_safety::DisplayText {
+    let lossy_text = String::from_utf8_lossy(content);
+    tekstide_core::text_safety::quote_untrusted(&lossy_text)
+}
+
+/// `the-window-boundary.md`'s own required distinction, rendered as
+/// this function's own required shape: **reader window** (this
+/// `TranscriptWindow` is a tail slice of a possibly-larger file --
+/// `delivered_start() > 0`) and **writer truncation**
+/// (`Transcript.truncation_state`, RFC-011's own bounded-writer record
+/// of bytes that were never captured to begin with) are two
+/// **independent, separately rendered** notices, never merged into one
+/// message -- "you are seeing part of this file" and "part of this
+/// file was never kept" are different facts about the user's data, and
+/// either can be true without the other. `Complete` vs
+/// `StillBeingWritten` is a third, also separate. Factored out for the
+/// same reason [`agent_run_detail_transcript_body`] is: directly
+/// testable against constructed values, no real file needed to prove
+/// the two notices render distinctly.
+fn agent_run_detail_notices(
+    catalog: &Catalog,
+    transcript: &tekstide_core::domain::Transcript,
+    window: &tekstide_core::transcript::TranscriptWindow,
+) -> Vec<String> {
+    let mut notices = Vec::new();
+
+    notices.push(catalog.get(match window {
+        tekstide_core::transcript::TranscriptWindow::StillBeingWritten { .. } => {
+            "agent-run-detail-status-active"
+        }
+        tekstide_core::transcript::TranscriptWindow::Complete { .. } => {
+            "agent-run-detail-status-finished"
+        }
+    }));
+
+    notices.push(if window.delivered_start() > 0 {
+        catalog.get_with_args(
+            "agent-run-detail-window-partial",
+            &CatalogArgs::new()
+                .number("shown_len", window.content().len() as u64)
+                .number("total_len", window.total_len())
+                .number("delivered_start", window.delivered_start()),
+        )
+    } else {
+        catalog.get_with_args(
+            "agent-run-detail-window-full",
+            &CatalogArgs::new().number("total_len", window.total_len()),
+        )
+    });
+
+    if transcript.truncation_state == tekstide_core::domain::TruncationState::Truncated {
+        notices.push(catalog.get("agent-run-detail-writer-truncated"));
+    }
+
+    notices
 }
 
 /// RFC-032, `what-the-trust-dialog-must-say.md` §1: escapes the paths

@@ -424,6 +424,42 @@ trust-settings-current-state = Current state: { $state ->
 trust-settings-grant-button = Grant Trust…
 trust-settings-revoke-button = Revoke Trust
 
+# PR-020-B: `ProjectOpenSurface::AgentRunDetail`'s own view -- the most
+# recently launched run in the active project (this slice's own answer
+# to "which run is current"), rendering its transcript through
+# `read_window`, escaped at the widget (`the-window-boundary.md` §2).
+# The transcript body itself is not a Fluent message: it is rendered
+# directly from `text_safety::quote_untrusted`'s escaped output
+# (`agent_run_detail_transcript_body`), the same "raw content, not a
+# translatable sentence" treatment the editor's own document body
+# already gets -- only the chrome around it (this block's keys) goes
+# through the catalog.
+agent-run-detail-empty = No active project.
+agent-run-detail-no-runs = No agent run in this project yet.
+agent-run-detail-heading = AgentRun Report
+agent-run-detail-no-transcript = No transcript is available for this run.
+agent-run-detail-read-error = The transcript for this run could not be read.
+# D5: `Complete` vs `StillBeingWritten`, in the type -- rendered as two
+# distinct messages, never flattened into one "status" string with a
+# boolean behind it.
+agent-run-detail-status-active = This run is still active. The transcript below may still be growing.
+agent-run-detail-status-finished = This run has finished. The transcript below is complete.
+# D2: the **reader window** notice -- this is a tail slice of a
+# possibly-larger file, not the writer's own truncation (see
+# `agent-run-detail-writer-truncated` below, a separate and independent
+# fact). `$delivered_start` is the *delivered* offset
+# (`the-window-boundary.md` §1's own required report), which can differ
+# from what was requested when resynchronization moved past a token
+# straddling the raw boundary.
+agent-run-detail-window-full = Showing the complete transcript ({ $total_len } bytes).
+agent-run-detail-window-partial = Showing the most recent { $shown_len } bytes of a { $total_len } byte transcript, starting at byte { $delivered_start }.
+# The **writer truncation** notice -- independent of the reader-window
+# notice above. This means RFC-011's bounded writer itself stopped
+# capturing before this run's real output ended; some of what the run
+# actually produced was never saved anywhere, which no reader window
+# size could recover.
+agent-run-detail-writer-truncated = This transcript's own storage was truncated while it was being captured -- some of what this run produced was never saved, independent of the window shown above.
+
 # RFC-032 `what-the-trust-dialog-must-say.md`: `$path` is the project's
 # **canonical** path -- what trust actually binds to
 # (`docs/src/contributors/security-decisions.md`) -- escaped via

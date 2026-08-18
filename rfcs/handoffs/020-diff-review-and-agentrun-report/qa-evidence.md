@@ -2,7 +2,7 @@
 title: "RFC-020: Diff Review and AgentRun Report Surfaces - QA Evidence"
 rfc: "RFC-020"
 rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
-status: "PR-020-B's core (transcript reader) implemented 2026-08-15, reviewed and accepted (responses 198/199, commits b74d8d5/c92d97e). Surface work for both PR-020-B and PR-020-C stopped 2026-08-15 (response 200): no production path creates an AgentRun or a captured change set to render. Re-sequencing owned by the architect/owner, not this slice."
+status: "PR-020-B implemented 2026-08-18 (core: responses 198/199, commits b74d8d5/c92d97e; surface: pr-020-b-report-surface.md, 2026-08-18), awaiting review. PR-020-C (change review surface) and PR-020-D (closeout) not started."
 target_milestone: "M10"
 created: "2026-08-15"
 ---
@@ -185,6 +185,114 @@ independently re-verified against `agent/tests.rs`/`project/tests/*.rs` only), a
 create one. Building the report against this would render "nothing here" forever. No
 surface code was written; nothing here claims PR-020-B complete. Full detail in
 `task-breakdown-pr-plan.md`'s PR-020-B section.
+
+### Surface: implemented 2026-08-18 (`pr-020-b-report-surface.md`)
+
+The blocker response 200 found no longer holds: `0.10.0` made agent-run launch reachable
+(RFC-032 grants trust, RFC-022 spawns), and `0.11.1` traced the rest of the chain end to end
+(transcript written for every AI CLI run → registered on the project →
+`AgentRun.transcript_ref` → `Transcript.storage_path` → `TranscriptPathResolver::resolve_agent_run`
+→ `read_window`), all real production code reached by a real key press. This checkpoint
+builds the surface against that real chain.
+
+**"Which `AgentRun`" answered**: the most recently launched run in the active project
+(`project.agent_runs().last()`) -- matches `OpenCurrentAgentRunDetail`'s own name,
+`agent_run_limit` bounds how many can exist, and a selector is a second surface with its own
+navigation decisions this slice was not for.
+
+**Reachability, both gaps closed in the required order.** `content_mode_view` previously fell
+through to the plain editor for `AgentRunDetail` (a binding without a render arm would have
+made the key silently open an editor -- worse than a dead key); the render arm landed first,
+then the binding (`Ctrl+Alt+R`, mechanically checked to collide with nothing, the same shape
+`approval-history-binding.md` established). `surface_renders_editor` classifies
+`AgentRunDetail` alongside `ApprovalHistory` (`false`) rather than `TrustSettings` (`true`) --
+a deliberate choice, not a default: this is a pure read-only report with no interactive
+elements of its own, so a document left open in the background must not keep absorbing
+keystrokes underneath it, unlike `TrustSettings`'s own real Enter-driven actions.
+
+**A real bug found and fixed while building the reachability test, not merely disclosed.**
+The first version of the read-side lookup (`agent_run_transcript_window`) called
+`open_real_agent_run_state_root()` internally, exactly mirroring the launch side's own
+pre-`transcript-capture-evidence` shape. Every real production call (write at launch, read at
+report time) resolves the same real `$XDG_STATE_HOME`, so this is invisible in production --
+but it made the read side untestable with an injected state root, and the reachability test
+below failed for real (`ReadFailed`, the real path never existing) against a transcript
+captured under a test-injected root, before the fix. Split into
+`agent_run_transcript_window`/`agent_run_transcript_window_with_state_root`, the identical
+testability shape `transcript-capture-evidence.md` already established for the launch side --
+production calls the plain wrapper; the reachability test supplies the same state root its own
+launch used. This is the ablation: the bug's own presence made the real test fail with the
+real wrong error, and the fix made it pass, observed directly rather than staged separately.
+
+**Escaping, at the widget, using the one existing primitive.** `agent_run_detail_transcript_body`
+lossy-decodes `TranscriptWindow::content()`'s raw bytes (D3: the reader never escapes) and
+calls `text_safety::quote_untrusted` -- no second escaping primitive. Proven directly
+(`transcript_body_escapes_a_real_override_and_does_not_double_escape_literal_marker_text`): a
+real `U+202E` becomes a visible `<U+202E>` marker and the raw override character never
+survives into the rendered text; literal ASCII text that already reads `<U+202E>` passes
+through completely unchanged (`escape_untrusted_chars` only touches Unicode Control/
+Default-Ignorable characters, none of which a plain `<`/`U`/`+`/digit/`>` sequence contains).
+**What this test does not, and could not, prove**: that the two cases render as visually
+*different* text -- they cannot, and that is `quote_untrusted`'s own already-proven contract,
+not a property this widget could change. What it proves instead is the concrete, checkable
+shape "double escaping" would take here: the isolate wrapping (`quote_untrusted`'s own
+FSI/PDI marks) never itself appears as escaped text in either case, which is what a second
+escaping pass over already-escaped content would produce (FSI/PDI are themselves Unicode
+Format characters). No dedicated ablation of the escaping call itself: `DisplayText` has no
+public constructor other than `quote_untrusted` (`text_safety`'s own design, "if the type
+system can make untrusted text unrenderable without passing through this function, prefer
+that"), so "forgot to escape" is not expressible in a value this function's own return type
+accepts -- a stronger guarantee than a staged ablation would add, not a gap.
+
+**Reader window vs. writer truncation, rendered as two independent, mechanically-checked
+notices**, per this same file's own known-limitation entry below. `agent_run_detail_notices`
+tested directly against constructed `Transcript`/`TranscriptWindow` values, no real file
+needed: a full, `Complete`, untruncated window produces exactly two notices (status, window);
+a partial reader window (`delivered_start() > 0`) produces a *different* window notice than
+the full case; independently, marking the same `Transcript.truncation_state` as `Truncated`
+adds a *third*, and that third notice is asserted textually distinct from the window notice --
+the exact conflation `the-window-boundary.md` names as the failure mode.
+
+**A real transcript from a real run, from a real key press.**
+`a_real_key_press_opens_the_report_surface_and_reaches_a_real_transcript`: launches a real
+`Supervised` profile (`claude_code_linux_default`'s own compatibility level, not the `Managed`
+reference adapter) against the marker script `transcript-capture-evidence.md` added, waits for
+the real marker to land in the real transcript through the exact production lookup the view
+calls, then dispatches the real `Ctrl+Alt+R` key press through `update` (`shell_input_for_test`,
+not a bypass) and confirms `open_surface()` is `AgentRunDetail` and the same production lookup
+still succeeds and still contains the real marker after escaping.
+
+**GUI evidence.** `niri msg action screenshot-window` against a real running instance, a fresh
+project with zero agent runs (the no-run case, reachable without a real AI CLI installed).
+This project's own documented convention (`env -u WAYLAND_DISPLAY`, `xdotool windowfocus`,
+`--clearmodifiers`) did not work in this session's environment -- `xdotool search` found no
+window (native-Wayland niri, no XWayland surface for the title to match) -- disclosed rather
+than silently substituted: `wtype -M ctrl -M alt r -m alt -m ctrl` (native Wayland virtual
+keyboard) was used instead, confirmed to actually deliver the keystroke (the earlier
+`xdotool`-based attempt at the same capture visibly did not: the resulting screenshot showed
+the unchanged Project Board, not the report surface, and is not used as evidence). The capture
+shows the report surface open, focused (blue border), rendering `"No agent run in this
+project yet."` -- the real catalog text, the real no-runs branch, not empty chrome. **What
+this does not prove**: a real transcript rendering with real content in the live GUI (would
+need a real AI CLI or the test-only marker script wired into the shipped binary, neither
+available for a manual capture) -- that path is covered by the automated end-to-end test
+above instead, not by this screenshot.
+
+**Gates**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features
+-- -D warnings`, full workspace suite (`tekstide-core` 615 passed; `tekstide` 297 passed -- 8
+new tests: the collision check, the reachability test, the escaping test, the notices test,
+the no-runs precondition test, plus the four already counted for
+`transcript-capture-evidence.md`), run three times for stability, `git diff --check`. All
+clean.
+
+**Not done in this checkpoint**: the change review surface (PR-020-C) and closeout
+(PR-020-D). This slice's own closing claim, stated precisely per its own gate: it makes the
+AgentRun report **buildable and now actually reachable** -- a real user pressing `Ctrl+Alt+R`
+in a trusted project after a real agent run sees real transcript content, escaped. It does
+**not** render what an agent *changed*, only what it *said* -- that is PR-020-C, still
+blocked on its own `DetectedChanges` projection. It does not establish that the real Claude
+Code CLI behaves well under this surface; every test uses a controlled executable, as
+everywhere else in this project.
 
 ## PR-020-C — The change review surface
 

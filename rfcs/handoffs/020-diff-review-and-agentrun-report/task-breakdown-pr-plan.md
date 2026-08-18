@@ -2,7 +2,7 @@
 title: "RFC-020: Diff Review and AgentRun Report Surfaces — Task Breakdown / PR Plan"
 rfc: "RFC-020"
 rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
-status: "PR-020-B's core (transcript reader) implemented 2026-08-15, reviewed and accepted (responses 198/199, commits b74d8d5/c92d97e). Surface work for both PR-020-B and PR-020-C stopped 2026-08-15 (response 200): no production path creates an AgentRun or a captured change set to render. Re-sequencing owned by the architect/owner, not this slice. PR-020-D not started."
+status: "PR-020-B implemented 2026-08-18 in full -- core (responses 198/199, commits b74d8d5/c92d97e) and surface (pr-020-b-report-surface.md), awaiting review. PR-020-C (change review surface) remains blocked on its own DetectedChanges projection; PR-020-D (closeout) not started."
 target_milestone: "M10"
 created: "2026-08-15"
 ---
@@ -108,6 +108,20 @@ architect's and owner's, not this slice's.
 reader-window-vs-writer-truncation rendered distinction (needs the widget to exist), and the
 no-double-escaping proof (needs the widget's own escaping call site) — none of this can start
 until an adapter-spawn pathway makes a real `AgentRun` reachable.
+
+**Unblocked and surface implemented 2026-08-18 (`pr-020-b-report-surface.md`).** The
+blocker no longer holds: `0.10.0` made agent-run launch reachable, and `0.11.1` traced the
+full chain from a real transcript write through to a bounded read, all real production code.
+Both remaining gate items landed: reader-window-vs-writer-truncation renders as two
+independent, mechanically-tested notices (`agent_run_detail_notices`), and no-double-escaping
+is proven directly (`transcript_body_escapes_a_real_override_and_does_not_double_escape_literal_marker_text`).
+Both render-arm gaps `pr-020-b-report-surface.md` itself named (`content_mode_view` had no
+arm; the binding was `Configurable`/`None`) are closed, render arm first per that document's
+own required order. Full evidence in `qa-evidence.md`'s own "Surface: implemented 2026-08-18"
+section, including a real state-root testability bug found and fixed while building the
+reachability test (production-invisible, test-breaking) and the GUI-evidence-convention
+substitution this session's environment required (`wtype` in place of `xdotool`, disclosed
+there).
 
 ## PR-020-C — The change review surface
 

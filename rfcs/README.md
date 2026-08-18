@@ -18,7 +18,7 @@ This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | **Accepted — the spine of `0.8.0`, ready for implementation 2026-08-15.** Both prerequisites met: RFC-024 (content access) implemented and closed, RFC-011 Amendment 1 authorises the bounded transcript reader (which does not exist yet — PR-020-B builds it). [Handoff pack](./handoffs/020-diff-review-and-agentrun-report/README.md) complete; all four open questions answered there |
+| 020 | [Diff Review and AgentRun Report Surfaces](./proposed/020-diff-review-and-agentrun-report.md) | **Accepted, partially implemented.** PR-020-B (transcript reader + AgentRun report surface) implemented in full 2026-08-18, `Ctrl+Alt+R` reachable from a real key press. PR-020-C (change review surface) and PR-020-D (closeout) remain, PR-020-C blocked on its own `DetectedChanges` projection. [Handoff pack](./handoffs/020-diff-review-and-agentrun-report/README.md); PR-020-B's own slice handoff and evidence in the same pack |
 | 023 | [Configuration System](./proposed/023-configuration-system.md) | Proposed |
 | 033 | [Transcript Lifecycle Controls](./proposed/033-transcript-lifecycle-controls.md) | **Proposed 2026-08-18.** Per-run opt-out, purge, and retained-data visibility — all designed by RFC-011, none reachable. Authored because `0.11.1` had to publish "there is no in-app way to turn capture off or to purge it" as a standing limitation |
 | 034 | [Change Review Actions and Review State](./proposed/034-change-review-actions-and-review-state.md) | **Proposed 2026-08-18.** Gives `transition_change_set_review_state` a route, and decides the question RFC-020's Q3 deferred: whether a review decision is a record or an operation. Blocked on RFC-020 |
@@ -75,7 +75,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 017 A1 | [Readiness-driven terminal I/O](./handoffs/017-amendment-1-readiness-driven-terminal-io/README.md) — RFC-017 Amendment 1 |
 | 018 | [Rendered Paste Protection and Trusted-UI Evidence](./handoffs/018-paste-protection-and-trusted-ui-evidence/README.md) |
 | 019 | [Editor and Explorer Surfaces](./handoffs/019-editor-and-explorer-surfaces/README.md) |
-| 020 | [Diff Review and AgentRun Report Surfaces](./handoffs/020-diff-review-and-agentrun-report/README.md) — **PR-020-B's surface half scheduled 2026-08-18** ([slice handoff](./handoffs/020-diff-review-and-agentrun-report/pr-020-b-report-surface.md)); its reader half landed 2026-08-15 |
+| 020 | [Diff Review and AgentRun Report Surfaces](./handoffs/020-diff-review-and-agentrun-report/README.md) — **PR-020-B implemented in full 2026-08-18** ([slice handoff](./handoffs/020-diff-review-and-agentrun-report/pr-020-b-report-surface.md)): reader landed 2026-08-15, the AgentRun report surface (`Ctrl+Alt+R`, escaped transcript content, reader-window-vs-writer-truncation rendered distinctly) landed 2026-08-18. PR-020-C (change review surface) remains blocked on its own `DetectedChanges` projection |
 | 024 | [Diff Preview Policy](./handoffs/024-diff-preview-policy/README.md) |
 | — | [Minimal user documentation](./handoffs/minimal-user-documentation.md) — no RFC; pulled forward from RFC-029 to M9 |
 | — | [The reachability audit](./handoffs/reachability-audit.md) — no RFC; scheduled 2026-08-17 |

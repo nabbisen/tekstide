@@ -14,30 +14,56 @@ evidence; an absence without one is a gap.
 
 ## The window boundary (PR-020-B)
 
-- [ ] A window starting inside a control sequence classifies identically to the same
+- [x] A window starting inside a control sequence classifies identically to the same
       content read whole, against a real sequence boundary in real captured output.
-- [ ] Resynchronization ablated; the **specific** divergence shown with the exact wrong
-      value.
-- [ ] The delivered start offset is reported, and differs from the requested one under
-      ablation.
-- [ ] No UTF-8 scalar split at either edge.
-- [ ] The window size is **measured** against the real 32 MiB ceiling, not estimated.
+      (`a_window_starting_inside_a_real_control_sequence_classifies_identically_to_the_whole`,
+      core, 2026-08-15)
+- [x] Resynchronization ablated; the **specific** divergence shown with the exact wrong
+      value. (`ablation_without_resynchronization_the_split_misclassifies`)
+- [x] The delivered start offset is reported, and differs from the requested one under
+      ablation. (`TranscriptWindow::delivered_start()`/`requested_start()`)
+- [x] No UTF-8 scalar split at either edge.
+      (`resynchronization_never_splits_a_utf8_scalar`)
+- [x] The window size is **measured** against the real 32 MiB ceiling, not estimated.
+      `DEFAULT_TRANSCRIPT_WINDOW_BYTES`'s own doc comment; response 198 Finding 2 corrected
+      an earlier, wrong sweep in place rather than silently.
 
 ## The transcript reader (PR-020-B)
 
-- [ ] Reader window and writer truncation render differently; a test pins the distinction.
-- [ ] Complete vs. still-being-written expressed **in the type**, not a doc comment.
-- [ ] Read-only proven by enumeration; a new reading call site fails by name.
-- [ ] No reader path reaches a mutating call; retention metadata untouched.
-- [ ] Raw bytes survive the reader, proven against `text_safety`'s own bidi probe.
+- [x] Reader window and writer truncation render differently; a test pins the distinction.
+      Surface-side, 2026-08-18: `reader_window_and_writer_truncation_render_as_distinct_notices`
+      (`agent_run_detail_notices`) -- a full window produces 2 notices, a partial window
+      produces a *different* 2nd notice, and independently marking the writer truncated adds
+      a textually-distinct 3rd.
+- [x] Complete vs. still-being-written expressed **in the type**, not a doc comment.
+      (`TranscriptWindow::Complete`/`::StillBeingWritten`)
+- [x] Read-only proven by enumeration; a new reading call site fails by name.
+      (`only_this_module_opens_a_transcript_file_for_reading`)
+- [x] No reader path reaches a mutating call; retention metadata untouched.
+- [x] Raw bytes survive the reader, proven against `text_safety`'s own bidi probe.
+      (`raw_bytes_survive_the_reader_including_bidi_and_format_characters`, core) --
+      re-proved surviving through to the widget's own escaping call, surface-side, 2026-08-18
+      (`transcript_body_escapes_a_real_override_and_does_not_double_escape_literal_marker_text`).
 
 ## Escaping (PR-020-B and PR-020-C)
 
-- [ ] Escaping happens at the widget; models return raw bytes.
-- [ ] No second escaping primitive introduced.
-- [ ] No double-escaping — literal `<U+202E>` text is distinguishable from a real override.
+- [x] Escaping happens at the widget; models return raw bytes. **PR-020-B side only** --
+      `agent_run_detail_transcript_body` (`quote_untrusted`, the widget); the reader (D3)
+      never escapes. PR-020-C's own widget does not exist yet.
+- [x] No second escaping primitive introduced. **PR-020-B side**: reuses `quote_untrusted`.
+- [x] No double-escaping — literal `<U+202E>` text is distinguishable from a real override.
+      **PR-020-B side**, 2026-08-18:
+      `transcript_body_escapes_a_real_override_and_does_not_double_escape_literal_marker_text`.
+      See that test's own doc for the precise claim -- the two cases cannot render as
+      *different visible text* (that is `quote_untrusted`'s own contract), what is proven is
+      that the isolate marks are never themselves visible as escaped text, which is the
+      concrete shape a second escaping pass would take.
 - [ ] **The falsifiable claim, tested**: a generated change containing a bidi override
-      renders it visibly in the diff surface.
+      renders it visibly in the diff surface. **Not this item's slice** -- this is
+      PR-020-C's own diff-review widget, which does not exist yet (blocked on its own
+      `DetectedChanges` projection). PR-020-B's own AgentRun report has no diff/change
+      content to render; its equivalent claim ("a real override in transcript content
+      renders visibly") is the item above, which is checked.
 
 ## The change review surface (PR-020-C)
 

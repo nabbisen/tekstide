@@ -558,6 +558,13 @@ fn generic_args() -> CatalogArgs<'static> {
             "root_path",
             &tekstide_core::text_safety::quote_untrusted("/fixture/root-path"),
         )
+        // PR-020-B: `agent-run-detail-window-partial`/`-full`'s three
+        // trusted numbers -- real byte offsets/lengths, never untrusted
+        // text, so `.number` is correct here the same way `line`/
+        // `column` above are for `editor-cursor`.
+        .number("shown_len", 1u64)
+        .number("total_len", 1u64)
+        .number("delivered_start", 1u64)
 }
 
 fn shipped_additional_locales() -> Vec<String> {

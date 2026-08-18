@@ -201,6 +201,35 @@ fn open_approval_history_shortcut_is_a_candidate_that_collides_with_no_other_rul
     );
 }
 
+/// pr-020-b-report-surface.md: `AgentRunDetail` is this slice's own
+/// real render arm, with no other route to open it -- a
+/// `Configurable`/`None` binding here would leave it unreachable by any
+/// real user input, the same category error response 248 named for
+/// `OpenTrustSettings`. Checked mechanically, not by inspection alone,
+/// the same shape every other real binding above already uses.
+#[test]
+fn open_current_agent_run_detail_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::OpenCurrentAgentRunDetail)
+        .expect("Open Current Agent Run Detail should have a keyboard policy");
+
+    assert_eq!(rule.default_binding, Some("Ctrl+Alt+R"));
+    assert_eq!(rule.status, KeybindingStatus::Candidate);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::OpenCurrentAgentRunDetail)
+        .filter(|other| other.default_binding == rule.default_binding)
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Alt+R must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
 #[test]
 fn primary_navigation_workflows_have_keyboard_policy_entries() {
     let policy = KeybindingPolicy::linux_mvp();
