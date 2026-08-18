@@ -6,7 +6,7 @@
 //! `ApplicationShell` is what gates the record, not an assumption about
 //! it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tekstide_core::audit::{AuditEventFamily, AuditQuery};
 use tekstide_core::project::ProjectId;
@@ -140,4 +140,64 @@ fn restoring_recent_projects_on_boot_writes_no_project_added_record() {
         "restoring recent projects on boot must not write an additional ProjectAdded record; \
          the count must still be exactly the one written by the original real open"
     );
+}
+
+/// Response 263's required follow-up: `record_project_added_if_possible` is
+/// called from the call site (`open_cli_project_path_and_record`), not
+/// from `add_project_from_path` itself -- `AppState` holds no
+/// `AuditCoordinator`, so the operation and the record cannot live
+/// together the way `grant_project_trust`'s do. That makes auditing a
+/// thing a future caller must remember: an interactive "Add Project"
+/// flow would compile and work with no record and no error. This test
+/// enumerates every production caller of `add_project_from_path` in this
+/// crate and fails by name the moment a second one appears, the same
+/// shape `only_this_module_opens_a_transcript_file_for_reading`
+/// established.
+const FILES_ALLOWED_TO_CALL_ADD_PROJECT_FROM_PATH: &[&str] = &["main.rs"];
+
+fn crate_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+}
+
+fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(dir).expect("crate src dir must exist") {
+        let path = entry.expect("readable dir entry").path();
+        if path.is_dir() {
+            collect_rs_files(&path, out);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            out.push(path);
+        }
+    }
+}
+
+#[test]
+fn only_boot_calls_add_project_from_path_so_a_new_caller_cannot_silently_skip_the_audit_record() {
+    let mut files = Vec::new();
+    collect_rs_files(&crate_src_dir(), &mut files);
+
+    for path in files {
+        let relative = path
+            .strip_prefix(crate_src_dir())
+            .expect("file must be under src/")
+            .to_str()
+            .expect("path must be valid UTF-8")
+            .to_string();
+
+        if relative.contains("/tests/") || relative.ends_with("tests.rs") {
+            continue;
+        }
+
+        let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
+        let calls_add_project_from_path = source.contains(".add_project_from_path(");
+        let is_allowed = FILES_ALLOWED_TO_CALL_ADD_PROJECT_FROM_PATH.contains(&relative.as_str());
+
+        assert!(
+            !calls_add_project_from_path || is_allowed,
+            "{relative} calls add_project_from_path but is not in \
+             FILES_ALLOWED_TO_CALL_ADD_PROJECT_FROM_PATH -- a new call site (for example an \
+             interactive Add Project flow) must wire its own audit record deliberately, either \
+             by reusing open_cli_project_path_and_record or by calling \
+             record_project_added_if_possible itself, not add a project with no record"
+        );
+    }
 }
