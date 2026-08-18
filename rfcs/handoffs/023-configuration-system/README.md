@@ -43,3 +43,31 @@ RFC-013 froze two audit action kinds whose names are ambiguous:
 - `config_policy_reduce` — **reduces the permitted capability surface** (tightens security). Applied directly.
 
 The names read the other way round to most people. RFC-023 pins the semantics; the authorization asymmetry in the frozen schema is what settles it. Do not guess from the names.
+
+## Carried in 2026-08-18 — the contrast gate does not survive configurability
+
+`theme-contrast-verification` (landed `55f53d8`) added a real WCAG gate over
+`Theme::default`: 4.5:1 for text pairs, 3:1 for non-text pairs, plus `composite_over` so
+the translucent scrim is measured against its actual backdrop. It caught and fixed a real
+failure — `border_default` at 2.63:1.
+
+**That module is `#[cfg(test)]`-gated**, correctly for today: nothing in the production
+render path needs a contrast ratio, and clippy confirmed it as dead code otherwise. But the
+gate therefore validates exactly one palette — the compiled default — at build time.
+
+**RFC-023 is what breaks that.** The moment `NFR-UX-004`'s configurable colours land, a
+user-supplied palette reaches the renderer having passed no contrast check at all, because
+the only check that exists is compiled out of the shipping binary. A user can silently
+configure an unreadable UI, including one where focus indication disappears.
+
+Decide deliberately, do not inherit it:
+
+- **Promote the module to production** and validate a loaded palette when config is
+  applied — refuse, warn, or fall back. Note that refusing a palette is a config-rejection
+  path, and `Missing config is not an error` above means an invalid file must not become a
+  denial of service; the same reasoning applies here.
+- **Or keep it test-only and state plainly** that configured colours are unchecked and
+  accessibility is the user's responsibility once they override the default.
+
+Either is defensible. Silently shipping the second while the changelog says a WCAG gate
+exists is not.
