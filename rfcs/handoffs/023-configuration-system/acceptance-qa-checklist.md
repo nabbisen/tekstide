@@ -2,7 +2,7 @@
 title: "RFC-023: Configuration System - Acceptance / QA Checklist"
 rfc: "RFC-023"
 rfc_file: "../../proposed/023-configuration-system.md"
-status: "Proposed — implementation pending"
+status: "Ready for implementation — RFC-023 accepted 2026-08-18, scoped 2026-08-19"
 target_milestone: "M12"
 source_rfc_status: "Proposed"
 created: "2026-07-28"

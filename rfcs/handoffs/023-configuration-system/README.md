@@ -71,3 +71,32 @@ Decide deliberately, do not inherit it:
 
 Either is defensible. Silently shipping the second while the changelog says a WCAG gate
 exists is not.
+
+## Scoping added 2026-08-19 — read this before PR-023-B
+
+RFC-023's own §Scoping section (at the end of the RFC) was added at handover and **changes what
+this pack is for**. In short:
+
+**This RFC delivers the configuration mechanism. It does not deliver every setting that names
+it.** Five things in shipped code point here expecting their settings — keybindings, theme
+values, locale preference, resource limits, and transcript capture defaults — and this RFC's
+Goals name none of them. Each is to be recorded as **out of scope with a stated owner**, not
+silently left pointing at a promise this RFC never made.
+
+Three previously-open questions are answered there too, and they bind:
+
+- **Workspace configuration does not ship in v1.** Vocabulary reserved, defaults + user-global
+  only. A file inside a project root is the untrusted surface RFC-032's trust model gates.
+- **An invalid configuration file produces a notification, not a blocking dialog** — this RFC's
+  own goal says an invalid file must not become a denial of service, and a modal nobody can
+  dismiss without valid configuration is exactly that.
+- **Configuration-defined AI CLI profiles require a one-time confirmation on first use.**
+  RFC-010's provenance validation still applies; provenance is not intent.
+
+**One thing this pack predates and must now carry** (recorded in this file 2026-08-19, see
+below): the WCAG contrast gate added by `theme-contrast-verification` is `#[cfg(test)]`-gated,
+so it validates exactly one compiled palette at build time. The moment configurable colours
+land, a user-supplied palette reaches the renderer having passed no contrast check at all.
+Decide that deliberately — promote the module and validate on load, or state plainly that
+configured colours are unchecked. Shipping the second silently while the changelog advertises a
+WCAG gate is not an option.
