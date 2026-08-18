@@ -449,7 +449,17 @@ can now be created." **Both halves are false, and checking took one grep:**
 
 - **`add_detected_generated_change_set` still has zero production callers.** Nothing runs
   change detection, so no `ChangeSet` can exist and RFC-020's change-review surface is
-  **still blocked**, exactly as response 200 found it.
+  **still blocked**, exactly as response 200 found it. **Superseded 2026-08-18 by the
+  `change-detection-wiring` handoff** (Slices A–D, `9d55cb8`/`8f0abff`): it has a real
+  production caller now. A real agent run captures a filesystem baseline before its process
+  spawns, and on that run's real terminal exit a real `ChangeSet` is created, strongly
+  associated with the run, listing the files it actually changed — proven end to end from a
+  real key press. **RFC-020's surfaces still render nothing**: this produces their input, so
+  the change-review surface is **buildable, not reachable**, and that distinction is the
+  whole point rather than a hedge. Disclosed limitations travel with it — exit is the only
+  completion trigger, so a long interactive session reports nothing until it ends; the
+  baseline is in-memory, so it does not survive the application; and `.git/`, `target/` and
+  `node_modules/` are excluded from detection by design.
 - **No `AgentRun` can be launched by a real user either.** `Ctrl+Alt+A` refuses with
   `WorkspaceDiscoveryBlocked` for every project, because the Claude Code profile honestly
   declares `MayDiscoverWorkspaceFiles` and every project is permanently `Restricted` —
@@ -457,8 +467,12 @@ can now be created." **Both halves are false, and checking took one grep:**
   re-verified). **Superseded 2026-08-17 by RFC-032**, authored in direct response to this
   bullet: trust is now grantable through `Ctrl+Alt+U` → `TrustSettings` → the confirmation
   dialog, so this gate is passable and an agent run using such a profile launches for real
-  in a trusted project. The bullet is kept rather than deleted because the *other* half —
-  no `ChangeSet` — still stands, and because the correction history above is the point.
+  in a trusted project. The bullet is kept rather than deleted because the correction
+  history above is the point. *(Its original reason — that the other half, no `ChangeSet`,
+  still stood — was itself superseded on 2026-08-18; see the bullet above. Both halves of
+  the paragraph this note corrects are now false, each fixed by the RFC or handoff its own
+  correction prompted, which is the delivery plan working as intended rather than a third
+  error.)*
   **Noted at RFC-032's own Final Acceptance**: this paragraph sat false for the length of
   RFC-032's implementation, inside the very passage complaining that reachability claims
   get written without checking. The closeout that fixed the underlying gap updated the RFC,
