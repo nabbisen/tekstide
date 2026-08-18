@@ -1,6 +1,6 @@
 # RFC-023: Configuration System - QA Evidence
 
-Status: PR-023-B implemented 2026-08-19, awaiting review; PR-023-C onward pending
+Status: PR-023-B and PR-023-C implemented 2026-08-19, awaiting review; PR-023-D onward pending
 Date opened: 2026-07-28
 Date accepted: Pending
 
@@ -128,7 +128,82 @@ tests — both runs clean, `git diff --check` clean.
 
 ### PR-023-C — Atomic load, validation, diagnostics
 
-Pending implementation.
+**Implemented 2026-08-19.** New `crates/tekstide-core/src/config/load.rs`, plus
+`config/tests/load.rs`. Adds the `toml` crate (workspace dependency, version `"1"` — a
+newly-added dependency, so pinned to the current major rather than an older one).
+
+**Pipeline.** `parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagnostic>`:
+parses to an untyped `toml::Table`, then walks each of the 8 sections in turn
+(`extract_core`/`extract_ui`/.../`extract_resources`), each pulling its own known fields out of
+its own sub-table via small typed helpers (`take_bool`/`take_u32`/`take_string`/
+`require_string`/`take_string_array`) and pushing anything left unconsumed as a warning. The
+function is pure — no shared state, so "no partial application" is not a property that needs
+separate proving; there is no code path that mutates anything outside the function's own locals,
+so either a complete `ConfigurationDocument` comes back or nothing does.
+
+**`ConfigStore`** wraps the pure function with the actual file I/O and the "swap" step the RFC's
+own pipeline names: `load` (initial, defaults on missing/invalid) and `reload` (explicit,
+designed for the M13 watcher to call unchanged later). `self.current` is assigned in exactly one
+place in the whole type — `reload`'s last line — gated on `parse_and_validate` having already
+returned a fully valid document. **Ablated for real**: temporarily inserted a premature
+`self.current.core.recent_projects_limit = 5;` before the validation call (simulating a
+"partial early-apply" bug), confirmed
+`reload_with_a_file_valid_in_its_first_half_and_invalid_in_its_second_changes_nothing` — the
+review's own planned test, verbatim: *"a file that is valid in its first half and invalid in its
+second, then assert nothing from the first half took effect"* — fails with exactly that leaked
+value, restored, confirmed green again.
+
+**Unknown keys warn, unknown values error**, proven both ways with dedicated tests at every
+level: unrecognized top-level section, unrecognized key inside a known section, unrecognized key
+inside a `[agent.profile.*]` table (all three warn, not fail); wrong-typed value for a known key,
+and a missing required key inside a profile (`command`), both error, naming the offending key.
+
+**`default_trust = "trusted"` carried forward from response 267.** Not a `take_string`/coercion
+call — a dedicated match arm that accepts only the literal `"restricted"` and returns a named
+`ConfigDiagnostic` for anything else, so the file is refused rather than the dangerous value
+being silently dropped in favor of the safe default (response 267's own words: *"a false belief
+[that blanket trust was configured] in that direction is exactly what this whole finding was
+about"*). **Ablated for real** a second time at this layer: temporarily widened the accepted-value
+guard to also accept `"trusted"`, confirmed `default_trust_set_to_trusted_in_the_file_is_an_explicit_named_error`
+fails (the file is silently accepted, still producing the type-level-safe `RestrictedDefaultTrust`
+value — proving this test guards *silent acceptance of the dangerous string*, independent of and
+in addition to the type-level safety net response 266 already built), restored, confirmed green.
+
+**Diagnostics: bounded, and now carrying the field the earlier draft of this section missed.**
+`ConfigDiagnostic.message` is `&'static str` — inert by construction, the same shape response 266
+used for `RestrictedDefaultTrust`, so there is no code path by which file content or a rejected
+value could ever reach it, re-verified directly with a real secret-shaped sentinel string
+(`a_secret_shaped_rejected_value_never_reaches_the_diagnostic`). `key` names the offending
+`section.field`. `location` carries a byte-offset span for TOML syntax errors, when the
+underlying parser provides one — `None` for validation errors constructed while walking the
+already-parsed table, since that information isn't available at that layer; an honest "where
+available," not an omission. **`path`**: the checklist requires "diagnostics carry file path,
+error location where available, and the offending key" — the first draft of this pipeline had no
+`path` field at all, caught while updating this checklist rather than by review. Fixed:
+`parse_and_validate` itself stays path-agnostic (it validates source text, not a file), and
+`ConfigStore` fills in `path` via `ConfigDiagnostic::with_path` on every diagnostic it returns —
+`parse_and_validate_alone_leaves_the_diagnostics_path_unset` and
+`store_load_with_an_invalid_file_at_first_start_yields_defaults_with_a_diagnostic` pin both
+halves of that split.
+
+**A fully-specified document round-trips every section** with zero warnings
+(`a_fully_specified_document_round_trips_every_section`), including a real `[agent.profile.codex]`
+table with `command`/`args` set and `adapter`/`environment_policy` left to default —
+demonstrating the per-field default-vs-override behavior inside a nested table, not only at the
+top level.
+
+**What this does not establish.** Nothing here reads a *live* configuration anywhere in the
+application — `ConfigStore` exists and is fully tested, but `main.rs`/`boot()` does not construct
+one; wiring an actual load at startup is not named as this slice's own scope in the task
+breakdown, and doing so here would be scope creep beyond "atomic load, validation, diagnostics."
+Security-sensitive classification (which settings require confirmation on reload, and the
+`sensitive_config_changed` producer) is PR-023-D's, not this slice's — `reload` today applies
+every section identically, including ones §5 will later gate.
+
+**Gates run**, 2026-08-19: `cargo fmt --all --check` clean. `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean. `cargo test --workspace --all-targets
+--all-features` run twice: `tekstide-core` 658 passed (was 639 — 19 new load tests), `tekstide`
+303 passed (unchanged), `reference_adapter` 0 tests — both runs clean. `git diff --check` clean.
 
 ### PR-023-D — Security-sensitive classification, reload, audit
 

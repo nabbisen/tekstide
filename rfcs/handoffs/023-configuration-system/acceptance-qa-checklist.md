@@ -2,7 +2,7 @@
 title: "RFC-023: Configuration System - Acceptance / QA Checklist"
 rfc: "RFC-023"
 rfc_file: "../../proposed/023-configuration-system.md"
-status: "PR-023-B implemented 2026-08-19, awaiting review; PR-023-C onward pending"
+status: "PR-023-B and PR-023-C implemented 2026-08-19, awaiting review; PR-023-D onward pending"
 target_milestone: "M12"
 source_rfc_status: "Proposed"
 created: "2026-07-28"
@@ -24,13 +24,11 @@ updated: "2026-07-28"
 - [x] Path canonicalized; symlink redirection outside the configuration root rejected.
       (`a_symlinked_config_directory_escaping_the_configuration_root_is_rejected`, ablated for
       real — see `qa-evidence.md`'s PR-023-B section)
-- [ ] Format is TOML; parsing cannot execute code. **PR-023-C** — no parser exists yet; B builds
-      the path and typed-model layers only.
-- [ ] Missing file yields working defaults, not an error. **Partially covered by B, completed by
-      PR-023-C.** The path layer resolves cleanly with nothing on disk
-      (`resolving_with_nothing_on_disk_yet_succeeds`) and `ConfigurationDocument::default()` is
-      total, but there is no loader yet to connect "file absent" to "defaults applied" as one
-      observed behavior — that connection is C's atomic load pipeline.
+- [x] Format is TOML; parsing cannot execute code. (`toml` crate, table/value AST only — no
+      execution hook exists in the format or the crate; `parse_and_validate`, `config/load.rs`,
+      2026-08-19)
+- [x] Missing file yields working defaults, not an error.
+      (`store_load_with_no_file_present_yields_defaults_and_no_diagnostic`, `config/tests/load.rs`)
 
 ## Model Checklist
 
@@ -54,15 +52,34 @@ updated: "2026-07-28"
 
 ## Atomic Validation Checklist
 
-- [ ] Pipeline is parse → validate whole → construct → swap.
-- [ ] **Invalid file leaves every previously active setting unchanged.**
-- [ ] No partial application at any stage.
-- [ ] Unknown keys warn.
-- [ ] Unknown values for known keys error.
-- [ ] Diagnostics carry path, location, offending key.
-- [ ] Diagnostics contain no file contents.
-- [ ] Diagnostics contain no secret-shaped values.
-- [ ] Invalid file at first start: defaults apply and Tekstide starts.
+- [x] Pipeline is parse → validate whole → construct → swap.
+      (`parse_and_validate`, `config/load.rs` — parse to `toml::Table`, validate+construct each
+      of the 8 sections, `ConfigStore::reload` swaps `self.current` in exactly one place, only
+      after the whole document validates)
+- [x] **Invalid file leaves every previously active setting unchanged.**
+      (`reload_with_a_file_valid_in_its_first_half_and_invalid_in_its_second_changes_nothing` —
+      the review's own planned test, verbatim; ablated for real, see `qa-evidence.md`)
+- [x] No partial application at any stage. Structural, not merely tested: `parse_and_validate`
+      mutates no shared state, and `ConfigStore` has exactly one assignment to `self.current`,
+      gated on `parse_and_validate` already having returned a complete document.
+- [x] Unknown keys warn.
+      (`an_unrecognized_top_level_section_warns_and_does_not_fail`,
+      `an_unrecognized_key_inside_a_known_section_warns_and_does_not_fail`,
+      `an_unrecognized_key_inside_a_profile_table_warns_and_does_not_fail`)
+- [x] Unknown values for known keys error.
+      (`an_unknown_value_for_a_known_key_is_an_error_naming_the_key`,
+      `default_trust_set_to_trusted_in_the_file_is_an_explicit_named_error`)
+- [x] Diagnostics carry path, location, offending key.
+      (`store_load_with_an_invalid_file_at_first_start_yields_defaults_with_a_diagnostic` asserts
+      `path`; `malformed_toml_syntax_is_a_parse_error_with_a_location_but_no_content` asserts
+      `location`; every diagnostic carries `key`)
+- [x] Diagnostics contain no file contents.
+- [x] Diagnostics contain no secret-shaped values. (Both: `message` is `&'static str`, inert by
+      construction — no code path can put runtime content into it; re-verified directly with a
+      real secret-shaped sentinel,
+      `a_secret_shaped_rejected_value_never_reaches_the_diagnostic`)
+- [x] Invalid file at first start: defaults apply and Tekstide starts.
+      (`store_load_with_an_invalid_file_at_first_start_yields_defaults_with_a_diagnostic`)
 
 ## Security-Sensitive Settings Checklist
 
