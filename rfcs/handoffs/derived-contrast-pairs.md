@@ -100,6 +100,24 @@ So this pair cannot be asserted as a fixed pair. It must be asserted as a **swee
 backdrop range, taking the worst case of `max(border, fill)` — the best channel available to
 identify the card — and requiring that worst case to clear 3:1. Anything less is sampling.
 
+**Sweep greyscale only, and here is why it is sufficient** (told to us by the snora team,
+verified here two ways before being written down). The scrim composites channelwise, and
+relative luminance is monotonic increasing in each channel, so a composited backdrop's
+luminance is bounded by its values at black and white content — and greyscale content spans
+that interval continuously. Contrast ratio depends on nothing but luminance, so every ratio
+a coloured backdrop can produce, a grey one already produces. A 3D colour sweep adds roughly
+a million points and no coverage. Confirmed empirically: 400,000 random RGB backdrops found
+a worst case of 2.4011, against the greyscale minimum of 2.401129.
+
+**But do not sample the sweep either.** A 2,000-step greyscale grid reports 2.4016 where the
+true minimum is 2.401129 — harmless at this magnitude, and not harmless in general: a coarse
+grid straddling a true minimum of 2.9995 will happily report 3.0002 and pass a failing
+palette. `max` of two monotone curves is **unimodal**, so the minimum can be found exactly by
+ternary search rather than approached by grid. Do that, and report the content value it
+occurs at, not only the ratio. (Found by checking snora's greyscale claim rather than
+accepting it — the first grid I ran disagreed with the 3D sweep and looked like a
+counterexample, and was resolution.)
+
 The snora team hit the identical trap from the other side and put it well: *"`light`'s
 background is pure white, so the dim over it is the lightest the dim can be — 2.85 was a
 floor, not a sample."* Ours is not a floor at either end; it is a minimum in the middle.
@@ -156,6 +174,18 @@ must ship as a stated one, not a silent fix.
 - If a *further* derived pair fails — one not named here — **stop and report** rather than
   adjusting another colour. A third palette change belongs in its own slice with its own
   red-then-green evidence.
+
+## One boundary that does not bite us, relayed via snora from the orbok team
+
+`#[non_exhaustive]` permits exhaustive destructuring **only inside the crate that defines
+the type**; from outside, the compiler requires `..`, which is exactly what defeats this
+mechanism (`E0638`). orbok hit it trying to apply RFC-063's pattern to snora's `Palette`
+from outside snora.
+
+**It does not apply here, checked rather than assumed**: `Theme` is defined in
+`crates/tekstide/src/theme.rs`, is not `#[non_exhaustive]`, and `theme/tests.rs` is a module
+of the same crate. The destructure will work as described. Recorded so that if `E0638` ever
+does appear, it reads as a boundary rather than a mistake.
 
 ## Not in scope
 
