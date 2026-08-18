@@ -225,3 +225,69 @@ All slices are headless.
 ## Scheduling
 
 All slices are headless and have no GUI dependency. Recommended to start immediately alongside RFC-021 and the RFC-014 spike. Configuration unblocks user-defined AI CLI profiles — a limitation users encounter the moment they try to use the product — and is a prerequisite for one of the eight unwired audit producers.
+
+---
+
+## Scoping, 2026-08-19 — five consumers accumulated while this RFC waited
+
+Scoped at the owner's request before handover. This RFC was authored early and held while its
+prerequisites landed. In the meantime **five places in the shipped code named RFC-023 as the
+thing that would supply their settings**, and this RFC's §Goals names none of them:
+
+| what points here | where | what it expects |
+| --- | --- | --- |
+| **Keybindings** | `navigation.rs` (×3), `shell.rs` | Every `Configurable` action has a `None` binding and is **dead** "until RFC-023 exists" |
+| **Theme values** | `theme.rs` (×2) | *"RFC-023 will supply these values from configuration"* — every colour and font size |
+| **Locale preference** | `i18n.rs` (×2) | `LocalePreference::configured` is permanently `None`; the field exists so the signature need not change when RFC-023 arrives |
+| **Resource limits** | reachability audit, priority 3 | `set_resource_limits` has no caller, so every tuned limit is fixed at its default forever |
+| **Transcript capture default** | RFC-033 | Defaults are named as this RFC's, per-run opt-out as RFC-033's |
+
+Plus one recorded in this RFC's own handoff pack: **the WCAG contrast gate does not survive
+configurability** — it validates one compiled palette at build time, and a user-supplied one
+would reach the renderer unchecked.
+
+### The scoping decision, and it is the whole point of this note
+
+**This RFC delivers the configuration *mechanism*, not every setting that wants to use it.**
+Its Goals are paths and format, load order and precedence, atomic validation,
+security-sensitive classification, hot-reload separation, AI CLI profiles, and the
+`sensitive_config_changed` producer. That is already a large RFC.
+
+If it also has to deliver keybindings, theme values, locale, resource limits and capture
+defaults, it becomes "make everything configurable" and **it will not land**. Worse, each of
+those five carries its own design question — a keybinding needs collision policy and a
+rebinding UI story; a user-supplied palette needs the contrast gate promoted out of
+`#[cfg(test)]`; a locale change needs runtime switching, which RFC-016 explicitly deferred.
+
+**So: name each of the five as out of scope, in this RFC, with a stated owner.** The five code
+comments will then be pointing at something true — a mechanism they can build on — rather than
+at a promise this RFC never made. **Do not leave them pointing here silently**; that is how
+`OpenApprovalHistory` sat unreachable for a release.
+
+### The three Open Questions, answered
+
+**OQ1 — does workspace configuration ship in v1?** **No.** Workspace configuration is a file
+inside a project root, which is exactly the untrusted, attacker-influenceable surface RFC-032's
+whole trust model exists to gate. Shipping the *vocabulary* while supporting only
+defaults + user-global is the right first step, and it means a project cannot configure the
+application that opens it until trust is a prerequisite that has been designed for it.
+
+**OQ2 — should an invalid config file be more prominent than a notification?** The question
+was written when no dialogs existed. **They exist now** (paste, external-change, trust,
+approval), so the option is live. **Recommend a notification, not a blocking dialog**, for the
+reason this RFC already states as a goal: *"an invalid file must not become a denial of
+service."* A modal at startup that a user cannot dismiss without valid configuration is exactly
+that.
+
+**OQ3 — should configuration-defined profiles need a one-time confirmation on first use?**
+**Yes.** A config-defined AI CLI profile is a reviewed launch contract supplied by a file; RFC-010's
+provenance validation still applies, but provenance is not intent. This is the same asymmetry
+RFC-032 chose for trust: the dangerous direction gets a deliberate act.
+
+### Stale text in this document, corrected rather than left
+
+- §Scheduling says *"start immediately alongside RFC-021 and the RFC-014 spike."* Both closed
+  long ago; RFC-023 is now M12 and follows RFC-031.
+- §Scheduling says configuration *"is a prerequisite for one of the eight unwired audit
+  producers."* **Three** remain unwired as of 2026-08-19, and `sensitive_config_changed` is one
+  of them — the statement's substance holds, its arithmetic does not.
