@@ -141,6 +141,18 @@ fn theme_default_meets_wcag_contrast_thresholds() {
 /// implementing this test: a fine-grained direct scan (200,001 grey
 /// steps, no ternary search) found the same minimum
 /// (`2.4011` at `t=0.7844`) `minimize_unimodal` finds below.
+///
+/// **Review response 261: with the Slice B alpha (`0.75`), the true
+/// minimum has moved to the endpoint (`content = 1.0`, ~3.62:1) --
+/// sampling would now happen to give the right answer.** Do not read
+/// that as a reason to simplify this back to a fixed pair. The minimum
+/// sits at an interior point (`~0.78` grey) with the pre-fix `0.55`
+/// alpha, and any future change to `accent`, `surface_elevated`, or the
+/// scrim itself (RFC-023 supplying any of them from configuration) can
+/// move it back into the interior -- where a sampled test would pass a
+/// failing palette silently, exactly as it did before this handoff. The
+/// sweep is not redundant because it currently resolves at an endpoint;
+/// it is what stays correct when it does not.
 #[test]
 fn modal_over_scrim_backdrop_clears_3_to_1_at_every_content_value() {
     let theme = Theme::default();
