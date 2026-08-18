@@ -4,6 +4,7 @@ pub mod approval;
 pub mod audit;
 pub mod close;
 pub mod command;
+pub mod config;
 pub mod content;
 pub mod domain;
 pub mod navigation;
