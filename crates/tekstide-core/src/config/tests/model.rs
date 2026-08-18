@@ -1,4 +1,4 @@
-use crate::config::ConfigurationDocument;
+use crate::config::{ConfigurationDocument, RestrictedDefaultTrust};
 use crate::transcript::DEFAULT_TRANSCRIPT_MAX_AGE_DAYS;
 
 /// Model Checklist: "Compiled defaults are total; no `Option` handling
@@ -29,7 +29,7 @@ fn every_section_default_is_the_documented_value() {
     assert!(config.terminal.multiline_paste_protection);
     assert!(config.terminal.safe_escape_sequences);
 
-    assert_eq!(config.projects.default_trust, "restricted");
+    assert_eq!(config.projects.default_trust, RestrictedDefaultTrust);
     assert!(config.projects.restore_recent_projects);
     assert_eq!(config.projects.open_duplicate_root, "focus_existing");
 
@@ -72,5 +72,26 @@ fn default_is_deterministic_and_total() {
     assert_eq!(
         ConfigurationDocument::default(),
         ConfigurationDocument::default()
+    );
+}
+
+/// Response 266: `default_trust` must never be able to say "trusted" --
+/// a two-valued setting here would be a trust-granting mechanism that
+/// bypasses RFC-032's per-project, two-deliberate-act design. This is
+/// not a runtime check because none is possible or needed:
+/// `RestrictedDefaultTrust` is a zero-field unit struct, so there is no
+/// value, constructor, or field assignment anywhere in this crate that
+/// can produce anything other than the one value asserted here -- the
+/// Rust compiler is the enforcement, not this test. What this test
+/// documents is *that* the type is a unit struct (a future edit that
+/// widened it back into a `String` or added a second variant would
+/// still compile against this assertion, so the real guard is
+/// `RestrictedDefaultTrust`'s own definition in `model.rs`, not this
+/// file -- read together, not this test alone).
+#[test]
+fn default_trust_has_exactly_one_possible_value() {
+    assert_eq!(
+        ConfigurationDocument::default().projects.default_trust,
+        RestrictedDefaultTrust
     );
 }

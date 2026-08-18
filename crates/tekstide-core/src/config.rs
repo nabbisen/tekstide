@@ -3,7 +3,8 @@ mod path;
 
 pub use model::{
     AgentSettings, ConfigurationDocument, ConfiguredAiCliProfile, CoreSettings, KeybindingSettings,
-    ProjectSettings, ResourceSettings, SecuritySettings, TerminalSettings, UiSettings,
+    ProjectSettings, ResourceSettings, RestrictedDefaultTrust, SecuritySettings, TerminalSettings,
+    UiSettings,
 };
 pub use path::{
     ConfigPathError, ConfigPathErrorReason, ConfigPathProvider, ConfigPathResolver,

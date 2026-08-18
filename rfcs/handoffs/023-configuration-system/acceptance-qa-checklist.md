@@ -44,6 +44,13 @@ updated: "2026-07-28"
       reads it** — no consumer wires it into `input.rs`'s real binding policy. This pack's own
       Scoping section already names keybindings as an out-of-scope, owner-pending consumer;
       unchecked here for the same reason, not a gap introduced by B.
+- [x] **`default_trust` cannot express "trusted."** Response 266 / RFC-023's own
+      §Security-Sensitive Settings correction (2026-08-19): a two-valued `default_trust` would be
+      a trust-granting mechanism bypassing RFC-032's per-project, two-deliberate-act design, and
+      security-sensitive classification (confirm-on-change) does not close that gap. Fixed:
+      `ProjectSettings.default_trust` is now `RestrictedDefaultTrust`, a zero-field unit struct
+      with exactly one possible value — inert by construction, not by runtime validation.
+      (`default_trust_has_exactly_one_possible_value`, `config/tests/model.rs`)
 
 ## Atomic Validation Checklist
 

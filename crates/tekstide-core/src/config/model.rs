@@ -102,17 +102,39 @@ impl Default for TerminalSettings {
     }
 }
 
-/// `default_trust` and `open_duplicate_root` are plain strings, not
-/// enums, on purpose: only one value of each is actually implemented
-/// today (`"restricted"` -- every project starts untrusted, confirmed
-/// against `AppState::add_project_session`; `"focus_existing"` --
-/// `AddProjectOutcome::FocusedExisting` is the only real behavior an
-/// already-open root produces), so an enum would assert a choice space
-/// that does not exist yet. Validating the string against whatever
-/// choice space PR-023-C settles on is that slice's job.
+/// Response 266 / RFC-023 §Security-Sensitive Settings ("`default_trust`
+/// is the one setting confirmation does not make safe"): a config value
+/// that could ever say "trusted" is a trust-granting mechanism that
+/// bypasses RFC-032's per-project, two-deliberate-act design entirely --
+/// no confirmation dialog, no `TrustGrant` record, not bound to a
+/// canonical path -- and the escalation path is concrete: an agent run
+/// in an already-trusted project can write user-global `config.toml`
+/// (trusted by this RFC's own load order), and a two-valued field here
+/// would let it trust every future project silently, forever.
+/// Security-sensitive classification (confirm-once-and-audit-the-change,
+/// PR-023-D's machinery) governs *changing a setting*, not the grants a
+/// setting then performs on every future use -- it does not close this
+/// gap, so this field must never be able to hold the dangerous value at
+/// all. `RestrictedDefaultTrust` has exactly one possible value: the
+/// vocabulary is reserved (the field exists, so a future design that
+/// actually reasons about a second value is a visible type change, not
+/// a silently loosened validation rule) while being inert by
+/// construction -- there is no constructor, parse path, or field
+/// assignment anywhere that can produce anything but this one value.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RestrictedDefaultTrust;
+
+/// `open_duplicate_root` is a plain string, not an enum, on purpose:
+/// only one value is actually implemented today
+/// (`"focus_existing"` -- `AddProjectOutcome::FocusedExisting` is the
+/// only real behavior an already-open root produces), so an enum would
+/// assert a choice space that does not exist yet. Unlike `default_trust`
+/// above, no value of this setting grants a capability another RFC
+/// treats as a deliberate per-use act, so a plain string awaiting
+/// PR-023-C's validation is the right amount of typing, not too little.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectSettings {
-    pub default_trust: String,
+    pub default_trust: RestrictedDefaultTrust,
     pub restore_recent_projects: bool,
     pub open_duplicate_root: String,
 }
@@ -120,7 +142,7 @@ pub struct ProjectSettings {
 impl Default for ProjectSettings {
     fn default() -> Self {
         Self {
-            default_trust: "restricted".to_owned(),
+            default_trust: RestrictedDefaultTrust,
             restore_recent_projects: true,
             open_duplicate_root: "focus_existing".to_owned(),
         }

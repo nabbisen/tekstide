@@ -88,10 +88,11 @@ locale, resource limits, and transcript-capture defaults — extended here to `[
 rest of `[agent]`, which the Scoping section did not name individually but which are in the exact
 same position: no Goal of this RFC names "wire `[security]`'s specific toggles into live
 Restricted-Mode enforcement" or "wire `[agent]`'s concurrency fields into the launch limiter."
-`[projects].default_trust`/`open_duplicate_root` are plain strings, not enums, because only one
-value of each is actually implemented today and an enum would assert a choice space that does not
-exist yet — validating the string against whatever choice space PR-023-C settles on is that
-slice's job, not this one's.
+`[projects].open_duplicate_root` is a plain string, not an enum, because only one value is
+actually implemented today and an enum would assert a choice space that does not exist yet —
+validating the string against whatever choice space PR-023-C settles on is that slice's job, not
+this one's. **`default_trust` is not a string** — see the response-266 follow-up below; a plain
+string was the original (wrong) design.
 
 **Gates run**, 2026-08-19: `cargo fmt --all --check` clean. `cargo clippy --workspace
 --all-targets --all-features -- -D warnings` clean (one `derivable_impls` lint on the first draft
@@ -99,6 +100,31 @@ of `ConfigurationDocument`'s manual `Default` impl, fixed by deriving instead). 
 --workspace --all-targets --all-features` run twice: `tekstide-core` 638 passed (was 619 — the
 19 new config tests), `tekstide` 303 passed (unchanged, no wiring here), `reference_adapter` 0
 tests — both runs clean. `git diff --check` clean.
+
+**Response 266 follow-up, same day: `default_trust` made inert by construction.** The reviewer
+found that a two-valued `default_trust` (`"restricted"`/`"trusted"`) would be a trust-granting
+mechanism bypassing RFC-032's per-project, two-deliberate-act design outright — RFC-023's own
+security-sensitive classification (confirm-once-and-audit-the-change) governs *changing a
+setting*, not the grants a setting then performs silently on every future project, so it does not
+close the gap. The concrete escalation: an agent run in an already-trusted project can write
+user-global `config.toml` (trusted by this RFC's own load order), so a config-writable trust
+default would let a compromised or malicious agent trust every future project at creation, with no
+per-project confirmation and no `TrustGrant` record. The RFC text itself was corrected by the
+reviewer (§Security-Sensitive Settings) before this fix landed.
+
+Fixed: `ProjectSettings.default_trust` is now `RestrictedDefaultTrust`, a zero-field unit struct.
+This is not runtime validation of a string — there is no constructor, parse path, or field
+assignment anywhere in the crate that can produce any value other than the one that exists,
+enforced by the Rust compiler rather than a check that could later be weakened or forgotten.
+`default_trust_has_exactly_one_possible_value` documents the property; the real enforcement is
+the type definition itself in `model.rs`.
+
+Gates re-run after the fix: `cargo fmt --all --check` clean, `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean (one `default_constructed_unit_structs` lint
+on the test's first draft, fixed by comparing to the value directly instead of via
+`::default()`), `cargo test --workspace --all-targets --all-features` run twice: `tekstide-core`
+639 passed (was 638 — the one new inertness test), `tekstide` 303 passed, `reference_adapter` 0
+tests — both runs clean, `git diff --check` clean.
 
 ### PR-023-C — Atomic load, validation, diagnostics
 
