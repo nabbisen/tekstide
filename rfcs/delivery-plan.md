@@ -54,7 +54,7 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | **Multi-document** — one active document only | External design §3.4 | M13 |
 | **Syntax highlighting** | `REQ-EDIT-003` | M10 (optional) |
 | **Crash / unsaved buffer recovery** | `REQ-RECOVER-005` | M13 |
-| **Audit producers** — 7 of 12 families unwired | `REQ-SEC-014` | M9, M11, M12 |
+| **Audit producers** — ~~7~~ **3** of 12 families unwired as of 2026-08-19 (`safe_close_decision`, `sensitive_config_changed`, `transcript_purge`) | `REQ-SEC-014` | M12 |
 | **LSP** | `REQ-LSP-001`..`005` | Deferred beyond 1.0 by design |
 | **Cross-platform** — Linux only | `NFR-PORT-001`..`003` | M14 |
 | **Documentation** — `docs/` absent | Project rules | **Split 2026-08-01 at the owner's direction ("as soon as possible").** Minimal user documentation → **M9, alongside RFC-017**. Full `docs/src` mdBook by persona stays with RFC-029 (M14). |
@@ -66,22 +66,29 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 
 ### Audit producer coverage
 
-Five of twelve v1 families have runtime producers. The remaining seven are the clearest measure of how much product surface is still missing. `command_approval` is wired but **produces nothing**, because nothing calls the coordinator — counted as wired, listed with that caveat:
+**Re-checked against the code 2026-08-19, at RFC-031's closeout — the table below had been
+stale in four rows.** `paste_blocked` and `plain_terminal_observation` were recorded as having
+no producer long after RFC-017/RFC-018 gave them one, and `command_approval` was recorded as
+having no caller after RFC-022 gave it a real audited producer. **Nine of twelve families now
+have producers**; three remain, each owned by an accepted RFC.
 
-| Family | Producer | Milestone |
+| Family | Producer | Owner |
 | --- | --- | --- |
-| `trust_change` | wired | — |
+| `trust_change` | wired, real user callers (RFC-032) | — |
 | `managed_process_lifecycle` | wired | — |
 | `root_access_blocked` | wired | — |
-| `audit_store_recovery` | wired | — |
-| `paste_blocked` | none | M9 |
-| `plain_terminal_observation` | none | M9 |
-| `command_approval` | wired, no caller | M11 (reachable only once the adapter-spawn slice lands) |
-| `safe_close_decision` | none | M11 |
-| `restricted_mode_blocked` | none | M11 |
-| `project_added` | none | M11 |
-| `sensitive_config_changed` | none | M12 (needs config system) |
-| `transcript_purge` | none | M12 |
+| `audit_store_recovery` | wired (in `audit/recovery.rs`, not the coordinator) | — |
+| `paste_blocked` | wired (RFC-018) | — |
+| `plain_terminal_observation` | wired (RFC-017) | — |
+| `command_approval` | wired, with a real producer as of RFC-022 — but exercisable only by the reference adapter, since no shipping AI CLI speaks RFC-021's protocol | — |
+| `restricted_mode_blocked` | **wired 2026-08-19 (RFC-031)** | — |
+| `project_added` | **wired 2026-08-19 (RFC-031)** | — |
+| `safe_close_decision` | none — blocked on a dialog that does not exist | RFC-031 scoped it out; needs a surface first |
+| `sensitive_config_changed` | none | RFC-023 |
+| `transcript_purge` | none | RFC-033 |
+
+**Nothing renders the audit store.** Every row above describes what is *recorded*, not what any
+user can see; there is no view of it at all.
 
 ## RFC Queue
 
