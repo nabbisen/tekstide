@@ -99,10 +99,16 @@ Status: transcript retention is implemented by RFC-011; generated-change review 
 - Add Git-backed detection only after its safety evidence is reviewed.
 - Add rendered review surfaces for transcript and generated changes in the GUI milestone.
 
-### URGENT — the shipped README's transcript privacy claim is false
+### Transcript privacy claim — corrected and shipped in `0.11.1` (was URGENT)
 
-**Found 2026-08-18 while scoping RFC-020. This is a false privacy claim in two published
-releases (`0.10.0`, `0.11.0`) and on the crates.io page for `tekstide`.**
+**Resolved 2026-08-18.** The owner confirmed capture is intended; `README.md`, both crate
+READMEs and the changelog were corrected, and **`0.11.1` was published specifically to carry
+the correction to the crates.io page**, since that page serves the published version's README
+and a repository-only fix reaches nobody. `transcript-capture-evidence.md` added the test whose
+absence let it ship (request 260). The record below is kept because the reasoning error is the
+point.
+
+**What it was: a false privacy claim in two published releases (`0.10.0`, `0.11.0`).**
 
 `README.md` says:
 
