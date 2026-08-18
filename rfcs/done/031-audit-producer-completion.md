@@ -9,7 +9,9 @@ features blocked a launch — one `RestrictedMode` reason code carries no such f
 granularity would be a frozen-schema change. `safe_close_decision` remains unwired and
 unreachable, as scoped. Accepted by the human owner 2026-08-18; see
 [the handoff pack](../handoffs/031-audit-producer-completion/README.md) for the full evidence.
-Target milestone: M11 — the last M11 item
+Target milestone: M11 — the last M11 *audit* item. **Corrected 2026-08-19**: this said "the
+last M11 item" outright, which was false when written. RFC-033 is also M11, and RFC-020 is M10
+slipping to M11; both were open the day this closed.
 Date: 2026-08-18
 
 Related baseline documents:
