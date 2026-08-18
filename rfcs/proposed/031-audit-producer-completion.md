@@ -53,28 +53,64 @@ as blocked on a surface that does not exist. Building an audit producer for an e
 cause would reproduce, in the audit layer, exactly the zero-reachable-surface failure this
 project has a standing rule against.
 
-## The security core — `summary` is free text, and that is where this goes wrong
+## The security core — corrected 2026-08-18, before any handoff derived from it
 
-`AuditEvent` carries `summary: String`. Every family already wired observes the same discipline,
-and the READMEs make it a public promise: an event records **that** something happened, never
-its content. `plain_terminal_observation` "names only whether the process exited or was
-signalled — never a command, its output, or a path." `paste_blocked` "names only that a paste
-was blocked and which project/terminal it was aimed at — never the pasted content."
+**The first draft of this section was wrong and is replaced.** It said the danger was the
+free-text `summary` field, and recommended careful wording. Checked against the code
+afterwards: **`DurableAuditRecordV1` — the record actually written to the store — has no
+free-text field at all.**
 
-Both new producers are more dangerous than they look:
+```rust
+pub struct DurableAuditRecordV1 {
+    project_id: Option<ProjectId>,      family: AuditEventFamily,
+    outcome: AuditOutcome,              action_kind: AuditActionKind,
+    subject_kind: Option<AuditSubjectKind>,  subject_ref: Option<AuditReference>,
+    risk_level: Option<AuditRiskLevel>, reason_code: Option<AuditReasonCode>,
+    actor_kind: AuditActorKind,         action_source: AuditActionSource,
+    /* ids and a timestamp */
+}
+```
 
-- **`project_added` naturally wants the project path.** A path is untrusted,
-  attacker-influenceable text — this project escapes it at every widget for exactly that reason
-  — and writing it into a durable, append-only store is a different act from rendering it. The
-  store is not escaped on read.
-- **`restricted_mode_blocked` naturally wants to say what was blocked.** RFC-004 blocks nine
-  features; naming which one is genuinely useful to a user asking "why did my run refuse?" But
-  the refusal often carries a path, an executable name, or a profile identifier, and the useful
-  version of this event is one step away from the leaky one.
+Every field is a typed enum or an id. `AuditEvent.summary` exists on the older RFC-002 domain
+type, not on what RFC-013 persists.
 
-**Decide the summary content explicitly, per family, and state the rule the way the READMEs
-already state it for the wired families.** A producer whose summary is built by formatting
-whatever error was in hand is how a store that promises to hold no paths ends up holding paths.
+**RFC-013 made this leak-resistant by construction, and that is the stronger property.** The
+one string-shaped field is a validated newtype:
+
+```rust
+pub fn new(value: impl Into<String>) -> Option<Self>   // AuditReference
+// non-empty, bounded length, and only [A-Za-z0-9-_.:]
+```
+
+**A filesystem path cannot be stored**: `/` is not in the permitted set, so
+`AuditReference::new("/home/u/project")` returns `None`. This is the same design as
+`DisplayText` in `text_safety` — the mistake is not expressible in a value the API accepts,
+which beats any amount of careful wording.
+
+### What remains, and it is narrower and real
+
+Two things the type system does *not* decide:
+
+1. **`subject_ref` accepts a single path segment.** `my-project` passes the charset check.
+   So does `..`, and so does a directory name chosen to be confusing. The newtype restricts
+   the *character set*, not the *meaning* — it prevents a path, not untrusted text.
+   **Recommend: `project_added` carries `project_id` (a generated id) and leaves
+   `subject_ref` as `None`.** The display name is attacker-influenceable and belongs nowhere
+   in an append-only store that is not escaped on read.
+
+2. **`reason_code` is a closed enum and already contains `RestrictedMode`.** So
+   `restricted_mode_blocked` has its answer without inventing anything — which also means
+   the useful-but-leaky version I worried about (naming the executable, the profile, the
+   path) is not reachable through this schema even if someone wanted it. The remaining
+   question is only whether the *feature class* deserves finer granularity than one
+   `RestrictedMode` code, and **that would be an RFC-013 schema change**, which is frozen.
+   Recommend using the existing code and recording the coarseness as a limitation.
+
+**Why this correction is recorded rather than silently replacing the draft**: the original
+reasoning would have produced a handoff whose security-critical document was about wording
+discipline for a field that does not exist. That is a scoping error of the same class this
+project keeps catching — asserting about code without reading it — and the correction is
+cheap only because it happened before the pack was written.
 
 ## Scope
 
@@ -93,15 +129,16 @@ whatever error was in hand is how a store that promises to hold no paths ends up
 
 ## Decisions required
 
-**D1 — what `restricted_mode_blocked`'s summary says.** Recommend the blocked *feature class*
-from RFC-004's own vocabulary and nothing derived from the attempt — no path, no executable, no
-profile id. A user learns "workspace discovery was blocked"; the store learns nothing it would
-be embarrassing to leak.
+**D1 — `restricted_mode_blocked`'s typed fields.** `reason_code: RestrictedMode` already
+exists. Decide `action_kind` (`RestrictedFeature` is the obvious one), `outcome`, and whether
+`subject_kind`/`subject_ref` carry anything at all. **Recommend they do not** — see the
+security core. Record that one `RestrictedMode` code cannot distinguish which of RFC-004's
+nine blocked features fired, and that finer granularity would be a frozen-schema change.
 
-**D2 — does `project_added` record a path at all?** Recommend **no path**, only the project id
-and that an add occurred. The recent-projects file already holds paths in plaintext and is the
-honest place for them; the audit store's value is the immutable sequence of security-relevant
-acts, not a second copy of the user's directory layout.
+**D2 — `project_added` carries `project_id` and no `subject_ref`.** The generated id
+identifies the project without reproducing the user's directory layout in an append-only
+store. The recent-projects file already holds paths in plaintext and is the honest place for
+them.
 
 **D3 — is a *blocked* event recorded every time, or once?** A user hammering `Ctrl+Alt+A` on an
 untrusted project would generate an event per press. Recommend recording every occurrence —
@@ -110,8 +147,10 @@ RFC-013's store has bounds and a repeated refusal is the cheapest way to reach t
 
 ## Risks
 
-- **A summary that leaks.** The whole §Security core. Mitigated by D1/D2 and by a test that
-  asserts the *absence* of a path in a produced record, not merely the presence of the event.
+- **Untrusted text reaching `subject_ref`.** Not a path — the newtype rejects `/` — but a
+  single attacker-influenceable path segment would pass. Mitigated by D1/D2 leaving it `None`,
+  and by a test asserting the *absence* of a `subject_ref` on both records rather than only
+  the presence of the event.
 - **Producing events nobody can read.** `OpenApprovalHistory` was unreachable for a release;
   the audit store has no user-facing view at all. This RFC does not create one, and should say
   so rather than implying that recording an event makes it visible.
