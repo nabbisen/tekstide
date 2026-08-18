@@ -128,6 +128,26 @@ RFC-015's pack, because closed evidence documents are not edited to match a late
 a convention nobody can execute is worse than none, since it costs the next slice the same
 hour to rediscover.
 
+**Enumeration tests: pick the unit that matches the property.** A source-scanning test that
+guards "only X may do Y" comes in two shapes, and choosing wrongly silently weakens it.
+
+- **A file-level allow-list is right when the allowed file *is* the reviewed implementation.**
+  `only_this_module_opens_a_transcript_file_for_reading` allows `transcript/reader.rs`; a
+  second read inside the reviewed reader is the same reviewed code, so the file is the right
+  unit.
+- **An occurrence count is required when the property is "every call site must also do Z."**
+  There, a second call *inside an allowed file* is a new, unreviewed site — and a boolean
+  `source.contains(..)` against a file allow-list passes it silently. Assert the exact count.
+
+Both shapes look identical when written, which is why this is worth stating: the difference is
+in the property, not the code. `only_boot_calls_add_project_from_path_...` (RFC-031) was
+written in the first shape against a second-shape property — every caller of
+`add_project_from_path` must also write an audit record — so a second call added to `main.rs`
+would have passed a test whose own name promised it could not. Corrected to a count.
+
+Related and older: a needle must not match its own definition line, and a scan that matches a
+bare identifier will match doc comments mentioning it. Require the call syntax, not the name.
+
 **Reachability comes before correctness.** Before a surface is scheduled, name the path a
 user takes to reach it and the production code that populates what it renders. Not "which
 RFC owns it" — the actual call site.
