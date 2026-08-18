@@ -1,6 +1,6 @@
 ---
 title: "Transcript capture evidence — assert what the real launch path actually does"
-status: "Scheduled 2026-08-18, awaiting implementation"
+status: "Implemented 2026-08-18, awaiting review"
 rfc_file: "../done/011-transcript-retention-and-local-data-policy.md"
 target_milestone: "M11"
 created: "2026-08-18"

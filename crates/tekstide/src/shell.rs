@@ -1824,14 +1824,6 @@ fn attempt_agent_run_launch(state: &mut State) -> Result<(), AgentRunLaunchRefus
     )
 }
 
-/// [`attempt_agent_run_launch`] split out with the profile as a
-/// parameter -- the same testability shape [`launch_terminal`]'s own
-/// explicit `shell: PathBuf` parameter uses (hardcoded to `/bin/sh` by
-/// its one real caller, injectable by tests). Tests use this to exercise
-/// the real launch plumbing against a controlled profile without
-/// depending on what happens to be installed on the machine running the
-/// suite, and without ever pointing it at the real, live product this
-/// profile is modelled on.
 /// change-detection-wiring handoff, Slice C, review response 252's D4
 /// decision: the production entry cap, explicit rather than inherited
 /// from `GeneratedChangeDetectionPolicy::default()`'s `4,096`. This
@@ -1853,12 +1845,39 @@ fn generated_change_detection_policy() -> tekstide_core::project::GeneratedChang
     }
 }
 
+/// [`attempt_agent_run_launch`] split out with the profile as a
+/// parameter -- the same testability shape [`launch_terminal`]'s own
+/// explicit `shell: PathBuf` parameter uses (hardcoded to `/bin/sh` by
+/// its one real caller, injectable by tests). Tests use this to exercise
+/// the real launch plumbing against a controlled profile without
+/// depending on what happens to be installed on the machine running the
+/// suite, and without ever pointing it at the real, live product this
+/// profile is modelled on.
 fn attempt_agent_run_launch_with_profile(
     state: &mut State,
     profile: tekstide_core::agent::AiCliProfile,
 ) -> Result<(), AgentRunLaunchRefusal> {
-    let state_root = open_real_agent_run_state_root();
+    attempt_agent_run_launch_with_profile_and_state_root(
+        state,
+        profile,
+        open_real_agent_run_state_root(),
+    )
+}
 
+/// transcript-capture-evidence handoff: the same testability split
+/// [`attempt_agent_run_launch_with_profile`] already gives `profile` --
+/// applied to `state_root` too, so a test can point transcript capture
+/// at a temporary directory instead of the developer's real
+/// `$XDG_STATE_HOME`/`open_real_agent_run_state_root`. The real launch
+/// path (`attempt_agent_run_launch_with_profile`, `Ctrl+Alt+A`'s own
+/// route) is the only production caller of the real resolution; every
+/// existing test that does not care about transcript paths keeps
+/// calling that wrapper unchanged.
+fn attempt_agent_run_launch_with_profile_and_state_root(
+    state: &mut State,
+    profile: tekstide_core::agent::AiCliProfile,
+    state_root: Option<std::path::PathBuf>,
+) -> Result<(), AgentRunLaunchRefusal> {
     let plan = {
         let Some(project) = state.app_shell.state().active_project() else {
             return Ok(());

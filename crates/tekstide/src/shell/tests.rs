@@ -6,11 +6,11 @@ use tekstide_core::shell::ApplicationShell;
 use super::{
     AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ExternalChangeButton, Message,
     ModalButton, ModalContent, PasteConfirmButton, State, TerminalPasteRefusal, TrustGrantButton,
-    agent_run_launch_refusal_text, attempt_agent_run_launch_with_profile, content_within_bound,
-    evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
-    open_real_audit_store, poll_approval_channels, sidebar_label, status_bar_summary,
-    terminal_paste_refusal_text, trust_grant_dialog_body, trusted_ui_state,
-    verify_restored_trust_against, zone_style,
+    agent_run_launch_refusal_text, attempt_agent_run_launch_with_profile,
+    attempt_agent_run_launch_with_profile_and_state_root, content_within_bound, evaluate_promotion,
+    focus_marker, main_area_key, main_area_label, modal_scrim_style, open_real_audit_store,
+    poll_approval_channels, sidebar_label, status_bar_summary, terminal_paste_refusal_text,
+    trust_grant_dialog_body, trusted_ui_state, verify_restored_trust_against, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -33,6 +33,30 @@ fn fresh_project_dir(label: &str) -> PathBuf {
             .unwrap()
             .as_nanos()
     ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// transcript-capture-evidence handoff: the injectable seam
+/// (`attempt_agent_run_launch_with_profile_and_state_root`) needs a
+/// state root of its own, separate from `fresh_project_dir` -- a real
+/// transcript directory tree gets created under this one, and it must
+/// never be the developer's real `$XDG_STATE_HOME`.
+///
+/// **Deliberately much shorter than `fresh_project_dir`'s naming**, and
+/// `label` is not embedded at all: a `Managed` launch binds a real Unix
+/// domain socket under `<state root>/approval/<agent-run-id>.sock`,
+/// bounded by `sun_path`'s ~108-byte kernel limit
+/// (`ApprovalChannelDirectory::socket_path`'s own doc). A verbose,
+/// timestamped state root -- the shape every other `fresh_*_dir` helper
+/// here uses -- leaves no room for that suffix and fails real launches
+/// with `SocketPathTooLong`, discovered by this handoff's own first
+/// test run. A short, counter-disambiguated prefix is still unique per
+/// call within one test binary, which is all that is required.
+fn fresh_state_root_dir() -> PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let sequence = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("tsr-{}-{sequence}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -3913,6 +3937,162 @@ fn truncated_and_clean_detections_are_distinguishable_though_both_produce_no_cha
         state.agent_run_change_detection_status.get(&run_a),
         state.agent_run_change_detection_status.get(&run_b),
         "truncated and clean must never be recorded identically"
+    );
+}
+
+/// transcript-capture-evidence handoff: `0.10.0` and `0.11.0` both
+/// claimed Tekstide writes no transcripts. It writes one for every AI
+/// CLI run, and no test on the real launch path ever looked. This one
+/// does -- `attempt_agent_run_launch_with_profile_and_state_root` is
+/// the exact function `Ctrl+Alt+A` reaches (through
+/// `attempt_agent_run_launch_with_profile`, which now delegates to it),
+/// pointed at a temporary directory rather than the developer's real
+/// `$XDG_STATE_HOME` via the injectable seam this slice's own gate
+/// asked for. Uses a `Supervised` profile -- the real
+/// `claude_code_linux_default`'s own compatibility level, unlike
+/// `launch_real_managed_agent_run`'s `Managed` reference adapter --
+/// pointed at a tiny marker-printing script instead, so this test
+/// exercises the exact shape of the real production launch rather than
+/// the `Managed`-only approval machinery a real AI CLI run never uses.
+///
+/// Asserts the documented path shape exactly
+/// (`<state root>/transcripts/<project>/<agent-run>/transcript.log`,
+/// `README.md`'s own *Local Data and Privacy* wording) and that the
+/// file contains real content -- the script's own known, printed
+/// marker. A file that merely exists but is empty would still pass a
+/// weaker assertion; this cannot.
+#[test]
+fn a_real_agent_run_launch_writes_a_real_transcript_with_real_content() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("transcript-capture-evidence");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let state_root = fresh_state_root_dir();
+
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "transcript-marker-script",
+        "Transcript Marker Script (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: transcript_marker_script_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    attempt_agent_run_launch_with_profile_and_state_root(
+        &mut state,
+        profile,
+        Some(state_root.clone()),
+    )
+    .expect("a resolvable Supervised profile should launch the real marker script");
+
+    let (project_id, agent_run_id, terminal_id) = {
+        let project = state.app_shell.state().active_project().unwrap();
+        let run = project.agent_runs().last().unwrap();
+        (
+            project.id().clone(),
+            run.id.clone(),
+            run.terminal_id
+                .clone()
+                .expect("a launched run has a real terminal id"),
+        )
+    };
+
+    let expected_transcript_file = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(agent_run_id.as_str())
+        .join("transcript.log");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut transcript_bytes = Vec::new();
+    while std::time::Instant::now() < deadline {
+        // Real exit detection, the same real route
+        // `a_real_session_exit_updates_status_frees_the_slot_and_is_reusable`
+        // already establishes -- driving it also drives the terminal
+        // reader thread that writes the transcript.
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        if let Ok(bytes) = std::fs::read(&expected_transcript_file) {
+            let found_marker = String::from_utf8_lossy(&bytes)
+                .contains("TEKSTIDE-TRANSCRIPT-CAPTURE-EVIDENCE-MARKER");
+            transcript_bytes = bytes;
+            if found_marker {
+                break;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    assert!(
+        expected_transcript_file.is_file(),
+        "expected a real transcript file at the documented path shape -- README.md's own \
+         *Local Data and Privacy* claim -- got nothing at {}",
+        expected_transcript_file.display()
+    );
+    let transcript_text = String::from_utf8_lossy(&transcript_bytes);
+    assert!(
+        transcript_text.contains("TEKSTIDE-TRANSCRIPT-CAPTURE-EVIDENCE-MARKER"),
+        "expected the real script's own printed marker in the transcript -- an empty or \
+         unrelated file must not pass this assertion: {transcript_text:?}"
+    );
+}
+
+/// A tiny, real, executable script that prints one known marker line
+/// and exits -- the "controlled test executable" the handoff's own
+/// gate asks for, so `a_real_agent_run_launch_writes_a_real_transcript_with_real_content`
+/// has a real, deliberate byte sequence to assert on rather than
+/// trusting that any output at all implies capture worked.
+fn transcript_marker_script_path() -> std::path::PathBuf {
+    let script_path = std::env::temp_dir().join(format!(
+        "tsms-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(
+        &script_path,
+        "#!/bin/sh\necho TEKSTIDE-TRANSCRIPT-CAPTURE-EVIDENCE-MARKER\n",
+    )
+    .expect("writing the marker script should succeed");
+    std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o700))
+        .expect("marking the marker script executable should succeed");
+    script_path
+}
+
+/// transcript-capture-evidence handoff: `README.md`'s second claim --
+/// "a plain terminal (`Ctrl+Alt+T`) is not recorded" -- asserted, not
+/// assumed. `attempt_terminal_launch` and the `launch_terminal` it
+/// calls take no state-root/transcript parameter at all, structurally
+/// unlike `attempt_agent_run_launch_with_profile_and_state_root`, so
+/// this checks the domain-level fact a future reader would actually
+/// consult: no `Transcript` is ever attached to the project for a plain
+/// terminal's session.
+#[test]
+fn a_plain_terminal_launch_writes_no_transcript() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir(
+            "transcript-capture-evidence-plain-terminal",
+        ))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    super::attempt_terminal_launch(&mut state).expect("a plain terminal launch must succeed");
+
+    assert!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .transcripts()
+            .is_empty(),
+        "a plain terminal must never attach a transcript"
     );
 }
 
