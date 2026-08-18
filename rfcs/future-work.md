@@ -148,6 +148,36 @@ path, which is why the suite could not contradict the claim.
 Either way the fix must land with **a test that asserts what actually happens on the real
 launch path**, since the absence of one is what let a false claim ship twice.
 
+### `approval_state_root` has an escape hatch the GUI never uses
+
+Found 2026-08-18 by the dev team's ablation in `transcript-capture-evidence` (request 260),
+and worth separating from that slice because it is not that slice's defect.
+
+RFC-022 PR-022-C response 216 already found and fixed the real coupling: an approval channel's
+socket path must not depend on transcript capture, or RFC-011's per-run transcript opt-out
+would silently make a `Managed` launch impossible. The fix was a separate
+`AgentRunLaunchRequest::approval_state_root`, with `None` falling back to
+`transcript_state_root` **purely as a convenience for the common case**, documented at
+`agent/launch.rs:33-49` as explicitly not reintroducing the coupling because a caller can
+always set it independently.
+
+**The GUI never sets it.** `grep approval_state_root crates/tekstide/src` returns nothing
+outside tests, so production uses the fallback — which means, for a `Managed` profile,
+approval-channel binding does depend on transcript capture being configured. The dev team hit
+this as `AdapterApproval(StateRootMissing)` when their ablation removed
+`with_local_bounded_transcript`.
+
+**Latent, not live**, and the reason matters: `claude_code_linux_default` is `Supervised`, so
+no `Managed` profile is reachable in production at all. The coupling can only bite if two
+things both change — a `Managed` profile becomes reachable, *and* RFC-011's designed per-run
+transcript opt-out gets a GUI route. Both are on the roadmap.
+
+**The shape is one this project keeps finding**: a correct model with an escape hatch, and a
+production caller that does not use it. The model is right; the call site inherits the
+convenience default. When either of the two conditions above is scheduled, set
+`approval_state_root` explicitly at the GUI call site rather than rediscovering response 216's
+reasoning from the failure.
+
 ### Durable Audit Storage
 
 Status: implemented by RFC-013 with documented limitations; three of twelve v1 event families have a wired producer.
