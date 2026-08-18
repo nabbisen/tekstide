@@ -99,6 +99,55 @@ Status: transcript retention is implemented by RFC-011; generated-change review 
 - Add Git-backed detection only after its safety evidence is reviewed.
 - Add rendered review surfaces for transcript and generated changes in the GUI milestone.
 
+### URGENT — the shipped README's transcript privacy claim is false
+
+**Found 2026-08-18 while scoping RFC-020. This is a false privacy claim in two published
+releases (`0.10.0`, `0.11.0`) and on the crates.io page for `tekstide`.**
+
+`README.md` says:
+
+> RFC-011's transcript retention is implemented and tested, but **is not wired into the
+> desktop application yet** — running `tekstide` does not retain any transcripts … nothing
+> in the desktop crate configures a transcript **writer**, so no transcript is ever written.
+
+**The premise is true and the conclusion does not follow.** The desktop crate does not
+configure a writer; `tekstide-core` configures one on its behalf. Four links, each read:
+
+1. `crates/tekstide/src/shell.rs:1878` — `request.with_local_bounded_transcript(state_root)`,
+   reached whenever `open_real_agent_run_state_root()` returns `Some`, which it does in
+   normal operation (it creates the directory and returns it).
+2. `crates/tekstide-core/src/agent/launch.rs:380` — `prepare_transcript_capture` calls
+   `set_transcript_writer_config(Some(TranscriptWriterConfig::new(storage_path, …)))`.
+3. `crates/tekstide-core/src/runtime/terminal/types.rs:85` — the spec carries it.
+4. `crates/tekstide-core/src/runtime/terminal/launch.rs:47` — `BoundedTranscriptWriter::create(config)`,
+   unconditional given `Some`, and a failure here **refuses the launch** rather than
+   proceeding without capture.
+
+So **pressing `Ctrl+Alt+A` on a trusted project writes that AI session's transcript to disk**
+under `$XDG_STATE_HOME/tekstide/`, while the README tells the user it does not. The claim
+became false in `0.10.0`, when agent-run launch first became reachable — not in `0.11.0`.
+
+**Why it survived review**: I verified it by grepping `crates/tekstide/src` only, found
+nothing, and wrote the conclusion into the release commit as "checked rather than assumed."
+It was checked in one crate and asserted about two. Same shape as every reachability error
+this project has recorded, committed by the person who wrote the convention.
+
+**No test covers it.** `shell/tests.rs` has no assertion about transcripts on the real launch
+path, which is why the suite could not contradict the claim.
+
+**Owner decision required — this is behaviour vs documentation, not a typo:**
+
+- **If capture is intended** (RFC-011's whole design says it is — retention limits, per-run
+  opt-out and purge all exist for this), then the code is right and **the README, the
+  `0.11.0` changelog entry, and the Local Data section are wrong** and must be corrected,
+  with the correction called out in the next release rather than quietly edited.
+- **If capture is not intended to be on by default**, that is a code change: the GUI should
+  not request `with_local_bounded_transcript` unconditionally, and there is no opt-out
+  surface today.
+
+Either way the fix must land with **a test that asserts what actually happens on the real
+launch path**, since the absence of one is what let a false claim ship twice.
+
 ### Durable Audit Storage
 
 Status: implemented by RFC-013 with documented limitations; three of twelve v1 event families have a wired producer.
