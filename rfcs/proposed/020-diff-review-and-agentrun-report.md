@@ -1,7 +1,10 @@
 # RFC-020: Diff Review and AgentRun Report Surfaces
 
-Status: Proposed — awaiting the human owner's acceptance
-Target milestone: M10 (`0.6.x`), second half
+Status: **Accepted 2026-08-12** (the status line said "awaiting acceptance" until 2026-08-18,
+stale against `rfcs/README.md` and this RFC's own handoff pack, both of which recorded the
+acceptance at the time). Surface work stopped 2026-08-15 by response 200 for want of a
+producer; **re-scoped 2026-08-18**, see the scoping section at the end.
+Target milestone: M10, slipping to M11
 Date: 2026-08-11
 
 Related baseline documents:
@@ -264,10 +267,27 @@ the modified one.
   `DiffPreviewPolicy::max_input_bytes` already bounds. Decide it explicitly here rather than
   inheriting the owned form by default — which is what RFC-024 asked for.
 
-### Revised slice order
+### Slice lettering — this document's own list is not the operative one
 
-1. **PR-020-C first — the AgentRun report surface.** Unblocked, real producer, bounded reader.
-   Needs a render arm and a binding.
-2. **PR-020-B second — the change review surface**, preceded by retaining `DetectedChanges`.
-3. Closeout, with the no-two-sided-diff limitation stated on the surface and the bidi-visibility
-   claim checked as this RFC already requires.
+**Correction, made the same day this section was written.** §Slices above calls itself
+"provisional, pending the Option A/B decision" and letters the change review surface
+**PR-020-B** and the report surface **PR-020-C**. The handoff pack letters them **the other
+way round**, and the pack is what was built against: PR-020-B is *the transcript reader plus
+the AgentRun report surface* (its reader half landed 2026-08-15), PR-020-C is *the change
+review surface*.
+
+**The pack's lettering is operative** — it is the plan work was executed against, and this
+RFC's list is provisional by its own text. The first draft of this scoping section used this
+document's lettering and so recommended "PR-020-C first" while meaning the report surface,
+which under the operative lettering names the blocked slice. Corrected here rather than
+leaving two readings in circulation.
+
+### Revised order, in the pack's lettering
+
+1. **Finish PR-020-B — the AgentRun report surface.** Its reader half is done. Its surface
+   half was stopped in 2026-08-15 because no `AgentRun` could exist in production; that
+   blocker is gone as of `0.10.0`. Needs the render arm, a binding, and an answer to the
+   selection question the pack raised and never got: *which* run does "current" mean.
+2. **Then PR-020-C — the change review surface**, preceded by retaining `DetectedChanges`.
+3. **PR-020-D closeout**, with the no-two-sided-diff limitation stated on the surface and the
+   bidi-visibility claim checked as this RFC already requires.
