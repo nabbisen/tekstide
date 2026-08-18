@@ -127,6 +127,30 @@ And for diff review specifically, **escaping is the stronger position, not a com
 
 **State this in the closeout as a claim that could be false**: a bidi override introduced by a generated change is visible in the diff surface. That is checkable.
 
+**Correction, 2026-08-18 — one half of the gate I wrote is unachievable, and PR-020-C must not
+inherit it.** The PR-020-B gate also required that *"content containing the literal text
+`<U+202E>` is distinguishable from a real override."* It is not, and cannot be under this
+project's escaping design: `escape_untrusted_chars` rewrites only Control, Format and
+Default-Ignorable characters, so a real `U+202E` becomes the ASCII text `<U+202E>` while
+content that already *was* that ASCII text passes through unchanged. Both render identically.
+Found by the dev team while building PR-020-B's surface, disclosed rather than worked around.
+
+**What is achievable, and is the security-relevant half, stands unchanged**: a real override
+is always rendered as a visible marker and never reaches a widget raw. That is what protects a
+reviewer, and it is tested.
+
+**What the unachievable half would have bought is small**, which is why the answer is to
+correct the gate rather than change the escaping. An attacker writing literal `<U+202E>` into
+generated output can make a reviewer believe an override is present where none is — a **false
+alarm**, not false safety. The dangerous direction is closed. Making the marker unmimicable
+means escaping the marker's own delimiters across every escaped surface in the product, which
+is an RFC-016 change with far wider blast radius than the failure it prevents.
+
+**Substitute assertion, which PR-020-B adopted and PR-020-C should too**: the isolation
+wrapping (`quote_untrusted`'s FSI/PDI marks) never itself appears as escaped text. Those are
+Format characters, so a second escaping pass over already-escaped content would render them
+visibly — which makes double-escaping concretely checkable even though marker-mimicry is not.
+
 ## What the surfaces render, and what they must not claim
 
 **AgentRun output is untrusted.** It is text produced by a third-party AI CLI, which may be quoting a file, an error, or an attacker-influenced input. It is rendered as data, never as chrome, and never as a basis for a decision the user did not make.

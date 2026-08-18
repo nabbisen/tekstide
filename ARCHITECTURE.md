@@ -116,6 +116,18 @@ when readiness-driven I/O removed the tick that had been throttling it, and nobo
 that. A test condition whose meaning depends on a defect elsewhere will change silently
 when the defect is fixed.
 
+**Synthetic input for GUI evidence: use `wtype`, not `xdotool`.** RFC-015's evidence
+established an XWayland route — `env -u WAYLAND_DISPLAY`, `xdotool search --name`,
+`windowfocus`, `key --clearmodifiers` — and it **no longer works here**: `xdotool search` finds
+no window at all, because the app runs as a native Wayland client and there is no XWayland
+surface for the title to match. Confirmed as a negative result during PR-020-B (2026-08-18),
+not assumed: a capture taken that way showed the unchanged prior screen, proving the keystroke
+never landed. `wtype -M ctrl -M alt r -m alt -m ctrl` (a native Wayland virtual keyboard)
+works. Screenshots remain `niri msg action screenshot-window`. Recorded here rather than in
+RFC-015's pack, because closed evidence documents are not edited to match a later state — and
+a convention nobody can execute is worse than none, since it costs the next slice the same
+hour to rediscover.
+
 **Reachability comes before correctness.** Before a surface is scheduled, name the path a
 user takes to reach it and the production code that populates what it renders. Not "which
 RFC owns it" — the actual call site.
