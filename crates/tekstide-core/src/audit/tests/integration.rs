@@ -375,6 +375,166 @@ fn paste_blocked_schema_rejects_any_outcome_other_than_blocked() {
     );
 }
 
+/// RFC-031 PR-031-A: `restricted_mode_blocked`'s first producer,
+/// persisting a record `valid_restricted_mode_blocked` itself accepts.
+/// **The test that matters more than presence**, per
+/// `what-the-store-may-hold.md`: `subject_ref`/`subject_kind` asserted
+/// `None` directly, not merely unset by inspection -- this is the
+/// assertion that fails if a future "improvement" starts putting the
+/// project's directory name in.
+#[test]
+fn restricted_mode_blocked_persists_a_valid_record_conforming_to_the_frozen_family() {
+    let dirs = TestAuditDirs::new("restricted-mode-blocked");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let project_id = ProjectId::new_uuid();
+
+    let status = AuditCoordinator::new(&mut store, &mut health)
+        .record_restricted_mode_blocked(project_id.clone());
+
+    assert_eq!(status, AuditObservationStatus::Persisted);
+
+    let records = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    let record = &records[0];
+    assert_eq!(record.family, AuditEventFamily::RestrictedModeBlocked);
+    assert_eq!(record.outcome, AuditOutcome::Blocked);
+    assert_eq!(
+        record.action_kind,
+        crate::audit::AuditActionKind::RestrictedFeature
+    );
+    assert_eq!(record.actor_kind, crate::audit::AuditActorKind::AppPolicy);
+    assert_eq!(
+        record.action_source,
+        crate::audit::AuditActionSource::PolicyEngine
+    );
+    assert_eq!(record.reason_code, Some(AuditReasonCode::RestrictedMode));
+    assert_eq!(record.project_id, Some(project_id));
+    assert_eq!(
+        record.terminal_id, None,
+        "a refused launch never reaches a terminal"
+    );
+    assert_eq!(record.agent_run_id, None);
+    assert_eq!(record.approval_id, None);
+    assert_eq!(
+        record.subject_kind, None,
+        "what-the-store-may-hold.md: no path-shaped text belongs in this record"
+    );
+    assert_eq!(
+        record.subject_ref, None,
+        "what-the-store-may-hold.md: no path-shaped text belongs in this record"
+    );
+    record
+        .validate()
+        .expect("a real producer's record must satisfy the frozen family's own predicate");
+}
+
+/// **Ablation**: `valid_restricted_mode_blocked` requires
+/// `outcome == Blocked` specifically, the same shape
+/// `paste_blocked_schema_rejects_any_outcome_other_than_blocked` already
+/// proves for a sibling family.
+#[test]
+fn restricted_mode_blocked_schema_rejects_any_outcome_other_than_blocked() {
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::RestrictedModeBlocked,
+        AuditOutcome::Failed,
+        crate::audit::AuditActionKind::RestrictedFeature,
+        crate::audit::AuditActorKind::AppPolicy,
+        crate::audit::AuditActionSource::PolicyEngine,
+    );
+    record.project_id = Some(ProjectId::new_uuid());
+    record.reason_code = Some(AuditReasonCode::RestrictedMode);
+
+    assert!(
+        record.validate().is_err(),
+        "outcome != Blocked must fail valid_restricted_mode_blocked -- this family exists only \
+         to record a refusal"
+    );
+}
+
+/// RFC-031 PR-031-B: `project_added`'s first producer, persisting a
+/// record `valid_project_added` itself accepts. `subject_ref` asserted
+/// `None` directly, the same required check
+/// `restricted_mode_blocked_persists_a_valid_record_conforming_to_the_frozen_family`
+/// applies to its own family.
+#[test]
+fn project_added_persists_a_valid_record_conforming_to_the_frozen_family() {
+    let dirs = TestAuditDirs::new("project-added");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let project_id = ProjectId::new_uuid();
+
+    let status =
+        AuditCoordinator::new(&mut store, &mut health).record_project_added(project_id.clone());
+
+    assert_eq!(status, AuditObservationStatus::Persisted);
+
+    let records = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    let record = &records[0];
+    assert_eq!(record.family, AuditEventFamily::ProjectAdded);
+    assert_eq!(record.outcome, AuditOutcome::Applied);
+    assert_eq!(
+        record.action_kind,
+        crate::audit::AuditActionKind::ProjectAdd
+    );
+    assert_eq!(record.actor_kind, crate::audit::AuditActorKind::User);
+    assert_eq!(
+        record.action_source,
+        crate::audit::AuditActionSource::AppCommand
+    );
+    assert_eq!(record.project_id, Some(project_id));
+    assert_eq!(record.terminal_id, None);
+    assert_eq!(record.agent_run_id, None);
+    assert_eq!(record.approval_id, None);
+    assert_eq!(record.operation_id, None);
+    assert_eq!(record.risk_level, None);
+    assert_eq!(record.adapter_profile_ref, None);
+    assert_eq!(record.reason_code, None);
+    assert_eq!(
+        record.subject_kind, None,
+        "what-the-store-may-hold.md: no path-shaped text belongs in this record -- project_id \
+         already identifies the project"
+    );
+    assert_eq!(record.subject_ref, None);
+    record
+        .validate()
+        .expect("a real producer's record must satisfy the frozen family's own predicate");
+}
+
+/// **Ablation**: `valid_project_added` requires `outcome == Applied`
+/// specifically and `no_optional_context` (every optional field unset),
+/// the same shape the sibling families' own schema-rejection tests use.
+#[test]
+fn project_added_schema_rejects_any_outcome_other_than_applied() {
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::ProjectAdded,
+        AuditOutcome::Requested,
+        crate::audit::AuditActionKind::ProjectAdd,
+        crate::audit::AuditActorKind::User,
+        crate::audit::AuditActionSource::AppCommand,
+    );
+    record.project_id = Some(ProjectId::new_uuid());
+
+    assert!(
+        record.validate().is_err(),
+        "outcome != Applied must fail valid_project_added -- adding a project is not a two-phase \
+         operation in this schema"
+    );
+}
+
 #[test]
 fn managed_launch_failure_is_recorded_after_authorization_without_process_attachment() {
     let dirs = TestAuditDirs::new("integration-managed-failure");

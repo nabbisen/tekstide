@@ -77,7 +77,7 @@ fn boot() -> shell::State {
     // without needing `iced::Result`/`iced::Error` to express a custom
     // exit code.
     for selected_path in std::env::args_os().skip(1) {
-        if let Err(error) = app_shell.add_project_from_path(selected_path) {
+        if let Err(error) = open_cli_project_path_and_record(&mut app_shell, selected_path) {
             eprintln!("{error}");
             std::process::exit(1);
         }
@@ -94,6 +94,61 @@ fn boot() -> shell::State {
     shell::State::new(app_shell, catalog)
 }
 
+/// RFC-031 PR-031-B: the real, testable open-a-project-from-the-CLI
+/// path -- factored out of `boot()`'s loop body (which reads real
+/// `std::env::args_os()` and cannot be driven from a test) the same
+/// testability-split shape `attempt_agent_run_launch_with_profile_and_state_root`
+/// established in `shell.rs`: the exact logic a real CLI argument
+/// reaches, callable directly with a controlled path.
+///
+/// `Added` means `add_project_session` genuinely created a new
+/// `ProjectSession` this run -- reusing a remembered `project_id` from
+/// `recent_projects` still counts (a real new session exists that did
+/// not a moment ago); `FocusedExisting` means nothing new happened (the
+/// canonical root already matched a session already open this run) and
+/// must not produce a second record for the same open.
+/// `restore_recent_projects` (called before this, in `boot()`) never
+/// reaches `add_project_session` at all -- it only populates the
+/// passive remembered-projects list -- so "restoring on startup" cannot
+/// itself fire this producer; only this CLI-argument path can, in the
+/// shipped application today.
+fn open_cli_project_path_and_record(
+    app_shell: &mut ApplicationShell,
+    selected_path: impl AsRef<std::path::Path>,
+) -> Result<(), tekstide_core::project::root::ProjectRootValidationError> {
+    match app_shell.add_project_from_path(selected_path)? {
+        tekstide_core::app::AddProjectOutcome::Added(project_id) => {
+            record_project_added_if_possible(app_shell, project_id);
+        }
+        tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => {}
+    }
+    Ok(())
+}
+
+/// RFC-031 PR-031-B: best-effort, matching every other producer call
+/// site in this crate (`record_paste_blocked`'s own) -- a failed audit
+/// write must never turn a real, already-successful project add into a
+/// boot failure. `shell::open_real_audit_store` is the one existing
+/// resolution this crate already has for the real audit store, widened
+/// from module-private to `pub(crate)` so `boot()` -- the only
+/// production caller of `add_project_from_path` in the shipped
+/// application -- can reach it, rather than inventing a second
+/// resolution here.
+fn record_project_added_if_possible(
+    app_shell: &ApplicationShell,
+    project_id: tekstide_core::project::ProjectId,
+) {
+    let mut audit_store = shell::open_real_audit_store(app_shell);
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    if let Some(store) = audit_store.as_mut() {
+        let _ = tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
+            .record_project_added(project_id);
+    }
+}
+
 fn locales_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")
 }
+
+#[cfg(test)]
+mod tests;

@@ -925,6 +925,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 if command == AppCommand::LaunchAgentRun {
                     state.agent_run_launch_notice = None;
                     if let Err(refusal) = attempt_agent_run_launch(state) {
+                        record_restricted_mode_blocked_if_applicable(state, &refusal);
                         state.agent_run_launch_notice = Some(refusal);
                     }
                 }
@@ -1776,6 +1777,39 @@ fn agent_run_launch_refusal_text(catalog: &Catalog, refusal: &AgentRunLaunchRefu
         args = args.number("limit", *limit);
     }
     catalog.get_with_args("agent-run-launch-refused", &args)
+}
+
+/// RFC-031 PR-031-A: `restricted_mode_blocked`'s only call site.
+/// **Only the workspace-discovery refusal, not every refusal** --
+/// `RunLimitExceeded` and `ExecutableUnavailable` are not restricted-mode
+/// blocks and must not produce this family. Reuses
+/// `agent_run_launch_refusal_symbol`'s own `"workspace-blocked"`
+/// discrimination by matching the identical pattern that symbol checks,
+/// rather than re-deriving the distinction a second way that could drift
+/// from the first. Best-effort, matching every other producer call site
+/// in this crate (`record_paste_blocked`'s own): a failed audit write
+/// must never turn a real refusal into a second, different failure.
+fn record_restricted_mode_blocked_if_applicable(
+    state: &mut State,
+    refusal: &AgentRunLaunchRefusal,
+) {
+    if !matches!(
+        refusal,
+        AgentRunLaunchRefusal::Validation(
+            tekstide_core::agent::AgentRunLaunchValidationError::WorkspaceDiscoveryBlocked { .. }
+        )
+    ) {
+        return;
+    }
+    let Some(project_id) = state.app_shell.state().active_project_id().cloned() else {
+        return;
+    };
+    let mut audit_store = open_real_audit_store(&state.app_shell);
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    if let Some(store) = audit_store.as_mut() {
+        let _ = tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
+            .record_restricted_mode_blocked(project_id);
+    }
 }
 
 /// RFC-022 PR-022-D: the same `AppStatePathProvider::linux_default()`
@@ -2765,7 +2799,9 @@ fn launch_measurement_terminal_pane(
 /// fail-silent, log-nothing-to-the-user shape appropriate for a
 /// diagnostic/observability path that must never block the app from
 /// starting.
-fn open_real_audit_store(app_shell: &ApplicationShell) -> Option<tekstide_core::audit::AuditStore> {
+pub(crate) fn open_real_audit_store(
+    app_shell: &ApplicationShell,
+) -> Option<tekstide_core::audit::AuditStore> {
     let path_provider =
         tekstide_core::project::recent::AppStatePathProvider::linux_default().ok()?;
     let project_roots = app_shell

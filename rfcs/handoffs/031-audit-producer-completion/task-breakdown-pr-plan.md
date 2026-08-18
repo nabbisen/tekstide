@@ -1,6 +1,6 @@
 ---
 title: "RFC-031 task breakdown and PR plan"
-status: "Ready for implementation"
+status: "PR-031-A and PR-031-B implemented 2026-08-19, awaiting review -- see acceptance-qa-checklist.md's correction note on this file's own restore-vs-add framing"
 rfc_file: "../../proposed/031-audit-producer-completion.md"
 target_milestone: "M11"
 created: "2026-08-18"

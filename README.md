@@ -192,11 +192,14 @@ would notice either property unprompted.
 
 Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked
 root/symlink access, audit-store recovery outcomes, plain-terminal session starts and
-terminations, paste refusals, and command-approval decisions. As of `0.10.0` the trust
-family has a real user-driven producer for the first time: granting or revoking
-workspace trust writes to the store. Restricted-feature, safe-close,
-configuration-change, transcript-purge, and project-added producers are defined in the
-audit schema but not yet wired.
+terminations, paste refusals, command-approval decisions, restricted-feature refusals,
+and project-added opens. As of `0.10.0` the trust family has a real user-driven
+producer for the first time: granting or revoking workspace trust writes to the store.
+RFC-031 (PR-031-A/B) added the restricted-feature producer (a real launch refused for
+lacking workspace-discovery trust) and the project-added producer (a real project
+opened from the CLI-argument path, distinct from a remembered project merely restored
+on boot, which writes nothing). Safe-close, configuration-change, and transcript-purge
+producers are defined in the audit schema but not yet wired.
 
 ### Command approval
 

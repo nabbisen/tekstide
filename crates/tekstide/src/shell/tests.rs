@@ -2275,6 +2275,255 @@ fn agent_run_launch_shell_input_switches_to_terminal_immersion_and_shows_the_rea
     );
 }
 
+/// RFC-031 PR-031-A: the restricted-mode-blocked producer's own
+/// reachability proof, on top of the same real `Ctrl+Alt+A` path the
+/// test above already establishes -- proven from a real key press,
+/// through `update`, to a record in the real audit store, not from a
+/// dispatched `AppCommand` or a direct call to the producer.
+#[test]
+fn a_real_workspace_discovery_refusal_writes_a_real_restricted_mode_blocked_record() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("restricted-mode-blocked-reachability");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .unwrap();
+
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::LaunchAgentRun,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+
+    assert!(
+        matches!(
+            state.agent_run_launch_notice,
+            Some(AgentRunLaunchRefusal::Validation(
+                tekstide_core::agent::AgentRunLaunchValidationError::WorkspaceDiscoveryBlocked { .. }
+            ))
+        ),
+        "test precondition: a fresh, untrusted project must refuse with WorkspaceDiscoveryBlocked: \
+         {:?}",
+        state.agent_run_launch_notice
+    );
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let records = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .expect("querying the real audit store must succeed")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .filter(|record| record.project_id.as_ref() == Some(&project_id))
+        .collect::<Vec<_>>();
+
+    let restricted_records: Vec<_> = records
+        .iter()
+        .filter(|record| {
+            record.family == tekstide_core::audit::AuditEventFamily::RestrictedModeBlocked
+        })
+        .collect();
+    assert_eq!(
+        restricted_records.len(),
+        1,
+        "exactly one RestrictedModeBlocked record must exist for this project's real refusal: \
+         {records:?}"
+    );
+    let record = restricted_records[0];
+    assert_eq!(
+        record.subject_ref, None,
+        "what-the-store-may-hold.md: no path-shaped text belongs in this record"
+    );
+    assert_eq!(
+        record.reason_code,
+        Some(tekstide_core::audit::AuditReasonCode::RestrictedMode)
+    );
+}
+
+/// RFC-031 PR-031-A: **both directions** of the discrimination the gate
+/// requires -- a record appears for `WorkspaceDiscoveryBlocked` and
+/// does not for `RunLimitExceeded` or `ExecutableUnavailable`. Uses
+/// `attempt_agent_run_launch_with_profile` directly with controlled
+/// profiles (the same shape
+/// `granting_trust_through_the_real_route_unblocks_a_real_agent_run_launch`/
+/// `agent_run_launch_refusal_text_renders_the_not_found_reason_honestly`
+/// already use to isolate one refusal reason deterministically) rather
+/// than a real key press -- reachability through a real key press is
+/// this same producer's own separate proof, above; this test's job is
+/// the narrower discrimination property.
+#[test]
+fn a_restricted_mode_blocked_record_appears_only_for_workspace_discovery_refusals() {
+    // WorkspaceDiscoveryBlocked -> a record appears.
+    {
+        let (mut state, project_id) =
+            state_with_a_real_project("restricted-mode-discrimination-workspace");
+        let mut profile = tekstide_core::agent::AiCliProfile::new(
+            "discrimination-workspace-discovery",
+            "Discrimination Fixture (workspace discovery)",
+            tekstide_core::agent::AiCliProfileSource::BuiltIn,
+            tekstide_core::agent::AiCliExecutable::Absolute {
+                path: transcript_marker_script_path(),
+                provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+            },
+            tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+        );
+        profile.workspace_discovery_policy =
+            tekstide_core::agent::AiCliWorkspaceDiscoveryPolicy::MayDiscoverWorkspaceFiles {
+                summary: "test fixture: reads workspace files".to_owned(),
+            };
+        let refusal = attempt_agent_run_launch_with_profile(&mut state, profile)
+            .expect_err("an untrusted project must refuse a workspace-discovering profile");
+        assert!(matches!(
+            refusal,
+            AgentRunLaunchRefusal::Validation(
+                tekstide_core::agent::AgentRunLaunchValidationError::WorkspaceDiscoveryBlocked { .. }
+            )
+        ));
+
+        super::record_restricted_mode_blocked_if_applicable(&mut state, &refusal);
+
+        let audit_store =
+            open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+        let found = audit_store
+            .query(&tekstide_core::audit::AuditQuery::latest(50))
+            .expect("querying the real audit store must succeed")
+            .records
+            .into_iter()
+            .map(|sequenced| sequenced.record)
+            .any(|record| {
+                record.project_id.as_ref() == Some(&project_id)
+                    && record.family
+                        == tekstide_core::audit::AuditEventFamily::RestrictedModeBlocked
+            });
+        assert!(
+            found,
+            "WorkspaceDiscoveryBlocked must produce a RestrictedModeBlocked record"
+        );
+    }
+
+    // ExecutableUnavailable -> no record.
+    {
+        let mut app_shell = ApplicationShell::new();
+        app_shell
+            .add_project_from_path(fresh_project_dir(
+                "restricted-mode-discrimination-not-found",
+            ))
+            .expect("a freshly created directory is a valid project root");
+        let mut state = state_with(app_shell);
+        let project_id = state
+            .app_shell
+            .state()
+            .active_project_id()
+            .cloned()
+            .unwrap();
+
+        let empty_lookup_dir = fresh_project_dir("restricted-mode-discrimination-empty-bin");
+        let profile = tekstide_core::agent::AiCliProfile::new(
+            "discrimination-absent-ai-cli",
+            "Discrimination Fixture (absent)",
+            tekstide_core::agent::AiCliProfileSource::BuiltIn,
+            tekstide_core::agent::AiCliExecutable::PathLookup {
+                command: "definitely-absent-ai-cli".to_owned(),
+                lookup_paths: vec![tekstide_core::agent::ExecutableLookupPath::reviewed_system(
+                    empty_lookup_dir,
+                )],
+                provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+            },
+            tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+        );
+        let refusal = attempt_agent_run_launch_with_profile(&mut state, profile)
+            .expect_err("an executable that genuinely does not exist must be refused");
+        assert!(matches!(
+            refusal,
+            AgentRunLaunchRefusal::Validation(
+                tekstide_core::agent::AgentRunLaunchValidationError::ExecutableUnavailable { .. }
+            )
+        ));
+
+        super::record_restricted_mode_blocked_if_applicable(&mut state, &refusal);
+
+        let audit_store =
+            open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+        let found = audit_store
+            .query(&tekstide_core::audit::AuditQuery::latest(50))
+            .expect("querying the real audit store must succeed")
+            .records
+            .into_iter()
+            .map(|sequenced| sequenced.record)
+            .any(|record| {
+                record.project_id.as_ref() == Some(&project_id)
+                    && record.family
+                        == tekstide_core::audit::AuditEventFamily::RestrictedModeBlocked
+            });
+        assert!(
+            !found,
+            "ExecutableUnavailable must not produce a RestrictedModeBlocked record"
+        );
+    }
+
+    // RunLimitExceeded -> no record.
+    {
+        let mut app_shell = ApplicationShell::new();
+        app_shell
+            .add_project_from_path(fresh_project_dir("restricted-mode-discrimination-limit"))
+            .expect("a freshly created directory is a valid project root");
+        let mut state = state_with(app_shell);
+        let project_id = state
+            .app_shell
+            .state()
+            .active_project_id()
+            .cloned()
+            .unwrap();
+        let limits = tekstide_core::project::ProjectResourceLimits {
+            agent_run_limit: Some(0),
+            ..Default::default()
+        };
+        state
+            .app_shell
+            .state_mut()
+            .project_mut(&project_id)
+            .unwrap()
+            .set_resource_limits(limits);
+
+        let profile = tekstide_core::agent::AiCliProfile::claude_code_linux_default();
+        let refusal = attempt_agent_run_launch_with_profile(&mut state, profile)
+            .expect_err("a zero agent_run_limit must refuse before anything else is checked");
+        assert!(matches!(
+            refusal,
+            AgentRunLaunchRefusal::RunLimitExceeded { limit: 0 }
+        ));
+
+        super::record_restricted_mode_blocked_if_applicable(&mut state, &refusal);
+
+        let audit_store =
+            open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+        let found = audit_store
+            .query(&tekstide_core::audit::AuditQuery::latest(50))
+            .expect("querying the real audit store must succeed")
+            .records
+            .into_iter()
+            .map(|sequenced| sequenced.record)
+            .any(|record| {
+                record.project_id.as_ref() == Some(&project_id)
+                    && record.family
+                        == tekstide_core::audit::AuditEventFamily::RestrictedModeBlocked
+            });
+        assert!(
+            !found,
+            "RunLimitExceeded must not produce a RestrictedModeBlocked record"
+        );
+    }
+}
+
 // --- RFC-032 PR-032-C/D: grant, revoke, the route, and the dialog -----
 
 /// Response 246's enumeration shape (`only_one_production_call_site_ever_restores_a_projects_trust_state`,

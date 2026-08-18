@@ -591,6 +591,41 @@ impl<'a> AuditCoordinator<'a> {
         let record = paste_blocked_record(project_id, terminal_id);
         self.append_observation(&record)
     }
+
+    /// RFC-031 PR-031-A: `restricted_mode_blocked`'s first and only
+    /// producer. Observes a refusal that already happened -- the same
+    /// shape [`Self::record_paste_blocked`] uses, not a combined
+    /// action-plus-audit method like [`Self::grant_project_trust`],
+    /// since there is no domain mutation to perform here: a blocked
+    /// launch changes nothing to roll into the same call.
+    /// `what-the-store-may-hold.md`'s own required leave: `subject_ref`
+    /// is `None` -- this project's canonical path is untrusted,
+    /// attacker-influenceable text, and nothing here escapes it on
+    /// read. `reason_code` is fixed at `RestrictedMode`, the one code
+    /// this family's frozen schema allows -- RFC-004 blocks nine
+    /// distinct features and this cannot say which; that coarseness is
+    /// the accepted trade, recorded in evidence rather than left for a
+    /// reader to assume finer granularity exists.
+    pub fn record_restricted_mode_blocked(
+        &mut self,
+        project_id: ProjectId,
+    ) -> AuditObservationStatus {
+        let record = restricted_mode_blocked_record(project_id);
+        self.append_observation(&record)
+    }
+
+    /// RFC-031 PR-031-B: `project_added`'s first and only producer.
+    /// Observes a session that already exists -- `add_project_session`
+    /// (`tekstide-core::app`) already created it by the time a caller
+    /// can reach `AddProjectOutcome::Added`, so there is nothing to
+    /// perform here either. `subject_ref` is `None`: `project_id`
+    /// already identifies the project, and a project's own display
+    /// name/path is exactly the untrusted, attacker-influenceable text
+    /// `what-the-store-may-hold.md` says not to put in the store.
+    pub fn record_project_added(&mut self, project_id: ProjectId) -> AuditObservationStatus {
+        let record = project_added_record(project_id);
+        self.append_observation(&record)
+    }
 }
 
 fn trust_record(
@@ -653,6 +688,44 @@ fn paste_blocked_record(
     record.project_id = Some(project_id);
     record.terminal_id = Some(terminal_id);
     record.reason_code = Some(AuditReasonCode::PastePolicy);
+    record
+}
+
+/// `valid_restricted_mode_blocked` fixes every field but `project_id` --
+/// same shape as `paste_blocked_record`, one fewer domain link (no
+/// `terminal_id`: a refused agent-run launch never reaches a terminal
+/// at all).
+fn restricted_mode_blocked_record(project_id: crate::project::ProjectId) -> DurableAuditRecordV1 {
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::RestrictedModeBlocked,
+        AuditOutcome::Blocked,
+        AuditActionKind::RestrictedFeature,
+        AuditActorKind::AppPolicy,
+        AuditActionSource::PolicyEngine,
+    );
+    record.project_id = Some(project_id);
+    record.reason_code = Some(AuditReasonCode::RestrictedMode);
+    record
+}
+
+/// `valid_project_added` fixes `action_kind`/`outcome` and requires
+/// `no_optional_context` -- nothing here to set beyond `project_id`.
+/// `AuditActorKind::User` with `AuditActionSource::AppCommand`: the
+/// real production caller is `boot()`'s CLI-argument path
+/// (`crates/tekstide/src/main.rs`), which runs before any GUI widget
+/// exists to make this `TrustedUi` -- closer to a startup directive
+/// than an interactive click, and `AppCommand` is the schema's other
+/// allowed source for a `User` actor (the same pairing
+/// `ManagedAgentLaunch`'s own `Authorized` outcome accepts).
+fn project_added_record(project_id: crate::project::ProjectId) -> DurableAuditRecordV1 {
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::ProjectAdded,
+        AuditOutcome::Applied,
+        AuditActionKind::ProjectAdd,
+        AuditActorKind::User,
+        AuditActionSource::AppCommand,
+    );
+    record.project_id = Some(project_id);
     record
 }
 
