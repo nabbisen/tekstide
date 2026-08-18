@@ -9,7 +9,7 @@ This crate is the headless core whose scope boundary was set by RFC-013; the des
 - terminal output security policy (RFC-009), paste classification, and trusted UI spoofing-boundary models — rendered as a real terminal surface and a real paste-confirmation dialog by the `tekstide` crate (RFC-017/RFC-018);
 - AI CLI profiles as reviewed launch contracts, with Restricted Mode blocking workspace-local executables, wrappers, project-local `PATH`, and implicit CLI workspace-config discovery;
 - AgentRun launch through project-owned terminals, with honest Plain/Supervised/Managed labels and active-file safety before process start;
-- bounded local transcript capture with retention limits, per-run opt-out, and purge;
+- bounded local transcript capture with retention limits, per-run opt-out, and purge — the `tekstide` crate reaches capture for real on every AI CLI run; the opt-out and purge have no user-facing route there yet;
 - metadata-only generated-change detection and review-state tracking;
 - durable local SQLite audit storage with schema identity, migration harness, corruption diagnostics, restart-safe recovery, and explicit purge.
 

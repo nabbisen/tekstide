@@ -31,7 +31,7 @@ switching. It includes:
   workspace-config discovery;
 - AgentRun launch through project-owned terminals, with honest Plain/Supervised/
   Managed labels and active-file safety before process start;
-- bounded local transcript capture with retention limits, per-run opt-out, and purge;
+- bounded local transcript capture with retention limits and purge policy — **reached for real by AI CLI runs**, see *Local Data and Privacy*; the per-run opt-out and purge have no user-facing route yet;
 - metadata-only generated-change detection and review-state tracking;
 - durable local SQLite audit storage with schema identity, migration harness,
   corruption diagnostics, restart-safe recovery, and explicit purge;
@@ -303,14 +303,32 @@ binds to. This is what makes trust survive a restart — the store is authoritat
 and it is queried for an *applied* grant specifically, so an interrupted or
 authorized-but-not-applied attempt does not restore as trust.
 
-RFC-011's transcript retention is implemented and tested, but **is not wired
-into the desktop application yet** — running `tekstide` does not retain any
-transcripts, and that remains true in `0.10.0` even though agent runs are now
-launchable. Checked rather than assumed for this release: the launch request
-does declare a local bounded retention policy, but nothing in the desktop crate
-configures a transcript **writer**, so no transcript is ever written. See
+**Launching an AI CLI run records that session's transcript to disk.** This corrects a
+claim `0.10.0` and `0.11.0` both made — that Tekstide retains no transcripts. It does, and
+has since agent-run launch became reachable in `0.10.0`. The error was ours and is described
+under *Corrections* in the changelog; what follows is what actually happens.
+
+Pressing `Ctrl+Alt+A` in a trusted project starts a bounded transcript for that run, written
+to `$XDG_STATE_HOME/tekstide/transcripts/<project>/<agent-run>/transcript.log`
+(`~/.local/state/tekstide/…` if `XDG_STATE_HOME` is unset). It contains **the terminal output
+of that AI session as it was produced** — which means whatever the AI CLI printed, including
+anything it quoted from your files.
+
+Capture is **bounded by policy, not by chance** (RFC-011): at most **32 MiB per transcript**,
+**256 MiB per project**, **1 GiB across the application**, and **30 days**. Capture is
+best-effort: if writing fails mid-session the run marks capture failed and the terminal stays
+usable, rather than silently continuing unrecorded.
+
+Two limitations to be plain about:
+
+- **There is no in-app way to turn capture off or to purge it.** RFC-011 designs both a
+  per-run opt-out and a purge scope, and neither has a user-facing route yet. To remove
+  transcripts today, delete the `transcripts/` directory.
+- **A plain terminal (`Ctrl+Alt+T`) is not recorded.** Only AI CLI runs are.
+
+See
 [`rfcs/done/011-transcript-retention-and-local-data-policy.md`](rfcs/done/011-transcript-retention-and-local-data-policy.md)
-for the retention and purge policy that applies once it is.
+for the full retention and purge policy.
 
 For a consolidated list of what else is missing or deferred, see
 [`rfcs/future-work.md`](rfcs/future-work.md).

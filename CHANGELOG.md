@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Corrections
+
+- **Tekstide records AI CLI session transcripts to disk, and `0.10.0` and `0.11.0` both said
+  it did not.** Both releases' READMEs stated that transcript retention was "not wired into
+  the desktop application" and that "no transcript is ever written." That was false from
+  `0.10.0` onward, the release in which launching an agent run first became possible.
+
+  What actually happens: pressing `Ctrl+Alt+A` in a trusted project writes that session's
+  terminal output to
+  `$XDG_STATE_HOME/tekstide/transcripts/<project>/<agent-run>/transcript.log`, bounded by
+  RFC-011's policy — 32 MiB per transcript, 256 MiB per project, 1 GiB application-wide, 30
+  days. There is no in-app way to disable capture or purge it; deleting the `transcripts/`
+  directory is the only route today. Plain terminals (`Ctrl+Alt+T`) are not recorded.
+
+  **The behaviour is intended** — RFC-011 designed capture, its bounds, and its purge policy
+  deliberately. **The documentation was wrong**, and the reason is worth recording: the claim
+  was verified by searching the `tekstide` crate only, where nothing configures a transcript
+  writer. `tekstide-core` configures one on that crate's behalf, so a true premise carried a
+  false conclusion into two releases. No test asserted transcript behaviour on the real launch
+  path, so the suite could not contradict it.
+
+  `README.md`'s *Local Data and Privacy* section now describes what is written, where, under
+  what bounds, and what has no user-facing control. Called out here rather than corrected
+  quietly, because it is a privacy claim users may have relied on.
+
+
 ## 0.11.0 - What the Agent Changed
 
 Status: released on 2026-08-18.
