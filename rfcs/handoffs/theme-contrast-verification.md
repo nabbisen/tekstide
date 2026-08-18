@@ -1,6 +1,6 @@
 ---
 title: "Theme contrast verification — a real gate, and the border defect it catches"
-status: "Scheduled 2026-08-17, awaiting implementation"
+status: "Implemented 2026-08-18, awaiting review"
 rfc_file: "none — a defect fix plus the test that should have caught it"
 target_milestone: "M11"
 created: "2026-08-17"

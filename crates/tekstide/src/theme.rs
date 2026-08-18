@@ -15,6 +15,13 @@
 
 use iced::Color;
 
+// theme-contrast-verification handoff: exists to verify `Theme::default`'s
+// palette against real WCAG thresholds, not to be drawn with -- no
+// production render path needs a contrast ratio, so this is test-only
+// rather than a dead-code-suppressed always-compiled module.
+#[cfg(test)]
+mod contrast;
+
 /// A colour role. Naming roles instead of exposing raw RGB fields keeps
 /// call sites like `theme.accent()` self-describing, and keeps this
 /// struct's shape stable if RFC-023 later needs to add a role without
@@ -94,7 +101,14 @@ impl Default for Theme {
             background: Color::from_rgb(0.08, 0.08, 0.09),
             foreground: Color::from_rgb(0.90, 0.90, 0.90),
             accent: Color::from_rgb(0.30, 0.60, 1.0),
-            border_default: Color::from_rgb(0.35, 0.35, 0.35),
+            // theme-contrast-verification handoff, Slice B: raised from
+            // 0.35 (2.63:1 on `background`, 2.37:1 on `surface_elevated`
+            // -- both fail WCAG 2.1 SC 1.4.11's 3:1 non-text threshold).
+            // 0.45 measures 3.85:1 / 3.48:1, real headroom over the
+            // minimum (~0.42, 3.44:1 / 3.11:1) so a future adjustment to
+            // `surface_elevated` does not re-break this the moment
+            // someone touches an unrelated colour.
+            border_default: Color::from_rgb(0.45, 0.45, 0.45),
             border_focused: Color::from_rgb(0.30, 0.60, 1.0),
             surface_elevated: Color::from_rgb(0.12, 0.12, 0.12),
             scrim: Color::from_rgba(0.0, 0.0, 0.0, 0.55),
