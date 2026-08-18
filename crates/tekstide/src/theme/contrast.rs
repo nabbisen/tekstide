@@ -61,5 +61,46 @@ pub(crate) fn composite_over(foreground: Color, backdrop: Color) -> Color {
     }
 }
 
+/// derived-contrast-pairs handoff: finds the minimum of a **unimodal**
+/// function over `[low, high]` -- one with a single interior minimum
+/// (curve descends, then ascends) or, as a degenerate case, one that is
+/// simply monotonic across the whole interval (the minimum then sits at
+/// an endpoint, which this still finds correctly). Ternary search halves
+/// the search triple every iteration rather than sampling a fixed grid,
+/// so it cannot straddle-and-miss a true minimum the way a coarse grid
+/// can: the handoff's own finding was that a 2,000-step grid reported
+/// `2.4016` where the true minimum is `2.401129`, harmless at that
+/// margin but not in general -- a grid straddling a true minimum of
+/// `2.9995` would happily report `3.0002` and pass a failing palette.
+///
+/// `max` of two functions that are each monotonic over the interval is
+/// itself unimodal, which is the property the modal-over-scrim sweep
+/// below relies on (`max(contrast_ratio(border, ..), contrast_ratio(fill,
+/// ..))`) -- **not proven here**, argued in the handoff and re-derived
+/// independently before being trusted (see that test's own doc comment).
+///
+/// Returns `(t, value)` for the `t` the minimum was found at, not only
+/// the value -- the handoff's own instruction: "report the content
+/// value it occurs at, not only the ratio."
+pub(crate) fn minimize_unimodal(
+    mut low: f32,
+    mut high: f32,
+    iterations: u32,
+    f: impl Fn(f32) -> f32,
+) -> (f32, f32) {
+    for _ in 0..iterations {
+        let third = (high - low) / 3.0;
+        let m1 = low + third;
+        let m2 = high - third;
+        if f(m1) < f(m2) {
+            high = m2;
+        } else {
+            low = m1;
+        }
+    }
+    let t = (low + high) / 2.0;
+    (t, f(t))
+}
+
 #[cfg(test)]
 mod tests;

@@ -111,7 +111,19 @@ impl Default for Theme {
             border_default: Color::from_rgb(0.45, 0.45, 0.45),
             border_focused: Color::from_rgb(0.30, 0.60, 1.0),
             surface_elevated: Color::from_rgb(0.12, 0.12, 0.12),
-            scrim: Color::from_rgba(0.0, 0.0, 0.0, 0.55),
+            // derived-contrast-pairs handoff, Slice B: raised from 0.55
+            // (worst case 2.40:1 against the modal card's own
+            // border/fill, at ~0.78 grey terminal content behind it --
+            // fails WCAG 2.1 SC 1.4.11's 3:1). 0.75 measures 3.62:1 at
+            // its own worst case (still at the bright end, content near
+            // white). Keeps the accent-coloured border rather than
+            // switching to the alternative grey-border lever, and moves
+            // in the same direction as RFC-018's own goal: more chrome
+            // dimming is a stronger spoofing tell, not a weaker one.
+            // Still visibly translucent -- verified against the real
+            // rendered window, not only the arithmetic; see the
+            // handoff's own evidence for what was observed.
+            scrim: Color::from_rgba(0.0, 0.0, 0.0, 0.75),
             font_size_body: 14.0,
             font_size_heading: 16.0,
             font_size_status: 13.0,

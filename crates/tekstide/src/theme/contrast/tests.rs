@@ -1,4 +1,4 @@
-use super::{composite_over, contrast_ratio, relative_luminance};
+use super::{composite_over, contrast_ratio, minimize_unimodal, relative_luminance};
 use iced::Color;
 
 const BLACK: Color = Color::from_rgb(0.0, 0.0, 0.0);
@@ -89,5 +89,61 @@ fn a_real_translucent_scrim_composites_partway_between_its_colour_and_the_backdr
         (composited.r - 0.45).abs() < 0.001,
         "55% black over white must land at 45% grey, got {}",
         composited.r
+    );
+}
+
+/// `minimize_unimodal`'s own anchors, checked against a known function
+/// before it is trusted to find the modal-over-scrim crossing point --
+/// the same discipline `black_on_white_is_exactly_21_to_1` applies to
+/// `contrast_ratio`.
+#[test]
+fn minimize_unimodal_finds_a_known_interior_parabola_minimum() {
+    let (t, value) = minimize_unimodal(0.0, 1.0, 100, |t| (t - 0.3).powi(2) + 1.0);
+    // A quadratic is locally flat at its own minimum -- f32 cannot
+    // distinguish two points closer than roughly the square root of its
+    // own precision near there, so this tolerance is set by that floor,
+    // not chosen to make the test pass. The crossing-point test below,
+    // where the two curves have a real slope at the minimum rather than
+    // a flat one, converges to exact precision instead -- the shape the
+    // real modal-over-scrim sweep actually has.
+    assert!((t - 0.3).abs() < 0.001, "expected t near 0.3, got {t}");
+    assert!(
+        (value - 1.0).abs() < 0.001,
+        "expected value near 1.0, got {value}"
+    );
+}
+
+/// The degenerate case the handoff's own alpha-`0.65` result exercises
+/// for real: a monotonic function has no interior minimum, and the true
+/// minimum sits at an endpoint. Ternary search must still converge
+/// there rather than reporting a false interior minimum.
+#[test]
+fn minimize_unimodal_finds_a_known_endpoint_minimum_on_a_monotonic_function() {
+    let (t, value) = minimize_unimodal(0.0, 1.0, 100, |t| t);
+    assert!(
+        (t - 0.0).abs() < 0.0001,
+        "expected t near the low endpoint, got {t}"
+    );
+    assert!(
+        (value - 0.0).abs() < 0.0001,
+        "expected value near 0.0, got {value}"
+    );
+}
+
+/// `max` of two monotone curves is unimodal -- the property the
+/// modal-over-scrim sweep depends on, checked here against a
+/// constructed pair rather than trusted from the handoff's own prose
+/// alone.
+#[test]
+fn minimize_unimodal_finds_the_crossing_point_of_two_monotone_curves() {
+    // Rising: 2*t. Falling: 2*(1-t). They cross at t = 0.5, value = 1.0.
+    let (t, value) = minimize_unimodal(0.0, 1.0, 100, |t| f32::max(2.0 * t, 2.0 * (1.0 - t)));
+    assert!(
+        (t - 0.5).abs() < 0.0001,
+        "expected the crossing at t=0.5, got {t}"
+    );
+    assert!(
+        (value - 1.0).abs() < 0.0001,
+        "expected value 1.0 at the crossing, got {value}"
     );
 }

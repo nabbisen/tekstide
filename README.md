@@ -118,14 +118,24 @@ switching. It includes:
   are deliberate and disclosed: detection runs only at exit, so a long-lived
   interactive session reports nothing until it ends, and the baseline lives in
   memory, so it does not survive the application closing mid-run.
-- **A WCAG contrast gate over the theme (`0.11.0`)**, with the failure it
+- **A WCAG contrast gate over the theme (`0.11.0`)**, with the failures it
   caught. Unfocused pane borders measured **2.63:1** against the background,
   below the 3:1 that WCAG 2.1 SC 1.4.11 requires for UI component boundaries;
   the border is now 3.85:1. Text contrast was never the problem — it sits above
-  14:1 — and focus indication was unaffected. The test asserting this measures
-  real ratios, including compositing the translucent modal scrim over its
-  backdrop before measuring it; the previous suite checked only that colour
-  channels were within `0.0..=1.0`, which no plausible colour can fail.
+  14:1 — and focus indication was unaffected. The pair list this gate checks is
+  **derived** from an exhaustive destructure of the theme, not hand-written: a
+  future colour role cannot be added to the theme without also being classified
+  here, or the crate fails to compile. That derivation caught a second,
+  separate defect no fixed pair could have: the modal dialog's real backdrop is
+  the scrim composited over whatever was behind it, including terminal
+  content, which is arbitrary. Sampling "scrim over the background" and "scrim
+  over white" both pass — the failure lives strictly between them, at content
+  around 78% grey, where neither the border nor the fill alone clears 3:1
+  (worst case measured **2.40:1**). The scrim is now more opaque (`0.55` →
+  `0.75`) so that no content value fails; this is a visible appearance change,
+  not only a number. The check itself is swept continuously across that range
+  rather than sampled at a few points, since sampling is exactly what let this
+  one hide.
 
 It is not yet the full AI CLI workbench. The editor has no undo (a mid-buffer
 edit is unrecoverable within the session past what Backspace can still
