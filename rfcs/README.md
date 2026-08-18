@@ -76,7 +76,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | — | [Minimal user documentation](./handoffs/minimal-user-documentation.md) — no RFC; pulled forward from RFC-029 to M9 |
 | — | [The reachability audit](./handoffs/reachability-audit.md) — no RFC; scheduled 2026-08-17 |
 | — | [Terminal resize](./handoffs/terminal-resize.md) — no RFC; priority 1 from the audit, scheduled 2026-08-17 |
-| — | [Change detection wiring](./handoffs/change-detection-wiring.md) — no RFC; the last structural blocker on RFC-020, scheduled 2026-08-17 |
+| — | [Change detection wiring](./handoffs/change-detection-wiring.md) — no RFC; the last structural blocker on RFC-020. Slices A-C (ignore model, measurement, real production wiring) implemented 2026-08-18; `add_detected_generated_change_set` has its first real caller. Makes diff review buildable, not reachable — RFC-020's own surface is still unbuilt. Slice D (truncation honesty) and closeout remaining |
 | — | [Theme contrast verification](./handoffs/theme-contrast-verification.md) — no RFC; a measured WCAG 1.4.11 failure in `border_default` plus the gate that should have caught it. Implemented 2026-08-18: `theme/contrast.rs`'s anchor-validated WCAG math, a threshold test observed failing at the measured ratios before the fix, `border_default` raised 0.35 → 0.45 (3.85:1 / 3.48:1) |
 | 022 | [Approval-history binding](./handoffs/approval-history-binding.md) — the remedy for RFC-022's corrected record; the last `Configurable`/`None` action whose surface actually exists, scheduled 2026-08-17 |
 | 032 | [Workspace Trust Granting](./handoffs/032-workspace-trust-granting/README.md) |

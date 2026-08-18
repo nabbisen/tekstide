@@ -1,7 +1,9 @@
 use crate::agent::AgentRunLaunchPlan;
 use crate::close::{CloseAssessment, assess_close};
 use crate::content::{ExternalChangeDecision, SaveDecision, TextCursor};
-use crate::domain::{AgentRunId, OwnershipError, TerminalId, TerminalSession, VisibleSlot};
+use crate::domain::{
+    AgentRunId, ChangeSetId, OwnershipError, TerminalId, TerminalSession, VisibleSlot,
+};
 use crate::project::recent::{
     RECENT_PROJECT_STATE_VERSION, RecentProject, RecentProjectAvailability, RecentProjectState,
     RestoredRecentProject, Timestamp, assess_recent_project_availability,
@@ -10,10 +12,11 @@ use crate::project::root::{
     ProjectRootValidationError, ProjectRootValidator, SymlinkPolicy, ValidProjectRoot,
 };
 use crate::project::{
-    ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectId,
-    ProjectMode, ProjectOpenSurface, ProjectSession, ProjectTerminalError,
+    DetectedChanges, ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError,
+    ProjectChangeSetError, ProjectContentError, ProjectId, ProjectMode, ProjectOpenSurface,
+    ProjectSession, ProjectTerminalError, ReviewBaseline,
 };
-use crate::runtime::terminal::{LinuxTerminalRuntime, TerminalRuntimeEvent};
+use crate::runtime::terminal::{LinuxTerminalRuntime, TerminalRuntimeEvent, TerminationOutcome};
 
 #[derive(Debug, Default)]
 pub struct AppState {
@@ -334,6 +337,51 @@ impl AppState {
                 OwnershipError::MissingProject,
             ))?;
         project.mark_terminal_exited(terminal_id, exit_status)
+    }
+
+    /// change-detection-wiring handoff, Slice C (D3): the same
+    /// "missing lifecycle glue" gap `mark_terminal_exited` closed for
+    /// plain terminals -- `ProjectSession::apply_agent_terminal_outcome`
+    /// existed, `pub(crate)`, with no caller outside `tekstide-core`
+    /// itself. Marks the terminal exited and transitions the owning
+    /// `AgentRun`'s status together, so the two facts cannot land out of
+    /// step with each other.
+    pub fn apply_agent_terminal_outcome(
+        &mut self,
+        agent_run_id: &AgentRunId,
+        terminal_id: &TerminalId,
+        outcome: &TerminationOutcome,
+    ) -> Result<(), ProjectAgentRuntimeLaunchError> {
+        let project = self
+            .active_project_mut()
+            .ok_or(ProjectAgentRuntimeLaunchError::Launch(
+                ProjectAgentLaunchError::Ownership(OwnershipError::MissingProject),
+            ))?;
+        project.apply_agent_terminal_outcome(agent_run_id, terminal_id, outcome)
+    }
+
+    /// change-detection-wiring handoff, Slice C: the same gap as
+    /// `apply_agent_terminal_outcome` immediately above --
+    /// `ProjectSession::add_detected_generated_change_set` existed,
+    /// fully tested, with no production caller anywhere in this crate.
+    pub fn add_detected_generated_change_set(
+        &mut self,
+        baseline: &ReviewBaseline,
+        detected: &DetectedChanges,
+        candidate_agent_run_id: Option<&AgentRunId>,
+        summary: impl Into<String>,
+    ) -> Result<Option<ChangeSetId>, ProjectChangeSetError> {
+        let project = self
+            .active_project_mut()
+            .ok_or(ProjectChangeSetError::Ownership(
+                OwnershipError::MissingProject,
+            ))?;
+        project.add_detected_generated_change_set(
+            baseline,
+            detected,
+            candidate_agent_run_id,
+            summary,
+        )
     }
 
     pub fn open_active_project_text_document(

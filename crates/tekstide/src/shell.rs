@@ -605,6 +605,21 @@ pub struct State {
     /// function's own doc for why a computed size, not a second live
     /// measurement, is what response 242 chose.
     window_size: Option<iced::Size>,
+    /// change-detection-wiring handoff, Slice C: the filesystem baseline
+    /// captured at agent-run launch (`attempt_agent_run_launch_with_profile`),
+    /// held here until that run's terminal exits and detection can run
+    /// against it (`record_terminal_exit`). Shell-local, transient
+    /// coordination state -- the same per-`AgentRunId` map shape
+    /// `approval_channels` uses, for the same reason: a captured
+    /// baseline is not part of the durable project model, only a fact
+    /// this GUI session needs to carry between two points in time.
+    /// Removed the moment detection is attempted for a run (whether or
+    /// not a real `ChangeSet` resulted) -- a baseline only makes sense
+    /// against the one run it was captured for, and is never reused.
+    agent_run_change_baselines: std::collections::HashMap<
+        tekstide_core::domain::AgentRunId,
+        tekstide_core::project::ReviewBaseline,
+    >,
 }
 
 impl State {
@@ -684,6 +699,7 @@ impl State {
             approval_channels: Vec::new(),
             approval_proposal_ids: std::collections::HashMap::new(),
             window_size: None,
+            agent_run_change_baselines: std::collections::HashMap::new(),
         }
     }
 
@@ -1470,23 +1486,57 @@ fn record_terminal_exit(
     };
     let mut audit_store = open_real_audit_store(&state.app_shell);
     let mut audit_health = tekstide_core::audit::AuditHealth::default();
-    // `mark_terminal_exited` always transitions to `Exited` and records
-    // the real exit code; any other outcome (signalled, or an ambiguous
-    // `Failed`/`OrphanedUnknown` shape `try_wait` cannot itself produce
-    // here) transitions to `Failed` via the more general status API
-    // instead -- "the session bar stops lying" either way, best-effort
-    // past this point for the same reason `launch_terminal`'s own
-    // post-registration steps are.
-    let _ = match &outcome {
-        tekstide_core::runtime::terminal::TerminationOutcome::Exited { exit_status } => state
-            .app_shell
-            .state_mut()
-            .mark_terminal_exited(&terminal_id, Some(*exit_status)),
-        _ => state.app_shell.state_mut().transition_terminal_status(
+
+    // change-detection-wiring handoff, Slice C (D3): exit is the
+    // completion trigger, but only for a terminal an `AgentRun` actually
+    // owns -- a plain terminal (`Ctrl+Alt+T`) keeps the exact behaviour
+    // in the `else` branch below, unchanged. Read fresh rather than
+    // cached, the same discipline every other post-launch fact in this
+    // module already follows.
+    let owning_agent_run_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .and_then(|project| {
+            project
+                .agent_runs()
+                .iter()
+                .find(|run| run.terminal_id.as_ref() == Some(&terminal_id))
+        })
+        .map(|run| run.id.clone());
+
+    if let Some(agent_run_id) = owning_agent_run_id {
+        // `apply_agent_terminal_outcome` marks the terminal exited *and*
+        // transitions the run's own status together, so the two facts
+        // cannot land out of step with each other the way calling
+        // `mark_terminal_exited` and a separate status transition
+        // sequentially could.
+        let _ = state.app_shell.state_mut().apply_agent_terminal_outcome(
+            &agent_run_id,
             &terminal_id,
-            tekstide_core::domain::TerminalStatus::Failed,
-        ),
-    };
+            &outcome,
+        );
+        attempt_generated_change_detection(state, &agent_run_id);
+    } else {
+        // `mark_terminal_exited` always transitions to `Exited` and records
+        // the real exit code; any other outcome (signalled, or an ambiguous
+        // `Failed`/`OrphanedUnknown` shape `try_wait` cannot itself produce
+        // here) transitions to `Failed` via the more general status API
+        // instead -- "the session bar stops lying" either way, best-effort
+        // past this point for the same reason `launch_terminal`'s own
+        // post-registration steps are.
+        let _ = match &outcome {
+            tekstide_core::runtime::terminal::TerminationOutcome::Exited { exit_status } => state
+                .app_shell
+                .state_mut()
+                .mark_terminal_exited(&terminal_id, Some(*exit_status)),
+            _ => state.app_shell.state_mut().transition_terminal_status(
+                &terminal_id,
+                tekstide_core::domain::TerminalStatus::Failed,
+            ),
+        };
+    }
+
     let _ = state
         .app_shell
         .state_mut()
@@ -1495,6 +1545,49 @@ fn record_terminal_exit(
         let _ = tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
             .record_plain_terminal_terminated(project_id, terminal_id, &outcome);
     }
+}
+
+/// change-detection-wiring handoff, Slice C: the completion half of the
+/// wiring -- runs generated-change detection against the baseline
+/// captured at launch (`state.agent_run_change_baselines`, populated by
+/// `attempt_agent_run_launch_with_profile`), and calls
+/// `add_detected_generated_change_set` for real when there is one to
+/// create. Best-effort past this point, the same discipline
+/// `record_terminal_exit` already follows for everything after a
+/// terminal's exit is recorded: a missing baseline (this run's terminal
+/// exited before launch finished capturing one, a `None` active
+/// project, or detection already ran once for this run) is not an
+/// error, just nothing further to do.
+///
+/// **Makes a real `ChangeSet` buildable in production, not diff review
+/// reachable.** RFC-020's own surface still renders nothing -- see the
+/// handoff's own gate for why that distinction is stated explicitly
+/// rather than left implicit.
+fn attempt_generated_change_detection(
+    state: &mut State,
+    agent_run_id: &tekstide_core::domain::AgentRunId,
+) {
+    let Some(baseline) = state.agent_run_change_baselines.remove(agent_run_id) else {
+        return;
+    };
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    let detector =
+        tekstide_core::project::GeneratedChangeDetector::new(generated_change_detection_policy());
+    let detected = detector.detect_filesystem_changes(project, &baseline);
+    // Not localized: nothing renders a `ChangeSet.summary` in production
+    // yet (RFC-020 does not exist) -- see the handoff's own reachability
+    // note. Revisit once a real surface reads this field.
+    let _ = state
+        .app_shell
+        .state_mut()
+        .add_detected_generated_change_set(
+            &baseline,
+            &detected,
+            Some(agent_run_id),
+            "Filesystem changes detected after this run exited",
+        );
 }
 
 /// Terminal launch UX handoff: why a real launch was refused -- a typed
@@ -1711,6 +1804,27 @@ fn attempt_agent_run_launch(state: &mut State) -> Result<(), AgentRunLaunchRefus
 /// depending on what happens to be installed on the machine running the
 /// suite, and without ever pointing it at the real, live product this
 /// profile is modelled on.
+/// change-detection-wiring handoff, Slice C, review response 252's D4
+/// decision: the production entry cap, explicit rather than inherited
+/// from `GeneratedChangeDetectionPolicy::default()`'s `4,096`. This
+/// repository alone is 1,506 entries after the D1 exclusions -- 37% of
+/// the default cap -- so a project a few times this size already gets
+/// nothing back under the default. `16,384` measures to a worst-case
+/// synchronous cost of ~60ms at this project's own measured per-entry
+/// rate (3.65 µs/entry, response 252), once at agent-run launch and
+/// once at exit, on the calling thread -- accepted as comfortably
+/// inside what a process spawn already costs at those two moments.
+/// `65,536` was considered and rejected: a ~239ms stall, twice per run,
+/// is not a cost response 252 was willing to accept on the calling
+/// thread. `max_changed_paths` is untouched -- a separate limit with
+/// its own semantics, left for Slice D.
+fn generated_change_detection_policy() -> tekstide_core::project::GeneratedChangeDetectionPolicy {
+    tekstide_core::project::GeneratedChangeDetectionPolicy {
+        max_entries: 16_384,
+        ..tekstide_core::project::GeneratedChangeDetectionPolicy::default()
+    }
+}
+
 fn attempt_agent_run_launch_with_profile(
     state: &mut State,
     profile: tekstide_core::agent::AiCliProfile,
@@ -1757,6 +1871,25 @@ fn attempt_agent_run_launch_with_profile(
         .state_mut()
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .map_err(AgentRunLaunchRefusal::Runtime)?;
+    // change-detection-wiring handoff, Slice C: capture the filesystem
+    // baseline as early as possible after this run starts, before the
+    // agent has had time to act -- the wider the gap between launch and
+    // this capture, the more of what an agent does becomes invisible to
+    // detection later. Best-effort: no active project here would mean
+    // the launch above could not have succeeded either, so this branch
+    // is not expected to be skipped in practice, but a missing baseline
+    // is not fatal to the launch that already happened -- see
+    // `attempt_generated_change_detection`'s own doc for what a missing
+    // baseline means at the other end.
+    if let Some(project) = state.app_shell.state().active_project() {
+        let baseline = tekstide_core::project::GeneratedChangeDetector::new(
+            generated_change_detection_policy(),
+        )
+        .capture_agent_run_filesystem_baseline(project, agent_run_id.clone());
+        state
+            .agent_run_change_baselines
+            .insert(agent_run_id.clone(), baseline);
+    }
     // `claude_code_linux_default` is `Supervised`, which never binds an
     // approval endpoint -- `None` here today. Registered for real once a
     // `Managed` profile can reach this path (response 227's found

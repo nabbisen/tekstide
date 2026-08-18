@@ -3663,6 +3663,158 @@ fn command_approval_family_produces_real_durable_audit_records_through_the_pipel
     );
 }
 
+/// change-detection-wiring handoff, Slice C: the gate's own required
+/// shape -- a real `ChangeSet`, created in production, from a real
+/// completion. `launch_real_managed_agent_run` reaches the exact same
+/// production `attempt_agent_run_launch_with_profile` a real
+/// `Ctrl+Alt+A` press does (only the executable is test-controlled --
+/// see that helper's own doc); this test's job is what this slice
+/// specifically adds beyond an already-real launch path: a baseline
+/// captured at that launch, and a real detection run at a real exit.
+///
+/// Writes a real file into the real project directory after the
+/// baseline is captured (what an agent changing files looks like from
+/// the outside -- the reference adapter itself never touches the
+/// filesystem), approves the adapter's own real proposal over the real
+/// socket via the same `Message::ModalActivate` route
+/// `command_approval_family_produces_real_durable_audit_records_through_the_pipeline`
+/// already proves delivers a real decision (which is what makes the
+/// real process exit for real, with a real `0` status), then drives the
+/// real `Message::TerminalWoke` handler -- the same real exit-detection
+/// loop `a_real_session_exit_updates_status_frees_the_slot_and_is_reusable`
+/// already establishes for a plain terminal -- until this run reaches a
+/// real terminal `AgentRunStatus`.
+#[test]
+fn a_real_agent_run_exit_creates_a_real_change_set_from_a_real_file_change() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("change-detection-real-agent-run-exit");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let agent_run_id = launch_real_managed_agent_run(&mut state);
+    assert!(
+        state.agent_run_change_baselines.contains_key(&agent_run_id),
+        "a real Managed launch must capture a real filesystem baseline for this run"
+    );
+
+    // What an agent changing files looks like from the outside -- a real
+    // write to the real project directory, made after the baseline
+    // above was already captured, so detection has something real to
+    // find.
+    std::fs::write(
+        project_dir.join("agent-created-file.txt"),
+        b"a real change, made after the baseline was captured\n",
+    )
+    .expect("writing a real file into the real project directory must succeed");
+
+    let received = poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    assert!(
+        received,
+        "the real adapter should send its proposal within the poll window"
+    );
+
+    let request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    let proposal_id = state.approval_proposal_ids[&request.id].clone();
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog::for_test(
+        request,
+        proposal_id,
+        ApprovalDialogButton::ApproveOnce,
+    ))));
+    // Delivers a real `approved_once` decision over the real socket --
+    // the reference adapter's own source (`bin/reference_adapter.rs`)
+    // exits `0` immediately once it reads this, which is the real exit
+    // this test's own wake loop below waits for.
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    let terminal_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .unwrap()
+        .terminal_id
+        .clone()
+        .expect("a launched agent run must have a real terminal id");
+
+    let status_of = |state: &State| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .agent_runs()
+            .iter()
+            .find(|run| run.id == agent_run_id)
+            .unwrap()
+            .status
+    };
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline
+        && matches!(
+            status_of(&state),
+            tekstide_core::domain::AgentRunStatus::Running
+                | tekstide_core::domain::AgentRunStatus::AwaitingApproval
+        )
+    {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    assert_eq!(
+        status_of(&state),
+        tekstide_core::domain::AgentRunStatus::Completed,
+        "the reference adapter exits 0 on ApprovedOnce, which must land the run at Completed \
+         within a few real wakes, through apply_agent_terminal_outcome"
+    );
+    assert!(
+        !state.agent_run_change_baselines.contains_key(&agent_run_id),
+        "the baseline must be consumed once detection has been attempted for this run, whether \
+         or not a real ChangeSet resulted"
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project
+        .change_sets()
+        .iter()
+        .find(|change_set| change_set.agent_run_id.as_ref() == Some(&agent_run_id))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a real ChangeSet strongly associated with this agent run: {:?}",
+                project.change_sets()
+            )
+        });
+    assert_eq!(
+        change_set.association_confidence,
+        tekstide_core::domain::ChangeAssociationConfidence::Strong,
+        "a single, unambiguous run with no other run overlapping its baseline must associate \
+         Strong, not Ambiguous"
+    );
+    assert_eq!(
+        change_set.changed_files,
+        vec![std::path::PathBuf::from("agent-created-file.txt")],
+        "the real file written above must be the one real change detected: {:?}",
+        change_set.changed_files
+    );
+}
+
 /// Response 233: the real navigation-to-dispatch path for
 /// `ProjectOpenSurface::ApprovalHistory`, the same shape
 /// `a_toggle_project_mode_shell_input_dispatches_the_real_app_command`
