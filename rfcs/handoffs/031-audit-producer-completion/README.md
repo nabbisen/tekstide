@@ -1,9 +1,9 @@
 ---
 title: "RFC-031: Audit Producer Completion — Developer Handoff Pack"
-status: "Ready for implementation — accepted by the owner 2026-08-18"
-rfc_file: "../../proposed/031-audit-producer-completion.md"
+status: "Complete 2026-08-19 — RFC-031 closed, moved to rfcs/done/"
+rfc_file: "../../done/031-audit-producer-completion.md"
 target_milestone: "M11"
-created: "2026-08-18"
+created: "2026-08-19"
 ---
 
 # RFC-031: Audit Producer Completion — Developer Handoff Pack

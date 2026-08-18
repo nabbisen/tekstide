@@ -1,9 +1,9 @@
 ---
 title: "RFC-031 task breakdown and PR plan"
-status: "PR-031-A and PR-031-B implemented 2026-08-19, awaiting review -- see acceptance-qa-checklist.md's correction note on this file's own restore-vs-add framing"
-rfc_file: "../../proposed/031-audit-producer-completion.md"
+status: "Complete 2026-08-19 — RFC-031 closed -- see acceptance-qa-checklist.md's correction note on this file's own restore-vs-add framing"
+rfc_file: "../../done/031-audit-producer-completion.md"
 target_milestone: "M11"
-created: "2026-08-18"
+created: "2026-08-19"
 ---
 
 # RFC-031 — task breakdown
@@ -51,6 +51,16 @@ distinction rather than recreating it.
 **The trigger already exists.** `AppState::add_project_from_path` →
 `add_project_session` (`app.rs:161`/`115`), reached when a project is opened from the CLI or
 restored from recent projects.
+
+**Correction, at closeout — the second half of that sentence was wrong.**
+`AppState::restore_recent_projects` builds the passive `recent_projects` list and **never
+calls `add_project_session`**. Only `boot()`'s CLI-argument loop reaches it. So the
+restore-vs-add question below was not a decision between two reachable call sites; there is
+one, and I invented the choice from an unchecked reading. Found by the implementer (request
+263), who settled it by writing
+`restoring_recent_projects_on_boot_writes_no_project_added_record` rather than by taking
+either of our assumptions. Left in place rather than rewritten, per this project's
+evidence-correction convention.
 
 **Decide and state:**
 

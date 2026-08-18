@@ -51,7 +51,7 @@ every row.
 ## What is already assigned, and should not be re-decided here
 
 - **`set_resource_limits`** → RFC-023. The audit named it; every limit this project tuned is
-  fixed forever at its default until configuration exists. **Note added 2026-08-18**: RFC-031's
+  fixed forever at its default until configuration exists. **Note added 2026-08-19**: RFC-031's
   discrimination test now calls it to force a `RunLimitExceeded` refusal. That does not change
   its dormancy — the audit only ever counted production call sites — but **"delete it" is no
   longer free**, and this RFC should not treat it as dead weight.

@@ -1,9 +1,9 @@
 ---
 title: "RFC-031 acceptance and QA checklist"
-status: "PR-031-A and PR-031-B implemented 2026-08-19, awaiting review"
-rfc_file: "../../proposed/031-audit-producer-completion.md"
+status: "Complete 2026-08-19 — RFC-031 closed"
+rfc_file: "../../done/031-audit-producer-completion.md"
 target_milestone: "M11"
-created: "2026-08-18"
+created: "2026-08-19"
 ---
 
 # RFC-031 — acceptance and QA checklist
@@ -92,8 +92,29 @@ than silently rewritten there.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted
+- [x] Accepted
 - [ ] Accepted with required follow-up
 - [ ] Rejected
 
-Reviewer notes:
+Reviewer notes: Accepted 2026-08-19 (requests 263/264/265, responses in
+`.git-exclude/reviewed/`). Suite re-run by the reviewer: **922 passed, 0 failed**.
+
+Both producers landed with their discrimination asserted in both directions, and the
+implementer added schema-boundary ablations nobody asked for — proving the chosen `outcome` is
+the only one RFC-013's validation accepts, which turns a judgement call into a constrained one.
+
+Two corrections went the other way, from the implementer to me:
+
+1. **This pack's task breakdown claimed restoring recent projects reaches
+   `add_project_session`.** It does not. The restore-vs-add "decision" I posed did not exist.
+   Corrected in `task-breakdown-pr-plan.md` at closeout, with the original left visible.
+2. **The enumeration test I required was the wrong shape**, and I pointed at a precedent
+   without saying which unit the property needed. A file-level allow-list is right for
+   "only the reviewed reader reads"; an occurrence count is required for "every call site must
+   also audit." Corrected across two rounds, and the rule is now in `ARCHITECTURE.md` so the
+   next one does not need this exchange.
+
+Known limitation, stated and not claimed away: one `RestrictedMode` reason code cannot
+distinguish which of RFC-004's nine restricted features blocked a launch, and finer
+granularity would be a frozen-schema change. Nothing renders the audit store; recording an
+event does not make it visible.

@@ -1,6 +1,14 @@
 # RFC-031: Audit Producer Completion
 
-Status: **Accepted by the human owner 2026-08-18.** Scoped to `restricted_mode_blocked` and `project_added`; `safe_close_decision` stays blocked on a surface that does not exist.
+Status: **Implemented and closed 2026-08-19.** `restricted_mode_blocked` and `project_added`
+have real producers with real production callers, each proven from the path a user actually
+takes — `Ctrl+Alt+A` on an untrusted project, and opening a project from the CLI. **Does not
+claim** that a user can see any of it: nothing renders the audit store, and recording an event
+does not make it visible. **Does not claim** to say *which* of RFC-004's nine restricted
+features blocked a launch — one `RestrictedMode` reason code carries no such field, and finer
+granularity would be a frozen-schema change. `safe_close_decision` remains unwired and
+unreachable, as scoped. Accepted by the human owner 2026-08-18; see
+[the handoff pack](../handoffs/031-audit-producer-completion/README.md) for the full evidence.
 Target milestone: M11 — the last M11 item
 Date: 2026-08-18
 
@@ -53,9 +61,9 @@ as blocked on a surface that does not exist. Building an audit producer for an e
 cause would reproduce, in the audit layer, exactly the zero-reachable-surface failure this
 project has a standing rule against.
 
-## The security core — corrected 2026-08-18, before any handoff derived from it
+## The security core — corrected 2026-08-19, before any handoff derived from it
 
-**The first draft of this section was wrong and is replaced.** It said the danger was the
+**The first draft of this section (2026-08-18) was wrong and is replaced.** It said the danger was the
 free-text `summary` field, and recommended careful wording. Checked against the code
 afterwards: **`DurableAuditRecordV1` — the record actually written to the store — has no
 free-text field at all.**

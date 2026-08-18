@@ -1,9 +1,9 @@
 ---
 title: "RFC-031 QA evidence"
-status: "PR-031-A and PR-031-B implemented 2026-08-19, awaiting review"
-rfc_file: "../../proposed/031-audit-producer-completion.md"
+status: "Complete 2026-08-19 — RFC-031 closed"
+rfc_file: "../../done/031-audit-producer-completion.md"
 target_milestone: "M11"
-created: "2026-08-18"
+created: "2026-08-19"
 ---
 
 # RFC-031 — QA evidence

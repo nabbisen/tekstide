@@ -1,9 +1,9 @@
 ---
 title: "What the audit store may hold — required reading before RFC-031 code"
-status: "Required reading"
-rfc_file: "../../proposed/031-audit-producer-completion.md"
+status: "Required reading — RFC-031 closed 2026-08-19; still binding for any future producer"
+rfc_file: "../../done/031-audit-producer-completion.md"
 target_milestone: "M11"
-created: "2026-08-18"
+created: "2026-08-19"
 ---
 
 # What the audit store may hold
