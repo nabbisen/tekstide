@@ -148,12 +148,18 @@ fn restoring_recent_projects_on_boot_writes_no_project_added_record() {
 /// `AuditCoordinator`, so the operation and the record cannot live
 /// together the way `grant_project_trust`'s do. That makes auditing a
 /// thing a future caller must remember: an interactive "Add Project"
-/// flow would compile and work with no record and no error. This test
-/// enumerates every production caller of `add_project_from_path` in this
-/// crate and fails by name the moment a second one appears, the same
-/// shape `only_this_module_opens_a_transcript_file_for_reading`
-/// established.
-const FILES_ALLOWED_TO_CALL_ADD_PROJECT_FROM_PATH: &[&str] = &["main.rs"];
+/// flow would compile and work with no record and no error.
+///
+/// Response 264's correction: the guarded property is "every *call* to
+/// `add_project_from_path` writes an audit record," so the unit an
+/// allow-list checks must be the call, not the file -- a per-file
+/// presence check (as `only_this_module_opens_a_transcript_file_for_reading`
+/// correctly uses for *its own*, different property) would let a second,
+/// unreviewed call added inside `main.rs` itself pass silently. This test
+/// instead asserts the exact call count per file: exactly one in `main.rs`,
+/// zero everywhere else -- so a second call anywhere, `main.rs` included,
+/// fails.
+const FILE_WITH_THE_ONE_ALLOWED_CALL_TO_ADD_PROJECT_FROM_PATH: &str = "main.rs";
 
 fn crate_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -171,7 +177,7 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
-fn only_boot_calls_add_project_from_path_so_a_new_caller_cannot_silently_skip_the_audit_record() {
+fn add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else() {
     let mut files = Vec::new();
     collect_rs_files(&crate_src_dir(), &mut files);
 
@@ -188,15 +194,19 @@ fn only_boot_calls_add_project_from_path_so_a_new_caller_cannot_silently_skip_th
         }
 
         let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
-        let calls_add_project_from_path = source.contains(".add_project_from_path(");
-        let is_allowed = FILES_ALLOWED_TO_CALL_ADD_PROJECT_FROM_PATH.contains(&relative.as_str());
+        let call_count = source.matches(".add_project_from_path(").count();
+        let expected_call_count =
+            if relative == FILE_WITH_THE_ONE_ALLOWED_CALL_TO_ADD_PROJECT_FROM_PATH {
+                1
+            } else {
+                0
+            };
 
-        assert!(
-            !calls_add_project_from_path || is_allowed,
-            "{relative} calls add_project_from_path but is not in \
-             FILES_ALLOWED_TO_CALL_ADD_PROJECT_FROM_PATH -- a new call site (for example an \
-             interactive Add Project flow) must wire its own audit record deliberately, either \
-             by reusing open_cli_project_path_and_record or by calling \
+        assert_eq!(
+            call_count, expected_call_count,
+            "{relative} calls add_project_from_path {call_count} time(s), expected \
+             {expected_call_count} -- every call site must wire its own audit record \
+             deliberately, either by reusing open_cli_project_path_and_record or by calling \
              record_project_added_if_possible itself, not add a project with no record"
         );
     }
