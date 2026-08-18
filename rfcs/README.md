@@ -75,7 +75,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 017 A1 | [Readiness-driven terminal I/O](./handoffs/017-amendment-1-readiness-driven-terminal-io/README.md) — RFC-017 Amendment 1 |
 | 018 | [Rendered Paste Protection and Trusted-UI Evidence](./handoffs/018-paste-protection-and-trusted-ui-evidence/README.md) |
 | 019 | [Editor and Explorer Surfaces](./handoffs/019-editor-and-explorer-surfaces/README.md) |
-| 020 | [Diff Review and AgentRun Report Surfaces](./handoffs/020-diff-review-and-agentrun-report/README.md) |
+| 020 | [Diff Review and AgentRun Report Surfaces](./handoffs/020-diff-review-and-agentrun-report/README.md) — **PR-020-B's surface half scheduled 2026-08-18** ([slice handoff](./handoffs/020-diff-review-and-agentrun-report/pr-020-b-report-surface.md)); its reader half landed 2026-08-15 |
 | 024 | [Diff Preview Policy](./handoffs/024-diff-preview-policy/README.md) |
 | — | [Minimal user documentation](./handoffs/minimal-user-documentation.md) — no RFC; pulled forward from RFC-029 to M9 |
 | — | [The reachability audit](./handoffs/reachability-audit.md) — no RFC; scheduled 2026-08-17 |
