@@ -68,24 +68,75 @@ they kept it: a pair only belongs in the list if the role is actually rendered o
 surface. A cross-product would be mostly noise, and noise in an accessibility gate is how
 gates come to be ignored.
 
-## The specific gap this should catch in our own theme
+## The specific gap this should catch — and it is a real failure, measured
 
 Our current list asserts against two backdrops: `background` and `surface_elevated`. **The
-modal dialog's real backdrop is neither.** `modal_dialog_box` draws over the scrim, which
-is itself composited over whatever was behind it — a third effective surface that appears
-nowhere in the pair list.
+modal dialog's real backdrop is neither.** `modal_dialog_box` draws over the scrim
+(`rgba(0,0,0,0.55)`), which is composited over whatever was behind it — including **terminal
+content, which is arbitrary and attacker-influenceable**.
 
-We are safe there today, and safe for the wrong reason: the scrim *darkens*, and our accent
-border is light, so the real ratio is higher than the `accent on background` figure we do
-assert. **We pass by luck rather than by declaration**, and a future palette with a darker
-accent or a lighter scrim would break it silently.
+I previously told the snora team we passed this case "by luck." **That was wrong, and it was
+reasoning rather than measurement.** Measured 2026-08-18:
 
-The declaration must name this case explicitly — the modal border's backdrop is
-`composite_over(scrim, background)` — and `composite_over` already exists in
-`theme/contrast.rs` for exactly this.
+| modal backdrop | border (`accent`) | fill (`surface_elevated`) |
+| --- | --- | --- |
+| scrim over `background` | 6.92:1 | 1.20:1 |
+| scrim over `surface_elevated` | 6.73:1 | 1.17:1 |
+| scrim over white terminal content | 1.66:1 | 3.48:1 |
+| **scrim over ~0.78 grey terminal content** | **2.40:1** | **2.40:1** |
 
-If the exercise turns up other pairs we render but never assert, that is the mechanism
-working. Report them; do not fix colours in this slice unless one actually fails.
+Over dark chrome the border identifies the card and the fill contributes nothing. Over bright
+content the fill identifies it and the border contributes nothing. **At the crossing point —
+terminal content around 0.78 grey — neither reaches 3:1.** The modal card has no boundary
+meeting WCAG 2.1 SC 1.4.11 against that backdrop, and a terminal can be made to display it.
+
+### The methodological point, which matters more than the number
+
+**Sampling the endpoints hides this.** Testing "scrim over `background`" and "scrim over
+white" both pass. The failure lives strictly between them, where the two curves cross. A
+pair list that checks plausible-looking backdrops would have found nothing.
+
+So this pair cannot be asserted as a fixed pair. It must be asserted as a **sweep** over the
+backdrop range, taking the worst case of `max(border, fill)` — the best channel available to
+identify the card — and requiring that worst case to clear 3:1. Anything less is sampling.
+
+The snora team hit the identical trap from the other side and put it well: *"`light`'s
+background is pure white, so the dim over it is the lightest the dim can be — 2.85 was a
+floor, not a sample."* Ours is not a floor at either end; it is a minimum in the middle.
+
+### What does not break
+
+**RFC-018's spoofing evidence is unaffected**, and do not let a fix description blur this.
+That property rests on keystroke suppression under a positive control, and on the scrim
+existing at all as a content-independent tell — not on the card's border contrast. This is
+an accessibility defect with an attacker-influenceable trigger, not a hole in the trusted-UI
+argument.
+
+## Slice B — the fix
+
+Two independent levers, both measured:
+
+| lever | worst case |
+| --- | --- |
+| scrim alpha `0.55` (today) | 2.40:1 |
+| scrim alpha `0.65` | 2.43:1 — **not enough**, the crossing barely moves |
+| **scrim alpha `0.75`** | **3.62:1** |
+| border grey `0.75` in place of `accent` | 3.01:1 |
+| border grey `0.85` in place of `accent` | 3.42:1 |
+
+**Recommended: raise the scrim alpha to `0.75`.** It keeps the accent-coloured border, which
+is a deliberate design signal, and it moves in the same direction as RFC-018's own goal —
+more chrome dimming is a stronger spoofing tell, not a weaker one.
+
+**But check RFC-018's upper constraint before committing to a number.** That RFC argues the
+scrim must stay translucent, because *"an opaque scrim would look identical to any solid
+full-window rectangle a spoofing attempt could also draw."* `0.75` is still visibly
+translucent; verify that claim against the real rendered window rather than trusting the
+arithmetic, and say what you observed. If translucency at `0.75` is not defensible, the
+border lever is there.
+
+This is an **appearance change** — the window goes noticeably darker behind a modal — and it
+must ship as a stated one, not a silent fix.
 
 ## The gate
 
@@ -97,9 +148,14 @@ working. Report them; do not fix colours in this slice unless one actually fails
 - The modal-over-scrim backdrop is declared and asserted via `composite_over`.
 - **Report the before/after pair count.** If it does not go up, either our old list really
   was complete or the declaration is too narrow — say which.
-- If a newly-derived pair fails, **stop and report** rather than adjusting a colour. A
-  second palette change belongs in its own slice with its own red-then-green evidence, the
-  way `border_default` got one.
+- **The scrim backdrop is asserted as a sweep, not as sampled pairs**, and the test is
+  observed failing at ~2.40:1 before Slice B changes anything. Reproduce the crossing point
+  independently rather than trusting the table above.
+- **Slice B is an appearance change**, verified against the real rendered window for
+  translucency, and reported as an appearance change rather than a fix.
+- If a *further* derived pair fails — one not named here — **stop and report** rather than
+  adjusting another colour. A third palette change belongs in its own slice with its own
+  red-then-green evidence.
 
 ## Not in scope
 
