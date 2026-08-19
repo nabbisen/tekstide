@@ -873,6 +873,15 @@ pub enum Message {
     /// larger, harder-to-undo grant is; this is the direct, one-action
     /// path that makes it so.
     RevokeWorkspaceTrust,
+    /// RFC-033 PR-033-B: fired by the `TrustSettings` surface's own
+    /// capture-opt-out control. Unlike the trust action above, this
+    /// control is always present regardless of trust state (declining
+    /// capture is independent of trust), so it cannot reuse Enter --
+    /// see `handle_trust_settings_key`'s own doc comment for why Space
+    /// is the key. No confirmation dialog: declining is the safe
+    /// direction, the same reasoning `RevokeWorkspaceTrust` already
+    /// applies to revocation.
+    ToggleTranscriptCaptureDeclined,
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -1312,6 +1321,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::RevokeWorkspaceTrust => {
             revoke_workspace_trust(state);
+        }
+        Message::ToggleTranscriptCaptureDeclined => {
+            toggle_transcript_capture_declined(state);
         }
     }
     Task::none()
@@ -1907,12 +1919,31 @@ fn attempt_agent_run_launch_with_profile(
 /// route) is the only production caller of the real resolution; every
 /// existing test that does not care about transcript paths keeps
 /// calling that wrapper unchanged.
+///
+/// RFC-033 PR-033-B: this is also the one production caller that reads
+/// the real per-project opt-out (`ProjectSession::transcript_capture_declined`)
+/// and threads it into `capture_enabled` -- `attempt_agent_run_launch_with_profile_state_root_and_capture`'s
+/// own seam, built in PR-033-A specifically so this wiring would be a
+/// value change here, not a restructure. Defaults to capture-on
+/// (`true`) when there is no active project, matching the inner
+/// function's own early-return-on-no-project shape: the value is
+/// discarded before it matters.
 fn attempt_agent_run_launch_with_profile_and_state_root(
     state: &mut State,
     profile: tekstide_core::agent::AiCliProfile,
     state_root: Option<std::path::PathBuf>,
 ) -> Result<(), AgentRunLaunchRefusal> {
-    attempt_agent_run_launch_with_profile_state_root_and_capture(state, profile, state_root, true)
+    let capture_enabled = !state
+        .app_shell
+        .state()
+        .active_project()
+        .is_some_and(|project| project.transcript_capture_declined());
+    attempt_agent_run_launch_with_profile_state_root_and_capture(
+        state,
+        profile,
+        state_root,
+        capture_enabled,
+    )
 }
 
 /// RFC-033 PR-033-A handoff: the third testability split this same
@@ -2327,13 +2358,20 @@ fn handle_approval_history_key(state: &mut State, key: &input::KeyPress) {
 /// all, leaving the entire chain RFC-032 exists to unblock unreachable
 /// for them.
 ///
-/// No highlight index, unlike [`handle_approval_history_key`]'s list --
-/// this surface shows exactly one control at a time (never both: nothing
-/// to grant while already trusted, nothing to revoke while not), so
-/// there is nothing to move a cursor between. Enter activates whichever
-/// one is currently shown, mirroring `trust_settings_view`'s own
-/// `is_trusted` branch exactly, so what Enter does always matches what
-/// is rendered.
+/// **Still no highlight index**, even after RFC-033 PR-033-B added a
+/// second control here -- [`handle_approval_history_key`]'s list needs
+/// one because its rows are interchangeable (any row might be the one a
+/// user wants); this surface's two controls are not interchangeable,
+/// they are two *independent* settings, so a shared cursor would force
+/// navigating past one to reach the other for no reason. Each keeps its
+/// own fixed key instead: Enter still activates whichever trust action
+/// is currently shown (unchanged from before this slice, mirroring
+/// `trust_settings_view`'s own `is_trusted` branch exactly); Space
+/// toggles capture, independent of trust state and always available,
+/// matching `trust_settings_view` always rendering that row regardless
+/// of which trust action is shown. What each key does still always
+/// matches what is rendered -- there are just two keys doing that now
+/// instead of one.
 fn handle_trust_settings_key(state: &mut State, key: &input::KeyPress) {
     let Some(project) = state.app_shell.state().active_project() else {
         return;
@@ -2343,13 +2381,18 @@ fn handle_trust_settings_key(state: &mut State, key: &input::KeyPress) {
     {
         return;
     }
-    if !matches!(key.key, keyboard::Key::Named(keyboard::key::Named::Enter)) {
-        return;
-    }
-    if project.trust_state() == tekstide_core::project::WorkspaceTrust::Trusted {
-        revoke_workspace_trust(state);
-    } else {
-        open_trust_grant_dialog(state);
+    match &key.key {
+        keyboard::Key::Named(keyboard::key::Named::Enter) => {
+            if project.trust_state() == tekstide_core::project::WorkspaceTrust::Trusted {
+                revoke_workspace_trust(state);
+            } else {
+                open_trust_grant_dialog(state);
+            }
+        }
+        keyboard::Key::Named(keyboard::key::Named::Space) => {
+            toggle_transcript_capture_declined(state);
+        }
+        _ => {}
     }
 }
 
@@ -4589,6 +4632,28 @@ fn revoke_workspace_trust(state: &mut State) {
     }
 }
 
+/// RFC-033 PR-033-B: `Message::ToggleTranscriptCaptureDeclined`'s
+/// handler. No audit store, unlike `revoke_workspace_trust` right
+/// above -- `ProjectSession::set_transcript_capture_declined`'s own doc
+/// comment states why: the task breakdown names no audit producer for
+/// this toggle, only for `transcript_purge` (PR-033-D), and this is the
+/// safe direction the same way revocation is.
+fn toggle_transcript_capture_declined(state: &mut State) {
+    let Some(project_id) = state
+        .app_shell
+        .state()
+        .active_project()
+        .map(|project| project.id().clone())
+    else {
+        return;
+    };
+    let Some(project) = state.app_shell.state_mut().project_mut(&project_id) else {
+        return;
+    };
+    let declined = project.transcript_capture_declined();
+    project.set_transcript_capture_declined(!declined);
+}
+
 /// RFC-022 PR-022-E: a compile-time literal symbol for `RiskLevel`, the
 /// same `trusted_symbol` division of labour every other symbol-driven
 /// Fluent lookup in this file uses -- the words live in `en.ftl`'s
@@ -4744,7 +4809,44 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
         );
     }
 
+    // RFC-033 PR-033-B: always rendered, regardless of `is_trusted` --
+    // unlike the trust action above, capture is a per-project
+    // preference independent of trust state, not something that only
+    // makes sense in one of two mutually exclusive states.
+    // `capture_declined_symbol`'s own doc comment explains why this
+    // reuses `trusted_symbol` despite the name.
+    let capture_declined = project.transcript_capture_declined();
+    lines.push(
+        text(state.catalog.get_with_args(
+            "trust-settings-capture-current-state",
+            &CatalogArgs::new().trusted_symbol("state", capture_declined_symbol(capture_declined)),
+        ))
+        .size(state.theme.font_size_body())
+        .into(),
+    );
+    lines.push(
+        button(
+            text(state.catalog.get(if capture_declined {
+                "trust-settings-capture-allow-button"
+            } else {
+                "trust-settings-capture-decline-button"
+            }))
+            .size(state.theme.font_size_body()),
+        )
+        .on_press(Message::ToggleTranscriptCaptureDeclined)
+        .into(),
+    );
+
     column(lines).spacing(12).into()
+}
+
+/// RFC-033 PR-033-B: a compile-time literal symbol for the capture
+/// opt-out, the same `trusted_symbol` division of labour
+/// `trust_state_symbol`/`risk_level_symbol` already use -- the words
+/// live in `en.ftl`'s `trust-settings-capture-current-state` select
+/// expression, not here.
+fn capture_declined_symbol(declined: bool) -> &'static str {
+    if declined { "declined" } else { "enabled" }
 }
 
 /// A compile-time literal symbol for `WorkspaceTrust`, the same

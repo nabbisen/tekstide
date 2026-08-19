@@ -44,6 +44,15 @@ pub struct RecentProject {
     /// trusted before `grant_project_trust` had a production caller.
     #[serde(default)]
     pub trust_state: WorkspaceTrust,
+    /// RFC-033 PR-033-B: the persisted half of `ProjectSession::transcript_capture_declined`,
+    /// the same relationship `trust_state` above has to `ProjectSession::trust_state`
+    /// -- restored on reopen, keyed by `canonical_root_path`, never
+    /// `root_path`. `#[serde(default)]`: a pre-RFC-033 on-disk record
+    /// lacks this field entirely; defaulting to `false` (capture stays
+    /// on) is correct, not merely convenient -- nothing could have
+    /// declined capture before this slice gave it a producer.
+    #[serde(default)]
+    pub transcript_capture_declined: bool,
 }
 
 impl RecentProjectState {
@@ -103,7 +112,18 @@ impl RecentProject {
             last_opened_at: now.clone(),
             last_activity: now,
             trust_state,
+            transcript_capture_declined: false,
         }
+    }
+
+    /// Chainable rather than a new constructor parameter, so the many
+    /// existing `RecentProject::new`/`with_timestamps` call sites that
+    /// do not care about this field (every test that predates PR-033-B)
+    /// need no changes -- the same reasoning `AgentRunLaunchRequest`'s
+    /// own `with_*` builder methods already follow in this codebase.
+    pub fn with_transcript_capture_declined(mut self, declined: bool) -> Self {
+        self.transcript_capture_declined = declined;
+        self
     }
 
     pub fn with_timestamps(
@@ -123,6 +143,7 @@ impl RecentProject {
             last_opened_at,
             last_activity,
             trust_state,
+            transcript_capture_declined: false,
         }
     }
 }

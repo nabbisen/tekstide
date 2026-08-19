@@ -23,11 +23,32 @@ created: "2026-08-19"
 ## Opt-out (PR-033-B)
 
 ```text
-[ ] Reachable from a real key press, not a dispatched command.
-[ ] A run launched with the opt-out set produces NO transcript file, asserted against the
+[x] Reachable from a real key press, not a dispatched command.
+    (pressing_the_capture_toggle_through_a_real_key_sequence_declines_capture,
+    crates/tekstide/src/shell/tests.rs — opens Trust Settings via the real navigation input
+    path, then dispatches a real Space keypress through send_main_area_key)
+[x] A run launched with the opt-out set produces NO transcript file, asserted against the
     documented path shape — not against the request's own field.
-[ ] The setting persists per project across a restart (or does not, with a stated reason).
-[ ] The surface distinguishes "do not record future runs" from "delete what exists".
+    (declining_capture_through_a_real_key_press_produces_no_transcript_file,
+    crates/tekstide/src/shell/tests.rs — declines via a real key press, launches a real
+    Supervised profile, polls TerminalWoke for up to 5s, then asserts the documented
+    state_root/transcripts/<project_id>/<agent_run_id>/transcript.log path does not exist,
+    and that the transcripts directory itself was never created. Ablated: forcing
+    capture_enabled = true unconditionally in
+    attempt_agent_run_launch_with_profile_and_state_root made this test fail with a real
+    transcript file written to that real path; reverted after confirming.)
+[x] The setting persists per project across a restart (or does not, with a stated reason).
+    (declining_transcript_capture_persists_and_survives_a_reopen,
+    crates/tekstide-core/src/app/tests.rs — mirrors
+    revoking_trust_persists_and_survives_a_reopen exactly: declines on a first AppState,
+    takes recent_project_state(), restores it into a fresh second AppState, reopens the
+    same project root, asserts transcript_capture_declined() is still true)
+[x] The surface distinguishes "do not record future runs" from "delete what exists".
+    (crates/tekstide/locales/en.ftl, trust-settings-capture-current-state /
+    trust-settings-capture-decline-button: "for future runs" / "Decline Future Capture" —
+    no wording anywhere in this slice claims or implies deletion of existing transcripts,
+    per what-purge-must-remove.md's requirement; deletion is PR-033-C's responsibility, not
+    introduced here)
 ```
 
 ## Purge (PR-033-C)

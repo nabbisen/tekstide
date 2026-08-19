@@ -70,7 +70,8 @@ impl AppState {
                     Timestamp::from_domain(project.last_opened_at()),
                     Timestamp::from_domain(project.last_activity_at()),
                     project.trust_state(),
-                ),
+                )
+                .with_transcript_capture_declined(project.transcript_capture_declined()),
             );
         }
 
@@ -139,6 +140,8 @@ impl AppState {
         // silently follows a path that no longer resolves to what was
         // trusted.
         let restored_trust = self.recent_trust_by_canonical_root(&canonical_root_path);
+        let restored_capture_declined =
+            self.recent_transcript_capture_declined_by_canonical_root(&canonical_root_path);
         let mut project = ProjectSession::new(
             project_id.clone(),
             display_name,
@@ -147,6 +150,9 @@ impl AppState {
         );
         if let Some(trust_state) = restored_trust {
             project.restore_trust_state(trust_state);
+        }
+        if let Some(declined) = restored_capture_declined {
+            project.restore_transcript_capture_declined(declined);
         }
 
         if self.active_project_id.is_none() {
@@ -535,6 +541,20 @@ impl AppState {
             .map(|restored| restored.recent_project.trust_state)
     }
 
+    /// RFC-033 PR-033-B: the transcript-capture-opt-out analogue of
+    /// `recent_trust_by_canonical_root` -- same key, same match,
+    /// deliberately separate rather than returning both from one lookup,
+    /// for the same reason that function's own doc comment states.
+    fn recent_transcript_capture_declined_by_canonical_root(
+        &self,
+        canonical_root_path: &std::path::Path,
+    ) -> Option<bool> {
+        self.recent_projects
+            .iter()
+            .find(|restored| restored.recent_project.canonical_root_path == canonical_root_path)
+            .map(|restored| restored.recent_project.transcript_capture_declined)
+    }
+
     fn upsert_open_project_recent(&mut self, project_id: ProjectId) {
         let Some(project) = self.project(&project_id) else {
             return;
@@ -547,7 +567,8 @@ impl AppState {
             Timestamp::from_domain(project.last_opened_at()),
             Timestamp::from_domain(project.last_activity_at()),
             project.trust_state(),
-        );
+        )
+        .with_transcript_capture_declined(project.transcript_capture_declined());
 
         if let Some(restored) = self.recent_projects.iter_mut().find(|restored| {
             restored.recent_project.canonical_root_path == recent_project.canonical_root_path

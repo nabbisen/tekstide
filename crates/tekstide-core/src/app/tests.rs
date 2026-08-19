@@ -447,6 +447,45 @@ fn revoking_trust_persists_and_survives_a_reopen() {
     );
 }
 
+/// RFC-033 PR-033-B: mirrors `revoking_trust_persists_and_survives_a_reopen`
+/// exactly, for the transcript-capture opt-out -- a setting that only lasts
+/// until the next restart is not durable, and the acceptance checklist
+/// requires the opt-out to survive one.
+#[test]
+fn declining_transcript_capture_persists_and_survives_a_reopen() {
+    let sandbox = TestSandbox::new("capture-decline-reopen");
+    let project_dir = sandbox.create_dir("project");
+
+    let mut first_session = AppState::default();
+    let outcome = first_session
+        .add_project_from_path(&project_dir)
+        .expect("plain project root should be added");
+    first_session
+        .project_mut(outcome.project_id())
+        .unwrap()
+        .set_transcript_capture_declined(true);
+    let declined_snapshot = first_session.recent_project_state();
+    assert!(
+        declined_snapshot.projects[0].transcript_capture_declined,
+        "test precondition: the decline must actually be in the persisted snapshot"
+    );
+
+    let mut second_session = AppState::default();
+    second_session.restore_recent_projects(declined_snapshot);
+    let reopened = second_session
+        .add_project_from_path(&project_dir)
+        .expect("reopening the same project should validate");
+
+    assert!(
+        second_session
+            .project(reopened.project_id())
+            .unwrap()
+            .transcript_capture_declined(),
+        "a declined-capture project reopened in a fresh session must still be declined -- an \
+         opt-out that only lasts until the next restart is not an opt-out"
+    );
+}
+
 #[test]
 fn active_project_with_missing_close_provider_is_not_closed() {
     let mut state = AppState::default();

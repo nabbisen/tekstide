@@ -82,6 +82,13 @@ pub struct ProjectSession {
     /// `mark_approval_expired`; nothing removes an id from it (an
     /// expired request does not un-expire).
     expired_approval_ids: std::collections::HashSet<ApprovalId>,
+    /// RFC-033 PR-033-B: the per-run transcript-capture opt-out, a
+    /// project-scoped preference the same way `trust_state` is --
+    /// persists across a restart for the same reasoning
+    /// (`restore_transcript_capture_declined`'s own doc comment). `false`
+    /// (capture stays on) by default: RFC-033 does not revisit RFC-011's
+    /// capture-on default, only gives a user a way to decline it.
+    transcript_capture_declined: bool,
 }
 
 impl ProjectSession {
@@ -117,6 +124,7 @@ impl ProjectSession {
             audit_events: Vec::new(),
             selected_agent_run: None,
             expired_approval_ids: std::collections::HashSet::new(),
+            transcript_capture_declined: false,
         }
     }
 
@@ -138,6 +146,16 @@ impl ProjectSession {
 
     pub fn trust_state(&self) -> WorkspaceTrust {
         self.trust_state
+    }
+
+    /// RFC-033 PR-033-B: `true` means this project's future agent runs
+    /// should not have their terminal output captured to a transcript
+    /// file. Declining is per-run scope, not retroactive -- it says
+    /// nothing about transcripts that already exist (`what-purge-must-remove.md`'s
+    /// own required distinction: declining future capture and deleting
+    /// past transcripts are two separate acts).
+    pub fn transcript_capture_declined(&self) -> bool {
+        self.transcript_capture_declined
     }
 
     pub fn created_at(&self) -> &DomainTimestamp {
@@ -292,6 +310,38 @@ impl ProjectSession {
     /// this method itself does not check it, and trusts its caller.
     pub(crate) fn restore_trust_state(&mut self, trust_state: WorkspaceTrust) {
         self.trust_state = trust_state;
+    }
+
+    /// RFC-033 PR-033-B: `pub`, not `pub(crate)`, unlike `grant_trust`/
+    /// `revoke_trust` -- those are gated behind `AuditCoordinator`
+    /// because they must be, so their own crate-private visibility
+    /// forces every real caller through the audit-writing wrapper. This
+    /// toggle has no audit producer at all (the task breakdown names
+    /// none for it, only for `transcript_purge`, PR-033-D), so it is a
+    /// plain, direct mutation the GUI crate calls itself -- the same
+    /// visibility `set_open_surface`/`toggle_mode` already use for
+    /// comparable no-audit project settings. No confirmation dialog, no
+    /// `AuditEvent`: the task breakdown is explicit that declining is
+    /// the safe direction and gating it with the same friction
+    /// `grant_trust`'s dialog uses "gets the asymmetry backwards."
+    /// `AuditEventClass`'s own `ConfigChanged`/`TranscriptPurged`
+    /// variants exist but are never constructed anywhere in this crate
+    /// (confirmed before writing this) -- `ProjectSession.audit_events`
+    /// predates RFC-013's durable store and has no reader left; adding
+    /// to it here would be extending dead code, not auditing an action.
+    pub fn set_transcript_capture_declined(&mut self, declined: bool) {
+        self.transcript_capture_declined = declined;
+    }
+
+    /// The restore-on-reopen half of [`Self::set_transcript_capture_declined`],
+    /// the same shape [`Self::restore_trust_state`] already establishes:
+    /// reconstructing a *previous* preference on reopen is not a new
+    /// decision, so this exists as its own method rather than reusing
+    /// the setter, even though the bodies are identical today -- a
+    /// future setter that gains side effects (an audit call, for
+    /// instance) must not silently gain them here too.
+    pub(crate) fn restore_transcript_capture_declined(&mut self, declined: bool) {
+        self.transcript_capture_declined = declined;
     }
 
     /// RFC-032 PR-032-C, response 245: the audit-store-authoritative

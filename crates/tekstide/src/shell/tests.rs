@@ -2615,6 +2615,49 @@ fn open_trust_settings_shell_input_routes_to_the_trust_settings_surface() {
     assert_eq!(project.mode(), tekstide_core::project::ProjectMode::Content);
 }
 
+/// RFC-033 PR-033-B, the Opt-out checklist's own first requirement:
+/// "Reachable from a real key press, not a dispatched command." Real
+/// `Ctrl+Alt+U` then Space, through `update`'s `Shell` arm -- proves the
+/// route exists before any test relies on it, the same discipline
+/// response 248 required for the trust action itself.
+#[test]
+fn pressing_the_capture_toggle_through_a_real_key_sequence_declines_capture() {
+    let (mut state, project_id) = state_with_a_real_project("capture-toggle-reachable");
+    assert!(
+        !state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .transcript_capture_declined(),
+        "test precondition: capture starts on"
+    );
+
+    press_transcript_capture_toggle(&mut state);
+
+    assert!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .transcript_capture_declined(),
+        "a real Ctrl+Alt+U then Space must decline capture"
+    );
+
+    press_transcript_capture_toggle(&mut state);
+
+    assert!(
+        !state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .transcript_capture_declined(),
+        "pressing it again must toggle back on -- this is a toggle, not a one-way switch"
+    );
+}
+
 fn state_with_a_real_project(label: &str) -> (State, tekstide_core::project::ProjectId) {
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir(label);
@@ -2657,6 +2700,28 @@ fn press_trust_settings_action(state: &mut State) {
     send_main_area_key(
         state,
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+}
+
+/// RFC-033 PR-033-B: the same real-key-sequence discipline
+/// `press_trust_settings_action` establishes, applied to the capture
+/// toggle's own key (Space, not Enter -- `handle_trust_settings_key`'s
+/// own doc comment explains why the two controls do not share one).
+/// Every test below that needs to decline capture through the real
+/// route goes through this rather than dispatching
+/// `Message::ToggleTranscriptCaptureDeclined` directly, for the same
+/// reason response 248 gave for the analogous trust-settings helper.
+fn press_transcript_capture_toggle(state: &mut State) {
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenTrustSettings,
+    );
+    let _ = super::update(
+        state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+    send_main_area_key(
+        state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Space),
     );
 }
 
@@ -4305,17 +4370,7 @@ fn a_real_agent_run_launch_writes_a_real_transcript_with_real_content() {
     )
     .expect("a resolvable Supervised profile should launch the real marker script");
 
-    let (project_id, agent_run_id, terminal_id) = {
-        let project = state.app_shell.state().active_project().unwrap();
-        let run = project.agent_runs().last().unwrap();
-        (
-            project.id().clone(),
-            run.id.clone(),
-            run.terminal_id
-                .clone()
-                .expect("a launched run has a real terminal id"),
-        )
-    };
+    let (project_id, agent_run_id, terminal_id) = capture_evidence_run_identifiers(&state);
 
     let expected_transcript_file = state_root
         .join("transcripts")
@@ -4353,6 +4408,106 @@ fn a_real_agent_run_launch_writes_a_real_transcript_with_real_content() {
         transcript_text.contains("TEKSTIDE-TRANSCRIPT-CAPTURE-EVIDENCE-MARKER"),
         "expected the real script's own printed marker in the transcript -- an empty or \
          unrelated file must not pass this assertion: {transcript_text:?}"
+    );
+}
+
+/// Extracted for RFC-033 PR-033-B's own negative gate to share: both
+/// tests need the same (project id, agent run id, terminal id) triple
+/// after a real launch, to build the documented transcript path and
+/// drive the same real exit-detection poll.
+fn capture_evidence_run_identifiers(
+    state: &State,
+) -> (
+    tekstide_core::project::ProjectId,
+    tekstide_core::domain::AgentRunId,
+    tekstide_core::domain::TerminalId,
+) {
+    let project = state.app_shell.state().active_project().unwrap();
+    let run = project.agent_runs().last().unwrap();
+    (
+        project.id().clone(),
+        run.id.clone(),
+        run.terminal_id
+            .clone()
+            .expect("a launched run has a real terminal id"),
+    )
+}
+
+/// RFC-033 PR-033-B's own required gate, verbatim: "proven from a real
+/// key press through to a run that produces NO transcript file,
+/// asserted against the real path shape ... not against 'the request
+/// said disabled.'" `press_transcript_capture_toggle` reaches the
+/// setting the same real way a user would (`Ctrl+Alt+U` then Space);
+/// the launch itself goes through `attempt_agent_run_launch_with_profile_and_state_root`
+/// -- the same real production wiring `a_real_agent_run_launch_writes_a_real_transcript_with_real_content`
+/// proves *writes* a transcript, now proving the opposite once capture
+/// has been declined through the real route -- not a direct call
+/// naming `capture_enabled: false`, which would only prove the plumbing
+/// in isolation, the gate's own stated distinction.
+#[test]
+fn declining_capture_through_a_real_key_press_produces_no_transcript_file() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("capture-declined-no-transcript");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let state_root = fresh_state_root_dir();
+
+    press_transcript_capture_toggle(&mut state);
+    assert!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .transcript_capture_declined(),
+        "test precondition: the real key press must have declined capture"
+    );
+
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "transcript-marker-script",
+        "Transcript Marker Script (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: transcript_marker_script_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    attempt_agent_run_launch_with_profile_and_state_root(
+        &mut state,
+        profile,
+        Some(state_root.clone()),
+    )
+    .expect("declining capture must not prevent the run itself from launching");
+
+    let (project_id, agent_run_id, terminal_id) = capture_evidence_run_identifiers(&state);
+    let expected_transcript_file = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(agent_run_id.as_str())
+        .join("transcript.log");
+
+    // Same real exit-detection poll as the positive control -- give the
+    // run every chance to have written a transcript, so the eventual
+    // negative assertion is not merely "we didn't wait long enough."
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    assert!(
+        !expected_transcript_file.exists(),
+        "capture was declined through a real key press -- no transcript file may exist at the \
+         documented path shape, got one at {}",
+        expected_transcript_file.display()
+    );
+    assert!(
+        !state_root.join("transcripts").exists(),
+        "not even the transcripts directory should have been created"
     );
 }
 

@@ -424,6 +424,18 @@ trust-settings-current-state = Current state: { $state ->
 trust-settings-grant-button = Grant Trust…
 trust-settings-revoke-button = Revoke Trust
 
+# RFC-033 PR-033-B: "for future runs" is load-bearing, not decoration --
+# what-purge-must-remove.md requires declining future capture to never
+# read as deleting transcripts that already exist. This setting is
+# per-project and persists across a restart, independent of trust
+# state.
+trust-settings-capture-current-state = Transcript capture: { $state ->
+    [declined] Off for future runs
+   *[enabled] On
+}
+trust-settings-capture-decline-button = Decline Future Capture
+trust-settings-capture-allow-button = Allow Future Capture
+
 # PR-020-B: `ProjectOpenSurface::AgentRunDetail`'s own view -- the most
 # recently launched run in the active project (this slice's own answer
 # to "which run is current"), rendering its transcript through
