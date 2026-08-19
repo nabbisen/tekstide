@@ -4,7 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::{
     ConfigStore, ConfigurationDocument, RequiredDestructiveCommandApproval,
-    RequiredMultilinePasteConfirmation, RestrictedDefaultTrust, parse_and_validate,
+    RequiredMultilinePasteConfirmation, RestrictedDefaultTrust, SecuritySensitiveField,
+    parse_and_validate,
 };
 
 struct TestDir {
@@ -481,6 +482,51 @@ fn reload_with_a_file_valid_in_its_first_half_and_invalid_in_its_second_changes_
     );
 }
 
+/// PR-023-D's own required property, end to end through the real
+/// `ConfigStore::reload` a caller actually uses -- not just the pure
+/// `security_sensitive_diff`/`apply_safe_fields` functions in
+/// isolation. One reload changes a safe field and a security-sensitive
+/// one at once; the safe field must take effect, the security-sensitive
+/// one must not, and the outcome must name it as pending.
+#[test]
+fn reload_applies_a_safe_change_but_holds_a_security_sensitive_one_pending() {
+    let temp = TestDir::new("reload-gating");
+    fs::write(temp.config_file(), "[core]\nrecent_projects_limit = 10\n").unwrap();
+    let (mut store, report) = ConfigStore::load(temp.config_file());
+    assert!(report.diagnostic.is_none());
+    assert_eq!(store.current().core.recent_projects_limit, 10);
+    assert!(
+        store
+            .current()
+            .security
+            .restricted_mode_blocks_workspace_prompts
+    );
+
+    fs::write(
+        temp.config_file(),
+        "[core]\nrecent_projects_limit = 20\n\n[security]\nrestricted_mode_blocks_workspace_prompts = false\n",
+    )
+    .unwrap();
+    let outcome = store.reload().unwrap();
+
+    assert_eq!(
+        store.current().core.recent_projects_limit,
+        20,
+        "the safe field must apply"
+    );
+    assert!(
+        store
+            .current()
+            .security
+            .restricted_mode_blocks_workspace_prompts,
+        "the security-sensitive field must NOT apply -- it must still read the old, safe value"
+    );
+    assert_eq!(
+        outcome.pending_security_sensitive_changes,
+        vec![SecuritySensitiveField::RestrictedModeBlocksWorkspacePrompts]
+    );
+}
+
 #[test]
 fn reload_when_the_file_disappears_falls_back_to_defaults() {
     let temp = TestDir::new("reload-disappears");
@@ -489,8 +535,9 @@ fn reload_when_the_file_disappears_falls_back_to_defaults() {
     assert_eq!(store.current().core.recent_projects_limit, 7);
 
     fs::remove_file(temp.config_file()).unwrap();
-    let warnings = store.reload().unwrap();
-    assert!(warnings.is_empty());
+    let outcome = store.reload().unwrap();
+    assert!(outcome.warnings.is_empty());
+    assert!(outcome.pending_security_sensitive_changes.is_empty());
     assert_eq!(store.current(), &ConfigurationDocument::default());
 }
 

@@ -358,11 +358,73 @@ demonstrated for `default_trust`), restored, confirmed green.
 --all-features` run twice: `tekstide-core` 669 passed (was 663 — 6 new tests), `tekstide` 303
 passed (unchanged), `reference_adapter` 0 tests — both runs clean. `git diff --check` clean.
 
+**Response 271, same day: classification accepted, with the reasoning sharpened rather than the
+code changed.** The reviewer corrected the *route* to the restricted-mode-blocks pass, not the
+verdict: disabling a block does give untrusted projects a capability, so it is not "a separate
+axis" from RFC-032 as I'd written — the real reason these three pass is that **no RFC defines a
+deliberate per-use act for them to bypass** (RFC-004 treats them as a policy baseline, not a
+per-project decision, and no GUI route exists to lift one for a single project) — which is
+literally what the confirmation-on-change test asks. The reviewer also flagged
+`redact_secret_like_environment_names`'s pass as *dated, not permanent*: it holds only because no
+environment-variable disclosure flow exists yet, and that flow is on the delivery plan for M12
+alongside this RFC. Written into RFC-023 itself as a trigger to re-test before environment
+redaction ships — no code change required here, but recorded so the next reader inherits the
+reasoning's own expiry date, not just its conclusion.
+
+**Reload gating, 2026-08-19 — the second piece of PR-023-D.** New `crates/tekstide-core/src/config/sensitive.rs`
+(`config/tests/sensitive.rs`), wired into `ConfigStore::reload`.
+
+`SecuritySensitiveField` names the seven fields classified security-sensitive above (the two
+inert settings are deliberately absent — they can never differ between two documents at all, so
+gating a value that cannot change would be a no-op dressed up as a control).
+`security_sensitive_diff` compares two documents and returns every one of the seven that differs.
+`apply_safe_fields` builds the document that actually takes effect on reload: every safe field
+from the freshly parsed candidate, every security-sensitive field held at the current value —
+one complete new `ConfigurationDocument` constructed before ever being assigned, the same
+"compute first, assign once" discipline `parse_and_validate`'s pipeline already uses, extended
+one level. `ConfigStore::reload` now returns `ConfigReloadOutcome { warnings,
+pending_security_sensitive_changes }` instead of a bare warning list — the changes are reported,
+not silently dropped, even though nothing can act on the report yet (no confirmation surface
+exists — M12 UI work, per this RFC's own Non-Goals).
+
+**`SecuritySensitiveDirection` and `direction()`**, RFC-013's frozen `config_policy_increase`/
+`config_policy_reduce` vocabulary applied per field, ahead of building the actual audit producer:
+`true`→`false` on any of the four booleans is `Increase` (weakens); the reverse is `Reduce`. Longer
+transcript retention is `Increase` (keeps more data around, weaker privacy posture); shorter is
+`Reduce`. `AgentProfiles` and `AgentDefaultEnvironmentPolicy` return `None` — not because they
+have no direction, but because this module does not yet define one: RFC-023's own text gives
+per-profile examples ("adding a profile" = increase, "removing one" = reduce) that need per-profile
+diffing PR-023-E's own profile-identity work is better positioned to build; `default_environment_policy`
+has no defined value ordering yet (today's only real value is `"explicit"`). Both stay
+reload-gated regardless — direction is an audit-producer question, gating already holds the field
+back either way. `direction`/`security_sensitive_diff`/`apply_safe_fields` exported from `config.rs`
+as genuine public API (this module is reusable library code, the same as `parse_and_validate`/
+`ConfigStore`), which is also why `direction` doesn't trip `dead_code` despite the audit producer
+that will call it in earnest not existing yet — it's real, tested, callable functionality, not
+scaffolding.
+
+**Tests**: twelve in `config/tests/sensitive.rs` covering the diff (every field, and that a safe
+field never appears in it), the apply (every safe field taken from the candidate, every
+security-sensitive field never taken from it), and direction (both transitions for the four
+booleans and retention days; `None` for the two deferred fields) as pure functions in isolation.
+One integration test, `reload_applies_a_safe_change_but_holds_a_security_sensitive_one_pending`,
+proves the wiring through the real `ConfigStore::reload` a caller actually uses — one reload
+changing both a safe and a security-sensitive field at once, asserting the safe one applies, the
+security-sensitive one doesn't, and the outcome names it as pending. **Ablated for real**:
+bypassed the gating in `reload` (`self.current = outcome.document.clone()`), confirmed the
+integration test fails with the security-sensitive field applied, restored, confirmed green.
+
+**Gates run**, 2026-08-19: `cargo fmt --all --check` clean. `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean (the `direction`/`security_sensitive_diff`/
+`apply_safe_fields` export was needed to clear a `dead_code` warning on `direction`'s first draft,
+before it had any caller). `cargo test --workspace --all-targets --all-features` run twice:
+`tekstide-core` 682 passed (was 669 — 13 new tests), `tekstide` 303 passed (unchanged),
+`reference_adapter` 0 tests — both runs clean. `git diff --check` clean.
+
 **Pending, not yet built**: `RestrictedModeFeature::WorkspaceConfigLoading` and the vocabulary
-update; reload-gating machinery (security-sensitive settings must not apply on
-`ConfigStore::reload` without confirmation — today's `reload` still applies every section
-uniformly); the `sensitive_config_changed` producer via `AuditCoordinator`; the sentinel-privacy
-test (no configuration values in the durable audit store).
+update; the `sensitive_config_changed` producer via `AuditCoordinator` (the `direction()` function
+this round built is the piece that producer will call); the sentinel-privacy test (no
+configuration values in the durable audit store).
 
 ### PR-023-E — AI CLI profiles from configuration
 

@@ -2,7 +2,7 @@
 title: "RFC-023: Configuration System - Acceptance / QA Checklist"
 rfc: "RFC-023"
 rfc_file: "../../proposed/023-configuration-system.md"
-status: "PR-023-B and PR-023-C accepted 2026-08-19; PR-023-D in progress (classification correction landed, awaiting review)"
+status: "PR-023-B and PR-023-C accepted 2026-08-19; PR-023-D in progress (classification accepted, reload gating landed, awaiting review)"
 target_milestone: "M12"
 source_rfc_status: "Proposed"
 created: "2026-07-28"
@@ -102,17 +102,24 @@ updated: "2026-07-28"
 
 ## Security-Sensitive Settings Checklist
 
-- [ ] Classification covers Restricted Mode defaults, approval policy, environment policy, profile definitions, transcript retention, audit location, plugin restrictions. **In progress** —
-      see the correction below for the two settings response 270 asked to check; the remaining
-      candidates (Restricted Mode's three `restricted_mode_blocks_*` fields, environment policy,
-      profile definitions, transcript retention) are not yet classified against reload-gating
-      machinery, which does not exist yet.
-- [ ] Security-sensitive settings never hot-reload without confirmation. Not yet — no reload-gating
-      machinery exists; `ConfigStore::reload` (PR-023-C) still applies every section identically.
-- [ ] Security-sensitive changes produce audit events. Not yet — no producer exists.
-- [ ] Safe settings (theme, fonts, valid keybindings, new-session scrollback, new-task limits) hot-reload. Already true today (`ConfigStore::reload` applies the whole document uniformly); will
-      need re-verifying once security-sensitive gating exists and safe settings must be shown to
-      keep applying *around* it.
+- [x] Classification covers Restricted Mode defaults, approval policy, environment policy, profile
+      definitions, transcript retention, audit location, plugin restrictions. Seven fields
+      classified security-sensitive and reload-gated (`SecuritySensitiveField`, `config/sensitive.rs`):
+      the three `restricted_mode_blocks_*` fields, `redact_secret_like_environment_names`,
+      `agent.default_environment_policy`, `agent.transcript_retention_days`, `agent.profiles`.
+      Approval policy has no remaining configurable surface to classify — its only candidate
+      (`require_approval_for_adapter_destructive_commands`) is inert, not merely gated. Audit
+      location and plugin restrictions have no corresponding field in this model at all (no
+      `[audit]` section exists; plugins don't exist) — nothing to classify, not an omission.
+- [x] Security-sensitive settings never hot-reload without confirmation.
+      (`reload_applies_a_safe_change_but_holds_a_security_sensitive_one_pending`, ablated for
+      real — see Reload Checklist below)
+- [ ] Security-sensitive changes produce audit events. Not yet — no producer exists; the next
+      piece of this slice.
+- [x] Safe settings (theme, fonts, valid keybindings, new-session scrollback, new-task limits) hot-reload.
+      (`applying_safe_fields_takes_every_safe_field_from_the_candidate`, and the same integration
+      test above proves a safe field applies in the same reload a security-sensitive one is held
+      back from)
 
 **Correction landed 2026-08-19, ahead of the rest of this checklist**: response 270 named two
 settings to re-examine against RFC-023's own general test (*"if flipping a setting would grant a
@@ -145,10 +152,23 @@ booleans pending the classifier and reload-gating work below.
 
 ## Reload Checklist
 
-- [ ] Explicit reload entry point exists.
-- [ ] Designed so the M13 watcher can call the same path without policy change.
-- [ ] Failed reload changes nothing and reports diagnostics.
-- [ ] Automatic file-change reload **not** implemented; deferral to M13 recorded.
+- [x] Explicit reload entry point exists. (`ConfigStore::reload`, PR-023-C)
+- [x] Designed so the M13 watcher can call the same path without policy change.
+      (`reload`'s own doc comment states this explicitly)
+- [x] Failed reload changes nothing and reports diagnostics.
+      (`reload_with_a_file_valid_in_its_first_half_and_invalid_in_its_second_changes_nothing`,
+      ablated for real, PR-023-C)
+- [x] Automatic file-change reload **not** implemented; deferral to M13 recorded.
+- [x] **Security-sensitive settings do not apply on reload without confirmation.** New this
+      round: `config/sensitive.rs`'s `security_sensitive_diff`/`apply_safe_fields`, wired into
+      `ConfigStore::reload`. A reload that changes both a safe and a security-sensitive field
+      applies the safe one and leaves the security-sensitive one at its old value, naming it in
+      `ConfigReloadOutcome.pending_security_sensitive_changes`. Ablated for real: bypassed the
+      gating (`self.current = outcome.document.clone()`), confirmed
+      `reload_applies_a_safe_change_but_holds_a_security_sensitive_one_pending` fails with the
+      security-sensitive field applied, restored, confirmed green.
+      (`reload_applies_a_safe_change_but_holds_a_security_sensitive_one_pending`, plus twelve
+      `config/tests/sensitive.rs` unit tests for the diff/apply/direction functions in isolation)
 
 ## Audit Checklist
 

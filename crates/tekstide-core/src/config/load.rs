@@ -9,6 +9,7 @@ use crate::config::model::{
     RequiredDestructiveCommandApproval, RequiredMultilinePasteConfirmation, ResourceSettings,
     RestrictedDefaultTrust, SecuritySettings, TerminalSettings, UiSettings,
 };
+use crate::config::sensitive::{self, SecuritySensitiveField};
 
 /// RFC-023 PR-023-C: a bounded, content-free diagnostic. `message` is
 /// `&'static str` -- a compile-time-fixed string, never `String` --
@@ -659,6 +660,21 @@ pub struct ConfigLoadReport {
     pub diagnostic: Option<ConfigDiagnostic>,
 }
 
+/// PR-023-D: what a successful `reload` produced. `pending_security_sensitive_changes`
+/// names every security-sensitive field the new file asked to change --
+/// none of them took effect; `ConfigStore::current()` still reflects
+/// their old values. Actually confirming and applying one is not built
+/// yet (no confirmation surface exists to drive it -- M12 UI work, per
+/// this RFC's own Non-Goals); this type exists so the *fact* that a
+/// change is pending is observable and testable now, rather than
+/// silently dropped on the floor with nothing to show it was ever
+/// requested.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConfigReloadOutcome {
+    pub warnings: Vec<ConfigWarning>,
+    pub pending_security_sensitive_changes: Vec<SecuritySensitiveField>,
+}
+
 /// RFC-023 PR-023-C: the stateful holder `reload` (this slice) and the
 /// M13 file watcher (deferred) both call through. `current` is mutated
 /// in exactly one place across this whole type (`reload`'s last line),
@@ -704,12 +720,20 @@ impl ConfigStore {
     /// has whatever was active before this call, which is the
     /// atomicity guarantee restated as "there is nothing else it could
     /// be," not merely "nothing else was observed."
-    pub fn reload(&mut self) -> Result<Vec<ConfigWarning>, ConfigDiagnostic> {
+    pub fn reload(&mut self) -> Result<ConfigReloadOutcome, ConfigDiagnostic> {
         let source = match fs::read_to_string(&self.config_file) {
             Ok(source) => source,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // A missing file is not "the file changed to say
+                // something different" -- it is "no user configuration
+                // exists," the same unambiguous case the initial `load`
+                // handles by resetting to compiled defaults outright,
+                // not by holding anything pending.
                 self.current = ConfigurationDocument::default();
-                return Ok(Vec::new());
+                return Ok(ConfigReloadOutcome {
+                    warnings: Vec::new(),
+                    pending_security_sensitive_changes: Vec::new(),
+                });
             }
             Err(_) => {
                 return Err(ConfigDiagnostic {
@@ -723,8 +747,12 @@ impl ConfigStore {
         };
         let outcome =
             parse_and_validate(&source).map_err(|error| error.with_path(&self.config_file))?;
-        self.current = outcome.document;
-        Ok(outcome.warnings)
+        let pending = sensitive::security_sensitive_diff(&self.current, &outcome.document);
+        self.current = sensitive::apply_safe_fields(&self.current, &outcome.document);
+        Ok(ConfigReloadOutcome {
+            warnings: outcome.warnings,
+            pending_security_sensitive_changes: pending,
+        })
     }
 }
 
