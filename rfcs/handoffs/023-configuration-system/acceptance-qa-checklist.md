@@ -74,15 +74,25 @@ updated: "2026-07-28"
       `path`; `malformed_toml_syntax_is_a_parse_error_with_a_location_but_no_content` asserts
       `location`; every diagnostic carries `key`)
 - [x] Diagnostics contain no file contents. `message`/`location`/`path` are all inert by
-      construction; `key` is bounded (response 268: capped to 128 characters, non-printable-ASCII
-      characters — including bidi overrides and control characters — replaced) whenever it
-      carries text the file itself supplied (an unknown key, or a profile name), the way
-      `AuditReference` bounds its own untrusted segment. Ablated for real: temporarily bypassed
-      `bound_key_segment` entirely, confirmed all three of the tests below fail with the
-      hostile/overlong text present, restored, confirmed green.
+      construction; `key` is bounded (response 268/269: length capped to 128 characters via
+      `AuditReference`'s own cap; character shape bounded by the **reviewed**
+      `text_safety::escape_untrusted_chars` — not a second, ad-hoc escaping primitive — so control
+      and bidi-override characters become a visible `<U+XXXX>` marker while every other character,
+      including legitimate non-Latin scripts, passes through unchanged) whenever it carries text
+      the file itself supplied (an unknown key, or a profile name). Truncation happens on the raw
+      input *before* escaping, so a hostile character at the length boundary cannot be split into
+      a mangled marker fragment. Ablated for real, three separate properties: (1) bypassed
+      `bound_key_segment` entirely — all hostile/overlong-text tests failed; (2) bypassed only the
+      escaping step (kept truncation) — the two marker-asserting tests failed while the
+      legitimate-non-Latin-text test still passed, showing that test is not vacuously satisfied by
+      either implementation; (3) swapped the ordering to escape-then-truncate — the boundary test
+      failed with the literal split-marker fragment (`...a<…`) the reviewer described. Restored
+      each time, confirmed green.
       (`an_overlong_unknown_key_is_truncated_in_the_warning`,
       `a_bidi_override_or_control_character_in_an_unknown_key_is_neutralized`,
-      `a_hostile_profile_name_is_bounded_in_diagnostics_but_not_in_the_stored_profile`)
+      `a_hostile_profile_name_is_bounded_in_diagnostics_but_not_in_the_stored_profile`,
+      `legitimate_non_latin_text_in_an_unknown_key_survives_unescaped`,
+      `a_hostile_character_at_the_truncation_boundary_is_never_split`)
 - [x] Diagnostics contain no secret-shaped values. `message` is `&'static str`, inert by
       construction — no code path can put runtime content into it; re-verified directly with a
       real secret-shaped sentinel,

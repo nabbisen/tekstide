@@ -53,32 +53,31 @@ impl ConfigDiagnostic {
 /// `.tekstide/config.toml` can carry a key of arbitrary length or one
 /// containing a bidi override, control characters, or other text shaped
 /// to mislead. `AuditReference::new()` bounds its own untrusted segment
-/// the same way -- capped length, printable-ASCII-only -- and this
-/// mirrors it rather than inventing a second bounding rule.
+/// the same way -- capped length -- and this reuses that number rather
+/// than inventing a second one.
 ///
-/// This bounds **size and character shape only**. It is not the
-/// escaping a future rendering widget will need -- nothing renders a
-/// `ConfigWarning`/`ConfigDiagnostic` today, so that requirement is
-/// stated here rather than left to be silently inherited: any surface
-/// that later displays this text must still run it through
-/// `text_safety::quote_untrusted` (or equivalent) before rendering,
-/// the same as every other untrusted string in this project.
+/// Response 269: length is bounded here; **character shape is bounded
+/// by [`crate::text_safety::escape_untrusted_chars`]**, not a second,
+/// ad-hoc character filter. An earlier draft replaced every non-ASCII
+/// character with `?`, which is a second escaping primitive next to the
+/// one this project already reviewed, and a lossy one: it destroyed
+/// legitimate non-Latin text along with the hostile characters, so a
+/// Polish `ł`/`ą` or a profile named in Japanese or Cyrillic became an
+/// unreadable row of `?`, defeating the diagnostic for exactly the
+/// users the i18n work exists to serve. `escape_untrusted_chars` turns
+/// only control and bidi-override characters into a visible `<U+XXXX>`
+/// marker and passes every other character through unchanged. Truncate
+/// first, escape second -- escaping expands (a marker is several
+/// characters), so truncating the *raw* input to the cap keeps the
+/// escaped result bounded without ever risking cutting a `<U+XXXX>`
+/// marker in half.
 const MAX_UNTRUSTED_KEY_SEGMENT_CHARS: usize = 128;
 
 fn bound_key_segment(raw: &str) -> String {
-    let truncated = raw.chars().count() > MAX_UNTRUSTED_KEY_SEGMENT_CHARS;
-    let mut bounded: String = raw
-        .chars()
-        .take(MAX_UNTRUSTED_KEY_SEGMENT_CHARS)
-        .map(|character| {
-            if character.is_ascii_graphic() || character == ' ' {
-                character
-            } else {
-                '?'
-            }
-        })
-        .collect();
-    if truncated {
+    let truncated_raw: String = raw.chars().take(MAX_UNTRUSTED_KEY_SEGMENT_CHARS).collect();
+    let was_truncated = raw.chars().count() > MAX_UNTRUSTED_KEY_SEGMENT_CHARS;
+    let mut bounded = crate::text_safety::escape_untrusted_chars(&truncated_raw);
+    if was_truncated {
         bounded.push('\u{2026}');
     }
     bounded

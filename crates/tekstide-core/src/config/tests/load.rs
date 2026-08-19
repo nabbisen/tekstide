@@ -171,6 +171,43 @@ fn an_overlong_unknown_key_is_truncated_in_the_warning() {
     assert!(warning_key.ends_with('\u{2026}'));
 }
 
+/// The regression response 269 exists to prevent: an earlier draft of
+/// `bound_key_segment` replaced every non-ASCII character with `?`,
+/// which would turn this key -- containing real Polish and Japanese
+/// text, not a hostile character -- into an unreadable row of `?` and
+/// defeat the diagnostic for exactly the users the i18n work exists to
+/// serve. Legitimate non-Latin text must pass through unchanged.
+#[test]
+fn legitimate_non_latin_text_in_an_unknown_key_survives_unescaped() {
+    let source = "[core]\n\"ustawienia_łąka_設定\" = 1\n";
+    let outcome = parse_and_validate(source).unwrap();
+    assert_eq!(outcome.warnings.len(), 1);
+    assert_eq!(outcome.warnings[0].key, "core.ustawienia_łąka_設定");
+}
+
+/// Response 269's ordering requirement, proven directly rather than by
+/// inspection: truncate the *raw* segment to the 128-character cap
+/// first, escape second. A bidi override placed right at the boundary
+/// (127 safe characters, then the hostile one) must produce either the
+/// **whole** `<U+202E>` marker or none of it at all -- never a mangled
+/// fragment, which is what escaping first and truncating the expanded
+/// result afterward would risk.
+#[test]
+fn a_hostile_character_at_the_truncation_boundary_is_never_split() {
+    let safe_prefix = "a".repeat(127);
+    let source = format!("[core]\n\"{safe_prefix}\u{202E}\" = 1\n");
+    let outcome = parse_and_validate(&source).unwrap();
+    assert_eq!(outcome.warnings.len(), 1);
+    let warning_key = &outcome.warnings[0].key;
+    let after_prefix = warning_key
+        .strip_prefix(&format!("core.{safe_prefix}"))
+        .unwrap();
+    assert!(
+        after_prefix.is_empty() || after_prefix.starts_with("<U+202E>"),
+        "the marker must appear whole or not at all, never a fragment: {warning_key:?}"
+    );
+}
+
 /// The concrete threat response 268 names: a cloned repository's
 /// `.tekstide/config.toml` can carry a key containing a bidi override
 /// or control characters, shaped to mislead whatever eventually renders
@@ -178,6 +215,12 @@ fn an_overlong_unknown_key_is_truncated_in_the_warning() {
 /// as a TOML quoted key with `\uXXXX` escapes -- a bare key cannot
 /// contain either character, so a quoted key is the real shape this
 /// attack would have to take.
+///
+/// Response 269: asserts the real `escape_untrusted_chars` marker
+/// (`<U+202E>`/`<U+0007>`), not mere absence of the raw character -- the
+/// earlier `?`-replacement draft would also have passed an
+/// absence-only assertion, which is why this is stronger than the
+/// version response 268 originally landed.
 #[test]
 fn a_bidi_override_or_control_character_in_an_unknown_key_is_neutralized() {
     let source = "[core]\n\"safe\\u202Eevil\\u0007bell\" = 1\n";
@@ -186,6 +229,11 @@ fn a_bidi_override_or_control_character_in_an_unknown_key_is_neutralized() {
     let warning_key = &outcome.warnings[0].key;
     assert!(!warning_key.contains('\u{202E}'));
     assert!(!warning_key.contains('\u{0007}'));
+    assert!(warning_key.contains("<U+202E>"));
+    assert!(warning_key.contains("<U+0007>"));
+    assert!(warning_key.contains("safe"));
+    assert!(warning_key.contains("evil"));
+    assert!(warning_key.contains("bell"));
 }
 
 /// The profile-table case, response 268's own `section` construction

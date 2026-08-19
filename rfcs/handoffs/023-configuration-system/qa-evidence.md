@@ -242,6 +242,51 @@ Gates re-run after the fix: `cargo fmt --all --check` clean, `cargo clippy --wor
 --all-features` run twice: `tekstide-core` 661 passed (was 658 — 3 new tests), `tekstide` 303
 passed, `reference_adapter` 0 tests — both runs clean, `git diff --check` clean.
 
+**Response 269 follow-up, same day: the character rule was a second escaping primitive.** The
+reviewer found that `bound_key_segment`'s `?`-replacement rule (any non-ASCII-graphic character
+→ `?`) violated RFC-020's own required reading, "do not add a second escaping primitive" —
+`text_safety::escape_untrusted_chars` already exists, is reviewed, and handles both hostile
+cases (control characters, bidi overrides) by turning them into a visible `<U+XXXX>` marker.
+Worse, the `?` rule was lossy in a way that mattered: it replaced *every* non-ASCII character,
+not only hostile ones, so a Polish `ł`/`ą` or a profile named in Japanese or Cyrillic became an
+unreadable row of `?` — defeating the diagnostic for exactly the users the i18n work exists to
+serve, while solving a problem the reviewed primitive already solves without that cost.
+
+Fixed: `bound_key_segment` now truncates the *raw* input to the 128-character cap first, then
+calls `text_safety::escape_untrusted_chars` on the truncated result — truncating before escaping
+because escaping expands (a marker is 8 characters), so truncating the raw input first keeps the
+escaped result bounded without ever risking cutting a `<U+XXXX>` marker in half; escaping first
+and truncating the expanded string afterward would risk exactly that.
+
+Two new tests plus one existing test strengthened: `legitimate_non_latin_text_in_an_unknown_key_survives_unescaped`
+(real Polish and Japanese text in a key survives completely unchanged, not replaced with `?`);
+`a_hostile_character_at_the_truncation_boundary_is_never_split` (a bidi override placed at the
+127th character produces the whole `<U+202E>` marker or none of it, never a fragment);
+`a_bidi_override_or_control_character_in_an_unknown_key_is_neutralized` now asserts the actual
+`<U+202E>`/`<U+0007>` markers are present (positive assertion) alongside the original
+absence-of-raw-character assertion, and that the surrounding legitimate text (`safe`, `evil`,
+`bell`) survives.
+
+**Three separate ablations, each isolating a different property**:
+
+1. Bypassed `bound_key_segment` entirely (returned input unchanged) — all five key-bounding
+   tests failed with the hostile/overlong text present verbatim.
+2. Bypassed only the escaping step, keeping truncation (`bounded = truncated_raw.clone()`) — the
+   two marker-asserting tests failed, while `legitimate_non_latin_text_in_an_unknown_key_survives_unescaped`
+   still passed, confirming that test does not vacuously pass under a broken implementation (it
+   exercises no hostile characters, so it can't distinguish correct escaping from none — the
+   marker tests are what actually prove escaping runs).
+3. Swapped the ordering to escape-then-truncate — `a_hostile_character_at_the_truncation_boundary_is_never_split`
+   failed with the literal fragment `"core.aaa...aaa<…"` (a lone `<` where the marker should have
+   been whole), the exact failure mode the reviewer described.
+
+All three restored, confirmed green after each.
+
+Gates re-run after this fix: `cargo fmt --all --check` clean, `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean, `cargo test --workspace --all-targets
+--all-features` run twice: `tekstide-core` 663 passed (was 661 — 2 new tests), `tekstide` 303
+passed, `reference_adapter` 0 tests — both runs clean, `git diff --check` clean.
+
 ### PR-023-D — Security-sensitive classification, reload, audit
 
 Pending implementation.
