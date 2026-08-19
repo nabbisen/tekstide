@@ -8,8 +8,8 @@ pub use load::{
 };
 pub use model::{
     AgentSettings, ConfigurationDocument, ConfiguredAiCliProfile, CoreSettings, KeybindingSettings,
-    ProjectSettings, ResourceSettings, RestrictedDefaultTrust, SecuritySettings, TerminalSettings,
-    UiSettings,
+    ProjectSettings, RequiredDestructiveCommandApproval, RequiredMultilinePasteConfirmation,
+    ResourceSettings, RestrictedDefaultTrust, SecuritySettings, TerminalSettings, UiSettings,
 };
 pub use path::{
     ConfigPathError, ConfigPathErrorReason, ConfigPathProvider, ConfigPathResolver,

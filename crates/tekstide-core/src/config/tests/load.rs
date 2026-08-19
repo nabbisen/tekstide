@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::{
-    ConfigStore, ConfigurationDocument, RestrictedDefaultTrust, parse_and_validate,
+    ConfigStore, ConfigurationDocument, RequiredDestructiveCommandApproval,
+    RequiredMultilinePasteConfirmation, RestrictedDefaultTrust, parse_and_validate,
 };
 
 struct TestDir {
@@ -71,7 +72,7 @@ toggle_mode = "ctrl+escape"
 [terminal]
 shell_path = "/bin/zsh"
 scrollback_lines = 5000
-multiline_paste_protection = false
+multiline_paste_protection = true
 safe_escape_sequences = false
 
 [projects]
@@ -95,7 +96,7 @@ restricted_mode_blocks_workspace_prompts = false
 restricted_mode_blocks_workspace_lsp = false
 restricted_mode_blocks_workspace_plugins = false
 redact_secret_like_environment_names = false
-require_approval_for_adapter_destructive_commands = false
+require_approval_for_adapter_destructive_commands = true
 
 [resources]
 max_terminal_output_mb_per_session = 32
@@ -117,6 +118,10 @@ max_file_watch_events_per_batch = 500
     );
     assert_eq!(document.terminal.shell_path, "/bin/zsh");
     assert_eq!(document.terminal.scrollback_lines, 5000);
+    assert_eq!(
+        document.terminal.multiline_paste_protection,
+        RequiredMultilinePasteConfirmation
+    );
     assert_eq!(document.projects.default_trust, RestrictedDefaultTrust);
     assert!(!document.projects.restore_recent_projects);
     assert_eq!(document.agent.max_concurrent_global, 4);
@@ -126,6 +131,12 @@ max_file_watch_events_per_batch = 500
     assert_eq!(profile.args, vec!["--project".to_owned(), ".".to_owned()]);
     assert_eq!(profile.adapter, "terminal-native"); // defaulted, not specified above
     assert!(!document.security.restricted_mode_blocks_workspace_prompts);
+    assert_eq!(
+        document
+            .security
+            .require_approval_for_adapter_destructive_commands,
+        RequiredDestructiveCommandApproval
+    );
     assert_eq!(document.resources.max_terminal_output_mb_per_session, 32);
 }
 
@@ -302,6 +313,62 @@ fn default_trust_set_to_restricted_in_the_file_is_accepted() {
     assert_eq!(
         outcome.document.projects.default_trust,
         RestrictedDefaultTrust
+    );
+}
+
+/// Response 270's same carried-forward requirement, applied to the two
+/// settings the review flagged: `multiline_paste_protection = false`
+/// and `require_approval_for_adapter_destructive_commands = false` must
+/// both be explicit, named errors -- not silently coerced to the safe
+/// default, which would leave a user believing they disabled a
+/// protection that was quietly ignored.
+#[test]
+fn multiline_paste_protection_set_to_false_in_the_file_is_an_explicit_named_error() {
+    let error = parse_and_validate("[terminal]\nmultiline_paste_protection = false\n").unwrap_err();
+    assert_eq!(error.key, "terminal.multiline_paste_protection");
+    assert_eq!(
+        error.message,
+        "must be true -- configuration cannot disable this protection"
+    );
+}
+
+#[test]
+fn multiline_paste_protection_set_to_true_in_the_file_is_accepted() {
+    let outcome = parse_and_validate("[terminal]\nmultiline_paste_protection = true\n").unwrap();
+    assert_eq!(
+        outcome.document.terminal.multiline_paste_protection,
+        RequiredMultilinePasteConfirmation
+    );
+}
+
+#[test]
+fn destructive_command_approval_set_to_false_in_the_file_is_an_explicit_named_error() {
+    let error = parse_and_validate(
+        "[security]\nrequire_approval_for_adapter_destructive_commands = false\n",
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.key,
+        "security.require_approval_for_adapter_destructive_commands"
+    );
+    assert_eq!(
+        error.message,
+        "must be true -- configuration cannot disable this protection"
+    );
+}
+
+#[test]
+fn destructive_command_approval_set_to_true_in_the_file_is_accepted() {
+    let outcome = parse_and_validate(
+        "[security]\nrequire_approval_for_adapter_destructive_commands = true\n",
+    )
+    .unwrap();
+    assert_eq!(
+        outcome
+            .document
+            .security
+            .require_approval_for_adapter_destructive_commands,
+        RequiredDestructiveCommandApproval
     );
 }
 

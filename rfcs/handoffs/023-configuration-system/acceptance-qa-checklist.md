@@ -2,7 +2,7 @@
 title: "RFC-023: Configuration System - Acceptance / QA Checklist"
 rfc: "RFC-023"
 rfc_file: "../../proposed/023-configuration-system.md"
-status: "PR-023-B and PR-023-C implemented 2026-08-19, awaiting review; PR-023-D onward pending"
+status: "PR-023-B and PR-023-C accepted 2026-08-19; PR-023-D in progress (classification correction landed, awaiting review)"
 target_milestone: "M12"
 source_rfc_status: "Proposed"
 created: "2026-07-28"
@@ -102,10 +102,28 @@ updated: "2026-07-28"
 
 ## Security-Sensitive Settings Checklist
 
-- [ ] Classification covers Restricted Mode defaults, approval policy, environment policy, profile definitions, transcript retention, audit location, plugin restrictions.
-- [ ] Security-sensitive settings never hot-reload without confirmation.
-- [ ] Security-sensitive changes produce audit events.
-- [ ] Safe settings (theme, fonts, valid keybindings, new-session scrollback, new-task limits) hot-reload.
+- [ ] Classification covers Restricted Mode defaults, approval policy, environment policy, profile definitions, transcript retention, audit location, plugin restrictions. **In progress** —
+      see the correction below for the two settings response 270 asked to check; the remaining
+      candidates (Restricted Mode's three `restricted_mode_blocks_*` fields, environment policy,
+      profile definitions, transcript retention) are not yet classified against reload-gating
+      machinery, which does not exist yet.
+- [ ] Security-sensitive settings never hot-reload without confirmation. Not yet — no reload-gating
+      machinery exists; `ConfigStore::reload` (PR-023-C) still applies every section identically.
+- [ ] Security-sensitive changes produce audit events. Not yet — no producer exists.
+- [ ] Safe settings (theme, fonts, valid keybindings, new-session scrollback, new-task limits) hot-reload. Already true today (`ConfigStore::reload` applies the whole document uniformly); will
+      need re-verifying once security-sensitive gating exists and safe settings must be shown to
+      keep applying *around* it.
+
+**Correction landed 2026-08-19, ahead of the rest of this checklist**: response 270 named two
+settings to re-examine against RFC-023's own general test (*"if flipping a setting would grant a
+capability that another RFC requires a deliberate per-use act for, confirmation-on-change is the
+wrong control"*) rather than reflexively classifying them security-sensitive. Both failed the
+test — see `qa-evidence.md`'s PR-023-D section for the full reasoning — and are now inert by
+construction (`RequiredMultilinePasteConfirmation`, `RequiredDestructiveCommandApproval`), the
+same shape response 266 built for `default_trust`. The three `restricted_mode_blocks_*` fields
+and `redact_secret_like_environment_names` were checked against the same test and found to pass
+it (documented in `config/model.rs`'s own doc comments) — they stay real, security-sensitive
+booleans pending the classifier and reload-gating work below.
 
 ## Workspace Configuration Checklist
 

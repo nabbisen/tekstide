@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use crate::config::ConfigurationDocument;
 use crate::config::model::{
     AgentSettings, ConfiguredAiCliProfile, CoreSettings, KeybindingSettings, ProjectSettings,
-    ResourceSettings, RestrictedDefaultTrust, SecuritySettings, TerminalSettings, UiSettings,
+    RequiredDestructiveCommandApproval, RequiredMultilinePasteConfirmation, ResourceSettings,
+    RestrictedDefaultTrust, SecuritySettings, TerminalSettings, UiSettings,
 };
 
 /// RFC-023 PR-023-C: a bounded, content-free diagnostic. `message` is
@@ -172,6 +173,37 @@ fn take_bool(
     match table.remove(field) {
         None => Ok(default),
         Some(toml::Value::Boolean(value)) => Ok(value),
+        Some(_) => Err(ConfigDiagnostic {
+            path: None,
+            key: format!("{section}.{field}"),
+            location: None,
+            message: "expected a boolean",
+        }),
+    }
+}
+
+/// Response 270: like `default_trust`'s handling, this is deliberately
+/// **not** `take_bool` -- a file that says `false` must be an explicit,
+/// named error rather than silently coerced to the safe default. The
+/// setting's type (`RequiredMultilinePasteConfirmation`/
+/// `RequiredDestructiveCommandApproval`) already makes the dangerous
+/// value unrepresentable in memory; this is the loader-side half of
+/// that same guarantee, refusing a file that asks for it rather than
+/// quietly ignoring the request.
+fn take_required_true(
+    table: &mut toml::Table,
+    section: &str,
+    field: &str,
+) -> Result<(), ConfigDiagnostic> {
+    match table.remove(field) {
+        None => Ok(()),
+        Some(toml::Value::Boolean(true)) => Ok(()),
+        Some(toml::Value::Boolean(false)) => Err(ConfigDiagnostic {
+            path: None,
+            key: format!("{section}.{field}"),
+            location: None,
+            message: "must be true -- configuration cannot disable this protection",
+        }),
         Some(_) => Err(ConfigDiagnostic {
             path: None,
             key: format!("{section}.{field}"),
@@ -367,6 +399,7 @@ fn extract_terminal(
     let Some(mut table) = section_table(root, "terminal")? else {
         return Ok(defaults);
     };
+    take_required_true(&mut table, "terminal", "multiline_paste_protection")?;
     let settings = TerminalSettings {
         shell_path: take_string(&mut table, "terminal", "shell_path", &defaults.shell_path)?,
         scrollback_lines: take_u32(
@@ -375,12 +408,7 @@ fn extract_terminal(
             "scrollback_lines",
             defaults.scrollback_lines,
         )?,
-        multiline_paste_protection: take_bool(
-            &mut table,
-            "terminal",
-            "multiline_paste_protection",
-            defaults.multiline_paste_protection,
-        )?,
+        multiline_paste_protection: RequiredMultilinePasteConfirmation,
         safe_escape_sequences: take_bool(
             &mut table,
             "terminal",
@@ -576,12 +604,14 @@ fn extract_security(
             "redact_secret_like_environment_names",
             defaults.redact_secret_like_environment_names,
         )?,
-        require_approval_for_adapter_destructive_commands: take_bool(
-            &mut table,
-            "security",
-            "require_approval_for_adapter_destructive_commands",
-            defaults.require_approval_for_adapter_destructive_commands,
-        )?,
+        require_approval_for_adapter_destructive_commands: {
+            take_required_true(
+                &mut table,
+                "security",
+                "require_approval_for_adapter_destructive_commands",
+            )?;
+            RequiredDestructiveCommandApproval
+        },
     };
     warn_unconsumed(table, "security", warnings);
     Ok(settings)

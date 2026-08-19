@@ -1,6 +1,8 @@
 # RFC-023: Configuration System - QA Evidence
 
-Status: PR-023-B and PR-023-C implemented 2026-08-19, awaiting review; PR-023-D onward pending
+Status: PR-023-B and PR-023-C implemented and accepted 2026-08-19; PR-023-D in progress
+(classification correction landed, awaiting review; reload gating/audit producer/
+WorkspaceConfigLoading pending); PR-023-E/F not started
 Date opened: 2026-07-28
 Date accepted: Pending
 
@@ -289,7 +291,78 @@ passed, `reference_adapter` 0 tests — both runs clean, `git diff --check` clea
 
 ### PR-023-D — Security-sensitive classification, reload, audit
 
-Pending implementation.
+**In progress, 2026-08-19. First landed piece: classification correction for the two settings
+response 270 asked to check, applied rigorously to the whole `[security]`/`[terminal]` surface
+rather than only the two named.** Reload gating, the `sensitive_config_changed` producer, and
+`RestrictedModeFeature::WorkspaceConfigLoading` are not yet built — see Pending below.
+
+**The test, restated**: RFC-023 now carries a general rule from `default_trust`'s own correction —
+*"if flipping a setting would grant a capability that another RFC requires a deliberate per-use
+act for, confirmation-on-change is the wrong control."* Security-sensitive classification
+(confirm-once-and-audit-the-change) governs *changing* a setting; it does not close a gap where
+the setting, once changed, silently grants something a *different* RFC requires a deliberate act
+for on every future use.
+
+**Applied to every candidate in `[security]` and `[terminal]`, not only the two response 270 named
+(both, plus three more re-examined on my own initiative since the same flaw class could plausibly
+apply):**
+
+- **`terminal.multiline_paste_protection` — fails the test.** RFC-018's multiline paste
+  confirmation modal is unconditional in the real terminal input path today
+  (`shell.rs`'s `TerminalInputDecisionReason::MultilinePasteRequiresConfirmation` — every
+  multiline paste opens it; no existing code path skips it). A config value able to disable that
+  modal would be a *new* bypass this codebase does not have today, for every terminal in every
+  project, forever, with no per-paste confirmation ever again.
+- **`security.require_approval_for_adapter_destructive_commands` — fails the test, the most
+  severe of the group.** `approval::arrival::should_promote_to_modal` unconditionally promotes
+  `High`/`Destructive` risk to the confirmation modal today; there is no existing "skip approval"
+  path. A config value able to disable it would let every future destructive command an AI agent
+  proposes execute with no human in the loop, in any project, ever.
+- **`security.restricted_mode_blocks_workspace_prompts`/`_workspace_lsp`/`_workspace_plugins` —
+  pass the test, stay real booleans.** These redefine Restricted Mode's own default *policy* —
+  RFC-023 §Security-Sensitive Settings explicitly names "Restricted Mode defaults and the
+  blocked-feature policy" as legitimately configurable-with-confirmation. Disabling one does not
+  bypass RFC-032's trust grant, which is a separate axis: a project still needs its own,
+  per-project trust decision for what that trust unlocks, independent of what Restricted Mode
+  blocks for untrusted projects generally.
+- **`security.redact_secret_like_environment_names` — passes the test, stays a real boolean.** No
+  environment-variable disclosure flow exists yet for this to bypass; there is no other RFC's
+  deliberate per-instance act in play.
+
+**Fix, mirroring `default_trust`'s exact shape (response 266/267).** Two new zero-field unit
+structs in `config/model.rs`: `RequiredMultilinePasteConfirmation`,
+`RequiredDestructiveCommandApproval` — each with exactly one possible value, inert by
+construction rather than checked at runtime. `TerminalSettings.multiline_paste_protection` and
+`SecuritySettings.require_approval_for_adapter_destructive_commands` now hold these types instead
+of `bool`. The loader (`config/load.rs`) gained `take_required_true`, mirroring
+`default_trust`'s dedicated match arm: a file that says `false` for either setting is an
+explicit, named `ConfigDiagnostic` ("must be true — configuration cannot disable this
+protection"), not silently coerced to the safe default — the same "silent acceptance is the
+outcome to avoid" reasoning response 267 established.
+
+**Tests**: `multiline_paste_confirmation_has_exactly_one_possible_value`,
+`destructive_command_approval_has_exactly_one_possible_value` (model, mirroring
+`default_trust_has_exactly_one_possible_value` — the type is the enforcement, the test documents
+it); `multiline_paste_protection_set_to_false_in_the_file_is_an_explicit_named_error`,
+`multiline_paste_protection_set_to_true_in_the_file_is_accepted`,
+`destructive_command_approval_set_to_false_in_the_file_is_an_explicit_named_error`,
+`destructive_command_approval_set_to_true_in_the_file_is_accepted` (load). **Ablated for real**:
+widened `take_required_true`'s match to accept `false` too, confirmed both
+`*_set_to_false_in_the_file_is_an_explicit_named_error` tests fail (the file is silently
+accepted, the type stays safe due to inertness — proving these tests guard *silent acceptance of
+the false value*, the same independent-of-the-type-level-safety-net property response 268
+demonstrated for `default_trust`), restored, confirmed green.
+
+**Gates run**, 2026-08-19: `cargo fmt --all --check` clean. `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean. `cargo test --workspace --all-targets
+--all-features` run twice: `tekstide-core` 669 passed (was 663 — 6 new tests), `tekstide` 303
+passed (unchanged), `reference_adapter` 0 tests — both runs clean. `git diff --check` clean.
+
+**Pending, not yet built**: `RestrictedModeFeature::WorkspaceConfigLoading` and the vocabulary
+update; reload-gating machinery (security-sensitive settings must not apply on
+`ConfigStore::reload` without confirmation — today's `reload` still applies every section
+uniformly); the `sensitive_config_changed` producer via `AuditCoordinator`; the sentinel-privacy
+test (no configuration values in the durable audit store).
 
 ### PR-023-E — AI CLI profiles from configuration
 

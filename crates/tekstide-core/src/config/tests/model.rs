@@ -1,4 +1,7 @@
-use crate::config::{ConfigurationDocument, RestrictedDefaultTrust};
+use crate::config::{
+    ConfigurationDocument, RequiredDestructiveCommandApproval, RequiredMultilinePasteConfirmation,
+    RestrictedDefaultTrust,
+};
 use crate::transcript::DEFAULT_TRANSCRIPT_MAX_AGE_DAYS;
 
 /// Model Checklist: "Compiled defaults are total; no `Option` handling
@@ -26,7 +29,10 @@ fn every_section_default_is_the_documented_value() {
 
     assert_eq!(config.terminal.shell_path, "auto");
     assert_eq!(config.terminal.scrollback_lines, 10_000);
-    assert!(config.terminal.multiline_paste_protection);
+    assert_eq!(
+        config.terminal.multiline_paste_protection,
+        RequiredMultilinePasteConfirmation
+    );
     assert!(config.terminal.safe_escape_sequences);
 
     assert_eq!(config.projects.default_trust, RestrictedDefaultTrust);
@@ -43,10 +49,11 @@ fn every_section_default_is_the_documented_value() {
     assert!(config.security.restricted_mode_blocks_workspace_lsp);
     assert!(config.security.restricted_mode_blocks_workspace_plugins);
     assert!(config.security.redact_secret_like_environment_names);
-    assert!(
+    assert_eq!(
         config
             .security
-            .require_approval_for_adapter_destructive_commands
+            .require_approval_for_adapter_destructive_commands,
+        RequiredDestructiveCommandApproval
     );
 
     assert_eq!(config.resources.max_terminal_output_mb_per_session, 64);
@@ -93,5 +100,37 @@ fn default_trust_has_exactly_one_possible_value() {
     assert_eq!(
         ConfigurationDocument::default().projects.default_trust,
         RestrictedDefaultTrust
+    );
+}
+
+/// Response 270: multiline paste confirmation is unconditional in the
+/// real terminal input path today, and a config value able to disable
+/// it would be a new bypass, the same shape `default_trust` failed the
+/// RFC's own test on. Same enforcement, same disclaimer as
+/// `default_trust_has_exactly_one_possible_value`: this documents the
+/// property, the zero-field unit struct in `model.rs` is what enforces
+/// it.
+#[test]
+fn multiline_paste_confirmation_has_exactly_one_possible_value() {
+    assert_eq!(
+        ConfigurationDocument::default()
+            .terminal
+            .multiline_paste_protection,
+        RequiredMultilinePasteConfirmation
+    );
+}
+
+/// Response 270: destructive-command approval is unconditional in the
+/// real approval pipeline today, and a config value able to disable it
+/// would let every future destructive command execute with no human in
+/// the loop, ever, in any project -- the most severe of the three
+/// settings this response corrected.
+#[test]
+fn destructive_command_approval_has_exactly_one_possible_value() {
+    assert_eq!(
+        ConfigurationDocument::default()
+            .security
+            .require_approval_for_adapter_destructive_commands,
+        RequiredDestructiveCommandApproval
     );
 }

@@ -83,11 +83,29 @@ pub struct KeybindingSettings {
     pub overrides: BTreeMap<String, String>,
 }
 
+/// Response 270 / RFC-023's own "general test" (stated after
+/// `default_trust`'s fix): *"if flipping a setting would grant a
+/// capability that another RFC requires a deliberate per-use act for,
+/// confirmation-on-change is the wrong control."* RFC-018's multiline
+/// paste protection is unconditional in the real terminal input path
+/// today (`shell.rs`'s `TerminalInputDecisionReason::MultilinePasteRequiresConfirmation`
+/// -- every multiline paste opens the confirmation modal; there is no
+/// existing code path that skips it). A config value able to disable
+/// that modal would be a *new* bypass this codebase does not have
+/// today, for every terminal in every project, and confirm-on-change
+/// classification would only gate *changing the setting*, not the
+/// silent, unconfirmed pastes it would then permit forever after.
+/// Inert by construction, the same shape as `RestrictedDefaultTrust`:
+/// exactly one possible value, so the vocabulary is reserved without
+/// the dangerous one being representable.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RequiredMultilinePasteConfirmation;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalSettings {
     pub shell_path: String,
     pub scrollback_lines: u32,
-    pub multiline_paste_protection: bool,
+    pub multiline_paste_protection: RequiredMultilinePasteConfirmation,
     pub safe_escape_sequences: bool,
 }
 
@@ -96,7 +114,7 @@ impl Default for TerminalSettings {
         Self {
             shell_path: "auto".to_owned(),
             scrollback_lines: 10_000,
-            multiline_paste_protection: true,
+            multiline_paste_protection: RequiredMultilinePasteConfirmation,
             safe_escape_sequences: true,
         }
     }
@@ -189,23 +207,49 @@ impl Default for AgentSettings {
     }
 }
 
-/// External-design §11.5's illustrative `[security]` shape. All five
-/// default to the tightest (`true`/blocking) setting, matching
-/// "fail closed on every parse, validation, and IO error" -- but none
-/// is read anywhere yet. `RestrictedModeFeature`'s real nine-variant
-/// vocabulary (`security.rs`) is not reused as field names here: these
-/// three `restricted_mode_blocks_*` flags are the external design's
-/// illustrative subset, and deciding whether configuration can
-/// selectively disable individual `RestrictedModeFeature` blocks at all
-/// is a real design question PR-023-D's classification work, not this
-/// typed container, has to settle.
+/// Response 270: destructive-command approval is unconditional in the
+/// real approval pipeline today (`approval::arrival::should_promote_to_modal`
+/// always promotes `High`/`Destructive` risk to the confirmation modal;
+/// there is no existing "skip approval" path). Unlike the three
+/// `restricted_mode_blocks_*` fields below -- which redefine Restricted
+/// Mode's own default *policy*, an axis RFC-023 §Security-Sensitive
+/// Settings already names as legitimately configurable-with-confirmation
+/// -- this would bypass a specific, already-implemented, unscoped
+/// per-command confirmation act: not "this one command, this one time"
+/// but "never ask again, for any destructive command, in any project,
+/// ever." That is the same shape `default_trust` and multiline-paste
+/// confirmation failed the RFC's own test on. Inert by construction.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RequiredDestructiveCommandApproval;
+
+/// External-design §11.5's illustrative `[security]` shape.
+/// `RestrictedModeFeature`'s real nine-variant vocabulary (`security.rs`)
+/// is not reused as field names here: `restricted_mode_blocks_*` are
+/// the external design's illustrative subset, covering three of the
+/// nine.
+///
+/// **Classification (PR-023-D, response 270's general test applied
+/// field by field):** the three `restricted_mode_blocks_*` fields
+/// redefine Restricted Mode's own default policy -- RFC-023 §Security-
+/// Sensitive Settings explicitly names "Restricted Mode defaults and
+/// the blocked-feature policy" as configurable-with-confirmation, and
+/// disabling one does not bypass any *other* RFC's per-instance
+/// deliberate act (RFC-032's trust grant is a separate axis: a project
+/// still needs its own trust decision for what that trust unlocks,
+/// independent of what Restricted Mode blocks by default) -- so these
+/// stay real, security-sensitive booleans.
+/// `redact_secret_like_environment_names` has no corresponding
+/// existing per-instance confirmation to bypass either (no environment-
+/// variable disclosure flow exists yet) -- also stays security-sensitive.
+/// `require_approval_for_adapter_destructive_commands` does not: see
+/// [`RequiredDestructiveCommandApproval`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SecuritySettings {
     pub restricted_mode_blocks_workspace_prompts: bool,
     pub restricted_mode_blocks_workspace_lsp: bool,
     pub restricted_mode_blocks_workspace_plugins: bool,
     pub redact_secret_like_environment_names: bool,
-    pub require_approval_for_adapter_destructive_commands: bool,
+    pub require_approval_for_adapter_destructive_commands: RequiredDestructiveCommandApproval,
 }
 
 impl Default for SecuritySettings {
@@ -215,7 +259,7 @@ impl Default for SecuritySettings {
             restricted_mode_blocks_workspace_lsp: true,
             restricted_mode_blocks_workspace_plugins: true,
             redact_secret_like_environment_names: true,
-            require_approval_for_adapter_destructive_commands: true,
+            require_approval_for_adapter_destructive_commands: RequiredDestructiveCommandApproval,
         }
     }
 }
