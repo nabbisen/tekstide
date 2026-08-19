@@ -1,6 +1,6 @@
 ---
 title: "The leaked-child test flake — cause known since 2026-08-16, still unfixed"
-status: "Implemented 2026-08-20, awaiting review"
+status: "Complete 2026-08-20 — accepted (request 282). Fixes the leak at its source; the socket flake is a separate, still-open defect"
 rfc_file: "none — a test-harness defect, not product behaviour"
 target_milestone: "M12"
 created: "2026-08-19"
@@ -54,13 +54,33 @@ technique applies: enumerate them mechanically rather than by reading.
 - **Measure before and after, the same way.** The existing figure is 3/150 full-suite runs. A
   fix claimed without a comparable post-measurement is a fix claimed on hope — and this
   project's own convention is to measure bounds rather than estimate them.
+
+  **Corrected 2026-08-20, at acceptance: this gate item pointed the measurement at the wrong
+  quantity, and it is mine.** The 3-in-150 baseline measures the *ambient* rate of the
+  `bind_recovers_from_a_stale_socket_file` flake. This fix does not target that. It prevents a
+  **panicking** test from leaking a process — so in a run where nothing panics, which is every
+  passing run, the fix cannot have an effect and a before/after comparison of passing runs
+  measures load, not the change. The implementer ran the comparison anyway (27/200 vs 29/200),
+  recognised it did not discriminate, and said so instead of reporting the number. The property
+  this fix actually has is **cascade reduction**: after any first failure, a leaked process no
+  longer contends with tests still running in the same binary. The direct leak-then-no-leak
+  demonstration proves the mechanism; no run-rate comparison can, without seeding a panic, and
+  nothing is being sized by the number.
 - **Show a leak happening, then not happening.** A test that panics deliberately, with the
   process count observed before and after. Without that, "no leaks" is unfalsifiable.
 - **Do not chase the three symptoms individually.** If the cause is fixed and one still flakes,
   that is a *second* finding and worth having — but fixing the tests rather than the harness
   would hide it.
 
-## What this does not establish
+## What this does not establish — and the one that matters most
+
+**That the socket flake is fixed. It is not.**
+`approval::tests::channel::bind_recovers_from_a_stale_socket_file` has its own, separate cause
+and will still fail intermittently. This handoff's title and the three tests listed above
+invited the reading that repairing the leak repairs the flakes; it does not. The leak makes a
+bad run *worse* by cascading after a first failure — it is not why the first one happens.
+**Anyone reading a green suite after this and concluding the flake is gone will be wrong**, and
+the next disclosure of it is not a regression.
 
 That the product leaks processes. This is a test-harness defect: `Child::drop`'s documented
 behaviour, met by helpers that assume otherwise. Nothing here says a shipped Tekstide leaks
