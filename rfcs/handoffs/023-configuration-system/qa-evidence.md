@@ -421,6 +421,42 @@ before it had any caller). `cargo test --workspace --all-targets --all-features`
 `tekstide-core` 682 passed (was 669 — 13 new tests), `tekstide` 303 passed (unchanged),
 `reference_adapter` 0 tests — both runs clean. `git diff --check` clean.
 
+**Response 272 follow-up, same day: retention policy was split across two sections, only one
+half was gated.** RFC-023 §Security-Sensitive Settings names "transcript retention **and purge**
+policy" as one policy; RFC-011 implements it as four bounds (per-transcript bytes, per-project
+bytes, app-wide bytes, max age). This module's original classification covered only
+`agent.transcript_retention_days` (max age) — `resources.max_agent_transcript_mb_per_run`
+(per-transcript bytes) sat unclassified because the typed model happens to put it under
+`[resources]` rather than `[agent]`. The reviewer's own framing: *"the classification followed
+the section boundary rather than the policy."* Concrete consequence before the fix: raising
+`max_agent_transcript_mb_per_run` from `128` to `4096` would have applied on reload with no
+confirmation, quadrupling-and-more the transcript bytes retained per run.
+
+Fixed: `SecuritySensitiveField::ResourcesMaxAgentTranscriptMbPerRun` added, gated in
+`security_sensitive_diff`/`apply_safe_fields` alongside the other seven fields, with a
+`retention_direction` helper shared with `transcript_retention_days` — larger bound (either days
+or megabytes) is `Increase`, smaller is `Reduce`, same reasoning either way: more data retained
+is the weaker privacy posture. `max_terminal_output_mb_per_session` (live output, not persisted
+beyond the already-covered transcript path) and `max_file_watch_events_per_batch` (a throughput
+bound for the M13 watcher, which doesn't exist yet) stay unclassified, with the reasoning
+recorded in `sensitive.rs`'s own doc comment and asserted directly in
+`a_change_to_a_safe_field_does_not_appear_in_the_diff` — neither is retention policy, so the
+boundary excludes them on purpose.
+
+Two new direction tests (`a_larger_per_run_transcript_byte_limit_is_an_increase`/
+`a_smaller_..._is_a_reduce`); the existing "every field changes" and "never takes a
+security-sensitive field from the candidate" tests extended to include the new field. **Ablated
+for real**: made `apply_safe_fields` read `max_agent_transcript_mb_per_run` from `candidate`
+instead of `current` (the exact bug the reviewer described), confirmed
+`applying_safe_fields_never_takes_a_security_sensitive_field_from_the_candidate` fails with
+`left: 4096, right: 128` — the literal escalation scenario from the review, reproduced and
+caught — restored, confirmed green.
+
+Gates re-run after the fix: `cargo fmt --all --check` clean, `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean, `cargo test --workspace --all-targets
+--all-features` run twice: `tekstide-core` 684 passed (was 682 — 2 new tests), `tekstide` 303
+passed, `reference_adapter` 0 tests — both runs clean, `git diff --check` clean.
+
 **Pending, not yet built**: `RestrictedModeFeature::WorkspaceConfigLoading` and the vocabulary
 update; the `sensitive_config_changed` producer via `AuditCoordinator` (the `direction()` function
 this round built is the piece that producer will call); the sentinel-privacy test (no

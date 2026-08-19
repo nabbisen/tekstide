@@ -24,6 +24,7 @@ fn a_change_to_every_security_sensitive_field_is_named_in_the_diff() {
         .agent
         .profiles
         .insert("codex".to_owned(), test_profile());
+    candidate.resources.max_agent_transcript_mb_per_run = 4096;
 
     let diff = security_sensitive_diff(&current, &candidate);
     for field in [
@@ -34,10 +35,11 @@ fn a_change_to_every_security_sensitive_field_is_named_in_the_diff() {
         SecuritySensitiveField::AgentDefaultEnvironmentPolicy,
         SecuritySensitiveField::AgentTranscriptRetentionDays,
         SecuritySensitiveField::AgentProfiles,
+        SecuritySensitiveField::ResourcesMaxAgentTranscriptMbPerRun,
     ] {
         assert!(diff.contains(&field), "{field:?} missing from {diff:?}");
     }
-    assert_eq!(diff.len(), 7, "no extra fields should appear: {diff:?}");
+    assert_eq!(diff.len(), 8, "no extra fields should appear: {diff:?}");
 }
 
 /// A change to a *non*-security-sensitive field (safe: hot-reloadable)
@@ -50,7 +52,15 @@ fn a_change_to_a_safe_field_does_not_appear_in_the_diff() {
     candidate.ui.theme = "different".to_owned();
     candidate.core.recent_projects_limit = 99;
     candidate.terminal.scrollback_lines = 1;
+    // The other two `[resources]` fields, deliberately excluded per
+    // response 272: `max_terminal_output_mb_per_session` bounds live
+    // terminal output, not persisted except through the transcript path
+    // already covered by `ResourcesMaxAgentTranscriptMbPerRun`;
+    // `max_file_watch_events_per_batch` is a throughput bound for the
+    // M13 watcher, which does not exist yet. Neither is retention
+    // policy.
     candidate.resources.max_terminal_output_mb_per_session = 1;
+    candidate.resources.max_file_watch_events_per_batch = 1;
 
     assert!(security_sensitive_diff(&current, &candidate).is_empty());
 }
@@ -158,6 +168,42 @@ fn a_shorter_transcript_retention_is_a_reduce() {
     );
 }
 
+/// Response 272: the other half of RFC-011's retention policy this
+/// module classifies, split across a different section
+/// (`[resources]`), same direction rule as retention days -- more
+/// bytes kept per run is the weaker privacy posture.
+#[test]
+fn a_larger_per_run_transcript_byte_limit_is_an_increase() {
+    let current = ConfigurationDocument::default();
+    let mut candidate = current.clone();
+    candidate.resources.max_agent_transcript_mb_per_run =
+        current.resources.max_agent_transcript_mb_per_run + 1;
+    assert_eq!(
+        direction(
+            SecuritySensitiveField::ResourcesMaxAgentTranscriptMbPerRun,
+            &current,
+            &candidate
+        ),
+        Some(SecuritySensitiveDirection::Increase)
+    );
+}
+
+#[test]
+fn a_smaller_per_run_transcript_byte_limit_is_a_reduce() {
+    let current = ConfigurationDocument::default();
+    let mut candidate = current.clone();
+    candidate.resources.max_agent_transcript_mb_per_run =
+        current.resources.max_agent_transcript_mb_per_run - 1;
+    assert_eq!(
+        direction(
+            SecuritySensitiveField::ResourcesMaxAgentTranscriptMbPerRun,
+            &current,
+            &candidate
+        ),
+        Some(SecuritySensitiveDirection::Reduce)
+    );
+}
+
 /// Direction is deliberately undefined for these two -- documented as a
 /// real limitation, not a bug, in `sensitive.rs`'s own doc comment.
 #[test]
@@ -217,6 +263,7 @@ fn applying_safe_fields_never_takes_a_security_sensitive_field_from_the_candidat
         .agent
         .profiles
         .insert("codex".to_owned(), test_profile());
+    candidate.resources.max_agent_transcript_mb_per_run = 4096;
 
     let applied = apply_safe_fields(&current, &candidate);
     assert_eq!(
@@ -236,6 +283,10 @@ fn applying_safe_fields_never_takes_a_security_sensitive_field_from_the_candidat
         current.agent.default_environment_policy
     );
     assert_eq!(applied.agent.profiles, current.agent.profiles);
+    assert_eq!(
+        applied.resources.max_agent_transcript_mb_per_run,
+        current.resources.max_agent_transcript_mb_per_run
+    );
 }
 
 fn test_profile() -> crate::config::ConfiguredAiCliProfile {

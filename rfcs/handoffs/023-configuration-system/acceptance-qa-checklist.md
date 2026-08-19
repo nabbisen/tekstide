@@ -103,14 +103,19 @@ updated: "2026-07-28"
 ## Security-Sensitive Settings Checklist
 
 - [x] Classification covers Restricted Mode defaults, approval policy, environment policy, profile
-      definitions, transcript retention, audit location, plugin restrictions. Seven fields
+      definitions, transcript retention, audit location, plugin restrictions. Eight fields
       classified security-sensitive and reload-gated (`SecuritySensitiveField`, `config/sensitive.rs`):
       the three `restricted_mode_blocks_*` fields, `redact_secret_like_environment_names`,
-      `agent.default_environment_policy`, `agent.transcript_retention_days`, `agent.profiles`.
-      Approval policy has no remaining configurable surface to classify — its only candidate
+      `agent.default_environment_policy`, `agent.transcript_retention_days`, `agent.profiles`, and
+      (response 272 — retention policy split across two sections, only one half was classified
+      originally) `resources.max_agent_transcript_mb_per_run`. Approval policy has no remaining
+      configurable surface to classify — its only candidate
       (`require_approval_for_adapter_destructive_commands`) is inert, not merely gated. Audit
       location and plugin restrictions have no corresponding field in this model at all (no
       `[audit]` section exists; plugins don't exist) — nothing to classify, not an omission.
+      `max_terminal_output_mb_per_session`/`max_file_watch_events_per_batch` deliberately excluded
+      — neither is retention policy (live output not persisted beyond the transcript path; a
+      throughput bound for the M13 watcher, which doesn't exist).
 - [x] Security-sensitive settings never hot-reload without confirmation.
       (`reload_applies_a_safe_change_but_holds_a_security_sensitive_one_pending`, ablated for
       real — see Reload Checklist below)

@@ -1,7 +1,9 @@
-use crate::config::model::{AgentSettings, ConfigurationDocument, SecuritySettings};
+use crate::config::model::{
+    AgentSettings, ConfigurationDocument, ResourceSettings, SecuritySettings,
+};
 
 /// RFC-023 §Security-Sensitive Settings, as corrected by this pack's
-/// own review responses (266-271): the fields that "may never be
+/// own review responses (266-272): the fields that "may never be
 /// applied silently, may never be hot-reloaded, and may never come
 /// from workspace configuration." `default_trust`,
 /// `multiline_paste_protection`, and
@@ -21,6 +23,22 @@ use crate::config::model::{AgentSettings, ConfigurationDocument, SecuritySetting
 /// yet (today's only real value is `"explicit"`); reload-gated here
 /// like every other field in this list, but its audit-producer
 /// direction is deferred for the same reason.
+///
+/// Response 272: RFC-023 §Security-Sensitive Settings names "transcript
+/// retention **and purge** policy" as one policy -- RFC-011 implements
+/// it as four bounds (per-transcript bytes, per-project bytes, app-wide
+/// bytes, max age), and this classification originally covered only
+/// `AgentTranscriptRetentionDays` (max age), because the model happens
+/// to put the other three under `[resources]` rather than `[agent]`.
+/// `ResourcesMaxAgentTranscriptMbPerRun` (`max_bytes_per_transcript`)
+/// closes that gap -- classified by the *policy* the RFC names, not by
+/// which section of the typed model the field happens to sit in.
+/// `max_terminal_output_mb_per_session` (live output, not persisted
+/// except through the already-covered transcript path) and
+/// `max_file_watch_events_per_batch` (a throughput bound for the M13
+/// watcher, which does not exist yet) are deliberately **not**
+/// classified -- neither is retention policy, so the boundary excludes
+/// them on purpose, not because nobody looked.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SecuritySensitiveField {
     RestrictedModeBlocksWorkspacePrompts,
@@ -30,6 +48,7 @@ pub enum SecuritySensitiveField {
     AgentDefaultEnvironmentPolicy,
     AgentTranscriptRetentionDays,
     AgentProfiles,
+    ResourcesMaxAgentTranscriptMbPerRun,
 }
 
 /// A change's direction under RFC-013's frozen `config_policy_increase`/
@@ -83,11 +102,16 @@ pub fn security_sensitive_diff(
     if current.agent.profiles != candidate.agent.profiles {
         diff.push(SecuritySensitiveField::AgentProfiles);
     }
+    if current.resources.max_agent_transcript_mb_per_run
+        != candidate.resources.max_agent_transcript_mb_per_run
+    {
+        diff.push(SecuritySensitiveField::ResourcesMaxAgentTranscriptMbPerRun);
+    }
     diff
 }
 
 /// The direction a *specific, already-known-to-differ* field's change
-/// takes, for the five fields with a defined ordering. Returns `None`
+/// takes, for the six fields with a defined ordering. Returns `None`
 /// for `AgentProfiles`/`AgentDefaultEnvironmentPolicy` -- not because
 /// they have no direction, but because this module does not yet define
 /// one for them (see the type's own doc comment). A caller must not
@@ -99,7 +123,6 @@ pub fn direction(
     current: &ConfigurationDocument,
     candidate: &ConfigurationDocument,
 ) -> Option<SecuritySensitiveDirection> {
-    use SecuritySensitiveDirection::{Increase, Reduce};
     match field {
         SecuritySensitiveField::RestrictedModeBlocksWorkspacePrompts => Some(bool_direction(
             current.security.restricted_mode_blocks_workspace_prompts,
@@ -117,24 +140,30 @@ pub fn direction(
             current.security.redact_secret_like_environment_names,
             candidate.security.redact_secret_like_environment_names,
         )),
-        SecuritySensitiveField::AgentTranscriptRetentionDays => {
-            let (was, now) = (
-                current.agent.transcript_retention_days,
-                candidate.agent.transcript_retention_days,
-            );
-            if now == was {
-                None
-            } else if now > was {
-                // Longer retention keeps more data around for longer --
-                // weakens the privacy posture RFC-011/RFC-033 exist to
-                // bound.
-                Some(Increase)
-            } else {
-                Some(Reduce)
-            }
-        }
+        SecuritySensitiveField::AgentTranscriptRetentionDays => Some(retention_direction(
+            current.agent.transcript_retention_days,
+            candidate.agent.transcript_retention_days,
+        )),
+        SecuritySensitiveField::ResourcesMaxAgentTranscriptMbPerRun => Some(retention_direction(
+            current.resources.max_agent_transcript_mb_per_run,
+            candidate.resources.max_agent_transcript_mb_per_run,
+        )),
         SecuritySensitiveField::AgentDefaultEnvironmentPolicy
         | SecuritySensitiveField::AgentProfiles => None,
+    }
+}
+
+/// Shared by both halves of RFC-011's retention policy this module
+/// classifies (max age, max bytes per transcript): a **larger** bound
+/// keeps more data around for longer -- weakens the privacy posture
+/// RFC-011/RFC-033 exist to bound, regardless of which unit (days,
+/// megabytes) the bound is measured in.
+fn retention_direction(was: u32, now: u32) -> SecuritySensitiveDirection {
+    debug_assert_ne!(was, now, "retention_direction called on an unchanged value");
+    if now > was {
+        SecuritySensitiveDirection::Increase
+    } else {
+        SecuritySensitiveDirection::Reduce
     }
 }
 
@@ -200,6 +229,12 @@ pub fn apply_safe_fields(
                 .security
                 .require_approval_for_adapter_destructive_commands,
         },
-        resources: candidate.resources.clone(),
+        resources: ResourceSettings {
+            max_terminal_output_mb_per_session: candidate
+                .resources
+                .max_terminal_output_mb_per_session,
+            max_agent_transcript_mb_per_run: current.resources.max_agent_transcript_mb_per_run,
+            max_file_watch_events_per_batch: candidate.resources.max_file_watch_events_per_batch,
+        },
     }
 }
