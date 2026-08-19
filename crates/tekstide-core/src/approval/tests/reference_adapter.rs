@@ -24,7 +24,7 @@ use crate::audit::{
 };
 use crate::domain::AgentRunId;
 use crate::project::ProjectId;
-use crate::test_support::RealProcessLimiter;
+use crate::test_support::{KillOnDropChild, RealProcessLimiter};
 
 const PROJECT_ROOT: &str = "/home/user/project";
 /// Short by design -- see `unique_temp_dir`'s doc comment.
@@ -143,11 +143,14 @@ fn reference_adapter_binary_path() -> PathBuf {
 /// argument, so a test spawning it directly and the production
 /// `spawn_adapter` (`runtime::terminal::launch`) exercise the identical
 /// contract.
+/// `test-process-leak.md`: returns [`KillOnDropChild`], not a bare
+/// `std::process::Child` -- every real adapter process this module spawns
+/// must be killed and reaped if a test panics before its own cleanup runs.
 fn spawn_adapter(
     socket_path: Option<&PathBuf>,
     token: Option<&str>,
     argv: &[&str],
-) -> std::process::Child {
+) -> KillOnDropChild {
     let mut command = Command::new(reference_adapter_binary_path());
     command
         .args(argv)
@@ -160,12 +163,14 @@ fn spawn_adapter(
     if let Some(socket_path) = socket_path {
         command.env(APPROVAL_SOCKET_PATH_ENV_VAR, socket_path);
     }
-    command
-        .spawn()
-        .expect("reference_adapter binary should spawn")
+    KillOnDropChild::new(
+        command
+            .spawn()
+            .expect("reference_adapter binary should spawn"),
+    )
 }
 
-fn finish(child: std::process::Child) -> Output {
+fn finish(child: KillOnDropChild) -> Output {
     child
         .wait_with_output()
         .expect("reference_adapter binary should exit")

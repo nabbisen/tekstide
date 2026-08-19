@@ -11,7 +11,7 @@ use crate::approval::{
     CommandDecision, DecisionOutcome,
 };
 use crate::domain::AgentRunId;
-use crate::test_support::RealProcessLimiter;
+use crate::test_support::{KillOnDropChild, RealProcessLimiter};
 
 /// Deliberately short: a Unix `sun_path` is bounded (~108 bytes on
 /// Linux), and this module's own socket paths are `<state_root>/approval/
@@ -383,13 +383,18 @@ s.close()
 "#
     );
 
-    let child = Command::new(python)
-        .arg("-c")
-        .arg(&script)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn python3 impersonator process");
+    // test-process-leak.md: KillOnDropChild, not a bare Child -- this real
+    // process must be killed and reaped if this test panics before
+    // wait_with_output below runs.
+    let child = KillOnDropChild::new(
+        Command::new(python)
+            .arg("-c")
+            .arg(&script)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn python3 impersonator process"),
+    );
 
     let result = endpoint.accept_proposal();
     let output = child
