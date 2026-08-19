@@ -376,6 +376,8 @@ For a consolidated list of what else is missing or deferred, see
 
 ## RFCs
 
-Implemented foundation RFCs live under [`rfcs/done/`](rfcs/done/).
+Implemented RFCs live under [`rfcs/done/`](rfcs/done/); RFCs that are accepted and being
+implemented live under [`rfcs/accepted/`](rfcs/accepted/). [`rfcs/README.md`](rfcs/README.md) is
+the index.
 
 Release scope and deferred work are tracked in [`rfcs/done/001-product-scope-mvp-and-non-goals.md`](rfcs/done/001-product-scope-mvp-and-non-goals.md), [`CHANGELOG.md`](CHANGELOG.md), [`ROADMAP.md`](ROADMAP.md), and [`rfcs/future-work.md`](rfcs/future-work.md).

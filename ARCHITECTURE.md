@@ -187,7 +187,7 @@ Terms this codebase uses without explanation. Domain vocabulary first, then hous
 
 | Path | What |
 | --- | --- |
-| `rfcs/proposed/`, `rfcs/done/`, `rfcs/archive/` | RFCs. **The folder is the source of truth for lifecycle state** (RFC-000); the Status field moves in the same commit as the file. |
+| `rfcs/proposed/`, `rfcs/accepted/`, `rfcs/done/`, `rfcs/archive/` | RFCs. **The folder is the source of truth for lifecycle state** (RFC-000, 5-folder variant adopted by RFC-037); the Status field moves in the same commit as the file. `accepted/` is where startable work lives — reviewed, not yet shipped — and an RFC stays there while it is being implemented, because `done/` means shipped. An empty `proposed/` is correct, not a missing folder. |
 | `rfcs/handoffs/<rfc>/` | Implementation instructions, review gates, and recorded evidence per RFC. |
 | `rfcs/future-work.md` | The durable index of deferred work. If something is deferred and only recorded in a closed RFC's evidence, it is lost. |
 | `rfcs/delivery-plan.md` | RFC queue, release-cycle tracking, standing constraints. |

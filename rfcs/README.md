@@ -1,6 +1,11 @@
 # Tekstide RFCs
 
-This directory follows [RFC 000](./done/000-rfc-lifecycle-policy.md).
+This directory follows [RFC-000](./done/000-rfc-lifecycle-policy.md), in the **5-folder
+variant** adopted by [RFC-037](./done/037-five-folder-rfc-lifecycle.md) on 2026-08-19.
+
+RFC-000 is written for the 4-folder variant and describes both; read RFC-037 for which one this
+project uses and why. The folder is the source of truth for an RFC's state — if a file's Status
+field and its folder ever disagree, the folder wins.
 
 ## Baseline Documents
 
