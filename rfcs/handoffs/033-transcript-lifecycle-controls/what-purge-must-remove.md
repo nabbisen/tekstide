@@ -1,7 +1,7 @@
 ---
 title: "What purge must remove — required reading before RFC-033 code"
-status: "Required reading"
-rfc_file: "../../proposed/033-transcript-lifecycle-controls.md"
+status: "Required reading — RFC-033 closed 2026-08-19; still binding for any future purge or retention control"
+rfc_file: "../../done/033-transcript-lifecycle-controls.md"
 target_milestone: "M11"
 created: "2026-08-19"
 ---

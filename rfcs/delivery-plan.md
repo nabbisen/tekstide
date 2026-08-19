@@ -54,7 +54,7 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | **Multi-document** — one active document only | External design §3.4 | M13 |
 | **Syntax highlighting** | `REQ-EDIT-003` | M10 (optional) |
 | **Crash / unsaved buffer recovery** | `REQ-RECOVER-005` | M13 |
-| **Audit producers** — ~~7~~ **3** of 12 families unwired as of 2026-08-19 (`safe_close_decision`, `sensitive_config_changed`, `transcript_purge`) | `REQ-SEC-014` | M12 |
+| **Audit producers** — ~~7~~ ~~3~~ **2** of 12 families unwired as of 2026-08-19 (`safe_close_decision`, `sensitive_config_changed`) | `REQ-SEC-014` | M12 |
 | **LSP** | `REQ-LSP-001`..`005` | Deferred beyond 1.0 by design |
 | **Cross-platform** — Linux only | `NFR-PORT-001`..`003` | M14 |
 | **Documentation** — `docs/` absent | Project rules | **Split 2026-08-01 at the owner's direction ("as soon as possible").** Minimal user documentation → **M9, alongside RFC-017**. Full `docs/src` mdBook by persona stays with RFC-029 (M14). |
@@ -69,8 +69,9 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 **Re-checked against the code 2026-08-19, at RFC-031's closeout — the table below had been
 stale in four rows.** `paste_blocked` and `plain_terminal_observation` were recorded as having
 no producer long after RFC-017/RFC-018 gave them one, and `command_approval` was recorded as
-having no caller after RFC-022 gave it a real audited producer. **Nine of twelve families now
-have producers**; three remain, each owned by an accepted RFC.
+having no caller after RFC-022 gave it a real audited producer. **Ten of twelve families now
+have producers** (nine at RFC-031's closeout, plus `transcript_purge` at RFC-033's the same day);
+two remain, each owned by an accepted RFC.
 
 | Family | Producer | Owner |
 | --- | --- | --- |
@@ -85,7 +86,7 @@ have producers**; three remain, each owned by an accepted RFC.
 | `project_added` | **wired 2026-08-19 (RFC-031)** | — |
 | `safe_close_decision` | none — blocked on a dialog that does not exist | RFC-031 scoped it out; needs a surface first |
 | `sensitive_config_changed` | none | RFC-023 |
-| `transcript_purge` | none | RFC-033 |
+| `transcript_purge` | **wired 2026-08-19 (RFC-033)** — records the purge and its scope, never a path or a byte count | — |
 
 **Nothing renders the audit store.** Every row above describes what is *recorded*, not what any
 user can see; there is no view of it at all.
@@ -107,6 +108,7 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | 022 | Adapter Spawn and the Command Approval Surface | M11 | 015, 021 | no | **Implemented and closed 2026-08-17.** Moved to `done/`. Retitled from the reserved "Security Dialogs and Audit Producer Completion" — the dialog and the spawn pathway proved inseparable (an adapter whose requests nobody can answer is useless or dangerous), and audit-producer completion split out to RFC-031. **Not reachable by any real user**: no shipping AI CLI speaks RFC-021's protocol, so `Managed` is exercisable only by the reference adapter, a test artifact |
 | 032 | Workspace Trust Granting | M11 | 004, 013, 022 | no | **Implemented and closed 2026-08-17.** Moved to `done/`. Authored just-in-time 2026-08-17 after RFC-022's closeout found that `grant_project_trust` had no production caller, so every project was permanently `Restricted` and RFC-022's whole agent-run chain was unreachable behind it. **Added to this queue retroactively at Final Acceptance** — it was authored, implemented and closed without ever appearing here, the same bookkeeping gap that produced the RFC-024/030 collision |
 | 031 | Audit Producer Completion | M11 | 013, 004 | partly | **Implemented and closed 2026-08-19.** Moved to `done/`. `restricted_mode_blocked` and `project_added` wired, each proven from a real user path; `safe_close_decision` scoped out, blocked on a dialog that does not exist. **The last M11 item** |
+| 033 | Transcript Lifecycle Controls | M11 | 011, 013 | no | **Implemented and closed 2026-08-19.** Moved to `done/`. Per-project capture opt-out, purge and retained-bytes visibility. Closes the limitation `0.11.1` published on a privacy claim |
 | 023 | Configuration System | M12 | — | **yes** | **Authored — ready for implementation.** Headless: shipping it alone would repeat the zero-reachable-surface failure `0.7.0` nearly hit. **Carries two now-named gaps**: `OpenTrustSettings` aside, every navigation action with `KeybindingStatus::Configurable` and a `None` binding is *dead*, not pending — `OpenApprovalHistory` and `SwitchActiveProject` among them (see `future-work.md`) |
 | 024 | Diff Preview Policy | M10 | 012 | **yes** | **Implemented and closed 2026-08-11** (`0.7.0`). Authored out of order as RFC-020's content-access prerequisite; carried RFC-012 Amendment 1, a breaking change |
 | 030 | Git Integration | M12 | — | **yes** | Queued (parallel-ready). **Renumbered from 024** 2026-08-12: this row still claimed a number RFC-024 (Diff Preview Policy) had taken on 2026-08-11, so an M12 item was left unaddressable. 025-029 could not absorb the shift — RFC-029 is referenced from closed RFCs (013, 016) and from `handoffs/minimal-user-documentation.md`, and closed documents are not edited to match a later state |

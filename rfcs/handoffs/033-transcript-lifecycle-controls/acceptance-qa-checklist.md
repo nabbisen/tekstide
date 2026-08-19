@@ -1,7 +1,7 @@
 ---
 title: "RFC-033 acceptance and QA checklist"
-status: "Open"
-rfc_file: "../../proposed/033-transcript-lifecycle-controls.md"
+status: "Final Acceptance recorded 2026-08-19"
+rfc_file: "../../done/033-transcript-lifecycle-controls.md"
 target_milestone: "M11"
 created: "2026-08-19"
 ---
@@ -146,8 +146,36 @@ created: "2026-08-19"
 
 ## Final Acceptance Decision
 
-- [ ] Accepted
+- [x] Accepted
 - [ ] Accepted with required follow-up
 - [ ] Rejected
 
-Reviewer notes:
+Reviewer notes: Accepted 2026-08-19 (requests 276-280). Suite re-run by the reviewer:
+**1006 passed, 0 failed**.
+
+**RFC-033 closes the limitation `0.11.1` published on a privacy claim.** A user can decline
+capture per project, delete what exists, and see what is retained — all from the Trust Settings
+surface, all proven from real key presses.
+
+Four things this RFC produced beyond its own scope:
+
+1. **PR-033-A took up a fix that had sat unused for three weeks.** `approval_state_root` was
+   added by RFC-022 response 216 precisely so capture and approval would not be coupled; the
+   GUI never called it. Proven at the production launch path, where a second model-layer test
+   would have passed the whole time.
+2. **PR-033-C caught a defect in this pack's own instruction.** The handoff said to wire
+   `transcript_local_data_summary`; doing so would have put "0 bytes" in a purge confirmation
+   for a real transcript, because the field it sums is set only by dormant recorders. The
+   implementer raised it instead of implementing it. Recorded in RFC-036: a tracked counter is
+   only ever correct prospectively, so wiring those recorders would not have fixed it either.
+3. **PR-033-D's first version refused to delete when the audit store would not open** — a
+   silent no-op after a user confirmed "cannot be undone." Corrected: the deletion is what the
+   user asked for, the record is best-effort, and the two failure modes of one subsystem are now
+   handled consistently.
+4. **The third flake disclosure in the approval/socket area** prompted scheduling the known
+   cause (`handoffs/test-process-leak.md`), diagnosed 2026-08-16 and never fixed.
+
+Known limitations, stated and not claimed away: purge leaves a tombstone and an audit record, so
+it does not remove every trace; declining capture does not delete what exists, and the surface
+says so; `revoke_workspace_trust` still refuses silently on the same store-open failure, milder
+because trust state is visible on the same surface, recorded rather than fixed here.

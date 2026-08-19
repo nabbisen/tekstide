@@ -1,7 +1,7 @@
 ---
 title: "RFC-033 task breakdown and PR plan"
-status: "Ready for implementation"
-rfc_file: "../../proposed/033-transcript-lifecycle-controls.md"
+status: "Complete 2026-08-19"
+rfc_file: "../../done/033-transcript-lifecycle-controls.md"
 target_milestone: "M11"
 created: "2026-08-19"
 ---

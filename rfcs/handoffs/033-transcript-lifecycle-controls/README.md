@@ -1,7 +1,7 @@
 ---
 title: "RFC-033: Transcript Lifecycle Controls — Developer Handoff Pack"
-status: "Ready for implementation — accepted by the owner 2026-08-18"
-rfc_file: "../../proposed/033-transcript-lifecycle-controls.md"
+status: "Complete 2026-08-19 — RFC-033 closed, moved to rfcs/done/"
+rfc_file: "../../done/033-transcript-lifecycle-controls.md"
 target_milestone: "M11"
 created: "2026-08-19"
 ---

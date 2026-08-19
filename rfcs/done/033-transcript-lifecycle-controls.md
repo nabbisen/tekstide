@@ -1,6 +1,15 @@
 # RFC-033: Transcript Lifecycle Controls
 
-Status: **Accepted by the human owner 2026-08-18.** Closes a limitation `0.11.1` had to publish on a privacy claim.
+Status: **Implemented and closed 2026-08-19.** A user can decline transcript capture per
+project, purge what exists, and see what is retained — all from the Trust Settings surface
+(`Ctrl+Alt+U`), all proven from real key presses. The sentence `0.11.1` had to publish — *"there
+is no in-app way to turn capture off or to purge it"* — is gone from both READMEs. **Does not
+claim** that purge removes every trace: a tombstone remains, and the purge itself is now audited,
+which is a trade stated in the closeout rather than discovered. **Does not claim** that declining
+capture deletes anything already written; those are two acts and the surface keeps them
+distinguishable. Accepted by the human owner 2026-08-18; see
+[the handoff pack](../handoffs/033-transcript-lifecycle-controls/README.md) for the full
+evidence. Original acceptance note: closes a limitation `0.11.1` had to publish on a privacy claim.
 Target milestone: M11
 Date: 2026-08-18
 

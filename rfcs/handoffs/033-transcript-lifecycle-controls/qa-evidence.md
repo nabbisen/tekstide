@@ -1,7 +1,7 @@
 ---
 title: "RFC-033 QA evidence"
-status: "PR-033-A/B/C accepted 2026-08-19; PR-033-D implemented 2026-08-19, awaiting review"
-rfc_file: "../../proposed/033-transcript-lifecycle-controls.md"
+status: "Complete 2026-08-19 — PR-033-A through D, accepted (requests 276-280)"
+rfc_file: "../../done/033-transcript-lifecycle-controls.md"
 target_milestone: "M11"
 created: "2026-08-19"
 ---
