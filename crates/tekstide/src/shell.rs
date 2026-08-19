@@ -4795,40 +4795,62 @@ fn open_transcript_purge_dialog(state: &mut State) {
     }));
 }
 
-/// RFC-033 PR-033-D: `ModalActivate`'s handler when a purge-confirmation
-/// dialog's focus is on `Purge` -- the real deletion, through
-/// `AuditCoordinator::purge_project_transcripts`'s first GUI caller
-/// (PR-033-C wired the model method directly, with no audit call, since
-/// the task breakdown assigned the `transcript_purge` record to this
-/// slice specifically; this replaces that direct call). Re-resolves the
+/// RFC-033 PR-033-D, response 279's required fix: `ModalActivate`'s
+/// handler when a purge-confirmation dialog's focus is on `Purge` --
+/// the real deletion, through `AuditCoordinator::purge_project_transcripts`
+/// when the audit store is available, and through
+/// `ProjectSession::purge_project_transcripts` directly when it is not
+/// (PR-033-C's own original wiring, for that one path). Re-resolves the
 /// project by `modal.project_id` rather than assuming the active
 /// project is unchanged, the same defensive-lookup shape
 /// `apply_workspace_trust_grant`/`revoke_workspace_trust` already use.
 ///
-/// **Two different failure modes, two different behaviours.** If
-/// `open_real_audit_store` itself fails, this is a silent no-op --
-/// nothing is purged -- the same "cannot record either way, leave state
-/// as it was" precedent `revoke_workspace_trust` already establishes,
-/// and arguably more load-bearing here: purging without any chance of
-/// a durable record is a worse outcome than not purging yet, since
-/// `what-purge-must-remove.md`'s whole point is that a privacy action
-/// should leave a trace, and the confirmation already told the user
-/// this cannot be undone -- silently proceeding unaudited would make
-/// that promise weaker than what it said. Once the store *is* open,
-/// though, `AuditCoordinator::purge_project_transcripts` is best-effort
-/// (`append_observation`) for the one record it writes: the deletion
-/// itself has already happened on the real filesystem by the time that
-/// record is built, so a transient write failure for the record alone
-/// cannot and does not roll the deletion back.
+/// **The purge itself is never gated on the audit store opening.**
+/// Response 279 corrected an earlier version of this function that
+/// treated `open_real_audit_store` failing as a silent no-op for the
+/// whole action, mirroring `revoke_workspace_trust`'s own precedent.
+/// That precedent does not transfer: "this cannot be undone" (the
+/// confirmation's own wording) describes the *deletion*, not the
+/// record, so refusing to delete when the record can't be written does
+/// not weaken that promise -- it leaves it unfulfilled, silently, after
+/// the user deliberately moved focus off `Cancel` and activated twice.
+/// There is also no accountability property being protected here the
+/// way there might be for a third-party-facing record: these are the
+/// user's own local transcripts and the audit store is local too --
+/// anyone able to prevent the store opening could delete the
+/// transcripts directly anyway, so refusing the deletion buys nothing
+/// and costs the user the thing they asked for. `revoke_workspace_trust`'s
+/// own refusal is milder for a reason that does not apply here: trust
+/// state is rendered on the same surface, so a silently-failed revoke
+/// at least leaves a visible, contradicting "Trusted" label -- deleted
+/// bytes have no equivalent tell either way. Not this function's place
+/// to fix that one; recorded here only so the asymmetry is not mistaken
+/// for a rule.
+///
+/// **Recording the purge, once the store is open, stays best-effort**
+/// (`AuditCoordinator::purge_project_transcripts`'s own
+/// `append_observation`) for the same reason as before: the deletion
+/// has already happened on the real filesystem by the time the record
+/// is built, so a transient write failure for the record alone cannot
+/// and does not roll the deletion back. This function now treats
+/// "store did not open" and "store opened but the one write failed" as
+/// the same case from the deletion's point of view -- delete regardless,
+/// record only if and however well the store currently allows.
 fn apply_transcript_purge(state: &mut State, modal: &TranscriptPurgeModal) {
-    let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
-        return;
-    };
-    let mut audit_health = tekstide_core::audit::AuditHealth::default();
-    let mut audit =
-        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health);
-    if let Some(project) = state.app_shell.state_mut().project_mut(&modal.project_id) {
-        let _ = audit.purge_project_transcripts(project);
+    match open_real_audit_store(&state.app_shell) {
+        Some(mut audit_store) => {
+            let mut audit_health = tekstide_core::audit::AuditHealth::default();
+            let mut audit =
+                tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health);
+            if let Some(project) = state.app_shell.state_mut().project_mut(&modal.project_id) {
+                let _ = audit.purge_project_transcripts(project);
+            }
+        }
+        None => {
+            if let Some(project) = state.app_shell.state_mut().project_mut(&modal.project_id) {
+                let _ = project.purge_project_transcripts();
+            }
+        }
     }
 }
 

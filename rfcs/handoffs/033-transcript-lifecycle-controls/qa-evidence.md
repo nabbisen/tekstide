@@ -251,12 +251,25 @@ anything. This slice only ever purges an entire project's transcripts (PR-033-C'
 decision), so `subject_ref` is the fixed literal `"project"` — a compile-time constant, naming
 the purge's breadth without naming which transcript, never a path.
 
-**Two failure modes, kept distinct in `apply_transcript_purge`** (`crates/tekstide/src/shell.rs`):
-if `open_real_audit_store` itself fails, the purge is a silent no-op — nothing is deleted — the
-same precedent `revoke_workspace_trust` already establishes, and more load-bearing here: purging
-without any chance of a durable record would make the confirmation's own "this cannot be undone"
-promise weaker than what it said. Once the store is open, the one record it writes is
-best-effort — the deletion has already happened by then, so a transient write failure for the
+**`apply_transcript_purge` (`crates/tekstide/src/shell.rs`) never gates the deletion on the
+audit store opening.** The version reviewed in request 279 did — mirroring
+`revoke_workspace_trust`'s own precedent of a silent no-op when `open_real_audit_store` fails —
+and response 279 required a fix: "this cannot be undone" (the confirmation's own wording)
+describes the *deletion*, not the record, so refusing to delete when the record can't be written
+does not weaken that promise, it leaves it unfulfilled, silently, after the user deliberately
+moved focus off `Cancel` and activated. There is also no accountability property being protected
+here the way there might be for a third-party-facing record: these are the user's own local
+transcripts and the audit store is local too, so refusing the deletion buys nothing.
+`revoke_workspace_trust`'s own refusal is milder for a reason that does not transfer: trust
+state is rendered on the same surface, so a silently-failed revoke at least leaves a visible,
+contradicting "Trusted" label — deleted bytes have no equivalent tell. Not this slice's place to
+fix that one; noted so the asymmetry is not mistaken for a rule to reapply elsewhere.
+
+Fixed: the purge now runs through `AuditCoordinator::purge_project_transcripts` when the store
+opens, and through `ProjectSession::purge_project_transcripts` directly when it does not — the
+deletion happens either way, and only the *recording* of it depends on the store being
+available. Once the store is open, that one record write stays best-effort, for the same reason
+as before: the deletion has already happened by then, so a transient write failure for the
 record alone does not and cannot roll it back.
 
 **Proven with four new tests**, none asserting a return value alone:
@@ -297,11 +310,21 @@ untouched — narrowing the README does not rewrite history.
 **What this does not establish.** No `Authorized`-phase pre-check exists for purge, by the
 schema's own design, not an oversight — see above. Application-wide purge, per-run purge, and
 purge confirmation copy naming the audit trade explicitly are all out of this slice's scope (the
-first two were PR-033-C's own scope decision, not revisited here).
+first two were PR-033-C's own scope decision, not revisited here). The `open_real_audit_store`
+returning `None` branch in `apply_transcript_purge` has no dedicated test: that function has no
+injectable seam (it calls the real, `$XDG_STATE_HOME`-derived path directly, the same as
+`revoke_workspace_trust`/`apply_workspace_trust_grant`), and no existing test anywhere in this
+crate forces that branch for any of the three functions that share it — confirmed by search
+before deciding not to add one here, rather than assumed. Confidence in that branch rests on it
+being a direct, unconditional call to `ProjectSession::purge_project_transcripts`, already
+proven correct standalone by the model-layer tests in
+`crates/tekstide-core/src/project/tests/transcripts.rs`.
 
-**Gates run**, 2026-08-19: `cargo fmt --all --check` clean (four sites needed `cargo fmt --all`,
-reverified clean). `cargo clippy --workspace --all-targets --all-features -- -D warnings` clean
-(one `needless_borrows_for_generic_args` fixed in a test helper). `cargo test --workspace
---all-targets --all-features` run three times, all fully clean: `tekstide` 311 passed (was 310),
-`tekstide-core` 695 passed (was 692), `reference_adapter` 0 tests. No flake this round. `git diff
---check` clean.
+**Gates run**, 2026-08-19: `cargo fmt --all --check` clean. `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean. `cargo test --workspace --all-targets
+--all-features` run three times, all fully clean: `tekstide` 311 passed, `tekstide-core` 695
+passed, `reference_adapter` 0 tests (test counts unchanged from the pre-fix commit — this was a
+logic correction, not new coverage). No flake this round. `git diff --check` clean.
+
+**Response 279's required fix, applied 2026-08-19.** See the corrected reasoning above,
+replacing what request 279 originally described.
