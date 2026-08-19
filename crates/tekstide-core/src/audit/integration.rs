@@ -9,13 +9,14 @@ use crate::domain::{
 use crate::project::root::{FileAccessBlockedReason, FileAccessError};
 use crate::project::{
     ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectId, ProjectSession,
+    ProjectTranscriptError, ProjectTranscriptPurgeSummary,
 };
 use crate::runtime::terminal::{LinuxTerminalRuntime, TerminalRuntimeEvent, TerminationOutcome};
 
 use super::{
     AuditActionKind, AuditActionSource, AuditActorKind, AuditEventFamily, AuditOutcome,
     AuditReasonCode, AuditReference, AuditStore, AuditStoreError, AuditStoreErrorReason,
-    DurableAuditRecordV1,
+    AuditSubjectKind, DurableAuditRecordV1,
 };
 
 pub(crate) trait AuditRecordWriter {
@@ -159,6 +160,65 @@ impl<'a> AuditCoordinator<'a> {
         let audit_status = self.append_observation(&record);
         AuditActionResult {
             value: (),
+            audit_status,
+        }
+    }
+
+    /// RFC-033 PR-033-D: `transcript_purge`'s first producer.
+    /// `what-purge-must-remove.md`: "Record that a purge occurred and
+    /// its scope. Never a path, never a byte count." `valid_transcript_purge`
+    /// only permits `Completed`/`Failed` -- no `Authorized`/`Applied`
+    /// pair the way `grant_project_trust` uses, and `operation_id` must
+    /// be `None` -- so there is no schema-representable "refused
+    /// because we could not pre-authorize it" state here, unlike
+    /// granting trust. This is the family's own `valid_*` function
+    /// already settling a question that looked like a judgement call
+    /// (the task breakdown's own warning, per PR-023-D's precedent):
+    /// the schema was designed for a record-after-the-fact family, not
+    /// a pre-authorized one, because a purge is performed and then
+    /// reported, not authorized in advance the way a future grant is.
+    ///
+    /// So `ProjectSession::purge_project_transcripts` (already real,
+    /// already tested, untouched by this slice) runs first; this
+    /// records what happened -- `Completed` on success, `Failed` on
+    /// error -- the same "record what happened, do not gate on
+    /// recording it" shape [`Self::revoke_project_trust`] already uses,
+    /// for the same reason: the deletion this documents has already
+    /// taken effect on the real filesystem by the time this runs, so a
+    /// failed audit write cannot and should not roll it back.
+    /// Best-effort (`append_observation`).
+    ///
+    /// `subject_ref` is the one place this record can state scope at
+    /// all -- `valid_transcript_purge` forces `subject_kind:
+    /// Some(Transcript)`, and the crate-wide `subject_kind.is_some() ==
+    /// subject_ref.is_some()` invariant then forces `subject_ref:
+    /// Some(..)` too, unlike `sensitive_config_changed_record`'s own
+    /// family, where `subject_kind` is forced `None` and `subject_ref`
+    /// is therefore structurally unable to hold anything at all. This
+    /// slice only ever purges an entire project's transcripts (the task
+    /// breakdown's own scope decision for PR-033-C), so the fixed
+    /// literal `"project"` is the whole of what "scope" means today --
+    /// a compile-time constant that names the purge's breadth without
+    /// naming which transcript, the same "never a path" property
+    /// `AuditReference`'s own bounded ASCII charset already enforces
+    /// structurally for every family, not only this one.
+    pub fn purge_project_transcripts(
+        &mut self,
+        project: &mut ProjectSession,
+    ) -> AuditActionResult<Result<ProjectTranscriptPurgeSummary, ProjectTranscriptError>> {
+        let project_id = project.id().clone();
+        let outcome = project.purge_project_transcripts();
+        let record = transcript_purge_record(
+            project_id,
+            if outcome.is_ok() {
+                AuditOutcome::Completed
+            } else {
+                AuditOutcome::Failed
+            },
+        );
+        let audit_status = self.append_observation(&record);
+        AuditActionResult {
+            value: outcome,
             audit_status,
         }
     }
@@ -697,6 +757,26 @@ fn trust_record(
         AuditActionSource::TrustedUi,
     );
     record.project_id = Some(project.id().clone());
+    record
+}
+
+/// [`AuditCoordinator::purge_project_transcripts`]'s own record --
+/// `subject_ref: "project"` is a fixed literal, not derived from any
+/// transcript's real identity or path; see that method's own doc
+/// comment for why `subject_ref` cannot be `None` here and why
+/// `"project"` is the whole of what this slice's own purge scope is.
+fn transcript_purge_record(project_id: ProjectId, outcome: AuditOutcome) -> DurableAuditRecordV1 {
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::TranscriptPurge,
+        outcome,
+        AuditActionKind::TranscriptPurge,
+        AuditActorKind::User,
+        AuditActionSource::TrustedUi,
+    );
+    record.project_id = Some(project_id);
+    record.subject_kind = Some(AuditSubjectKind::Transcript);
+    record.subject_ref =
+        Some(AuditReference::new("project").expect("\"project\" is a valid AuditReference"));
     record
 }
 

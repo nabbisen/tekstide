@@ -4653,6 +4653,129 @@ fn purging_transcripts_through_a_real_key_sequence_removes_the_real_file() {
     );
 }
 
+/// RFC-033 PR-033-D: **audit records queried and asserted, not
+/// implied** (`granting_trust_through_the_real_route_records_both_audit_records`'s
+/// own standard) -- a real purge through the real route (Delete,
+/// `ModalFocusNext`, `ModalActivate`) writes exactly one
+/// `TranscriptPurge` record, `Completed`, naming this project and
+/// nothing else -- `AuditCoordinator::purge_project_transcripts`'s
+/// first GUI caller.
+#[test]
+fn purging_transcripts_through_a_real_key_sequence_records_a_real_audit_record() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("purge-real-audit-record");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let state_root = fresh_state_root_dir();
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .id()
+        .clone();
+
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "transcript-marker-script",
+        "Transcript Marker Script (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: transcript_marker_script_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    attempt_agent_run_launch_with_profile_and_state_root(
+        &mut state,
+        profile,
+        Some(state_root.clone()),
+    )
+    .expect("a resolvable Supervised profile should launch the real marker script");
+
+    let (project_id_from_run, agent_run_id, terminal_id) = capture_evidence_run_identifiers(&state);
+    assert_eq!(project_id_from_run, project_id);
+    let expected_transcript_file = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(agent_run_id.as_str())
+        .join("transcript.log");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        let marker_written = std::fs::read(&expected_transcript_file)
+            .map(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .contains("TEKSTIDE-TRANSCRIPT-CAPTURE-EVIDENCE-MARKER")
+            })
+            .unwrap_or(false);
+        if marker_written {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "test precondition: the real transcript file never appeared with its marker"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    press_transcript_purge_key(&mut state);
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let _ = super::update(&mut state, Message::ModalActivate);
+    assert!(
+        !expected_transcript_file.exists(),
+        "test precondition: the purge itself must have succeeded"
+    );
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let records = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .expect("querying the real audit store must succeed")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .filter(|record| {
+            record.project_id.as_ref() == Some(&project_id)
+                && record.family == tekstide_core::audit::AuditEventFamily::TranscriptPurge
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        records.len(),
+        1,
+        "a real project-wide purge must write exactly one TranscriptPurge record for this \
+         project: {records:?}"
+    );
+    let record = &records[0];
+    assert_eq!(
+        record.family,
+        tekstide_core::audit::AuditEventFamily::TranscriptPurge
+    );
+    assert_eq!(
+        record.action_kind,
+        tekstide_core::audit::AuditActionKind::TranscriptPurge
+    );
+    assert_eq!(
+        record.outcome,
+        tekstide_core::audit::AuditOutcome::Completed
+    );
+    assert_eq!(
+        record.subject_kind,
+        Some(tekstide_core::audit::AuditSubjectKind::Transcript)
+    );
+    assert_eq!(
+        record
+            .subject_ref
+            .as_ref()
+            .map(|reference| reference.as_str()),
+        Some("project")
+    );
+}
+
 /// The other half, mirroring `trust_grant_dialog_defaults_focus_to_cancel_and_activating_it_grants_nothing`:
 /// activating on the default `Cancel` focus (i.e. Escape's equivalent,
 /// reachable via Enter too) must not delete anything -- purging needs

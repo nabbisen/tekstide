@@ -4795,25 +4795,40 @@ fn open_transcript_purge_dialog(state: &mut State) {
     }));
 }
 
-/// RFC-033 PR-033-C: `ModalActivate`'s handler when a purge-confirmation
+/// RFC-033 PR-033-D: `ModalActivate`'s handler when a purge-confirmation
 /// dialog's focus is on `Purge` -- the real deletion, through
-/// `ProjectSession::purge_project_transcripts`'s first GUI caller.
-/// `what-purge-must-remove.md`'s own instruction: "do not rebuild it;
-/// wire it" -- this calls the existing, already-tested model method
-/// directly rather than reimplementing any part of it. Re-resolves the
+/// `AuditCoordinator::purge_project_transcripts`'s first GUI caller
+/// (PR-033-C wired the model method directly, with no audit call, since
+/// the task breakdown assigned the `transcript_purge` record to this
+/// slice specifically; this replaces that direct call). Re-resolves the
 /// project by `modal.project_id` rather than assuming the active
 /// project is unchanged, the same defensive-lookup shape
-/// `apply_workspace_trust_grant` already uses. No audit store call here
-/// -- unlike `apply_workspace_trust_grant`/`revoke_workspace_trust`,
-/// this slice's own task breakdown assigns the `transcript_purge`
-/// record to PR-033-D, not this one; wiring it here would be recording
-/// an action this slice's own review gate does not cover. A project
-/// that has since closed is a silent no-op, matching every other
-/// modal-decision handler's own "cannot record either way, leave state
-/// as it was" precedent.
+/// `apply_workspace_trust_grant`/`revoke_workspace_trust` already use.
+///
+/// **Two different failure modes, two different behaviours.** If
+/// `open_real_audit_store` itself fails, this is a silent no-op --
+/// nothing is purged -- the same "cannot record either way, leave state
+/// as it was" precedent `revoke_workspace_trust` already establishes,
+/// and arguably more load-bearing here: purging without any chance of
+/// a durable record is a worse outcome than not purging yet, since
+/// `what-purge-must-remove.md`'s whole point is that a privacy action
+/// should leave a trace, and the confirmation already told the user
+/// this cannot be undone -- silently proceeding unaudited would make
+/// that promise weaker than what it said. Once the store *is* open,
+/// though, `AuditCoordinator::purge_project_transcripts` is best-effort
+/// (`append_observation`) for the one record it writes: the deletion
+/// itself has already happened on the real filesystem by the time that
+/// record is built, so a transient write failure for the record alone
+/// cannot and does not roll the deletion back.
 fn apply_transcript_purge(state: &mut State, modal: &TranscriptPurgeModal) {
+    let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
+        return;
+    };
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    let mut audit =
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health);
     if let Some(project) = state.app_shell.state_mut().project_mut(&modal.project_id) {
-        let _ = project.purge_project_transcripts();
+        let _ = audit.purge_project_transcripts(project);
     }
 }
 

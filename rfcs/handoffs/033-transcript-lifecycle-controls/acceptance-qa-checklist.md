@@ -98,17 +98,31 @@ created: "2026-08-19"
 ## Audit (PR-033-D)
 
 ```text
-[ ] valid_transcript_purge() read before the record was designed; what it permits is stated.
-[ ] No path and no byte count in the record.
-[ ] The trade is stated in the closeout: the store retains a record of a privacy action.
+[x] valid_transcript_purge() read before the record was designed; what it permits is stated.
+    (crates/tekstide-core/src/audit/record.rs — Completed|Failed only, operation_id: None,
+    subject_kind forced Some(Transcript) which then forces subject_ref: Some(..) via the
+    crate-wide subject_kind.is_some() == subject_ref.is_some() invariant. Documented in
+    AuditCoordinator::purge_project_transcripts's own doc comment as the family's own valid_*
+    function settling the "Authorized-then-Applied or single-record?" question before any
+    design choice was made, per PR-023-D's own precedent the task breakdown named.)
+[x] No path and no byte count in the record.
+    (subject_ref is the fixed literal "project" — a compile-time constant, not derived from any
+    transcript's real identity or path. purge_persists_a_completed_record_naming_only_the_project_scope,
+    crates/tekstide-core/src/audit/tests/integration.rs, asserts every other field is None and
+    that the record's own Debug text contains neither the real transcript's real path nor its
+    content. Ablated: temporarily set subject_ref to a wrong literal, confirmed the test fails.)
+[x] The trade is stated in the closeout: the store retains a record of a privacy action.
+    (README.md's Local Data and Privacy section: "so does a transcript_purge entry in the local
+    audit store — recording that a purge happened and its scope, never a path or a byte count.")
 ```
 
 ## Claims that must not be made
 
 ```text
 [x] Not claimed: purge removes every trace. A tombstone and an audit record remain.
-    (transcript-purge-dialog-body names only the transcript bytes; PR-033-D still owes the
-    audit-record half of this line once transcript_purge is wired.)
+    (transcript-purge-dialog-body names only the transcript bytes; PR-033-D's own
+    transcript_purge record is now the audit-record half of this line — README.md states the
+    trade explicitly rather than leaving it for a user to discover.)
 [x] Not claimed: opting out removes existing transcripts.
     (PR-033-B's own trust-settings-capture-current-state wording, unchanged this slice.)
 [x] Not claimed: the store is viewable. Nothing renders it.
@@ -118,9 +132,16 @@ created: "2026-08-19"
 ## Published documentation
 
 ```text
-[ ] README.md's "no in-app way to turn capture off or to purge it" sentence narrowed to what
+[x] README.md's "no in-app way to turn capture off or to purge it" sentence narrowed to what
     is still true, in the same commit as the last slice.
-[ ] crates/tekstide-core/README.md's equivalent bullet updated.
+    (README.md's Local Data and Privacy section: both former limitations replaced with what
+    Ctrl+Alt+U's Space/Delete controls actually do, including the tombstone and audit-record
+    trade; the top-level feature-list bullet updated too. The one limitation that remains --
+    plain terminals are not recorded -- is kept, unchanged, since it is still true.)
+[x] crates/tekstide-core/README.md's equivalent bullet updated.
+    (the transcript-capture bullet and the durable-audit-producer sentence both updated;
+    transcript-purge moved from the "defined but not yet wired" list to the list of currently
+    wired producers.)
 ```
 
 ## Final Acceptance Decision

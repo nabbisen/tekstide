@@ -1,6 +1,6 @@
 ---
 title: "RFC-033 QA evidence"
-status: "PR-033-A/B accepted 2026-08-19; PR-033-C implemented 2026-08-19, awaiting review"
+status: "PR-033-A/B/C accepted 2026-08-19; PR-033-D implemented 2026-08-19, awaiting review"
 rfc_file: "../../proposed/033-transcript-lifecycle-controls.md"
 target_milestone: "M11"
 created: "2026-08-19"
@@ -227,4 +227,81 @@ model-layer tests), `reference_adapter` 0 tests. No flake this round. `git diff 
 
 ## PR-033-D — audit producer and closeout
 
-*(not started)*
+**Implemented 2026-08-19.** Response 278's own closing instruction: read `valid_transcript_purge()`
+before designing the record, and narrow the published sentence in the same commit.
+
+**The schema had already settled the shape.** `valid_transcript_purge` permits only `Completed`/
+`Failed` outcomes (no `Authorized`/`Applied` pair the way `TrustGrant` uses) and forces
+`operation_id: None` — there is no schema-representable "refused because we could not
+pre-authorize it" state for this family, unlike granting trust. That is not a limitation worked
+around; it is the correct shape for a delete-then-report action, and PR-023-D's own precedent
+(`valid_config_change` forcing `subject_kind: None`) predicted exactly this: read the family's
+own `valid_*` function before assuming a judgement call is still open. `AuditCoordinator::purge_project_transcripts`
+runs the real, already-tested `ProjectSession::purge_project_transcripts` first, then records
+`Completed` or `Failed` after the fact — the same "record what happened, do not gate on
+recording it" shape `revoke_project_trust` already uses, and for the same reason: the deletion
+has already taken effect on the real filesystem by the time the record is built, so a failed
+*write of the record* cannot roll back the deletion. Best-effort (`append_observation`).
+
+**Where scope actually goes.** `valid_transcript_purge` forces `subject_kind: Some(Transcript)`,
+and the crate-wide `subject_kind.is_some() == subject_ref.is_some()` invariant then forces
+`subject_ref: Some(..)` too — unlike `sensitive_config_changed_record`'s own family, where
+`subject_kind` is forced `None` and `subject_ref` is therefore structurally unable to hold
+anything. This slice only ever purges an entire project's transcripts (PR-033-C's own scope
+decision), so `subject_ref` is the fixed literal `"project"` — a compile-time constant, naming
+the purge's breadth without naming which transcript, never a path.
+
+**Two failure modes, kept distinct in `apply_transcript_purge`** (`crates/tekstide/src/shell.rs`):
+if `open_real_audit_store` itself fails, the purge is a silent no-op — nothing is deleted — the
+same precedent `revoke_workspace_trust` already establishes, and more load-bearing here: purging
+without any chance of a durable record would make the confirmation's own "this cannot be undone"
+promise weaker than what it said. Once the store is open, the one record it writes is
+best-effort — the deletion has already happened by then, so a transient write failure for the
+record alone does not and cannot roll it back.
+
+**Proven with four new tests**, none asserting a return value alone:
+- `purge_persists_a_completed_record_naming_only_the_project_scope`
+  (`crates/tekstide-core/src/audit/tests/integration.rs`) — a real transcript with real,
+  sensitive content, purged through the coordinator; asserts the persisted record's every field
+  (`subject_kind`, `subject_ref == "project"`, `operation_id`/`terminal_id`/`agent_run_id`/
+  `approval_id`/`risk_level`/`adapter_profile_ref`/`reason_code` all `None`), and that the
+  record's own `Debug` text contains neither the real transcript's real path nor its content.
+  Ablated: temporarily set `subject_ref` to a wrong literal (`"everything"`), confirmed the test
+  fails on a concrete `Some("everything")` vs `Some("project")` mismatch, reverted, confirmed
+  green.
+- `purge_failure_still_persists_a_failed_record` (same file) — a project-local transcript path
+  (the existing, untouched `UnsafeProjectPath` refusal) still gets a `Failed` record, not
+  silence.
+- `purge_write_failure_degrades_health_but_the_deletion_already_happened` (same file) — a
+  `RecordingWriter` that fails the one audit write; asserts the deletion still happened (the
+  real file is gone from disk, `bytes_removed` is correct) while `audit_status` reports
+  `Degraded` — the two failure modes' independence, proven directly.
+- `purging_transcripts_through_a_real_key_sequence_records_a_real_audit_record`
+  (`crates/tekstide/src/shell/tests.rs`) — the full GUI-level proof, mirroring
+  `granting_trust_through_the_real_route_records_both_audit_records`'s own standard ("audit
+  records queried and asserted, not implied"): a real launch, a real transcript, a real key
+  sequence (Delete, `ModalFocusNext`, `ModalActivate`), then the real audit store queried and
+  filtered by project id and family, asserting exactly one `TranscriptPurge` record, `Completed`.
+
+**The closeout.** `README.md`'s *Local Data and Privacy* section: the "no in-app way to turn
+capture off or to purge it" sentence is replaced with what `Ctrl+Alt+U`'s Space/Delete controls
+actually do, including the tombstone and the new audit-record trade, stated plainly rather than
+left for a user to discover later (`what-purge-must-remove.md`'s own instruction for this exact
+trade). The plain-terminal-not-recorded limitation is kept, unchanged, since it is still true.
+The top-level feature-list bullet updated too. `crates/tekstide-core/README.md`: the
+transcript-capture bullet and the durable-audit-producer sentence both updated — `transcript_purge`
+moved from "defined but not yet wired" to the list of real producers. `CHANGELOG.md`'s `0.11.1`
+entry is a dated, released record of what was true on 2026-08-18 and is deliberately left
+untouched — narrowing the README does not rewrite history.
+
+**What this does not establish.** No `Authorized`-phase pre-check exists for purge, by the
+schema's own design, not an oversight — see above. Application-wide purge, per-run purge, and
+purge confirmation copy naming the audit trade explicitly are all out of this slice's scope (the
+first two were PR-033-C's own scope decision, not revisited here).
+
+**Gates run**, 2026-08-19: `cargo fmt --all --check` clean (four sites needed `cargo fmt --all`,
+reverified clean). `cargo clippy --workspace --all-targets --all-features -- -D warnings` clean
+(one `needless_borrows_for_generic_args` fixed in a test helper). `cargo test --workspace
+--all-targets --all-features` run three times, all fully clean: `tekstide` 311 passed (was 310),
+`tekstide-core` 695 passed (was 692), `reference_adapter` 0 tests. No flake this round. `git diff
+--check` clean.

@@ -16,11 +16,11 @@ use crate::audit::integration::AuditRecordWriter;
 use crate::audit::{
     AuditCoordinator, AuditEventFamily, AuditHealth, AuditHealthStatus, AuditIntegrationError,
     AuditObservationStatus, AuditOutcome, AuditQuery, AuditReasonCode, AuditStore, AuditStoreError,
-    AuditStoreErrorReason, CommandDecisionActionKind, DurableAuditRecordV1,
+    AuditStoreErrorReason, AuditSubjectKind, CommandDecisionActionKind, DurableAuditRecordV1,
 };
 use crate::domain::{
     AgentCompatibilityLevel, AgentRunId, AgentRunStatus, ApprovalDecision, ApprovalId, RiskLevel,
-    TerminalId, TerminalStatus,
+    TerminalId, TerminalKind, TerminalSession, TerminalStatus, Transcript,
 };
 use crate::project::{ProjectContentError, ProjectId, ProjectSession, WorkspaceTrust};
 use crate::runtime::terminal::{
@@ -1119,9 +1119,219 @@ fn edit_and_approve_audit_block_leaves_the_stored_request_describing_the_origina
     assert_eq!(still_pending.risk_reasons, original.risk_reasons);
 }
 
+/// RFC-033 PR-033-D: `transcript_purge`'s required gate, per the
+/// handoff -- record that a purge occurred and its scope, **never a
+/// path, never a byte count**. The real transcript's own path and its
+/// real byte count are both asserted absent from the persisted record's
+/// own `Debug` text, not merely "no field happens to be named that" --
+/// the same kind of direct proof
+/// `local_data_summary_counts_retained_bytes_without_transcript_content`
+/// already uses for a comparable secret-content concern.
+#[test]
+fn purge_persists_a_completed_record_naming_only_the_project_scope() {
+    let dirs = TestAuditDirs::new("integration-transcript-purge");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let mut project = project_for(&dirs, 1);
+    let real_bytes = b"a real transcript's real, sensitive content";
+    attach_real_transcript(&mut project, &dirs, real_bytes);
+    let transcript_path = dirs.base.join("state").join("transcript.log");
+
+    let result =
+        AuditCoordinator::new(&mut store, &mut health).purge_project_transcripts(&mut project);
+
+    let summary = result
+        .value
+        .expect("a real, non-project-local transcript purges cleanly");
+    assert_eq!(summary.purged_transcripts, 1);
+    assert_eq!(summary.bytes_removed, real_bytes.len() as u64);
+    assert_eq!(result.audit_status, AuditObservationStatus::Persisted);
+    assert_eq!(health.status(), AuditHealthStatus::Healthy);
+
+    let records = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        records.len(),
+        1,
+        "single-phase family, per valid_transcript_purge's own Completed/Failed-only outcome"
+    );
+    let record = &records[0];
+    assert_eq!(record.family, AuditEventFamily::TranscriptPurge);
+    assert_eq!(
+        record.action_kind,
+        crate::audit::AuditActionKind::TranscriptPurge
+    );
+    assert_eq!(record.outcome, AuditOutcome::Completed);
+    assert_eq!(record.project_id, Some(project.id().clone()));
+    assert_eq!(record.subject_kind, Some(AuditSubjectKind::Transcript));
+    assert_eq!(
+        record
+            .subject_ref
+            .as_ref()
+            .map(|reference| reference.as_str()),
+        Some("project")
+    );
+    assert!(record.operation_id.is_none());
+    assert!(record.terminal_id.is_none());
+    assert!(record.agent_run_id.is_none());
+    assert!(record.approval_id.is_none());
+    assert!(record.risk_level.is_none());
+    assert!(record.adapter_profile_ref.is_none());
+    assert!(record.reason_code.is_none());
+    // Every field `DurableAuditRecordV1` has is now asserted above --
+    // the exhaustive check IS the "no byte count" proof: there is no
+    // field left the count could have gone into. A `record_debug`
+    // substring check for a *number* was tried and dropped: short byte
+    // counts (e.g. `45`) collide with digits inside `event_id`'s own
+    // UUID and `created_at`'s own timestamp often enough to make that
+    // assertion flaky rather than meaningful.
+
+    let record_debug = format!("{record:?}");
+    assert!(
+        !record_debug.contains(transcript_path.to_str().unwrap()),
+        "the real transcript path must never reach the audit record: {record_debug}"
+    );
+    assert!(
+        !record_debug.contains("sensitive content"),
+        "no transcript content must ever reach the audit record: {record_debug}"
+    );
+}
+
+/// The other outcome `valid_transcript_purge` permits: `Failed`, still
+/// recorded rather than silently dropped -- the deletion itself refused
+/// (`UnsafeProjectPath`, already tested at the model layer), and the
+/// audit trail says so, not nothing.
+#[test]
+fn purge_failure_still_persists_a_failed_record() {
+    let dirs = TestAuditDirs::new("integration-transcript-purge-failure");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let mut project = project_for(&dirs, 1);
+    attach_project_local_transcript(&mut project, &dirs);
+
+    let result =
+        AuditCoordinator::new(&mut store, &mut health).purge_project_transcripts(&mut project);
+
+    result
+        .value
+        .expect_err("a project-local transcript path must be refused, not purged");
+    assert_eq!(result.audit_status, AuditObservationStatus::Persisted);
+
+    let records = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].outcome, AuditOutcome::Failed);
+    assert_eq!(records[0].family, AuditEventFamily::TranscriptPurge);
+}
+
+/// Response 278's own reasoning, proven directly: the deletion already
+/// took effect on the real filesystem by the time the record is built,
+/// so a write failure for that one record must not be able to claim the
+/// deletion itself did not happen.
+#[test]
+fn purge_write_failure_degrades_health_but_the_deletion_already_happened() {
+    let dirs = TestAuditDirs::new("integration-transcript-purge-write-failure");
+    let mut project = project_for(&dirs, 1);
+    let real_bytes = b"real bytes that must actually be removed from disk";
+    attach_real_transcript(&mut project, &dirs, real_bytes);
+    let transcript_path = dirs.base.join("state").join("transcript.log");
+    let mut health = AuditHealth::default();
+    let mut failing = RecordingWriter::fail_on(1);
+
+    let result = AuditCoordinator::with_writer(&mut failing, &mut health)
+        .purge_project_transcripts(&mut project);
+
+    let summary = result
+        .value
+        .expect("a degraded audit write must not roll back a deletion that already happened");
+    assert_eq!(summary.bytes_removed, real_bytes.len() as u64);
+    assert!(
+        !transcript_path.exists(),
+        "the real file must be gone from disk regardless of the audit write's own outcome"
+    );
+    assert_eq!(result.audit_status, AuditObservationStatus::Degraded);
+    assert_eq!(health.failure_count(), 1);
+}
+
 fn project_for(dirs: &TestAuditDirs, sequence: u64) -> ProjectSession {
     let root = dirs.base.join("project");
     ProjectSession::new(ProjectId::for_test(sequence), "Project", &root, &root)
+}
+
+/// RFC-033 PR-033-D: a real transcript, with real bytes on a real file,
+/// attached to `project` -- the minimum `purge_project_transcripts`
+/// needs something real to delete. `storage_path` lives under
+/// `dirs.base.join("state")`, outside the project root `project_for`
+/// uses, so a normal call is not refused by `UnsafeProjectPath`;
+/// `attach_project_local_transcript` below is the deliberate opposite,
+/// for proving the `Failed` outcome is still recorded.
+fn attach_real_transcript(project: &mut ProjectSession, dirs: &TestAuditDirs, bytes: &[u8]) {
+    let transcript_path = dirs.base.join("state").join("transcript.log");
+    fs::create_dir_all(transcript_path.parent().unwrap()).unwrap();
+    fs::write(&transcript_path, bytes).unwrap();
+
+    let terminal = TerminalSession::new(
+        project.id().clone(),
+        TerminalKind::Supervised,
+        "Agent",
+        dirs.base.join("project"),
+        "agent-cli",
+    );
+    let transcript = Transcript::metadata(
+        project.id().clone(),
+        terminal.id.clone(),
+        None,
+        &transcript_path,
+        "local-bounded-agent-run",
+    );
+    project.add_terminal_session(terminal).unwrap();
+    project.add_transcript(transcript).unwrap();
+}
+
+/// The deliberate `UnsafeProjectPath` trigger: a transcript record whose
+/// own `storage_path` resolves *inside* the project's canonical root --
+/// `transcript_path_is_project_local`'s own refusal condition, already
+/// tested at the model layer
+/// (`transcript_purge_never_deletes_project_files`,
+/// `crates/tekstide-core/src/project/tests/transcripts.rs`). Used here
+/// only to prove the coordinator still records `Failed` rather than
+/// silently dropping the audit trail when the underlying purge itself
+/// refuses.
+fn attach_project_local_transcript(project: &mut ProjectSession, dirs: &TestAuditDirs) {
+    let project_root = dirs.base.join("project");
+    let transcript_path = project_root.join("inside-project.log");
+    fs::write(
+        &transcript_path,
+        b"must not be treated as a real transcript store",
+    )
+    .unwrap();
+
+    let terminal = TerminalSession::new(
+        project.id().clone(),
+        TerminalKind::Supervised,
+        "Agent",
+        &project_root,
+        "agent-cli",
+    );
+    let transcript = Transcript::metadata(
+        project.id().clone(),
+        terminal.id.clone(),
+        None,
+        &transcript_path,
+        "local-bounded-agent-run",
+    );
+    project.add_terminal_session(terminal).unwrap();
+    project.add_transcript(transcript).unwrap();
 }
 
 fn launch_plan_for(project: &ProjectSession, executable: &Path) -> AgentRunLaunchPlan {

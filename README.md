@@ -31,7 +31,7 @@ switching. It includes:
   workspace-config discovery;
 - AgentRun launch through project-owned terminals, with honest Plain/Supervised/
   Managed labels and active-file safety before process start;
-- bounded local transcript capture with retention limits and purge policy — **reached for real by AI CLI runs**, see *Local Data and Privacy*; the per-run opt-out and purge have no user-facing route yet;
+- bounded local transcript capture with retention limits and purge policy — **reached for real by AI CLI runs**, with an in-app per-project opt-out and purge on the Trust Settings surface, see *Local Data and Privacy*;
 - metadata-only generated-change detection and review-state tracking;
 - durable local SQLite audit storage with schema identity, migration harness,
   corruption diagnostics, restart-safe recovery, and explicit purge;
@@ -351,12 +351,21 @@ Capture is **bounded by policy, not by chance** (RFC-011): at most **32 MiB per 
 best-effort: if writing fails mid-session the run marks capture failed and the terminal stays
 usable, rather than silently continuing unrecorded.
 
-Two limitations to be plain about:
+**Both limitations this section used to describe as unaddressed now have an in-app route**
+(RFC-033), from the same `Ctrl+Alt+U` Trust Settings surface trust grants and revocations
+already use:
 
-- **There is no in-app way to turn capture off or to purge it.** RFC-011 designs both a
-  per-run opt-out and a purge scope, and neither has a user-facing route yet. To remove
-  transcripts today, delete the `transcripts/` directory.
-- **A plain terminal (`Ctrl+Alt+T`) is not recorded.** Only AI CLI runs are.
+- **Decline capture for future runs, per project.** Space toggles it. This is forward-only —
+  declining does not delete any transcript that already exists, and the setting persists
+  across a restart.
+- **Purge every transcript retained for this project.** Delete opens a confirmation that names
+  the scope (this project; other projects are unaffected) and states it cannot be undone. A
+  tombstone record remains after a purge, and so does a `transcript_purge` entry in the local
+  audit store — recording that a purge happened and its scope, never a path or a byte count. To
+  remove transcripts without using the app, delete the `transcripts/` directory directly.
+
+One limitation remains: **a plain terminal (`Ctrl+Alt+T`) is not recorded.** Only AI CLI runs
+are.
 
 See
 [`rfcs/done/011-transcript-retention-and-local-data-policy.md`](rfcs/done/011-transcript-retention-and-local-data-policy.md)
