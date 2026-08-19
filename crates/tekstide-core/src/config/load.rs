@@ -44,6 +44,46 @@ impl ConfigDiagnostic {
     }
 }
 
+/// Response 268: a *known* `key` (`"core.recent_projects_limit"`, and
+/// so on) is a fixed literal this module wrote, already bounded by
+/// being source code. An **unknown** key -- the TOML table key a warn
+/// or error path names -- is whatever the file said, unfiltered. RFC-023
+/// requires "a bounded diagnostic," and workspace configuration is
+/// untrusted by this RFC's own design: a cloned repository's
+/// `.tekstide/config.toml` can carry a key of arbitrary length or one
+/// containing a bidi override, control characters, or other text shaped
+/// to mislead. `AuditReference::new()` bounds its own untrusted segment
+/// the same way -- capped length, printable-ASCII-only -- and this
+/// mirrors it rather than inventing a second bounding rule.
+///
+/// This bounds **size and character shape only**. It is not the
+/// escaping a future rendering widget will need -- nothing renders a
+/// `ConfigWarning`/`ConfigDiagnostic` today, so that requirement is
+/// stated here rather than left to be silently inherited: any surface
+/// that later displays this text must still run it through
+/// `text_safety::quote_untrusted` (or equivalent) before rendering,
+/// the same as every other untrusted string in this project.
+const MAX_UNTRUSTED_KEY_SEGMENT_CHARS: usize = 128;
+
+fn bound_key_segment(raw: &str) -> String {
+    let truncated = raw.chars().count() > MAX_UNTRUSTED_KEY_SEGMENT_CHARS;
+    let mut bounded: String = raw
+        .chars()
+        .take(MAX_UNTRUSTED_KEY_SEGMENT_CHARS)
+        .map(|character| {
+            if character.is_ascii_graphic() || character == ' ' {
+                character
+            } else {
+                '?'
+            }
+        })
+        .collect();
+    if truncated {
+        bounded.push('\u{2026}');
+    }
+    bounded
+}
+
 /// An unrecognized key: not fatal, per RFC-023's own rule ("unknown
 /// keys warn; they do not fail") -- forward compatibility for a file
 /// users hand-edit matters more than strictness here.
@@ -92,7 +132,9 @@ pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagn
     };
 
     for key in root.keys() {
-        warnings.push(ConfigWarning { key: key.clone() });
+        warnings.push(ConfigWarning {
+            key: bound_key_segment(key),
+        });
     }
 
     Ok(ConfigLoadOutcome { document, warnings })
@@ -117,7 +159,7 @@ fn section_table(
 fn warn_unconsumed(table: toml::Table, section: &str, warnings: &mut Vec<ConfigWarning>) {
     for key in table.keys() {
         warnings.push(ConfigWarning {
-            key: format!("{section}.{key}"),
+            key: format!("{section}.{}", bound_key_segment(key)),
         });
     }
 }
@@ -308,7 +350,7 @@ fn extract_keybindings(root: &mut toml::Table) -> Result<KeybindingSettings, Con
             _ => {
                 return Err(ConfigDiagnostic {
                     path: None,
-                    key: format!("keybindings.{key}"),
+                    key: format!("keybindings.{}", bound_key_segment(&key)),
                     location: None,
                     message: "expected a binding string",
                 });
@@ -460,15 +502,21 @@ fn extract_agent_profiles(
 
     let mut profiles = BTreeMap::new();
     for (name, value) in profiles_table {
+        // `section` is used only to build diagnostic/warning `key` text
+        // below, so it is built from the bounded segment; `name` itself
+        // stays unbounded for the real profile identity (the map key,
+        // and `display_name`'s default) -- bounding it too would corrupt
+        // data PR-023-E still has to validate on its own terms.
+        let bounded_name = bound_key_segment(&name);
         let toml::Value::Table(mut profile_table) = value else {
             return Err(ConfigDiagnostic {
                 path: None,
-                key: format!("agent.profile.{name}"),
+                key: format!("agent.profile.{bounded_name}"),
                 location: None,
                 message: "expected a table",
             });
         };
-        let section = format!("agent.profile.{name}");
+        let section = format!("agent.profile.{bounded_name}");
         let display_name = take_string(&mut profile_table, &section, "display_name", &name)?;
         let command = require_string(&mut profile_table, &section, "command")?;
         let args = take_string_array(&mut profile_table, &section, "args")?;

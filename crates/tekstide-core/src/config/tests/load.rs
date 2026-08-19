@@ -153,6 +153,63 @@ fn an_unrecognized_key_inside_a_profile_table_warns_and_does_not_fail() {
     assert_eq!(outcome.warnings[0].key, "agent.profile.codex.nonsense");
 }
 
+/// Response 268: an unknown key is text the *file* supplied, and
+/// workspace configuration is untrusted by this RFC's own design.
+/// A key longer than the bound must be truncated, not carried through
+/// verbatim -- RFC-023 requires "a bounded diagnostic."
+#[test]
+fn an_overlong_unknown_key_is_truncated_in_the_warning() {
+    let long_key = "a".repeat(500);
+    let source = format!("[core]\n{long_key} = 1\n");
+    let outcome = parse_and_validate(&source).unwrap();
+    assert_eq!(outcome.warnings.len(), 1);
+    let warning_key = &outcome.warnings[0].key;
+    assert!(
+        warning_key.chars().count() < 500,
+        "the raw 500-character key must not survive into the warning verbatim: {warning_key}"
+    );
+    assert!(warning_key.ends_with('\u{2026}'));
+}
+
+/// The concrete threat response 268 names: a cloned repository's
+/// `.tekstide/config.toml` can carry a key containing a bidi override
+/// or control characters, shaped to mislead whatever eventually renders
+/// this text. Neither may survive into the warning unescaped. Written
+/// as a TOML quoted key with `\uXXXX` escapes -- a bare key cannot
+/// contain either character, so a quoted key is the real shape this
+/// attack would have to take.
+#[test]
+fn a_bidi_override_or_control_character_in_an_unknown_key_is_neutralized() {
+    let source = "[core]\n\"safe\\u202Eevil\\u0007bell\" = 1\n";
+    let outcome = parse_and_validate(source).unwrap();
+    assert_eq!(outcome.warnings.len(), 1);
+    let warning_key = &outcome.warnings[0].key;
+    assert!(!warning_key.contains('\u{202E}'));
+    assert!(!warning_key.contains('\u{0007}'));
+}
+
+/// The profile-table case, response 268's own `section` construction
+/// fix: a hostile profile *name* -- the one thing in `[agent.profile.*]`
+/// that is itself an untrusted TOML key, not a value -- must not survive
+/// into any diagnostic or warning `key` built from it, even though the
+/// same name is used unbounded for the profile's own real identity.
+/// Written as a quoted dotted-table segment (`[agent.profile."..."]`),
+/// the real TOML shape a name containing a bidi override would need.
+#[test]
+fn a_hostile_profile_name_is_bounded_in_diagnostics_but_not_in_the_stored_profile() {
+    let hostile_name = format!("evil\u{202E}{}", "x".repeat(200));
+    let source = format!("[agent.profile.\"{hostile_name}\"]\ncommand = \"x\"\nnonsense = 1\n");
+    let outcome = parse_and_validate(&source).unwrap();
+
+    assert_eq!(outcome.warnings.len(), 1);
+    assert!(!outcome.warnings[0].key.contains('\u{202E}'));
+    assert!(outcome.warnings[0].key.chars().count() < hostile_name.chars().count());
+
+    // The real profile name is untouched -- PR-023-E validates it on
+    // its own terms; bounding it here would corrupt data, not protect it.
+    assert!(outcome.document.agent.profiles.contains_key(&hostile_name));
+}
+
 #[test]
 fn an_unknown_value_for_a_known_key_is_an_error_naming_the_key() {
     let error =

@@ -73,11 +73,20 @@ updated: "2026-07-28"
       (`store_load_with_an_invalid_file_at_first_start_yields_defaults_with_a_diagnostic` asserts
       `path`; `malformed_toml_syntax_is_a_parse_error_with_a_location_but_no_content` asserts
       `location`; every diagnostic carries `key`)
-- [x] Diagnostics contain no file contents.
-- [x] Diagnostics contain no secret-shaped values. (Both: `message` is `&'static str`, inert by
+- [x] Diagnostics contain no file contents. `message`/`location`/`path` are all inert by
+      construction; `key` is bounded (response 268: capped to 128 characters, non-printable-ASCII
+      characters — including bidi overrides and control characters — replaced) whenever it
+      carries text the file itself supplied (an unknown key, or a profile name), the way
+      `AuditReference` bounds its own untrusted segment. Ablated for real: temporarily bypassed
+      `bound_key_segment` entirely, confirmed all three of the tests below fail with the
+      hostile/overlong text present, restored, confirmed green.
+      (`an_overlong_unknown_key_is_truncated_in_the_warning`,
+      `a_bidi_override_or_control_character_in_an_unknown_key_is_neutralized`,
+      `a_hostile_profile_name_is_bounded_in_diagnostics_but_not_in_the_stored_profile`)
+- [x] Diagnostics contain no secret-shaped values. `message` is `&'static str`, inert by
       construction — no code path can put runtime content into it; re-verified directly with a
       real secret-shaped sentinel,
-      `a_secret_shaped_rejected_value_never_reaches_the_diagnostic`)
+      `a_secret_shaped_rejected_value_never_reaches_the_diagnostic`.
 - [x] Invalid file at first start: defaults apply and Tekstide starts.
       (`store_load_with_an_invalid_file_at_first_start_yields_defaults_with_a_diagnostic`)
 

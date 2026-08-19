@@ -205,6 +205,43 @@ every section identically, including ones §5 will later gate.
 --all-features` run twice: `tekstide-core` 658 passed (was 639 — 19 new load tests), `tekstide`
 303 passed (unchanged), `reference_adapter` 0 tests — both runs clean. `git diff --check` clean.
 
+**Response 268 follow-up, same day: `key` bounded against untrusted file text.** The reviewer
+found that `ConfigWarning`/`ConfigDiagnostic.key` was bounded for a *known* field name (a fixed
+literal this module wrote) but not for an *unknown* one — the raw TOML table key the file
+supplied, unfiltered, in the warn path (top-level unrecognized sections, unrecognized keys inside
+a known section, unrecognized keys inside a `[agent.profile.*]` table) and in the profile-name
+error path (`agent.profile.<name>`, where `<name>` is itself an untrusted TOML key, not a value).
+RFC-023 requires "a bounded diagnostic," and workspace configuration is untrusted by this RFC's
+own design — a cloned repository's `.tekstide/config.toml` can carry a key of arbitrary length or
+containing a bidi override, control characters, or other text shaped to mislead whatever
+eventually renders it. Nothing renders diagnostics today, so this was not a live defect, but an
+inherited requirement worth writing down rather than leaving silent.
+
+Fixed: `bound_key_segment` (`config/load.rs`) caps a raw key segment to 128 characters (matching
+`AuditReference`'s own cap — the same bounding rule, not a second one) and replaces any character
+outside printable ASCII (plus space) with `?`, appending an ellipsis when truncated. Applied at
+every point a raw file-derived key becomes part of a `ConfigWarning`/`ConfigDiagnostic.key`: the
+top-level unknown-section loop, `warn_unconsumed` (covers every section's unrecognized-key
+warnings and, transitively, unrecognized keys inside a profile table), the keybindings-section
+type error, and the profile-name error/warning path. The profile case needed care: the *real*
+profile name (used as the `BTreeMap` key and `display_name`'s default) is deliberately left
+unbounded — bounding it would corrupt stored data PR-023-E still has to validate on its own terms;
+only the text flowing into diagnostic/warning `key` fields is bounded.
+
+Three new tests, each against the concrete shape named above: an overlong key (500 `a`s) is
+truncated with a trailing ellipsis; a key containing a bidi override (`U+202E`) and a control
+character (BEL, `U+0007`) — written as a TOML quoted key with `\uXXXX` escapes, the real syntax
+either character requires — has both neutralized; a hostile profile name (bidi override plus 200
+characters) is bounded in the resulting warning but the profile itself is still stored under its
+real, unbounded name. **Ablated for real**: temporarily made `bound_key_segment` return its input
+unchanged, confirmed all three tests fail with the hostile/overlong text present verbatim in the
+warning, restored, confirmed green again.
+
+Gates re-run after the fix: `cargo fmt --all --check` clean, `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean, `cargo test --workspace --all-targets
+--all-features` run twice: `tekstide-core` 661 passed (was 658 — 3 new tests), `tekstide` 303
+passed, `reference_adapter` 0 tests — both runs clean, `git diff --check` clean.
+
 ### PR-023-D — Security-sensitive classification, reload, audit
 
 Pending implementation.
