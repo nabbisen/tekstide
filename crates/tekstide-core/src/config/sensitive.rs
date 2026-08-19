@@ -1,5 +1,8 @@
+use std::collections::BTreeMap;
+
 use crate::config::model::{
-    AgentSettings, ConfigurationDocument, ResourceSettings, SecuritySettings,
+    AgentSettings, ConfigurationDocument, ConfiguredAiCliProfile, ResourceSettings,
+    SecuritySettings,
 };
 
 /// RFC-023 §Security-Sensitive Settings, as corrected by this pack's
@@ -17,12 +20,13 @@ use crate::config::model::{
 /// `AgentProfiles` is one coarse entry covering the whole
 /// `[agent.profile.*]` table -- per-profile add/remove/modify direction
 /// (RFC-023's own examples: adding a profile increases permitted
-/// capability, removing one reduces it) is PR-023-E's to classify,
-/// since that slice is where profile identity and validation actually
-/// live. `AgentDefaultEnvironmentPolicy` has no defined value ordering
-/// yet (today's only real value is `"explicit"`); reload-gated here
-/// like every other field in this list, but its audit-producer
-/// direction is deferred for the same reason.
+/// capability, removing one reduces it) is classified by
+/// [`agent_profiles_direction`], PR-023-E's own addition, since that
+/// slice is where profile identity and validation actually live.
+/// `AgentDefaultEnvironmentPolicy` has no defined value ordering yet
+/// (today's only real value is `"explicit"`); reload-gated here like
+/// every other field in this list, but its audit-producer direction is
+/// still deferred, for the same reason.
 ///
 /// Response 272: RFC-023 §Security-Sensitive Settings names "transcript
 /// retention **and purge** policy" as one policy -- RFC-011 implements
@@ -111,13 +115,13 @@ pub fn security_sensitive_diff(
 }
 
 /// The direction a *specific, already-known-to-differ* field's change
-/// takes, for the six fields with a defined ordering. Returns `None`
-/// for `AgentProfiles`/`AgentDefaultEnvironmentPolicy` -- not because
-/// they have no direction, but because this module does not yet define
-/// one for them (see the type's own doc comment). A caller must not
-/// treat `None` as "safe to apply" -- direction is an audit-producer
-/// question; reload-gating (`security_sensitive_diff`) already held the
-/// field back regardless of whether a direction is classifiable yet.
+/// takes, for the seven fields with a defined ordering. Returns `None`
+/// only for `AgentDefaultEnvironmentPolicy` -- not because it has no
+/// direction, but because this module does not yet define one for it
+/// (see the type's own doc comment). A caller must not treat `None` as
+/// "safe to apply" -- direction is an audit-producer question;
+/// reload-gating (`security_sensitive_diff`) already held the field
+/// back regardless of whether a direction is classifiable yet.
 pub fn direction(
     field: SecuritySensitiveField,
     current: &ConfigurationDocument,
@@ -148,8 +152,46 @@ pub fn direction(
             current.resources.max_agent_transcript_mb_per_run,
             candidate.resources.max_agent_transcript_mb_per_run,
         )),
-        SecuritySensitiveField::AgentDefaultEnvironmentPolicy
-        | SecuritySensitiveField::AgentProfiles => None,
+        SecuritySensitiveField::AgentProfiles => Some(agent_profiles_direction(
+            &current.agent.profiles,
+            &candidate.agent.profiles,
+        )),
+        SecuritySensitiveField::AgentDefaultEnvironmentPolicy => None,
+    }
+}
+
+/// RFC-023 PR-023-E: `AgentProfiles`'s own direction, completing the
+/// classification `sensitive.rs`'s own doc comment deferred to this
+/// slice. RFC-023 gives two clean examples -- adding a profile
+/// increases permitted capability, removing one reduces it -- but does
+/// not say what *modifying* an existing profile's `command`/`args`/
+/// `adapter`/`environment_policy` is: that could tighten or loosen
+/// depending on specifics this module has no principled way to judge
+/// (a new `command` value is not comparably "more" or "less" than the
+/// old one the way a retention day-count is). So the rule here is
+/// worst-case-wins, the same reasoning `retention_direction`'s
+/// less-is-safer logic generalises to a set-valued field: `candidate`
+/// is `Reduce` only if it is a **pure subset** of `current` -- every
+/// entry `candidate` still has exists in `current` under the same key
+/// with an *identical* value. Anything else -- a new key, a changed
+/// value for an existing key, or both -- is `Increase`, because at
+/// least one entry in `candidate` was not already authorized under
+/// `current`'s own values.
+fn agent_profiles_direction(
+    current: &BTreeMap<String, ConfiguredAiCliProfile>,
+    candidate: &BTreeMap<String, ConfiguredAiCliProfile>,
+) -> SecuritySensitiveDirection {
+    debug_assert_ne!(
+        current, candidate,
+        "agent_profiles_direction called on unchanged profiles"
+    );
+    let candidate_is_a_pure_subset_of_current = candidate
+        .iter()
+        .all(|(name, value)| current.get(name) == Some(value));
+    if candidate_is_a_pure_subset_of_current {
+        SecuritySensitiveDirection::Reduce
+    } else {
+        SecuritySensitiveDirection::Increase
     }
 }
 

@@ -1,8 +1,8 @@
-use crate::config::ConfigurationDocument;
 use crate::config::sensitive::{
     SecuritySensitiveDirection, SecuritySensitiveField, apply_safe_fields, direction,
     security_sensitive_diff,
 };
+use crate::config::{ConfigurationDocument, ConfiguredAiCliProfile};
 
 #[test]
 fn two_identical_documents_have_no_security_sensitive_diff() {
@@ -204,22 +204,16 @@ fn a_smaller_per_run_transcript_byte_limit_is_a_reduce() {
     );
 }
 
-/// Direction is deliberately undefined for these two -- documented as a
+/// Direction is deliberately undefined for this one -- documented as a
 /// real limitation, not a bug, in `sensitive.rs`'s own doc comment.
+/// `AgentProfiles` is no longer in this group -- see the
+/// `agent_profiles_direction_*` tests below, PR-023-E's own addition.
 #[test]
-fn agent_profiles_and_environment_policy_have_no_defined_direction_yet() {
+fn agent_default_environment_policy_has_no_defined_direction_yet() {
     let current = ConfigurationDocument::default();
     let mut candidate = current.clone();
-    candidate
-        .agent
-        .profiles
-        .insert("codex".to_owned(), test_profile());
     candidate.agent.default_environment_policy = "different".to_owned();
 
-    assert_eq!(
-        direction(SecuritySensitiveField::AgentProfiles, &current, &candidate),
-        None
-    );
     assert_eq!(
         direction(
             SecuritySensitiveField::AgentDefaultEnvironmentPolicy,
@@ -227,6 +221,91 @@ fn agent_profiles_and_environment_policy_have_no_defined_direction_yet() {
             &candidate
         ),
         None
+    );
+}
+
+/// RFC-023 PR-023-E, RFC-023's own example verbatim: adding a profile
+/// increases permitted capability.
+#[test]
+fn agent_profiles_direction_adding_a_profile_is_an_increase() {
+    let current = ConfigurationDocument::default();
+    let mut candidate = current.clone();
+    candidate
+        .agent
+        .profiles
+        .insert("codex".to_owned(), test_profile());
+
+    assert_eq!(
+        direction(SecuritySensitiveField::AgentProfiles, &current, &candidate),
+        Some(SecuritySensitiveDirection::Increase)
+    );
+}
+
+/// RFC-023's other worked example: removing a profile reduces permitted
+/// capability.
+#[test]
+fn agent_profiles_direction_removing_a_profile_is_a_reduce() {
+    let mut current = ConfigurationDocument::default();
+    current
+        .agent
+        .profiles
+        .insert("codex".to_owned(), test_profile());
+    let candidate = ConfigurationDocument::default();
+
+    assert_eq!(
+        direction(SecuritySensitiveField::AgentProfiles, &current, &candidate),
+        Some(SecuritySensitiveDirection::Reduce)
+    );
+}
+
+/// Not one of RFC-023's own worked examples -- this module's own
+/// worst-case-wins rule (`agent_profiles_direction`'s doc comment):
+/// changing an existing profile's own fields is an `Increase`, the same
+/// as adding one, since there is no principled way to say a new
+/// `command`/`args`/`adapter`/`environment_policy` value is "less"
+/// than the old one.
+#[test]
+fn agent_profiles_direction_modifying_an_existing_profile_is_an_increase() {
+    let mut current = ConfigurationDocument::default();
+    current
+        .agent
+        .profiles
+        .insert("codex".to_owned(), test_profile());
+    let mut candidate = current.clone();
+    candidate.agent.profiles.get_mut("codex").unwrap().command = "different-command".to_owned();
+
+    assert_eq!(
+        direction(SecuritySensitiveField::AgentProfiles, &current, &candidate),
+        Some(SecuritySensitiveDirection::Increase)
+    );
+}
+
+/// A mixed change -- one profile added, a different one removed in the
+/// same reload -- must still be `Increase`: the removal alone would be
+/// safe, but the addition means `candidate` is not a pure subset of
+/// `current`, and worst-case-wins.
+#[test]
+fn agent_profiles_direction_a_mixed_add_and_remove_is_an_increase() {
+    let mut current = ConfigurationDocument::default();
+    current
+        .agent
+        .profiles
+        .insert("codex".to_owned(), test_profile());
+    let mut candidate = ConfigurationDocument::default();
+    candidate.agent.profiles.insert(
+        "claude".to_owned(),
+        ConfiguredAiCliProfile {
+            display_name: "Claude".to_owned(),
+            command: "claude".to_owned(),
+            args: Vec::new(),
+            adapter: "terminal-native".to_owned(),
+            environment_policy: "explicit".to_owned(),
+        },
+    );
+
+    assert_eq!(
+        direction(SecuritySensitiveField::AgentProfiles, &current, &candidate),
+        Some(SecuritySensitiveDirection::Increase)
     );
 }
 

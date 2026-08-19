@@ -1,6 +1,7 @@
 mod load;
 mod model;
 mod path;
+mod profile;
 mod sensitive;
 
 pub use load::{
@@ -16,6 +17,7 @@ pub use path::{
     ConfigPathError, ConfigPathErrorReason, ConfigPathProvider, ConfigPathResolver,
     ConfigStoragePath,
 };
+pub use profile::to_ai_cli_profile;
 pub use sensitive::{
     SecuritySensitiveDirection, SecuritySensitiveField, apply_safe_fields, direction,
     security_sensitive_diff,
