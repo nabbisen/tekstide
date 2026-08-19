@@ -1,6 +1,6 @@
 ---
 title: "RFC-033 QA evidence"
-status: "PR-033-A accepted 2026-08-19; PR-033-B implemented 2026-08-19, awaiting review"
+status: "PR-033-A/B accepted 2026-08-19; PR-033-C implemented 2026-08-19, awaiting review"
 rfc_file: "../../proposed/033-transcript-lifecycle-controls.md"
 target_milestone: "M11"
 created: "2026-08-19"
@@ -136,11 +136,94 @@ No flake observed this round. `git diff --check` clean.
 
 ## PR-033-C — purge and visibility
 
-*(not started)*
+**Implemented 2026-08-19.** Per-project purge, from the same Trust Settings surface (`Ctrl+Alt+U`)
+— the task breakdown's own recommended scope, not application-wide. The model layer
+(`ProjectSession::purge_project_transcripts`/`purge_transcript`/`purge_agent_run_transcripts`,
+real `fs::remove_file` via `remove_transcript_file`, the `UnsafeProjectPath` refusal, the
+tombstone) already existed and was already fully tested
+(`crates/tekstide-core/src/project/tests/transcripts.rs`) — this slice's own job, per
+`what-purge-must-remove.md`'s explicit instruction ("do not rebuild it; wire it"), was wiring a
+real GUI confirmation dialog and a real key path to it, and it does not touch that model code at
+all.
 
-## PR-033-C — purge and visibility
+**The confirmation dialog.** A third `ModalContent` variant, `TranscriptPurge`, the same
+manual-open/two-button/default-to-safe shape `TrustGrant` already establishes: `Purge`/`Cancel`
+focus cycle, defaults to `Cancel`, opened by `Message::OpenTranscriptPurgeDialog`
+(`open_transcript_purge_dialog`), real deletion only on `ModalActivate` with focus on `Purge`
+(`apply_transcript_purge`, calling `purge_project_transcripts` directly — no audit store call,
+since the task breakdown assigns the `transcript_purge` record to PR-033-D, not this slice).
+Reached by a third fixed key on Trust Settings, Delete (Enter and Space were already taken by
+PR-033-B; `handle_trust_settings_key`'s own doc comment explains why a highlight index still
+does not fit three independent controls any better than it fit two). `transcript_count`/
+`retained_bytes` are captured at dialog-open time, the same "captured, not re-read" shape
+`TrustGrantModal` already uses, so what the confirmation states is exactly what was true when
+the user chose to open it.
 
-*(not started)*
+**The confirmation wording**, `crates/tekstide/locales/en.ftl`:
+`transcript-purge-dialog-body` names the scope ("stored locally for this project. Other
+projects are not affected.") and the irreversibility ("This cannot be undone."), and states only
+what disappears — the transcript bytes — never claiming every trace is removed (a tombstone
+remains, by design).
+
+**A real, unexpected finding, and how it was resolved.** Wiring `transcript_local_data_summary`
+(the task breakdown's own literal instruction: "exists and has no caller... wire it to the same
+surface") as written would have been actively wrong. `ProjectSession::transcript_local_data_summary`
+computes `project_retained_bytes` from each `Transcript`'s tracked `byte_count` field — but that
+field is only ever updated by `record_transcript_write_summary`/
+`record_terminal_transcript_write_summary`, and grepping the whole workspace found **zero
+production call sites** for either, only test call sites. `rfcs/proposed/036-dormant-capability-closure.md`
+already names `record_terminal_transcript_write_summary` as dormant and assigns its own
+wire/delete/keep decision to that RFC, explicitly not RFC-033's. The practical effect: every real,
+non-empty transcript's tracked `byte_count` is permanently `0` today, so wiring the surface
+literally as instructed would have shown "Retained locally: 1 transcript (0 bytes)" for a real
+transcript with real content on disk — a variant of exactly the "tells a user something false
+about their own data" failure `what-purge-must-remove.md` warns against for purge itself, except
+here it would have reached the purge confirmation dialog's own stated byte count too, not only a
+secondary visibility line.
+
+Resolved without touching the dormant recorder or RFC-036's own undecided question: added
+`ProjectSession::real_retained_transcript_bytes`, a new method reading real bytes directly via
+`fs::metadata` on each non-tombstone transcript's own `storage_path` — the same real-filesystem
+source of truth `remove_transcript_file` already uses at purge time. `ProjectSession::transcript_local_data_summary`
+itself is left unchanged (its own existing tests construct transcripts with a tracked `byte_count`
+and no real backing file, a pure/I/O-free contract this fix does not disturb); the GUI's
+`transcript_local_data_summary_for` builds `TranscriptLocalDataSummary` from the new real-bytes
+method instead of delegating to that existing one. `AppState::app_wide_retained_transcript_bytes`
+(the `app_retained_bytes` input) is built the same way, across all open projects.
+
+**Proven with six new tests**, none asserting against a return value or in-memory field alone:
+- `pressing_delete_on_trust_settings_opens_the_purge_confirmation_dialog` (shell/tests.rs) —
+  reachability, a real Delete keypress.
+- `purging_transcripts_through_a_real_key_sequence_removes_the_real_file` (shell/tests.rs) — the
+  required gate: real launch, real transcript file, real key sequence (Delete, `ModalFocusNext`,
+  `ModalActivate`), then asserts the real file is gone from disk and the tombstone remains.
+- `cancelling_the_purge_dialog_leaves_the_real_transcript_file_untouched` (shell/tests.rs) — the
+  default-focus-`Cancel` safety half, mirroring `trust_grant_dialog_defaults_focus_to_cancel_and_activating_it_grants_nothing`.
+- `retained_transcript_visibility_reflects_a_real_transcripts_real_byte_count` (shell/tests.rs) —
+  the GUI-level proof that the wired summary reports the real file's real byte count.
+- `real_retained_transcript_bytes_reads_real_disk_content_not_the_tracked_field`
+  (`crates/tekstide-core/src/project/tests/transcripts.rs`) — the model-level proof of the fix
+  above: a transcript with `byte_count` left at `0` and a real file with real bytes on disk;
+  the real sum still comes back correct.
+- `real_retained_transcript_bytes_excludes_purged_transcripts` (same file) — a purged
+  transcript's real (already-deleted) file must not be double-counted.
+
+**Ablated for real**: temporarily reverted `real_retained_transcript_bytes` to the
+`byte_count`-based sum (the same computation `transcript_local_data_summary` still correctly
+uses for its own, different, pure contract). `real_retained_transcript_bytes_reads_real_disk_content_not_the_tracked_field`
+failed with a concrete `0` vs `22` real-byte mismatch. Reverted, confirmed green again.
+
+**What this does not establish.** No audit record is produced by purging — PR-033-D's own scope.
+The `UnsafeProjectPath` refusal and the tombstone mechanism are unmodified by this slice, not
+newly built; their own existing tests (unchanged) are cited, not re-proven here. The real-bytes
+finding above does not resolve `record_terminal_transcript_write_summary`'s own dormancy — that
+remains RFC-036's decision to make, untouched by this slice.
+
+**Gates run**, 2026-08-19: `cargo fmt --all --check` clean (three sites needed `cargo fmt --all`,
+reverified clean). `cargo clippy --workspace --all-targets --all-features -- -D warnings` clean.
+`cargo test --workspace --all-targets --all-features` run three times, all fully clean: `tekstide`
+310 passed (was 306 — four new shell tests), `tekstide-core` 692 passed (was 690 — two new
+model-layer tests), `reference_adapter` 0 tests. No flake this round. `git diff --check` clean.
 
 ## PR-033-D — audit producer and closeout
 

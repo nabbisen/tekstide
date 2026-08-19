@@ -191,6 +191,54 @@ pub(crate) struct TrustGrantModal {
     focus: TrustGrantButton,
 }
 
+/// RFC-033 PR-033-C: purge confirmation -- `what-purge-must-remove.md`'s
+/// required reading names the two things the confirmation must state,
+/// "what disappears and that it cannot be undone." Same two-item cycle
+/// shape as `TrustGrantButton`, and the same reason for a distinct type:
+/// "Purge"/"Cancel" do not describe what another dialog's buttons
+/// decide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TranscriptPurgeButton {
+    Purge,
+    Cancel,
+}
+
+impl TranscriptPurgeButton {
+    const ORDER: [TranscriptPurgeButton; 2] =
+        [TranscriptPurgeButton::Purge, TranscriptPurgeButton::Cancel];
+
+    fn next(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + 1) % Self::ORDER.len()]
+    }
+
+    fn previous(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + Self::ORDER.len() - 1) % Self::ORDER.len()]
+    }
+}
+
+/// RFC-033 PR-033-C: the project a purge-confirmation dialog is deciding
+/// about. `transcript_count`/`retained_bytes` are captured once, at open
+/// time, from `ProjectSession::transcript_local_data_summary` -- the
+/// same "captured, not re-read" shape `TrustGrantModal` already uses, so
+/// what the confirmation states is exactly what was true when the user
+/// chose to open it, not a value that could have drifted (e.g. from
+/// another agent run writing a transcript) by the time they decide.
+#[derive(Debug)]
+pub(crate) struct TranscriptPurgeModal {
+    project_id: tekstide_core::project::ProjectId,
+    transcript_count: u64,
+    retained_bytes: u64,
+    focus: TranscriptPurgeButton,
+}
+
 /// RFC-019 PR-019-D: the reload/dismiss targets of the real external-
 /// change conflict dialog -- the same two-item cycle shape as
 /// `PasteConfirmButton`, a distinct type for the same reason: "Reload"/
@@ -446,6 +494,13 @@ pub(crate) enum ModalContent {
     /// paste dialog's shape, not the approval dialog's (both of that
     /// one's buttons are real decisions).
     TrustGrant(TrustGrantModal),
+    /// RFC-033 PR-033-C: opened manually from the `TrustSettings`
+    /// surface's own purge control (`Message::OpenTranscriptPurgeDialog`),
+    /// the same manual-only shape `TrustGrant` above uses. Only `Purge`
+    /// is a real decision; `Cancel`, like `ModalDismiss`/Escape, closes
+    /// without deleting anything -- the paste dialog's shape, not the
+    /// approval dialog's.
+    TranscriptPurge(TranscriptPurgeModal),
 }
 
 impl Default for ModalContent {
@@ -882,6 +937,14 @@ pub enum Message {
     /// direction, the same reasoning `RevokeWorkspaceTrust` already
     /// applies to revocation.
     ToggleTranscriptCaptureDeclined,
+    /// RFC-033 PR-033-C: fired by the `TrustSettings` surface's own
+    /// purge control -- opens the real confirmation dialog. No I/O here;
+    /// the real purge only happens on `ModalActivate` with focus on
+    /// `Purge` (see `TranscriptPurgeModal`'s own doc for why this dialog
+    /// is not folded into a direct mutation the way capture-decline is:
+    /// deletion is irreversible, and `what-purge-must-remove.md` requires
+    /// the confirmation to name the scope and say it cannot be undone).
+    OpenTranscriptPurgeDialog,
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -1110,6 +1173,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::ExternalChange(modal)) => modal.focus = modal.focus.next(),
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.next(),
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.next(),
+            Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.next(),
             None => {}
         },
         Message::ModalFocusPrevious => match state.modal.as_mut() {
@@ -1118,6 +1182,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::ExternalChange(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.previous(),
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.previous(),
+            Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.previous(),
             None => {}
         },
         // RFC-018 PR-018-C: the layer-demo placeholder still has no
@@ -1175,10 +1240,20 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 Some(ModalContent::TrustGrant(modal)) if modal.focus == TrustGrantButton::Grant => {
                     apply_workspace_trust_grant(state, &modal);
                 }
+                // RFC-033 PR-033-C: the paste dialog's shape again --
+                // only `Purge` is a real decision. Any other focus
+                // (`Cancel`), or `ModalDismiss` (Escape) below, closes
+                // without deleting anything.
+                Some(ModalContent::TranscriptPurge(modal))
+                    if modal.focus == TranscriptPurgeButton::Purge =>
+                {
+                    apply_transcript_purge(state, &modal);
+                }
                 Some(ModalContent::LayerDemo { .. })
                 | Some(ModalContent::PasteConfirmation(_))
                 | Some(ModalContent::ExternalChange(_))
                 | Some(ModalContent::TrustGrant(_))
+                | Some(ModalContent::TranscriptPurge(_))
                 | None => {}
             }
             // RFC-022 PR-022-E, response 227: re-evaluate after every
@@ -1324,6 +1399,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::ToggleTranscriptCaptureDeclined => {
             toggle_transcript_capture_declined(state);
+        }
+        Message::OpenTranscriptPurgeDialog => {
+            open_transcript_purge_dialog(state);
         }
     }
     Task::none()
@@ -2358,20 +2436,23 @@ fn handle_approval_history_key(state: &mut State, key: &input::KeyPress) {
 /// all, leaving the entire chain RFC-032 exists to unblock unreachable
 /// for them.
 ///
-/// **Still no highlight index**, even after RFC-033 PR-033-B added a
-/// second control here -- [`handle_approval_history_key`]'s list needs
-/// one because its rows are interchangeable (any row might be the one a
-/// user wants); this surface's two controls are not interchangeable,
-/// they are two *independent* settings, so a shared cursor would force
-/// navigating past one to reach the other for no reason. Each keeps its
+/// **Still no highlight index**, even with three controls here now
+/// (RFC-033 PR-033-B added the second, PR-033-C this third) --
+/// [`handle_approval_history_key`]'s list needs one because its rows are
+/// interchangeable (any row might be the one a user wants); this
+/// surface's controls are not interchangeable, they are *independent*
+/// settings, so a shared cursor would force navigating past ones a user
+/// does not want to reach the one they do, for no reason. Each keeps its
 /// own fixed key instead: Enter still activates whichever trust action
-/// is currently shown (unchanged from before this slice, mirroring
+/// is currently shown (unchanged from before PR-033-B, mirroring
 /// `trust_settings_view`'s own `is_trusted` branch exactly); Space
-/// toggles capture, independent of trust state and always available,
-/// matching `trust_settings_view` always rendering that row regardless
-/// of which trust action is shown. What each key does still always
-/// matches what is rendered -- there are just two keys doing that now
-/// instead of one.
+/// toggles capture, independent of trust state and always available;
+/// Delete opens the purge confirmation, also always available and also
+/// independent of trust state -- named-key choice deliberate, the same
+/// reasoning Space's own doc comment already gives, and unclaimed by any
+/// other handler in this file at the time of writing (confirmed before
+/// use). What each key does still always matches what is rendered --
+/// there are just three keys doing that now instead of one.
 fn handle_trust_settings_key(state: &mut State, key: &input::KeyPress) {
     let Some(project) = state.app_shell.state().active_project() else {
         return;
@@ -2391,6 +2472,9 @@ fn handle_trust_settings_key(state: &mut State, key: &input::KeyPress) {
         }
         keyboard::Key::Named(keyboard::key::Named::Space) => {
             toggle_transcript_capture_declined(state);
+        }
+        keyboard::Key::Named(keyboard::key::Named::Delete) => {
+            open_transcript_purge_dialog(state);
         }
         _ => {}
     }
@@ -2628,9 +2712,12 @@ fn trusted_ui_state(state: &State) -> TerminalTrustedUiState {
         // bucket `LayerDemo`/`ExternalChange` already share -- it is not
         // a terminal-paste concern any more than those are, but modal
         // exclusivity still needs it to read as active, not `Inactive`.
+        // RFC-033 PR-033-C: the purge-confirmation dialog falls into the
+        // same generic bucket, for the same reason `TrustGrant` does.
         Some(ModalContent::LayerDemo { .. })
         | Some(ModalContent::ExternalChange(_))
-        | Some(ModalContent::TrustGrant(_)) => TerminalTrustedUiState::SecurityDialogActive,
+        | Some(ModalContent::TrustGrant(_))
+        | Some(ModalContent::TranscriptPurge(_)) => TerminalTrustedUiState::SecurityDialogActive,
     }
 }
 
@@ -3217,6 +3304,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             }
             ModalContent::Approval(dialog) => approval_dialog_view(state, dialog),
             ModalContent::TrustGrant(modal) => trust_grant_dialog_view(state, modal),
+            ModalContent::TranscriptPurge(modal) => transcript_purge_dialog_view(state, modal),
         };
         let scrim = center(modal_view).style(modal_scrim_style(state.theme));
         stack![base, opaque(scrim)].into()
@@ -4654,6 +4742,81 @@ fn toggle_transcript_capture_declined(state: &mut State) {
     project.set_transcript_capture_declined(!declined);
 }
 
+/// RFC-033 PR-033-C: `TranscriptLocalDataSummary`'s first real caller on
+/// this surface (the task breakdown's own description of the gap:
+/// "exists and has no caller"). Built from
+/// [`tekstide_core::project::ProjectSession::real_retained_transcript_bytes`]
+/// / [`tekstide_core::app::AppState::app_wide_retained_transcript_bytes`],
+/// **not** `ProjectSession::transcript_local_data_summary` -- that
+/// method's own doc comment explains why its `byte_count`-based sum is
+/// stale for every real run today, and this surface is read by a user
+/// deciding whether to purge, the one place that staleness cannot be
+/// silently inherited. `app_retained_bytes`'s own doc states its
+/// "currently open projects only" limitation; that limitation
+/// propagates into `budget_pressure` here (an app-wide figure computed
+/// from an incomplete sum), but `project_retained_bytes` (now real,
+/// on-disk bytes) and `project_transcript_count` are exact for the
+/// project passed in -- its own `transcripts` list is the complete,
+/// authoritative record of which transcripts exist, not a scan of
+/// anything that could be missing entries.
+fn transcript_local_data_summary_for(
+    state: &State,
+    project: &tekstide_core::project::ProjectSession,
+) -> tekstide_core::transcript::TranscriptLocalDataSummary {
+    let app_retained_bytes = state.app_shell.state().app_wide_retained_transcript_bytes();
+    tekstide_core::transcript::TranscriptLocalDataSummary::new(
+        project.real_retained_transcript_bytes(),
+        app_retained_bytes,
+        project.transcripts().len() as u64,
+        tekstide_core::transcript::TranscriptRetentionLimits::agent_run_default(),
+    )
+}
+
+/// RFC-033 PR-033-C: `Message::OpenTranscriptPurgeDialog`'s handler --
+/// the same "never replace an open modal" rule `open_trust_grant_dialog`
+/// checks first, for the same reason. Captures the active project's
+/// current retained-transcript count/bytes at open time
+/// (`TranscriptPurgeModal`'s own doc explains why), and defaults focus
+/// to `Cancel` -- `what-purge-must-remove.md`'s own required framing:
+/// deleting is irreversible, so the safe default is not deleting.
+fn open_transcript_purge_dialog(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    let summary = transcript_local_data_summary_for(state, project);
+    state.modal = Some(ModalContent::TranscriptPurge(TranscriptPurgeModal {
+        project_id: project.id().clone(),
+        transcript_count: summary.project_transcript_count,
+        retained_bytes: summary.project_retained_bytes,
+        focus: TranscriptPurgeButton::Cancel,
+    }));
+}
+
+/// RFC-033 PR-033-C: `ModalActivate`'s handler when a purge-confirmation
+/// dialog's focus is on `Purge` -- the real deletion, through
+/// `ProjectSession::purge_project_transcripts`'s first GUI caller.
+/// `what-purge-must-remove.md`'s own instruction: "do not rebuild it;
+/// wire it" -- this calls the existing, already-tested model method
+/// directly rather than reimplementing any part of it. Re-resolves the
+/// project by `modal.project_id` rather than assuming the active
+/// project is unchanged, the same defensive-lookup shape
+/// `apply_workspace_trust_grant` already uses. No audit store call here
+/// -- unlike `apply_workspace_trust_grant`/`revoke_workspace_trust`,
+/// this slice's own task breakdown assigns the `transcript_purge`
+/// record to PR-033-D, not this one; wiring it here would be recording
+/// an action this slice's own review gate does not cover. A project
+/// that has since closed is a silent no-op, matching every other
+/// modal-decision handler's own "cannot record either way, leave state
+/// as it was" precedent.
+fn apply_transcript_purge(state: &mut State, modal: &TranscriptPurgeModal) {
+    if let Some(project) = state.app_shell.state_mut().project_mut(&modal.project_id) {
+        let _ = project.purge_project_transcripts();
+    }
+}
+
 /// RFC-022 PR-022-E: a compile-time literal symbol for `RiskLevel`, the
 /// same `trusted_symbol` division of labour every other symbol-driven
 /// Fluent lookup in this file uses -- the words live in `en.ftl`'s
@@ -4834,6 +4997,34 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
             .size(state.theme.font_size_body()),
         )
         .on_press(Message::ToggleTranscriptCaptureDeclined)
+        .into(),
+    );
+
+    // RFC-033 PR-033-C: `transcript_local_data_summary`'s real caller --
+    // a user deciding whether to purge needs to see what is retained
+    // first, per the task breakdown. Always rendered, the same
+    // "independent of trust state" reasoning the capture row above
+    // already applies -- what is retained does not depend on whether
+    // the project is currently trusted.
+    let summary = transcript_local_data_summary_for(state, project);
+    lines.push(
+        text(
+            state.catalog.get_with_args(
+                "trust-settings-retained-transcripts",
+                &CatalogArgs::new()
+                    .number("count", summary.project_transcript_count)
+                    .number("bytes", summary.project_retained_bytes),
+            ),
+        )
+        .size(state.theme.font_size_body())
+        .into(),
+    );
+    lines.push(
+        button(
+            text(state.catalog.get("trust-settings-purge-button"))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(Message::OpenTranscriptPurgeDialog)
         .into(),
     );
 
@@ -5332,6 +5523,58 @@ fn trust_grant_dialog_view<'a>(
         button_line(TrustGrantButton::Grant, "trust-grant-dialog-grant").into(),
         button_line(TrustGrantButton::Cancel, "trust-grant-dialog-cancel").into(),
         text(state.catalog.get("trust-grant-dialog-hint"))
+            .size(state.theme.font_size_status())
+            .into(),
+    ];
+
+    modal_dialog_box(state, column(lines).spacing(10).into())
+}
+
+/// RFC-033 PR-033-C: `$count`/`$bytes` are `TranscriptPurgeModal`'s own
+/// captured-at-open-time values -- see its doc comment for why these are
+/// not re-read live. `what-purge-must-remove.md`'s own required content:
+/// what disappears (this project's transcript bytes, named as such, not
+/// "data"), the scope ("this project" -- other projects unaffected), and
+/// that it cannot be undone. Does not claim purge removes every trace:
+/// a tombstone remains, per `purge_project_transcripts`'s own real
+/// behavior, and this message says only what the surface can honestly
+/// promise.
+fn transcript_purge_dialog_body(catalog: &Catalog, modal: &TranscriptPurgeModal) -> String {
+    catalog.get_with_args(
+        "transcript-purge-dialog-body",
+        &CatalogArgs::new()
+            .number("count", modal.transcript_count)
+            .number("bytes", modal.retained_bytes),
+    )
+}
+
+fn transcript_purge_dialog_view<'a>(
+    state: &'a State,
+    modal: &'a TranscriptPurgeModal,
+) -> Element<'a, Message> {
+    let button_line = |target: TranscriptPurgeButton, label_key: &str| {
+        let marker = if modal.focus == target { "> " } else { "  " };
+        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+    };
+
+    let lines: Vec<Element<'_, Message>> = vec![
+        text(state.catalog.get("transcript-purge-dialog-title"))
+            .size(state.theme.font_size_heading())
+            .into(),
+        text(transcript_purge_dialog_body(&state.catalog, modal))
+            .size(state.theme.font_size_body())
+            .into(),
+        button_line(
+            TranscriptPurgeButton::Purge,
+            "transcript-purge-dialog-purge",
+        )
+        .into(),
+        button_line(
+            TranscriptPurgeButton::Cancel,
+            "transcript-purge-dialog-cancel",
+        )
+        .into(),
+        text(state.catalog.get("transcript-purge-dialog-hint"))
             .size(state.theme.font_size_status())
             .into(),
     ];

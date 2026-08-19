@@ -436,6 +436,18 @@ trust-settings-capture-current-state = Transcript capture: { $state ->
 trust-settings-capture-decline-button = Decline Future Capture
 trust-settings-capture-allow-button = Allow Future Capture
 
+# RFC-033 PR-033-C: `transcript_local_data_summary`'s own framing --
+# "a user deciding whether to purge needs to see what is retained."
+# `$bytes` has no plural machinery, matching `agent-run-detail-window-full`'s
+# own precedent for a byte count elsewhere in this file; `$count`
+# (transcripts) does, matching every other item-count key here (e.g.
+# `project-board-dirty-file-count`).
+trust-settings-retained-transcripts = Retained locally: { $count ->
+    [one] {$count} transcript
+   *[other] {$count} transcripts
+} ({ $bytes } bytes)
+trust-settings-purge-button = Purge Project Transcripts…
+
 # PR-020-B: `ProjectOpenSurface::AgentRunDetail`'s own view -- the most
 # recently launched run in the active project (this slice's own answer
 # to "which run is current"), rendering its transcript through
@@ -499,3 +511,20 @@ trust-grant-dialog-symlink-notice = You opened this project at { $root_path }, w
 trust-grant-dialog-grant = Grant Trust
 trust-grant-dialog-cancel = Cancel
 trust-grant-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.
+
+# RFC-033 PR-033-C, `what-purge-must-remove.md`: the confirmation must
+# name the scope (this project only) and state the count/bytes affected
+# -- `$count`/`$bytes` are captured at dialog-open time
+# (`TranscriptPurgeModal`'s own doc), the same "captured, not re-read"
+# shape `trust-grant-dialog-body` above already uses. Does not claim
+# purge removes every trace: a tombstone remains
+# (`purge_project_transcripts`'s own real behavior), so this message
+# says only what disappears -- the bytes -- not "all data" or similar.
+transcript-purge-dialog-title = Purge all transcripts for this project?
+transcript-purge-dialog-body = This permanently deletes { $count ->
+    [one] {$count} transcript
+   *[other] {$count} transcripts
+} ({ $bytes } bytes) stored locally for this project. Other projects are not affected. This cannot be undone.
+transcript-purge-dialog-purge = Purge
+transcript-purge-dialog-cancel = Cancel
+transcript-purge-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.

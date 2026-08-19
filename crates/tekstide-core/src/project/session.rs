@@ -270,6 +270,40 @@ impl ProjectSession {
         )
     }
 
+    /// RFC-033 PR-033-C: real bytes on disk, read directly via
+    /// `fs::metadata` on each non-tombstone transcript's own real
+    /// `storage_path` -- the same real-filesystem source of truth
+    /// [`Self::purge_transcript_at`]'s own `remove_transcript_file` call
+    /// already uses at delete time.
+    ///
+    /// **Deliberately not [`Self::transcript_local_data_summary`]'s own
+    /// `byte_count`-based sum.** That field is only ever updated by
+    /// `record_transcript_write_summary`, which has no production
+    /// caller today (confirmed by grepping the whole workspace before
+    /// writing this) -- `rfcs/proposed/036-dormant-capability-closure.md`
+    /// already names `record_terminal_transcript_write_summary` as its
+    /// own, separate, undecided question, not RFC-033's to resolve.
+    /// Trusting `byte_count` for a surface a user reads before deciding
+    /// whether to purge would report **0 bytes for every real,
+    /// non-empty transcript** -- exactly the "tells a user something
+    /// false about their own data" failure `what-purge-must-remove.md`
+    /// warns against, just for visibility instead of the purge action
+    /// itself. `transcript_local_data_summary` itself is left
+    /// unchanged: its existing tests construct transcripts with a
+    /// tracked `byte_count` and no real backing file, so switching its
+    /// own internals to a filesystem read would break that pure,
+    /// I/O-free contract for whatever future caller wants the *tracked*
+    /// number once RFC-036 decides whether to wire the recorder that
+    /// keeps it current.
+    pub fn real_retained_transcript_bytes(&self) -> u64 {
+        self.transcripts
+            .iter()
+            .filter(|transcript| !transcript.is_tombstone())
+            .filter_map(|transcript| fs::metadata(&transcript.storage_path).ok())
+            .map(|metadata| metadata.len())
+            .sum()
+    }
+
     pub fn change_sets(&self) -> &[ChangeSet] {
         &self.change_sets
     }

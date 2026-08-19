@@ -565,6 +565,14 @@ fn generic_args() -> CatalogArgs<'static> {
         .number("shown_len", 1u64)
         .number("total_len", 1u64)
         .number("delivered_start", 1u64)
+        // RFC-033 PR-033-C: `trust-settings-retained-transcripts`'s and
+        // `transcript-purge-dialog-body`'s trusted byte count -- a real
+        // count of bytes on disk, never untrusted text, the same
+        // reasoning `shown_len`/`total_len` above already establish for
+        // this file's other byte counts. `count` above (already 1u32)
+        // covers both keys' transcript-count selector; no new entry
+        // needed for it.
+        .number("bytes", 1u64)
 }
 
 fn shipped_additional_locales() -> Vec<String> {

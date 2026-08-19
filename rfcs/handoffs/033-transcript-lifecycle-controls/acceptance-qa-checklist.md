@@ -54,11 +54,45 @@ created: "2026-08-19"
 ## Purge (PR-033-C)
 
 ```text
-[ ] Bytes are gone from the real filesystem, asserted directly.
-[ ] The tombstone remains and the surface does not claim otherwise.
-[ ] The project-local refusal (UnsafeProjectPath) is preserved, not weakened.
-[ ] The confirmation names the scope of what is deleted.
-[ ] Retained-data visibility wired — transcript_local_data_summary has a real caller.
+[x] Bytes are gone from the real filesystem, asserted directly.
+    (purging_transcripts_through_a_real_key_sequence_removes_the_real_file,
+    crates/tekstide/src/shell/tests.rs — real launch, real transcript file with real marker
+    content, real Delete keypress opens the confirmation, ModalFocusNext + ModalActivate
+    confirms, then asserts the real file no longer exists on disk. Wires the existing,
+    already-tested ProjectSession::purge_project_transcripts — not rebuilt, per
+    what-purge-must-remove.md's own instruction.)
+[x] The tombstone remains and the surface does not claim otherwise.
+    (same test: asserts the purged transcript's own record is_tombstone() after purge.
+    transcript-purge-dialog-body, crates/tekstide/locales/en.ftl, says only what is
+    removed — "This permanently deletes N transcript(s) (X bytes)" — never "every trace" or
+    "all data".)
+[x] The project-local refusal (UnsafeProjectPath) is preserved, not weakened.
+    (transcript_path_is_project_local/remove_transcript_file untouched by this slice; existing
+    coverage — transcript_purge_never_deletes_project_files,
+    crates/tekstide-core/src/project/tests/transcripts.rs — still passes unmodified.)
+[x] The confirmation names the scope of what is deleted.
+    (transcript-purge-dialog-body: "stored locally for this project. Other projects are not
+    affected. This cannot be undone." — per-project scope named explicitly, matching the task
+    breakdown's own scope decision; cancelling-the-purge-dialog-leaves-the-real-transcript-file-untouched,
+    shell/tests.rs, proves the default focus is Cancel and activating it deletes nothing.)
+[x] Retained-data visibility wired — transcript_local_data_summary has a real caller.
+    (trust_settings_view, crates/tekstide/src/shell.rs, via transcript_local_data_summary_for —
+    but NOT ProjectSession::transcript_local_data_summary's own byte_count-based sum: that
+    field has no production writer (record_transcript_write_summary/
+    record_terminal_transcript_write_summary have zero call sites outside tests, confirmed by
+    grep; rfcs/proposed/036-dormant-capability-closure.md already names the latter as its own,
+    separate, undecided question). Trusting it would have shown "0 bytes" for every real
+    transcript. Added ProjectSession::real_retained_transcript_bytes — real fs::metadata reads
+    on each non-tombstone transcript's own storage_path, the same real-filesystem source of
+    truth purge's own remove_transcript_file already uses at delete time — and built
+    TranscriptLocalDataSummary from that instead. Proven against real data:
+    real_retained_transcript_bytes_reads_real_disk_content_not_the_tracked_field,
+    crates/tekstide-core/src/project/tests/transcripts.rs, constructs a transcript with
+    byte_count left at 0 and a real file with real bytes on disk, and asserts the real sum is
+    still correct. Ablated: temporarily reverted to the byte_count-based sum, confirmed that
+    test fails (0 vs 22 real bytes), reverted back, confirmed green.
+    retained_transcript_visibility_reflects_a_real_transcripts_real_byte_count,
+    shell/tests.rs, proves the same property through the full GUI-level call.
 ```
 
 ## Audit (PR-033-D)
@@ -72,9 +106,13 @@ created: "2026-08-19"
 ## Claims that must not be made
 
 ```text
-[ ] Not claimed: purge removes every trace. A tombstone and an audit record remain.
-[ ] Not claimed: opting out removes existing transcripts.
-[ ] Not claimed: the store is viewable. Nothing renders it.
+[x] Not claimed: purge removes every trace. A tombstone and an audit record remain.
+    (transcript-purge-dialog-body names only the transcript bytes; PR-033-D still owes the
+    audit-record half of this line once transcript_purge is wired.)
+[x] Not claimed: opting out removes existing transcripts.
+    (PR-033-B's own trust-settings-capture-current-state wording, unchanged this slice.)
+[x] Not claimed: the store is viewable. Nothing renders it.
+    (no surface added or changed this slice renders the durable audit store; still true.)
 ```
 
 ## Published documentation

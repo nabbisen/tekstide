@@ -5,14 +5,14 @@ use tekstide_core::shell::ApplicationShell;
 
 use super::{
     AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ExternalChangeButton, Message,
-    ModalButton, ModalContent, PasteConfirmButton, State, TerminalPasteRefusal, TrustGrantButton,
-    agent_run_launch_refusal_text, attempt_agent_run_launch_with_profile,
-    attempt_agent_run_launch_with_profile_and_state_root,
+    ModalButton, ModalContent, PasteConfirmButton, State, TerminalPasteRefusal,
+    TranscriptPurgeButton, TrustGrantButton, agent_run_launch_refusal_text,
+    attempt_agent_run_launch_with_profile, attempt_agent_run_launch_with_profile_and_state_root,
     attempt_agent_run_launch_with_profile_state_root_and_capture, content_within_bound,
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
     open_real_audit_store, poll_approval_channels, sidebar_label, status_bar_summary,
-    terminal_paste_refusal_text, trust_grant_dialog_body, trusted_ui_state,
-    verify_restored_trust_against, zone_style,
+    terminal_paste_refusal_text, transcript_local_data_summary_for, trust_grant_dialog_body,
+    trusted_ui_state, verify_restored_trust_against, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -2725,6 +2725,29 @@ fn press_transcript_capture_toggle(state: &mut State) {
     );
 }
 
+/// RFC-033 PR-033-C: the same real-key-sequence discipline
+/// `press_transcript_capture_toggle` establishes, applied to the purge
+/// control's own key (Delete, not Space -- `handle_trust_settings_key`'s
+/// own doc comment explains why the three controls do not share one).
+/// Opens the confirmation dialog only -- a real purge additionally needs
+/// `Message::ModalFocusNext`/`Message::ModalActivate`, the same two
+/// deliberate acts `trust_grant_dialog_requires_moving_focus_and_activating_to_grant`
+/// already requires for the analogous trust-grant dialog, so callers that
+/// need the real deletion dispatch those themselves.
+fn press_transcript_purge_key(state: &mut State) {
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenTrustSettings,
+    );
+    let _ = super::update(
+        state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+    send_main_area_key(
+        state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete),
+    );
+}
+
 /// `handle_trust_settings_key`'s own guard: a no-op while a project is
 /// open but its `open_surface` is anything other than `TrustSettings`
 /// (`ProjectDashboard`, the real default, here) -- the same guard shape
@@ -4508,6 +4531,292 @@ fn declining_capture_through_a_real_key_press_produces_no_transcript_file() {
     assert!(
         !state_root.join("transcripts").exists(),
         "not even the transcripts directory should have been created"
+    );
+}
+
+/// RFC-033 PR-033-C: reachability, the same standard PR-033-B's own
+/// capture-toggle reachability test set -- a real Delete keypress on
+/// Trust Settings, through `press_transcript_purge_key`, not a
+/// dispatched `Message::OpenTranscriptPurgeDialog`.
+#[test]
+fn pressing_delete_on_trust_settings_opens_the_purge_confirmation_dialog() {
+    let (mut state, _project_id) = state_with_a_real_project("purge-dialog-reachable");
+
+    press_transcript_purge_key(&mut state);
+
+    assert!(
+        matches!(state.modal, Some(ModalContent::TranscriptPurge(_))),
+        "a real Delete keypress on Trust Settings must open the purge confirmation dialog, got \
+         {:?}",
+        state.modal
+    );
+}
+
+/// RFC-033 PR-033-C's own required gate, verbatim: "bytes gone from the
+/// real filesystem, asserted directly -- not the return value, not the
+/// metadata." Real launch -> a real transcript file with real content
+/// (the same positive control `a_real_agent_run_launch_writes_a_real_transcript_with_real_content`
+/// establishes) -> a real key sequence through the confirmation dialog
+/// (Delete opens it, `ModalFocusNext` moves focus to `Purge`,
+/// `ModalActivate` confirms, the same two-deliberate-acts shape
+/// `trust_grant_dialog_requires_moving_focus_and_activating_to_grant`
+/// already requires) -> the file itself must be gone from disk, and the
+/// tombstone (`what-purge-must-remove.md`'s own required property) must
+/// remain.
+#[test]
+fn purging_transcripts_through_a_real_key_sequence_removes_the_real_file() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("purge-real-file");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let state_root = fresh_state_root_dir();
+
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "transcript-marker-script",
+        "Transcript Marker Script (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: transcript_marker_script_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    attempt_agent_run_launch_with_profile_and_state_root(
+        &mut state,
+        profile,
+        Some(state_root.clone()),
+    )
+    .expect("a resolvable Supervised profile should launch the real marker script");
+
+    let (project_id, agent_run_id, terminal_id) = capture_evidence_run_identifiers(&state);
+    let expected_transcript_file = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(agent_run_id.as_str())
+        .join("transcript.log");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        let marker_written = std::fs::read(&expected_transcript_file)
+            .map(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .contains("TEKSTIDE-TRANSCRIPT-CAPTURE-EVIDENCE-MARKER")
+            })
+            .unwrap_or(false);
+        if marker_written {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "test precondition: the real transcript file never appeared with its marker"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    press_transcript_purge_key(&mut state);
+    assert!(
+        matches!(state.modal, Some(ModalContent::TranscriptPurge(_))),
+        "test precondition: the purge dialog must be open before moving focus and activating"
+    );
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    match state.modal.as_ref() {
+        Some(ModalContent::TranscriptPurge(modal)) => {
+            assert_eq!(modal.focus, TranscriptPurgeButton::Purge);
+        }
+        other => panic!("expected an open TranscriptPurge dialog, got {other:?}"),
+    }
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert!(
+        state.modal.is_none(),
+        "activating the purge decision must close the dialog"
+    );
+    assert!(
+        !expected_transcript_file.exists(),
+        "purge was confirmed through a real key sequence -- the real transcript file must be \
+         gone from disk, got one still at {}",
+        expected_transcript_file.display()
+    );
+    let project = state.app_shell.state().active_project().unwrap();
+    let transcript = project
+        .transcripts()
+        .iter()
+        .find(|transcript| transcript.agent_run_id.as_ref() == Some(&agent_run_id))
+        .expect("the purged transcript's own record must still exist");
+    assert!(
+        transcript.is_tombstone(),
+        "the tombstone must be preserved, per what-purge-must-remove.md"
+    );
+}
+
+/// The other half, mirroring `trust_grant_dialog_defaults_focus_to_cancel_and_activating_it_grants_nothing`:
+/// activating on the default `Cancel` focus (i.e. Escape's equivalent,
+/// reachable via Enter too) must not delete anything -- purging needs
+/// the same two deliberate acts real deletion always does in this file.
+#[test]
+fn cancelling_the_purge_dialog_leaves_the_real_transcript_file_untouched() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("purge-cancel-untouched");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let state_root = fresh_state_root_dir();
+
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "transcript-marker-script",
+        "Transcript Marker Script (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: transcript_marker_script_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    attempt_agent_run_launch_with_profile_and_state_root(
+        &mut state,
+        profile,
+        Some(state_root.clone()),
+    )
+    .expect("a resolvable Supervised profile should launch the real marker script");
+
+    let (project_id, agent_run_id, terminal_id) = capture_evidence_run_identifiers(&state);
+    let expected_transcript_file = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(agent_run_id.as_str())
+        .join("transcript.log");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        let marker_written = std::fs::read(&expected_transcript_file)
+            .map(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .contains("TEKSTIDE-TRANSCRIPT-CAPTURE-EVIDENCE-MARKER")
+            })
+            .unwrap_or(false);
+        if marker_written {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "test precondition: the real transcript file never appeared with its marker"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    press_transcript_purge_key(&mut state);
+    match state.modal.as_ref() {
+        Some(ModalContent::TranscriptPurge(modal)) => {
+            assert_eq!(
+                modal.focus,
+                TranscriptPurgeButton::Cancel,
+                "test precondition: the dialog must default to Cancel"
+            );
+        }
+        other => panic!("expected an open TranscriptPurge dialog, got {other:?}"),
+    }
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert!(state.modal.is_none(), "activating must close the dialog");
+    assert!(
+        expected_transcript_file.exists(),
+        "activating on the default Cancel focus must not delete anything -- the real transcript \
+         file must still be at {}",
+        expected_transcript_file.display()
+    );
+    let project = state.app_shell.state().active_project().unwrap();
+    let transcript = project
+        .transcripts()
+        .iter()
+        .find(|transcript| transcript.agent_run_id.as_ref() == Some(&agent_run_id))
+        .expect("the transcript's own record must still exist");
+    assert!(
+        !transcript.is_tombstone(),
+        "cancelling must not mark the transcript purged either"
+    );
+}
+
+/// RFC-033 PR-033-C: `transcript_local_data_summary`'s first real
+/// caller, proven against real data -- not merely that the call
+/// compiles. The real transcript file's own byte count on disk must
+/// match what the wired summary reports, and the count must be exactly
+/// one real transcript, not a placeholder.
+#[test]
+fn retained_transcript_visibility_reflects_a_real_transcripts_real_byte_count() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("purge-visibility-real-bytes");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let state_root = fresh_state_root_dir();
+
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "transcript-marker-script",
+        "Transcript Marker Script (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: transcript_marker_script_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    attempt_agent_run_launch_with_profile_and_state_root(
+        &mut state,
+        profile,
+        Some(state_root.clone()),
+    )
+    .expect("a resolvable Supervised profile should launch the real marker script");
+
+    let (project_id, agent_run_id, terminal_id) = capture_evidence_run_identifiers(&state);
+    let expected_transcript_file = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(agent_run_id.as_str())
+        .join("transcript.log");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let real_byte_count = loop {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        if let Ok(metadata) = std::fs::metadata(&expected_transcript_file)
+            && std::fs::read(&expected_transcript_file)
+                .map(|bytes| {
+                    String::from_utf8_lossy(&bytes)
+                        .contains("TEKSTIDE-TRANSCRIPT-CAPTURE-EVIDENCE-MARKER")
+                })
+                .unwrap_or(false)
+        {
+            break metadata.len();
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "test precondition: the real transcript file never appeared with its marker"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert!(
+        real_byte_count > 0,
+        "test precondition: the real marker script must have written real bytes"
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let summary = transcript_local_data_summary_for(&state, project);
+
+    assert_eq!(
+        summary.project_transcript_count, 1,
+        "exactly one real transcript exists for this project"
+    );
+    assert_eq!(
+        summary.project_retained_bytes, real_byte_count,
+        "the wired summary must report the real file's real byte count, not a placeholder"
     );
 }
 

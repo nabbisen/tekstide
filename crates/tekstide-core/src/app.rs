@@ -30,6 +30,25 @@ impl AppState {
         &self.projects
     }
 
+    /// RFC-033 PR-033-C: the `app_retained_bytes` input
+    /// `TranscriptLocalDataSummary` needs. Sums each open
+    /// `ProjectSession`'s own [`ProjectSession::real_retained_transcript_bytes`]
+    /// -- real bytes on disk, not the `byte_count` field that method's
+    /// own doc comment explains is stale for every real run today. Sums
+    /// only across currently open `ProjectSession`s -- there is no
+    /// aggregate byte count kept independent of an open session, so a
+    /// project closed since its last transcript write is not counted
+    /// here. This is the best real data available, not a full-disk
+    /// scan; stated here rather than silently claiming completeness,
+    /// the same honesty `what-purge-must-remove.md` requires of the
+    /// purge confirmation itself.
+    pub fn app_wide_retained_transcript_bytes(&self) -> u64 {
+        self.projects
+            .iter()
+            .map(ProjectSession::real_retained_transcript_bytes)
+            .sum()
+    }
+
     pub fn active_project_id(&self) -> Option<&ProjectId> {
         self.active_project_id.as_ref()
     }

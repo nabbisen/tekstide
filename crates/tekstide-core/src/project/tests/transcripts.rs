@@ -236,6 +236,77 @@ fn local_data_summary_counts_retained_bytes_without_transcript_content() {
     assert!(!format!("{summary:?}").contains("secret"));
 }
 
+/// RFC-033 PR-033-C: `real_retained_transcript_bytes` exists precisely
+/// because `byte_count`/`transcript_local_data_summary`'s own sum is
+/// stale for every real run -- nothing calls
+/// `record_transcript_write_summary` in production
+/// (`real_retained_transcript_bytes`'s own doc comment). Unlike
+/// `attach_agent_run_transcript` (used by every other test in this
+/// file), this constructs the transcript record without ever calling
+/// `record_active_write`, so `byte_count` stays at its untouched
+/// default -- the exact state a real launch leaves it in today -- while
+/// the real file on disk has real bytes. The real sum must still come
+/// back correct, proving it is read from the real file, not the tracked
+/// field.
+#[test]
+fn real_retained_transcript_bytes_reads_real_disk_content_not_the_tracked_field() {
+    let temp = TestDirs::new("real-retained-bytes");
+    let mut project = real_project_session(1, &temp);
+
+    let bytes: &[u8] = b"untracked-secret-bytes";
+    let transcript_path = temp.state_root.join("transcripts").join("untracked.log");
+    fs::create_dir_all(transcript_path.parent().unwrap()).unwrap();
+    fs::write(&transcript_path, bytes).unwrap();
+
+    let terminal = TerminalSession::new(
+        project.id().clone(),
+        TerminalKind::Supervised,
+        "Agent",
+        &temp.project_root,
+        "agent-cli",
+    );
+    let transcript = Transcript::metadata(
+        project.id().clone(),
+        terminal.id.clone(),
+        None,
+        &transcript_path,
+        "local-bounded-agent-run",
+    );
+    assert_eq!(
+        transcript.byte_count, 0,
+        "test precondition: the tracked field must be untouched -- no record_active_write/\
+         record_transcript_write_summary call anywhere in this test, the same state a real \
+         launch leaves it in today"
+    );
+    project.add_terminal_session(terminal).unwrap();
+    project.add_transcript(transcript).unwrap();
+
+    assert_eq!(
+        project.real_retained_transcript_bytes(),
+        bytes.len() as u64,
+        "must read the real file's real byte count, not the untouched tracked field"
+    );
+}
+
+/// The other required property: a purged transcript's real file is
+/// really gone (`transcript_purge_removes_bytes_and_preserves_path_free_tombstone_references`
+/// already proves that directly), so it must not still be counted here
+/// either -- a real re-read after purge, not an assumption that the
+/// tombstone filter alone is enough.
+#[test]
+fn real_retained_transcript_bytes_excludes_purged_transcripts() {
+    let temp = TestDirs::new("real-retained-bytes-purged");
+    let mut project = real_project_session(1, &temp);
+    let (_terminal_id, _agent_run_id, first_id, _first_path) =
+        attach_agent_run_transcript(&mut project, &temp, "first.log", b"secret-a");
+    let (_terminal_id, _agent_run_id, _second_id, _second_path) =
+        attach_agent_run_transcript(&mut project, &temp, "second.log", b"secret-bb");
+
+    project.purge_transcript(&first_id).unwrap();
+
+    assert_eq!(project.real_retained_transcript_bytes(), 9);
+}
+
 fn attach_agent_run_transcript(
     project: &mut ProjectSession,
     temp: &TestDirs,
