@@ -122,6 +122,43 @@ These may never be applied silently, may never be hot-reloaded, and may never co
 
 Changing any of these requires explicit user confirmation and produces an audit event. A change that cannot be confirmed is not applied.
 
+### The classification test, applied — and one result that is conditional
+
+PR-023-D applied the test above to all five `[security]`/`[terminal]` candidates. Recorded here
+because the reasoning is what gets reused, not the verdicts.
+
+**Fail the test — made inert by construction, like `default_trust`:**
+
+- `terminal.multiline_paste_protection` — RFC-018's paste confirmation is unconditional in the
+  real input path; a setting able to disable it would be a new bypass for every terminal.
+- `security.require_approval_for_adapter_destructive_commands` —
+  `approval::arrival::should_promote_to_modal` promotes `High`/`Destructive` unconditionally;
+  a setting able to disable it would let every future destructive command run with no human in
+  the loop.
+
+**Pass — real booleans, governed by confirmation:**
+
+- `security.restricted_mode_blocks_workspace_prompts` / `_lsp` / `_plugins`. **The reason is
+  narrower than "it is a separate axis from trust."** Lifting a block *does* give untrusted
+  projects a capability — Restricted Mode is precisely what applies when trust has not been
+  granted. They pass because **no RFC requires a deliberate per-use act for these**: RFC-004
+  defines them as a policy baseline, not a per-project decision, and no GUI route exists to
+  lift one for a single project. There is no per-use act for confirmation-on-change to bypass,
+  which is exactly what the test asks.
+
+**Passes conditionally, and this one needs a trigger rather than a verdict:**
+
+- `security.redact_secret_like_environment_names` passes **because the flow it would weaken
+  does not exist** — there is no environment-variable disclosure path today. That is not a
+  permanent property. **When environment redaction lands** (the delivery plan puts it at M12,
+  with configuration), this setting must be re-tested against the same rule *before* the
+  redaction feature ships, or it becomes a bypass the day its subject arrives. A classification
+  that rests on a missing feature is a dated classification.
+
+**Generalisation worth keeping**: "passes because the thing it would weaken does not exist yet"
+is a legitimate answer and an unstable one. It belongs in the record with the trigger that
+invalidates it, not as a tick.
+
 ### `default_trust` is the one setting confirmation does not make safe
 
 PR-023-B's typed model added `[projects].default_trust`, from the external design's worked
