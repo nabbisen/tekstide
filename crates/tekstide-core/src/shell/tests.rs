@@ -2,6 +2,7 @@ use super::ApplicationShell;
 use crate::command::AppCommand;
 use crate::project::{ProjectMode, ProjectOpenSurface, ProjectResourceLimits};
 use crate::route::AppRoute;
+use crate::security::RestrictedModeFeature;
 use std::fs;
 
 #[test]
@@ -154,7 +155,10 @@ fn populated_project_board_renders_placeholder_branch_status_without_process_pro
     assert!(rendered.contains("branch/status: not available"));
     assert!(rendered.contains("trust: Restricted"));
     assert!(rendered.contains("security: Restricted Mode"));
-    assert!(rendered.contains("blocked automation: 9"));
+    assert!(rendered.contains(&format!(
+        "blocked automation: {}",
+        RestrictedModeFeature::ALL.len()
+    )));
 }
 
 #[test]

@@ -12,10 +12,23 @@ pub enum RestrictedModeFeature {
     TekstideInitiatedGitHook,
     WorkspaceCommandPaletteEntry,
     BackgroundProjectAutomation,
+    /// RFC-023 §Workspace Configuration: a repository's own
+    /// `.tekstide/config.toml`, blocked in Restricted Mode like every
+    /// other feature here. Reserved vocabulary, not yet implemented --
+    /// RFC-023 ships only defaults + user-global configuration in v1
+    /// ("shipping only defaults + user-global in the first slice is
+    /// acceptable, provided the blocked-feature vocabulary and
+    /// precedence rule land with it"); there is no code anywhere that
+    /// reads a workspace-local config file yet, so this variant has no
+    /// real trigger to test end to end. Landing the vocabulary now,
+    /// ahead of the loader, is deliberate: a future workspace-config
+    /// reader can cite an already-reviewed variant instead of adding
+    /// one alongside itself.
+    WorkspaceConfigLoading,
 }
 
 impl RestrictedModeFeature {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::AutomaticLspStartup,
         Self::WorkspaceAiProfileLoading,
         Self::WorkspaceAiPromptLoading,
@@ -25,6 +38,7 @@ impl RestrictedModeFeature {
         Self::TekstideInitiatedGitHook,
         Self::WorkspaceCommandPaletteEntry,
         Self::BackgroundProjectAutomation,
+        Self::WorkspaceConfigLoading,
     ];
 
     pub fn label(self) -> &'static str {
@@ -38,6 +52,7 @@ impl RestrictedModeFeature {
             Self::TekstideInitiatedGitHook => "Tekstide-initiated Git hook",
             Self::WorkspaceCommandPaletteEntry => "workspace command palette entry",
             Self::BackgroundProjectAutomation => "background project automation",
+            Self::WorkspaceConfigLoading => "workspace configuration loading",
         }
     }
 }

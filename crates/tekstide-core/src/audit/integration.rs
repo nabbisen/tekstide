@@ -626,6 +626,62 @@ impl<'a> AuditCoordinator<'a> {
         let record = project_added_record(project_id);
         self.append_observation(&record)
     }
+
+    /// RFC-023 PR-023-D: `config_policy_increase`'s producer. Observes
+    /// a change that has *already* been confirmed and applied by the
+    /// time this is called -- there is no confirmation surface yet to
+    /// call it from (M12 UI work), so, like `record_paste_blocked` and
+    /// unlike `grant_project_trust`, this does not perform the change
+    /// itself. Writes `Authorized` then `Applied` under one fresh
+    /// `AuditOperationId`, the same two-stage shape
+    /// `grant_project_trust` uses for the same reason: by the time
+    /// either of these is called, the deliberate act (a confirmation
+    /// dialog, in both cases) has already happened, so recording it as
+    /// two linked stages in one call is complete and honest, not a
+    /// fiction. Both writes are best-effort
+    /// (`append_observation`, not `append_required`) -- this pack's own
+    /// stated rule for every config producer: "audit-store availability
+    /// is not guaranteed... a record that cannot be written must not
+    /// break the action it was observing." `project_id` is always
+    /// `None`: workspace configuration is not implemented (defaults +
+    /// user-global only), so every config change today is global, with
+    /// no project to attribute it to.
+    pub fn record_sensitive_config_policy_increase(&mut self) -> AuditObservationStatus {
+        let operation_id = AuditOperationId::new_uuid();
+        let authorized = sensitive_config_changed_record(
+            AuditActionKind::ConfigPolicyIncrease,
+            AuditOutcome::Authorized,
+            AuditActorKind::User,
+            AuditActionSource::TrustedUi,
+            Some(operation_id),
+        );
+        let _ = self.append_observation(&authorized);
+
+        let mut applied = authorized;
+        applied.event_id = AuditEventId::new_uuid();
+        applied.outcome = AuditOutcome::Applied;
+        self.append_observation(&applied)
+    }
+
+    /// RFC-023 PR-023-D: `config_policy_reduce`'s producer. Single
+    /// stage -- `valid_config_change` fixes `outcome` to `Applied` and
+    /// `operation_id` to `None` for this direction, matching RFC-023's
+    /// own asymmetry: tightening never needs authorization, so there is
+    /// no `Authorized` stage to write. `AppPolicy`/`PolicyEngine`, not
+    /// `User`/`TrustedUi`: RFC-023 explicitly does not require a
+    /// deliberate confirming act for this direction, so attributing it
+    /// to a policy decision rather than a user click is accurate, not
+    /// merely permitted by the schema's other allowed pairing.
+    pub fn record_sensitive_config_policy_reduce(&mut self) -> AuditObservationStatus {
+        let record = sensitive_config_changed_record(
+            AuditActionKind::ConfigPolicyReduce,
+            AuditOutcome::Applied,
+            AuditActorKind::AppPolicy,
+            AuditActionSource::PolicyEngine,
+            None,
+        );
+        self.append_observation(&record)
+    }
 }
 
 fn trust_record(
@@ -726,6 +782,40 @@ fn project_added_record(project_id: crate::project::ProjectId) -> DurableAuditRe
         AuditActionSource::AppCommand,
     );
     record.project_id = Some(project_id);
+    record
+}
+
+/// `valid_config_change` forces `subject_kind: None`, and a separate,
+/// crate-wide invariant (`DurableAuditRecordV1::validate`) forces
+/// `subject_kind.is_some() == subject_ref.is_some()` -- so `subject_ref`
+/// is not merely left `None` by convention here, it is **structurally
+/// unable to hold anything** for this family. That matters for
+/// `SecuritySensitiveField::AgentProfiles`: a profile name is
+/// user-supplied text from the file, the same class as RFC-031's
+/// `subject_ref` question and this RFC's own `key`-bounding work, and
+/// the schema itself -- not a judgment call made here -- is what
+/// prevents it from ever reaching the store. `project_id` is always
+/// `None`, for the same reason `record_sensitive_config_policy_increase`'s
+/// own doc states: no project to attribute a global config change to.
+/// `operation_id` is the one field the two directions disagree on
+/// (`Some` for increase, `None` for reduce), so it stays a parameter
+/// rather than being fixed here.
+fn sensitive_config_changed_record(
+    action_kind: AuditActionKind,
+    outcome: AuditOutcome,
+    actor_kind: AuditActorKind,
+    action_source: AuditActionSource,
+    operation_id: Option<AuditOperationId>,
+) -> DurableAuditRecordV1 {
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::SensitiveConfigChanged,
+        outcome,
+        action_kind,
+        actor_kind,
+        action_source,
+    );
+    record.reason_code = Some(AuditReasonCode::PolicyChanged);
+    record.operation_id = operation_id;
     record
 }
 

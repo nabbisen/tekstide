@@ -3129,9 +3129,10 @@ fn trust_grant_dialog_body_states_the_present_and_future_consequence() {
     );
 }
 
-/// `what-the-trust-dialog-must-say.md` §3: "do not enumerate the nine
-/// features in the dialog." None of `RestrictedModeFeature::ALL`'s own
-/// words appear.
+/// `what-the-trust-dialog-must-say.md` §3: "do not enumerate the
+/// features in the dialog" (nine at the time that document was
+/// written; ten as of RFC-023's `WorkspaceConfigLoading`). None of
+/// `RestrictedModeFeature::ALL`'s own words appear.
 #[test]
 fn trust_grant_dialog_body_does_not_enumerate_the_nine_restricted_features() {
     let catalog = state_with(ApplicationShell::new()).catalog;

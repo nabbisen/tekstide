@@ -535,6 +535,184 @@ fn project_added_schema_rejects_any_outcome_other_than_applied() {
     );
 }
 
+/// RFC-023 PR-023-D: `config_policy_increase`'s producer, the same
+/// two-linked-records shape `trust_grant_commits_authorization_before_mutation_and_applied_outcome`
+/// proves for `grant_project_trust` -- `Authorized` then `Applied`,
+/// sharing one `operation_id`, both real, persisted, queried-back
+/// records rather than in-memory values.
+#[test]
+fn sensitive_config_policy_increase_persists_authorized_then_applied_sharing_one_operation_id() {
+    let dirs = TestAuditDirs::new("config-policy-increase");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+
+    let status =
+        AuditCoordinator::new(&mut store, &mut health).record_sensitive_config_policy_increase();
+    assert_eq!(status, AuditObservationStatus::Persisted);
+
+    let mut records = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2, "{records:?}");
+    records.sort_by_key(|record| record.outcome == AuditOutcome::Applied);
+    let (authorized, applied) = (&records[0], &records[1]);
+
+    for record in [authorized, applied] {
+        assert_eq!(record.family, AuditEventFamily::SensitiveConfigChanged);
+        assert_eq!(
+            record.action_kind,
+            crate::audit::AuditActionKind::ConfigPolicyIncrease
+        );
+        assert_eq!(record.actor_kind, crate::audit::AuditActorKind::User);
+        assert_eq!(
+            record.action_source,
+            crate::audit::AuditActionSource::TrustedUi
+        );
+        assert_eq!(record.reason_code, Some(AuditReasonCode::PolicyChanged));
+        assert_eq!(
+            record.project_id, None,
+            "no project to attribute a global config change to"
+        );
+        assert_eq!(record.subject_kind, None);
+        assert_eq!(
+            record.subject_ref, None,
+            "structurally impossible for this family -- see sensitive_config_changed_record's \
+             own doc comment"
+        );
+        record
+            .validate()
+            .expect("a real producer's record must satisfy the frozen family's own predicate");
+    }
+    assert_eq!(authorized.outcome, AuditOutcome::Authorized);
+    assert_eq!(applied.outcome, AuditOutcome::Applied);
+    assert!(authorized.operation_id.is_some());
+    assert_eq!(authorized.operation_id, applied.operation_id);
+    assert_ne!(
+        authorized.event_id, applied.event_id,
+        "two distinct events, not the same record persisted twice"
+    );
+}
+
+/// **Ablation**: `valid_config_change`'s `ConfigPolicyIncrease` arm
+/// requires `operation_id.is_some()`.
+#[test]
+fn sensitive_config_policy_increase_schema_rejects_a_missing_operation_id() {
+    let record = DurableAuditRecordV1::new(
+        AuditEventFamily::SensitiveConfigChanged,
+        AuditOutcome::Authorized,
+        crate::audit::AuditActionKind::ConfigPolicyIncrease,
+        crate::audit::AuditActorKind::User,
+        crate::audit::AuditActionSource::TrustedUi,
+    );
+    assert!(
+        record.validate().is_err(),
+        "ConfigPolicyIncrease without an operation_id must fail -- it is the one direction that \
+         requires authorization to be traceable"
+    );
+}
+
+/// RFC-023 PR-023-D: `config_policy_reduce`'s producer -- single stage,
+/// no `operation_id`, `AppPolicy`/`PolicyEngine` rather than a user
+/// actor, matching the asymmetry RFC-023's own §Audit pins: tightening
+/// never needs authorization.
+#[test]
+fn sensitive_config_policy_reduce_persists_a_valid_record_conforming_to_the_frozen_family() {
+    let dirs = TestAuditDirs::new("config-policy-reduce");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+
+    let status =
+        AuditCoordinator::new(&mut store, &mut health).record_sensitive_config_policy_reduce();
+    assert_eq!(status, AuditObservationStatus::Persisted);
+
+    let records = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    let record = &records[0];
+    assert_eq!(record.family, AuditEventFamily::SensitiveConfigChanged);
+    assert_eq!(record.outcome, AuditOutcome::Applied);
+    assert_eq!(
+        record.action_kind,
+        crate::audit::AuditActionKind::ConfigPolicyReduce
+    );
+    assert_eq!(record.actor_kind, crate::audit::AuditActorKind::AppPolicy);
+    assert_eq!(
+        record.action_source,
+        crate::audit::AuditActionSource::PolicyEngine
+    );
+    assert_eq!(record.reason_code, Some(AuditReasonCode::PolicyChanged));
+    assert_eq!(record.operation_id, None);
+    assert_eq!(record.project_id, None);
+    assert_eq!(record.subject_kind, None);
+    assert_eq!(record.subject_ref, None);
+    record
+        .validate()
+        .expect("a real producer's record must satisfy the frozen family's own predicate");
+}
+
+/// **Ablation**: `valid_config_change`'s `ConfigPolicyReduce` arm
+/// requires `outcome == Applied` and `operation_id.is_none()` --
+/// checked here with a present `operation_id`, the direction-specific
+/// half `sensitive_config_policy_increase_schema_rejects_a_missing_operation_id`
+/// does not cover.
+#[test]
+fn sensitive_config_policy_reduce_schema_rejects_a_present_operation_id() {
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::SensitiveConfigChanged,
+        AuditOutcome::Applied,
+        crate::audit::AuditActionKind::ConfigPolicyReduce,
+        crate::audit::AuditActorKind::AppPolicy,
+        crate::audit::AuditActionSource::PolicyEngine,
+    );
+    record.reason_code = Some(AuditReasonCode::PolicyChanged);
+    record.operation_id = Some(crate::domain::AuditOperationId::new_uuid());
+
+    assert!(
+        record.validate().is_err(),
+        "ConfigPolicyReduce with an operation_id must fail -- reduce never requires \
+         authorization, so an operation_id here would imply a confirmation step that did not \
+         happen"
+    );
+}
+
+/// RFC-023's own required sentinel test (implementation-handoff.md §8,
+/// modeled on RFC-012's own): the honest form it takes here is that
+/// *neither producer method accepts a config value as a parameter at
+/// all* -- `record_sensitive_config_policy_increase`/`_reduce` take no
+/// arguments describing what changed, only that a change of a given
+/// direction occurred. A distinctive, secret-shaped string is not
+/// merely absent from the real, persisted, queried-back record; there
+/// is no code path by which one could reach it, the same "inert by
+/// construction" shape this pack has used throughout (`ConfigDiagnostic.message`,
+/// `RestrictedDefaultTrust`). Proven against the real store round-trip
+/// (write, persist, query, format), not by reading the source.
+#[test]
+fn no_config_value_can_reach_a_sensitive_config_changed_record() {
+    let dirs = TestAuditDirs::new("config-policy-sentinel");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let sentinel = "sk-live-sentinel-config-value-should-never-appear-here";
+
+    let mut coordinator = AuditCoordinator::new(&mut store, &mut health);
+    coordinator.record_sensitive_config_policy_increase();
+    coordinator.record_sensitive_config_policy_reduce();
+
+    let records = store.query(&AuditQuery::latest(10)).unwrap().records;
+    let debug = format!("{records:?}");
+    assert!(!debug.contains(sentinel));
+    assert!(!debug.contains("agent.profile"));
+    assert!(!debug.contains("restricted_mode_blocks"));
+}
+
 #[test]
 fn managed_launch_failure_is_recorded_after_authorization_without_process_attachment() {
     let dirs = TestAuditDirs::new("integration-managed-failure");

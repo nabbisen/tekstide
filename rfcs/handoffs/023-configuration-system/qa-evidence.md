@@ -1,8 +1,8 @@
 # RFC-023: Configuration System - QA Evidence
 
-Status: PR-023-B and PR-023-C implemented and accepted 2026-08-19; PR-023-D in progress
-(classification correction landed, awaiting review; reload gating/audit producer/
-WorkspaceConfigLoading pending); PR-023-E/F not started
+Status: PR-023-B and PR-023-C implemented and accepted 2026-08-19; PR-023-D implemented in full
+2026-08-19 (classification, reload gating, WorkspaceConfigLoading, audit producer, sentinel
+test), awaiting review; PR-023-E/F not started
 Date opened: 2026-07-28
 Date accepted: Pending
 
@@ -457,10 +457,67 @@ Gates re-run after the fix: `cargo fmt --all --check` clean, `cargo clippy --wor
 --all-features` run twice: `tekstide-core` 684 passed (was 682 — 2 new tests), `tekstide` 303
 passed, `reference_adapter` 0 tests — both runs clean, `git diff --check` clean.
 
-**Pending, not yet built**: `RestrictedModeFeature::WorkspaceConfigLoading` and the vocabulary
-update; the `sensitive_config_changed` producer via `AuditCoordinator` (the `direction()` function
-this round built is the piece that producer will call); the sentinel-privacy test (no
-configuration values in the durable audit store).
+**Final piece of PR-023-D, 2026-08-19: `WorkspaceConfigLoading`, the audit producer, and the
+sentinel test.**
+
+**`RestrictedModeFeature::WorkspaceConfigLoading`** added to `security.rs`'s vocabulary (`ALL`
+bumped 9 → 10). Reserved, not wired to a real loader — RFC-023 ships only defaults + user-global
+configuration in v1, so there is no workspace-config-reading code anywhere for this variant to
+gate yet; landing the vocabulary now means a future workspace-config reader cites an
+already-reviewed variant instead of adding one alongside itself. No other exhaustive `match` over
+this enum exists anywhere in the workspace (confirmed by grep before adding the variant — every
+other call site iterates `ALL` or reads `.len()` dynamically), so restricted-mode-blocking
+coverage for the new variant came for free from the existing generic test
+(`restricted_mode_blocks_workspace_local_automation_paths`). **One real regression found and
+fixed**: `tekstide-core::shell::tests::populated_project_board_renders_placeholder_branch_status_without_process_probe`
+asserted the literal rendered string `"blocked automation: 9"` — a genuine hardcoded count my
+grep for bare `9` (combined with `restrict|feature`) missed because it's embedded in a longer
+string. Fixed to derive the expected count from `RestrictedModeFeature::ALL.len()` instead of a
+literal, so it can't silently go stale again the same way.
+
+**The `sensitive_config_changed` producer**, `AuditCoordinator::record_sensitive_config_policy_increase`/
+`_reduce` (`audit/integration.rs`), following `record_paste_blocked`'s *observe* shape, not
+`grant_project_trust`'s *operate-and-audit* shape: no confirmation surface exists yet to call
+this from (M12 UI work), so, like every other config producer, this does not perform the change
+itself — it records one that has already been confirmed and applied. Both producers take **no
+parameters describing what changed**, only that a change of a given direction occurred: the
+frozen schema forces `subject_kind: None` for this family, and a separate crate-wide invariant
+(`subject_kind.is_some() == subject_ref.is_some()`) then structurally forces `subject_ref: None`
+too — so the reviewer's own carried-forward concern (should `AgentProfiles` name *which* profile
+changed?) is settled by the schema itself, not a judgment call that could be gotten wrong. Also
+settles why `project_id` is always `None`: workspace configuration isn't implemented, so every
+config change today is global with no project to attribute it to.
+
+**Increase**: writes `Authorized` then `Applied` under one fresh `AuditOperationId`, the same
+two-linked-records shape `grant_project_trust` uses and for the same reason — by the time either
+is called, the deliberate confirming act has already happened, so recording it as two stages in
+one call is complete and honest. `User`/`TrustedUi`: RFC-023 requires explicit confirmation for
+this direction. **Reduce**: single stage, `Applied` only, `operation_id: None` — `valid_config_change`
+fixes both, matching RFC-023's own asymmetry that tightening never needs authorization.
+`AppPolicy`/`PolicyEngine`, not a user actor: accurate, not merely the schema's other allowed
+pairing — no confirming act is required for this direction. Both best-effort (`append_observation`,
+not `append_required`), matching this pack's own stated rule for every config producer.
+
+**Tests**: two full persistence-and-validation tests (increase's two linked records, reduce's
+one), two schema-boundary ablations (`ConfigPolicyIncrease` without an `operation_id`;
+`ConfigPolicyReduce` with one present), and the RFC's own required sentinel test —
+`no_config_value_can_reach_a_sensitive_config_changed_record`, calling both producers and
+asserting a distinctive secret-shaped string, plus literal field names
+(`"agent.profile"`/`"restricted_mode_blocks"`), never appear in the real, persisted,
+queried-back records' `Debug` output. The honest framing, stated in the test's own doc comment:
+this is not proving a leak was closed, but confirming the structural guarantee (no value
+parameter exists to leak) against the real store round-trip rather than only by reading the
+source.
+
+**Gates run**, 2026-08-19: `cargo fmt --all --check` clean. `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean. `cargo test --workspace --all-targets
+--all-features` run twice (after the count-regression fix): `tekstide-core` 689 passed (was
+684 — 5 new sensitive-config-changed tests), `tekstide` 303 passed (unchanged), `reference_adapter`
+0 tests — both runs clean. `git diff --check` clean.
+
+**What remains for RFC-023 as a whole**: PR-023-E (AI CLI profiles from configuration, the
+highest-risk slice — bypass tests first) and PR-023-F (closeout evidence, known limitations,
+answers to the RFC's open questions). Neither started.
 
 ### PR-023-E — AI CLI profiles from configuration
 

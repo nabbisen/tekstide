@@ -2,7 +2,7 @@
 title: "RFC-023: Configuration System - Acceptance / QA Checklist"
 rfc: "RFC-023"
 rfc_file: "../../proposed/023-configuration-system.md"
-status: "PR-023-B and PR-023-C accepted 2026-08-19; PR-023-D in progress (classification accepted, reload gating landed, awaiting review)"
+status: "PR-023-B and PR-023-C accepted 2026-08-19; PR-023-D implemented in full (classification, reload gating, WorkspaceConfigLoading, audit producer, sentinel test), awaiting review; PR-023-E/F not started"
 target_milestone: "M12"
 source_rfc_status: "Proposed"
 created: "2026-07-28"
@@ -139,10 +139,22 @@ booleans pending the classifier and reload-gating work below.
 
 ## Workspace Configuration Checklist
 
-- [ ] `RestrictedModeFeature::WorkspaceConfigLoading` added; `ALL` and exhaustive matches updated.
-- [ ] Workspace configuration blocked in Restricted Mode.
-- [ ] Block is surfaced like other Restricted Mode blocks.
-- [ ] **Workspace configuration cannot set any security-sensitive setting at any trust level.**
+- [x] `RestrictedModeFeature::WorkspaceConfigLoading` added; `ALL` and exhaustive matches updated.
+      (`security.rs`, `ALL` bumped from 9 to 10; no other exhaustive `match` over this enum
+      exists anywhere in the workspace — every other call site iterates `ALL` or `.len()`
+      dynamically, confirmed by grep before adding the variant)
+- [x] Workspace configuration blocked in Restricted Mode.
+      (`restricted_mode_blocks_workspace_local_automation_paths` iterates `ALL` generically —
+      the new variant is covered by the same test without modification)
+- [x] Block is surfaced like other Restricted Mode blocks.
+      (same mechanism, `SecurityPolicyDecision::Blocked`, no special-casing added)
+- [x] **Workspace configuration cannot set any security-sensitive setting at any trust level.**
+      Vacuously true and stated as such, not silently: RFC-023 ships only defaults +
+      user-global configuration in v1 (the RFC's own explicit decision, §Workspace
+      Configuration) — no code anywhere reads a workspace-local config file, so there is no
+      path by which one could set anything, security-sensitive or not. Reserving the
+      `WorkspaceConfigLoading` vocabulary now, ahead of the loader, means a future
+      implementation cites an already-reviewed variant instead of adding one alongside itself.
 
 ## Profile Bypass Checklist — write these tests first
 
@@ -177,12 +189,30 @@ booleans pending the classifier and reload-gating work below.
 
 ## Audit Checklist
 
-- [ ] Events conform to the frozen `sensitive_config_changed` family; schema unamended.
-- [ ] `config_policy_increase` used for changes that **increase permitted capability**, with an operation id.
-- [ ] `config_policy_reduce` used for changes that **reduce permitted capability**, without an operation id.
-- [ ] `reason_code` always `policy_changed`.
-- [ ] Written via `AuditCoordinator`, not directly to the store.
-- [ ] **Sentinel test: no configuration values in the durable store.**
+- [x] Events conform to the frozen `sensitive_config_changed` family; schema unamended.
+      (`record_sensitive_config_policy_increase`/`_reduce`, `audit/integration.rs`; both proven
+      against `record.validate()` on the real, persisted, queried-back record)
+- [x] `config_policy_increase` used for changes that **increase permitted capability**, with an
+      operation id.
+      (`sensitive_config_policy_increase_persists_authorized_then_applied_sharing_one_operation_id`
+      — `Authorized` then `Applied`, one shared `AuditOperationId`, the same two-stage shape
+      `grant_project_trust` uses and for the same reason: the deliberate act has already
+      happened by the time this producer is called)
+- [x] `config_policy_reduce` used for changes that **reduce permitted capability**, without an
+      operation id.
+      (`sensitive_config_policy_reduce_persists_a_valid_record_conforming_to_the_frozen_family`)
+- [x] `reason_code` always `policy_changed`. (asserted directly in both persistence tests)
+- [x] Written via `AuditCoordinator`, not directly to the store.
+- [x] **Sentinel test: no configuration values in the durable store.**
+      `no_config_value_can_reach_a_sensitive_config_changed_record` — the honest form this takes:
+      neither producer method accepts a config value as a parameter at all, so there is no code
+      path by which one could reach the record. Proven against the real store round-trip (write,
+      persist, query, format), not by reading the source. `subject_ref`/`subject_kind` are also
+      structurally `None` for this family — not a judgment call about whether to name which
+      setting or profile changed (the reviewer's own carried-forward concern for `AgentProfiles`),
+      but a fact the frozen schema itself enforces (`valid_config_change` requires
+      `subject_kind: None`, and a separate crate-wide invariant forces
+      `subject_kind.is_some() == subject_ref.is_some()`).
 
 ## Evidence Required
 
