@@ -30,6 +30,14 @@ code changed.
   false conclusion into two releases. No test asserted transcript behaviour on the real launch
   path, so the suite could not contradict it.
 
+  **What to do if you relied on the old claim** (added 2026-08-19; this entry originally
+  described the correction without saying what a reader who had acted on it should check).
+  **If you ran an AI CLI session on `0.10.0` or `0.11.0` believing nothing was recorded, those
+  transcripts are on your disk now.** They are at
+  `$XDG_STATE_HOME/tekstide/transcripts/` — `~/.local/state/tekstide/transcripts/` if
+  `XDG_STATE_HOME` is unset. Delete that directory if you did not want them. Nothing was
+  transmitted anywhere; this is local data only.
+
   `README.md`'s *Local Data and Privacy* section now describes what is written, where, under
   what bounds, and what has no user-facing control. Called out here rather than corrected
   quietly, because it is a privacy claim users may have relied on.

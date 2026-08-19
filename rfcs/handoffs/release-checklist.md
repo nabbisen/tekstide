@@ -15,6 +15,18 @@ This checklist applies before creating a tag or package for a Tekstide release.
 - [ ] Confirm crate versions match the intended tag.
 - [ ] Confirm future-work themes are preserved in the changelog or follow-up tracking.
 
+## Corrections
+
+- [ ] **A correction names the re-check, not only the correction.** If a release corrects a
+      claim the product previously made, the entry must say what a reader who *relied on* the
+      old claim should now do — not only what the truth is. Adopted 2026-08-19 after the snora
+      team reported that a withdrawn claim of theirs had already propagated into three
+      downstream projects' accessibility work, none of whom learned of the withdrawal from the
+      release notes that withdrew it. Our own `0.11.1` transcript correction had the same gap
+      and was amended retroactively.
+- [ ] If the correction concerns data on a user's disk, say **where it is** and **what removes
+      it**, in the entry itself — not only in the README it points at.
+
 ## Required Gates
 
 - [ ] `git status --short` shows no unintended changes.
