@@ -295,6 +295,18 @@ impl ProjectSession {
     /// I/O-free contract for whatever future caller wants the *tracked*
     /// number once RFC-036 decides whether to wire the recorder that
     /// keeps it current.
+    ///
+    /// Response 278: `filter_map(fs::metadata(..).ok())` treats an
+    /// **unreadable** file the same as an **absent** one -- both
+    /// contribute `0`. For a missing file that is correct; for an
+    /// unreadable one it *understates* retained bytes, the same
+    /// direction of error this method exists to correct against
+    /// (telling a user less of their data exists than does). Benign
+    /// today: rare (a file in the user's own state directory they
+    /// cannot stat), and where this feeds the purge confirmation
+    /// specifically, purge deletes regardless and is the safe direction
+    /// anyway -- the understatement risk is confined to the informational
+    /// visibility line, not to whether purge itself acts correctly.
     pub fn real_retained_transcript_bytes(&self) -> u64 {
         self.transcripts
             .iter()
