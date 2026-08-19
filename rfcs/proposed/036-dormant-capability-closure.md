@@ -56,6 +56,16 @@ every row.
   its dormancy — the audit only ever counted production call sites — but **"delete it" is no
   longer free**, and this RFC should not treat it as dead weight.
 - **`transition_change_set_review_state`** → RFC-034.
+- **`record_terminal_transcript_write_summary` / `record_transcript_write_summary` — one fewer
+  reason to wire, as of 2026-08-19.** These set `Transcript.byte_count`, and RFC-033 PR-033-C
+  needed a real retained-bytes figure for its purge confirmation. It did **not** wire them,
+  and the reasoning generalises: **a tracked counter is only ever correct prospectively.**
+  Wiring it would have left every transcript written before the wiring at `0`, so the dialog
+  would still have lied about existing data. Reading `fs::metadata` is correct retrospectively
+  too, and it is the same source `remove_transcript_file` already uses at delete time — so the
+  displayed figure and the deleted figure now agree by construction. **This RFC's wire /
+  delete / document decision should know that the obvious consumer went elsewhere on purpose**,
+  and that "wire it" would not have served that consumer even if taken.
 - **`purge_project_transcripts`** → RFC-033.
 - **`add_detected_generated_change_set`**, **`capture_agent_run_filesystem_baseline`**,
   **`apply_agent_terminal_outcome`** → discharged by `change-detection-wiring` (`0.11.0`).
