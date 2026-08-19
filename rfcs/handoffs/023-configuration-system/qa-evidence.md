@@ -1,8 +1,8 @@
 # RFC-023: Configuration System - QA Evidence
 
-Status: PR-023-B and PR-023-C implemented and accepted 2026-08-19; PR-023-D implemented in full
-2026-08-19 (classification, reload gating, WorkspaceConfigLoading, audit producer, sentinel
-test), awaiting review; PR-023-E/F not started
+Status: PR-023-B/C/D accepted; PR-023-E implemented 2026-08-20 (profile translation, four bypass
+tests, Managed-denial, profile-direction audit classification), awaiting review; PR-023-F not
+started
 Date opened: 2026-07-28
 Date accepted: Pending
 
@@ -563,9 +563,127 @@ known limitations, answers to the RFC's open questions). Neither started.
 
 ### PR-023-E — AI CLI profiles from configuration
 
-Pending implementation.
+**Implemented 2026-08-20.** The highest-risk slice — write the bypass tests first, which is the
+order this actually happened in.
 
-**Reminder for whoever takes this slice:** write the four bypass tests before the feature. Configuration that names an executable is the highest-risk surface in this RFC.
+**The translation** (`crates/tekstide-core/src/config/profile.rs`, new module):
+`to_ai_cli_profile(id, &ConfiguredAiCliProfile) -> AiCliProfile`, exactly the scope
+`ConfiguredAiCliProfile`'s own doc comment (PR-023-B) already named for this slice. `source` is
+always `UserGlobal`, per RFC-023 §AI CLI Profiles From Configuration's own words. This function
+does not, and structurally cannot, touch `AgentRunLaunchValidator::validate` — it only
+constructs a value; `git diff` on `crates/tekstide-core/src/agent/launch.rs` is empty in the
+final commit, confirmed directly rather than assumed from intent.
+
+**Two fields with no home yet, stated rather than silently dropped.** `configured.args` has no
+corresponding field on `AiCliProfile` at all — the launch pipeline has no argv-template concept
+for a profile to configure — so this translation does not wire it anywhere; the same "typed
+storage, no consumer yet" status this pack's own Scoping section already gives keybindings and
+several other fields. `environment_policy`'s string value is not parsed into a specific
+`AiCliEnvironmentPolicy` either; every config-defined profile gets `Minimal`, the same
+least-exposure default `AiCliProfile::new` itself already uses, not a weaker one invented here.
+
+**Executable resolution** (`resolve_executable`, private to `profile.rs`): a `command`
+containing a path separator resolves as `AiCliExecutable::Absolute`; a bare name resolves via
+`AiCliExecutable::PathLookup` against reviewed system paths only (`/usr/local/bin`, `/usr/bin`)
+— **never** `ExecutableLookupPath::project_local`, because `ConfiguredAiCliProfile` has no field
+that could request one. This is why the fourth bypass test (below) constructs its `AiCliProfile`
+directly rather than through the translator: proving `AgentRunLaunchValidator::validate` itself
+still refuses that shape is the point, since the translator cannot produce it today regardless.
+
+**The four bypass tests**, all in `crates/tekstide-core/src/config/tests/profile.rs`, all
+building a real `ConfiguredAiCliProfile`, translating it through the real `to_ai_cli_profile`,
+and validating through the real, unmodified `AgentRunLaunchValidator`:
+- `config_profile_pointing_at_a_project_root_executable_is_rejected`
+- `config_profile_pointing_at_a_wrapper_script_inside_the_project_root_is_rejected` (a real,
+  executable shell-script wrapper — same underlying guard as the case above, proven separately
+  because the review gate names it as its own case)
+- `config_profile_pointing_at_a_symlink_resolving_into_the_project_root_is_rejected` (a real
+  symlink outside the root, target inside it)
+- `config_profile_relying_on_a_project_local_path_entry_is_rejected` (constructed directly, per
+  the executable-resolution note above)
+
+Plus a positive control, `a_legitimate_config_profile_outside_the_project_root_validates_successfully`
+— without it, a translator that rejected everything would trivially pass all four bypass tests.
+
+**Managed does not confer Managed**, proven twice: `to_ai_cli_profile_never_sets_managed_compatibility_or_structured_action_approval`
+(the translator structurally cannot produce it — no field exists to request it from, tried
+across a range of `adapter` strings including `"managed"`, `"MANAGED"`, `"reference"`) and
+`managed_compatibility_level_without_structured_action_approval_is_still_rejected` (a hand-forced
+`compatibility_level: Managed`, simulating a hypothetical future translator bug, is still
+rejected by RFC-010's own `validate_compatibility`, unmodified).
+
+**Ablated for real, three separate guards, each restored and confirmed clean**:
+1. `validate_executable_provenance`'s restricted-mode check — disabled, the three
+   executable-location bypass tests all failed with the launch succeeding (the failure output
+   showed the resolved `executable_path` genuinely inside the project root). Restored.
+2. `validate_lookup_path`'s two checks (declared-project-local and canonicalize-and-compare) —
+   disabled, `config_profile_relying_on_a_project_local_path_entry_is_rejected` still failed, but
+   on a *different* error variant (`WorkspaceLocalExecutableBlocked`, from the independent
+   downstream provenance check catching the same hostile resolved path) rather than passing
+   outright — genuine defense-in-depth, and confirms this test is precisely pinned to the
+   PATH-lookup guard specifically, not merely "some rejection happens." Restored.
+3. `validate_compatibility`'s `Managed`-without-capability check — disabled,
+   `managed_compatibility_level_without_structured_action_approval_is_still_rejected` failed with
+   the launch succeeding as `Managed`. Restored.
+
+`git diff` on `agent/launch.rs` confirmed empty after each restoration and in the final commit.
+
+**Workspace-local via config-file-location: vacuously true, stated as such.** RFC-023 v1 loads
+only defaults and user-global configuration — `ConfigStore::load` takes a single,
+non-project-relative path, confirmed by reading the whole loading pipeline before writing this.
+There is no code path anywhere that could load a configuration file from inside a project root,
+so there is nothing for the "profiles from such a file are workspace-local" rule to apply to
+yet. Same status the Workspace Configuration Checklist already gives the comparable
+security-sensitive-setting question.
+
+**Profile add/edit is audited: completing PR-023-D's own deferred piece.** Reload-gating for
+`[agent.profile.*]` already existed (`current.agent.profiles != candidate.agent.profiles`,
+unmodified this slice); what was missing was the audit-producer *direction* classification,
+which `sensitive.rs`'s own doc comment named as PR-023-E's to do. Added
+`agent_profiles_direction` (`crates/tekstide-core/src/config/sensitive.rs`): RFC-023's two own
+worked examples (adding a profile is `Increase`, removing one is `Reduce`) plus a rule for the
+case the RFC does not name — modifying an existing profile's fields — worst-case-wins:
+`candidate` is `Reduce` only if it is a pure subset of `current` (every entry it still has exists
+under the same key with an *identical* value); anything else, including a single-field
+modification or a mixed add-and-remove, is `Increase`. Five new tests in
+`config/tests/sensitive.rs` cover add/remove/modify/mixed cases. **Ablated for real**: inverted
+the subset-check's two branches, confirmed all four direction-specific tests fail with the
+literal `Reduce`/`Increase` values swapped, restored.
+
+**OQ3, raised rather than built: "should configuration-defined profiles require a one-time
+confirmation on first use?"** RFC-023's own Scoping addendum (2026-08-19) answers **yes**, and
+names this as something PR-023-E "carries." Not implemented this slice, and the reason is a real
+finding, not a schedule call: **`AiCliProfileSource::UserGlobal` cannot currently distinguish a
+genuinely configuration-defined profile from a hardcoded one.** `AiCliProfile::claude_code_linux_default`
+— the one real, shipped built-in profile — is *also* `AiCliProfileSource::UserGlobal` (its own
+doc comment, `agent/profile.rs`). A confirmation-on-first-use gate keyed on `source == UserGlobal`
+alone would therefore also demand confirmation for the built-in Claude Code profile, which needs
+none — it is compiled in, already reviewed, not something a file supplied. Building the gate
+correctly needs either a new, narrower marker distinguishing "this profile's values came from a
+parsed file" from "this profile is compiled into the binary," or a confirmation-state registry
+keyed by profile identity that a future M12 confirmation dialog would consult — both are genuine
+design surfaces, not scaffolding this slice can add as a side effect, and the second crosses into
+GUI-layer persistence this headless RFC does not otherwise touch. Raised in review request 281
+rather than decided unilaterally.
+
+**What this does not establish.** No confirmation-on-first-use exists yet (OQ3, above). No real
+boot path constructs a `ConfigStore` or calls `to_ai_cli_profile` in production — this slice
+proves the translation and its safety, not that a configured profile is reachable from the real
+GUI yet, the same "typed storage / real logic, no production caller yet" status this pack's own
+convention has given every other piece of RFC-023 so far. `configured.args` is not wired into
+any launch pipeline field, for the reason stated above. `environment_policy`'s string value is
+not parsed beyond always producing `Minimal`.
+
+**Gates run**, 2026-08-20: `cargo fmt --all --check` clean. `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean. `cargo test --workspace --all-targets
+--all-features` run three times, all fully clean, combined with the same-session, separately
+committed leaked-child test-harness fix (`f0c5055`) landed just before this slice:
+`tekstide` 311 passed (unchanged, no GUI-crate work this slice), `tekstide-core` 713 passed (was
+695 before either same-session change; this slice's own 10 `config/tests/profile.rs` tests plus
+a net +4 in `config/tests/sensitive.rs` account for 14 of the +18, the leaked-child fix's own 4
+new `test_support` tests the rest). `git diff` on `crates/tekstide-core/src/agent/launch.rs`
+confirmed empty. `git diff --check` clean. Committed as `855d063`, staged by explicit path,
+separately from the unrelated leaked-child fix.
 
 ### PR-023-F — Closeout evidence
 

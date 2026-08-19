@@ -2,7 +2,7 @@
 title: "RFC-023: Configuration System - Acceptance / QA Checklist"
 rfc: "RFC-023"
 rfc_file: "../../accepted/023-configuration-system.md"
-status: "PR-023-B and PR-023-C accepted 2026-08-19; PR-023-D implemented in full (classification, reload gating, WorkspaceConfigLoading, audit producer, sentinel test), awaiting review; PR-023-E/F not started"
+status: "PR-023-B/C/D accepted; PR-023-E implemented 2026-08-20 (profile translation, four bypass tests, Managed-denial, profile-direction audit classification), awaiting review; PR-023-F not started"
 target_milestone: "M12"
 source_rfc_status: "Proposed"
 created: "2026-07-28"
@@ -170,14 +170,64 @@ booleans pending the classifier and reload-gating work below.
 
 ## Profile Bypass Checklist — write these tests first
 
-- [ ] Config profile with a project-root executable → rejected at launch.
-- [ ] Config profile with a wrapper script inside the project root → rejected.
-- [ ] Config profile with a symlink resolving into the project root → rejected.
-- [ ] Config profile relying on a project-local `PATH` entry → rejected.
-- [ ] Config file located inside a project root → its profiles treated as workspace-local.
-- [ ] **RFC-010 validation code reused unmodified, not reimplemented.**
-- [ ] `Managed` declared in configuration does not confer `Managed`.
-- [ ] Adding or editing a profile is audited.
+- [x] Config profile with a project-root executable → rejected at launch.
+      (`config_profile_pointing_at_a_project_root_executable_is_rejected`,
+      `crates/tekstide-core/src/config/tests/profile.rs` — a real `ConfiguredAiCliProfile`,
+      translated through the real `to_ai_cli_profile`, validated by the real, unmodified
+      `AgentRunLaunchValidator`. Ablated for real: temporarily disabled
+      `validate_executable_provenance`'s restricted-mode check in `agent/launch.rs`, confirmed
+      this test fails with the launch succeeding, restored, confirmed `git diff` on `launch.rs`
+      is empty.)
+- [x] Config profile with a wrapper script inside the project root → rejected.
+      (`config_profile_pointing_at_a_wrapper_script_inside_the_project_root_is_rejected`, same
+      file and same ablation as above — a real, executable shell-script wrapper.)
+- [x] Config profile with a symlink resolving into the project root → rejected.
+      (`config_profile_pointing_at_a_symlink_resolving_into_the_project_root_is_rejected` — a
+      real symlink outside the root whose target resolves inside it; same ablation, same
+      restoration.)
+- [x] Config profile relying on a project-local `PATH` entry → rejected.
+      (`config_profile_relying_on_a_project_local_path_entry_is_rejected` — `ConfiguredAiCliProfile`
+      has no field that could produce a `project_local` lookup path at all, so this test
+      constructs the `AiCliProfile` shape directly, as defense-in-depth proof that
+      `AgentRunLaunchValidator::validate` itself still refuses it regardless of what constructed
+      it. Ablated for real: disabled both of `validate_lookup_path`'s checks in `agent/launch.rs`
+      — the test still failed, but on a *different* error variant (`WorkspaceLocalExecutableBlocked`,
+      from the downstream provenance check catching the same hostile path independently) rather
+      than passing outright, confirming genuine defense-in-depth and that this test is precisely
+      pinned to the PATH-lookup guard specifically. Restored, confirmed clean.)
+- [x] Config file located inside a project root → its profiles treated as workspace-local.
+      **Vacuously true, stated as such.** RFC-023 v1 loads only defaults and user-global
+      configuration (`ConfigStore::load` takes a single, non-project-relative path; confirmed by
+      reading the whole loading pipeline before writing this) — there is no code path anywhere
+      that could load a configuration file from inside a project root, so there is nothing for
+      this rule to apply to yet. The same status the Workspace Configuration Checklist above
+      already gives the comparable security-sensitive-setting question.
+- [x] **RFC-010 validation code reused unmodified, not reimplemented.**
+      `git diff` on `crates/tekstide-core/src/agent/launch.rs` is empty in the final commit —
+      confirmed directly, not merely by not having intended to touch it. The four bypass tests'
+      own ablations (above) were performed as temporary edits, verified, then reverted before
+      committing.
+- [x] `Managed` declared in configuration does not confer `Managed`.
+      Proven twice, independently: `to_ai_cli_profile_never_sets_managed_compatibility_or_structured_action_approval`
+      (the translator structurally cannot produce `Managed` — there is no field on
+      `ConfiguredAiCliProfile` to request it from, tried across a range of `adapter` strings
+      including ones that read as an attempt) and
+      `managed_compatibility_level_without_structured_action_approval_is_still_rejected` (even a
+      hand-forced `compatibility_level: Managed`, simulating a hypothetical future translator
+      bug, is still rejected by RFC-010's own, unmodified `validate_compatibility`. Ablated for
+      real: disabled that check in `agent/launch.rs`, confirmed the test fails with the launch
+      succeeding, restored.)
+- [x] Adding or editing a profile is audited.
+      Reload-gating for `[agent.profile.*]` already existed (PR-023-D's own
+      `current.agent.profiles != candidate.agent.profiles` diff comparison, unmodified this
+      slice) — what this slice completes is the audit-producer *direction* classification,
+      previously deferred (`sensitive.rs`'s own doc comment named it as PR-023-E's to do):
+      `agent_profiles_direction` — adding a profile is `Increase` (RFC-023's own worked example),
+      removing one is `Reduce` (the other example), and modifying an existing profile's fields is
+      also `Increase` (worst-case-wins: this module has no principled way to say a new
+      `command`/`args`/`adapter`/`environment_policy` value is "less" than the old one). Five new
+      tests cover add/remove/modify/mixed cases; ablated for real by inverting the subset check,
+      confirmed all four direction-specific tests fail, restored.
 
 ## Reload Checklist
 
