@@ -1,6 +1,6 @@
 ---
 title: "A default binding for OpenApprovalHistory — the last unreachable built surface"
-status: "Implemented 2026-08-18, awaiting review"
+status: "Complete 2026-08-18 — accepted (requests 256/257). `Ctrl+Alt+H` reachable from a real key press; the surface opens, command approval itself remains unreachable for want of an AI CLI that speaks the protocol"
 rfc_file: "../done/022-adapter-spawn-and-command-approval-surface.md"
 target_milestone: "M11"
 created: "2026-08-17"

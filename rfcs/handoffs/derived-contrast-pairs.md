@@ -1,6 +1,6 @@
 ---
 title: "Derived contrast pairs — make a new theme role impossible to leave unmeasured"
-status: "Implemented 2026-08-18, awaiting review"
+status: "Complete 2026-08-18 — accepted (requests 260/261). Pairs derived from an exhaustive `Theme` destructure; the scrim backdrop found failing at 2.40:1 and fixed by raising the scrim alpha to 0.75"
 rfc_file: "none — hardening the gate added by theme-contrast-verification"
 target_milestone: "M11"
 created: "2026-08-18"

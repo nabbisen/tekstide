@@ -1,6 +1,6 @@
 ---
 title: "Theme contrast verification — a real gate, and the border defect it catches"
-status: "Implemented 2026-08-18, awaiting review"
+status: "Complete 2026-08-18 — accepted (requests 256/257). `border_default` raised 0.35 → 0.45 after the gate was observed failing at 2.63:1. Superseded in part by `derived-contrast-pairs.md`, which replaced the hand-written pair list"
 rfc_file: "none — a defect fix plus the test that should have caught it"
 target_milestone: "M11"
 created: "2026-08-17"
