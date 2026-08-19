@@ -11,9 +11,13 @@ created: "2026-08-19"
 ## Prerequisite (PR-033-A)
 
 ```text
-[ ] approval_state_root set explicitly at the GUI launch call site.
-[ ] A test opts out of capture AND binds an approval channel successfully.
-[ ] Ablated: removing the explicit approval_state_root fails that test specifically.
+[x] approval_state_root set explicitly at the GUI launch call site.
+    (attempt_agent_run_launch_with_profile_state_root_and_capture, crates/tekstide/src/shell.rs)
+[x] A test opts out of capture AND binds an approval channel successfully.
+    (a_managed_launch_with_capture_disabled_still_binds_its_approval_channel, shell/tests.rs)
+[x] Ablated: removing the explicit approval_state_root fails that test specifically.
+    (fails with Runtime(AdapterApproval(StateRootMissing)), the exact failure mode the handoff
+    describes)
 ```
 
 ## Opt-out (PR-033-B)

@@ -7,10 +7,12 @@ use super::{
     AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ExternalChangeButton, Message,
     ModalButton, ModalContent, PasteConfirmButton, State, TerminalPasteRefusal, TrustGrantButton,
     agent_run_launch_refusal_text, attempt_agent_run_launch_with_profile,
-    attempt_agent_run_launch_with_profile_and_state_root, content_within_bound, evaluate_promotion,
-    focus_marker, main_area_key, main_area_label, modal_scrim_style, open_real_audit_store,
-    poll_approval_channels, sidebar_label, status_bar_summary, terminal_paste_refusal_text,
-    trust_grant_dialog_body, trusted_ui_state, verify_restored_trust_against, zone_style,
+    attempt_agent_run_launch_with_profile_and_state_root,
+    attempt_agent_run_launch_with_profile_state_root_and_capture, content_within_bound,
+    evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
+    open_real_audit_store, poll_approval_channels, sidebar_label, status_bar_summary,
+    terminal_paste_refusal_text, trust_grant_dialog_body, trusted_ui_state,
+    verify_restored_trust_against, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -3505,6 +3507,70 @@ fn launch_real_managed_agent_run_with_executable(
         .expect("a resolvable Managed profile should launch the real reference adapter");
     let project = state.app_shell.state().active_project().unwrap();
     project.agent_runs().last().unwrap().id.clone()
+}
+
+/// RFC-033 PR-033-A's own required gate: a real `Managed` launch with
+/// transcript capture disabled must still bind its approval channel --
+/// through `attempt_agent_run_launch_with_profile_state_root_and_capture`,
+/// the exact seam PR-033-B's real per-project opt-out will drive. Before
+/// this slice's fix, the GUI launch call site never set
+/// `approval_state_root` explicitly, so a `Managed` launch with no
+/// transcript state root configured would have had nothing for its
+/// approval channel to bind to either, and failed closed with
+/// `AgentAdapterApprovalError::StateRootMissing` -- not reachable in
+/// production yet (`claude_code_linux_default` is `Supervised`), which
+/// is exactly why this had to land before the opt-out that makes it
+/// reachable.
+#[test]
+fn a_managed_launch_with_capture_disabled_still_binds_its_approval_channel() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("capture-disabled-managed-launch");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let state_root = fresh_state_root_dir();
+
+    let mut profile = tekstide_core::agent::AiCliProfile::new(
+        "reference-adapter",
+        "Reference Adapter (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: reference_adapter_binary_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Managed,
+    );
+    profile.adapter_capabilities = tekstide_core::agent::AiCliAdapterCapabilities {
+        structured_action_approval: true,
+    };
+    profile.workspace_discovery_policy =
+        tekstide_core::agent::AiCliWorkspaceDiscoveryPolicy::DisabledByLaunch {
+            evidence: "test: bypasses the trust gate the same way tekstide-core's own \
+                       built_in_profile test helper does"
+                .to_owned(),
+        };
+
+    attempt_agent_run_launch_with_profile_state_root_and_capture(
+        &mut state,
+        profile,
+        Some(state_root.clone()),
+        false,
+    )
+    .expect(
+        "a Managed launch with capture disabled must still bind its approval channel via the \
+         explicit approval_state_root this slice adds",
+    );
+
+    assert_eq!(
+        state.approval_channels.len(),
+        1,
+        "the approval channel must actually be live, not merely absent an error"
+    );
+    assert!(
+        !state_root.join("transcripts").exists(),
+        "capture was disabled -- no transcript directory should have been created"
+    );
 }
 
 /// Response 228 Required 1: the production launch path never appends

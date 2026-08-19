@@ -1912,6 +1912,32 @@ fn attempt_agent_run_launch_with_profile_and_state_root(
     profile: tekstide_core::agent::AiCliProfile,
     state_root: Option<std::path::PathBuf>,
 ) -> Result<(), AgentRunLaunchRefusal> {
+    attempt_agent_run_launch_with_profile_state_root_and_capture(state, profile, state_root, true)
+}
+
+/// RFC-033 PR-033-A handoff: the third testability split this same
+/// function has now had -- `capture_enabled` is the seam PR-033-B's
+/// real per-project opt-out will drive (a persisted setting instead of
+/// a test literal); the wrappers above keep capture on, matching every
+/// existing caller's current, unchanged behaviour.
+///
+/// **The fix this slice exists for**: `approval_state_root` is now set
+/// explicitly, from the same `state_root`, whenever one is available --
+/// unconditionally, not only when `with_local_bounded_transcript` is
+/// also called. Before this, a `Managed` launch with capture disabled
+/// (not reachable yet -- `claude_code_linux_default` is `Supervised` --
+/// but about to become reachable the moment PR-033-B lands) would have
+/// had no state root to bind its approval channel to at all, and failed
+/// closed with `AgentAdapterApprovalError::StateRootMissing`.
+/// `prepare_adapter_approval`'s own fallback to `transcript_state_root`
+/// (RFC-022 PR-022-C response 216) was never wrong -- this call site
+/// simply never took up the escape hatch response 216 built.
+fn attempt_agent_run_launch_with_profile_state_root_and_capture(
+    state: &mut State,
+    profile: tekstide_core::agent::AiCliProfile,
+    state_root: Option<std::path::PathBuf>,
+    capture_enabled: bool,
+) -> Result<(), AgentRunLaunchRefusal> {
     let plan = {
         let Some(project) = state.app_shell.state().active_project() else {
             return Ok(());
@@ -1928,7 +1954,12 @@ fn attempt_agent_run_launch_with_profile_and_state_root(
             "Interactive Claude Code session",
         );
         if let Some(state_root) = state_root {
-            request = request.with_local_bounded_transcript(state_root);
+            request = if capture_enabled {
+                request.with_local_bounded_transcript(state_root.clone())
+            } else {
+                request.without_transcript_capture()
+            };
+            request = request.with_approval_channel(state_root);
         }
 
         let validation = tekstide_core::agent::AgentRunLaunchValidator
