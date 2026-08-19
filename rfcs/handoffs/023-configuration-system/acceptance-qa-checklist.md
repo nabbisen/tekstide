@@ -1,7 +1,7 @@
 ---
 title: "RFC-023: Configuration System - Acceptance / QA Checklist"
 rfc: "RFC-023"
-rfc_file: "../../proposed/023-configuration-system.md"
+rfc_file: "../../accepted/023-configuration-system.md"
 status: "PR-023-B and PR-023-C accepted 2026-08-19; PR-023-D implemented in full (classification, reload gating, WorkspaceConfigLoading, audit producer, sentinel test), awaiting review; PR-023-E/F not started"
 target_milestone: "M12"
 source_rfc_status: "Proposed"

@@ -418,7 +418,7 @@ run three times for stability across every slice in this RFC. `git diff --check`
 
 ### Documents updated in this closeout
 
-- `rfcs/proposed/032-workspace-trust-granting.md` -> moved to `rfcs/done/`; `Status` rewritten
+- `rfcs/done/032-workspace-trust-granting.md` -> moved to `rfcs/done/`; `Status` rewritten
   to the closed, precise claim above, matching RFC-021/022's own closed-status convention.
 - `rfcs/README.md`: the stale Proposed-table row removed; a new Implemented-table row added.
 - This pack's other four documents (`README.md`, `task-breakdown-pr-plan.md`,

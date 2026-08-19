@@ -1,7 +1,10 @@
 # RFC-037: Adopt the 5-Folder RFC Lifecycle
 
-Status: **Proposed — awaiting the human owner's acceptance.** Authored 2026-08-19 at the owner's
-direction ("we have to migrate to the 5-folder variant at good timing").
+Status: **Implemented and closed 2026-08-19.** Accepted by the human owner and migrated in the
+same commit, per RFC-000 §Self-application's own recommended pattern. `rfcs/accepted/` exists and
+holds the five RFCs that were accepted but unfinished; `rfcs/proposed/` is empty, which is the
+correct state when nothing is under review. This RFC lives in `done/` for the same reason RFC-000
+does: the policy it defines is now in effect.
 Target milestone: M12
 Date: 2026-08-19
 

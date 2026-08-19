@@ -1,7 +1,7 @@
 ---
 title: "RFC-020: Diff Review and AgentRun Report Surfaces - Acceptance / QA Checklist"
 rfc: "RFC-020"
-rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
+rfc_file: "../../accepted/020-diff-review-and-agentrun-report.md"
 status: "Open"
 target_milestone: "M10"
 created: "2026-08-15"

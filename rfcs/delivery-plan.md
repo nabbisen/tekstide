@@ -8,8 +8,8 @@ This is the ordered RFC queue for the remaining work, with the requirements gap 
 
 ## How to pick up work
 
-1. Find the next RFC in [§ RFC Queue](#rfc-queue) whose status is *Accepted* and whose dependencies are met.
-2. Read the RFC in `rfcs/proposed/NNN-*.md` (or `rfcs/done/` if already implemented).
+1. Find the next RFC in [§ RFC Queue](#rfc-queue) whose status is *Accepted* and whose dependencies are met — or equivalently, look in `rfcs/accepted/`, which holds exactly those (RFC-037, 2026-08-19).
+2. Read the RFC in **`rfcs/accepted/NNN-*.md`** — that is where startable work lives (RFC-037). `rfcs/proposed/` is for RFCs still under review, `rfcs/done/` for shipped ones.
 3. Read its handoff pack at `rfcs/handoffs/NNN-*/README.md` — that file is the entry point and links everything else in reading order.
 4. Implement one slice from the handoff's `task-breakdown-pr-plan.md`.
 5. Record evidence in the handoff's `qa-evidence.md` and tick `acceptance-qa-checklist.md`.

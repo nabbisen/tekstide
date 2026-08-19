@@ -280,7 +280,7 @@ impl ProjectSession {
     /// `byte_count`-based sum.** That field is only ever updated by
     /// `record_transcript_write_summary`, which has no production
     /// caller today (confirmed by grepping the whole workspace before
-    /// writing this) -- `rfcs/proposed/036-dormant-capability-closure.md`
+    /// writing this) -- `rfcs/accepted/036-dormant-capability-closure.md`
     /// already names `record_terminal_transcript_write_summary` as its
     /// own, separate, undecided question, not RFC-033's to resolve.
     /// Trusting `byte_count` for a surface a user reads before deciding

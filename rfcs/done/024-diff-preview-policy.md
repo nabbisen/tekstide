@@ -18,7 +18,7 @@ Depends on:
 
 Blocks:
 
-- [RFC-020](../proposed/020-diff-review-and-agentrun-report.md) — the diff review surface has nothing to render until this exists.
+- [RFC-020](../accepted/020-diff-review-and-agentrun-report.md) — the diff review surface has nothing to render until this exists.
 
 ## Why this RFC exists
 

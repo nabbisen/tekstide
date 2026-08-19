@@ -303,7 +303,7 @@ Acceptance:
 
 Implementation:
 
-- Moved RFC-011 from `rfcs/proposed/011-transcript-retention-and-local-data-policy.md` to `rfcs/done/011-transcript-retention-and-local-data-policy.md`.
+- Moved RFC-011 from `rfcs/done/011-transcript-retention-and-local-data-policy.md` to `rfcs/done/011-transcript-retention-and-local-data-policy.md`.
 - Updated `rfcs/README.md` so RFC-011 is implemented with documented limitations.
 - Updated handoff metadata and links to point at the done RFC.
 - Updated `acceptance-qa-checklist.md` with observed acceptance status, evidence coverage, and limitations.

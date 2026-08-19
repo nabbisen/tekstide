@@ -390,14 +390,14 @@ from PR-024-A through C; PR-024-D adds no rendering code and no diff algorithm.
 527 — 4 new tests; `tekstide` 203 passed, unchanged — no `crates/tekstide` changes),
 `git diff --check`. All clean.
 
-**Not done in this slice**: moving `rfcs/proposed/024-diff-preview-policy.md` to
+**Not done in this slice**: moving `rfcs/done/024-diff-preview-policy.md` to
 `rfcs/done/`, and the index/reference updates that go with it — deferred to after this
 slice's own review, matching this project's established closeout sequencing (RFC-019 was
 moved to `rfcs/done/` only after its own closeout review was accepted, not alongside it).
 
 > **Update (2026-08-11).** The move happened after response 193 accepted this slice and
 > response 192 separately accepted PR-024-B (closing the relay gap recorded in PR-024-B's
-> own section above). `rfcs/proposed/024-diff-preview-policy.md` is now
+> own section above). `rfcs/done/024-diff-preview-policy.md` is now
 > `rfcs/done/024-diff-preview-policy.md`; every cross-reference to the old path in this
 > handoff pack and `rfcs/README.md` was updated in the same commit as the move.
 

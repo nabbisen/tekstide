@@ -24,7 +24,7 @@ Depends on:
   capture mode, per-run opt-out and purge scope, all **designed and none reachable**.
 - [RFC-013](../done/013-durable-audit-store-and-local-data-policy.md) — the audit store a
   purge must record into (`transcript_purge` is a defined, unwired family).
-- [RFC-023](./023-configuration-system.md) — where a *default* capture setting would live, if
+- [RFC-023](../accepted/023-configuration-system.md) — where a *default* capture setting would live, if
   one is wanted. This RFC is about per-run and after-the-fact control, not defaults.
 
 ## Summary

@@ -171,7 +171,7 @@ surface") as written would have been actively wrong. `ProjectSession::transcript
 computes `project_retained_bytes` from each `Transcript`'s tracked `byte_count` field — but that
 field is only ever updated by `record_transcript_write_summary`/
 `record_terminal_transcript_write_summary`, and grepping the whole workspace found **zero
-production call sites** for either, only test call sites. `rfcs/proposed/036-dormant-capability-closure.md`
+production call sites** for either, only test call sites. `rfcs/accepted/036-dormant-capability-closure.md`
 already names `record_terminal_transcript_write_summary` as dormant and assigns its own
 wire/delete/keep decision to that RFC, explicitly not RFC-033's. The practical effect: every real,
 non-empty transcript's tracked `byte_count` is permanently `0` today, so wiring the surface

@@ -80,7 +80,7 @@ created: "2026-08-19"
     but NOT ProjectSession::transcript_local_data_summary's own byte_count-based sum: that
     field has no production writer (record_transcript_write_summary/
     record_terminal_transcript_write_summary have zero call sites outside tests, confirmed by
-    grep; rfcs/proposed/036-dormant-capability-closure.md already names the latter as its own,
+    grep; rfcs/accepted/036-dormant-capability-closure.md already names the latter as its own,
     separate, undecided question). Trusting it would have shown "0 bytes" for every real
     transcript. Added ProjectSession::real_retained_transcript_bytes — real fs::metadata reads
     on each non-tombstone transcript's own storage_path, the same real-filesystem source of

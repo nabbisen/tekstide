@@ -1,7 +1,7 @@
 ---
 title: "RFC-023: Configuration System - Implementation Handoff"
 rfc: "RFC-023"
-rfc_file: "../../proposed/023-configuration-system.md"
+rfc_file: "../../accepted/023-configuration-system.md"
 target_milestone: "M12"
 source_rfc_status: "Proposed"
 created: "2026-07-28"

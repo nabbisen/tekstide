@@ -1,7 +1,7 @@
 ---
 title: "RFC-020 — The window boundary and the third escaping position: implementation handoff"
 rfc: "RFC-020"
-rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
+rfc_file: "../../accepted/020-diff-review-and-agentrun-report.md"
 status: "Required reading before any RFC-020 code"
 created: "2026-08-15"
 ---

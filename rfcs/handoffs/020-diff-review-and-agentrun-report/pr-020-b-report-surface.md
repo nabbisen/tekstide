@@ -1,7 +1,7 @@
 ---
 title: "PR-020-B, surface half — the AgentRun report surface"
 status: "Implemented 2026-08-18, awaiting review"
-rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
+rfc_file: "../../accepted/020-diff-review-and-agentrun-report.md"
 target_milestone: "M11"
 created: "2026-08-18"
 ---

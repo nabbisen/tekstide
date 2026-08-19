@@ -1,6 +1,6 @@
 # RFC-023: Configuration System - Developer Handoff Pack
 
-Source RFC: [RFC-023](../../proposed/023-configuration-system.md)
+Source RFC: [RFC-023](../../accepted/023-configuration-system.md)
 Target milestone: **M12** (all slices headless — start immediately)
 Source RFC status: **Proposed**
 
@@ -10,7 +10,7 @@ Source RFC status: **Proposed**
 
 | # | Document | Purpose |
 | --- | --- | --- |
-| 1 | [RFC-023](../../proposed/023-configuration-system.md) | Format, precedence, atomic validation, security-sensitive settings, audit vocabulary. |
+| 1 | [RFC-023](../../accepted/023-configuration-system.md) | Format, precedence, atomic validation, security-sensitive settings, audit vocabulary. |
 | 2 | This file | Orientation and what is binding. |
 | 3 | [`implementation-handoff.md`](./implementation-handoff.md) | Module layout, validation pipeline, the profile-bypass trap, audit mapping. |
 | 4 | [`task-breakdown-pr-plan.md`](./task-breakdown-pr-plan.md) | Slice boundaries and review gates. |

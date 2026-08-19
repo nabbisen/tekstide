@@ -1,6 +1,6 @@
 # RFC-019: Editor and Explorer Surfaces - Developer Handoff Pack
 
-Source RFC: [RFC-019](../../proposed/019-editor-and-explorer-surfaces.md)
+Source RFC: [RFC-019](../../done/019-editor-and-explorer-surfaces.md)
 Target milestone: **M10** (`0.6.x`)
 Source RFC status: **Accepted by the human owner 2026-08-10**
 
@@ -10,7 +10,7 @@ Source RFC status: **Accepted by the human owner 2026-08-10**
 
 | # | Document | Purpose |
 | --- | --- | --- |
-| 1 | [RFC-019](../../proposed/019-editor-and-explorer-surfaces.md) | The surfaces, the security core, the label trap. |
+| 1 | [RFC-019](../../done/019-editor-and-explorer-surfaces.md) | The surfaces, the security core, the label trap. |
 | 2 | This file | Orientation and what is binding. |
 | 3 | [`the-escaping-asymmetry.md`](./the-escaping-asymmetry.md) | **Read before PR-019-B or PR-019-C.** The two halves are only correct together. |
 | 4 | [`implementation-handoff.md`](./implementation-handoff.md) | What exists, the seams, what is genuinely missing. |

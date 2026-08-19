@@ -1,7 +1,7 @@
 ---
 title: "RFC-023: Configuration System - Task Breakdown and PR Plan"
 rfc: "RFC-023"
-rfc_file: "../../proposed/023-configuration-system.md"
+rfc_file: "../../accepted/023-configuration-system.md"
 target_milestone: "M12"
 created: "2026-07-28"
 updated: "2026-07-28"

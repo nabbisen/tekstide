@@ -1,7 +1,7 @@
 ---
 title: "RFC-020: Diff Review and AgentRun Report Surfaces - QA Evidence"
 rfc: "RFC-020"
-rfc_file: "../../proposed/020-diff-review-and-agentrun-report.md"
+rfc_file: "../../accepted/020-diff-review-and-agentrun-report.md"
 status: "PR-020-B implemented 2026-08-18 (core: responses 198/199, commits b74d8d5/c92d97e; surface: pr-020-b-report-surface.md, 2026-08-18), awaiting review. PR-020-C (change review surface) and PR-020-D (closeout) not started."
 target_milestone: "M10"
 created: "2026-08-15"
