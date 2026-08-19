@@ -515,9 +515,51 @@ source.
 684 — 5 new sensitive-config-changed tests), `tekstide` 303 passed (unchanged), `reference_adapter`
 0 tests — both runs clean. `git diff --check` clean.
 
-**What remains for RFC-023 as a whole**: PR-023-E (AI CLI profiles from configuration, the
-highest-risk slice — bypass tests first) and PR-023-F (closeout evidence, known limitations,
-answers to the RFC's open questions). Neither started.
+**Response 274 follow-up, same day: a reserved vocabulary variant was inflating a real,
+user-visible count.** `RestrictedModeSummary::from_trust` built the Project Board's
+`blocked_features` (and, downstream, its rendered "blocked automation: N" count and label list)
+from `RestrictedModeFeature::ALL` — the full ten-variant vocabulary, including
+`WorkspaceConfigLoading`, which blocks nothing since no code anywhere reads a workspace config
+file yet. A real user opening an untrusted project was told ten automations were blocked when
+nine actually were. The regression fix that added the tenth variant to the count in the first
+place (deriving the expected string from `RestrictedModeFeature::ALL.len()` instead of a
+hardcoded `9`) was mechanically correct — a literal does go stale — but it coupled a user-facing
+claim to the *vocabulary* rather than to what is *enforced*, and the vocabulary now contains a
+reserved entry with no enforcement point.
+
+Fixed: `RestrictedModeFeature::ENFORCED` added alongside `ALL` — the nine variants with a real
+production trigger today. `ALL` stays as the full vocabulary, used only where the property under
+test is the *policy function's* exhaustive correctness
+(`restricted_mode_blocks_workspace_local_automation_paths`/`trusted_workspace_allows_policy_checked_automation_paths`,
+both in `security/tests.rs`, both correctly still iterate `ALL` — a reserved feature must still
+be *correctly* blocked if it is ever checked, even though nothing checks it yet).
+`RestrictedModeSummary::from_trust` now builds `blocked_features` from `ENFORCED`. Three test
+call sites updated to expect `ENFORCED.len()` (9) instead of `ALL.len()` (10):
+`restricted_mode_summary_exposes_ui_ready_blocked_feature_labels` (`security/tests.rs`, gained a
+second assertion that `WorkspaceConfigLoading` is absent from the summary directly),
+`project_rows_preserve_placeholder_field_shape_without_probing` (`project_board/tests.rs`), and
+`populated_project_board_renders_placeholder_branch_status_without_process_probe`
+(`shell/tests.rs` — the same test the earlier regression fix touched).
+
+**Ablated for real**: reverted `from_trust` to `ALL`, confirmed all three tests fail with the
+literal `left: 10, right: 9` mismatch (and the rendered-text test's own string-match failure),
+restored, confirmed green again.
+
+**`README.md`'s "the nine restricted features" claim was correctly left untouched**, per the
+reviewer's own note: under this fix it is true again (nine are actually enforced), so "fixing" it
+to say ten would have re-introduced the exact overstatement this response corrects. Recorded here
+so a reader comparing the README against `RestrictedModeFeature::ALL.len()` (10) does not conclude
+the README is stale — it isn't; it's counting the right thing.
+
+Gates re-run after the fix: `cargo fmt --all --check` clean, `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean, `cargo test --workspace --all-targets
+--all-features` run twice: `tekstide-core` 689 passed (unchanged — the fix strengthened existing
+tests rather than adding new ones), `tekstide` 303 passed, `reference_adapter` 0 tests — both runs
+clean, `git diff --check` clean.
+
+**PR-023-D closes with this fix.** What remains for RFC-023 as a whole: PR-023-E (AI CLI profiles
+from configuration, the highest-risk slice — bypass tests first) and PR-023-F (closeout evidence,
+known limitations, answers to the RFC's open questions). Neither started.
 
 ### PR-023-E — AI CLI profiles from configuration
 

@@ -51,11 +51,13 @@ fn project_rows_preserve_placeholder_field_shape_without_probing() {
     assert!(row.restricted_mode);
     assert_eq!(
         row.blocked_automation_count,
-        u32::try_from(RestrictedModeFeature::ALL.len()).unwrap()
+        u32::try_from(RestrictedModeFeature::ENFORCED.len()).unwrap(),
+        "response 274: must report what is actually enforced, not the whole reserved \
+         vocabulary"
     );
     assert_eq!(
         row.blocked_automation_labels.len(),
-        RestrictedModeFeature::ALL.len()
+        RestrictedModeFeature::ENFORCED.len()
     );
     assert!(
         row.blocked_automation_labels

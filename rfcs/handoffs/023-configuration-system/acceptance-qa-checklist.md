@@ -143,6 +143,18 @@ booleans pending the classifier and reload-gating work below.
       (`security.rs`, `ALL` bumped from 9 to 10; no other exhaustive `match` over this enum
       exists anywhere in the workspace — every other call site iterates `ALL` or `.len()`
       dynamically, confirmed by grep before adding the variant)
+- [x] **A reserved variant must not inflate a user-facing count.** Response 274 found that
+      `RestrictedModeSummary::from_trust` built the Project Board's "blocked automation: N" from
+      `ALL` (10) even though `WorkspaceConfigLoading` blocks nothing — a real user was told ten
+      automations were blocked when nine were. Fixed: `RestrictedModeFeature::ENFORCED` (the
+      nine variants with a real production trigger) added alongside `ALL` (the full reserved
+      vocabulary, kept for the policy-function tests that must cover every variant exhaustively
+      regardless of whether it's reserved). `from_trust` now builds `blocked_features` from
+      `ENFORCED`. Ablated for real: reverted to `ALL`, confirmed all three affected tests fail
+      with the literal `left: 10, right: 9` mismatch, restored, confirmed green.
+      `README.md`'s own "the nine restricted features" claim is correct again under this fix and
+      was left untouched, per the reviewer's own note — it would have been wrong to "fix" a
+      README line that the code fix made true again.
 - [x] Workspace configuration blocked in Restricted Mode.
       (`restricted_mode_blocks_workspace_local_automation_paths` iterates `ALL` generically —
       the new variant is covered by the same test without modification)

@@ -48,7 +48,16 @@ fn restricted_mode_summary_exposes_ui_ready_blocked_feature_labels() {
     assert_eq!(summary.mode_label, "Restricted Mode");
     assert_eq!(
         summary.blocked_features.len(),
-        RestrictedModeFeature::ALL.len()
+        RestrictedModeFeature::ENFORCED.len(),
+        "response 274: the summary must report what is actually enforced, not the whole \
+         reserved vocabulary -- WorkspaceConfigLoading has no production trigger yet and must \
+         not inflate this count"
+    );
+    assert!(
+        !summary
+            .blocked_features
+            .contains(&RestrictedModeFeature::WorkspaceConfigLoading),
+        "a reserved variant with no enforcement point must not appear in a user-facing count"
     );
     assert!(
         summary

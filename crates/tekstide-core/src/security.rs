@@ -28,6 +28,15 @@ pub enum RestrictedModeFeature {
 }
 
 impl RestrictedModeFeature {
+    /// The full reserved vocabulary, including variants with no real
+    /// production trigger yet (`WorkspaceConfigLoading`). Use this to
+    /// test the *policy function* exhaustively -- `assess_restricted_mode_feature`
+    /// must correctly block every variant if it is ever checked,
+    /// reserved or not. Do **not** use this to build anything a user
+    /// reads as a count of what Tekstide is *currently doing* -- see
+    /// [`Self::ENFORCED`] and response 274's own finding, which is
+    /// exactly this mistake: the Project Board told a real user "ten
+    /// automations are blocked" when only nine were.
     pub const ALL: [Self; 10] = [
         Self::AutomaticLspStartup,
         Self::WorkspaceAiProfileLoading,
@@ -39,6 +48,26 @@ impl RestrictedModeFeature {
         Self::WorkspaceCommandPaletteEntry,
         Self::BackgroundProjectAutomation,
         Self::WorkspaceConfigLoading,
+    ];
+
+    /// [`Self::ALL`] minus every variant with no real production trigger
+    /// yet -- currently just `WorkspaceConfigLoading`. Use this for
+    /// anything a user reads as what Tekstide is *actually enforcing*
+    /// (`RestrictedModeSummary::from_trust`'s own `blocked_features`,
+    /// and any count derived from it). A reserved variant joins
+    /// [`Self::ALL`] the moment it lands so the exhaustive policy-function
+    /// tests cover it, but must not join a user-facing count until the
+    /// production trigger that makes the claim true also lands.
+    pub const ENFORCED: [Self; 9] = [
+        Self::AutomaticLspStartup,
+        Self::WorkspaceAiProfileLoading,
+        Self::WorkspaceAiPromptLoading,
+        Self::WorkspaceEnvironmentLoading,
+        Self::WorkspacePluginLoading,
+        Self::AutomaticTaskExecution,
+        Self::TekstideInitiatedGitHook,
+        Self::WorkspaceCommandPaletteEntry,
+        Self::BackgroundProjectAutomation,
     ];
 
     pub fn label(self) -> &'static str {
@@ -108,7 +137,12 @@ impl RestrictedModeSummary {
         let effective_trust = effective_workspace_trust(trust);
         let restricted_mode = effective_trust == WorkspaceTrust::Restricted;
         let blocked_features = if restricted_mode {
-            RestrictedModeFeature::ALL.to_vec()
+            // Response 274: `ENFORCED`, not `ALL` -- this summary feeds
+            // a real, user-visible count (the Project Board's "blocked
+            // automation: N"), and a reserved vocabulary entry with no
+            // production trigger yet must not inflate what Tekstide
+            // claims it is doing.
+            RestrictedModeFeature::ENFORCED.to_vec()
         } else {
             Vec::new()
         };
