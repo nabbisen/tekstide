@@ -100,3 +100,30 @@ land, a user-supplied palette reaches the renderer having passed no contrast che
 Decide that deliberately — promote the module and validate on load, or state plainly that
 configured colours are unchecked. Shipping the second silently while the changelog advertises a
 WCAG gate is not an option.
+
+## Two transferable precedents for the contrast-gate question (added 2026-08-19)
+
+The contrast-gate decision above — promote the module and validate a loaded palette, or state
+plainly that configured colours are unchecked — has prior art worth reading before deciding.
+Both come from snora's own history, surfaced by a review of their 0.39.1 docs (request 283).
+**Neither argues for adopting snora**; both are design decisions transferable regardless.
+
+**1. Make an undeclared contrast obligation a compile error, not a runtime check.** Their
+`Palette::usages` (RFC-063) requires a new palette role to declare its intended surfaces and
+threshold class, or the crate fails to build. That is the same mechanism our own
+`derived-contrast-pairs` slice adopted for `Theme` — and it is worth noting *why* they arrived
+at it: their earlier rule lived attached to **one role** (`focus`) rather than being an
+obligation every role satisfies, and `border` consequently went untested for several releases.
+That is precisely the shape of the defect we found in their palette and they found in
+`text_muted`.
+
+**If we promote our contrast module to validate a configured palette**, the compile-time
+declaration surface is the stronger of the two shapes. A runtime pass/fail can be added to and
+forgotten; a declaration a new role cannot skip cannot.
+
+**2. "Every threshold is a floor, never a ceiling" — state it, do not leave it inferable.**
+Their RFC-072 added that sentence after a downstream team asserted the opposite about a value
+that had already moved once, and shipped a test asserting the wrong direction. If RFC-023 ships
+any WCAG-tested defaults that a user can then override, saying which direction the number may
+move is a one-paragraph, front-loaded fix for a gap that otherwise surfaces only after someone
+has built on the wrong reading.
