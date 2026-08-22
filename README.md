@@ -134,11 +134,11 @@ switching. It includes:
   over white" both pass — the failure lives strictly between them, at content
   around 78% grey, where neither the border nor the fill alone clears 3:1
   (worst case measured **2.40:1**). The scrim is now more opaque (`0.55` →
-  `0.75`) so that no content value fails; this is a visible appearance change,
+  `0.75`, in `0.12.0`) so that no content value fails; this is a visible appearance change,
   not only a number. The check itself is swept continuously across that range
   rather than sampled at a few points, since sampling is exactly what let this
   one hide.
-- **The AgentRun report surface** (`Ctrl+Alt+R`) — real transcript content for
+- **The AgentRun report surface (`0.12.0`)** (`Ctrl+Alt+R`) — real transcript content for
   the most recently launched run in the active project, escaped at render
   (a Unicode directionality override in what an AI CLI printed shows as a
   visible marker, never as an invisible reordering — the same policy every

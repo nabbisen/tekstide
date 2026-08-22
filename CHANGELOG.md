@@ -1,5 +1,105 @@
 # Changelog
 
+## 0.12.0 - Your Transcripts, and What the Agent Did
+
+Status: released on 2026-08-22.
+
+`0.11.1` was a documentation-only release that corrected a false privacy claim and had to
+publish an admission with it: transcripts are written for every AI CLI run, **and there was
+no in-app way to stop it or delete them**. This release removes that sentence by fixing the
+thing it described. It also makes an agent run's transcript readable inside the application
+for the first time — until now it was recorded and never shown.
+
+### Added
+
+- **Per-project transcript capture opt-out, purge, and retained-size visibility**, all on the
+  Trust Settings surface (`Ctrl+Alt+U`). You can decline capture for a project before running
+  anything, see how many transcripts are retained and how many bytes they occupy, and purge
+  them permanently through a confirmation dialog. The decision persists across sessions.
+  Declining affects **future** runs; it does not delete what is already there, which is what
+  purge is for.
+
+  The retained-size figure is read from the files themselves at display time, not from a
+  counter incremented as data is written. That is deliberate: a counter would read `0` for
+  every transcript written before the counter existed, so the dialog would have understated
+  exactly the data a user opting out most wants to find. The figure shown and the bytes
+  deleted now come from the same source.
+
+- **The AgentRun report surface**, with `Ctrl+Alt+R`: the transcript of the current project's
+  most recent agent run, rendered in the application. It states whether the run is still
+  active — in which case the transcript may still be growing — and it distinguishes two
+  different kinds of "you are not seeing everything": the *window* (only the most recent
+  bytes are shown, and it says which bytes) and *writer truncation* (the run produced more
+  than storage kept, and that data is gone). Those are different facts and it does not
+  collapse them. Transcript content is treated as untrusted and escaped.
+
+- **Two more audit families have real producers**: `restricted_mode_blocked`, recorded when
+  Restricted mode refuses a launch, and `project_added`, recorded when a project is added to
+  the board. Purging transcripts records `transcript_purge`. The audit store still has **no
+  surface** — nothing in the application renders it — so this improves the record on disk,
+  not what you can see.
+
+### Fixed
+
+- **The modal scrim failed WCAG 2.1 SC 1.4.11 at its worst case.** `0.11.0`'s new contrast
+  gate measured the pairs it was given; this cycle measured the *derived* pair nobody had —
+  the modal card's own border against the scrim, with bright terminal content behind it —
+  and found **2.40:1** where 3:1 is required. The scrim is now 0.75 alpha, measuring 3.62:1
+  at that same worst case, and remains visibly translucent.
+
+  The interesting part is why it was missed twice. Contrast of a translucent layer is not
+  monotonic in the backdrop: the worst case sits at neither the darkest nor the brightest
+  backdrop but at a crossing point in between, so **sampling a few plausible backdrops finds
+  a passing ratio and stops.** It is now swept rather than sampled, and adding a new theme
+  role that participates in a translucent pair cannot leave it unmeasured.
+
+- **Restricted mode overstated what it blocks.** The board reported ten blocked automations
+  when nine are actually enforced: the count was taken from the full `RestrictedModeFeature`
+  vocabulary, which had grown a tenth variant reserved for a capability nothing enforces yet.
+  A security surface that overstates its own protection is the wrong direction to be wrong
+  in, so the count is now taken from what is enforced.
+
+- **Purging transcripts no longer depends on the audit store opening.** Deletion was reached
+  through the code path that records it, so a project whose audit store failed to open would
+  have had its purge silently do nothing — failing closed on the audit record, but also on
+  the deletion the user asked for. Deletion now happens on both paths; only the record is
+  conditional.
+
+- A test-harness defect that leaked real child processes when a test panicked. No effect on
+  the shipped application.
+
+### Known limitations
+
+- **Purge does not erase every trace.** The transcript files are deleted; a tombstone marking
+  that the run had a transcript remains in project state, and the `transcript_purge` audit
+  record remains in the audit store by design — an audit trail you can erase from inside the
+  application is not an audit trail. Stated here rather than left for someone to discover.
+- **The retained-bytes figure can understate**, never overstate: a file whose size cannot be
+  read is counted as zero rather than guessed at.
+- **The AgentRun report shows the most recent run only.** There is no run history, and no way
+  to open a specific earlier run.
+- **There is still no way to review generated changes.** `0.11.0` made change detection real;
+  rendering it remains unbuilt (RFC-020 PR-020-C), so a detected change set is still
+  something the product knows and cannot show you.
+- **The audit store remains unviewable** from the application.
+- Unchanged: no screen-reader support, no cross-platform evidence beyond Linux, the real
+  Claude Code CLI still never exercised by the test suite, and `NFR-PERF-004` still
+  unverified.
+
+### Also in this cycle
+
+- **A configuration system was implemented, and a configuration file still does nothing.**
+  The file format, search precedence, atomic validation, bounded diagnostics, the rule that
+  security-sensitive settings do not take effect on hot reload, and configuration-defined AI
+  CLI profiles routed through the same launch validation as the built-in one are all built
+  and tested (RFC-023). **Nothing in the application loads them** — no code constructs a
+  configuration store, so writing a config file has no effect on the running product. This is
+  named here explicitly because "configuration system" in a changelog reasonably reads as
+  "you can configure it now," and you cannot. It is groundwork, and the slice that makes it
+  reachable is not yet scheduled.
+- The RFC process moved to a five-folder lifecycle, and RFC-023, RFC-031, RFC-033 and
+  RFC-037 closed.
+
 ## 0.11.1 - Transcript Disclosure Correction
 
 Status: released on 2026-08-18.
