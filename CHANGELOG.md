@@ -65,6 +65,14 @@ for the first time — until now it was recorded and never shown.
   the deletion the user asked for. Deletion now happens on both paths; only the record is
   conditional.
 
+- **Both published crates now ship `LICENSE` and `NOTICE`.** They live at the workspace root,
+  which cargo does not include when packaging a crate in a subdirectory, so every release
+  from `0.1.0` to `0.11.1` published without the Apache-2.0 licence text or the NOTICE —
+  Apache-2.0 §4 requires both to travel with the distribution. The NOTICE also carries
+  rusqlite's MIT terms and SQLite's public-domain notice, so third-party attribution was
+  missing too. **If you are redistributing an earlier version, take the two files from the
+  repository root**; the licensing itself is unchanged and always was Apache-2.0.
+
 - A test-harness defect that leaked real child processes when a test panicked. No effect on
   the shipped application.
 
