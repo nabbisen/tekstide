@@ -100,8 +100,17 @@ paste-confirm-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape a
 # `tekstide-core`'s own pre-baked English for these three strings
 # (`ProjectBoardEmptyState`'s fields exist but are not read).
 project-board-empty-heading = No projects yet
-project-board-empty-primary-action = Add Project
-project-board-empty-secondary-action = Open from path
+# 0.12.1: `project-board-empty-primary-action` ("Add Project") and
+# `-secondary-action` ("Open from path") were rendered as plain `text()`
+# widgets naming two actions that do not exist -- there is no in-app way
+# to add a project, and both labels were inert from the day they landed.
+# Replaced with what is actually true. The keys are gone rather than
+# reworded so nothing can render them again by accident; the matching
+# fields on `tekstide-core`'s `ProjectBoardEmptyState` still hold the old
+# pre-baked English and are still never read (RFC-038 owns removing them).
+project-board-empty-open-a-project = To open a project, start Tekstide with its path:
+project-board-empty-command-example = tekstide /path/to/project
+project-board-empty-keyboard-heading = Keyboard
 
 # Every `project-board-*-count` key below shares `blocked-automation-count`'s
 # vocabulary for `CountDisplay`'s three non-numeric states
@@ -528,3 +537,34 @@ transcript-purge-dialog-body = This permanently deletes { $count ->
 transcript-purge-dialog-purge = Purge
 transcript-purge-dialog-cancel = Cancel
 transcript-purge-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.
+
+
+# 0.12.1: descriptions for `keyboard_help::keyboard_help_lines`, one per
+# live `KeybindingPolicy` rule. Before this release the string `Ctrl`
+# appeared zero times in this catalogue while nine bindings were live, so
+# every capability the product had was reachable only by reading
+# `navigation.rs`. Each key is looked up from an exhaustive match in
+# `keyboard_help.rs`, so a new user-visible action cannot compile without
+# one; a *missing* key is caught by
+# `every_live_binding_is_described_to_the_user`, since `Catalog::get`
+# falls back to echoing the key rather than failing.
+#
+# Each description says what the action does AND what it needs, because
+# the commonest way to conclude this product is broken is to press a key
+# whose precondition is not met and watch nothing happen.
+keyboard-help-open-project-board = Project Board
+keyboard-help-toggle-project-mode = Switch between Content and Terminal (needs an open project)
+keyboard-help-launch-terminal = New terminal (needs an open project)
+keyboard-help-paste-into-terminal = Paste into the focused terminal
+keyboard-help-save-active-document = Save the open file
+keyboard-help-launch-agent-run = Launch an AI CLI run (needs a trusted project)
+keyboard-help-open-current-agent-run-detail = AgentRun Report for the latest run
+keyboard-help-open-approval-history = Approval History (needs an open project)
+keyboard-help-open-trust-settings = Trust Settings: grant trust, transcript capture and purge
+
+# 0.12.1: rendered beside `status-bar-summary`, on the same line so the
+# status bar's height -- which `content_area_height` subtracts to size
+# real terminal panes -- is unchanged. Points at the Project Board
+# because that is where the full keyboard list lives when nothing is
+# open; it is deliberately not a claim that Ctrl+Alt+P opens "help".
+status-bar-key-hint = Ctrl+Alt+P Project Board

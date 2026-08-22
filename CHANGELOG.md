@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.12.1 - You Can See What It Does
+
+Status: released on 2026-08-22.
+
+**`0.12.0` shipped a window that told a new user nothing.** Started with no argument — which
+this project's own Quick Start told people to do — it showed an empty Project Board naming two
+actions that do not exist, while the nine keyboard shortcuts that do exist were named nowhere
+in the running application. This release makes the product describe itself. It does not yet
+add the missing action; see *Known limitations*.
+
+### Fixed
+
+- **The Project Board's empty state named two actions that do not exist.** It rendered
+  **"Add Project"** and **"Open from path"** as plain text — no button, no handler, nothing
+  behind either — from the day the surface landed. Both are gone. The empty state now says how
+  a project is actually opened (`tekstide /path/to/project`), which is the truth, and the keys
+  in the catalogue naming those two actions are deleted so no surface can render them again.
+
+- **The running application named no keyboard shortcut anywhere.** The string `Ctrl` appeared
+  **zero times** in the entire user-facing catalogue while nine bindings were live, so every
+  capability the product had was reachable only by a user who had read `navigation.rs` or the
+  repository README. The Project Board now lists every binding and what it needs — in both its
+  empty and populated states, because help that disappears when you open your first project is
+  not help. The status bar carries a standing pointer back to the board.
+
+  The list is **derived from `KeybindingPolicy`**, not written: it cannot drift from the
+  bindings the input layer dispatches on, and it cannot advertise the five actions that have
+  no working binding. Four of those are `Configurable` with no key — dead rather than pending
+  — and one is the reserved command-palette binding with nothing behind it.
+
+- **`tekstide --help` printed `folder does not exist: --help`.** Every argument was treated as
+  a project path, so the only documented entry point rejected the universal request for
+  documentation. `-h`, `--help`, `-V` and `--version` now work, and `--help` prints usage plus
+  the same derived keyboard list. An unrecognised `-`-prefixed argument is still treated as a
+  path, deliberately: a real file can begin with a dash.
+
+- **The published Quick Start led users into the dead end.** It said to run `tekstide` bare and
+  mentioned passing a path second, as an option, when a path is the only way to put a project
+  on the board. Corrected to lead with the path and to state the limitation.
+
+### Known limitations
+
+- **There is still no in-app way to add a project.** A path on the command line remains the
+  only route; `tekstide` with no argument opens an empty board that now explains itself instead
+  of misleading you. **RFC-038 is the fix** and is proposed, not scheduled — this release is a
+  correction, and correcting a product that misrepresents itself came first.
+- **A user inside Terminal Immersion still needs to know `Ctrl+Alt+P`** to reach the board
+  where the keyboard list lives. A help surface independent of the board is RFC-038's Goal 4.
+- **`--help`'s framing sentences are English only.** The shortcut descriptions are
+  catalog-driven and localize; the surrounding usage text does not, because argument parsing
+  happens before the catalog is resolved. Recorded in RFC-038 rather than left as a surprise.
+- **`ProjectBoardEmptyState`'s `primary_action` / `secondary_action` fields still exist** in
+  `tekstide-core`'s public API, still holding the pre-baked English for the two actions that do
+  not exist. Nothing reads them. Removing them is a breaking change and belongs to RFC-038.
+- Unchanged from `0.12.0`: the configuration system loads nothing, no screen-reader support, no
+  cross-platform evidence beyond Linux, the real Claude Code CLI still never exercised by the
+  test suite, and `NFR-PERF-004` still unverified.
+
 ## 0.12.0 - Your Transcripts, and What the Agent Did
 
 Status: released on 2026-08-22.

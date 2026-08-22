@@ -25,9 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-
-*(empty — and that is the correct state. An empty `proposed/` means nothing is awaiting review,
-not that a folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
+| 038 | [First-Run and Project Entry](./proposed/038-first-run-and-project-entry.md) | **Proposed 2026-08-22**, the day the owner ran the `0.12.0` executable and found no way to do anything with it. There is no in-app route to open a project: the only production caller of `add_project_from_path` is a command-line argument. `0.12.1` corrected the empty state, which had rendered "Add Project" and "Open from path" as inert labels for actions that do not exist, and added the keyboard list and `--help` — a correction, not a fix. This RFC is the fix |
 
 ## Accepted
 

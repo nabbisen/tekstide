@@ -3640,16 +3640,25 @@ pub(crate) fn status_bar_summary(state: &State) -> String {
     )
 }
 
+/// The summary and the keyboard hint share one line on purpose:
+/// [`content_area_height`] subtracts this bar's height to size real
+/// terminal panes, so a second line would silently shrink every PTY.
 fn status_bar(state: &State) -> Element<'_, Message> {
-    container(text(status_bar_summary(state)).size(state.theme.font_size_status()))
-        .width(Length::Fill)
-        .padding(6)
-        .style(chrome_style(
-            state.theme.surface_elevated(),
-            state.theme.foreground(),
-            state.theme.border_default(),
-        ))
-        .into()
+    container(
+        row![
+            text(status_bar_summary(state)).size(state.theme.font_size_status()),
+            text(state.catalog.get("status-bar-key-hint")).size(state.theme.font_size_status()),
+        ]
+        .spacing(16),
+    )
+    .width(Length::Fill)
+    .padding(6)
+    .style(chrome_style(
+        state.theme.surface_elevated(),
+        state.theme.foreground(),
+        state.theme.border_default(),
+    ))
+    .into()
 }
 
 fn content_area(state: &State) -> Element<'_, Message> {

@@ -264,3 +264,47 @@ fn terminal_immersion_policy_limits_visible_panes_to_two() {
         assert_eq!(policy.visible_pane_count(3), 2);
     }
 }
+
+/// `advertised_bindings` is what every piece of user-facing help is
+/// built from, so its filter is the thing that decides whether the
+/// product can promise an action it cannot perform. Asserted as an exact
+/// set, not a count: a rule changing status silently is the failure mode
+/// this guards.
+#[test]
+fn advertised_bindings_are_exactly_the_live_ones() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let advertised = policy.advertised_bindings();
+
+    let bindings: Vec<&str> = advertised.iter().map(|(_, binding)| *binding).collect();
+    assert_eq!(
+        bindings,
+        vec![
+            "Ctrl+Alt+P",
+            "Ctrl+Alt+M",
+            "Ctrl+Alt+T",
+            "Ctrl+Shift+V",
+            "Ctrl+S",
+            "Ctrl+Alt+A",
+            "Ctrl+Alt+R",
+            "Ctrl+Alt+H",
+            "Ctrl+Alt+U",
+        ],
+    );
+
+    // `Ctrl+Shift+P` is `Reserved` -- claimed so nothing else takes it,
+    // with no command palette behind it. Advertising a reserved binding
+    // would tell a user to press a key that does nothing.
+    assert!(!bindings.contains(&"Ctrl+Shift+P"));
+
+    // Every excluded rule is excluded for one of exactly two reasons.
+    for rule in &policy.rules {
+        if bindings.contains(&rule.default_binding.unwrap_or("")) {
+            continue;
+        }
+        assert!(
+            rule.default_binding.is_none() || rule.status != KeybindingStatus::Candidate,
+            "{:?} is a live binding but was not advertised",
+            rule.action
+        );
+    }
+}

@@ -229,7 +229,7 @@ fn attention_state_renders_through_the_catalog() {
 
 /// The empty-state keys resolve to real text, not the key itself --
 /// `Catalog::get`'s "missing key renders as the key" fallback would
-/// fail this loudly if any of the three key names were ever mistyped.
+/// fail this loudly if any key name were ever mistyped.
 /// Deliberately does not check against `ProjectBoardEmptyState`'s own
 /// pre-baked English (the module doc: those strings are never read).
 #[test]
@@ -237,8 +237,9 @@ fn empty_state_keys_resolve_to_real_catalog_text() {
     let catalog = real_catalog();
     for key in [
         "project-board-empty-heading",
-        "project-board-empty-primary-action",
-        "project-board-empty-secondary-action",
+        "project-board-empty-open-a-project",
+        "project-board-empty-command-example",
+        "project-board-empty-keyboard-heading",
     ] {
         let rendered = catalog.get(key);
         assert_ne!(
@@ -246,4 +247,75 @@ fn empty_state_keys_resolve_to_real_catalog_text() {
             "empty-state key {key:?} did not resolve to real text -- check the key name against en.ftl"
         );
     }
+}
+
+/// 0.12.1. The empty state rendered "Add Project" and "Open from path"
+/// as inert `text()` widgets from the day it landed: no `button`, no
+/// `on_press`, and no in-app route to add a project at all. A user who
+/// started `tekstide` with no arguments -- which the published Quick
+/// Start told them to do -- saw two action names and could activate
+/// neither.
+///
+/// This asserts the keys are *gone from the catalogue*, not merely
+/// unused by this module. An unused key would let any future surface
+/// render the same lie again, and the advisory unused-key report is not
+/// a gate.
+#[test]
+fn the_two_action_labels_that_named_nothing_are_gone_from_the_catalogue() {
+    let catalog_source = std::fs::read_to_string(real_locales_dir().join("en.ftl"))
+        .expect("source-locale catalog must be readable");
+
+    for retired in [
+        "project-board-empty-primary-action",
+        "project-board-empty-secondary-action",
+    ] {
+        assert!(
+            !catalog_source.contains(&format!("\n{retired} =")),
+            "{retired} is defined again -- it names an action that does not exist.              There is still no in-app way to add a project (RFC-038); until there is,              the empty state must say how one is actually opened."
+        );
+    }
+}
+
+/// The empty state is the only place a first-time user can learn any of
+/// this, so it must carry the whole live binding list, not a sample.
+#[test]
+fn the_empty_state_lists_every_live_keybinding() {
+    let catalog = real_catalog();
+    let lines = crate::keyboard_help::keyboard_help_lines(&catalog);
+    assert_eq!(
+        lines.len(),
+        9,
+        "the empty state must describe every live binding"
+    );
+    assert!(
+        catalog
+            .get("project-board-empty-command-example")
+            .contains("tekstide "),
+        "the empty state must show the actual command that opens a project"
+    );
+}
+
+/// The first cut of `0.12.1` put the keyboard list in the empty state
+/// only, which meant help vanished the moment a user opened their first
+/// project -- a fix that stops working exactly when the product starts
+/// being used. Both arms of `view` must render it.
+///
+/// An occurrence count, not a `contains`, per `ARCHITECTURE.md`'s
+/// enumeration-test unit rule: the property is "every arm of `view`
+/// also renders help", so a third arm added later without help must
+/// fail this. A boolean check would pass on the empty-state call alone.
+#[test]
+fn every_board_state_renders_the_keyboard_list() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/surface/board.rs"),
+    )
+    .expect("board.rs must be readable");
+
+    let call_sites = source.matches("keyboard_help_view(catalog, theme)").count();
+    assert_eq!(
+        call_sites, 2,
+        "expected `view`'s empty-state arm and its populated arm each to render the \
+         keyboard list; found {call_sites} call sites. If a new board state was added, \
+         it needs help too -- see RFC-038 for why this is not optional yet."
+    );
 }

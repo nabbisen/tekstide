@@ -249,6 +249,39 @@ impl KeybindingPolicy {
         }
     }
 
+    /// The bindings a user can actually press today, derived from the
+    /// policy rather than listed anywhere -- the one source any help
+    /// text must be built from.
+    ///
+    /// Two categories are deliberately excluded, and both exclusions are
+    /// the point of deriving this instead of writing a list:
+    ///
+    /// - `Configurable` with no `default_binding` is **dead**, not
+    ///   pending. `SwitchActiveProject`, `CycleVisibleTerminalSession`,
+    ///   `OpenDiffReview` and `OpenSafeCloseDialog` are all in this
+    ///   state; advertising them would promise four actions no key can
+    ///   reach. This project has already had to fix that exact category
+    ///   error three times in the policy itself (`OpenTrustSettings`,
+    ///   `OpenApprovalHistory`, `OpenCurrentAgentRunDetail`) -- help
+    ///   text derived from the policy cannot repeat it a fourth.
+    /// - `Reserved` means the binding is claimed so nothing else takes
+    ///   it, not that pressing it does something. `Ctrl+Shift+P` is
+    ///   reserved for a command palette that does not exist.
+    ///
+    /// A hand-written help list would have to be edited whenever a rule
+    /// changes status, which is exactly the kind of state-asserting text
+    /// `ARCHITECTURE.md` records this project repeatedly failing to keep
+    /// current. This cannot go stale: it *is* the policy.
+    pub fn advertised_bindings(&self) -> Vec<(NavigationAction, &'static str)> {
+        self.rules
+            .iter()
+            .filter_map(|rule| match (rule.status, rule.default_binding) {
+                (KeybindingStatus::Candidate, Some(binding)) => Some((rule.action, binding)),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn rule_for(&self, action: NavigationAction) -> Option<&KeybindingRule> {
         self.rules.iter().find(|rule| rule.action == action)
     }

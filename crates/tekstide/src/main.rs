@@ -9,6 +9,7 @@
 // unused later.
 pub mod i18n;
 pub mod input;
+pub mod keyboard_help;
 pub mod measurement;
 mod shell;
 mod surface;
@@ -23,6 +24,7 @@ fn main() -> iced::Result {
     // Must be the very first statement -- see `measurement`'s module doc
     // on why this is the only honest definition of "process start."
     measurement::mark_process_start();
+    handle_informational_flags();
     iced::application(boot, shell::update, timed_view)
         .title(shell::State::window_title)
         .subscription(shell::subscription)
@@ -45,6 +47,37 @@ fn timed_view(state: &shell::State) -> iced::Element<'_, shell::Message> {
     } else {
         shell::view(state)
     }
+}
+
+/// `-h`/`--help`/`-V`/`--version`, handled before any window opens.
+///
+/// Until `0.12.1` every argument was treated as a project path, so
+/// `tekstide --help` printed `folder does not exist: --help` -- the
+/// product's only documented entry point rejecting the universal request
+/// for documentation. Nothing else about argument handling changes: an
+/// unrecognised `-`-prefixed argument is still passed through as a path,
+/// because a real file really can begin with a dash and silently
+/// refusing one would trade this defect for a subtler one.
+fn handle_informational_flags() {
+    let flags: Vec<String> = std::env::args().skip(1).collect();
+    let wants_help = flags.iter().any(|arg| arg == "-h" || arg == "--help");
+    let wants_version = flags.iter().any(|arg| arg == "-V" || arg == "--version");
+    if !wants_help && !wants_version {
+        return;
+    }
+
+    if wants_version {
+        println!("tekstide {}", env!("CARGO_PKG_VERSION"));
+    }
+    if wants_help {
+        let catalog =
+            i18n::Catalog::resolve(i18n::LocalePreference::default(), Some(&locales_dir()));
+        let executable = std::env::args()
+            .next()
+            .unwrap_or_else(|| "tekstide".to_owned());
+        print!("{}", keyboard_help::usage_text(&catalog, &executable));
+    }
+    std::process::exit(0);
 }
 
 /// `iced::application`'s boot function: called once, with no arguments,
