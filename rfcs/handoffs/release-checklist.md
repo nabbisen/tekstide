@@ -60,7 +60,18 @@ The workspace dry-run is the release-candidate gate for same-workspace dependenc
 
 ## Package Smoke
 
-- [ ] Inspect generated package contents for missing README, license, Cargo manifests, and source files.
+- [ ] Inspect generated package contents for missing README, license, Cargo manifests, and
+      source files. **Name the files and check the archive, not the repository.** `LICENSE`
+      and `NOTICE` live at the workspace root; cargo only auto-includes them from the
+      *package* root, so for fourteen releases both published crates shipped without either
+      — an Apache-2.0 §4 gap, since the licence and NOTICE are required to travel with the
+      distribution. Copies now sit in `crates/tekstide/` and `crates/tekstide-core/` and
+      must stay in sync with the root originals. The check is
+      `tar tzf target/package/<crate>-<version>.crate | grep -iE 'LICENSE|NOTICE'`, and it
+      must be run against the generated archive: this item existed and was ticked every
+      time, because "license" read as "is the crate licensed" rather than "is the file in
+      the tarball." Same failure shape as the README item above, which had to be amended
+      for the same reason.
 - [ ] Build or test from generated package artifacts rather than only the working tree.
 - [ ] Confirm package output does not include `.git/`, `.git-exclude/`, local agent config, `target/`, or temporary state.
 - [ ] Confirm crates.io package pages and README badges describe the intended release scope and do not overclaim the full AI CLI workbench.
