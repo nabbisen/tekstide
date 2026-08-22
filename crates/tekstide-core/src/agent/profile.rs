@@ -59,6 +59,23 @@ impl AiCliProfile {
     /// this profile is correctly refused in a Restricted (untrusted,
     /// default) project until the user grants trust -- not a bug to route
     /// around.
+    ///
+    /// RFC-023 PR-023-F response 281: `source` is `BuiltIn`, not
+    /// `UserGlobal` -- corrected here rather than left as the mislabel
+    /// PR-023-E's own review found. This profile is compiled into the
+    /// binary, not read from a file; `UserGlobal` is reserved for what
+    /// `config::to_ai_cli_profile` actually produces (RFC-023's own
+    /// wording: "a configuration-defined profile is an
+    /// `AiCliProfileSource::UserGlobal` profile"), and OQ3's still-open
+    /// confirm-on-first-use question needs exactly this distinction to
+    /// gate on once a config-defined profile can reach a real launch --
+    /// see `docs`/handoff for why this alone does not build that gate.
+    /// Verified behaviourally inert today: `AgentRunLaunchValidator`
+    /// reads `profile.source` at exactly two sites
+    /// (`validate_profile_source`'s `WorkspaceLocal` check;
+    /// `validate_workspace_discovery_policy`'s `BuiltIn | UserGlobal`
+    /// grouping), and both already treat `BuiltIn` and `UserGlobal`
+    /// identically, so this changes no observable launch behaviour.
     pub fn claude_code_linux_default() -> Self {
         Self::claude_code_from_env(std::env::var_os("HOME"))
     }
@@ -76,7 +93,7 @@ impl AiCliProfile {
         let mut profile = Self::new(
             "claude-code",
             "Claude Code",
-            AiCliProfileSource::UserGlobal,
+            AiCliProfileSource::BuiltIn,
             AiCliExecutable::PathLookup {
                 command: "claude".to_owned(),
                 lookup_paths,

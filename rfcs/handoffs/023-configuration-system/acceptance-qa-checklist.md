@@ -2,9 +2,9 @@
 title: "RFC-023: Configuration System - Acceptance / QA Checklist"
 rfc: "RFC-023"
 rfc_file: "../../accepted/023-configuration-system.md"
-status: "PR-023-B/C/D accepted; PR-023-E implemented 2026-08-20 (profile translation, four bypass tests, Managed-denial, profile-direction audit classification), awaiting review; PR-023-F not started"
+status: "PR-023-B/C/D/E accepted; PR-023-F implemented 2026-08-20 (BuiltIn/UserGlobal fix, closeout evidence, contrast-gate and confirm-gate deferrals recorded), awaiting review"
 target_milestone: "M12"
-source_rfc_status: "Proposed"
+source_rfc_status: "Accepted (2026-08-18)"
 created: "2026-07-28"
 updated: "2026-07-28"
 ---
@@ -278,13 +278,39 @@ booleans pending the classifier and reload-gating work below.
 
 ## Evidence Required
 
-- [ ] Commit/PR list.
-- [ ] Gate command output.
-- [ ] Atomicity test results.
-- [ ] Profile bypass test results — all four cases.
-- [ ] Audit conformance and sentinel-privacy results.
-- [ ] Known limitations.
-- [ ] Answers to the RFC's open questions.
+- [x] Commit/PR list.
+      PR-023-B `2026-08-19`; PR-023-C `2026-08-19`; PR-023-D `2026-08-19` (classification/reload/
+      audit-producer, plus response-270/271/272/274 follow-ups same day); PR-023-E `855d063`
+      (evidence `da959ed`); PR-023-F's own `BuiltIn` fix and this closeout — see `qa-evidence.md`
+      for the full per-slice list with every follow-up response cited.
+- [x] Gate command output.
+      `cargo fmt --all --check` / `cargo clippy --workspace --all-targets --all-features -- -D
+      warnings` / `cargo test --workspace --all-targets --all-features` (run three times per
+      slice) / `git diff --check` — clean at every slice; see each slice's own "Gates run"
+      paragraph in `qa-evidence.md` for the exact pass counts.
+- [x] Atomicity test results.
+      `reload_with_a_file_valid_in_its_first_half_and_invalid_in_its_second_changes_nothing`
+      (PR-023-C), ablated for real — see the Atomic Validation Checklist above.
+- [x] Profile bypass test results — all four cases.
+      See the Profile Bypass Checklist above — all four ablated for real against the real,
+      unmodified `AgentRunLaunchValidator`.
+- [x] Audit conformance and sentinel-privacy results.
+      See the Audit Checklist above —
+      `no_config_value_can_reach_a_sensitive_config_changed_record` is the sentinel; both
+      producers proven against `record.validate()` on the real, persisted, queried-back record.
+- [x] Known limitations.
+      See `qa-evidence.md`'s Known Limitations section — automatic reload (M13), the confirm-
+      on-first-use gate (deferred on reachability, not a date), the contrast-gate decision
+      (deferred on reachability, recorded in this pack's own README), and
+      `redact_secret_like_environment_names`'s dated classification (re-test before environment
+      redaction ships).
+- [x] Answers to the RFC's open questions.
+      All three answered in RFC-023's own §Scoping addendum (added 2026-08-19, before PR-023-F):
+      workspace configuration does not ship in v1; an invalid file produces a notification, not a
+      blocking dialog; configuration-defined profiles require one-time confirmation on first use.
+      PR-023-F does not re-derive these — it implements the one piece OQ3's answer needed
+      (`AiCliProfileSource::BuiltIn` vs `UserGlobal` actually distinguishing a compiled-in profile
+      from a config-defined one) and records why the confirmation gate itself is not built yet.
 
 ## Final Acceptance Decision
 
@@ -296,5 +322,5 @@ booleans pending the classifier and reload-gating work below.
 Reviewer notes:
 
 ```text
-Pending implementation.
+Pending review.
 ```

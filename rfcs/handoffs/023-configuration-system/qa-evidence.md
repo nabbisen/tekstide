@@ -1,8 +1,7 @@
 # RFC-023: Configuration System - QA Evidence
 
-Status: PR-023-B/C/D accepted; PR-023-E implemented 2026-08-20 (profile translation, four bypass
-tests, Managed-denial, profile-direction audit classification), awaiting review; PR-023-F not
-started
+Status: PR-023-B/C/D/E accepted; PR-023-F implemented 2026-08-20 (BuiltIn/UserGlobal fix,
+closeout evidence, contrast-gate and confirm-gate deferrals recorded), awaiting review
 Date opened: 2026-07-28
 Date accepted: Pending
 
@@ -687,7 +686,75 @@ separately from the unrelated leaked-child fix.
 
 ### PR-023-F — Closeout evidence
 
-Pending implementation.
+**Implemented 2026-08-20.** Response 281's own required piece, plus the checklist, known
+limitations, and the RFC's open questions — the last of which turned out to already be answered
+before this slice started.
+
+**The `BuiltIn`/`UserGlobal` fix.** Response 281 found that `AiCliProfile::claude_code_linux_default`
+labelled itself `AiCliProfileSource::UserGlobal` — the same value `config::to_ai_cli_profile`
+gives every configuration-defined profile (PR-023-E). A confirmation-on-first-use gate keyed on
+`source == UserGlobal` would therefore have demanded confirmation for the compiled-in Claude Code
+profile too. Fixed in `crates/tekstide-core/src/agent/profile.rs`: `claude_code_linux_default`
+now constructs `AiCliProfileSource::BuiltIn`. Verified inert to today's behaviour before changing
+it, not assumed: `AgentRunLaunchValidator` reads `profile.source` at exactly two sites
+(`validate_profile_source`'s `WorkspaceLocal` check, `validate_workspace_discovery_policy`'s
+`BuiltIn | UserGlobal` grouping), and both already treat the two identically. **The assertion is
+the point** (response 281's own words) — `claude_code_profile_lookup_paths_prefer_home_local_bin_when_home_is_set`
+(`crates/tekstide-core/src/agent/tests.rs`) now asserts `BuiltIn` where it previously asserted
+`UserGlobal`, the wrong value the mislabel had made a passing test. **Ablated for real**:
+reverted the fix, confirmed the test fails with the literal `left: UserGlobal, right: BuiltIn`
+mismatch, restored, confirmed green. This is the one piece of code PR-023-F adds; everything
+else in this slice is documentation and decision-recording.
+
+**OQ3's confirmation gate: deferred on reachability, not a date.** Response 281's own finding:
+`to_ai_cli_profile` has no production caller, and nothing constructs a live `ConfigStore` in the
+application either (PR-023-C's own "what this does not establish") — a config-defined profile
+cannot reach a real launch at all today, so a confirmation gate would guard a path that does not
+exist. Per `ARCHITECTURE.md`'s "reachability before correctness," the gate is deferred to the
+same slice that first lets a config-defined profile reach `attempt_agent_run_launch` — never a
+later slice inheriting it silently. Recorded in Known Limitations below with that condition, not
+a milestone number, so it cannot pass unnoticed the way a date can.
+
+**The contrast-gate decision: the same shape, for the same reason.** `rfcs/handoffs/023-configuration-system/README.md`
+now records the decision: deferred until a configuration value can actually reach theme/palette
+selection, since RFC-023 v1 wires none (theme-from-configuration is one of the five out-of-scope
+consumers this pack's own Scoping section names with a stated, pending owner). The two
+transferable precedents from the snora 0.39.1 review (request 283) — compile-time-enforced
+per-role contrast declarations, and stating explicitly that thresholds are floors and never
+ceilings — are recorded in the same section for whoever takes that slice.
+
+**`redact_secret_like_environment_names`'s classification re-checked, unchanged.** Carried from
+response 281. Grepped the workspace for any environment-variable disclosure flow
+(`environment.*disclos`/`disclose.*environment`) — none exists, confirming RFC-023 §Security-
+Sensitive Settings' own stated trigger ("when environment redaction lands... re-tested against
+the same rule before the redaction feature ships") has not fired. The classification stands: a
+real, security-sensitive-but-not-yet-triggered boolean, dated rather than permanent, restated
+here rather than left only in the RFC body for a future reader to rediscover.
+
+**The RFC's open questions: already answered, not this slice's to re-derive.** RFC-023's own
+§Scoping addendum (2026-08-19, before PR-023-E or PR-023-F started) answers all three: workspace
+configuration does not ship in v1 (OQ1); an invalid file produces a notification, not a blocking
+dialog (OQ2); configuration-defined profiles require one-time confirmation on first use (OQ3).
+PR-023-F's own contribution to OQ3 is narrow and stated above: the one structural piece (`BuiltIn`
+vs `UserGlobal`) its eventual gate will need, not the gate itself.
+
+**What this does not establish.** No confirmation-on-first-use gate exists (OQ3's answer is
+recorded; its implementation is reachability-deferred, above). No contrast validation of a
+loaded/configured palette exists (also reachability-deferred, above, in the pack's own README).
+Neither deferral is silent — both are stated with the condition that ends them.
+
+**Gates run**, 2026-08-20: `cargo fmt --all --check` clean. `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` clean. `cargo test --workspace --all-targets
+--all-features` run four times: `tekstide-core` 713 passed every run (unchanged count — this
+slice's own test strengthens an existing assertion rather than adding a new one), `tekstide` 311
+passed on three of the four runs; one run showed
+`shell::tests::command_approval_family_produces_real_durable_audit_records_through_the_pipeline`
+fail — the third of the three tests named in `rfcs/handoffs/test-process-leak.md`, not touched by
+this slice's diff (`agent/profile.rs`, `agent/tests.rs`, and this pack's own docs), confirmed
+non-deterministic and unrelated by running it in isolation three times in a row immediately
+after, all passing. Recorded honestly per that handoff's own instruction not to chase the three
+symptoms individually — the harness fix (response 282) addresses the leak mechanism, not this
+test's own separate cause. `git diff --check` clean.
 
 ## Known Limitations
 
@@ -695,3 +762,17 @@ Pending implementation.
 - Security-sensitive settings do not hot-reload by design; they require confirmation or apply to future sessions only.
 - Workspace configuration may be reserved rather than implemented in the first slice, provided the blocked-feature vocabulary and precedence rule land with it.
 - Durable audit records the setting name and change direction only. It cannot answer "what value was it changed to" — consistent with RFC-013's exclusion of values from audit throughout.
+- **Configuration-defined AI CLI profiles have no confirmation-on-first-use gate yet (OQ3).**
+  Deferred on reachability, not a date: `to_ai_cli_profile` has no production caller, and nothing
+  constructs a live `ConfigStore` in the application, so no config-defined profile can reach a
+  real launch today. Whoever first wires that path must build the gate in the same slice — see
+  `qa-evidence.md`'s PR-023-F section and response 281.
+- **The WCAG contrast gate does not validate a loaded or configured palette.** Deferred on the
+  same reachability condition: RFC-023 v1 wires no configuration value into theme/palette
+  selection at all. Decision recorded, not silent — see this pack's own `README.md`, "The
+  contrast-gate decision (PR-023-F, 2026-08-20)," including two transferable precedents from
+  snora's own history for whoever takes that slice.
+- **`redact_secret_like_environment_names`'s classification is dated, not permanent.** It passes
+  the confirmation-on-change test only because no environment-variable disclosure flow exists
+  yet. Re-test against the same rule before that flow ships (RFC-023 §Security-Sensitive
+  Settings' own stated trigger).

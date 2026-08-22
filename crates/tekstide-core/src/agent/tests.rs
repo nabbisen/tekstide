@@ -1911,7 +1911,17 @@ fn claude_code_profile_lookup_paths_prefer_home_local_bin_when_home_is_set() {
         profile.compatibility_level,
         AgentCompatibilityLevel::Supervised
     );
-    assert_eq!(profile.source, AiCliProfileSource::UserGlobal);
+    // RFC-023 PR-023-F response 281: BuiltIn, not UserGlobal -- this
+    // profile is compiled into the binary, not read from a file.
+    // UserGlobal is reserved for what config::to_ai_cli_profile actually
+    // produces (proven the other direction by
+    // to_ai_cli_profile_sets_user_global_source,
+    // crates/tekstide-core/src/config/tests/profile.rs); asserting both
+    // here is the point, since a regression collapsing the distinction
+    // back to one value would otherwise be silent -- the two sources are
+    // behaviourally interchangeable everywhere `AgentRunLaunchValidator`
+    // reads `profile.source` today.
+    assert_eq!(profile.source, AiCliProfileSource::BuiltIn);
     assert!(
         matches!(
             profile.workspace_discovery_policy,

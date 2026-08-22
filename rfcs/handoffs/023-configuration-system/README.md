@@ -2,7 +2,7 @@
 
 Source RFC: [RFC-023](../../accepted/023-configuration-system.md)
 Target milestone: **M12** (all slices headless — start immediately)
-Source RFC status: **Proposed**
+Source RFC status: **Accepted** (2026-08-18)
 
 **Start here.** This file is the entry point. Everything is linked below in reading order.
 
@@ -127,3 +127,23 @@ that had already moved once, and shipped a test asserting the wrong direction. I
 any WCAG-tested defaults that a user can then override, saying which direction the number may
 move is a one-paragraph, front-loaded fix for a gap that otherwise surfaces only after someone
 has built on the wrong reading.
+
+## The contrast-gate decision (PR-023-F, 2026-08-20)
+
+**Deferred, on a condition, not a date.** Neither of the two options above is chosen yet,
+because choosing between them now would be deciding a question that has no reachable
+consequence: RFC-023 v1 wires no configuration value into theme or palette selection at all.
+`[ui]`'s theme and font fields are typed storage with zero consumers (PR-023-B's own "what this
+does not establish"), and theme-from-configuration is one of the five out-of-scope consumers
+this pack's own Scoping section names with a stated owner — pending, not this RFC's to build.
+Deciding the contrast-gate question before that owner exists would be scheduling a surface with
+no path a user takes to reach it, the exact defect `ARCHITECTURE.md`'s "reachability before
+correctness" section names.
+
+**The condition, stated so it cannot pass unnoticed the way a date can:** the contrast-gate
+decision must be made and implemented in the *same slice* that first lets a configuration value
+reach theme or palette selection — never left for a later slice to inherit silently. Whoever
+takes that slice reads this section, the two precedents above, and RFC-023's own
+`theme-contrast-verification` module before choosing. Recorded in `qa-evidence.md`'s PR-023-F
+Known Limitations as a reachability-conditioned deferral, the same shape PR-023-E's OQ3
+confirm-on-first-use gate uses for the same reason.
