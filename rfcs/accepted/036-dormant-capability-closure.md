@@ -11,8 +11,9 @@ Related baseline documents:
 Depends on:
 
 - `handoffs/reachability-audit.md` — the audit that produced the list (2026-08-17).
-- [RFC-023](./023-configuration-system.md) — owns `set_resource_limits`, per the audit's own
-  priority 3.
+- [RFC-023](../done/023-configuration-system.md) — **closed 2026-08-22 without wiring
+  `set_resource_limits`**, which it owned per the audit's priority 3. The decision returns
+  here, conditioned; see §What is already assigned.
 
 ## Summary
 
