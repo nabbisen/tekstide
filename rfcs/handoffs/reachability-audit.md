@@ -1,7 +1,7 @@
 ---
 title: "The reachability audit: implementation handoff"
 owning_rfcs: "none — infrastructure, like minimal-user-documentation"
-status: "Scheduled 2026-08-17 by the owner"
+status: "Run 2026-08-17; findings carried into RFC-023, RFC-031 and RFC-036"
 created: "2026-08-17"
 ---
 

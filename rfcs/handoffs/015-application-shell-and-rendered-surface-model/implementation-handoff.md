@@ -3,7 +3,7 @@ title: "RFC-015: Application Shell and Rendered Surface Model - Implementation H
 rfc: "RFC-015"
 rfc_file: "../../done/015-application-shell-and-rendered-surface-model.md"
 target_milestone: "M8"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented (RFC-015 is in rfcs/done/)"
 created: "2026-07-29"
 updated: "2026-07-29"
 ---

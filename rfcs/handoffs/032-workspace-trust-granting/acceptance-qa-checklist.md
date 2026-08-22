@@ -2,7 +2,7 @@
 title: "RFC-032: Workspace Trust Granting - Acceptance / QA Checklist"
 rfc: "RFC-032"
 rfc_file: "../../done/032-workspace-trust-granting.md"
-status: "Substantive items ticked by the implementer 2026-08-17; Final Acceptance Decision reserved for the reviewer"
+status: "Final Acceptance recorded 2026-08-17 (response 250) — RFC-032 is in rfcs/done/"
 target_milestone: "M11"
 created: "2026-08-17"
 ---

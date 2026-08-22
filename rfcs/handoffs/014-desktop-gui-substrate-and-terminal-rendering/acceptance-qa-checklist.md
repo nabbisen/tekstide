@@ -2,9 +2,9 @@
 title: "RFC-014: Desktop GUI Substrate and Terminal Rendering Strategy - Acceptance / QA Checklist"
 rfc: "RFC-014"
 rfc_file: "../../done/014-desktop-gui-substrate-and-terminal-rendering.md"
-status: "Proposed — criteria accepted, spike pending"
+status: "Implemented — RFC-014 is in rfcs/done/; the spike was discharged 2026-08-04 (see spike-crate-deletion.md)"
 target_milestone: "M8"
-source_rfc_status: "Proposed — criteria accepted"
+source_rfc_status: "Implemented (RFC-014 is in rfcs/done/)"
 created: "2026-07-28"
 updated: "2026-07-28"
 ---

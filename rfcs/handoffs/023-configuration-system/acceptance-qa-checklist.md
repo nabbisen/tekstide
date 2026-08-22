@@ -1,10 +1,10 @@
 ---
 title: "RFC-023: Configuration System - Acceptance / QA Checklist"
 rfc: "RFC-023"
-rfc_file: "../../accepted/023-configuration-system.md"
+rfc_file: "../../done/023-configuration-system.md"
 status: "PR-023-B/C/D/E accepted; PR-023-F implemented 2026-08-20 (BuiltIn/UserGlobal fix, closeout evidence, contrast-gate and confirm-gate deferrals recorded), awaiting review"
 target_milestone: "M12"
-source_rfc_status: "Accepted (2026-08-18)"
+source_rfc_status: "Implemented and closed 2026-08-22 — RFC-023 is in rfcs/done/"
 created: "2026-07-28"
 updated: "2026-07-28"
 ---
@@ -315,12 +315,57 @@ booleans pending the classifier and reload-gating work below.
 ## Final Acceptance Decision
 
 - [ ] Accepted.
-- [ ] Accepted with required follow-up.
+- [x] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 - [ ] Blocked — configuration can bypass RFC-010 provenance.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Final Acceptance recorded 2026-08-22 (review request 284, response 285). Suite re-run by
+the reviewer: 1024 passed, 0 failed.
+
+Accepted with required follow-up -- the follow-up is not a defect in the work, and no code
+change was asked for. It is that RFC-023 closes owning three things it did not discharge,
+and a closed RFC cannot own anything. All three were re-homed in the closing commit, which
+is what "required" refers to and what has already been done:
+
+  - set_resource_limits            -> RFC-036, conditioned (the reachability audit's
+                                      priority 3; RFC-036 had explicitly deferred it here
+                                      and said it "should not be re-decided", so closing
+                                      RFC-023 silently would have stranded it)
+  - the sensitive_config_changed   -> RFC-036, same condition. The producer API exists and
+    producer                          is proven against the real store; it has no caller
+                                      because a setting cannot change at runtime in an
+                                      application that never loads configuration.
+  - OQ3's first-use confirmation   -> the slice that first lets a configuration-defined
+    gate                              profile reach attempt_agent_run_launch, per the
+                                      implementer's own reachability-conditioned deferral.
+
+Two new orphans -- to_ai_cli_profile and ConfigStore itself -- are recorded in RFC-036 for
+the same reason. They are not separately decidable: one slice discharges all five.
+
+PR-023-F itself is accepted without reservation. The BuiltIn/UserGlobal fix response 281
+required is in, at agent/profile.rs:96, ablated for real (left: UserGlobal, right: BuiltIn)
+rather than asserted; and it was verified inert to today's behaviour before being changed,
+which is the right order. Both deferrals are conditioned on reachability rather than on a
+milestone number -- that is what ARCHITECTURE.md asks for and it is rare to get without
+being asked twice. The one disclosed flake is the third test named in test-process-leak.md,
+untouched by the diff, and was disclosed rather than re-run until green.
+
+The WCAG contrast gate question is still open and is NOT closed by this RFC. RFC-023 v1
+wires no configuration value into theme selection, so the gate was never actually put at
+risk; the question survives to whichever slice first makes a theme value configurable. The
+two transferable precedents from the snora review (request 283) are recorded in this pack's
+README for whoever takes it: compile-time-enforced per-role contrast declarations, and
+stating explicitly that a threshold is a floor and never a ceiling.
+
+One correction of the reviewer's, recorded because it is the third of its kind. The
+implementer found source_rfc_status: "Proposed" stale in three files of this pack and
+observed that "the RFC-037 folder migration updated rfc_file: paths but missed this field."
+That is exactly right, and generalising it found nine more such files across four other
+packs, stale since those RFCs closed. The migration was mine. It swept for references to
+files, which break loudly; it never swept for fields that assert a state, which do not.
+ARCHITECTURE.md now carries the rule and the mechanical invariant that would have caught
+all thirteen without anyone noticing anything.
 ```

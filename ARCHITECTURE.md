@@ -152,7 +152,7 @@ bare identifier will match doc comments mentioning it. Require the call syntax, 
 user takes to reach it and the production code that populates what it renders. Not "which
 RFC owns it" — the actual call site.
 
-This is the newest convention and it exists because it was missing. RFC-020 was scheduled
+This convention exists because it was missing. RFC-020 was scheduled
 as `0.8.0`'s spine, and its handoff pack written and accepted, before anyone checked
 whether an `AgentRun` or a `ChangeSet` could be created at all. Neither can:
 `launch_agent_run_with_runtime` and `add_detected_generated_change_set` have no production
@@ -162,6 +162,30 @@ RFC-024 had already shipped correct, reviewed, unreachable models for the same r
 Every review gate in every handoff pack asked whether the rendering was **correct**. None
 asked whether anything could **reach** it. A model with no producer and a surface with no
 route are the same defect, and neither is visible from inside the slice that builds it.
+
+**A field that asserts a state is not a reference, and a sweep for references will not
+find it.** When a rename or a move lands, the obvious sweep is for paths and links — they
+break loudly, so they get fixed. Three other kinds of text name the same state and stay
+silent when it changes: a *description of structure* (a folder list in prose), a *status
+field* (`Status:`, `source_rfc_status:`), and a *count* ("the last M11 item", "all four
+presets"). None of them contains the old path, so a grep for the path cannot reach them.
+
+The RFC-037 five-folder migration is the worked example, and it took three separate people
+to finish. The migration itself swept `proposed/0` and repointed every `rfc_file:` — all
+references, all correct. It missed `ARCHITECTURE.md`'s own authoritative folder list, caught
+by the owner asking whether the README was stale. It missed `source_rfc_status:` in RFC-023's
+pack, caught by the dev team while working in that pack. Generalizing that second catch found
+nine more in four other packs, stale since those RFCs closed — some for weeks.
+
+So the rule is not "sweep harder." It is: **after a move, grep for the old *state word*, not
+just the old path** — `Proposed`, `Scheduled`, `Ready for implementation` — and for handoff
+packs specifically, the check is mechanical, because the folder is the source of truth:
+
+    for each rfcs/handoffs/NNN-*/*.md with a source_rfc_status field,
+    the value must agree with which of rfcs/{proposed,accepted,done,archive}/ holds RFC-NNN.
+
+That invariant is checkable in a dozen lines and would have caught all thirteen files without
+anyone noticing anything.
 
 ## Glossary
 

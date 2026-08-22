@@ -4,7 +4,7 @@ rfc: "RFC-016"
 rfc_file: "../../done/016-internationalization-and-localization.md"
 status: "Proposed — implementation in progress (PR-016-B/C/D complete and accepted [response 126]; PR-016-E implemented 2026-08-01, pending review; PR-016-F closeout remains)"
 target_milestone: "M8"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented (RFC-016 is in rfcs/done/)"
 created: "2026-07-29"
 updated: "2026-08-01"
 ---

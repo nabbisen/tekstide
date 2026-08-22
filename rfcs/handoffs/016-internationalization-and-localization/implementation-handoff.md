@@ -3,7 +3,7 @@ title: "RFC-016: Internationalization and Localization - Implementation Handoff"
 rfc: "RFC-016"
 rfc_file: "../../done/016-internationalization-and-localization.md"
 target_milestone: "M8"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented (RFC-016 is in rfcs/done/)"
 created: "2026-07-29"
 updated: "2026-07-29"
 ---

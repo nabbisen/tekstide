@@ -4,7 +4,7 @@ rfc: "RFC-015"
 rfc_file: "../../done/015-application-shell-and-rendered-surface-model.md"
 status: "Proposed — PR-015-B/C/D/F/G accepted (0.4.0 released); PR-015-E (mode switching, focus indicator, C4) implemented 2026-08-01, pending review. RFC-015 stays in `rfcs/proposed/` until PR-015-E and NFR-PERF-002 are accepted and the architect performs the rfcs/done/ transition."
 target_milestone: "M8"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented (RFC-015 is in rfcs/done/)"
 created: "2026-07-29"
 updated: "2026-08-01"
 ---

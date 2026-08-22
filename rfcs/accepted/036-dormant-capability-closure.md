@@ -50,12 +50,40 @@ every row.
 
 ## What is already assigned, and should not be re-decided here
 
-- **`set_resource_limits`** → RFC-023. The audit named it; every limit this project tuned is
-  fixed forever at its default until configuration exists. **Note added 2026-08-19**: RFC-031's
+- **`set_resource_limits`** → **returned to this RFC 2026-08-22, conditioned.** The audit named
+  it and assigned it to RFC-023, which **closed on 2026-08-22 without wiring it** — correctly, and
+  for a reason this RFC must inherit rather than re-litigate: RFC-023 v1 is headless, nothing
+  constructs a `ConfigStore`, so there is no runtime configuration change for a limit to come
+  from. The dormancy is therefore *conditioned*, not a defect: wiring it is blocked on the same
+  missing slice as everything else below, and "delete it" would delete a capability whose owner
+  is scheduled, not absent. **Decide it as `keep, documented` unless that slice lands first.**
+  Every limit this project tuned is
+  fixed forever at its default until configuration is *reachable*, which is a later thing than
+  configuration existing. **Note added 2026-08-19**: RFC-031's
   discrimination test now calls it to force a `RunLimitExceeded` refusal. That does not change
   its dormancy — the audit only ever counted production call sites — but **"delete it" is no
   longer free**, and this RFC should not treat it as dead weight.
 - **`transition_change_set_review_state`** → RFC-034.
+- **The `sensitive_config_changed` producer** — `AuditCoordinator::record_sensitive_config_policy_
+  increase` / `_reduce` — **added here 2026-08-22, same condition.** RFC-023 built both methods,
+  proved them against the real store round-trip, and proved the negative that no configuration
+  *value* can reach a record (`no_config_value_can_reach_a_sensitive_config_changed_record`), then
+  closed with zero production call sites for either. It is one of the two audit families still
+  unwired after RFC-031, and it is now the only one whose owner is a closed RFC. Note the shape:
+  this is not a missing producer, it is a **producer with no event to observe** — a sensitive
+  configuration setting cannot change at runtime in an application that never loads
+  configuration.
+- **`to_ai_cli_profile` and `ConfigStore` itself** — **new orphans as of 2026-08-22**, created by
+  RFC-023's own closure and recorded here so the count stays honest. Both are correct, both are
+  tested against hostile input, neither has a production caller. They are the *reason* the three
+  items above are conditioned rather than actionable, so they are not separately decidable: the
+  slice that constructs a live `ConfigStore` and lets a configuration-defined profile reach
+  `attempt_agent_run_launch` discharges all of them at once, and also carries RFC-023's OQ3
+  first-use confirmation gate, which was deferred to exactly that slice.
+
+  **This is the successor RFC-023's closure implies and does not schedule.** It has no number.
+  Recommending one is a scheduling decision for the human owner, recorded here so that closing
+  RFC-023 does not make it invisible.
 - **`record_terminal_transcript_write_summary` / `record_transcript_write_summary` — one fewer
   reason to wire, as of 2026-08-19.** These set `Transcript.byte_count`, and RFC-033 PR-033-C
   needed a real retained-bytes figure for its purge confirmation. It did **not** wire them,

@@ -1,7 +1,19 @@
 # RFC-023: Configuration System
 
-Status: **Accepted by the human owner 2026-08-18.** Authored earlier and held while its
-prerequisites landed; accepted alongside RFC-031/033/034/035/036 in one decision.
+Status: **Implemented and closed 2026-08-22** (PR-023-B through F, review requests 273-284).
+Accepted by the human owner 2026-08-18; authored earlier and held while its prerequisites
+landed; accepted alongside RFC-031/033/034/035/036 in one decision.
+
+**What closed is the headless model, and nothing in it is reachable by a user.** The
+configuration file format, precedence, atomic validation, diagnostics, the security-sensitive
+reload rule over eight fields, and configuration-defined AI CLI profiles routed through
+unmodified RFC-010 validation are all built, tested and correct. No production code constructs
+a `ConfigStore`, so no configuration file is ever read by the shipped application:
+`to_ai_cli_profile`, `set_resource_limits` and `AuditCoordinator::record_sensitive_config_
+policy_{increase,reduce}` each have zero production call sites at closeout. This was the
+scope decided in the §Scoping addendum (2026-08-19), which named five out-of-scope consumers
+with a pending owner; it is recorded here rather than discovered later. See §Scoping and the
+handoff pack's Known Limitations for what each one is conditioned on.
 Target milestone: M12 (headless model may be implemented earlier — see Scheduling)
 Date: 2026-07-28
 

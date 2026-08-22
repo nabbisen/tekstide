@@ -2,9 +2,9 @@
 title: "RFC-010: AgentRun Launch Model and AI CLI Profiles — Implementation Handoff"
 rfc: "RFC-010"
 rfc_file: "../../done/010-agentrun-launch-model-and-ai-cli-profiles.md"
-status: "Proposed"
+status: "Implemented — RFC-010 is in rfcs/done/"
 target_milestone: "M5"
-source_rfc_status: "Proposed"
+source_rfc_status: "Implemented (RFC-010 is in rfcs/done/)"
 created: "2026-07-17"
 ---
 
