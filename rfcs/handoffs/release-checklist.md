@@ -27,6 +27,28 @@ This checklist applies before creating a tag or package for a Tekstide release.
 - [ ] If the correction concerns data on a user's disk, say **where it is** and **what removes
       it**, in the entry itself — not only in the README it points at.
 
+## Run It
+
+- [ ] **Launch the built binary as a first-time user and look at the screen.** No arguments,
+      a fresh `XDG_STATE_HOME` (`XDG_STATE_HOME=$(mktemp -d) ./target/release/tekstide`).
+      Confirm the first screen names **only actions that exist**, and that a user who has read
+      nothing can tell what to do next.
+- [ ] **`./target/release/tekstide --help`** prints usage and exits, rather than treating the
+      flag as a path.
+
+This section exists because nothing above it opens a window. Every other gate here checks
+internal consistency — do the tests pass, does it compile, does the package contain the right
+files — and `0.12.0` passed all of them while shipping a Project Board that rendered
+"Add Project" and "Open from path" as inert labels for actions that do not exist, with nine
+live keybindings named nowhere in the running application. That state shipped in **twelve
+releases**, `0.4.0` through `0.12.0`, and was found by the owner running the program.
+
+There was even a passing test over those exact strings: it asserted they resolved to real
+catalog text rather than to the raw key. A correct test of the wrong property — the shape of
+the claim, never its truth.
+
+Ninety seconds. Run it.
+
 ## Required Gates
 
 - [ ] `git status --short` shows no unintended changes.

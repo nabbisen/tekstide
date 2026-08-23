@@ -187,6 +187,46 @@ packs specifically, the check is mechanical, because the folder is the source of
 That invariant is checkable in a dozen lines and would have caught all thirteen files without
 anyone noticing anything.
 
+**An ablation changes exactly one thing.** Break the property, watch the *specific* test
+fail, restore. If reaching the property requires also breaking something else, **stop**: what
+you have proven is that the something-else is guarded, and the property you set out to test
+has no test at all.
+
+`0.12.1` recorded five ablations and had four. The fifth gave a `Reserved` navigation action a
+help description *and* widened the policy filter that would otherwise keep it out of the help
+builder — because the description is unreachable without that second change. Three tests
+failed and were counted as evidence. They were the filter's tests, already run as the first
+ablation. The reason was written in a comment on the ablation itself — *"also break the core
+filter so the reserved rule reaches the GUI"* — which is the finding, stated and then read as
+setup. Found by the dev team auditing the commit.
+
+So the older rule (*a green ablation is a defect in the ablation*) has a twin: **a red
+ablation that needed two edits is a defect in the ablation too.** Only single-variable results
+are evidence.
+
+**A premise that would surprise a user is a finding.** When narrow reasoning reaches for a
+fact about the product to support itself, ask whether that fact would startle someone who had
+just installed it. If so it is not scaffolding, it is a finding, and it belongs at the top of
+its own review request the day it is written.
+
+The worked example cost twelve releases. On 2026-08-19 the dev team wrote, correctly, in
+RFC-031's acceptance checklist: *"there is no interactive 'Add Project' GUI flow yet."* It was
+load-bearing for a decision about one audit producer, and as that reasoning it was flawless.
+As a fact about the product — *a user cannot add a project* — it went nowhere; the architect
+read it, quoted the surrounding paragraph, and closed the RFC on it. Neither party missed the
+fact. Both had it, and it had no route to become a finding. The owner found it by running the
+program three days later.
+
+**A claim about behaviour cites the command that produced it.** Not "verified", not "confirmed"
+— the command, in the document. Every false claim this project has published came from
+reasoning carefully about code instead of running it: "no transcript is ever written" (one
+crate grepped, false in two releases), "0.12.0 is ready" (every gate green, the binary never
+launched, twelve releases of a UI naming actions that do not exist), "five ablations" (above).
+
+The rule is asymmetric on purpose and applies hardest to whoever reviews. **Anyone may reject
+a behavioural claim that does not say how it was checked**, including the dev team rejecting
+the architect's, and doing so needs no further justification than its absence.
+
 ## Glossary
 
 Terms this codebase uses without explanation. Domain vocabulary first, then house terms.
