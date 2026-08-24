@@ -31,8 +31,22 @@ This checklist applies before creating a tag or package for a Tekstide release.
 
 - [ ] **Launch the built binary as a first-time user and look at the screen.** No arguments,
       a fresh `XDG_STATE_HOME` (`XDG_STATE_HOME=$(mktemp -d) ./target/release/tekstide`).
-      Confirm the first screen names **only actions that exist**, and that a user who has read
-      nothing can tell what to do next.
+      **The release binary, not a debug build** — this gate exists to look at the artifact that
+      ships. Confirm the first screen names **only actions that exist**, and that a user who has
+      read nothing can tell what to do next.
+
+      Reference for what a correct first screen looks like, and for how to record one:
+      [`first-run-correction/evidence/cold-start-empty-board.png`](./first-run-correction/evidence/cold-start-empty-board.png)
+      and its
+      [sidecar](./first-run-correction/evidence/cold-start-empty-board.md), which states the
+      launch command in full. That capture is a reference, taken from a debug build after
+      `0.12.1` shipped; it does **not** discharge this gate for any release.
+
+      **Every box in this file stays unchecked.** It is a per-release template: a ticked box
+      here would assert "done" for every future release, which is the same
+      state-asserting-text failure `ARCHITECTURE.md` records. Tick a copy, or record the run in
+      the release's own evidence — never here. (Response 293 promised to tick this one on
+      evidence landing; that promise was wrong and is withdrawn.)
 - [ ] **`./target/release/tekstide --help`** prints usage and exits, rather than treating the
       flag as a path.
 

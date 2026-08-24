@@ -138,9 +138,19 @@ architect had implemented the release himself.
   — and neither was retained. `release-checklist.md`'s *Run It* item remains unchecked and has
   never been executed as a release gate.
 
-  Requested of the dev team (response 293): commit the cold-start capture under this pack's
-  `evidence/`, with the launch command recorded, per response 127's standing convention. Until
-  that lands, this row is a description of something nobody can inspect.
+  **Closed 2026-08-24** — `7b64914`, request 294:
+  [`first-run-correction/evidence/cold-start-empty-board.png`](./first-run-correction/evidence/cold-start-empty-board.png),
+  with its launch command in
+  [`cold-start-empty-board.md`](./first-run-correction/evidence/cold-start-empty-board.md).
+  Re-run rather than recovered, `XDG_STATE_HOME` a fresh `mktemp -d`, no CLI argument, both
+  stated explicitly — the exact detail `pr-015-b`'s capture omitted. Reviewer opened the PNG
+  before accepting it; it matches the sidecar.
+
+  **One qualification on that capture, recorded so it is not over-read:** it was taken from
+  `./target/debug/tekstide`. For its purpose — showing that the shipped empty state names only
+  actions that exist — debug and release render identically and this is immaterial. It is a
+  **reference capture, not a discharged release gate**: `release-checklist.md`'s *Run It* item
+  requires the release binary, and is per-release.
 
 ## Why there was no pack
 
