@@ -286,38 +286,3 @@ fn no_hardcoded_english_label_function_is_called_in_this_module() {
         );
     }
 }
-
-/// RFC-038 PR-038-I (response 300's own follow-up): a mechanical guard
-/// that every untrusted value this module passes to the catalog was
-/// escaped first -- the property is "**every** untrusted value reaching
-/// the catalog is escaped", so per `ARCHITECTURE.md`'s enumeration-test
-/// unit rule the unit is the call site, not the file. Count-equality
-/// rather than a per-call-site trace: this module's own convention is
-/// "escape immediately into a local, then pass that local to
-/// `.untrusted(`" (`node_line`, `status_line`, `browse_node_line`), so
-/// one `quote_untrusted(` feeding exactly one `.untrusted(` is what
-/// "escaped before it reaches the catalog" means here. A `browse_*`-style
-/// renderer added later that
-/// passes a raw, unescaped name to `.untrusted(` changes only the
-/// `.untrusted(` count, not the `quote_untrusted(` count, and fails
-/// this test.
-///
-/// **Scoped to this module only, deliberately.** `board.rs` reads a
-/// different count (0 `.untrusted(`, escapes and renders through a
-/// different path) -- extending this exact invariant there without
-/// first deciding what it should mean for that module would produce a
-/// count-equality that is false for correct code, worse than no
-/// invariant at all (response 300's own caution).
-#[test]
-fn every_untrusted_value_this_module_hands_the_catalog_was_escaped_first() {
-    let source = include_str!("../explorer.rs");
-    let untrusted_call_sites = source.matches(".untrusted(").count();
-    let escape_calls = source.matches("quote_untrusted(").count();
-
-    assert_eq!(
-        untrusted_call_sites, escape_calls,
-        "surface/explorer.rs calls .untrusted( {untrusted_call_sites} time(s) and \
-         quote_untrusted( {escape_calls} time(s) -- every untrusted value reaching the catalog \
-         must be escaped first, so these must match"
-    );
-}

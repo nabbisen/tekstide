@@ -104,15 +104,21 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
       button itself), plus a screenshot of the browser itself.
       `evidence/pr-038-g/after-real-mouse-click-opens-browser.png` through
       `after-space-commits-project-without-typing.png`.
-- [x] **Disclosed, then decided.** Does not reuse RFC-019's explorer renderer as the task
-      breakdown asked ("do not write a second directory renderer") -- `browse_view` and its
-      siblings are a near-duplicate of `view`/`node_line`/`tree_lines`. Core scanning could not
-      honestly reuse `FileExplorerScanner`/`ExplorerDirectoryScan` (project-root-relative by
-      construction; no project exists yet at browse time). **Decision (response 300, guard built
-      in PR-038-I)**: a shared render helper is not required -- forcing `BrowseNode` through
-      `ExplorerNode`'s shape would reintroduce the dishonest-field problem the core split exists
-      to avoid; a mechanical escaping-count guard prevents the real risk (divergence) instead.
-      `qa-evidence.md`'s own PR-038-G and PR-038-I sections.
+- [x] **Disclosed, then decided, then corrected.** Does not reuse RFC-019's explorer renderer as
+      the task breakdown asked ("do not write a second directory renderer") -- `browse_view` and
+      its siblings are a near-duplicate of `view`/`node_line`/`tree_lines`. Core scanning could
+      not honestly reuse `FileExplorerScanner`/`ExplorerDirectoryScan` (project-root-relative by
+      construction; no project exists yet at browse time). **Decision (response 300)**: a shared
+      render helper is not required -- forcing `BrowseNode` through `ExplorerNode`'s shape would
+      reintroduce the dishonest-field problem the core split exists to avoid. **PR-038-I first
+      built a runtime count-equality guard to protect the escaping property instead of sharing;
+      PR-038-E then removed that guard** (response 304): `DisplayText`'s private field and single
+      constructor already make the property a compile-time fact, so the runtime count added
+      nothing and would have failed on correct code the moment either renderer legitimately
+      escaped-then-rendered-directly rather than through `.untrusted(`. What actually protects
+      the property is `DisplayText`'s own constructor/field guard (PR-038-E), not anything
+      specific to this pair of renderers. `qa-evidence.md`'s own PR-038-G, PR-038-I, and PR-038-E
+      sections.
 
 ## Recent projects (PR-038-D)
 
@@ -133,11 +139,21 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
 
 ## Closeout
 
-- [ ] `ProjectBoardEmptyState::primary_action` / `secondary_action` removed from
-      `tekstide-core`'s public API. Pending PR-038-E — deliberately untouched this slice, per
-      the task breakdown's scope boundary.
-- [ ] Recorded in the changelog as a **breaking change**, with the version implication stated.
-      Pending PR-038-E.
+- [x] `ProjectBoardEmptyState::primary_action` / `secondary_action` removed from
+      `tekstide-core`'s public API. **A real finding while doing it**: the task breakdown's own
+      "read by nothing" premise was false -- `tekstide-core::shell::render_project_board` (the
+      pre-GUI `render_text()` harness) read both fields directly, and a real, passing core test
+      asserted on the exact string they produced. Both fixed alongside the field removal; see
+      `qa-evidence.md`'s own PR-038-E section.
+- [x] Recorded in the changelog as a **breaking change**, with the version implication stated.
+      `CHANGELOG.md`'s new `0.13.0` entry (bumped from `0.12.1`); `Cargo.toml`'s workspace
+      version bumped to match.
+- [x] RFC-038's acceptance criterion 2 ("no text naming an action that is not activatable...
+      asserted by enumeration, not by inspection") answered by an actual enumeration test, not
+      left implicit. `board::tests::every_catalog_key_this_module_renders_is_enumerated_and_none_names_a_dead_action`
+      -- `qa-evidence.md`'s own PR-038-E section, item 4.
+- [x] All four of RFC-038's acceptance criteria answered explicitly, in the RFC's own words.
+      `qa-evidence.md`'s own PR-038-E section, closing paragraph.
 - [x] Every ablation in this slice was **single-variable**. Three in PR-038-A, three in PR-038-B,
       four in PR-038-C, two in PR-038-G (the collision test against a colliding binding, which
       also caught `open_help_shortcut...` failing as its own collision victim; the audit-record
@@ -149,8 +165,11 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
       side effects used to break -- `open_surface`, response 233's own test; `route`, PR-038-B's
       own test, only meaningful once that slice's route workaround was itself reverted), two in
       PR-038-I (the new core contract test, ablated against the core method itself with no GUI
-      touched; the new escaping-count guard, ablated with an added unmatched `.untrusted(` call).
-      Each reverted after confirming the expected failure. See `qa-evidence.md`.
+      touched; the new escaping-count guard, ablated with an added unmatched `.untrusted(` call
+      -- **this guard was itself removed in PR-038-E**, see below), two in PR-038-E (the
+      `DisplayText` constructor-count guard, ablated with a second constructor added; the
+      `DisplayText` field-privacy guard, ablated by making the field `pub`). Each reverted after
+      confirming the expected failure. See `qa-evidence.md`.
 - [x] Flakes disclosed, not re-run past; any fifth symptom of the approval/socket flake reported
       as a disclosure rather than attributed to this work. PR-038-B's run hit three (all
       already-named). PR-038-C's own run separately hit a fourth already-named symptom
@@ -158,14 +177,15 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
       confirmed passing in isolation) — and, distinctly, the PTY-exhaustion cascade recorded in
       `qa-evidence.md`'s own PR-038-C section, which is a different, newly-disclosed defect, not
       a fifth symptom of the approval/socket one. PR-038-G's own run hit none. PR-038-D's,
-      PR-038-F's, and PR-038-I's own runs hit none either.
-- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-I's
-      own state (359 tekstide + 725 tekstide-core, 0 failed).
+      PR-038-F's, PR-038-I's, and PR-038-E's own runs hit none either.
+- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-E's
+      own state (359 tekstide + 727 tekstide-core, 0 failed).
 - [x] Known limitations stated, including anything this slice leaves unreachable.
-      `qa-evidence.md`'s "Known limitations" section, now "as of PR-038-A/B/C/D/F/G/I," including
-      the recent-cache staleness note. The render-layer duplication note is now marked resolved
-      (guarded, not shared) rather than open. PR-038-F and PR-038-I both left no new limitation --
-      structural/test-only.
+      `qa-evidence.md`'s "Known limitations" section, now "as of PR-038-A/B/C/D/E/F/G/I." The
+      render-layer duplication note is corrected to its final resolution (the type system, not a
+      runtime guard, per PR-038-E). PR-038-F and PR-038-I both left no new limitation --
+      structural/test-only; PR-038-I's own guard was itself removed by PR-038-E, disclosed above,
+      not silently dropped.
 
 ## Final Acceptance Decision
 

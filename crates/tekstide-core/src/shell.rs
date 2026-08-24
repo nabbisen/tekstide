@@ -294,13 +294,15 @@ fn render_project_board(view_model: &ProjectBoardViewModel) -> String {
     let mut output = String::from("Tekstide\nProject Board\n\n");
 
     if let Some(empty_state) = &view_model.empty_state {
+        // RFC-038 PR-038-E: no longer renders bracketed action names here
+        // -- `ProjectBoardEmptyState::primary_action`/`secondary_action`
+        // are gone (this harness was the one production reader the task
+        // breakdown's "read by nothing" premise missed; see this slice's
+        // own qa-evidence.md finding). This pre-GUI harness has no
+        // concept of what actions the real frontend offers, so it says
+        // only what it can honestly know: the board is empty.
         output.push_str(&empty_state.heading);
         output.push('\n');
-        output.push('[');
-        output.push_str(&empty_state.primary_action);
-        output.push_str("] [");
-        output.push_str(&empty_state.secondary_action);
-        output.push_str("]\n");
         return output;
     }
 

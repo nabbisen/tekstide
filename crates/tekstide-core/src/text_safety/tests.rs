@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use super::{escape_untrusted_chars, is_untrusted_display_control, quote_untrusted};
 
 /// RFC-016 §Test and Evidence Requirements' bidi corpus, and README's
@@ -250,4 +252,120 @@ fn ordinary_space_and_cjk_letters_are_not_escaped() {
         );
     }
     assert_eq!(escape_untrusted_chars(" \u{3042}"), " \u{3042}");
+}
+
+// RFC-038 PR-038-E: response 304's own correction to response 300's Guard
+// 1. That guard (a `.untrusted(`-vs-`quote_untrusted(` count-equality
+// check scoped to one GUI module) was redundant with a compile-time
+// guarantee that has existed since RFC-016: `DisplayText`'s field is
+// private and `quote_untrusted` is its only constructor, so an untrusted
+// value literally cannot reach a `.untrusted(`-typed parameter (`&
+// DisplayText`) without having passed through this module's escaping --
+// there is no way to construct one otherwise, and no runtime test adds
+// anything to that. Worse, the deleted guard would fail on *correct*
+// code the moment `surface/explorer.rs` legitimately escaped a value and
+// rendered it directly rather than through `.untrusted(` -- exactly the
+// shape `board.rs` already uses (0 `.untrusted(` against 3
+// `quote_untrusted(`), which response 300 itself named as a reason not
+// to extend the invariant there, without noticing it is also a hazard
+// for the module the guard *was* written against, on its very next
+// refactor.
+//
+// The property actually worth guarding, per response 304: `DisplayText`
+// must keep exactly one constructor, and its field must stay private.
+// Add a second `-> DisplayText` function, or make the field `pub`, and
+// this whole compile-time guarantee silently degrades into a mere
+// convention -- with every existing `.untrusted(` call site across the
+// crate instantly unproven and nothing failing. Guarded here, not
+// per-caller, since the property belongs to the type, not to any one
+// module that happens to use it.
+
+fn crate_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+}
+
+fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rs_files(&path, out);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            out.push(path);
+        }
+    }
+}
+
+/// The constructor count: exactly one function in this crate's own,
+/// non-test source may return `DisplayText`. Test files are excluded
+/// from the scan, the same convention
+/// `only_one_production_call_site_ever_restores_a_projects_trust_state`
+/// (`app::tests`) already uses -- not because a test-only constructor
+/// would be safe (it would be exactly the kind of second entry point
+/// this guard exists to catch), but because this guard's own doc
+/// comments and assertion messages necessarily contain the literal text
+/// `-> DisplayText` in prose, which a raw source-text scan cannot
+/// distinguish from a real function signature. A genuine test-only
+/// constructor would still be new *production-shaped* code inside a
+/// `#[cfg(test)]` module and would still be worth catching, but that is
+/// a narrower, different check than this one; this test's job is the
+/// production API surface.
+#[test]
+fn exactly_one_function_in_the_crate_returns_displaytext() {
+    let mut files = Vec::new();
+    collect_rs_files(&crate_src_dir(), &mut files);
+
+    let sites: Vec<String> = files
+        .into_iter()
+        .flat_map(|path| {
+            let relative = path
+                .strip_prefix(crate_src_dir())
+                .expect("file must be under src/")
+                .to_str()
+                .expect("path must be valid UTF-8")
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            if relative.contains("/tests/") || relative.ends_with("tests.rs") {
+                return Vec::new();
+            }
+            let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
+            let count = source.matches("-> DisplayText").count();
+            std::iter::repeat_with(move || relative.clone())
+                .take(count)
+                .collect()
+        })
+        .collect();
+
+    assert_eq!(
+        sites,
+        vec!["text_safety.rs".to_string()],
+        "exactly one function may return DisplayText (quote_untrusted, this file) -- a second \
+         constructor anywhere silently degrades the compile-time \"untrusted text cannot reach \
+         a DisplayText-typed parameter unescaped\" guarantee into a mere convention: {sites:?}"
+    );
+}
+
+/// The other half: `DisplayText`'s own field must stay private. Not
+/// mechanically enforceable as a property of the *language* (Rust has no
+/// "assert this field is private" reflection), so asserted the same way
+/// `no_raw_color_construction_anywhere_in_the_crate`-style tests already
+/// assert other structural properties elsewhere in this codebase: a
+/// direct source-text check against the one line that declares the
+/// struct, which is honest about being a text match rather than a type-
+/// system fact, but is still enough to fail loudly the moment someone
+/// changes `struct DisplayText(String)` to `struct DisplayText(pub String)`.
+#[test]
+fn displaytexts_field_is_declared_private_in_source() {
+    let source =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/text_safety.rs"))
+            .expect("text_safety.rs must be readable");
+
+    assert!(
+        source.contains("struct DisplayText(String)"),
+        "DisplayText's field must stay private (declared as `struct DisplayText(String)`, not \
+         `pub String`) -- a public field would let any caller construct one from raw, \
+         unescaped text, defeating the guarantee exactly_one_function_in_the_crate_returns_displaytext \
+         only proves for the constructor side"
+    );
 }

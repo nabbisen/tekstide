@@ -18,8 +18,6 @@ fn empty_project_board_has_first_run_state() {
         .empty_state
         .expect("empty board should expose first-run state");
     assert_eq!(empty_state.heading, "No projects yet.");
-    assert_eq!(empty_state.primary_action, "Add Project");
-    assert_eq!(empty_state.secondary_action, "Open from path");
     assert_eq!(view_model.global_attention_summary, "Calm");
 }
 

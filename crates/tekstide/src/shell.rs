@@ -778,10 +778,22 @@ impl State {
         // user-writable recent-projects cache, is authoritative for
         // whether a boot-time (CLI-argument) project is really trusted.
         // Must run before anything reads `trust_state()` for a security
-        // decision -- currently nothing does yet (RFC-032's own dialog
-        // and restricted-mode gates are still ahead), but this is the
-        // one place every boot-time project is in place before the
-        // event loop starts.
+        // decision -- this is the one place every boot-time project is
+        // in place before the event loop starts.
+        //
+        // **Corrected in PR-038-E (response 302's own finding)**: the
+        // original comment here said "currently nothing does yet"
+        // about RFC-032's dialog and restricted-mode gates, true when
+        // written and false since those shipped. Worse, this call is
+        // no longer the *only* place trust gets verified: RFC-038
+        // PR-038-D added three more (`reopen_recent_project`,
+        // `attempt_open_project_from_path_field`,
+        // `choose_current_browsed_directory`) once it became possible
+        // to restore a project's trust from the recent-projects cache
+        // *after* boot, mid-session -- each calls `verify_restored_trust`
+        // itself, right after its own `add_project_from_path` succeeds.
+        // This call covers only the CLI-argument projects already live
+        // when `State::new` runs.
         verify_restored_trust(&mut app_shell);
         let measurement = Measurement::from_env();
         let typing_doc = if matches!(

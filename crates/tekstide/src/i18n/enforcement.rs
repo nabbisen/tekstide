@@ -183,11 +183,16 @@ const CORE_BLANKET_EXEMPT_FILES: &[&str] = &["shell.rs"];
 ///   scan's target files) rather than being hardcoded here either.
 /// - **A fifth core site, not in the table**:
 ///   `ProjectBoardViewModel::from_app_state`'s `ProjectBoardEmptyState`
-///   construction (`"No projects yet."`, `"Add Project"`,
-///   `"Open from path"`). Dormant: `board.rs`'s `empty_state_view` reads
-///   only `.is_some()` and renders its own catalog-driven strings
-///   instead (already documented in `en.ftl`'s own comment above
-///   `project-board-empty-heading`). Not fixed here, same as the rest.
+///   construction. Dormant: `board.rs`'s `empty_state_view` reads only
+///   `.is_some()` and renders its own catalog-driven strings instead
+///   (already documented in `en.ftl`'s own comment above
+///   `project-board-empty-heading`). **RFC-038 PR-038-E**: this
+///   construction held three literals (`"No projects yet."`, `"Add
+///   Project"`, `"Open from path"`); the latter two named actions
+///   nothing implemented, and were removed from the published API
+///   along with the fields that held them (`primary_action`/
+///   `secondary_action`, see `CHANGELOG.md`). Only `"No projects yet."`
+///   (`heading`) remains, still dormant, still not fixed here.
 /// - **`project/metadata.rs` also holds two dormant `.label()`
 ///   producers** not in the table: `ProjectOpenSurface::label()` and
 ///   `ProjectMode::label()`. Both are reachable only through
@@ -224,11 +229,17 @@ const CORE_EXEMPT_LITERALS: &[CoreExemptSite] = &[
     CoreExemptSite::dormant("project_board.rs", "Dirty"),
     CoreExemptSite::dormant("project_board.rs", "Calm"),
     // project_board.rs -- ProjectBoardEmptyState (`from_app_state`).
-    // Dormant: `board.rs`'s `empty_state_view` never reads these
-    // fields. The fifth site, not in `pr-016-e-enforcement.md`'s table.
+    // Dormant: `board.rs`'s `empty_state_view` never reads this field.
+    // The fifth site, not in `pr-016-e-enforcement.md`'s table.
+    //
+    // RFC-038 PR-038-E: `"Add Project"`/`"Open from path"` removed from
+    // this list -- `ProjectBoardEmptyState::primary_action`/
+    // `secondary_action`, the fields that held them, were removed from
+    // the published API entirely (they named two actions that were
+    // never reachable from anywhere; see `CHANGELOG.md`), so those two
+    // literals no longer exist in `project_board.rs` at all. `"No
+    // projects yet."` (`heading`) stays -- that field was not removed.
     CoreExemptSite::dormant("project_board.rs", "No projects yet."),
-    CoreExemptSite::dormant("project_board.rs", "Add Project"),
-    CoreExemptSite::dormant("project_board.rs", "Open from path"),
     // project_board.rs -- `recent_project_row`'s `availability_label`.
     // Dormant: `board.rs` never reads this field.
     CoreExemptSite::dormant("project_board.rs", "Folder missing"),

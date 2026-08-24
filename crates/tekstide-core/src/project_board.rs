@@ -108,11 +108,15 @@ pub struct ProjectBoardViewModel {
     pub global_attention_summary: String,
 }
 
+/// RFC-038 PR-038-E: `primary_action`/`secondary_action` (`"Add Project"`/
+/// `"Open from path"`) were removed here -- pre-baked English naming two
+/// actions that were never reachable from anywhere, the exact defect
+/// `0.12.1` shipped and RFC-038's own path field/browser/one-key-reopen
+/// slices existed to fix on the GUI side. **A breaking change to a
+/// published crate** (see `CHANGELOG.md`).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectBoardEmptyState {
     pub heading: String,
-    pub primary_action: String,
-    pub secondary_action: String,
 }
 
 impl ProjectBoardViewModel {
@@ -137,8 +141,6 @@ impl ProjectBoardViewModel {
 
         let empty_state = rows.is_empty().then(|| ProjectBoardEmptyState {
             heading: "No projects yet.".to_owned(),
-            primary_action: "Add Project".to_owned(),
-            secondary_action: "Open from path".to_owned(),
         });
 
         let global_attention_summary = rows

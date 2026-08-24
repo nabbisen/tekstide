@@ -131,6 +131,13 @@ fn workspace_commands_without_active_project_do_not_leave_project_board() {
     assert_eq!(shell.route(), AppRoute::ProjectBoard);
 }
 
+/// RFC-038 PR-038-E: no longer asserts `"[Add Project] [Open from
+/// path]"` -- those named two actions this harness could never actually
+/// perform, the same defect `0.12.1`'s real GUI shipped and RFC-038's
+/// own slices fixed there. `ProjectBoardEmptyState::primary_action`/
+/// `secondary_action`, the fields that held them, are gone from the
+/// published API (`render_project_board`'s own doc comment has the
+/// full account).
 #[test]
 fn first_run_project_board_renders_empty_state() {
     let shell = ApplicationShell::new();
@@ -140,7 +147,10 @@ fn first_run_project_board_renders_empty_state() {
     assert!(rendered.contains("Tekstide"));
     assert!(rendered.contains("Project Board"));
     assert!(rendered.contains("No projects yet."));
-    assert!(rendered.contains("[Add Project] [Open from path]"));
+    assert!(
+        !rendered.contains("Add Project") && !rendered.contains("Open from path"),
+        "the harness must not name actions it cannot actually perform: {rendered:?}"
+    );
 }
 
 #[test]

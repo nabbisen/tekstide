@@ -1,5 +1,65 @@
 # Changelog
 
+## 0.13.0 - There Is Now Something to Do
+
+Status: released on 2026-08-24.
+
+**`0.12.1` made the product describe itself; it still could not act.** A user starting
+`tekstide` with no argument saw an honest empty board and a full keyboard reference — and no way
+to actually open a project without leaving the window to retype a path at a shell prompt. This
+release is RFC-038's own fix: a real path field, a real folder browser, a keyboard reference
+reachable from anywhere, and a one-key way back into a project you already had open.
+
+### Added
+
+- **A path field on the Project Board**, focused by construction the moment the board is empty,
+  and reachable on a populated board too via `Ctrl+Alt+O` for a second project. Every keystroke
+  routes through the same reviewed input path every other key in this application does; a failed
+  path renders a bounded, escaped diagnostic and leaves the field editable, never exits.
+- **A real, clickable "Browse..." button** next to the field — the first genuine
+  `iced::widget::button` in this crate — opening a keyboard- and mouse-operable folder browser
+  (`Ctrl+Alt+B`) that lets a project be chosen by navigating the filesystem, never by typing a
+  path. Directories only; the chosen folder goes through the exact same entry point the field
+  uses, with the same audit record and the same `Restricted`-by-default outcome.
+- **A keyboard reference reachable from anywhere** (`Ctrl+Alt+K`), including from inside a
+  project's own Terminal Immersion mode, where no route back to any help existed before. Derived
+  directly from the same policy the input layer dispatches on, so it cannot drift from what a key
+  actually does.
+- **A previously-opened project can be reopened without retyping its path.** The Project Board
+  already remembered recent projects and rendered them as rows; this release adds the missing
+  action — `Up`/`Down` to highlight a remembered row, `Enter` or a real click on its own "Open"
+  button to reopen it, one key, no typing.
+
+### Fixed (security)
+
+- **A project's cached trust label could be restored with no confirmation against the durable
+  audit store**, outside of the one point at startup this was previously checked. Concretely: a
+  user who once granted a project trust, closed it, and later reopened it by any route other than
+  the original command line — retyping its path, browsing to it, or (as of this release) the new
+  one-key reopen — got `Trusted` back on the strength of a user-writable cache file alone, with
+  nothing behind it. Fixed at all three non-command-line routes a project can open through; each
+  now re-confirms against the audit store the same way a command-line-opened project already did.
+
+### Breaking changes
+
+- **`ProjectBoardEmptyState`'s `primary_action` and `secondary_action` fields are removed** from
+  `tekstide-core`'s public API. They held pre-baked English for two actions — "Add Project",
+  "Open from path" — that were never reachable from anywhere; `0.12.1` already stopped rendering
+  them, and this release removes the fields themselves. Any external caller constructing or
+  matching on `ProjectBoardEmptyState` by its full field set will need to drop both.
+
+### Known limitations
+
+- **The remembered-projects cache is only written at startup.** Reopening a project mid-session
+  updates the live session (and its confirmed trust) but not the on-disk cache's own timestamps
+  until the next process start happens to rewrite it.
+- **Adding a second project through `Ctrl+Alt+O` does not switch to it.** It lands on the board;
+  the originally active project stays active. Switching which project is active has no live
+  binding yet.
+- Unchanged from `0.12.1`: the configuration system loads nothing, no screen-reader support, no
+  cross-platform evidence beyond Linux, the real Claude Code CLI still never exercised by the
+  test suite, and `NFR-PERF-004` still unverified.
+
 ## 0.12.1 - You Can See What It Does
 
 Status: released on 2026-08-22.

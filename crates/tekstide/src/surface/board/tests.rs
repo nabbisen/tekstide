@@ -415,3 +415,67 @@ fn the_recent_row_open_button_is_real_and_gated_on_row_kind_not_highlight() {
          whether the row happens to be highlighted"
     );
 }
+
+/// RFC-038's own acceptance criterion, in its own words: "The board's
+/// empty state contains no text naming an action that is not
+/// activatable. A test asserts this by enumeration, not by inspection."
+///
+/// Enumerates every `catalog.get("...")` key literal this whole module
+/// calls, in source order, and requires the exact list -- the same "a
+/// second call site fails this test by name" discipline every
+/// enumeration test in this crate already uses, so a new key added
+/// anywhere in `board.rs` must be named here explicitly and reasoned
+/// about below, not merely counted or left to a future reader to
+/// notice by inspecting the rendered output.
+///
+/// Of the six: three are plain descriptive prose with no action-shaped
+/// claim at all (`project-board-empty-heading`,
+/// `project-board-empty-open-a-project`,
+/// `project-board-empty-command-example`); one describes a real,
+/// keystroke-routed field rather than naming a separate action
+/// (`project-board-path-field-label`); and two are real button labels,
+/// each proven to sit on a genuine, wired `iced::widget::button` by its
+/// own dedicated test rather than re-proven here
+/// (`project-board-browse-button` by
+/// `the_browse_button_is_a_real_clickable_widget_not_an_inert_label`;
+/// `project-board-recent-open-button` by
+/// `the_recent_row_open_button_is_real_and_gated_on_row_kind_not_highlight`).
+/// This is the exact shape the pre-`0.12.1` defect did not have: two
+/// keys (`project-board-empty-primary-action`/`secondary-action`, gone
+/// from the catalogue entirely -- `the_two_action_labels_that_named_
+/// nothing_are_gone_from_the_catalogue`) named actions with nothing
+/// behind them at all.
+#[test]
+fn every_catalog_key_this_module_renders_is_enumerated_and_none_names_a_dead_action() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/surface/board.rs"),
+    )
+    .expect("board.rs must be readable");
+
+    let needle = "catalog.get(\"";
+    let keys: Vec<&str> = source
+        .match_indices(needle)
+        .map(|(index, _)| {
+            let rest = &source[index + needle.len()..];
+            let end = rest
+                .find('"')
+                .expect("a catalog.get( call must be a plain string literal");
+            &rest[..end]
+        })
+        .collect();
+
+    assert_eq!(
+        keys,
+        vec![
+            "project-board-empty-heading",
+            "project-board-empty-open-a-project",
+            "project-board-empty-command-example",
+            "project-board-browse-button",
+            "project-board-path-field-label",
+            "project-board-recent-open-button",
+        ],
+        "board.rs's own catalog.get( keys, in source order -- a new one added here must be \
+         named explicitly in this test's own doc comment and reasoned about, not merely \
+         counted: {keys:?}"
+    );
+}

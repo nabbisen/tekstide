@@ -239,12 +239,15 @@ tekstide /path/to/project
 
 **Give it a path, or run it bare.** `tekstide` with no argument opens an
 empty board with a field to type or paste a path into — press Enter to
-open it. `Ctrl+Alt+O` opens the same field once a project is already
-open, for adding another. Until `0.12.1` this section said to run
+open it — and a "Browse..." button next to it for choosing a folder
+without typing a path at all. `Ctrl+Alt+O` opens the same field once a
+project is already open, for adding another. A project you previously
+opened and later closed is remembered on the board too: highlight its
+row with `Up`/`Down` and press `Enter` (or click its own "Open" button)
+to reopen it, no retyping. Until `0.12.1` this section said to run
 `tekstide` bare and mentioned the path second, as an option, which left
 a first-time user looking at a window with nothing to do and no way to
-change that; RFC-038 PR-038-A/B added the in-app route this section now
-describes.
+change that; RFC-038 added the in-app routes this section now describes.
 
 You can open more than one:
 
@@ -271,12 +274,17 @@ The shell is keyboard-navigable by design. These bindings exist today
 | Binding | Action |
 | --- | --- |
 | `Ctrl+Alt+P` | Open the Project Board |
+| `Ctrl+Alt+O` | Open a field to type or paste a project path (RFC-038) |
+| `Ctrl+Alt+B` | Open a folder browser to choose a project without typing a path (RFC-038) |
 | `Ctrl+Alt+M` | Toggle Content / Terminal mode for the active project |
 | `Ctrl+Alt+T` | Launch a real terminal in the active project (switches to Terminal mode) |
+| `Ctrl+Shift+V` | Paste into the focused terminal |
+| `Ctrl+S` | Save the open file |
 | `Ctrl+Alt+A` | Launch an AI CLI (Claude Code) run in the active project — refused unless the project is trusted |
 | `Ctrl+Alt+U` | Open the Workspace Trust surface for the active project (grant or revoke) |
 | `Ctrl+Alt+H` | Open the Approval History surface for the active project |
 | `Ctrl+Alt+R` | Open the AgentRun Report for the most recently launched run in the active project |
+| `Ctrl+Alt+K` | Open this keyboard reference, from anywhere (RFC-038) |
 | `Ctrl+Shift+V` | Paste the clipboard into the focused terminal, subject to RFC-009's policy |
 | `Ctrl+S` | Save the active document in Content mode |
 | `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |

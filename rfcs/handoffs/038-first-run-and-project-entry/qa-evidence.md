@@ -745,28 +745,148 @@ clean.
 **Security.** Both guards are pure test additions -- no production code changed, no new render
 path, no new I/O.
 
+**Correction (response 304, PR-038-E): Guard 1 was removed.** It was specified on a mistaken
+premise -- I did not check that `CatalogArgs::untrusted` takes `&DisplayText`, a type with a
+**private** field and exactly one constructor in the whole crate (`quote_untrusted`,
+`text_safety.rs`). "Every untrusted value handed to the catalog was escaped first" has therefore
+been unrepresentable otherwise since RFC-016; there was never a runtime discipline for the count
+test to guard, only a compile-time one already in force. Worse: the guard was a count over two
+quantities only *incidentally* equal today. The moment `surface/explorer.rs` legitimately escapes
+a value and renders it directly rather than through `.untrusted(` -- exactly the shape `board.rs`
+already uses, 0 against 3, which this same section already named as a reason not to extend the
+invariant there -- the counts diverge and the test fails on correct code. Removed in PR-038-E,
+along with its own test
+(`surface::explorer::tests::every_untrusted_value_this_module_hands_the_catalog_was_escaped_first`).
+Replaced by the actual invariant worth guarding: see PR-038-E's own section below.
+
 ## PR-038-E — closeout
 
-_Pending._
+The last slice. Carries three items response 302/304 folded in here, plus the task breakdown's
+own original scope.
+
+**1. `State::new`'s stale `verify_restored_trust` comment (response 302's finding).** Said
+"currently nothing does yet (RFC-032's own dialog and restricted-mode gates are still ahead)" --
+true when written, false since those shipped. Worse, the comment implied this was the *only*
+place trust gets verified; PR-038-D added three more mid-session call sites
+(`reopen_recent_project`, `attempt_open_project_from_path_field`,
+`choose_current_browsed_directory`), each calling `verify_restored_trust` itself right after its
+own `add_project_from_path` succeeds. Corrected to state what this call site actually covers
+(CLI-argument projects already live when `State::new` runs) and to point at the other three
+rather than imply there are none.
+
+**2. The `DisplayText` constructor guard (response 304, replacing the deleted Guard 1).** Two
+tests in `crates/tekstide-core/src/text_safety/tests.rs`:
+
+- `exactly_one_function_in_the_crate_returns_displaytext` -- scans every non-test `.rs` file
+  under this crate's own `src/` for the literal `-> DisplayText`, expecting exactly one match
+  (`quote_untrusted`, `text_safety.rs`). Test files are excluded from the scan, the same
+  convention `app::tests::only_one_production_call_site_ever_restores_a_projects_trust_state`
+  already uses -- not because a test-only constructor would be safe, but because this guard's
+  own doc comments and assertion messages necessarily contain the literal text `-> DisplayText`
+  in prose, which a raw source-text scan cannot distinguish from a real signature.
+  **Ablated**: added a second function returning `DisplayText` (`text_safety.rs`, delegating to
+  `quote_untrusted`) -- failed (two sites, not one); reverted.
+- `displaytexts_field_is_declared_private_in_source` -- not mechanically enforceable as a
+  property of the language itself (Rust has no "assert this field is private" reflection), so
+  asserted the same way structural properties are asserted elsewhere in this codebase: a direct
+  source-text check that `text_safety.rs` still declares `struct DisplayText(String)`, not
+  `pub String`. **Ablated**: changed the field to `pub String` -- failed; reverted.
+
+Together these guard the property that actually matters: `DisplayText` keeps exactly one
+constructor and a private field, which is what makes "untrusted text cannot reach a
+`DisplayText`-typed parameter unescaped" a compile-time fact rather than a convention. Add a
+second constructor, or make the field `pub`, and every existing `.untrusted(` call site across
+the crate becomes silently unproven -- these two tests are what would catch that.
+
+**3. `ProjectBoardEmptyState::primary_action`/`secondary_action` removed** from
+`tekstide-core`'s public API -- pre-baked English for two actions (`"Add Project"`, `"Open from
+path"`) that were never reachable from anywhere, unread by `board.rs` since `0.12.1`. **A real
+finding while removing them, disclosed rather than silently worked around**: the task breakdown's
+own premise ("read by nothing") was false. `tekstide-core::shell::render_project_board` -- the
+pre-GUI text harness `render_text()` calls, kept from before the real GUI existed -- read both
+fields directly to print `[Add Project] [Open from path]`, and a real, passing core test
+(`shell::tests::first_run_project_board_renders_empty_state`) asserted on that exact string.
+Removing the fields meant also fixing that harness (now prints only the heading -- it has no
+concept of what actions the real frontend offers, so it says only what it can honestly know) and
+that test (now asserts the opposite: neither literal appears). The `tekstide::i18n::enforcement`
+exemption list (`CORE_EXEMPT_LITERALS`) also named both strings as dormant exemptions for
+`project_board.rs`; both entries removed, since the literals they exempted no longer exist.
+**This is the same "read by nothing" pattern response 300/303/304 already found three times this
+RFC** (reusing the explorer tree, the route ablation, Guard 1) -- checked before executing, this
+time by grepping for the fields' own readers rather than trusting the task breakdown's claim.
+
+Recorded in `CHANGELOG.md` as a breaking change under a new `0.13.0` entry (workspace version
+bumped from `0.12.1`), alongside the rest of RFC-038's user-facing changes -- the path field, the
+folder browser button, the help modal, one-key recent-project reopen, and the trust-confirmation
+fix PR-038-D found and closed across three call sites. `README.md`'s own Quick Start and Keyboard
+Reference sections were also out of date (missing `Ctrl+Alt+O`/`Ctrl+Alt+B`/`Ctrl+Alt+K`/
+`Ctrl+Shift+V`/`Ctrl+S` from the table entirely, and no mention of the browser or one-key
+reopen in the prose) -- updated to match what the application actually does today, not just what
+`0.12.1` added.
+
+**4. RFC-038's acceptance criterion 2, answered by enumeration, not left implicit.** "The board's
+empty state contains no text naming an action that is not activatable. A test asserts this by
+enumeration, not by inspection." No test previously asserted this positively and on an ongoing
+basis -- only negative checks that the two specific `0.12.1`-era dead keys are gone from the
+catalogue. Added
+`board::tests::every_catalog_key_this_module_renders_is_enumerated_and_none_names_a_dead_action`:
+scans `board.rs`'s own source for every `catalog.get("...")` key literal, asserts the exact list
+(six today), and its own doc comment reasons about each -- three plain descriptive strings, one
+field label, and two real button labels each already proven wired to a genuine
+`iced::widget::button` by its own dedicated test. A new key added to `board.rs` later must be
+named in this test's own list and doc comment or the test fails, the same "named explicitly, not
+merely counted" discipline every enumeration test in this crate uses.
+
+**Gates.** `cargo build`, `cargo test --workspace --all-targets --all-features` (359 tekstide +
+727 tekstide-core, up from 359/725; 0 failed), `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`, `git diff --check` -- all
+clean.
+
+**RFC-038's acceptance criteria, answered one by one, in its own words.**
+
+- *"A user launching `tekstide` with no arguments, who has never read any documentation, can put
+  a project on the board using only what the window shows them. Proven from a real key event
+  through production code -- not from a dispatched message."* **Met.** Three independent ways,
+  each proven live against the release binary with real `xdotool` key/click events, not
+  dispatched `Message`s: typing a path into the field and pressing Enter (PR-038-A,
+  `evidence/pr-038-a/`), browsing to a folder with the keyboard or a real mouse click (PR-038-G,
+  `evidence/pr-038-g/`), and, for a project opened before, one-key reopen from the board's own
+  remembered-projects row (PR-038-D, `evidence/pr-038-d/`).
+- *"The board's empty state contains no text naming an action that is not activatable. A test
+  asserts this by enumeration, not by inspection."* **Met**, per item 4 above.
+- *"`ProjectBoardEmptyState`'s dead fields are gone from the published API, and the breaking
+  change is recorded in the changelog."* **Met**, per item 3 above.
+- *"Every live keybinding is reachable from a help surface that does not require the Project
+  Board to be the visible route."* **Met.** `Ctrl+Alt+K` opens a modal reachable from any route
+  or mode, including from inside a project's own Terminal Immersion
+  (`shell::tests::ctrl_alt_k_opens_help_from_inside_terminal_immersion`), listing every live
+  binding derived directly from `KeybindingPolicy::advertised_bindings()` -- twelve today, up
+  from the nine `0.12.1` first listed, unable to drift from what the input layer actually
+  dispatches on since nothing here is hand-written (PR-038-C, `qa-evidence.md`'s own section).
 
 ## Known limitations (RFC-038-wide)
 
-As of PR-038-A/B/C/D/F/G/I:
+As of PR-038-A/B/C/D/E/F/G/I:
 
 - **The folder browser's render layer duplicates the project explorer's own** (`browse_view` and
   siblings, alongside `view`/`node_line`/`tree_lines`), rather than sharing it -- disclosed and
-  flagged for the architect's decision in PR-038-G's own qa-evidence.md section above. **Resolved
-  in PR-038-I**: a shared render helper was decided against (forcing `BrowseNode` through
-  `ExplorerNode`'s shape would reintroduce the dishonest-field problem the core split exists to
-  avoid); a mechanical count-equality guard over `.untrusted(`/`quote_untrusted(` call sites
-  prevents the two renderers from diverging on escaping instead. Revisit only if a third browser
-  ever appears.
+  flagged for the architect's decision in PR-038-G's own qa-evidence.md section above. **Resolved,
+  corrected in PR-038-E**: a shared render helper was decided against (forcing `BrowseNode`
+  through `ExplorerNode`'s shape would reintroduce the dishonest-field problem the core split
+  exists to avoid). PR-038-I first built a runtime count-equality guard over
+  `.untrusted(`/`quote_untrusted(` call sites to protect the escaping property instead of a
+  shared helper -- **that guard was itself redundant and removed in PR-038-E** (response 304):
+  `DisplayText`'s private field and single constructor already make "untrusted text cannot reach
+  the catalog unescaped" a compile-time fact, not a runtime discipline a count could add anything
+  to. The two renderers stay unshared; what actually protects the escaping property is the type
+  system, guarded now by `exactly_one_function_in_the_crate_returns_displaytext`/
+  `displaytexts_field_is_declared_private_in_source` (PR-038-E's own section above) rather than by
+  anything specific to `surface/explorer.rs`. Revisit sharing only if a third browser ever
+  appears.
 - **A recent project reopened mid-session does not update the on-disk `recent-projects.json`
   cache's own timestamps.** Only `boot()` writes that file, once, at startup -- disclosed in
   PR-038-D's own qa-evidence.md section above, pre-existing behaviour this slice did not
   introduce and is not scoped to fix.
-- **`ProjectBoardEmptyState::primary_action`/`secondary_action` still in the published API,**
-  unread by anything, same as `0.12.1` left them. PR-038-E.
 - **`Ctrl+V` paste is not exercised by a live/synthetic-input test**, only by its resource bound
   -- see PR-038-A's own section above.
 - **Adding a second project through `Ctrl+Alt+O` does not switch to it.** It lands on the board,
