@@ -4,15 +4,16 @@ use std::path::{Path, PathBuf};
 use tekstide_core::shell::ApplicationShell;
 
 use super::{
-    AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ExternalChangeButton, Message,
-    ModalButton, ModalContent, PasteConfirmButton, State, TerminalPasteRefusal,
-    TranscriptPurgeButton, TrustGrantButton, agent_run_launch_refusal_text,
-    attempt_agent_run_launch_with_profile, attempt_agent_run_launch_with_profile_and_state_root,
+    AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ExternalChangeButton,
+    MAX_PATH_FIELD_CHARS, Message, ModalButton, ModalContent, PasteConfirmButton, PathFieldError,
+    State, TerminalPasteRefusal, TranscriptPurgeButton, TrustGrantButton,
+    agent_run_launch_refusal_text, attempt_agent_run_launch_with_profile,
+    attempt_agent_run_launch_with_profile_and_state_root,
     attempt_agent_run_launch_with_profile_state_root_and_capture, content_within_bound,
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
-    open_real_audit_store, poll_approval_channels, sidebar_label, status_bar_summary,
-    terminal_paste_refusal_text, transcript_local_data_summary_for, trust_grant_dialog_body,
-    trusted_ui_state, verify_restored_trust_against, zone_style,
+    open_real_audit_store, path_field_error_text, poll_approval_channels, sidebar_label,
+    status_bar_summary, terminal_paste_refusal_text, transcript_local_data_summary_for,
+    trust_grant_dialog_body, trusted_ui_state, verify_restored_trust_against, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -7711,5 +7712,311 @@ fn terminal_bridge_thread_count_is_stable_across_many_view_rebuilds() {
          spawn -- a count above 1 means iced's own Subscription::run_with identity is not \
          deduping this subscription across rebuilds, which would leak one bridging thread \
          (and one duplicated eventfd) per rebuild in production"
+    );
+}
+
+// RFC-038 PR-038-A: the Project Board empty state's path field.
+
+/// Drives `text.chars()` through the **real** router
+/// (`route_non_modal_input`) and the **real** `update`, one `KeyPress`
+/// at a time, exactly the shape `a_real_typed_key_inserts_into_the_
+/// active_document` already established for the editor -- "proven from
+/// a real key event through production code," per this project's
+/// standing evidence rule, not from a `Message` constructed and handed
+/// to `update` directly.
+fn type_through_the_real_path_field(state: &mut State, text: &str) {
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    for character in text.chars() {
+        let press = crate::input::KeyPress {
+            key: iced::keyboard::Key::Character(character.to_string().into()),
+            modifiers: iced::keyboard::Modifiers::empty(),
+        };
+        let proof = crate::input::ModalAbsent::check(&state.modal)
+            .expect("test precondition: no modal open");
+        let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, press);
+        let _ = super::update(state, Message::Input(routed));
+    }
+}
+
+fn press_enter_in_the_real_path_field(state: &mut State) {
+    press_named_key_in_the_real_path_field(state, iced::keyboard::key::Named::Enter);
+}
+
+fn press_backspace_in_the_real_path_field(state: &mut State) {
+    press_named_key_in_the_real_path_field(state, iced::keyboard::key::Named::Backspace);
+}
+
+fn press_named_key_in_the_real_path_field(state: &mut State, key: iced::keyboard::key::Named) {
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Named(key),
+        modifiers: iced::keyboard::Modifiers::empty(),
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, press);
+    let _ = super::update(state, Message::Input(routed));
+}
+
+/// **The acceptance criterion RFC-038 exists for.** A cold, fresh
+/// `ApplicationShell` (no projects, no recent projects -- the exact
+/// state a first-time user's `tekstide` with no arguments produces),
+/// with **every character of a real path typed through the real
+/// router**, then a real Enter. No dispatched `Message` constructed by
+/// hand anywhere in this test.
+#[test]
+fn a_real_typed_path_and_enter_opens_a_project_from_a_cold_empty_board() {
+    let mut state = state_with(ApplicationShell::new());
+    assert!(
+        state.app_shell.project_board().empty_state.is_some(),
+        "test precondition: a fresh ApplicationShell has an empty board"
+    );
+
+    let project_dir = fresh_project_dir("path-field-real-open");
+    type_through_the_real_path_field(&mut state, &project_dir.display().to_string());
+    press_enter_in_the_real_path_field(&mut state);
+
+    let active = state
+        .app_shell
+        .state()
+        .active_project()
+        .expect("a real typed path followed by Enter must open and activate a project");
+    assert_eq!(active.root_path(), project_dir.as_path());
+    assert_eq!(
+        active.trust_state(),
+        tekstide_core::project::WorkspaceTrust::Restricted,
+        "a project added through the field must arrive Restricted, exactly like one added \
+         from the CLI -- what-a-path-field-must-not-trust.md §4"
+    );
+    assert!(
+        state.path_field.is_empty(),
+        "the field must clear on a successful open"
+    );
+    assert!(state.path_field_notice.is_none());
+}
+
+/// The other half of §4: `Restricted` is not just a label on the row --
+/// a real agent-run launch against a project added *through the field*
+/// must be refused exactly the way one added from the CLI already is
+/// (`agent_run_launch_shell_input_switches_to_terminal_immersion_and_shows_the_real_trust_refusal`).
+/// Proves the field does not take a shortcut around RFC-032's trust
+/// gate for the one property that would matter most if it did.
+#[test]
+fn a_project_opened_through_the_field_refuses_an_agent_run_until_trust_is_granted() {
+    let mut state = state_with(ApplicationShell::new());
+    let project_dir = fresh_project_dir("path-field-restricted-refusal");
+    type_through_the_real_path_field(&mut state, &project_dir.display().to_string());
+    press_enter_in_the_real_path_field(&mut state);
+    assert!(state.app_shell.state().active_project().is_some());
+
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::LaunchAgentRun,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "a refused agent run launch must still land in Terminal Immersion, matching the CLI \
+         path's own refusal shape"
+    );
+    assert!(
+        state.agent_run_launch_notice.is_some(),
+        "the launch must have been refused, not silently ignored"
+    );
+}
+
+/// `what-a-path-field-must-not-trust.md` §5's own audit guard, proven
+/// live: a real `ProjectAdded` record exists for a project opened
+/// through the field, the same proof
+/// `opening_a_real_new_project_from_the_cli_path_writes_exactly_one_real_project_added_record`
+/// already gives the CLI path. **Ablated**: temporarily commenting out
+/// `attempt_open_project_from_path_field`'s call to
+/// `record_path_field_project_added` makes this assertion fail (0
+/// records, not 1) -- confirmed by hand while writing this test, then
+/// restored; not left as a standing ablation in the tree since this
+/// crate's tests do not carry a runtime toggle for it, matching every
+/// other single-variable ablation in this codebase's convention of
+/// reverting before commit.
+#[test]
+fn opening_a_project_through_the_real_field_writes_exactly_one_real_project_added_record() {
+    let mut state = state_with(ApplicationShell::new());
+    let project_dir = fresh_project_dir("path-field-audit-record");
+    type_through_the_real_path_field(&mut state, &project_dir.display().to_string());
+    press_enter_in_the_real_path_field(&mut state);
+
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .expect("test precondition: the field must have opened a project");
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let records: Vec<_> = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .expect("querying the real audit store must succeed")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .filter(|record| record.project_id.as_ref() == Some(&project_id))
+        .filter(|record| record.family == tekstide_core::audit::AuditEventFamily::ProjectAdded)
+        .collect();
+
+    assert_eq!(
+        records.len(),
+        1,
+        "exactly one ProjectAdded record must exist for a project opened through the real \
+         field: {records:?}"
+    );
+}
+
+/// Re-submitting the same path a second time must focus the existing
+/// session, not add a duplicate or write a second record -- the same
+/// `FocusedExisting` distinction `reopening_the_same_project_path_
+/// focuses_it_instead_of_writing_a_second_record` already proves for
+/// the CLI path, proven here for the field's own, separate call site.
+#[test]
+fn resubmitting_the_same_path_through_the_field_focuses_it_without_a_second_record() {
+    let mut state = state_with(ApplicationShell::new());
+    let project_dir = fresh_project_dir("path-field-refocus");
+    type_through_the_real_path_field(&mut state, &project_dir.display().to_string());
+    press_enter_in_the_real_path_field(&mut state);
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .expect("test precondition: the first open must succeed");
+
+    type_through_the_real_path_field(&mut state, &project_dir.display().to_string());
+    press_enter_in_the_real_path_field(&mut state);
+
+    assert_eq!(
+        state.app_shell.state().active_project_id(),
+        Some(&project_id),
+        "resubmitting the same path must focus the same project, not create a second one"
+    );
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let record_count = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .expect("querying the real audit store must succeed")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .filter(|record| record.project_id.as_ref() == Some(&project_id))
+        .filter(|record| record.family == tekstide_core::audit::AuditEventFamily::ProjectAdded)
+        .count();
+    assert_eq!(
+        record_count, 1,
+        "re-focusing an already-open project through the field must not write a second record"
+    );
+}
+
+/// `what-a-path-field-must-not-trust.md` §2: a bad path must render a
+/// diagnostic and leave the application running, never exit. There is
+/// no `std::process::exit` anywhere reachable from
+/// `attempt_open_project_from_path_field` to assert the *absence* of
+/// directly, so this proves the property behaviourally instead: the
+/// notice appears, the field is preserved (not silently wiped, so the
+/// user can correct it), and -- the real proof the process kept
+/// running -- a **second**, valid submission through the same still-live
+/// `state` afterwards succeeds normally.
+#[test]
+fn a_bad_path_renders_a_notice_and_the_application_keeps_running() {
+    let mut state = state_with(ApplicationShell::new());
+    let bad_path = fresh_project_dir("path-field-bad-parent").join("does-not-exist-at-all");
+    type_through_the_real_path_field(&mut state, &bad_path.display().to_string());
+    press_enter_in_the_real_path_field(&mut state);
+
+    assert_eq!(
+        state.path_field_notice,
+        Some(PathFieldError::DoesNotExist),
+        "a nonexistent path must be refused with the specific reason, not a generic one"
+    );
+    assert_eq!(
+        state.path_field,
+        bad_path.display().to_string(),
+        "the field must keep exactly what the user typed so they can correct it, not be \
+         cleared on failure"
+    );
+    assert!(
+        state.app_shell.state().active_project().is_none(),
+        "a refused path must not have added anything"
+    );
+
+    // The real proof of "kept running": the same live `state`, still
+    // fully functional, opens a real project right after -- cleared with
+    // real Backspace presses (not a direct assignment) so this half of
+    // the test is exactly as "real key event through production code"
+    // as the first half.
+    for _ in bad_path.display().to_string().chars() {
+        press_backspace_in_the_real_path_field(&mut state);
+    }
+    assert!(
+        state.path_field.is_empty(),
+        "test precondition: real Backspace presses must clear the field"
+    );
+    let project_dir = fresh_project_dir("path-field-after-bad-path");
+    type_through_the_real_path_field(&mut state, &project_dir.display().to_string());
+    press_enter_in_the_real_path_field(&mut state);
+    assert!(
+        state.app_shell.state().active_project().is_some(),
+        "the application must still be able to open a real project after an earlier refusal"
+    );
+}
+
+/// `what-a-path-field-must-not-trust.md` §1: the typed path is untrusted
+/// even though the user typed it -- a directionality override must
+/// render as a visible marker, never obeyed. Tests the pure function
+/// directly (`path_field_error_text`), the same "test the rendered
+/// string, not the widget tree" shape `row_lines` and `status_bar_
+/// summary` already use, since this is exactly what
+/// `attempt_open_project_from_path_field` calls to build the notice a
+/// user actually sees.
+#[test]
+fn a_directionality_override_in_the_typed_path_renders_as_a_visible_marker_not_obeyed() {
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let hostile_path = "/tmp/\u{202E}gpj.exe";
+
+    let text = path_field_error_text(&catalog, hostile_path, PathFieldError::DoesNotExist);
+
+    assert!(
+        text.contains("<U+202E>"),
+        "the override character must render as a visible marker: {text:?}"
+    );
+    assert!(
+        !text.contains('\u{202E}'),
+        "the real U+202E character must never reach the rendered string unescaped: {text:?}"
+    );
+}
+
+/// `push_to_path_field` is the one place `state.path_field` grows, from
+/// either typing or a resolved paste -- proves its own bound directly,
+/// the pure-function level `MAX_PATH_FIELD_CHARS` is documented against,
+/// rather than only indirectly through a real (slow) 4096-keystroke
+/// sequence through the router.
+#[test]
+fn the_path_field_stops_growing_at_its_bound_rather_than_unbounded() {
+    let mut state = state_with(ApplicationShell::new());
+    let oversized = "a".repeat(MAX_PATH_FIELD_CHARS + 500);
+
+    super::push_to_path_field(&mut state, &oversized);
+
+    assert_eq!(
+        state.path_field.chars().count(),
+        MAX_PATH_FIELD_CHARS,
+        "the field must stop growing exactly at the bound, not silently accept an oversized \
+         paste"
     );
 }

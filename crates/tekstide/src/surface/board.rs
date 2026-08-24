@@ -69,9 +69,11 @@ pub fn view<'a, Message: 'a>(
     view_model: &ProjectBoardViewModel,
     catalog: &'a Catalog,
     theme: &'a Theme,
+    path_field: &'a str,
+    path_field_notice: Option<String>,
 ) -> Element<'a, Message> {
     if let Some(_empty_state) = &view_model.empty_state {
-        return empty_state_view(catalog, theme);
+        return empty_state_view(catalog, theme, path_field, path_field_notice);
     }
 
     let rows: Vec<Element<'a, Message>> = view_model
@@ -128,25 +130,94 @@ fn keyboard_help_view<'a, Message: 'a>(
 /// What a first-time user sees, and until `0.12.1` the whole reason the
 /// product looked broken: this rendered "Add Project" and "Open from
 /// path" as inert `text()` widgets for two actions that do not exist,
-/// while naming none of the nine live keybindings. It now says how a
-/// project actually gets opened and lists every binding, derived.
+/// while naming none of the nine live keybindings. `0.12.1` said how a
+/// project actually gets opened and listed every binding, derived.
+/// RFC-038 PR-038-A adds the missing action itself: a path field,
+/// focused by construction (there is nothing else in `MainArea` to
+/// route a keystroke to while the board is empty --
+/// `shell::handle_project_board_path_field_key`'s own doc explains why
+/// no separate "is this focused" state is needed).
+///
+/// **Not `iced::widget::text_input`.** This project routes every
+/// keystroke through one reviewed router (`input::route_non_modal_input`)
+/// so global keybindings always win and a modal can suppress input
+/// structurally, not by a guard a future surface could forget.
+/// `text_input` maintains its own internal keyboard capture independent
+/// of that router -- introducing it here would open a second,
+/// unreviewed path for a keystroke to reach the application, exactly
+/// what `input`'s module doc says this crate does not do anywhere else.
+/// The field is instead a plain rendering of `path_field`, a `String`
+/// `shell.rs` owns and appends to one `KeyPress` at a time, the same
+/// shape [`crate::surface::editor::apply_edit_key`] already established
+/// for the (multi-line) editor.
+///
+/// `path_field` is untyped, untrusted input -- routed through
+/// `text_safety::quote_untrusted` here, same as every other
+/// filesystem-derived string this module renders, never handed to
+/// `text(...)` raw.
 fn empty_state_view<'a, Message: 'a>(
     catalog: &'a Catalog,
     theme: &'a Theme,
+    path_field: &'a str,
+    path_field_notice: Option<String>,
 ) -> Element<'a, Message> {
-    let lines = column![
+    let field_box =
+        container(text(path_field_display_text(path_field)).size(theme.font_size_body()))
+            .width(Length::Fill)
+            .padding(8)
+            .style(
+                move |_base_theme: &iced::Theme| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(theme.surface_elevated())),
+                    text_color: Some(theme.foreground()),
+                    border: iced::Border {
+                        color: theme.border_focused(),
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..iced::widget::container::Style::default()
+                },
+            );
+
+    let mut lines = column![
         text(catalog.get("project-board-empty-heading")).size(theme.font_size_heading()),
         text(catalog.get("project-board-empty-open-a-project")).size(theme.font_size_body()),
         text(catalog.get("project-board-empty-command-example")).size(theme.font_size_body()),
-        keyboard_help_view(catalog, theme),
+        text(catalog.get("project-board-empty-path-field-label")).size(theme.font_size_body()),
+        field_box,
     ]
     .spacing(6);
+
+    // `path_field_notice` is already a fully-resolved, catalog-rendered
+    // string (`shell::path_field_error_text`) -- this module renders it
+    // as-is, the same "notice computed by `shell.rs`, rendered by the
+    // surface" division `terminal_launch_refusal_text` already uses for
+    // the terminal workspace's own launch-refusal notice.
+    if let Some(notice) = path_field_notice {
+        lines = lines.push(text(notice).size(theme.font_size_body()));
+    }
+
+    lines = lines.push(keyboard_help_view(catalog, theme));
 
     container(lines)
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(16)
         .into()
+}
+
+/// The path field's own rendered content -- factored out of
+/// [`empty_state_view`] so it is directly testable without going
+/// through `iced`'s `Element` tree, the same shape [`row_lines`] and
+/// `shell::status_bar_summary` already use. `U+2588 FULL BLOCK` is a
+/// static trailing cursor marker (this crate has no live text-editing
+/// caret today -- see `empty_state_view`'s own doc for why not
+/// `iced::widget::text_input`), appended *after* escaping so it can
+/// never be mistaken for part of the typed value.
+pub(crate) fn path_field_display_text(path_field: &str) -> String {
+    format!(
+        "{}\u{2588}",
+        text_safety::quote_untrusted(path_field).as_str()
+    )
 }
 
 fn row_view<'a, Message: 'a>(

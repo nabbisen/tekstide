@@ -110,7 +110,27 @@ project-board-empty-heading = No projects yet
 # pre-baked English and are still never read (RFC-038 owns removing them).
 project-board-empty-open-a-project = To open a project, start Tekstide with its path:
 project-board-empty-command-example = tekstide /path/to/project
+# RFC-038 PR-038-A: the field itself. Focused on arrival at an empty
+# board -- see `board.rs`'s own doc for why this is not an
+# `iced::widget::text_input` (this project routes every keystroke
+# through one reviewed router; a second, widget-internal capture path
+# would bypass it).
+project-board-empty-path-field-label = Or type a project path and press Enter:
 project-board-empty-keyboard-heading = Keyboard
+
+# RFC-038 PR-038-A: `$reason` is a compile-time symbol
+# (`PathFieldError`'s own shape), the same division of labour
+# `terminal-launch-refused` already uses -- never the error's Rust
+# `Debug` text. `$path` is the user's own typed/pasted text, bounded and
+# escaped (`shell::path_field_error_text`) before it ever reaches this
+# key, per `what-a-path-field-must-not-trust.md` §1/§3.
+project-board-path-field-error = { $reason ->
+    [does-not-exist] Couldn't open { $path } — that folder doesn't exist.
+    [not-directory] Couldn't open { $path } — that isn't a folder.
+    [permission-denied] Couldn't open { $path } — permission denied.
+    [cannot-read-folder] Couldn't open { $path } — the folder couldn't be read.
+   *[symlink-ambiguous] Couldn't open { $path } — its real location through a symlink is ambiguous.
+}
 
 # Every `project-board-*-count` key below shares `blocked-automation-count`'s
 # vocabulary for `CountDisplay`'s three non-numeric states

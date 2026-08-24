@@ -156,10 +156,23 @@ fn restoring_recent_projects_on_boot_writes_no_project_added_record() {
 /// presence check (as `only_this_module_opens_a_transcript_file_for_reading`
 /// correctly uses for *its own*, different property) would let a second,
 /// unreviewed call added inside `main.rs` itself pass silently. This test
-/// instead asserts the exact call count per file: exactly one in `main.rs`,
-/// zero everywhere else -- so a second call anywhere, `main.rs` included,
-/// fails.
-const FILE_WITH_THE_ONE_ALLOWED_CALL_TO_ADD_PROJECT_FROM_PATH: &str = "main.rs";
+/// instead asserts the exact call count per file: exactly one in each
+/// allow-listed file, zero everywhere else -- so a second call anywhere,
+/// an allow-listed file included, fails.
+///
+/// RFC-038 PR-038-A widened this from one file to two: `shell.rs`'s
+/// `attempt_open_project_from_path_field` is the field's own real call
+/// site, wiring `record_path_field_project_added` directly rather than
+/// reusing `main.rs`'s `open_cli_project_path_and_record` (whose caller,
+/// `boot()`, exits on `Err` -- catastrophic reached from a text field,
+/// per `what-a-path-field-must-not-trust.md` §2). Kept a `HashMap` of
+/// exact counts, not widened to a presence check, for the same reason
+/// response 264 gave: a *third*, unreviewed call added inside either
+/// already-allowed file must still fail this test.
+fn files_with_one_allowed_call_to_add_project_from_path()
+-> std::collections::HashMap<&'static str, usize> {
+    std::collections::HashMap::from([("main.rs", 1), ("shell.rs", 1)])
+}
 
 fn crate_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -180,6 +193,7 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
 fn add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else() {
     let mut files = Vec::new();
     collect_rs_files(&crate_src_dir(), &mut files);
+    let allowed = files_with_one_allowed_call_to_add_project_from_path();
 
     for path in files {
         let relative = path
@@ -195,12 +209,7 @@ fn add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else() 
 
         let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
         let call_count = source.matches(".add_project_from_path(").count();
-        let expected_call_count =
-            if relative == FILE_WITH_THE_ONE_ALLOWED_CALL_TO_ADD_PROJECT_FROM_PATH {
-                1
-            } else {
-                0
-            };
+        let expected_call_count = allowed.get(relative.as_str()).copied().unwrap_or(0);
 
         assert_eq!(
             call_count, expected_call_count,

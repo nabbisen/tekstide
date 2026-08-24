@@ -13,66 +13,93 @@ Every unchecked line at closeout carries a stated reason.
 
 ## The acceptance criterion that matters
 
-- [ ] **A person who has read nothing, given only the built binary, can put a project on the
+- [x] **A person who has read nothing, given only the built binary, can put a project on the
       board using what the window shows them.** Not "the field renders" — the whole journey.
-- [ ] Proven from **real key events through production code**, not from dispatched messages.
+      PR-038-A: `qa-evidence.md`'s live cold-start capture.
+- [x] Proven from **real key events through production code**, not from dispatched messages.
+      `shell::tests::a_real_typed_path_and_enter_opens_a_project_from_a_cold_empty_board` and the
+      live `xdotool` capture, both driven through the real router.
 
 ## Cold start — the first evidence item, deliberately
 
-- [ ] Release binary, **no arguments**, fresh `XDG_STATE_HOME` (`$(mktemp -d)`), launch command
-      recorded in full alongside the capture.
-- [ ] Screenshot before: the empty board with the field, focused.
-- [ ] Screenshot after: a real project on the board, opened through the field.
-- [ ] No text on either screen names an action that does not exist.
+- [x] Release binary, **no arguments**, fresh `XDG_STATE_HOME` (`$(mktemp -d)`), launch command
+      recorded in full alongside the capture. `qa-evidence.md`'s PR-038-A section.
+- [x] Screenshot before: the empty board with the field, focused.
+      `evidence/pr-038-a/before-empty-board-with-field.png`.
+- [x] Screenshot after: a real project on the board, opened through the field.
+      `evidence/pr-038-a/after-project-opened.png`.
+- [x] No text on either screen names an action that does not exist. Confirmed by viewing both
+      captures directly.
 
 Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`.
 
 ## Security — `what-a-path-field-must-not-trust.md`
 
-- [ ] Typed/pasted path routed through `text_safety::quote_untrusted` on render; never handed
-      raw to `text(...)`.
-- [ ] A path containing a Unicode directionality override renders as a visible marker, proven
+- [x] Typed/pasted path routed through `text_safety::quote_untrusted` on render; never handed
+      raw to `text(...)`. `board::path_field_display_text`.
+- [x] A path containing a Unicode directionality override renders as a visible marker, proven
       by test, not by inspection.
-- [ ] **A bad path leaves the application running.** Test proves no exit; the diagnostic is
+      `shell::tests::a_directionality_override_in_the_typed_path_renders_as_a_visible_marker_not_obeyed`.
+- [x] **A bad path leaves the application running.** Test proves no exit; the diagnostic is
       bounded and escaped per `bound_key_segment`'s shape, truncation marked visibly.
-- [ ] No second escaping routine was written.
-- [ ] A project added through the field is `Restricted`; an agent run in it is refused until
+      `shell::tests::a_bad_path_renders_a_notice_and_the_application_keeps_running`; live in
+      `after-project-opened.png`'s own first (retried) capture, disclosed in `qa-evidence.md`.
+- [x] No second escaping routine was written. `path_field_error_text` calls
+      `text_safety::quote_untrusted` exactly once; see its own doc comment for why not
+      `escape_untrusted_chars` in addition.
+- [x] A project added through the field is `Restricted`; an agent run in it is refused until
       trust is granted through `Ctrl+Alt+U`.
-- [ ] No `canonicalize`, symlink policy, or root validation added in `shell.rs`.
+      `shell::tests::a_project_opened_through_the_field_refuses_an_agent_run_until_trust_is_granted`.
+- [x] No `canonicalize`, symlink policy, or root validation added in `shell.rs`. Confirmed by
+      diff: the only new call is `state.app_shell.add_project_from_path(&path)`.
 
 ## The audit guard
 
-- [ ] `project_added` is recorded on the new call site.
-- [ ] `add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else` updated to
+- [x] `project_added` is recorded on the new call site. `record_path_field_project_added`.
+- [x] `add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else` updated to
       name both call sites with **exact counts**, still a count and not a presence check.
-- [ ] Ablated: remove the record from the new call site, watch that test fail, restore.
+- [x] Ablated: remove the record from the new call site, watch that test fail, restore.
+      Done twice: the record itself, and (separately) a duplicated call site to prove the guard
+      test's own widened allow-list holds a count, not a presence check. Both in `qa-evidence.md`.
 
 ## Bindings and help
 
-- [ ] `Ctrl+Alt+O` proven unclaimed **mechanically** against `KeybindingPolicy`.
+- [ ] `Ctrl+Alt+O` proven unclaimed **mechanically** against `KeybindingPolicy`. Pending
+      PR-038-B — not started.
 - [ ] The new action has a `keyboard_help` catalog key; the live-binding count updated from
-      nine to ten deliberately, assertion not loosened.
-- [ ] The help surface is reachable from Terminal Immersion, not only from the board.
-- [ ] If modal: scrim, keystroke suppression, focus and Escape all met per RFC-018.
+      nine to ten deliberately, assertion not loosened. Pending PR-038-B.
+- [ ] The help surface is reachable from Terminal Immersion, not only from the board. Pending
+      PR-038-C.
+- [ ] If modal: scrim, keystroke suppression, focus and Escape all met per RFC-018. Pending
+      PR-038-C.
 
 ## Recent projects (PR-038-D)
 
-- [ ] Remembered names and paths escaped as untrusted.
+- [ ] Remembered names and paths escaped as untrusted. Pending PR-038-D — not started, not
+      dropped.
 - [ ] Rendering a remembered project restores or implies **no** trust the audit store does not
-      confirm.
+      confirm. Pending PR-038-D.
 - [ ] If this slice was dropped, the drop was authorised by the human owner via the architect,
-      and the authorisation is cited here.
+      and the authorisation is cited here. Not dropped; unstarted, pending PR-038-A/B/C.
 
 ## Closeout
 
 - [ ] `ProjectBoardEmptyState::primary_action` / `secondary_action` removed from
-      `tekstide-core`'s public API.
+      `tekstide-core`'s public API. Pending PR-038-E — deliberately untouched this slice, per
+      the task breakdown's scope boundary.
 - [ ] Recorded in the changelog as a **breaking change**, with the version implication stated.
-- [ ] Every ablation in this slice was **single-variable**.
-- [ ] Flakes disclosed, not re-run past; any fifth symptom of the approval/socket flake reported
-      as a disclosure rather than attributed to this work.
-- [ ] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`.
-- [ ] Known limitations stated, including anything this slice leaves unreachable.
+      Pending PR-038-E.
+- [x] Every ablation in this slice was **single-variable**. Three performed this slice (the
+      audit record removed alone; a duplicated call site added alone; the field-growth bound
+      exercised directly at the pure-function level), each reverted after confirming the
+      expected failure. See `qa-evidence.md`.
+- [x] Flakes disclosed, not re-run past; any fifth symptom of the approval/socket flake reported
+      as a disclosure rather than attributed to this work. None observed in this slice's own
+      gate runs — nothing to disclose.
+- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, this slice's
+      own state (326 tekstide + 714 tekstide-core, 0 failed).
+- [x] Known limitations stated, including anything this slice leaves unreachable.
+      `qa-evidence.md`'s "Known limitations" section, scoped explicitly to "as of PR-038-A only."
 
 ## Final Acceptance Decision
 

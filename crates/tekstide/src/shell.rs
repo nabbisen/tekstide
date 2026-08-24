@@ -692,6 +692,24 @@ pub struct State {
         tekstide_core::domain::AgentRunId,
         tekstide_core::domain::ChangeDetectionStatus,
     >,
+    /// RFC-038 PR-038-A: the Project Board empty state's path field.
+    /// Shell-local, transient UI state -- the same shape `typing_doc`
+    /// already is -- not part of `tekstide-core`'s model, since it holds
+    /// nothing until `Enter` turns it into a real
+    /// `add_project_from_path` call. Raw, unescaped text: per
+    /// `text_safety`'s own rule, escaping happens at render
+    /// (`board::empty_state_view`), never before storing. Bounded to
+    /// [`MAX_PATH_FIELD_CHARS`] as it grows, from either source
+    /// (`push_to_path_field`), so neither typing nor a pasted clipboard
+    /// value can grow this without bound.
+    path_field: String,
+    /// The most recent `add_project_from_path` failure reached through
+    /// the field, if any -- same shell-local, transient shape as
+    /// `terminal_launch_notice`. Cleared at the start of every new
+    /// submit attempt. Holds no path of its own: `path_field` above is
+    /// the one source `path_field_error_text` reads the (still-live,
+    /// still-editable) typed value from when rendering this.
+    path_field_notice: Option<PathFieldError>,
 }
 
 impl State {
@@ -773,6 +791,8 @@ impl State {
             window_size: None,
             agent_run_change_baselines: std::collections::HashMap::new(),
             agent_run_change_detection_status: std::collections::HashMap::new(),
+            path_field: String::new(),
+            path_field_notice: None,
         }
     }
 
@@ -945,6 +965,15 @@ pub enum Message {
     /// deletion is irreversible, and `what-purge-must-remove.md` requires
     /// the confirmation to name the scope and say it cannot be undone).
     OpenTranscriptPurgeDialog,
+    /// RFC-038 PR-038-A: `Ctrl+V` while the Project Board's empty-state
+    /// path field would receive the key (`handle_project_board_path_
+    /// field_key`) -- the same async-round-trip shape `TerminalPasteResolved`
+    /// already established for `Ctrl+Shift+V`, since `iced` has no
+    /// synchronous clipboard access. Simpler than that one: this field is
+    /// not a PTY, so there is no `TerminalInputPolicy` decision to defer
+    /// -- `None` (empty or unreadable clipboard) is a silent no-op, the
+    /// same as an empty terminal paste.
+    PathFieldPasteResolved(Option<String>),
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -1061,6 +1090,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 // `open_surface` itself" mutual-exclusion shape the
                 // comment above already establishes for the other three.
                 handle_trust_settings_key(state, surface_input.key());
+                // RFC-038 PR-038-A: a fifth `MainArea` consumer, checking
+                // `empty_state.is_some()` in place of the other four's
+                // `active_project()`/`open_surface()` guards -- naturally
+                // mutually exclusive with all of them, since none of the
+                // other four can be reachable while there is no active
+                // project. Returned rather than called as a statement:
+                // this is the one of the five that sometimes needs a
+                // real `Task` (`Ctrl+V`'s async clipboard read).
+                return handle_project_board_path_field_key(state, surface_input.key());
             }
         }
         Message::Input(RoutedInput::Terminal(text_stream)) => {
@@ -1163,6 +1201,20 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                     state.terminal_paste_notice = Some(TerminalPasteRefusal::Blocked(reason));
                 }
+            }
+        }
+        Message::PathFieldPasteResolved(content) => {
+            // Same "state changed enough during the round trip" silent
+            // no-op precedent `TerminalPasteResolved` sets, checked the
+            // same way `handle_project_board_path_field_key` itself
+            // does: the board may no longer be empty by the time this
+            // arrives (a CLI-launched second window is not possible
+            // today, but nothing about this arm should assume that).
+            if state.app_shell.project_board().empty_state.is_none() {
+                return Task::none();
+            }
+            if let Some(content) = content {
+                push_to_path_field(state, &content);
             }
         }
         Message::Input(RoutedInput::FocusNext) => state.focus = state.focus.next(),
@@ -1745,6 +1797,84 @@ fn terminal_launch_refusal_text(catalog: &Catalog, refusal: &TerminalLaunchRefus
         args = args.number("limit", *limit);
     }
     catalog.get_with_args("terminal-launch-refused", &args)
+}
+
+/// RFC-038 PR-038-A: `add_project_from_path`'s error, minus the raw path
+/// it embeds in its own `Display` -- that path lives in
+/// `state.path_field` already (the field the user is still looking at
+/// and can correct), and rendering `error.to_string()` directly would
+/// hand an un-escaped, un-bounded filesystem path straight to `text(...)`,
+/// exactly what `what-a-path-field-must-not-trust.md` §1 says never to
+/// do. This enum carries only *which kind* of refusal happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PathFieldError {
+    DoesNotExist,
+    NotDirectory,
+    PermissionDenied,
+    CannotReadFolder,
+    SymlinkAmbiguous,
+}
+
+impl PathFieldError {
+    fn from_validation_error(
+        error: &tekstide_core::project::root::ProjectRootValidationError,
+    ) -> Self {
+        use tekstide_core::project::root::ProjectRootValidationError as E;
+        match error {
+            E::DoesNotExist { .. } => Self::DoesNotExist,
+            E::NotDirectory { .. } => Self::NotDirectory,
+            E::PermissionDenied { .. } => Self::PermissionDenied,
+            E::CannotReadFolder { .. } => Self::CannotReadFolder,
+            E::SymlinkAmbiguous { .. } => Self::SymlinkAmbiguous,
+        }
+    }
+}
+
+/// A compile-time literal symbol, not the displayed word -- same
+/// division of labour `terminal_launch_refusal_symbol` already uses.
+fn path_field_error_symbol(error: PathFieldError) -> &'static str {
+    match error {
+        PathFieldError::DoesNotExist => "does-not-exist",
+        PathFieldError::NotDirectory => "not-directory",
+        PathFieldError::PermissionDenied => "permission-denied",
+        PathFieldError::CannotReadFolder => "cannot-read-folder",
+        PathFieldError::SymlinkAmbiguous => "symlink-ambiguous",
+    }
+}
+
+/// The one catalog lookup a path-field failure's full text takes -- same
+/// shape `terminal_launch_refusal_text` uses, so a test can assert over
+/// what actually renders. `raw_path` is bounded and escaped here, at
+/// render (`what-a-path-field-must-not-trust.md` §3), following RFC-023's
+/// `bound_key_segment` in spirit -- truncate the **raw** chars first,
+/// escape second -- but through `text_safety::quote_untrusted`'s single
+/// canonical whole-string API rather than a second, hand-rolled escaping
+/// call: `quote_untrusted` already does the escaping *and* the bidi
+/// isolation this embedded value needs, and `escape_untrusted_chars`
+/// alone would either skip isolation or (called in addition to
+/// `quote_untrusted`) escape the same text twice for no benefit --
+/// `what-a-path-field-must-not-trust.md` §3's "do not write a second
+/// escaping routine" reading applies to *calling* the primitive twice,
+/// not only to reimplementing it. Truncating before escaping (not
+/// after) is still required: escaping expands (a marker is several
+/// characters), so truncating post-escape could cut one in half.
+const MAX_PATH_FIELD_ERROR_DISPLAY_CHARS: usize = 128;
+
+fn path_field_error_text(catalog: &Catalog, raw_path: &str, error: PathFieldError) -> String {
+    let mut truncated: String = raw_path
+        .chars()
+        .take(MAX_PATH_FIELD_ERROR_DISPLAY_CHARS)
+        .collect();
+    if raw_path.chars().count() > MAX_PATH_FIELD_ERROR_DISPLAY_CHARS {
+        truncated.push('\u{2026}');
+    }
+    let quoted = tekstide_core::text_safety::quote_untrusted(&truncated);
+    catalog.get_with_args(
+        "project-board-path-field-error",
+        &CatalogArgs::new()
+            .trusted_symbol("reason", path_field_error_symbol(error))
+            .untrusted("path", &quoted),
+    )
 }
 
 /// The **one ingress** for creating and registering a real, PTY-backed
@@ -2478,6 +2608,123 @@ fn handle_trust_settings_key(state: &mut State, key: &input::KeyPress) {
         }
         _ => {}
     }
+}
+
+/// A real filesystem path can legitimately be long -- reasoned against
+/// Linux's own `PATH_MAX` (4096 bytes) rather than an arbitrary
+/// UI-driven number, so this bound never rejects a real path while still
+/// bounding worst-case cost from a hostile or oversized paste. This
+/// caps `state.path_field` itself (both typing and paste share
+/// [`push_to_path_field`]); the separate, much tighter
+/// [`MAX_PATH_FIELD_ERROR_DISPLAY_CHARS`] bounds only the *failure
+/// notice*'s embedded copy of it, per `what-a-path-field-must-not-trust.md`
+/// §3.
+const MAX_PATH_FIELD_CHARS: usize = 4096;
+
+/// RFC-038 PR-038-A: the Project Board empty state's path field. Mirrors
+/// the shape [`handle_editor_key`]/[`handle_trust_settings_key`] already
+/// establish for their own `MainArea` zones -- a no-op guard, then a
+/// direct match on the key -- but has no `active_project()` to check:
+/// this is exactly the state that exists *because* there is none.
+/// `state.app_shell.project_board().empty_state.is_some()` is the same
+/// signal `board::view` itself branches on (`ProjectBoardViewModel::
+/// from_app_state`), so the two cannot independently drift about when
+/// the field is showing.
+fn handle_project_board_path_field_key(state: &mut State, key: &input::KeyPress) -> Task<Message> {
+    if state.app_shell.project_board().empty_state.is_none() {
+        return Task::none();
+    }
+    match &key.key {
+        keyboard::Key::Character(typed) => {
+            if key.modifiers.control() && typed.as_ref() == "v" {
+                return iced::clipboard::read().map(Message::PathFieldPasteResolved);
+            }
+            if !key.modifiers.control() && !key.modifiers.alt() {
+                push_to_path_field(state, typed);
+            }
+        }
+        keyboard::Key::Named(keyboard::key::Named::Space) => {
+            push_to_path_field(state, " ");
+        }
+        keyboard::Key::Named(keyboard::key::Named::Backspace) => {
+            let mut chars: Vec<char> = state.path_field.chars().collect();
+            chars.pop();
+            state.path_field = chars.into_iter().collect();
+        }
+        keyboard::Key::Named(keyboard::key::Named::Enter) => {
+            attempt_open_project_from_path_field(state);
+        }
+        _ => {}
+    }
+    Task::none()
+}
+
+/// The one place `state.path_field` grows, from either source (typing a
+/// character, or [`Message::PathFieldPasteResolved`]'s pasted content) --
+/// so [`MAX_PATH_FIELD_CHARS`] is enforced exactly once, the same
+/// "one bounding point, not two" shape `attempt_paste_into_terminal`'s
+/// own `MAX_PASTE_BYTES` cap uses for terminal paste. Silently stops
+/// accepting more once the cap is hit, rather than truncating and
+/// continuing -- a path this long has already left "someone typed a
+/// real path" and entered "something is wrong," and continuing to
+/// accumulate would trade one bound for a different one.
+fn push_to_path_field(state: &mut State, text: &str) {
+    let remaining = MAX_PATH_FIELD_CHARS.saturating_sub(state.path_field.chars().count());
+    if remaining == 0 {
+        return;
+    }
+    state.path_field.extend(text.chars().take(remaining));
+}
+
+/// RFC-038 PR-038-A: `Enter`'s real handler, and the field's second
+/// (only other) call to `add_project_from_path` alongside `main.rs`'s
+/// own -- see `what-a-path-field-must-not-trust.md` §5 and
+/// `add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else`'s
+/// updated allow-list. Mirrors `apply_workspace_trust_grant`'s own
+/// direct-audit-write shape (`open_real_audit_store` +
+/// `AuditCoordinator::new` + the one producer call) rather than reusing
+/// `main.rs`'s `open_cli_project_path_and_record`: that helper's own
+/// caller (`boot()`) `eprintln!`s and exits on `Err`, which
+/// `what-a-path-field-must-not-trust.md` §2 says is catastrophic here --
+/// a typo must never close the application. This function's failure
+/// path renders instead, and the application keeps running either way.
+fn attempt_open_project_from_path_field(state: &mut State) {
+    state.path_field_notice = None;
+    let path = state.path_field.clone();
+    match state.app_shell.add_project_from_path(&path) {
+        Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
+            record_path_field_project_added(state, project_id);
+            state.path_field.clear();
+        }
+        Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
+            // Same as `open_cli_project_path_and_record`'s own
+            // `FocusedExisting` arm: nothing new happened, so no record.
+            state.path_field.clear();
+        }
+        Err(error) => {
+            // Deliberately does not clear `path_field`: a rejected path
+            // is exactly what the user needs to see and correct, not
+            // have silently wiped out from under them.
+            state.path_field_notice = Some(PathFieldError::from_validation_error(&error));
+        }
+    }
+}
+
+/// [`attempt_open_project_from_path_field`]'s own audit write -- same
+/// shape `main.rs`'s `record_project_added_if_possible` uses
+/// (best-effort: a failed audit write must never turn a real,
+/// already-successful project add into a visible failure), reached
+/// directly rather than through that private `main.rs` function, since
+/// `shell.rs` already owns this exact `open_real_audit_store` +
+/// `AuditCoordinator::new` shape for every other GUI-triggered producer
+/// (`apply_workspace_trust_grant`, `revoke_workspace_trust`).
+fn record_path_field_project_added(state: &State, project_id: tekstide_core::project::ProjectId) {
+    let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
+        return;
+    };
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    let _ = tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health)
+        .record_project_added(project_id);
 }
 
 /// Shared between [`handle_approval_history_key`]'s Enter handling and
@@ -3666,11 +3913,24 @@ fn content_area(state: &State) -> Element<'_, Message> {
         typing_measurement_view(state)
     } else {
         match state.app_shell.route() {
-            AppRoute::ProjectBoard => crate::surface::board::view(
-                &state.app_shell.project_board(),
-                &state.catalog,
-                &state.theme,
-            ),
+            AppRoute::ProjectBoard => {
+                // Owned, not borrowed: this `String` is freshly computed
+                // per render (the same "notice computed by `shell.rs`,
+                // rendered by the surface" division
+                // `terminal_launch_refusal_text` already uses), and
+                // `board::view`'s returned `Element` must not outlive a
+                // function-local borrow.
+                let path_field_notice_text: Option<String> = state
+                    .path_field_notice
+                    .map(|error| path_field_error_text(&state.catalog, &state.path_field, error));
+                crate::surface::board::view(
+                    &state.app_shell.project_board(),
+                    &state.catalog,
+                    &state.theme,
+                    &state.path_field,
+                    path_field_notice_text,
+                )
+            }
             AppRoute::ActiveProjectWorkspace => active_project_workspace_view(state),
         }
     };
