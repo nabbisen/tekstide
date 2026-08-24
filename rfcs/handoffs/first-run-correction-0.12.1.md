@@ -1,7 +1,7 @@
 ---
 title: "0.12.1: the first-run correction — evidence and corrections"
 owning_rfcs: "none — a correction release; RFC-038 owns the actual fix"
-status: "Released and published 2026-08-22; audited 2026-08-22 (request 288, response 289)"
+status: "Released and published 2026-08-22; audited 2026-08-22 (requests 288/290/292). Correction 2 discharged; the cold-start claim corrected and its evidence still outstanding"
 created: "2026-08-22"
 ---
 
@@ -109,9 +109,38 @@ architect had implemented the release himself.
   `content_area_height`'s subtraction still holds.
 - Live binary: `--help`, `-h`, `-V`, `--version` verified against the compiled binary.
 - **Cold start**: `tekstide` with no arguments and a fresh `XDG_STATE_HOME`, screenshotted live.
-  All nine bindings listed with their preconditions; no lying action labels. **This is the first
-  cold-start evidence in this repository's history**, and it exists because report 287 asked for
-  the rule and the dev team applied it to the next thing they touched.
+  All nine bindings listed with their preconditions; no lying action labels. Run because report
+  287 asked for the rule and the dev team applied it to the next thing they touched.
+
+  **Correction, 2026-08-22 (request 292).** This bullet originally read *"This is the first
+  cold-start evidence in this repository's history."* That sentence was false in two independent
+  ways, and it was the one claim in this document not established by running anything — flagged
+  as such in response 291 and checked by the dev team, who found the first error. Checking theirs
+  surfaced the second.
+
+  1. **It was not the first.** `handoffs/015-application-shell-and-rendered-surface-model/
+     evidence/pr-015-b/shell-chrome-over-real-state.png` (2026-07-31) shows the shell running
+     with zero projects and a status bar reading `Project Board | 0 projects`. It does **not**
+     show the surface this correction is about — its content area reads *"No surface rendered
+     yet / RFC-015 PR-015-D adds the Project Board surface here,"* because it was captured
+     before the empty state existed. Honest scaffolding, correctly labelled, and it still
+     falsifies an unqualified "first". Its launch command is also undocumented, so "0 projects"
+     cannot be upgraded to "fresh state" from what is written.
+  2. **It is not in this repository.** The screenshot request 288 took was never committed —
+     `find rfcs -name '*.png' -newermt 2026-08-20` returns nothing, and no PNG has been added
+     under `rfcs/` since. The architect's own cold-start captures from implementing `0.12.1`
+     live in a session scratchpad and were likewise never committed. A claim about "this
+     repository's history" was made about an artifact this repository does not contain.
+
+  **What is actually true, and it is a gap rather than a milestone: no cold-start evidence of
+  the shipped Project Board empty state exists in this repository.** Two runs have been
+  performed — one by the architect while implementing `0.12.1`, one by the dev team auditing it
+  — and neither was retained. `release-checklist.md`'s *Run It* item remains unchecked and has
+  never been executed as a release gate.
+
+  Requested of the dev team (response 293): commit the cold-start capture under this pack's
+  `evidence/`, with the launch command recorded, per response 127's standing convention. Until
+  that lands, this row is a description of something nobody can inspect.
 
 ## Why there was no pack
 
