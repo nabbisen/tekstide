@@ -50,6 +50,38 @@ original sampling and has not been re-measured since; treat it as a floor rather
 rate, given that the number of distinct tests observed failing has grown from three to four
 without anyone re-running the sample.
 
+## A second, distinct cause: the production spawn path (added 2026-08-24)
+
+Everything above concerns two `approval::tests` call sites, which the original fix covered.
+**`runtime/terminal/launch.rs` — the real shell-spawn path the product itself uses — was never
+given the same treatment**, and has the identical defect: `RunningTerminal` holds a `Child` with
+no `Drop` impl, and nothing calls `.kill()`.
+
+Found during RFC-038 PR-038-C (request 299) when a test run hit `PTY exhaustion (os error 28)`
+and cascaded into roughly seventy unrelated failures. Investigation found **4023 orphaned idle
+`/bin/sh` processes** (`PS1=tekstide$`, reparented to `systemd --user`, ages up to ~2.5 hours),
+with the PTY pool at 4096/4096. They ignored `SIGTERM` — confirmed via `SigIgn` in
+`/proc/<pid>/status` — and cleared only under `SIGKILL`.
+
+The implementer stopped before killing anything, confirmed via `/proc/<pid>/environ` and
+`/proc/<pid>/fd` that these were genuinely orphaned Tekstide artifacts rather than the owner's
+real terminals, and asked for authorization first. That was the right call at that scale.
+
+**This document's title and original framing invited the reading that the leak was fixed.** It
+was fixed at two call sites. The path that spawns a shell for a real user was not among them,
+so any panicking terminal test still leaks its shell.
+
+**Not yet fixed.** `runtime/terminal/launch.rs` needs the `KillOnDropChild` treatment the
+approval call sites already have. Deliberately not folded into a UI slice.
+
+**Whether the shipped application can trigger this is unknown and worth determining** — on
+ordinary exit the PTY master closes and a shell normally takes `SIGHUP`, which is likely why no
+user has reported it. That is a plausible mechanism, not a verified one, and it is stated here
+as unverified rather than as reassurance. What is certain: RFC-039 PR-039-C adds a
+user-triggered close path, which is exactly the shape that would make it reachable. That slice
+is required to call `request_terminate` before closing — see
+`039-interaction-model-and-visible-affordances/what-closing-a-project-must-not-lose.md` §6.
+
 ## Why it matters beyond tidiness
 
 The affected area is **the command-approval and socket path** — the security-critical machinery

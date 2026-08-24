@@ -71,9 +71,42 @@ the exact case RFC-018 §2 names.
 **Required:** escaped, bounded so a long name cannot push the rest of the strip off-screen, and
 tested with the bidi-override fixture this project already has in its recent-projects state.
 
-## 6. What this document does not cover
+## 6. `close_project` does not stop anything — verified, not assumed
 
-Whether a closed project's terminals are killed or reaped, and by what mechanism. That is
-`close_project`'s own contract in core — read it before assuming, and if it turns out **not** to
-stop child processes, **stop and escalate**: that is a leak with a user-visible trigger, and it
-is a finding, not something to work around in the surface.
+This section originally told you to read `close_project`'s contract and escalate if it did not
+stop child processes. It was read during PR-038-C's review (request 299), so here is the answer
+instead of the instruction.
+
+**`close_project` never touches the terminal runtime.** It calls `assess_project_close`, and if
+the assessment says safe, `remove_active_project_session` — which removes the `ProjectSession`
+from a `Vec` and updates `active_project_id`. That is all. The runtime's `RunningTerminal`
+values are held elsewhere and are not consulted.
+
+`RunningTerminal` has **no `Drop` impl**, and nothing in `runtime/` or `project/` calls
+`.kill()`.
+
+There *is* a correct termination path — `TerminalRuntime::request_terminate` in
+`runtime/terminal/termination.rs`, SIGTERM escalating to SIGKILL against the process group, with
+a guard refusing to signal a group id ≤ 1. **It has zero production callers.** Another reviewed,
+tested, unreachable capability, and this one is load-bearing for the slice you are about to
+write.
+
+What saves the product today is that `assess_project_close` refuses: a project with live
+terminals or an active agent run is **not safe to close**, so `close_project` returns the
+assessment and removes nothing. The leak is currently unreachable because the close is.
+
+**So PR-039-C must not force the close past the assessment.** The confirmed path is:
+
+1. Confirmation accepted →
+2. `request_terminate` on each of the project's terminals, and wait for the runtime to observe
+   the group gone — its first production use, so treat it as new code, not as plumbing →
+3. *then* `close_project`, which will now assess as safe on its own terms.
+
+Removing the project first and terminating afterwards, or bypassing the assessment, orphans
+every shell in that project with nothing owning them. At scale that exhausts the PTY pool: the
+dev team hit exactly this in testing, **4023 orphaned shells, 4096/4096 PTYs consumed**, from
+the same `Child::drop`-does-not-kill defect in the production spawn path.
+
+If `request_terminate` turns out not to do what it says — it has never run in production —
+**that** is the escalation, and it is a core finding, not something to compensate for in the
+surface.
