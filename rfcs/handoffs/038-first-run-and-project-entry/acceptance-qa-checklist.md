@@ -114,12 +114,20 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
 
 ## Recent projects (PR-038-D)
 
-- [ ] Remembered names and paths escaped as untrusted. Pending PR-038-D — not started, not
-      dropped.
-- [ ] Rendering a remembered project restores or implies **no** trust the audit store does not
-      confirm. Pending PR-038-D.
-- [ ] If this slice was dropped, the drop was authorised by the human owner via the architect,
-      and the authorisation is cited here. Not dropped; unstarted, pending PR-038-A/B/C.
+- [x] Remembered names and paths escaped as untrusted. Pre-existing, unchanged this slice:
+      `project_board.rs::recent_project_row` already fed the board's own escaping
+      (`row_lines`/`highlighted_row_lines`); this PR added no new untrusted-text render path.
+- [x] Rendering a remembered project restores or implies **no** trust the audit store does not
+      confirm. **The real finding this slice exists to report**: this was *not already true* --
+      `verify_restored_trust` only ran once, at boot, before this PR, so every non-CLI reopen
+      path (including this PR's own new one) restored cached trust with zero confirmation.
+      Fixed at all three call sites (`reopen_recent_project`, `attempt_open_project_from_path_field`,
+      `choose_current_browsed_directory`), each separately ablated. `qa-evidence.md`'s own
+      PR-038-D section.
+- [x] One-key reopen, proven from real key events, plus a real mouse click on the row's own
+      button. `qa-evidence.md`'s own PR-038-D section, live captures and automated tests both.
+- [x] Not dropped -- built in full this slice; the human owner's own escalation clause never
+      needed to trigger.
 
 ## Closeout
 
@@ -131,20 +139,25 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
 - [x] Every ablation in this slice was **single-variable**. Three in PR-038-A, three in PR-038-B,
       four in PR-038-C, two in PR-038-G (the collision test against a colliding binding, which
       also caught `open_help_shortcut...` failing as its own collision victim; the audit-record
-      guard against the new call site's record write commented out). Each reverted after
-      confirming the expected failure. See `qa-evidence.md`.
+      guard against the new call site's record write commented out), four in PR-038-D (the new
+      call site's own audit-record guard; the new call site's own trust-confirmation fix; the
+      same trust-confirmation fix retroactively ablated at both of the two pre-existing call
+      sites it also closed). Each reverted after confirming the expected failure. See
+      `qa-evidence.md`.
 - [x] Flakes disclosed, not re-run past; any fifth symptom of the approval/socket flake reported
       as a disclosure rather than attributed to this work. PR-038-B's run hit three (all
       already-named). PR-038-C's own run separately hit a fourth already-named symptom
       (`command_approval_family_produces_real_durable_audit_records_through_the_pipeline`,
       confirmed passing in isolation) — and, distinctly, the PTY-exhaustion cascade recorded in
       `qa-evidence.md`'s own PR-038-C section, which is a different, newly-disclosed defect, not
-      a fifth symptom of the approval/socket one. PR-038-G's own run hit none.
-- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-G's
-      own state (346 tekstide + 724 tekstide-core, 0 failed).
+      a fifth symptom of the approval/socket one. PR-038-G's own run hit none. PR-038-D's own run
+      hit none either.
+- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-D's
+      own state (357 tekstide + 724 tekstide-core, 0 failed).
 - [x] Known limitations stated, including anything this slice leaves unreachable.
-      `qa-evidence.md`'s "Known limitations" section, now "as of PR-038-A/B/C/G," including the
-      render-layer duplication disclosed and flagged for the architect above.
+      `qa-evidence.md`'s "Known limitations" section, now "as of PR-038-A/B/C/D/G," including the
+      render-layer duplication and the recent-cache staleness note both disclosed and flagged
+      above.
 
 ## Final Acceptance Decision
 

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use tekstide_core::project::ProjectId;
 use tekstide_core::project_board::{AttentionState, BoardRowKind, CountDisplay, ProjectBoardRow};
 
-use super::row_lines;
+use super::{highlighted_row_lines, row_lines};
 use crate::i18n::{Catalog, LocalePreference};
 
 fn real_locales_dir() -> PathBuf {
@@ -353,5 +353,65 @@ fn the_browse_button_is_a_real_clickable_widget_not_an_inert_label() {
     assert!(
         source.contains(".on_press(open_browser_message)"),
         "the Browse button must dispatch a real message on click"
+    );
+}
+
+/// RFC-038 PR-038-D: `highlighted_row_lines` prefixes exactly the name
+/// line, exactly one of the two rows, with the keyboard cursor's own
+/// marker -- the same "> "/"  " convention already proven elsewhere
+/// (`surface::explorer::tests`), tested here at the string level rather
+/// than through `iced`'s `Element` tree.
+#[test]
+fn highlighted_row_lines_marks_only_the_name_line_of_the_highlighted_row() {
+    let catalog = real_catalog();
+    let row = baseline_row();
+
+    let highlighted = highlighted_row_lines(&row, &catalog, true);
+    let not_highlighted = highlighted_row_lines(&row, &catalog, false);
+    let unmarked = row_lines(&row, &catalog);
+
+    assert!(
+        highlighted[0].starts_with("> "),
+        "the highlighted row's name line must carry the marker: {:?}",
+        highlighted[0]
+    );
+    assert!(
+        not_highlighted[0].starts_with("  "),
+        "a not-highlighted row's name line must carry the blank-space equivalent, not nothing: \
+         {:?}",
+        not_highlighted[0]
+    );
+    assert_eq!(
+        &highlighted[0][2..],
+        unmarked[0],
+        "the marker must be a prefix, not a rewrite of the underlying name line"
+    );
+    assert_eq!(
+        &highlighted[1..],
+        &unmarked[1..],
+        "only the name line carries the marker -- every other line must be untouched"
+    );
+}
+
+/// The other half of the widget-vs-inert-label proof for the recent-row
+/// "Open" control, mirroring `the_browse_button_is_a_real_clickable_widget_not_an_inert_label`'s
+/// own source-level shape: a real button, gated on row kind, present
+/// regardless of highlight (the highlight is a keyboard cursor, not a
+/// precondition for the mouse).
+#[test]
+fn the_recent_row_open_button_is_real_and_gated_on_row_kind_not_highlight() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/surface/board.rs"),
+    )
+    .expect("board.rs must be readable");
+
+    assert!(
+        source.contains("project-board-recent-open-button"),
+        "the recent row's Open control must render through the catalog"
+    );
+    assert!(
+        source.contains("row.row_kind != BoardRowKind::ActiveSession"),
+        "the Open control must be gated on row kind (absent for ActiveSession rows), not on \
+         whether the row happens to be highlighted"
     );
 }

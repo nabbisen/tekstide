@@ -127,6 +127,10 @@ project-board-path-field-label = Type a project path and press Enter (Ctrl+V to 
 # folder).
 project-board-browse-button = Browse...
 
+# RFC-038 PR-038-D: the one-key-reopen button on a remembered-but-closed
+# project's own row.
+project-board-recent-open-button = Open
+
 # RFC-038 PR-038-A: `$reason` is a compile-time symbol
 # (`PathFieldError`'s own shape), the same division of labour
 # `terminal-launch-refused` already uses -- never the error's Rust

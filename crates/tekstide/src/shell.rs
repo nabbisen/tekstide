@@ -758,6 +758,18 @@ pub struct State {
     /// the empty-board case, so the two cannot independently drift about
     /// when the field is showing.
     path_field_requested: bool,
+    /// RFC-038 PR-038-D: the Project Board's own keyboard cursor over
+    /// `project_board().rows` -- the direct analogue of
+    /// `approval_history_highlight` for a third, independent list.
+    /// Moves over every row (active sessions included); only `Enter` on
+    /// a `Recent*`-kind row acts on it (see
+    /// `handle_project_board_row_key`'s own doc for why `ActiveSession`
+    /// rows are inert here rather than switching to them --
+    /// `NavigationAction::SwitchActiveProject` is still out of scope).
+    /// Clamped defensively on every read, the same "not tracked by id"
+    /// limitation `explorer_highlight`/`approval_history_highlight`
+    /// already carry relative to the list changing between key presses.
+    project_board_row_highlight: usize,
 }
 
 impl State {
@@ -842,6 +854,7 @@ impl State {
             path_field: String::new(),
             path_field_notice: None,
             path_field_requested: false,
+            project_board_row_highlight: 0,
         }
     }
 
@@ -1041,6 +1054,15 @@ pub enum Message {
     /// `Enter` already means "navigate into the highlighted row," and a
     /// folder browser genuinely needs both actions distinguishable.
     FolderBrowserChooseCurrentDirectory,
+    /// RFC-038 PR-038-D: the Project Board's real, clickable "Open"
+    /// button on a `Recent*`-kind row -- `iced`'s own click dispatch,
+    /// the same mouse-is-outside-the-keyboard-router reasoning
+    /// `OpenFolderBrowserButtonPressed` already established. Both this
+    /// arm and `handle_project_board_row_key`'s own `Enter` case call
+    /// [`reopen_recent_project`], so a mouse click and the keyboard
+    /// one-key reopen (RFC-038's own OQ1: "offering it as one-key
+    /// reopen") converge on the exact same setup.
+    ReopenRecentProjectRowPressed(tekstide_core::project::ProjectId),
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -1183,6 +1205,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 // `open_surface` itself" mutual-exclusion shape the
                 // comment above already establishes for the other three.
                 handle_trust_settings_key(state, surface_input.key());
+                // RFC-038 PR-038-D: a sixth `MainArea` consumer, checking
+                // `route() == ProjectBoard` in place of the first four's
+                // `active_project()`/`open_surface()` guards, plus
+                // `!path_field_is_showing(state)` for mutual exclusion
+                // with the fifth (`Enter` means two different things to
+                // the two of them -- submit the typed path, or reopen
+                // the highlighted row -- so exactly one may claim it).
+                // Called before the field, not after: the field's own
+                // `return` below would otherwise skip this one entirely.
+                handle_project_board_row_key(state, surface_input.key());
                 // RFC-038 PR-038-A: a fifth `MainArea` consumer, checking
                 // `empty_state.is_some()` in place of the other four's
                 // `active_project()`/`open_surface()` guards -- naturally
@@ -1315,6 +1347,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::FolderBrowserChooseCurrentDirectory => {
             choose_current_browsed_directory(state);
+        }
+        Message::ReopenRecentProjectRowPressed(project_id) => {
+            reopen_recent_project(state, &project_id);
         }
         Message::Input(RoutedInput::FocusNext) => state.focus = state.focus.next(),
         Message::Input(RoutedInput::FocusPrevious) => state.focus = state.focus.previous(),
@@ -2767,6 +2802,118 @@ fn path_field_is_showing(state: &State) -> bool {
     state.app_shell.project_board().empty_state.is_some() || state.path_field_requested
 }
 
+/// RFC-038 PR-038-D, RFC-038's own OQ1 ("one-key reopen"): `Up`/`Down`
+/// move `project_board_row_highlight` over every board row (mirrors
+/// [`handle_approval_history_key`]'s own shape exactly -- clamp on
+/// entry, then move, not wrapping); `Enter` reopens the highlighted row
+/// through [`reopen_recent_project`], but only when it names a
+/// `Recent*`-kind row. An `ActiveSession` row is already open -- there
+/// is nothing for `Enter` to do to it, and switching to it is
+/// `NavigationAction::SwitchActiveProject`, still `Configurable`/`None`
+/// and out of this RFC's scope (see the known-limitations note PR-038-B's
+/// own qa-evidence.md section already carries).
+///
+/// Guarded on `route() == ProjectBoard` (this zone means something
+/// different on every other route) and `!path_field_is_showing(state)`
+/// (mutual exclusion with [`handle_project_board_path_field_key`] --
+/// `Enter` means two different things to the two of them).
+fn handle_project_board_row_key(state: &mut State, key: &input::KeyPress) {
+    if state.app_shell.route() != AppRoute::ProjectBoard || path_field_is_showing(state) {
+        return;
+    }
+    let row_count = state.app_shell.project_board().rows.len();
+    if row_count == 0 {
+        return;
+    }
+    state.project_board_row_highlight = state.project_board_row_highlight.min(row_count - 1);
+
+    match &key.key {
+        keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
+            state.project_board_row_highlight =
+                (state.project_board_row_highlight + 1).min(row_count - 1);
+        }
+        keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
+            state.project_board_row_highlight = state.project_board_row_highlight.saturating_sub(1);
+        }
+        keyboard::Key::Named(keyboard::key::Named::Enter) => {
+            let board = state.app_shell.project_board();
+            let Some(row) = board.rows.get(state.project_board_row_highlight) else {
+                return;
+            };
+            if row.row_kind != tekstide_core::project_board::BoardRowKind::ActiveSession {
+                let project_id = row.project_id.clone();
+                reopen_recent_project(state, &project_id);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// RFC-038 PR-038-D: reopens a remembered-but-not-currently-open
+/// project by its id, through the exact same `add_project_from_path`
+/// entry point PR-038-A's field and PR-038-G's browser both already
+/// use -- the same audit record, the same live re-validation
+/// (`what-a-path-field-must-not-trust.md` applies unchanged: a
+/// remembered path is untrusted exactly as a typed or browsed one is,
+/// however long it has sat in the cache).
+///
+/// **The property this function exists to guarantee**: `add_project_
+/// session`'s own cached-trust restoration (`AppState::add_project_
+/// session`, keyed by canonical root) is *not* proof by itself -- it is
+/// the same user-writable display hint `project_board.rs`'s own
+/// `recent_project_row` doc already calls one. [`verify_restored_trust`]
+/// is called immediately after a successful add, the same demotion
+/// pass [`State::new`] already runs once at boot for CLI-opened
+/// projects, so a cached `Trusted` label the durable audit store does
+/// not confirm is demoted before this function returns, never rendered
+/// or acted on as real trust. See this slice's own qa-evidence.md for
+/// the finding that led here: this same gap was live, unfixed, in both
+/// pre-existing non-CLI call sites (the path field, the browser) --
+/// fixed there too, in this same slice, not left for a third call site
+/// to repeat.
+///
+/// A row whose remembered path no longer resolves (missing, unreadable,
+/// permission-denied) fails through `add_project_from_path`'s own
+/// real, live validation -- rendered by reusing the path field's own
+/// notice machinery (`path_field`/`path_field_requested`/
+/// `path_field_notice`) rather than a second, parallel notice type, so
+/// the user lands on an editable field showing exactly the path that
+/// failed and why, the same "never a silent no-op" shape
+/// `a_bad_path_renders_a_notice_and_the_application_keeps_running`
+/// already proves for a typed path.
+fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project::ProjectId) {
+    state.project_board_row_highlight = 0;
+    let Some(restored) = state
+        .app_shell
+        .state()
+        .recent_projects()
+        .iter()
+        .find(|restored| &restored.recent_project.project_id == project_id)
+    else {
+        return;
+    };
+    let root_path = restored.recent_project.root_path.clone();
+
+    match state.app_shell.add_project_from_path(&root_path) {
+        Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
+            record_new_project_added(state, project_id);
+            verify_restored_trust(&mut state.app_shell);
+        }
+        // Should not normally happen -- a `Recent*`-kind row is, by
+        // construction, not currently open -- but if the board's rows
+        // and the live project set have somehow diverged, "nothing new
+        // happened" is still the correct, existing precedent
+        // (`attempt_open_project_from_path_field`'s own `FocusedExisting`
+        // arm), not an error.
+        Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {}
+        Err(error) => {
+            state.path_field = root_path.display().to_string();
+            state.path_field_requested = true;
+            state.path_field_notice = Some(PathFieldError::from_validation_error(&error));
+        }
+    }
+}
+
 /// RFC-038 PR-038-A/B: the Project Board's path field, in both the
 /// places it can appear. Mirrors the shape
 /// [`handle_editor_key`]/[`handle_trust_settings_key`] already establish
@@ -2844,12 +2991,22 @@ fn push_to_path_field(state: &mut State, text: &str) {
 /// `what-a-path-field-must-not-trust.md` §2 says is catastrophic here --
 /// a typo must never close the application. This function's failure
 /// path renders instead, and the application keeps running either way.
+/// **RFC-038 PR-038-D finding, fixed here retroactively**: a typed path
+/// matching a recent project's canonical root inherits that project's
+/// *cached* trust (`AppState::add_project_session`) with nothing to
+/// confirm it against the durable audit store -- the same gap
+/// [`reopen_recent_project`]'s own doc explains fixing at its own,
+/// newer call site. A user who once granted trust to a project, closed
+/// it, then retyped its exact path here got `Trusted` back with no
+/// re-verification. [`verify_restored_trust`] closes it: the same
+/// demotion pass `State::new` already runs once at boot.
 fn attempt_open_project_from_path_field(state: &mut State) {
     state.path_field_notice = None;
     let path = state.path_field.clone();
     match state.app_shell.add_project_from_path(&path) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
             record_new_project_added(state, project_id);
+            verify_restored_trust(&mut state.app_shell);
             state.path_field.clear();
             state.path_field_requested = false;
         }
@@ -2945,6 +3102,11 @@ fn starting_browse_directory() -> std::path::PathBuf {
 /// directory found by browsing is untrusted exactly as a typed one is),
 /// and a failure is recorded on the modal rather than closing it, so
 /// the user can back out or try another folder.
+/// **RFC-038 PR-038-D finding, fixed here retroactively**: see
+/// `attempt_open_project_from_path_field`'s own doc comment for the
+/// same gap and the same fix -- a browsed path matching a recent
+/// project's canonical root inherited cached trust with no audit-store
+/// confirmation, which this call site shared before this fix.
 fn choose_current_browsed_directory(state: &mut State) {
     let Some(ModalContent::FolderBrowser(modal)) = state.modal.as_mut() else {
         return;
@@ -2955,6 +3117,7 @@ fn choose_current_browsed_directory(state: &mut State) {
     match state.app_shell.add_project_from_path(&path) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
             record_new_project_added(state, project_id);
+            verify_restored_trust(&mut state.app_shell);
             state.modal = None;
         }
         Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
@@ -4269,6 +4432,8 @@ fn content_area(state: &State) -> Element<'_, Message> {
                     path_field_notice_text,
                     state.path_field_requested,
                     Message::OpenFolderBrowserButtonPressed,
+                    state.project_board_row_highlight,
+                    Message::ReopenRecentProjectRowPressed,
                 )
             }
             AppRoute::ActiveProjectWorkspace => active_project_workspace_view(state),

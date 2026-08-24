@@ -8700,3 +8700,393 @@ fn a_commit_failure_renders_the_error_and_keeps_the_modal_open() {
         "a refused commit must not have added anything"
     );
 }
+
+// RFC-038 PR-038-D: recent projects, "one key" reopen (RFC-038's own
+// OQ1). `restore_recent_projects` already populated a passive `Vec<
+// RestoredRecentProject>` since RFC-032/033; `project_board.rs` already
+// rendered it as board rows since before this PR. What this slice adds
+// is the missing action: `Up`/`Down` move `project_board_row_highlight`
+// over the board's own rows, `Enter` (or a real click on the row's own
+// "Open" button) reopens the highlighted `Recent*`-kind one through
+// `reopen_recent_project`, without retyping its path.
+
+fn state_with_cached_trusted_recent_project(
+    label: &str,
+) -> (State, tekstide_core::project::ProjectId, PathBuf) {
+    let project_dir = fresh_project_dir(label);
+    let canonical_root = std::fs::canonicalize(&project_dir).expect("must canonicalize");
+    let project_id = tekstide_core::project::ProjectId::new_uuid();
+    let mut app_shell = ApplicationShell::new();
+    app_shell.restore_recent_projects(cached_trusted_recent_project(
+        project_id.clone(),
+        canonical_root,
+    ));
+    (state_with(app_shell), project_id, project_dir)
+}
+
+/// **The acceptance criterion RFC-038's own OQ1 names**: a remembered
+/// project opens through real `Up`/`Down`/`Enter` key events, through
+/// production code (`send_main_area_key`, the same real-routing shape
+/// `a_typed_key_edits_the_real_active_document_through_real_routing`
+/// already establishes), with the path never retyped anywhere.
+#[test]
+fn enter_on_a_highlighted_recent_row_reopens_it_without_retyping_the_path() {
+    let (mut state, project_id, project_dir) =
+        state_with_cached_trusted_recent_project("board-row-reopen-real-keys");
+    assert_eq!(
+        state.app_shell.project_board().rows.len(),
+        1,
+        "test precondition: exactly one recent, not-yet-open row"
+    );
+    assert!(
+        state.app_shell.state().active_project().is_none(),
+        "test precondition: nothing open yet"
+    );
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+
+    let active = state
+        .app_shell
+        .state()
+        .active_project()
+        .expect("Enter on the highlighted recent row must open and activate it");
+    assert_eq!(active.id(), &project_id);
+    assert_eq!(
+        active.root_path(),
+        project_dir.canonicalize().unwrap().as_path()
+    );
+    assert!(
+        state.path_field.is_empty(),
+        "the path field must never have been touched by a successful reopen"
+    );
+}
+
+/// `Up`/`Down` move the highlight, clamped rather than wrapping -- the
+/// same shape `arrow_keys_move_the_approval_history_highlight` already
+/// establishes for its own, independent list.
+#[test]
+fn up_and_down_move_the_project_board_row_highlight_clamped_not_wrapping() {
+    let mut app_shell = ApplicationShell::new();
+    for label in ["board-highlight-a", "board-highlight-b"] {
+        app_shell
+            .add_project_from_path(fresh_project_dir(label))
+            .expect("a freshly created directory is a valid project root");
+    }
+    let mut state = state_with(app_shell);
+    let row_count = state.app_shell.project_board().rows.len();
+    assert_eq!(row_count, 2, "test precondition: two real rows");
+
+    for _ in 0..(row_count + 2) {
+        send_main_area_key(
+            &mut state,
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown),
+        );
+    }
+    assert_eq!(
+        state.project_board_row_highlight,
+        row_count - 1,
+        "ArrowDown must clamp at the last row, not wrap"
+    );
+
+    for _ in 0..(row_count + 2) {
+        send_main_area_key(
+            &mut state,
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
+        );
+    }
+    assert_eq!(
+        state.project_board_row_highlight, 0,
+        "ArrowUp must clamp at the first row, not wrap"
+    );
+}
+
+/// An `ActiveSession` row is already open -- `Enter` on one must do
+/// nothing (no second session, no record), not attempt to "reopen" a
+/// project that never closed. Switching which project is active is
+/// `NavigationAction::SwitchActiveProject`, still out of RFC-038's
+/// scope (see PR-038-B's own qa-evidence.md known-limitations note).
+#[test]
+fn enter_on_a_highlighted_active_session_row_does_nothing() {
+    let mut app_shell = ApplicationShell::new();
+    let project_id = app_shell
+        .add_project_from_path(fresh_project_dir("board-row-active-noop"))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    let mut state = state_with(app_shell);
+    assert_eq!(state.app_shell.project_board().rows.len(), 1);
+    state.project_board_row_highlight = 0;
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+
+    assert_eq!(
+        state.app_shell.state().active_project_id(),
+        Some(&project_id),
+        "Enter on an ActiveSession row must not change what is active"
+    );
+    assert_eq!(
+        state.app_shell.state().projects().len(),
+        1,
+        "Enter on an ActiveSession row must not create a second session"
+    );
+}
+
+/// The real "Open" button and keyboard `Enter` must converge on the
+/// exact same [`reopen_recent_project`] -- proven here by dispatching
+/// the button's own message directly, exactly as `iced` would when the
+/// real click lands, the same shape
+/// `the_real_browse_button_message_opens_the_same_modal_the_keyboard_shortcut_does`
+/// already establishes for PR-038-G's own button.
+#[test]
+fn the_real_open_button_message_reopens_the_same_project_the_keyboard_does() {
+    let (mut state, project_id, project_dir) =
+        state_with_cached_trusted_recent_project("board-row-reopen-button-message");
+
+    let _ = super::update(
+        &mut state,
+        Message::ReopenRecentProjectRowPressed(project_id.clone()),
+    );
+
+    let active = state
+        .app_shell
+        .state()
+        .active_project()
+        .expect("the Open button's message must open and activate the recent project");
+    assert_eq!(active.id(), &project_id);
+    assert_eq!(
+        active.root_path(),
+        project_dir.canonicalize().unwrap().as_path()
+    );
+}
+
+/// `what-a-path-field-must-not-trust.md` §5's own audit guard, proven
+/// for the reopen call site (`reopen_recent_project`), the same way
+/// `opening_a_project_through_the_real_field_writes_exactly_one_real_project_added_record`
+/// already proves it for the path field. **Ablated**: temporarily
+/// commented out `reopen_recent_project`'s call to
+/// `record_new_project_added` -- this assertion failed (0 records, not
+/// 1); reverted.
+#[test]
+fn reopening_a_recent_project_writes_exactly_one_real_project_added_record() {
+    let (mut state, project_id, _project_dir) =
+        state_with_cached_trusted_recent_project("board-row-reopen-audit-record");
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+    assert!(
+        state.app_shell.state().active_project().is_some(),
+        "test precondition: the reopen must have succeeded"
+    );
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let records: Vec<_> = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .expect("querying the real audit store must succeed")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .filter(|record| record.project_id.as_ref() == Some(&project_id))
+        .filter(|record| record.family == tekstide_core::audit::AuditEventFamily::ProjectAdded)
+        .collect();
+
+    assert_eq!(
+        records.len(),
+        1,
+        "exactly one ProjectAdded record must exist for a project reopened via the board: \
+         {records:?}"
+    );
+}
+
+/// **The security property PR-038-D's own task breakdown states in so
+/// many words**: "Rendering a remembered project must not restore or
+/// imply any trust state the audit store does not confirm." A recent
+/// project's cached `Trusted` label, with no real `TrustGrant` in the
+/// durable store to back it (a fresh project id can have none), must
+/// come back `Restricted` from a real, key-driven reopen -- not the
+/// cached label taken on faith. **Ablated**: temporarily removed
+/// `reopen_recent_project`'s call to `verify_restored_trust` -- this
+/// assertion failed (`Trusted`, not `Restricted`, the exact defect this
+/// function exists to prevent); reverted.
+#[test]
+fn reopening_a_project_cached_trusted_but_unconfirmed_by_the_audit_store_demotes_to_restricted() {
+    let (mut state, project_id, _project_dir) =
+        state_with_cached_trusted_recent_project("board-row-reopen-trust-unconfirmed");
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+
+    let active = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .expect("test precondition: the reopen must have succeeded");
+    assert_eq!(
+        active.trust_state(),
+        tekstide_core::project::WorkspaceTrust::Restricted,
+        "a cached Trusted label the durable audit store does not confirm must be demoted, \
+         never acted on as real trust"
+    );
+}
+
+/// A remembered path that no longer resolves (folder removed since it
+/// was last open, simulated by never creating one under the canonical
+/// root this recent entry names) fails through `add_project_from_path`'s
+/// own real, live validation -- rendered by reusing the path field's
+/// notice machinery, the same "never a silent no-op" shape
+/// `a_bad_path_renders_a_notice_and_the_application_keeps_running`
+/// already proves for a typed path.
+#[test]
+fn a_reopen_of_a_no_longer_existing_recent_project_renders_a_notice_and_keeps_running() {
+    let base = fresh_project_dir("board-row-reopen-missing-base");
+    let missing_dir = base.join("gone");
+    let missing_canonical = base.canonicalize().unwrap().join("gone");
+    let project_id = tekstide_core::project::ProjectId::new_uuid();
+    let mut app_shell = ApplicationShell::new();
+    app_shell.restore_recent_projects(cached_trusted_recent_project(
+        project_id,
+        missing_canonical.clone(),
+    ));
+    let mut state = state_with(app_shell);
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+
+    assert!(
+        state.app_shell.state().active_project().is_none(),
+        "a reopen of a path that no longer exists must not have added anything"
+    );
+    assert_eq!(
+        state.path_field_notice,
+        Some(PathFieldError::DoesNotExist),
+        "the failure must render the specific reason, reusing the path field's own notice"
+    );
+    assert_eq!(
+        state.path_field,
+        missing_dir.display().to_string(),
+        "the field must show the path that was actually attempted, for the user to see or edit"
+    );
+    assert!(
+        state.path_field_requested,
+        "the field must become visible so the notice is actually shown"
+    );
+
+    // The real proof of "kept running": the same live `state` still
+    // opens a real, different project right after -- cleared with real
+    // Backspace presses first (not a direct assignment), the same shape
+    // `a_bad_path_renders_a_notice_and_the_application_keeps_running`
+    // already uses, since the field shows the failed attempt's own text
+    // and must be cleared, not appended to.
+    for _ in state.path_field.clone().chars() {
+        press_backspace_in_the_real_path_field(&mut state);
+    }
+    let project_dir = fresh_project_dir("board-row-reopen-missing-after");
+    type_through_the_real_path_field(&mut state, &project_dir.display().to_string());
+    press_enter_in_the_real_path_field(&mut state);
+    assert!(
+        state.app_shell.state().active_project().is_some(),
+        "the application must still be able to open a real project after the failed reopen"
+    );
+}
+
+// RFC-038 PR-038-D finding, fixed retroactively in this same slice: the
+// path field (PR-038-A) and the folder browser (PR-038-G) shared the
+// exact same gap `reopening_a_project_cached_trusted_but_unconfirmed_by_the_audit_store_demotes_to_restricted`
+// proves closed for the board's own new call site -- neither called
+// `verify_restored_trust` after a successful add, so a typed or browsed
+// path matching a recent project's canonical root inherited its cached
+// trust with no confirmation against the durable audit store.
+
+/// **A real board (recent row and all), not an empty one**: with a
+/// recent row present, the board is not "empty"
+/// (`path_field_is_showing`'s own doc), so the field only shows via a
+/// real `Ctrl+Alt+O` first (PR-038-B) -- without it, `Enter` reaches
+/// `handle_project_board_row_key` instead, which happens to reopen the
+/// exact same cached project through its *own*, already-fixed call
+/// site, silently passing this test for the wrong reason. `Ctrl+Alt+O`
+/// makes `path_field_is_showing` true, which is also what makes
+/// `handle_project_board_row_key` correctly stand down (its own mutual-
+/// exclusion guard), so `Enter` here can only reach
+/// `attempt_open_project_from_path_field`.
+///
+/// **Ablated**: temporarily removed `attempt_open_project_from_path_field`'s
+/// new call to `verify_restored_trust` -- this assertion failed
+/// (`Trusted`, not `Restricted`); reverted.
+#[test]
+fn typing_a_path_matching_a_cached_trusted_but_unconfirmed_recent_project_demotes_to_restricted() {
+    let project_dir = fresh_project_dir("path-field-reopen-trust-unconfirmed");
+    let canonical_root = std::fs::canonicalize(&project_dir).expect("must canonicalize");
+    let project_id = tekstide_core::project::ProjectId::new_uuid();
+    let mut app_shell = ApplicationShell::new();
+    app_shell.restore_recent_projects(cached_trusted_recent_project(
+        project_id.clone(),
+        canonical_root,
+    ));
+    let mut state = state_with(app_shell);
+    press_ctrl_alt_o(&mut state);
+    assert!(
+        state.path_field_requested,
+        "test precondition: Ctrl+Alt+O must make the field showing"
+    );
+
+    type_through_the_real_path_field(&mut state, &project_dir.display().to_string());
+    press_enter_in_the_real_path_field(&mut state);
+
+    let active = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .expect("test precondition: the field must have reopened the cached project");
+    assert_eq!(
+        active.trust_state(),
+        tekstide_core::project::WorkspaceTrust::Restricted,
+        "a cached Trusted label the durable audit store does not confirm must be demoted, \
+         even when the path arrived through the field, not the board"
+    );
+}
+
+/// The browser's own analogue of the test directly above. **Ablated**:
+/// temporarily removed `choose_current_browsed_directory`'s new call to
+/// `verify_restored_trust` -- this assertion failed (`Trusted`, not
+/// `Restricted`); reverted.
+#[test]
+fn browsing_to_a_cached_trusted_but_unconfirmed_recent_project_demotes_to_restricted() {
+    let project_dir = fresh_project_dir("browse-reopen-trust-unconfirmed");
+    let canonical_root = std::fs::canonicalize(&project_dir).expect("must canonicalize");
+    let project_id = tekstide_core::project::ProjectId::new_uuid();
+    let mut app_shell = ApplicationShell::new();
+    app_shell.restore_recent_projects(cached_trusted_recent_project(
+        project_id.clone(),
+        canonical_root,
+    ));
+    let mut state = state_with(app_shell);
+    state.modal = Some(ModalContent::FolderBrowser(folder_browser_modal_fixture(
+        &project_dir,
+    )));
+
+    let _ = super::update(&mut state, Message::FolderBrowserChooseCurrentDirectory);
+
+    let active = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .expect("test precondition: the browser must have reopened the cached project");
+    assert_eq!(
+        active.trust_state(),
+        tekstide_core::project::WorkspaceTrust::Restricted,
+        "a cached Trusted label the durable audit store does not confirm must be demoted, \
+         even when the path arrived through the browser, not the board"
+    );
+}

@@ -178,12 +178,18 @@ fn restoring_recent_projects_on_boot_writes_no_project_added_record() {
 /// than the file simply reading `2`, so a reviewer checking this list
 /// against the source does not have to first find both call sites
 /// themselves.
+///
+/// RFC-038 PR-038-D widened `shell.rs`'s own count from two to three:
+/// `reopen_recent_project` is the one-key-reopen feature's own real
+/// call site, the same shape again -- named explicitly below with the
+/// other two.
 fn files_with_one_allowed_call_to_add_project_from_path()
 -> std::collections::HashMap<&'static str, usize> {
     // main.rs: boot()'s CLI-argument loop, via open_cli_project_path_and_record.
-    // shell.rs: attempt_open_project_from_path_field (the path field)
-    //           and choose_current_browsed_directory (the folder browser).
-    std::collections::HashMap::from([("main.rs", 1), ("shell.rs", 2)])
+    // shell.rs: attempt_open_project_from_path_field (the path field),
+    //           choose_current_browsed_directory (the folder browser),
+    //           and reopen_recent_project (the one-key reopen).
+    std::collections::HashMap::from([("main.rs", 1), ("shell.rs", 3)])
 }
 
 fn crate_src_dir() -> PathBuf {

@@ -484,9 +484,127 @@ the same mechanism. Nothing here changes PR-038-G's acceptance; this is a correc
 written record, not a reopened question. `board/tests.rs`'s own doc comment for
 `the_browse_button_is_a_real_clickable_widget_not_an_inert_label` corrected to match.
 
-## PR-038-D — recent projects
+## PR-038-D — recent projects, one key each
 
-_Pending._
+**Build.** `restore_recent_projects` already populated a passive `Vec<RestoredRecentProject>`
+since RFC-032/033, and `project_board.rs::recent_project_row` already rendered it as board rows
+before this PR -- what was missing, per RFC-038's own OQ1 ("recent projects on the empty board:
+yes... offering it as one-key reopen"), was the action. Added: `project_board_row_highlight`
+(the board's own keyboard cursor, the same shape `approval_history_highlight` already is for its
+list), moved by `Up`/`Down`, clamped not wrapping; `Enter`, or a real click on a `Recent*`-kind
+row's own "Open" button, reopens it through `reopen_recent_project` -- the exact same
+`add_project_from_path` entry point PR-038-A's field and PR-038-G's browser already use, so the
+same audit record, the same `Restricted`-by-default outcome, and the same live re-validation
+(`what-a-path-field-must-not-trust.md` applies unchanged: a remembered path is untrusted exactly
+as a typed or browsed one is). `ActiveSession` rows are inert to `Enter`/the button -- already
+open, nothing to reopen; switching to one is `NavigationAction::SwitchActiveProject`, still out
+of scope (PR-038-B's own known-limitations note).
+
+**A security finding, disclosed and fixed in this same slice, not left for review to catch.**
+`AppState::add_project_session` optimistically restores a recent project's *cached* trust label
+(keyed by canonical root) with nothing to confirm it against the durable audit store --
+`project_board.rs`'s own doc already calls the cache "a display hint only." `verify_restored_
+trust` exists to close exactly this gap, but until this slice it only ever ran once, at
+`State::new()`, over whatever `ProjectSession`s CLI arguments had already created at boot. Every
+non-CLI `add_project_from_path` call site added since PR-038-A -- the path field, the browser,
+and now the board's own reopen -- restores cached trust the same optimistic way and **never
+called `verify_restored_trust` afterward**. A user who once granted trust to a project, closed
+it, and later retyped, browsed to, or (after this PR) one-key-reopened that exact path got
+`Trusted` back with zero confirmation against the audit store, for the rest of that session.
+
+Fixed at all three call sites in this slice: `reopen_recent_project` (this PR's own new one),
+`attempt_open_project_from_path_field` (PR-038-A), and `choose_current_browsed_directory`
+(PR-038-G) -- each now calls `verify_restored_trust(&mut state.app_shell)` immediately after a
+successful `Added` outcome, the same demotion pass `State::new` already runs once at boot,
+reused rather than reimplemented. Each is proven, and separately ablated, below.
+
+**Gates.** `cargo build`, `cargo test --workspace --all-targets --all-features` (357 tekstide +
+724 tekstide-core, up from 346/724; 0 failed -- this slice is GUI-layer only, no `tekstide-core`
+change at all: every primitive it needed already existed), `cargo fmt --all --check`, `cargo
+clippy --workspace --all-targets --all-features -- -D warnings` (one `#[allow(clippy::
+too_many_arguments)]` on `board::view`, matching this crate's own existing precedent in
+`audit/integration.rs`/`approval/coordinator.rs` over inventing a grouping struct for the lint
+alone), `git diff --check` -- all clean.
+
+**The acceptance criterion, both keyboard and mouse, both automated and live.**
+
+- Automated (`shell/tests.rs`): `enter_on_a_highlighted_recent_row_reopens_it_without_retyping_the_path`
+  (real `Up`/`Down`/`Enter` through `send_main_area_key`, the same real-routing shape
+  `a_typed_key_edits_the_real_active_document_through_real_routing` already establishes),
+  `up_and_down_move_the_project_board_row_highlight_clamped_not_wrapping`,
+  `enter_on_a_highlighted_active_session_row_does_nothing`,
+  `the_real_open_button_message_reopens_the_same_project_the_keyboard_does`,
+  `a_reopen_of_a_no_longer_existing_recent_project_renders_a_notice_and_keeps_running`. `board/tests.rs`:
+  `highlighted_row_lines_marks_only_the_name_line_of_the_highlighted_row` (the rendered string,
+  not the `Element` tree, the same `row_lines`/`tree_lines` shape this crate always uses),
+  `the_recent_row_open_button_is_real_and_gated_on_row_kind_not_highlight`.
+- Live, against the release binary: `cargo build --release -p tekstide`. Two launches against the
+  same `XDG_STATE_HOME` -- `env -u WAYLAND_DISPLAY XDG_STATE_HOME=<mktemp -d>
+  ./target/release/tekstide <mktemp -d>/tsd-pr038d-demo` first (registers the project and saves
+  the recent-projects cache at boot, per `boot()`'s own `store.save(...)` call, then killed), then
+  a genuinely cold `env -u WAYLAND_DISPLAY XDG_STATE_HOME=<same dir> ./target/release/tekstide`
+  with **no arguments at all** -- the same `xdotool`/`niri msg action screenshot-window`/
+  `wl-paste` capture method PR-038-A/B/C/G already established:
+  - `evidence/pr-038-d/before-cold-start-recent-row.png` -- cold start, one recent row, the
+    keyboard cursor's own `>` marker already on it (highlight defaults to the only row), a real
+    "Open" button.
+  - `evidence/pr-038-d/after-enter-reopens-without-retyping.png` -- real `Return` (`xdotool key
+    --clearmodifiers Return`, no other key ever pressed): the row is now a live session (real
+    `0 pending approvals`/`0 reviews`/`0 dirty files`, not `unknown`), the "Open" button gone.
+    **No path was ever typed.**
+  - `evidence/pr-038-d/after-real-mouse-click-on-open-button.png` -- a third, separate cold-start
+    cycle against the same cache, this time a real `xdotool mousemove`/`click 1` on the button's
+    own on-screen coordinates rather than `Return`: identical result, proving the button and the
+    key converge on the same `reopen_recent_project`.
+  - Every process terminated cleanly with `SIGTERM` after its capture; no terminal was ever
+    launched in this session, so `test-process-leak.md`'s defect class does not apply.
+
+**The audit guard, widened and ablated.**
+`add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else`'s allow-list:
+`shell.rs`'s count from two to three, naming all three call sites explicitly. Ablated: commented
+out `reopen_recent_project`'s call to `record_new_project_added` --
+`reopening_a_recent_project_writes_exactly_one_real_project_added_record` failed (0 records, not
+1); reverted.
+
+**The trust-confirmation fix, ablated at all three call sites separately -- this is the
+security-relevant part, not a formality.**
+
+- `reopen_recent_project`: `reopening_a_project_cached_trusted_but_unconfirmed_by_the_audit_store_demotes_to_restricted`.
+  Ablated: removed the new `verify_restored_trust` call -- failed (`Trusted`, not `Restricted`,
+  the exact defect this fix exists to prevent); reverted.
+- `attempt_open_project_from_path_field` (the PR-038-A retroactive fix):
+  `typing_a_path_matching_a_cached_trusted_but_unconfirmed_recent_project_demotes_to_restricted`.
+  **A real finding while writing this test, disclosed rather than silently corrected**: the
+  board is not "empty" once a recent row exists (`path_field_is_showing`'s own condition), so
+  without first pressing a real `Ctrl+Alt+O`, `Enter` reaches this slice's own
+  `handle_project_board_row_key` instead of the field -- which, for a path matching the same
+  cached project, reopens it through the *already-fixed* `reopen_recent_project` and passes the
+  test for the wrong reason. Fixed by making the test press `Ctrl+Alt+O` first, which is also
+  what correctly makes `handle_project_board_row_key` stand down (its own mutual-exclusion
+  guard), so `Enter` can only reach the field. Ablated afterward exactly like the other two --
+  failed (`Trusted`, not `Restricted`) with the corrected test; reverted.
+- `choose_current_browsed_directory` (the PR-038-G retroactive fix):
+  `browsing_to_a_cached_trusted_but_unconfirmed_recent_project_demotes_to_restricted` (dispatches
+  `Message::FolderBrowserChooseCurrentDirectory` directly, so it was never exposed to the same
+  interception risk as the field's own test). Ablated: removed the new `verify_restored_trust`
+  call -- failed (`Trusted`, not `Restricted`); reverted.
+
+**Security -- `what-a-path-field-must-not-trust.md`.** Applies unchanged: a remembered path is
+untrusted exactly as a typed or browsed one is, however long it has sat in the cache.
+`reopen_recent_project` adds no canonicalisation, symlink policy, or root validation of its own
+-- confirmed by diff, the only new calls are the cache lookup (read-only) and the two,
+already-reviewed primitives (`add_project_from_path`, `verify_restored_trust`). Project names and
+paths from the cache render through the board's own existing, already-tested escaping
+(`row_lines`/`highlighted_row_lines`) -- no new untrusted-text render path was added.
+
+**Known limitation, disclosed, not silently accepted.** The `recent-projects.json` cache file
+itself is not re-saved mid-session -- only `boot()` writes it, once, after processing CLI
+arguments. A project reopened through this PR's own new action updates the live `AppState` (and,
+via `verify_restored_trust`, the live session's trust) but **not** the on-disk cache's
+`last_opened_at`/`last_activity` timestamps until the *next* process boot happens to write them
+again incidentally. Pre-existing behaviour (`upsert_open_project_recent` already updates the
+in-memory list; only the file write is boot-only), not introduced by this slice, and out of its
+scope to fix -- named here so it is not mistaken for something this PR verified and got wrong.
 
 ## PR-038-E — closeout
 
@@ -494,16 +612,17 @@ _Pending._
 
 ## Known limitations (RFC-038-wide)
 
-As of PR-038-A/B/C/G:
+As of PR-038-A/B/C/D/G:
 
 - **The folder browser's render layer duplicates the project explorer's own** (`browse_view` and
   siblings, alongside `view`/`node_line`/`tree_lines`), rather than sharing it -- disclosed and
   flagged for the architect's decision in PR-038-G's own qa-evidence.md section above, not
   silently absorbed. Possible follow-up: extract a shared render helper once the reviewer decides
   the shape it should take.
-- **No recent-projects reopen.** A previously-opened project not currently on the board must be
-  retyped by path; `restore_recent_projects`'s data remains unread by any surface for this
-  purpose. PR-038-D.
+- **A recent project reopened mid-session does not update the on-disk `recent-projects.json`
+  cache's own timestamps.** Only `boot()` writes that file, once, at startup -- disclosed in
+  PR-038-D's own qa-evidence.md section above, pre-existing behaviour this slice did not
+  introduce and is not scoped to fix.
 - **`ProjectBoardEmptyState::primary_action`/`secondary_action` still in the published API,**
   unread by anything, same as `0.12.1` left them. PR-038-E.
 - **`Ctrl+V` paste is not exercised by a live/synthetic-input test**, only by its resource bound

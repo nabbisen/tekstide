@@ -48,8 +48,9 @@
 //!   -- no enum or new core field required, unlike the label-string
 //!   fields above.
 
+use tekstide_core::project::ProjectId;
 use tekstide_core::project_board::{
-    AttentionState, CountDisplay, ProjectBoardRow, ProjectBoardViewModel,
+    AttentionState, BoardRowKind, CountDisplay, ProjectBoardRow, ProjectBoardViewModel,
 };
 use tekstide_core::text_safety;
 
@@ -59,6 +60,12 @@ use iced::{Element, Length};
 use crate::i18n::{Catalog, CatalogArgs};
 use crate::theme::Theme;
 
+// RFC-038 PR-038-D: nine parameters -- the path-field trio
+// (PR-038-A/B/G) plus the row-highlight/reopen pair this slice adds.
+// Matches this crate's own existing precedent for a real, already-wide
+// parameter list over a grouping struct invented only to satisfy the
+// lint (`audit/integration.rs`, `approval/coordinator.rs`).
+#[allow(clippy::too_many_arguments)]
 pub fn view<'a, Message: 'a + Clone>(
     view_model: &ProjectBoardViewModel,
     catalog: &'a Catalog,
@@ -67,6 +74,8 @@ pub fn view<'a, Message: 'a + Clone>(
     path_field_notice: Option<String>,
     show_field_on_populated_board: bool,
     open_browser_message: Message,
+    row_highlight: usize,
+    reopen_project_message: impl Fn(ProjectId) -> Message + 'a,
 ) -> Element<'a, Message> {
     if let Some(_empty_state) = &view_model.empty_state {
         return empty_state_view(
@@ -81,7 +90,19 @@ pub fn view<'a, Message: 'a + Clone>(
     let rows: Vec<Element<'a, Message>> = view_model
         .rows
         .iter()
-        .map(|row| row_view(row, catalog, theme))
+        .enumerate()
+        .map(|(index, row)| {
+            // RFC-038 PR-038-D: `Recent*`-kind rows get a real, clickable
+            // "Open" button, the same `is_live`-gated shape
+            // `shell::approval_history_entry_view` already uses for its
+            // own list -- an `ActiveSession` row is already open, so it
+            // gets none. `Message` is constructed once here, not inside
+            // `row_view`, so that pure function stays free of any
+            // `ProjectId`-shaped decision about *which* message to build.
+            let open_message = (row.row_kind != BoardRowKind::ActiveSession)
+                .then(|| reopen_project_message(row.project_id.clone()));
+            row_view(row, catalog, theme, index == row_highlight, open_message)
+        })
         .collect();
 
     let mut sections: Vec<Element<'a, Message>> = vec![column(rows).spacing(12).into()];
@@ -264,17 +285,35 @@ pub(crate) fn path_field_display_text(path_field: &str) -> String {
     )
 }
 
-fn row_view<'a, Message: 'a>(
+fn row_view<'a, Message: 'a + Clone>(
     row: &ProjectBoardRow,
     catalog: &'a Catalog,
     theme: &'a Theme,
+    highlighted: bool,
+    open_message: Option<Message>,
 ) -> Element<'a, Message> {
-    let lines: Vec<Element<'a, Message>> = row_lines(row, catalog)
-        .into_iter()
-        .map(|line| text(line).size(theme.font_size_status()).into())
-        .collect();
+    let mut column_items: Vec<Element<'a, Message>> =
+        highlighted_row_lines(row, catalog, highlighted)
+            .into_iter()
+            .map(|line| text(line).size(theme.font_size_status()).into())
+            .collect();
 
-    container(column(lines).spacing(2))
+    // RFC-038 PR-038-D: a real, clickable "Open" button on every
+    // `Recent*`-kind row -- the same `is_live`-gated shape
+    // `shell::approval_history_entry_view` already uses, present
+    // regardless of which row is highlighted (the highlight is a
+    // keyboard cursor, not a precondition for the mouse).
+    if let Some(message) = open_message {
+        column_items.push(
+            iced::widget::button(
+                text(catalog.get("project-board-recent-open-button")).size(theme.font_size_body()),
+            )
+            .on_press(message)
+            .into(),
+        );
+    }
+
+    container(column(column_items).spacing(2))
         .width(Length::Fill)
         .padding(8)
         .style(
@@ -341,6 +380,27 @@ pub(crate) fn row_lines(row: &ProjectBoardRow, catalog: &Catalog) -> Vec<String>
         ));
     }
 
+    lines
+}
+
+/// [`row_lines`] plus the keyboard cursor's own marker on the name
+/// line, exactly the "> "/"  " convention `surface/explorer.rs`'s own
+/// `tree_lines`/`browse_tree_lines` already use (not `shell::
+/// focus_marker`: that helper is private to `shell.rs`, and every
+/// existing render module here keeps its own copy of the same literal
+/// rather than reaching across the surface/shell boundary for it --
+/// see `browse_tree_lines`'s own doc for the precedent). Factored out
+/// from [`row_view`] for the same testability reason `row_lines` itself
+/// already is: the rendered string, not the `Element` tree.
+pub(crate) fn highlighted_row_lines(
+    row: &ProjectBoardRow,
+    catalog: &Catalog,
+    highlighted: bool,
+) -> Vec<String> {
+    let mut lines = row_lines(row, catalog);
+    if let Some(first) = lines.first_mut() {
+        *first = format!("{}{first}", if highlighted { "> " } else { "  " });
+    }
     lines
 }
 
