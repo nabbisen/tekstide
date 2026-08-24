@@ -4,7 +4,11 @@ Status: **Proposed 2026-08-24.** Written after the human owner reviewed `0.12.1`
 first two slices and said: *"What is the most important is to design user workflow(s) and make
 UI/UX to help them. Currently, no button or link to open project tab, close it, return to the
 entrance etc."*
-Target milestone: to be set by the human owner. This RFC argues it precedes RFC-020 and RFC-034.
+Target milestone: **M12, after RFC-038** — accepted by the human owner 2026-08-24, ahead of
+RFC-020 and RFC-034.
+
+Its three open questions were **decided by the architect on acceptance** and are recorded as
+decisions below. Each is the owner's to overturn; none is the implementer's to inherit.
 Date: 2026-08-24
 
 Related RFCs:
@@ -106,15 +110,52 @@ RFC-039 takes **everything after entry**: rows that respond, entering and leavin
 closing one, and the affordance audit. RFC-038 must not grow into this; a slice quietly becoming
 a redesign is how scope stops being reviewable.
 
-## Open questions
+## Decisions (were open questions; settled on acceptance)
 
-- **OQ1.** What happens to a project's running terminals and agent runs when it is closed? A
-  confirmation is the obvious answer, and `safe_close_decision` is an audit family that has
-  never had a producer, blocked on exactly this dialog. This RFC likely unblocks it — but must
-  decide deliberately, not inherit it.
-- **OQ2.** Board-plus-back, tabs, or a persistent project sidebar? The owner said "project tab";
-  the underlying need is workflows 3–5, and the form should follow an explicit comparison rather
-  than the first word used to describe it.
-- **OQ3.** Does an interactive row need a trusted-UI treatment? RFC-018 governs surfaces that
-  can be spoofed. A clickable row rendering an untrusted project name is a new case, and the
-  answer may be "the existing escaping is sufficient" — but it must be asked, not assumed.
+**D1 — the form is a project tab strip in the existing top bar.**
+
+Checked before deciding rather than assumed: `view()` composes
+`column![top_bar, content_area, status_bar]` in **every** mode, Terminal Immersion included. So
+a tab strip in the top bar has no conflict with immersion — the chrome a strip would live in is
+already always present, and no existing surface loses space it currently has.
+
+One persistent affordance then serves four of the seven workflows at once:
+
+| Workflow | The control |
+| --- | --- |
+| 3. See which projects are open, pick one | the strip itself |
+| 4. Enter a project | click its tab |
+| 5. Return to the entrance | a permanent leftmost **Projects** tab — the board |
+| 6. Close a project | `×` on the tab |
+
+A `+` at the end of the strip opens RFC-038's folder browser, which makes "open another
+project" a visible action from anywhere rather than a second keybinding.
+
+Chosen over board-plus-back (which serves 5 but leaves 3 and 4 unserved, and gives close no
+home) and over a sidebar (which costs horizontal space permanently, in a product whose main
+surfaces are a terminal grid and an editor). The owner's word was "project tab"; this is that,
+arrived at against the constraints rather than adopted from the phrasing.
+
+**D2 — closing a project with live work confirms; closing an idle one does not.**
+
+A project with no running terminal and no active agent run closes directly. One that has either
+raises a confirmation naming what will be lost. A confirmation on every close trains people to
+dismiss confirmations, which is the failure mode RFC-018's paste model exists to avoid.
+
+**This unblocks `safe_close_decision` and this RFC wires it.** That audit family has never had a
+producer — RFC-031 scoped it out explicitly, "blocked on a dialog that does not exist". The
+dialog now exists, so the blocker is gone, and wiring it takes the unwired families from two to
+one. Completing a gap at the moment its blocker is removed is the same discipline as correcting
+a statement at the moment your work falsifies it.
+
+**D3 — escaping is necessary and not sufficient for the close control.**
+
+Project names and paths in the strip are untrusted and escaped, as everywhere else — and per
+RFC-018 the grid exception does not apply here, because a tab strip is **trusted chrome**.
+
+For *switching*, a misleading label is a wrong belief and not a wrong action: activating a tab
+switches to the project that tab actually is. For *closing*, it is a wrong action with real
+consequences — terminals killed, an agent run interrupted. So **the close confirmation must
+identify the project by its canonical path, escaped, not by its display name alone.** A user
+must be able to tell which project they are about to close even if its name was chosen to look
+like another's.
