@@ -3,10 +3,14 @@ use crate::app::{AddProjectOutcome, RemoveProjectError};
 use crate::close::{
     CloseAssessment, CloseReason, CloseReasonCode, CloseResourceProviderState, CloseResourceSummary,
 };
-use crate::domain::{DomainTimestamp, TerminalKind, TerminalSession, TerminalStatus};
+use crate::domain::{
+    AgentCompatibilityLevel, AgentRun, AgentRunStatus, DomainTimestamp, TerminalKind,
+    TerminalSession, TerminalStatus,
+};
 use crate::project::recent::{RecentProject, RecentProjectState, Timestamp};
 use crate::project::root::{ProjectRootValidationError, SymlinkPolicy};
 use crate::project::{ProjectId, ProjectProviderState, ProjectRuntimeSummary};
+use crate::runtime::terminal::TerminationOutcome;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -628,6 +632,95 @@ fn active_project_with_real_running_terminal_needs_confirmation_and_stays_open()
         }
     );
     assert!(state.project(&project_id).is_some());
+}
+
+/// RFC-039 PR-039-C: the one property [`active_project_with_real_running_terminal_needs_confirmation_and_stays_open`]
+/// above cannot show -- `apply_agent_terminal_outcome` (the pre-existing
+/// wrapper) is hardcoded to `active_project_mut()`, so it can only ever
+/// be exercised against whichever project happens to be active.
+/// `apply_agent_terminal_outcome_for_project` exists specifically so
+/// closing a *different* tab's project can retire its own live agent
+/// run -- this proves that project-scoped path completes the run and
+/// clears `running_processes` on a project that is not, and never
+/// becomes, the active one.
+#[test]
+fn apply_agent_terminal_outcome_for_project_completes_a_run_on_a_project_that_is_not_active() {
+    let mut state = AppState::default();
+    let active_id = state.add_project_session("Active", "/workspace/active", "/workspace/active");
+    let background_id = state.add_project_session(
+        "Background",
+        "/workspace/background",
+        "/workspace/background",
+    );
+    assert_eq!(
+        state.active_project_id(),
+        Some(&active_id),
+        "test precondition: the first project added is active, not the second"
+    );
+
+    let mut terminal = TerminalSession::new(
+        background_id.clone(),
+        TerminalKind::Plain,
+        "Agent",
+        "/workspace/background",
+        "bash",
+    );
+    terminal.transition_to(TerminalStatus::Running).unwrap();
+    let terminal_id = terminal.id.clone();
+
+    let agent_run = AgentRun {
+        terminal_id: Some(terminal_id.clone()),
+        status: AgentRunStatus::Running,
+        ..AgentRun::draft(
+            background_id.clone(),
+            "profile",
+            "prompt",
+            AgentCompatibilityLevel::Supervised,
+        )
+    };
+    let agent_run_id = agent_run.id.clone();
+
+    let background = state.project_mut(&background_id).unwrap();
+    background.add_terminal_session(terminal).unwrap();
+    background.add_agent_run(agent_run).unwrap();
+    assert_eq!(
+        background
+            .runtime_summary()
+            .close_resources
+            .running_processes,
+        1,
+        "test precondition: the background project's own terminal reads as a live process"
+    );
+
+    state
+        .apply_agent_terminal_outcome_for_project(
+            &background_id,
+            &agent_run_id,
+            &terminal_id,
+            &TerminationOutcome::Exited { exit_status: 0 },
+        )
+        .expect("a clean exit should complete the run on the non-active project");
+
+    assert_eq!(
+        state.active_project_id(),
+        Some(&active_id),
+        "completing a background run must not change which project is active"
+    );
+    let background = state.project(&background_id).unwrap();
+    let run = background
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .unwrap();
+    assert_eq!(run.status, AgentRunStatus::Completed);
+    assert_eq!(
+        background
+            .runtime_summary()
+            .close_resources
+            .running_processes,
+        0,
+        "the run's own terminal exiting must clear the background project's running-process count"
+    );
 }
 
 #[test]

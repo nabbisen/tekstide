@@ -14,13 +14,15 @@ use crate::approval::{
 };
 use crate::audit::integration::AuditRecordWriter;
 use crate::audit::{
-    AuditCoordinator, AuditEventFamily, AuditHealth, AuditHealthStatus, AuditIntegrationError,
-    AuditObservationStatus, AuditOutcome, AuditQuery, AuditReasonCode, AuditStore, AuditStoreError,
-    AuditStoreErrorReason, AuditSubjectKind, CommandDecisionActionKind, DurableAuditRecordV1,
+    AuditActionKind, AuditCoordinator, AuditEventFamily, AuditHealth, AuditHealthStatus,
+    AuditIntegrationError, AuditObservationStatus, AuditOutcome, AuditQuery, AuditReasonCode,
+    AuditStore, AuditStoreError, AuditStoreErrorReason, AuditSubjectKind,
+    CommandDecisionActionKind, DurableAuditRecordV1, SafeCloseDecision,
 };
 use crate::domain::{
-    AgentCompatibilityLevel, AgentRunId, AgentRunStatus, ApprovalDecision, ApprovalId, RiskLevel,
-    TerminalId, TerminalKind, TerminalSession, TerminalStatus, Transcript,
+    AgentCompatibilityLevel, AgentRunId, AgentRunStatus, ApprovalDecision, ApprovalId,
+    AuditOperationId, RiskLevel, TerminalId, TerminalKind, TerminalSession, TerminalStatus,
+    Transcript,
 };
 use crate::project::{ProjectContentError, ProjectId, ProjectSession, WorkspaceTrust};
 use crate::runtime::terminal::{
@@ -1261,6 +1263,157 @@ fn purge_write_failure_degrades_health_but_the_deletion_already_happened() {
     );
     assert_eq!(result.audit_status, AuditObservationStatus::Degraded);
     assert_eq!(health.failure_count(), 1);
+}
+
+/// RFC-039 PR-039-C, `what-closing-a-project-must-not-lose.md` §4:
+/// `safe_close_decision`'s first producer pair, the confirmed-and-closed
+/// path -- `record_safe_close_authorized` (phase one) then
+/// `record_safe_close_decision` (phase two, `fully_confirmed: true`
+/// since every terminated terminal reported a real exit, not an orphan)
+/// maps to `Applied`, carrying the same `operation_id` phase one
+/// authorized. `AuditStore`'s own schema enforces this pairing: a phase
+/// two write with no matching `Authorized` record for its `operation_id`
+/// is rejected outright (`missing_authorization_rejects_a_bare_closed_record`
+/// below proves it), the same two-phase discipline
+/// `ManagedProcessLifecycle` already has.
+#[test]
+fn safe_close_decision_persists_an_applied_record_with_its_operation_id() {
+    let dirs = TestAuditDirs::new("integration-safe-close-applied");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let project_id = ProjectId::for_test(1);
+    let operation_id = AuditOperationId::for_test(1);
+    let mut coordinator = AuditCoordinator::new(&mut store, &mut health);
+
+    let authorized_status =
+        coordinator.record_safe_close_authorized(project_id.clone(), operation_id.clone());
+    assert_eq!(authorized_status, AuditObservationStatus::Persisted);
+
+    let status = coordinator.record_safe_close_decision(
+        project_id.clone(),
+        SafeCloseDecision::Closed {
+            operation_id: operation_id.clone(),
+            fully_confirmed: true,
+        },
+    );
+
+    assert_eq!(status, AuditObservationStatus::Persisted);
+    assert_eq!(health.status(), AuditHealthStatus::Healthy);
+
+    let records = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2, "one record per phase");
+    let applied = records
+        .iter()
+        .find(|record| record.outcome == AuditOutcome::Applied)
+        .expect("the second phase's own record");
+    assert_eq!(applied.family, AuditEventFamily::SafeCloseDecision);
+    assert_eq!(applied.action_kind, AuditActionKind::SafeCloseTerminate);
+    assert_eq!(applied.project_id, Some(project_id));
+    assert_eq!(applied.operation_id, Some(operation_id));
+    assert!(applied.subject_kind.is_none());
+    assert!(applied.subject_ref.is_none());
+    assert!(applied.terminal_id.is_none());
+    assert!(applied.agent_run_id.is_none());
+}
+
+/// The uncertain half of the same decision: at least one terminated
+/// terminal's own outcome was ambiguous (`OrphanedUnknown`/`Failed`),
+/// so the project was still removed but the record says `Failed`, not
+/// `Applied` -- honest that termination was not confirmed, matching
+/// `record_plain_terminal_terminated`'s own refusal to guess a reason
+/// code for the same two outcomes.
+#[test]
+fn safe_close_decision_persists_a_failed_record_when_termination_was_not_confirmed() {
+    let dirs = TestAuditDirs::new("integration-safe-close-unconfirmed");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let project_id = ProjectId::for_test(2);
+    let operation_id = AuditOperationId::for_test(2);
+    let mut coordinator = AuditCoordinator::new(&mut store, &mut health);
+    coordinator.record_safe_close_authorized(project_id.clone(), operation_id.clone());
+
+    coordinator.record_safe_close_decision(
+        project_id,
+        SafeCloseDecision::Closed {
+            operation_id,
+            fully_confirmed: false,
+        },
+    );
+
+    let records = store.query(&AuditQuery::latest(10)).unwrap().records;
+    assert_eq!(records.len(), 2);
+    assert!(
+        records
+            .iter()
+            .any(|record| record.record.outcome == AuditOutcome::Failed)
+    );
+}
+
+/// The two-phase enforcement itself, proven rather than assumed: a
+/// `Closed` record with no preceding `record_safe_close_authorized` call
+/// for its own `operation_id` is refused, not silently accepted --
+/// `AuditStore`'s own schema-level guard against a phase-two write with
+/// nothing to authorize it (`AuditStoreErrorReason::MissingAuthorization`,
+/// surfaced here only as `Degraded` since `append_observation` never
+/// exposes the reason to its caller, matching every other best-effort
+/// producer in this file).
+#[test]
+fn missing_authorization_rejects_a_bare_closed_record() {
+    let dirs = TestAuditDirs::new("integration-safe-close-missing-authorization");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let project_id = ProjectId::for_test(4);
+    let operation_id = AuditOperationId::for_test(4);
+
+    let status = AuditCoordinator::new(&mut store, &mut health).record_safe_close_decision(
+        project_id,
+        SafeCloseDecision::Closed {
+            operation_id,
+            fully_confirmed: true,
+        },
+    );
+
+    assert_eq!(status, AuditObservationStatus::Degraded);
+    assert_eq!(health.status(), AuditHealthStatus::Degraded);
+    assert!(
+        store
+            .query(&AuditQuery::latest(10))
+            .unwrap()
+            .records
+            .is_empty(),
+        "a rejected write must not persist anything"
+    );
+}
+
+/// The declined half of `safe_close_decision`: `valid_safe_close`
+/// requires `Cancelled` to carry **no** `operation_id` -- there was no
+/// termination operation, because the user never authorized one.
+#[test]
+fn safe_close_decision_persists_a_cancelled_record_with_no_operation_id() {
+    let dirs = TestAuditDirs::new("integration-safe-close-cancelled");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let project_id = ProjectId::for_test(3);
+
+    let status = AuditCoordinator::new(&mut store, &mut health)
+        .record_safe_close_decision(project_id.clone(), SafeCloseDecision::Cancelled);
+
+    assert_eq!(status, AuditObservationStatus::Persisted);
+    let records = store.query(&AuditQuery::latest(10)).unwrap().records;
+    assert_eq!(records.len(), 1);
+    let record = &records[0].record;
+    assert_eq!(record.outcome, AuditOutcome::Cancelled);
+    assert_eq!(record.project_id, Some(project_id));
+    assert!(
+        record.operation_id.is_none(),
+        "a cancelled close has no termination operation to name"
+    );
 }
 
 fn project_for(dirs: &TestAuditDirs, sequence: u64) -> ProjectSession {

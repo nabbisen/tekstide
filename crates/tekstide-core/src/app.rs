@@ -385,6 +385,33 @@ impl AppState {
         project.apply_agent_terminal_outcome(agent_run_id, terminal_id, outcome)
     }
 
+    /// RFC-039 PR-039-C: the same call as [`Self::apply_agent_terminal_outcome`]
+    /// above, `project_id`-addressed instead of implicit. Closing a
+    /// project must work from any tab, not only the active one
+    /// (`what-closing-a-project-must-not-lose.md` §6's confirmed
+    /// sequence has no "switch to it first" step) -- but retiring a live
+    /// agent run's own status is the one piece of that sequence with no
+    /// existing project-scoped path: `mark_terminal_exited`/
+    /// `transition_terminal_status` are reachable for any project via
+    /// `project_mut` already, since `ProjectSession`'s own versions of
+    /// those two are `pub`, but `ProjectSession::apply_agent_terminal_outcome`
+    /// is `pub(crate)`, so only this crate can call it, and until now
+    /// only through the active-project-only wrapper above.
+    pub fn apply_agent_terminal_outcome_for_project(
+        &mut self,
+        project_id: &ProjectId,
+        agent_run_id: &AgentRunId,
+        terminal_id: &TerminalId,
+        outcome: &TerminationOutcome,
+    ) -> Result<(), ProjectAgentRuntimeLaunchError> {
+        let project =
+            self.project_mut(project_id)
+                .ok_or(ProjectAgentRuntimeLaunchError::Launch(
+                    ProjectAgentLaunchError::Ownership(OwnershipError::MissingProject),
+                ))?;
+        project.apply_agent_terminal_outcome(agent_run_id, terminal_id, outcome)
+    }
+
     /// change-detection-wiring handoff, Slice C: the same gap as
     /// `apply_agent_terminal_outcome` immediately above --
     /// `ProjectSession::add_detected_generated_change_set` existed,

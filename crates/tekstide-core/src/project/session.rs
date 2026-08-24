@@ -1735,7 +1735,12 @@ enum DetectedChangeAssociation {
     Ambiguous,
 }
 
-fn terminal_status_is_active(status: TerminalStatus) -> bool {
+/// RFC-039 PR-039-C: made `pub` (was module-private) so
+/// `close_project`'s own confirmation flow can select exactly the
+/// terminals `assess_project_close`'s `running_processes` count already
+/// includes, rather than re-deriving a second "which statuses count"
+/// list in the GUI crate that could drift from this one.
+pub fn terminal_status_is_active(status: TerminalStatus) -> bool {
     matches!(
         status,
         TerminalStatus::Starting
@@ -1862,7 +1867,11 @@ fn transcript_path_is_project_local(storage_path: &Path, canonical_root_path: &P
     canonical_storage_path.starts_with(canonical_project_root)
 }
 
-fn agent_run_status_is_active(status: AgentRunStatus) -> bool {
+/// RFC-039 PR-039-C: `pub` for the same reason
+/// [`terminal_status_is_active`] is -- the close confirmation flow needs
+/// to know which of a project's agent runs `running_processes` already
+/// counted, without a second, driftable copy of this list.
+pub fn agent_run_status_is_active(status: AgentRunStatus) -> bool {
     matches!(
         status,
         AgentRunStatus::Preparing | AgentRunStatus::Running | AgentRunStatus::AwaitingApproval

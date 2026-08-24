@@ -28,9 +28,25 @@ macro_rules! impl_id {
                 Self(format!("{}-{}", $prefix, uuid::Uuid::new_v4()))
             }
 
+            /// RFC-039 PR-039-C: a deterministic id whose suffix is still
+            /// a real UUID, not the plain hex sequence this used to
+            /// produce -- that shape passed [`Self::from_persisted`]'s
+            /// own doc-implied contract in every existing caller only
+            /// because none of them had gone through a real
+            /// `AuditStore` round trip before (every prior use was
+            /// either a bare `.validate()` check with no SQL involved,
+            /// or an `operation_id`-less record). `for_test(1)` and
+            /// `for_test(2)` are still guaranteed distinct and stable
+            /// across runs -- `Uuid::from_u128` is a pure function of
+            /// its input, not random -- so no caller's own assertions
+            /// change; only decodability does.
             #[cfg(test)]
             pub fn for_test(sequence: u64) -> Self {
-                Self(format!("{}-{:012x}", $prefix, sequence))
+                Self(format!(
+                    "{}-{}",
+                    $prefix,
+                    uuid::Uuid::from_u128(u128::from(sequence))
+                ))
             }
 
             pub fn as_str(&self) -> &str {

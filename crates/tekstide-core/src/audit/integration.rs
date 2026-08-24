@@ -76,6 +76,33 @@ pub struct AuditActionResult<T> {
     pub audit_status: AuditObservationStatus,
 }
 
+/// RFC-039 PR-039-C: `record_safe_close_decision`'s one parameter --
+/// phase *two* of the two-phase shape `Closed` requires
+/// (`record_safe_close_authorized` above is phase one, called earlier
+/// with the same `operation_id`). Shaped so the `operation_id`/outcome
+/// pairing `valid_safe_close` requires (`Authorized`/`Applied`/`Failed`
+/// need one, `Cancelled` must have none) is enforced by construction
+/// rather than left for the caller to get right by hand -- the same
+/// reasoning behind this project's other recent move from a
+/// runtime-checked invariant to one the type system makes
+/// unrepresentable. `Closed::fully_confirmed` is `false` when any
+/// terminated terminal's own outcome was `OrphanedUnknown`/`Failed` (see
+/// `record_plain_terminal_terminated`'s own `NotRequired` branch for
+/// that same ambiguity) -- honest that the project was removed from the
+/// session, not that every process it owned is confirmed gone, matching
+/// `what-closing-a-project-must-not-lose.md` §6's warning that an
+/// unconfirmed termination is the orphaned-shell failure mode this whole
+/// slice exists to close off. `Cancelled` never has a phase-one call at
+/// all -- no operation began, so there is nothing to authorize.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SafeCloseDecision {
+    Closed {
+        operation_id: AuditOperationId,
+        fully_confirmed: bool,
+    },
+    Cancelled,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuditedAgentLaunch {
     agent_run_id: AgentRunId,
@@ -221,6 +248,65 @@ impl<'a> AuditCoordinator<'a> {
             value: outcome,
             audit_status,
         }
+    }
+
+    /// RFC-039 PR-039-C, `what-closing-a-project-must-not-lose.md` §4:
+    /// `safe_close_decision` never had a producer before this slice --
+    /// RFC-031 scoped it out for the exact reason the RFC-039 handoff
+    /// names, that the dialog which would call it did not exist.
+    ///
+    /// Phase one of two, for the confirmed-and-closing path only --
+    /// `Cancelled` (no live-work operation ever begins) skips this call
+    /// entirely and goes straight to [`Self::record_safe_close_decision`].
+    /// `AuditStore`'s own append path enforces the two-phase shape at the
+    /// schema level for any record carrying an `operation_id`: a second
+    /// phase (`Applied`/`Failed`) with no matching `Authorized` record
+    /// already persisted for that same `operation_id` is rejected
+    /// (`MissingAuthorization`), the same `ManagedProcessLifecycle`
+    /// discipline [`Self::launch_managed_agent_run`] below already
+    /// follows -- this is that same shape, not a new one. Unlike that
+    /// producer's own `append_required` for its first phase, this one is
+    /// best-effort (`append_observation`): closing this project's local
+    /// session has no third-party-facing accountability property to
+    /// protect (`purge_project_transcripts`'s own reasoning above
+    /// applies unchanged), so gating a real termination sequence on
+    /// whether the audit store happens to be open would cost the user
+    /// the thing they asked for and buy nothing.
+    pub fn record_safe_close_authorized(
+        &mut self,
+        project_id: ProjectId,
+        operation_id: AuditOperationId,
+    ) -> AuditObservationStatus {
+        let mut record = DurableAuditRecordV1::new(
+            AuditEventFamily::SafeCloseDecision,
+            AuditOutcome::Authorized,
+            AuditActionKind::SafeCloseTerminate,
+            AuditActorKind::User,
+            AuditActionSource::TrustedUi,
+        );
+        record.project_id = Some(project_id);
+        record.operation_id = Some(operation_id);
+        self.append_observation(&record)
+    }
+
+    /// Phase two: records the decision itself (closed, or cancelled).
+    /// Each individual terminal's own termination is
+    /// [`Self::record_plain_terminal_terminated`]'s job, already called
+    /// once per terminal before this runs -- the same "two separate
+    /// facts, two separate records" division `purge_project_transcripts`
+    /// above draws between "the deletion happened" and "here is what was
+    /// deleted." Best-effort (`append_observation`), for the same reason
+    /// [`Self::record_safe_close_authorized`] is: by the time this runs
+    /// the project has already been removed (or the user has already
+    /// declined), so a transient audit-write failure cannot and must not
+    /// roll either back.
+    pub fn record_safe_close_decision(
+        &mut self,
+        project_id: ProjectId,
+        decision: SafeCloseDecision,
+    ) -> AuditObservationStatus {
+        let record = safe_close_decision_record(project_id, decision);
+        self.append_observation(&record)
     }
 
     pub fn launch_managed_agent_run(
@@ -777,6 +863,45 @@ fn transcript_purge_record(project_id: ProjectId, outcome: AuditOutcome) -> Dura
     record.subject_kind = Some(AuditSubjectKind::Transcript);
     record.subject_ref =
         Some(AuditReference::new("project").expect("\"project\" is a valid AuditReference"));
+    record
+}
+
+/// `action_kind` is always `SafeCloseTerminate`, not a choice between it
+/// and `SafeCloseAbandon` -- this producer is only ever called on the
+/// confirmation path (a project with live terminals or an active agent
+/// run), and `SafeCloseTerminate` names exactly that: a close that had
+/// something to terminate. `subject_kind`/`subject_ref` stay `None`
+/// (`valid_safe_close` permits either `None` or `AppResource`); the
+/// project already has its own field on this record, and this decision
+/// covers the whole project's terminals together, not one at a time --
+/// naming any single one here would be arbitrary.
+fn safe_close_decision_record(
+    project_id: ProjectId,
+    decision: SafeCloseDecision,
+) -> DurableAuditRecordV1 {
+    let (outcome, operation_id) = match decision {
+        SafeCloseDecision::Closed {
+            operation_id,
+            fully_confirmed,
+        } => (
+            if fully_confirmed {
+                AuditOutcome::Applied
+            } else {
+                AuditOutcome::Failed
+            },
+            Some(operation_id),
+        ),
+        SafeCloseDecision::Cancelled => (AuditOutcome::Cancelled, None),
+    };
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::SafeCloseDecision,
+        outcome,
+        AuditActionKind::SafeCloseTerminate,
+        AuditActorKind::User,
+        AuditActionSource::TrustedUi,
+    );
+    record.project_id = Some(project_id);
+    record.operation_id = operation_id;
     record
 }
 

@@ -36,7 +36,8 @@ pub use runtime::ProjectRuntimeSummary;
 pub use session::{
     ProjectAgentActiveFileLaunchError, ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError,
     ProjectApprovalError, ProjectChangeSetError, ProjectSession, ProjectTerminalError,
-    ProjectTranscriptError, ProjectTranscriptPurgeSummary,
+    ProjectTranscriptError, ProjectTranscriptPurgeSummary, agent_run_status_is_active,
+    terminal_status_is_active,
 };
 
 #[cfg(test)]

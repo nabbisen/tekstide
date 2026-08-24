@@ -11,7 +11,7 @@ mod store;
 pub use diagnostics::{AuditDiagnosticStatus, AuditDiagnostics, AuditDiagnosticsReport};
 pub use integration::{
     AuditActionResult, AuditCoordinator, AuditHealth, AuditHealthStatus, AuditIntegrationError,
-    AuditObservationStatus, AuditedAgentLaunch, CommandDecisionActionKind,
+    AuditObservationStatus, AuditedAgentLaunch, CommandDecisionActionKind, SafeCloseDecision,
 };
 pub use path::{
     AuditPathError, AuditPathErrorReason, AuditPathRequest, AuditPathResolver, AuditStoragePath,
