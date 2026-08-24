@@ -39,6 +39,14 @@ Plus a screenshot of the board before and after.
 
 ## PR-038-B — `Ctrl+Alt+O`
 
+**Carried in from PR-038-A's review (request 297):** name `Ctrl+V` in the field's own hint,
+following `transcript-purge-dialog-hint`'s precedent. `Ctrl+V` pastes into the field and is
+named nowhere, while `Ctrl+Shift+V` — the gesture the keyboard list on that same screen teaches
+— is intercepted as a global binding, reaches `attempt_paste_into_terminal`, finds no focused
+terminal, and does nothing silently. **Do not retarget `Ctrl+Shift+V` to the field**: an action
+that silently changes destination based on focus is the surprise RFC-018 exists to prevent.
+
+
 **Build:** a `NavigationAction` for opening the field, `Candidate` with `Some("Ctrl+Alt+O")`,
 reachable when a project is already open — the second-project case PR-038-A does not serve.
 
