@@ -72,6 +72,32 @@ The field is an *entry* mechanism, not a trust decision, and RFC-032 owns granti
 run in it is refused until trust is granted through the existing `Ctrl+Alt+U` route. If that
 test is awkward to write, that is a signal worth escalating, not routing around.
 
+**Correction, 2026-08-24 (request 302).** The sentence above originally continued *"exactly as
+one added from the CLI does"*, and that equivalence was **false**. A CLI project is verified
+against the audit store by `verify_restored_trust` at `State::new()`; a project opened at
+runtime was not, because that function had exactly one caller and it ran only at boot.
+
+`add_project_session` restores a *remembered* project's trust from `recent-projects.json` —
+user-writable, and `project_board.rs` calls it "a display hint only". So a path already in that
+cache came back **`Trusted` with nothing confirming it**, for the rest of the session. A new
+project is `Restricted`; a remembered one was not, and this document asserted they were the
+same.
+
+Found by the dev team while building PR-038-D, and fixed retroactively at all three runtime
+sites — the field, the browser, and the reopen action — each calling the same already-reviewed
+`verify_restored_trust` pass, each with its own test, each independently ablated.
+
+**The reviewer accepted PR-038-A and PR-038-G without catching it**: §4 was checked for a *new*
+project, where `ProjectSession::new` sets `Restricted` unconditionally, and the adjacent case —
+a path already in the cache — was never asked about. RFC-032 response 245 had already
+established that the audit store, not the cache, is authoritative. That property held at boot
+and was lost the moment a second way to open a project existed.
+
+**Any future call site that creates a `ProjectSession` must call `verify_restored_trust` after
+a successful `Added` outcome.** Not because the surface makes a trust decision — it must not —
+but because restoring one from a user-writable file is what `add_project_session` does, and
+confirming it is what makes that safe.
+
 ## 5. Every call to `add_project_from_path` writes an audit record
 
 `project_added` is wired at the *call site*, not inside the operation — `AppState` holds no
