@@ -149,7 +149,27 @@ the PR-038-B route test fails.
 
 Additive to core's public API, so no breaking change and no version implication.
 
-## PR-038-I — one guard, so two renderers cannot diverge on escaping
+## PR-038-I — the guards slice: two, both before closeout
+
+**Guard 2 added 2026-08-24 from PR-038-F's review.**
+`scan_active_project_explorer_directory_without_navigating` is new public core API whose entire
+reason for existing is a **negative** property — it scans and does not navigate. That property is
+currently asserted only by two GUI-level tests, two layers up, through `ensure_explorer_scanned`.
+
+Same shape as the `action_catalog_key` gap request 290 corrected: a function's contract tested
+only through its one caller's composed behaviour. If a later refactor stops
+`ensure_explorer_scanned` calling it, the contract becomes untested and can silently regain
+navigation with nothing failing.
+
+**Build:** a direct core test — call the scan-only method with a project in Content mode and the
+shell on `ProjectBoard`, assert `route()`, `open_surface()` and `mode()` are all unchanged, and
+that the scan actually happened. All three accessors are public from core (`shell.rs:26`,
+`session.rs:173`, `:177`), verified before this was assigned.
+
+**Ablate** by making the scan-only method call the navigating one, GUI untouched, and confirm the
+**core** test fails — so the failure is attributable to the contract, not to a caller.
+
+## Guard 1 — so two renderers cannot diverge on escaping
 
 **Added 2026-08-24 from PR-038-G's review, and it replaces a shared-render refactor rather than
 deferring one.** PR-038-G shipped `browse_row_line`/`browse_node_line`/`browse_tree_lines` as a
