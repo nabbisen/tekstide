@@ -15,7 +15,7 @@ created: "2026-08-19"
 > `Child::drop` does not kill the process, so **any test that panics before reaching its own
 > cleanup leaks a shell process**
 
-Since then, **three distinct tests** have been reported failing intermittently under the
+Since then, **four distinct tests** have been reported failing intermittently under the
 resulting pressure, each disclosed separately and each moved past:
 
 | test | first reported |
@@ -23,6 +23,20 @@ resulting pressure, each disclosed separately and each moved past:
 | `approval::tests::channel::bind_recovers_from_a_stale_socket_file` | the original, response 213 |
 | `approval::tests::coordinator::agent_run_queue_limit_is_enforced_and_only_counts_live_entries` | request 260 |
 | `command_approval_family_produces_real_durable_audit_records_through_the_pipeline` | request 276 |
+| `shell::tests::a_real_low_risk_proposal_is_received_mirrored_and_stays_queued_without_promoting` | request 296 (2026-08-24) |
+
+**The fourth was added 2026-08-24 and the count above was edited with it**, because "three
+distinct tests" is a count, and `ARCHITECTURE.md` records counts as state-asserting text that a
+reference sweep cannot find. This document would otherwise have gone on saying three while
+naming four, which is the failure it exists to describe, in the document describing it.
+
+The fourth arrives through the same machinery as the others — `launch_real_managed_agent_run`
+and `poll_approval_channels_until`, i.e. a real adapter process over a real socket — so it is
+not a new cause. It was disclosed by the implementer with the correct reasoning attached: their
+change touched only `rfc_docs_invariants.rs`, a separate test binary, so it cannot be the
+source. **Not reproduced by the reviewer**, deliberately: this document's own instruction is not
+to chase the symptoms individually, and a 3-in-150 event is not worth a sampling run to
+re-observe what is already diagnosed.
 
 Every one of those disclosures was the right individual call — reported rather than re-run
 past, confirmed non-deterministic in isolation, not attributed to the slice that saw it.
@@ -31,7 +45,10 @@ repaired, and each new symptom costs a reviewer and an implementer the time to e
 the same old thing.
 
 Measured rate, from the sampling already recorded: **3 failures in 150 full-suite runs.** Not
-enough to block work. Enough that every contributor will meet it.
+enough to block work. Enough that every contributor will meet it. That figure is from the
+original sampling and has not been re-measured since; treat it as a floor rather than a current
+rate, given that the number of distinct tests observed failing has grown from three to four
+without anyone re-running the sample.
 
 ## Why it matters beyond tidiness
 
