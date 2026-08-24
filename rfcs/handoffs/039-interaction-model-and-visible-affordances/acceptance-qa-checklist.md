@@ -21,10 +21,18 @@ Every unchecked line at closeout carries a stated reason.
 
 ## The strip
 
-- [ ] Renders in Content mode **and** Terminal Immersion; screenshots of both.
-- [ ] Project names escaped and bounded; bidi-override fixture test passes.
-- [ ] Active project distinguishable **without relying on colour alone**.
-- [ ] Every control keyboard-operable as well as clickable.
+- [x] Renders in Content mode **and** Terminal Immersion; screenshots of both.
+      `evidence/pr-039-a/content-mode-workspace-two-tabs.png`,
+      `evidence/pr-039-a/terminal-immersion-two-tabs.png` -- `qa-evidence.md`'s PR-039-A section.
+- [x] Project names escaped and bounded; bidi-override fixture test passes.
+      `shell::tests::tab_label_escapes_a_bidi_override_in_the_display_name`,
+      `tab_label_truncates_a_long_display_name_with_an_ellipsis_marker`.
+- [x] Active project distinguishable **without relying on colour alone**.
+      `shell::tests::tab_label_marks_the_active_project_and_not_the_inactive_one` -- a textual
+      marker (`focus_marker`) independent of the border-colour channel (`zone_style`).
+- [ ] Every control keyboard-operable as well as clickable. **Not yet -- PR-039-A is read-only by
+      its own design** ("it shows, it does not yet act"); no control exists yet to be either
+      clickable or keyboard-operable. Pending PR-039-B, which adds the first ones.
 
 ## Switching and going home
 

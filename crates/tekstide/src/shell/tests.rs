@@ -9118,3 +9118,137 @@ fn browsing_to_a_cached_trusted_but_unconfirmed_recent_project_demotes_to_restri
          even when the path arrived through the browser, not the board"
     );
 }
+
+// RFC-039 PR-039-A: the project tab strip -- read-only this slice.
+// `tab_label` is the pure, testable half (the rendered string); the
+// strip's own presence/absence (`project_tab_strip`) is checked at the
+// `Option` boundary, the same "test the string, not the Element tree"
+// split every other rendered surface in this crate already uses.
+
+fn fixture_project_session(display_name: &str) -> tekstide_core::project::ProjectSession {
+    tekstide_core::project::ProjectSession::new(
+        tekstide_core::project::ProjectId::new_uuid(),
+        display_name,
+        "/home/user/demo",
+        "/home/user/demo",
+    )
+}
+
+/// The colour-independence rule (RFC-015) applied to the tab strip's
+/// own marker, the same shape `focus_marker_differs_and_is_not_colour_dependent`
+/// already establishes for the generic helper -- proven here at the
+/// call site that actually uses it for a tab.
+#[test]
+fn tab_label_marks_the_active_project_and_not_the_inactive_one() {
+    let project = fixture_project_session("demo-project");
+
+    let active_label = super::tab_label(&project, true);
+    let inactive_label = super::tab_label(&project, false);
+
+    assert_ne!(active_label, inactive_label);
+    assert!(active_label.starts_with("> "));
+    assert!(inactive_label.starts_with("  "));
+}
+
+/// **D3's own requirement, and `what-closing-a-project-must-not-lose.md`
+/// §5**: the strip is trusted chrome, not the RFC-016 terminal-grid
+/// exception -- a project name carrying a live bidi override must
+/// render escaped, the same bidi-override fixture this project already
+/// uses for the recent-projects state (RFC-032/038).
+#[test]
+fn tab_label_escapes_a_bidi_override_in_the_display_name() {
+    let project = fixture_project_session("proj\u{202E}gpj.exe");
+
+    let label = super::tab_label(&project, false);
+
+    assert!(
+        label.contains("<U+202E>"),
+        "the override must be escaped to its visible marker: {label:?}"
+    );
+    assert!(
+        !label.contains('\u{202E}'),
+        "the real override character must never reach the rendered label: {label:?}"
+    );
+}
+
+/// The opposite-direction check this project's own convention asks for
+/// (response 175/176): a plain, non-hostile name renders with no escape
+/// marker, so the bidi test above is exercising real escaping, not a
+/// coincidence of that particular fixture.
+#[test]
+fn an_ordinary_tab_name_renders_without_any_escape_marker() {
+    let project = fixture_project_session("demo-project");
+
+    let label = super::tab_label(&project, false);
+
+    assert!(label.contains("demo-project"));
+    assert!(!label.contains("<U+"));
+}
+
+/// **PR-039-A's own bound**: "escaped, and bounded so one long name
+/// cannot push the strip off-screen." Truncated to
+/// `MAX_TAB_NAME_DISPLAY_CHARS`, marked with an ellipsis -- the same
+/// truncate-then-escape order `path_field_error_text` already
+/// establishes, proven here for the strip's own, shorter bound.
+#[test]
+fn tab_label_truncates_a_long_display_name_with_an_ellipsis_marker() {
+    let long_name = "a".repeat(200);
+    let project = fixture_project_session(&long_name);
+
+    let label = super::tab_label(&project, false);
+
+    assert!(
+        label.contains('\u{2026}'),
+        "an over-bound name must be marked with an ellipsis: {label:?}"
+    );
+    assert!(
+        !label.contains(&"a".repeat(200)),
+        "the full 200-character name must not reach the rendered label unbounded: {label:?}"
+    );
+}
+
+/// The strip renders nothing when no project is open -- there is
+/// nothing yet to show a tab for.
+#[test]
+fn the_project_tab_strip_shows_nothing_with_no_project_open() {
+    let state = state_with(ApplicationShell::new());
+
+    assert!(super::project_tab_strip(&state).is_none());
+}
+
+/// The strip shows something once a real project is open -- proven
+/// against the real `State`, not just the `Option` boundary in
+/// isolation, so a wiring mistake (e.g. reading the wrong `AppState`
+/// accessor) would be caught the same way `sidebar_label_reflects_focus`
+/// already catches an equivalent mistake for the sidebar.
+#[test]
+fn the_project_tab_strip_shows_something_once_a_project_is_open() {
+    let (state, _project_id) = state_with_a_real_project("tab-strip-presence");
+
+    assert!(super::project_tab_strip(&state).is_some());
+}
+
+/// **PR-039-A's own evidence requirement**: the strip survives Terminal
+/// Immersion, not only Content mode -- `view()`'s own `column![top_bar,
+/// content_area, status_bar]` composition runs in every mode, and this
+/// proves the strip specifically (not just the composition) does too,
+/// since `top_bar` reads `state.app_shell.state()` directly rather than
+/// anything mode-gated.
+#[test]
+fn the_project_tab_strip_survives_terminal_immersion() {
+    let (mut state, _project_id) = state_with_a_real_project("tab-strip-terminal-immersion");
+    state
+        .app_shell
+        .dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "test precondition: the active project must be in Terminal Immersion"
+    );
+
+    assert!(super::project_tab_strip(&state).is_some());
+}

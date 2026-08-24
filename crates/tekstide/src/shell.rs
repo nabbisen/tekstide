@@ -4361,8 +4361,21 @@ fn chrome_style(
     }
 }
 
+/// RFC-039 D1: the project tab strip lives in this existing chrome,
+/// composed here alongside the title rather than as a fourth top-level
+/// row -- `view()`'s own `column![top_bar, content_area, status_bar]`
+/// already runs in every mode, Terminal Immersion included, so nothing
+/// new needs to be threaded through that composition for the strip to
+/// survive every route/mode the title already does.
 fn top_bar(state: &State) -> Element<'_, Message> {
-    container(text(state.window_title()).size(state.theme.font_size_heading()))
+    let mut content =
+        column![text(state.window_title()).size(state.theme.font_size_heading())].spacing(6);
+
+    if let Some(strip) = project_tab_strip(state) {
+        content = content.push(strip);
+    }
+
+    container(content)
         .width(Length::Fill)
         .padding(8)
         .style(chrome_style(
@@ -4371,6 +4384,69 @@ fn top_bar(state: &State) -> Element<'_, Message> {
             state.theme.border_default(),
         ))
         .into()
+}
+
+/// RFC-039 PR-039-A: the project tab strip -- read-only this slice (it
+/// shows which projects are open; PR-039-B wires switching and going
+/// home, adding the permanent leftmost "Projects" entry D1 describes,
+/// absent here on purpose). One tab per open project, in
+/// `AppState::projects()`'s own order, the active one distinguished
+/// through two independent channels: `zone_style`'s border treatment
+/// (colour and width, the same focused/unfocused pair every other zone
+/// in this crate already uses) and `focus_marker`'s textual prefix --
+/// RFC-015's own rule that a focus indicator must never depend on
+/// colour alone. Renders nothing when no project is open: there is
+/// nothing yet to show a tab for, and `top_bar` simply omits this row
+/// in that case.
+fn project_tab_strip(state: &State) -> Option<Element<'_, Message>> {
+    let projects = state.app_shell.state().projects();
+    if projects.is_empty() {
+        return None;
+    }
+    let active_id = state.app_shell.state().active_project_id();
+
+    let tabs: Vec<Element<'_, Message>> = projects
+        .iter()
+        .map(|project| {
+            let active = Some(project.id()) == active_id;
+            container(text(tab_label(project, active)).size(state.theme.font_size_body()))
+                .padding(6)
+                .style(zone_style(state.theme, active))
+                .into()
+        })
+        .collect();
+
+    Some(row(tabs).spacing(4).into())
+}
+
+/// The strip's own bound -- shorter than
+/// [`MAX_PATH_FIELD_ERROR_DISPLAY_CHARS`] (a single notice's own
+/// embedded path) since several of these render side by side in one
+/// fixed-width row; one long name must not push the rest of the strip
+/// off-screen. Truncate-then-escape, the same order
+/// `path_field_error_text` already establishes and for the same reason:
+/// escaping expands text (a marker is several characters), so
+/// truncating after escaping could cut one in half.
+const MAX_TAB_NAME_DISPLAY_CHARS: usize = 24;
+
+/// A tab's own rendered label -- the marker plus the escaped, bounded
+/// display name -- factored out from [`project_tab_strip`] for the same
+/// testability reason every other rendered-string function in this
+/// crate already is: the rendered string, not the `Element` tree.
+/// `project.display_name()` is filesystem-derived and untrusted
+/// (RFC-016), the same discipline `board::row_lines` already applies to
+/// the identical field on the Project Board -- this is trusted chrome
+/// (the top bar), not the RFC-016 terminal-grid exception, so escaping
+/// is required here too
+/// (`what-closing-a-project-must-not-lose.md` §5, D3).
+pub(crate) fn tab_label(project: &tekstide_core::project::ProjectSession, active: bool) -> String {
+    let raw_name = project.display_name();
+    let mut truncated: String = raw_name.chars().take(MAX_TAB_NAME_DISPLAY_CHARS).collect();
+    if raw_name.chars().count() > MAX_TAB_NAME_DISPLAY_CHARS {
+        truncated.push('\u{2026}');
+    }
+    let quoted = tekstide_core::text_safety::quote_untrusted(&truncated);
+    format!("{}{}", focus_marker(active), quoted)
 }
 
 /// The route symbol `status_bar_summary` selects on -- a compile-time
