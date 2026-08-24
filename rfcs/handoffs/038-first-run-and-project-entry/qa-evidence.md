@@ -687,15 +687,80 @@ explicitly, not merely counted" shape every enumeration test in this crate alrea
 `add_project_from_path` or any audit producer -- purely a structural split of an existing,
 already-reviewed scan into two entry points that do less than the one they were carved from.
 
+## PR-038-I — the guards slice: two, both before closeout
+
+**Guard 2, added 2026-08-24 from PR-038-F's own review response.**
+`scan_active_project_explorer_directory_without_navigating` is new public core API whose entire
+reason for existing is a *negative* property -- it scans and does not navigate. Before this
+slice that property was asserted only by two GUI-level tests, two layers up, through
+`ensure_explorer_scanned` (PR-038-F's own qa-evidence.md section). Same shape as the
+`action_catalog_key` gap response 290 corrected: a function's contract tested only through its
+one caller's composed behaviour, so a later refactor that stops `ensure_explorer_scanned` calling
+it would leave the contract untested and able to silently regain navigation with nothing failing.
+
+**Build.** A direct core test, `shell::tests::scan_active_project_explorer_directory_without_navigating_touches_nothing_but_the_scan`
+(`crates/tekstide-core/src/shell/tests.rs`) -- adds a project (which, by
+`ApplicationShell::new`/`ProjectSession::new`'s own defaults, already leaves the shell on
+`ProjectBoard` with the project in `Content` mode, so no extra setup is needed to reach the exact
+state the scan-only method exists to leave undisturbed), calls the scan-only method directly,
+and asserts `route()`, `open_surface()`, and `mode()` are all unchanged, plus that
+`content_workspace().explorer_scan()` is genuinely `Some` -- the scan itself still happened. All
+three accessors were confirmed public before this was assigned (`shell.rs:26`, `session.rs:173`,
+`:177`).
+
+**Ablated**: made `ApplicationShell::scan_active_project_explorer_directory_without_navigating`
+delegate to the navigating method instead of `AppState`'s own scan-only one -- the **core** test
+failed (`route()` read back `ActiveProjectWorkspace`, not `ProjectBoard`), with no GUI code
+touched, so the failure is attributable to the core contract itself, not to a caller; reverted.
+
+**Guard 1, added 2026-08-24 from PR-038-G's own review response** -- replaces a shared-render
+refactor rather than deferring one (that decision was already made in PR-038-G's own response;
+this slice only builds the guard). The risk in `surface/explorer.rs`'s two renderers
+(`view`/`node_line`/`tree_lines` and PR-038-G's `browse_view`/`browse_node_line`/`browse_tree_lines`)
+is not volume, it is escaping divergence -- both render filesystem-derived names, and if one
+later gains a fix the other does not, that is a security divergence, not a tidiness problem.
+
+**Build.**
+`surface::explorer::tests::every_untrusted_value_this_module_hands_the_catalog_was_escaped_first`
+-- a count-equality invariant over `surface/explorer.rs`'s own source text: the number of
+`.untrusted(` call sites equals the number of `quote_untrusted(` calls (both **4** today, matching
+what response 300 verified before assigning this). Per `ARCHITECTURE.md`'s enumeration-test unit
+rule the unit is the call site, not the file, so a future renderer that passes an unescaped name
+to `.untrusted(` changes one count but not the other and fails. Deliberately scoped to this module
+only -- `board.rs` reads a different shape (0 `.untrusted(`, escapes and renders through a
+different path) and extending the same invariant there without first deciding what it should mean
+would produce a count-equality that is false for correct code, per the task's own caution.
+
+**Ablated**: added a second, unmatched `.untrusted(` call inside `browse_node_line` (reusing the
+already-escaped `name` local, so the ablation is purely about the *count*, not a real unescaped
+value reaching a real render) -- failed (6 `.untrusted(` sites, 4 `quote_untrusted(` calls);
+reverted. Not the exact mechanic the task breakdown named ("removing one `quote_untrusted` call")
+but the identical property: an unbalanced count fails the same assertion either direction.
+
+**Gates.** `cargo build`, `cargo test --workspace --all-targets --all-features` (359 tekstide +
+725 tekstide-core, up from 358/724; 0 failed), `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`, `git diff --check` -- all
+clean.
+
+**Security.** Both guards are pure test additions -- no production code changed, no new render
+path, no new I/O.
+
+## PR-038-E — closeout
+
+_Pending._
+
 ## Known limitations (RFC-038-wide)
 
-As of PR-038-A/B/C/D/F/G:
+As of PR-038-A/B/C/D/F/G/I:
 
 - **The folder browser's render layer duplicates the project explorer's own** (`browse_view` and
   siblings, alongside `view`/`node_line`/`tree_lines`), rather than sharing it -- disclosed and
-  flagged for the architect's decision in PR-038-G's own qa-evidence.md section above, not
-  silently absorbed. Possible follow-up: extract a shared render helper once the reviewer decides
-  the shape it should take.
+  flagged for the architect's decision in PR-038-G's own qa-evidence.md section above. **Resolved
+  in PR-038-I**: a shared render helper was decided against (forcing `BrowseNode` through
+  `ExplorerNode`'s shape would reintroduce the dishonest-field problem the core split exists to
+  avoid); a mechanical count-equality guard over `.untrusted(`/`quote_untrusted(` call sites
+  prevents the two renderers from diverging on escaping instead. Revisit only if a third browser
+  ever appears.
 - **A recent project reopened mid-session does not update the on-disk `recent-projects.json`
   cache's own timestamps.** Only `boot()` writes that file, once, at startup -- disclosed in
   PR-038-D's own qa-evidence.md section above, pre-existing behaviour this slice did not

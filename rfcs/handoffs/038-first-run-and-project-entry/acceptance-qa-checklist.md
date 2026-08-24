@@ -104,13 +104,15 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
       button itself), plus a screenshot of the browser itself.
       `evidence/pr-038-g/after-real-mouse-click-opens-browser.png` through
       `after-space-commits-project-without-typing.png`.
-- [ ] **Disclosed, not silently resolved**: does not reuse RFC-019's explorer renderer as the
-      task breakdown asked ("do not write a second directory renderer") -- `browse_view` and its
+- [x] **Disclosed, then decided.** Does not reuse RFC-019's explorer renderer as the task
+      breakdown asked ("do not write a second directory renderer") -- `browse_view` and its
       siblings are a near-duplicate of `view`/`node_line`/`tree_lines`. Core scanning could not
       honestly reuse `FileExplorerScanner`/`ExplorerDirectoryScan` (project-root-relative by
-      construction; no project exists yet at browse time) -- see `qa-evidence.md`'s own PR-038-G
-      section for the full reasoning. Left unchecked deliberately: this is a question for the
-      architect's decision, not a completed item.
+      construction; no project exists yet at browse time). **Decision (response 300, guard built
+      in PR-038-I)**: a shared render helper is not required -- forcing `BrowseNode` through
+      `ExplorerNode`'s shape would reintroduce the dishonest-field problem the core split exists
+      to avoid; a mechanical escaping-count guard prevents the real risk (divergence) instead.
+      `qa-evidence.md`'s own PR-038-G and PR-038-I sections.
 
 ## Recent projects (PR-038-D)
 
@@ -145,22 +147,25 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
       sites it also closed), two in PR-038-F (`ensure_explorer_scanned` pointed back at the
       navigating method, checked against both of the two pre-existing regression tests its own
       side effects used to break -- `open_surface`, response 233's own test; `route`, PR-038-B's
-      own test, only meaningful once that slice's route workaround was itself reverted). Each
-      reverted after confirming the expected failure. See `qa-evidence.md`.
+      own test, only meaningful once that slice's route workaround was itself reverted), two in
+      PR-038-I (the new core contract test, ablated against the core method itself with no GUI
+      touched; the new escaping-count guard, ablated with an added unmatched `.untrusted(` call).
+      Each reverted after confirming the expected failure. See `qa-evidence.md`.
 - [x] Flakes disclosed, not re-run past; any fifth symptom of the approval/socket flake reported
       as a disclosure rather than attributed to this work. PR-038-B's run hit three (all
       already-named). PR-038-C's own run separately hit a fourth already-named symptom
       (`command_approval_family_produces_real_durable_audit_records_through_the_pipeline`,
       confirmed passing in isolation) — and, distinctly, the PTY-exhaustion cascade recorded in
       `qa-evidence.md`'s own PR-038-C section, which is a different, newly-disclosed defect, not
-      a fifth symptom of the approval/socket one. PR-038-G's own run hit none. PR-038-D's and
-      PR-038-F's own runs hit none either.
-- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-F's
-      own state (358 tekstide + 724 tekstide-core, 0 failed).
+      a fifth symptom of the approval/socket one. PR-038-G's own run hit none. PR-038-D's,
+      PR-038-F's, and PR-038-I's own runs hit none either.
+- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-I's
+      own state (359 tekstide + 725 tekstide-core, 0 failed).
 - [x] Known limitations stated, including anything this slice leaves unreachable.
-      `qa-evidence.md`'s "Known limitations" section, now "as of PR-038-A/B/C/D/F/G," including
-      the render-layer duplication and the recent-cache staleness note both disclosed and
-      flagged above. PR-038-F itself left no new limitation -- structural only.
+      `qa-evidence.md`'s "Known limitations" section, now "as of PR-038-A/B/C/D/F/G/I," including
+      the recent-cache staleness note. The render-layer duplication note is now marked resolved
+      (guarded, not shared) rather than open. PR-038-F and PR-038-I both left no new limitation --
+      structural/test-only.
 
 ## Final Acceptance Decision
 

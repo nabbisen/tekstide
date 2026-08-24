@@ -380,6 +380,65 @@ fn explorer_scan_from_terminal_mode_forces_content_mode() {
     assert!(shell.render_text().contains("explorer: ready"));
 }
 
+/// RFC-038 PR-038-F/I (response 303's own required follow-up): the
+/// exact negative of the test immediately above -- the scan-only entry
+/// point's whole reason for existing is what it does *not* do, and that
+/// contract must be tested directly against this method, not only
+/// through `tekstide`'s `ensure_explorer_scanned` two layers up. A fresh
+/// project starts on `ProjectBoard`/`Content` already
+/// (`ApplicationShell::new`/`ProjectSession::new`'s own defaults), so no
+/// extra setup is needed to put the shell in the exact state the scan-
+/// only method exists to leave undisturbed.
+#[test]
+fn scan_active_project_explorer_directory_without_navigating_touches_nothing_but_the_scan() {
+    let sandbox = TestSandbox::new("shell-scan-only-contract");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/file.txt", b"original\n");
+    let mut shell = ApplicationShell::new();
+    let project_id = shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added")
+        .project_id()
+        .clone();
+    assert_eq!(
+        shell.route(),
+        AppRoute::ProjectBoard,
+        "test precondition: a freshly added project leaves the board route untouched"
+    );
+    let project_before = shell.state().project(&project_id).unwrap();
+    assert_eq!(
+        project_before.mode(),
+        ProjectMode::Content,
+        "test precondition: a fresh project starts in Content mode"
+    );
+    let open_surface_before = project_before.open_surface();
+
+    shell
+        .scan_active_project_explorer_directory_without_navigating("")
+        .expect("project root should scan");
+
+    assert_eq!(
+        shell.route(),
+        AppRoute::ProjectBoard,
+        "the scan-only method must never touch route"
+    );
+    let project = shell.state().project(&project_id).unwrap();
+    assert_eq!(
+        project.mode(),
+        ProjectMode::Content,
+        "the scan-only method must never touch mode"
+    );
+    assert_eq!(
+        project.open_surface(),
+        open_surface_before,
+        "the scan-only method must never touch open_surface"
+    );
+    assert!(
+        project.content_workspace().explorer_scan().is_some(),
+        "the scan itself must still have genuinely happened"
+    );
+}
+
 #[test]
 fn opening_text_document_from_terminal_mode_forces_content_mode() {
     let sandbox = TestSandbox::new("shell-content-forces-mode");
