@@ -71,7 +71,7 @@ dialogs across RFC-032/033/038/039 but not to what happens once they are open. N
 document is fixing (build nothing); recording it as the shape of the gap so whoever picks it up
 does not have to re-derive it modal by modal.
 
-## Finding 2 — nine of thirteen live global actions have no visible control anywhere
+## Finding 2 — ten of thirteen live global actions have no visible control anywhere
 
 `KeybindingPolicy::linux_mvp()` has seventeen rules: one `Reserved`, thirteen `Candidate` (live,
 with a real binding), three `Configurable` with `default_binding: None` (dead — the ones the task
@@ -94,12 +94,12 @@ click-inventory above:
 | `OpenTrustSettings` | `Ctrl+Alt+U` | **none** |
 | `OpenHelp` | `Ctrl+Alt+K` | **none** |
 
-Three have one. Nine do not, at all — not "hard to find," genuinely absent from the ten-entry
+Three have one. Ten do not, at all — not "hard to find," genuinely absent from the ten-entry
 inventory above. `ToggleProjectMode`, `LaunchTerminal`, and `SaveActiveDocument` are worth naming
 specifically: these are not edge-surface actions, they are core, constantly-used workflow steps
 (switch between editing and a terminal, open a shell, save a file), and none has a button, icon,
 or menu item anywhere. A user who has not memorized the keybinding table cannot perform any of
-these nine actions at all.
+these ten actions at all.
 
 Two notes, so this table is not read as flatter than it should be:
 
@@ -109,7 +109,8 @@ Two notes, so this table is not read as flatter than it should be:
   typed path is not an acceptable primary way to choose a folder. Read generously, this keybinding
   is a power-user accelerator to an alternate input mode for a workflow that already has a visible
   control, not a workflow with none. Read strictly, the action itself still has no control of its
-  own. Recorded as the more defensible of the nine; not removed from the count.
+  own. Recorded as the more defensible of the ten; not removed from the count -- the *action*
+  has none, even though its *workflow* does, and the count is of actions.
 - **`PasteIntoTerminal`** (`Ctrl+Shift+V`) is a near-universal terminal-emulator convention with
   no obvious visible-button equivalent in comparable tools either (most terminal emulators don't
   put a "Paste" button in their own chrome). Plausibly a legitimate, accepted exception to the

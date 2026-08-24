@@ -430,7 +430,7 @@ findings, with the exhaustive method behind each, in
   Confirmed by direct inspection of every modal's own view function (`button(` count: 0, in all
   nine, no exception). Generalizes response 312's own question about `ProjectCloseModal`
   specifically to the whole crate.
-- **Nine of thirteen live global actions have no visible control anywhere in the
+- **Ten of thirteen live global actions have no visible control anywhere in the
   application** -- `ToggleProjectMode`, `LaunchTerminal`, `PasteIntoTerminal`,
   `SaveActiveDocument`, `LaunchAgentRun`, `OpenCurrentAgentRunDetail`, `OpenApprovalHistory`,
   `OpenTrustSettings`, `OpenHelp`, and (more defensibly, since `OpenFolderBrowser`'s own button
@@ -466,7 +466,7 @@ PR-039-A/B/C's own evidence directories.
 
 *"Every workflow claimed as served names the control the user sees, not the keystroke that also
 works."* True of every workflow this RFC's own three build slices (A/B/C) actually built. **Not**
-true of the wider application -- the affordance audit above found nine live, pre-existing actions
+true of the wider application -- the affordance audit above found ten live, pre-existing actions
 this RFC did not touch that have no visible control at all. This criterion is answered for what
 RFC-039 shipped, not as a claim about the whole product; the audit is what keeps that distinction
 honest rather than implicit.
@@ -480,7 +480,7 @@ silently replaced file.
 
 ## Known limitations (RFC-039-wide)
 
-- **Nine of the application's thirteen live global actions have no visible control** --
+- **Ten of the application's thirteen live global actions have no visible control** --
   `affordance-audit.md`'s Finding 2, table and both notes. Out of this RFC's own fix-scope (it
   built the tab strip and the close flow, not a whole-application affordance pass); recorded so it
   is a stated limitation, not a silent gap.

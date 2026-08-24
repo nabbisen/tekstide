@@ -19,7 +19,7 @@ Every unchecked line at closeout carries a stated reason.
       has a real, clicked-in-live-evidence control across PR-039-A/B/C.
 - [x] Every workflow claimed as served names **the control the user sees**, not the keystroke
       that also works. True of everything PR-039-A/B/C themselves built. **Not** true of the wider
-      application -- `affordance-audit.md`'s Finding 2 found nine live, pre-existing actions this
+      application -- `affordance-audit.md`'s Finding 2 found ten live, pre-existing actions this
       RFC did not touch with no visible control at all. Answered for what shipped, not as a claim
       about the whole product; see `qa-evidence.md`'s own worded answer and the "Known
       limitations" section below.
@@ -103,7 +103,7 @@ Every unchecked line at closeout carries a stated reason.
       *entire* mouse-clickable inventory (ten `.on_press` sites, the complete set — verified by
       grep, not sampled) cross-referenced against both `NavigationAction` and every modal's own
       decision (`affordance-audit.md`'s Finding 1).
-- [x] Anything with no control **reported as a finding**, not given a keybinding. Nine live
+- [x] Anything with no control **reported as a finding**, not given a keybinding. Ten live
       actions and all nine modals' own decisions -- reported in `affordance-audit.md`, nothing
       quietly wired.
 
