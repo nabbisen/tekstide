@@ -168,6 +168,47 @@ Under Option B, with the amendments landed first:
 - **PR-020-C** — the AgentRun report surface. Renders transcript content within RFC-011's bounds, escaped.
 - **PR-020-D** — closeout, with the claim statement checked against this RFC's own text.
 
+## Scoping addendum, 2026-08-25 — the remaining surface is unblocked
+
+Requested by the human owner. Every structural prerequisite that blocked this RFC in August is
+now resolved; what remains is the surface itself, which is ordinary slice work rather than a
+blocker.
+
+**Checked, not assumed:**
+
+| Leg | State |
+| --- | --- |
+| A `ChangeSet` can exist in production | **Yes.** `attempt_generated_change_detection` (`shell.rs`) creates one for real when an agent run's terminal exits — wired 2026-08-18 by the change-detection-wiring handoff |
+| The GUI can read them | **Yes.** `ProjectSession::change_sets()` is public |
+| A bounded projection exists | **Yes.** `ChangeSet::bounded_summary(limit)` / `default_summary()` produce `ChangeSetSummary`, which already carries `changed_file_count`, `shown_changed_files`, **`omitted_changed_file_count`** and `detection_status` |
+| A route to the surface | **No.** `OpenDiffReview` is `Configurable` with **no binding** — one of the three dead actions the RFC-039 affordance audit enumerates |
+| A render arm | **No.** No change-review surface module exists |
+| A visible control | **No.** Per the same audit: ten of thirteen live actions have none |
+
+The projection is better placed than expected. `omitted_changed_file_count` makes truncation
+explicit rather than silent, and `detection_status` carries the coverage limitation — which is
+exactly what this RFC requires the surface to state ("a change surface that implies *these are
+all the changes* would overclaim what detection can see"). The surface does not have to invent
+that discipline; it has to render what the projection already distinguishes.
+
+**Correction — this RFC's own slice lettering is wrong, and has already misled once.**
+
+The Slices section below says PR-020-B is *the change review surface* and PR-020-C is *the
+AgentRun report surface*. **What shipped as PR-020-B in `0.12.0` was the AgentRun report**
+(`Ctrl+Alt+R`), the opposite of what that list says. The architect mislabelled the two once
+already when recommending scope to the owner, on the strength of this same list.
+
+The list is left as written — it is what was accepted — but **the remaining slice is the change
+review surface, whatever letter is used for it.** Do not hand off "PR-020-C" without saying
+which surface is meant. The next handoff should name the surface and drop the letter.
+
+**What the remaining slice must carry** (from this RFC's own text, unchanged): AgentRun output
+and file paths are untrusted and escaped; the surface must not present a change as safe, and
+must state the metadata-only limitation **on the surface** rather than only in documentation;
+the reader must not become a second retention policy. And, from RFC-039's audit: a visible
+control, not only a keybinding — the third reachability principle applies to this surface as it
+does to every other.
+
 ## Risks
 
 - **Mis-sized as a rendering RFC.** The whole point of the section above. Mitigated by the Option A/B decision being made before implementation starts.
