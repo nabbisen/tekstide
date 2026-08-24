@@ -1,6 +1,6 @@
 ---
 title: "The leaked-child test flake — cause known since 2026-08-16, still unfixed"
-status: "Complete 2026-08-20 — accepted (request 282). Fixes the leak at its source; the socket flake is a separate, still-open defect"
+status: "Leak fixed at the two approval call sites 2026-08-20 (request 282); **a second, distinct cause remains unfixed** in runtime/terminal/launch.rs, found 2026-08-24 (request 299). The socket flake is separate and also unfixed"
 rfc_file: "none — a test-harness defect, not product behaviour"
 target_milestone: "M12"
 created: "2026-08-19"
