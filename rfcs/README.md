@@ -25,7 +25,9 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 038 | [First-Run and Project Entry](./proposed/038-first-run-and-project-entry.md) | **Proposed 2026-08-22**, the day the owner ran the `0.12.0` executable and found no way to do anything with it. There is no in-app route to open a project: the only production caller of `add_project_from_path` is a command-line argument. `0.12.1` corrected the empty state, which had rendered "Add Project" and "Open from path" as inert labels for actions that do not exist, and added the keyboard list and `--help` — a correction, not a fix. This RFC is the fix |
+
+*(empty — and that is the correct state. An empty `proposed/` means nothing is awaiting review,
+not that a folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
 
 ## Accepted
 
@@ -35,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 038 | [First-Run and Project Entry](./accepted/038-first-run-and-project-entry.md) | **Accepted 2026-08-24. M12, first — ahead of RFC-020 PR-020-C.** There is no in-app route to open a project: the only production caller of `add_project_from_path` is a command-line argument, so a user who runs the binary with no path can do nothing from inside the window. `0.12.1` made the empty state tell the truth and added the keyboard list and `--help`; this RFC adds the missing action. Three design questions decided on acceptance (path field over portal picker, focus-plus-`Ctrl+Alt+O`, help surface in-scope as its own PR) and both open questions settled — recent-projects reopen is in, last and droppable only by the owner; the failure path renders a bounded escaped diagnostic instead of exiting. [Handoff pack](./handoffs/038-first-run-and-project-entry/README.md) |
 | 020 | [Diff Review and AgentRun Report Surfaces](./accepted/020-diff-review-and-agentrun-report.md) | **Accepted, partially implemented.** PR-020-B (transcript reader + AgentRun report surface) implemented in full 2026-08-18, `Ctrl+Alt+R` reachable from a real key press. PR-020-C (change review surface) and PR-020-D (closeout) remain, PR-020-C blocked on its own `DetectedChanges` projection. [Handoff pack](./handoffs/020-diff-review-and-agentrun-report/README.md); PR-020-B's own slice handoff and evidence in the same pack |
 | 034 | [Change Review Actions and Review State](./accepted/034-change-review-actions-and-review-state.md) | **Accepted 2026-08-18.** Gives `transition_change_set_review_state` a route, and decides the question RFC-020's Q3 deferred: whether a review decision is a record or an operation. Blocked on RFC-020 |
 | 035 | [Change Detection Coverage and Disclosure](./accepted/035-change-detection-coverage-and-disclosure.md) | **Accepted 2026-08-18.** The `.git/hooks/` supervision hole and `max_changed_paths` discarding a computed list; the exit-only trigger and non-persistent baseline recorded and deferred |
@@ -91,6 +94,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 018 | [Rendered Paste Protection and Trusted-UI Evidence](./handoffs/018-paste-protection-and-trusted-ui-evidence/README.md) |
 | 019 | [Editor and Explorer Surfaces](./handoffs/019-editor-and-explorer-surfaces/README.md) |
 | 020 | [Diff Review and AgentRun Report Surfaces](./handoffs/020-diff-review-and-agentrun-report/README.md) — **PR-020-B implemented in full 2026-08-18** ([slice handoff](./handoffs/020-diff-review-and-agentrun-report/pr-020-b-report-surface.md)): reader landed 2026-08-15, the AgentRun report surface (`Ctrl+Alt+R`, escaped transcript content, reader-window-vs-writer-truncation rendered distinctly) landed 2026-08-18. PR-020-C (change review surface) remains blocked on its own `DetectedChanges` projection |
+| 038 | [First-Run and Project Entry](./handoffs/038-first-run-and-project-entry/README.md) — **M12, first**; the product's missing door |
 | 024 | [Diff Preview Policy](./handoffs/024-diff-preview-policy/README.md) |
 | — | [Minimal user documentation](./handoffs/minimal-user-documentation.md) — no RFC; pulled forward from RFC-029 to M9 |
 | — | [The reachability audit](./handoffs/reachability-audit.md) — no RFC; run 2026-08-17, findings carried into RFC-023, RFC-031 and RFC-036 |

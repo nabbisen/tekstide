@@ -1,9 +1,14 @@
 # RFC-038: First-Run and Project Entry
 
-Status: **Proposed 2026-08-22.** Written the day the owner ran the `0.12.0` executable and
-reported it "wholly useless. No help for me to operate. No action available."
-Target milestone: to be set by the human owner — this RFC argues it precedes every other
-open item.
+Status: **Accepted by the human owner 2026-08-24.** Written the day the owner ran the `0.12.0`
+executable and reported it "wholly useless. No help for me to operate. No action available."
+Target milestone: **M12, first** — ahead of RFC-020 PR-020-C, which adds a surface to a product
+a new user still cannot get into.
+
+The three design questions below were **decided by the architect on acceptance** and are
+recorded as decisions, not questions: an implementer must not inherit an unresolved
+architecture decision. Each records the recommendation the owner scheduled and the reasoning,
+and any of them is the owner's to overturn.
 Date: 2026-08-22
 
 Related baseline documents:
@@ -76,33 +81,36 @@ diligently at one altitude and never at the altitude above it.
 - Project *creation* (`git init`, scaffolding). Opening an existing directory only.
 - Removing the CLI path argument. It works, it is scriptable, and it stays.
 
-## Design questions for the owner
+## Decisions (were design questions; settled on acceptance)
 
-**Q1. What opens a project — a path entry field, or a directory picker?** A text field is
+**D1. A path entry field, not a directory picker.** A text field is
 small, keyboard-first, testable without a portal dependency, and consistent with the rest of
 the product; it also asks a user to type a path, which is exactly the friction that made the
 CLI-only route feel broken. A native picker means an XDG desktop portal dependency and a
 capability this project has so far avoided entirely.
 
-**Recommendation: the text field, this milestone.** It closes the goal completely and adds no
-new external surface. A portal picker is a later, separable improvement, and stating that
-plainly is better than blocking the fix on a dependency decision.
+**Decided: the text field, this milestone.** It closes the goal completely and adds no new
+external surface. A portal picker would introduce an XDG desktop portal dependency — the first
+in this project — and blocking the fix for an unusable product on a dependency decision is the
+wrong trade. A picker remains a separable later improvement and is explicitly not foreclosed.
 
-**Q2. Does the empty state's action need a keybinding of its own?** Every existing action is
+**D2. Focus the field on an empty board, and bind `Ctrl+Alt+O` as well.** Every existing action is
 `Ctrl+Alt+<letter>`, and `Ctrl+Alt+O` (Open) is unclaimed. The alternative is that the field
 is simply focused when the board is empty, so typing works immediately with no binding to
 learn — which is strictly better for the first-run case this RFC is about.
 
-**Recommendation: focus it, and bind `Ctrl+Alt+O` as well.** The first costs nothing and
-serves the user who has never read anything; the second serves the user who has a project open
-already and wants a second one.
+**Decided: both.** Focusing costs nothing and serves the user who has never read anything —
+they type and it works, with no binding to learn, which is the entire first-run case. The
+binding serves the user who already has a project open and wants a second one. `Ctrl+Alt+O` is
+unclaimed; the implementer must prove that mechanically against `KeybindingPolicy`, not by
+inspection, exactly as `Ctrl+Alt+R` was proven in PR-020-B.
 
-**Q3. Is the help surface part of this RFC or its own?** Goal 4 can be met by a modal listing
+**D3. The help surface is in this RFC, as its own PR.** Goal 4 can be met by a modal listing
 `keyboard_help_lines` on a new binding. It is small, but it is a new surface with the usual
 modal obligations (RFC-018's scrim and keystroke suppression, focus, escape).
 
-**Recommendation: same RFC, separate PR.** The two share `keyboard_help`, and splitting them
-across RFCs would repeat the mistake of scheduling a surface without asking who reaches it.
+**Decided: same RFC, separate PR.** The two share `keyboard_help`, and splitting them across
+RFCs would repeat the mistake of scheduling a surface without asking who reaches it.
 
 ## Acceptance criteria
 
@@ -117,13 +125,28 @@ across RFCs would repeat the mistake of scheduling a surface without asking who 
 - Every live keybinding is reachable from a help surface that does not require the Project
   Board to be the visible route.
 
-## Open questions
+## Open questions, also decided
 
-- **OQ1.** Should the recent-projects list — which already persists paths across sessions and
-  is restored at boot — be offered on the empty board as one-key reopen? It would make the
-  second run of the product substantially better than the first, and the data is already
-  there, unread by any surface.
-- **OQ2.** Does `add_project_from_path`'s `FailClosed` symlink policy produce a good error
-  *in the GUI*? Today its failure goes to `eprintln!` and `std::process::exit(1)` before any
-  window exists. Reached from a text field, it needs a rendered diagnostic instead, and
-  `ConfigDiagnostic`'s bounded-untrusted-text discipline (RFC-023) is the precedent to follow.
+- **OQ1 — recent projects on the empty board: yes, and it is the last slice.** The
+  recent-projects list already persists paths across sessions and is repopulated at boot by
+  `restore_recent_projects`, which builds a passive `Vec<RestoredRecentProject>` that **no
+  surface reads**. Offering it as one-key reopen makes the second run of the product
+  categorically better than the first and consumes data that is already on disk and currently
+  dormant.
+
+  Scheduled as the final PR so it cannot delay the slice that makes the product usable at all.
+  **Dropping it is the owner's decision, not the implementer's** — if the earlier PRs run long,
+  escalate rather than silently descoping.
+
+- **OQ2 — the failure path renders a bounded, escaped diagnostic; it does not exit.** Today
+  `add_project_from_path`'s `FailClosed` symlink refusal reaches `eprintln!` and
+  `std::process::exit(1)` in `boot()`, before any window exists. That is correct for a CLI
+  argument and **catastrophic for a text field**: a typo would close the application.
+
+  Decided: the field's failure path renders a diagnostic in the surface and leaves the
+  application running, and the CLI path keeps its existing exit behaviour unchanged. The
+  rendered text is **untrusted** — a user-typed path can carry Trojan Source characters and is
+  echoed back — so it follows RFC-023's `bound_key_segment` discipline exactly:
+  `escape_untrusted_chars`, truncated to a bounded length with an explicit ellipsis. This is a
+  security decision and is not the implementer's to re-open; see the pack's
+  `what-a-path-field-must-not-trust.md`.
