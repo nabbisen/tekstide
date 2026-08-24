@@ -147,7 +147,8 @@ fn every_pack_status_field_agrees_with_its_rfc_folder() {
     );
 }
 
-/// Every relative Markdown link inside `rfcs/` resolves to a real file.
+/// Every relative link inside `rfcs/` -- to another document (`.md`) or
+/// to an image (`.png`/`.jpg`/`.svg`) -- resolves to a real file.
 ///
 /// `RFC-000` is excluded: it teaches the lifecycle using invented
 /// example filenames (`./done/010-revoke-tokens.md`) that are not meant
@@ -180,7 +181,10 @@ fn every_relative_link_in_the_rfc_tree_resolves() {
             let Some(end) = tail.find(')') else { continue };
             let target = &tail[..end];
             let target = target.split('#').next().unwrap_or(target);
-            if !target.ends_with(".md") {
+            let is_checked_target = [".md", ".png", ".jpg", ".svg"]
+                .iter()
+                .any(|ext| target.ends_with(ext));
+            if !is_checked_target {
                 continue;
             }
             let resolved = document
