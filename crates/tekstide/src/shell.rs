@@ -4581,8 +4581,7 @@ fn project_tab_strip(state: &State) -> Element<'_, Message> {
     let home_active = state.app_shell.route() == tekstide_core::route::AppRoute::ProjectBoard;
     let home_focused = strip_focused && highlight == 0;
     let home_tab = button(
-        text(home_tab_label(&state.catalog, home_active, home_focused))
-            .size(state.theme.font_size_body()),
+        text(home_tab_label(&state.catalog, home_focused)).size(state.theme.font_size_body()),
     )
     .padding(6)
     .style(tab_active_style(state.theme, home_focused, home_active))
@@ -4642,9 +4641,11 @@ fn tab_active_style(
 /// (a hollow one) otherwise, so a screen or terminal that cannot render
 /// colour still shows which channel means what: `focus_marker`'s `"> "`/
 /// `"  "` prefix for keyboard focus, this one for which project is
-/// actually active. Composed with `focus_marker` by the two callers
-/// ([`project_tab_label`], [`home_tab_label`]), never used alone --
-/// there is always a focus state to render alongside an active one.
+/// actually active. Composed with `focus_marker` by its one caller
+/// ([`project_tab_label`]) -- never used alone, there is always a focus
+/// state to render alongside an active one, and never by
+/// [`home_tab_label`], which is not a project and does not get this
+/// symbol (response 307).
 fn tab_marker(focused: bool, active: bool) -> String {
     let active_symbol = if active { '\u{25CF}' } else { '\u{25CB}' };
     format!("{}{active_symbol} ", focus_marker(focused))
@@ -4687,14 +4688,24 @@ pub(crate) fn project_tab_label(
 /// The permanent leftmost "Projects" tab's own label -- trusted,
 /// catalog-driven text (D1's own workflow 5 name), not filesystem-
 /// derived, so unlike [`project_tab_label`] it is never escaped: there
-/// is nothing untrusted in it to escape. `active` is true exactly when
-/// `route() == ProjectBoard` -- the same "which one are you looking at"
-/// honesty every other active/focus marker in this strip gives a real
-/// project.
-pub(crate) fn home_tab_label(catalog: &Catalog, active: bool, focused: bool) -> String {
+/// is nothing untrusted in it to escape.
+///
+/// Deliberately carries only [`focus_marker`], not [`tab_marker`]'s
+/// `"\u{25CF}"`/`"\u{25CB}"` pair (response 307's own finding): that
+/// symbol's one meaning everywhere else in the strip is "this is
+/// `AppState::active_project_id()`", a fact about a project session.
+/// The home tab is not a project session, so giving it the same symbol
+/// for a different fact ("`route() == ProjectBoard`") reads as a second
+/// active project when the board is showing -- two filled circles
+/// answering two different questions the same way. "You are here" is
+/// still shown, honestly, through [`tab_active_style`]'s own background
+/// fill and border (`project_tab_strip` passes `home_active` there
+/// unchanged) -- just not through the symbol reserved for project
+/// identity.
+pub(crate) fn home_tab_label(catalog: &Catalog, focused: bool) -> String {
     format!(
         "{}{}",
-        tab_marker(focused, active),
+        focus_marker(focused),
         catalog.get("project-tab-strip-home")
     )
 }

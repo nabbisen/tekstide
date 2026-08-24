@@ -9285,16 +9285,31 @@ fn project_tab_label_truncates_a_long_display_name_with_an_ellipsis_marker() {
 }
 
 /// The home tab's own label is trusted, catalog-driven text -- no
-/// escaping applies (there is nothing untrusted in it), but it still
-/// carries the same marker composition every project tab does.
+/// escaping applies (there is nothing untrusted in it). Unlike a
+/// project tab it carries only the focus marker, deliberately never
+/// `tab_marker`'s active-project symbol (response 307): that symbol
+/// means "this is `AppState::active_project_id()`" everywhere else in
+/// the strip, a claim the home tab -- not a project -- must not make.
 #[test]
-fn home_tab_label_carries_the_catalog_text_and_the_marker() {
+fn home_tab_label_carries_the_catalog_text_and_only_the_focus_marker() {
     let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
 
-    let label = super::home_tab_label(&catalog, true, true);
+    let focused = super::home_tab_label(&catalog, true);
+    let unfocused = super::home_tab_label(&catalog, false);
 
-    assert!(label.contains(&catalog.get("project-tab-strip-home")));
-    assert!(label.starts_with("> \u{25CF} "));
+    assert!(focused.contains(&catalog.get("project-tab-strip-home")));
+    assert_eq!(
+        focused,
+        format!("> {}", catalog.get("project-tab-strip-home"))
+    );
+    assert_eq!(
+        unfocused,
+        format!("  {}", catalog.get("project-tab-strip-home"))
+    );
+    assert!(
+        !focused.contains('\u{25CF}') && !focused.contains('\u{25CB}'),
+        "the home tab must never render the active-project symbol: {focused:?}"
+    );
 }
 
 // RFC-039 PR-039-B: switching, and going home -- both mouse- and

@@ -105,6 +105,19 @@ legible at once is the common case (a tab that is both focused and active) and t
 tab focused, a different tab active) alike -- see `focused-tab-distinct-from-active-tab.png`
 below.
 
+**Response 307's required correction and its own follow-on fix.** The home tab's `active` symbol
+does not mean the same thing a project tab's does. `home_tab_label` no longer calls `tab_marker`
+at all -- it carries only `focus_marker`, never `"●"`/`"○"`. `"●"` means one thing everywhere it
+appears now: "this is `AppState::active_project_id()`", a fact about a project session, which the
+home tab is not. "You are on the board" is still shown, honestly, through `tab_active_style`'s
+background fill alone (`project_tab_strip` still passes `home_active` there unchanged) -- just not
+through the symbol reserved for project identity. Response 307 also caught that
+`focused-tab-distinct-from-active-tab.png` did not show what its own caption claimed (no tab in
+that frame was actually focused) -- the same synthetic-focus quirk described below for the
+Enter-activation capture, hit on a neighbouring capture and not re-checked there. All five
+screenshots in this section were re-captured against the rebuilt binary after both fixes; the
+descriptions below match what is actually in each file.
+
 **`FocusZone::TabStrip` and the reviewed router.** `route_non_modal_input`'s precedence is
 unchanged: global keybinding match, then `Tab`/`Shift+Tab` (shell focus-cycle, never reaches a
 surface), then `terminal_focus` if set, then `RoutedInput::Surface`. `#[non_exhaustive]` has no
@@ -146,9 +159,11 @@ clean.
   distinct (see ablation above).
 - `project_tab_label_escapes_a_bidi_override_in_the_display_name`,
   `an_ordinary_project_tab_name_renders_without_any_escape_marker`,
-  `project_tab_label_truncates_a_long_display_name_with_an_ellipsis_marker`,
-  `home_tab_label_carries_the_catalog_text_and_the_marker` -- PR-039-A's escaping/truncation
-  proofs, carried forward against the renamed, now-focus-aware label functions.
+  `project_tab_label_truncates_a_long_display_name_with_an_ellipsis_marker` -- PR-039-A's
+  escaping/truncation proofs, carried forward against the renamed, now-focus-aware label
+  functions.
+- `home_tab_label_carries_the_catalog_text_and_only_the_focus_marker` -- response 307's fix:
+  proves the home tab's label carries `focus_marker` and never `"●"`/`"○"`.
 - `switch_active_project_tab_pressed_switches_and_enters_the_workspace` /
   `go_to_project_board_tab_pressed_returns_to_the_board` -- both `Message` arms proven directly
   against a real `State`: active project and route both change (or return), together.
@@ -169,42 +184,49 @@ clean.
 `niri msg action screenshot-window`/`wl-paste` capture method every prior slice established.
 
 - `evidence/pr-039-b/before-cold-start-two-tabs.png` -- cold start: `Project Board` route,
-  `alpha` (the auto-activated first project) and `Projects` both show `●` (route is
-  `ProjectBoard` *and* `alpha` is the active project -- two independently true facts, one symbol
-  each), `beta` shows `○`.
+  `alpha` (the auto-activated first project) shows `●`, `beta` shows `○`. `Projects` carries no
+  symbol at all -- only the background-fill "you are here" treatment (visibly lighter than
+  `alpha`'s own background) -- since `"●"` means "active project" and the board is not a project.
 - Real mouse click on the `beta` tab (`xdotool mousemove --sync` + `click 1`):
   `evidence/pr-039-b/after-clicking-beta-tab.png` -- `beta` now `●`, route becomes
   `ActiveProjectWorkspace` (status bar: "Project Workspace | 2 projects"), explorer/editor panes
   visible.
 - Real mouse click on the `Projects` tab:
   `evidence/pr-039-b/after-clicking-projects-home-tab.png` -- route returns to `ProjectBoard`;
-  `Projects` and `beta` both show `●` (`beta` is still the active project, `Projects` is active
-  because the route is `ProjectBoard` -- independence holding under a real click, not only in the
-  unit tests above).
-- Real `Tab`, `Tab` (`xdotool key --clearmodifiers Tab` twice: `MainArea → Sidebar → TabStrip`),
-  then `ArrowRight` (highlight moves off the home tab onto `alpha`):
-  `evidence/pr-039-b/focused-tab-distinct-from-active-tab.png` -- **response 306's required
-  evidence**. `alpha` shows the focus border and `"> ○"` (focused, not active); `beta` shows
-  `"●"` with no border (active, not focused). Both legible at once, from a real keypress sequence,
-  not a constructed `State`.
+  `beta` still shows `●` (still the active project); `Projects` again shows no symbol, only the
+  background fill, now carried by a real click rather than only the unit tests above.
+- Real click on `beta` (making it active), a real click on empty window space (clearing native
+  button focus -- see below), then `Tab`, `Tab` (`xdotool key --clearmodifiers Tab` twice:
+  `MainArea → Sidebar → TabStrip`), then `ArrowRight` (highlight moves off the home tab onto
+  `alpha`): `evidence/pr-039-b/focused-tab-distinct-from-active-tab.png` -- **response 306's
+  required evidence**. `alpha` shows the focus border and `"> ○"` (focused, not active); `beta`
+  shows `"●"` with no border (active, not focused); `Projects` shows neither symbol nor border.
+  Both the focus and active channels legible at once, on different tabs, from a real keypress
+  sequence.
 - From that same highlighted state, real `Return`
   (`xdotool key --window "$WID" --clearmodifiers Return`):
   `evidence/pr-039-b/after-enter-switches-to-highlighted-tab.png` -- `alpha` becomes active (`●`
   and the focus border together) and the route switches to `ActiveProjectWorkspace`, proving the
   strip is keyboard-operable end to end through the real built binary, not only through
   `enter_on_a_highlighted_project_tab_switches_to_that_project`'s equivalent constructed scenario.
-  Getting a clean capture of this took three attempts: the first two, run immediately after the
-  `ArrowRight` capture above without an intervening real click inside the window, produced a
-  pixel-identical "no effect" screenshot despite `xdotool windowfocus --sync` beforehand -- the
-  automated test already proved `handle_tab_strip_key`'s own logic correct for the identical
-  scenario, which localized the discrepancy to live key delivery rather than the handler. The
-  capture above succeeded once preceded by a real mouse click on empty window space (establishing
-  genuine compositor-level input focus) before repeating `Tab, Tab, ArrowRight, Return`. This
-  reads as an `xdotool`/niri/XWayland synthetic-focus quirk in this test harness, not an
-  application defect -- both the unit test and this corrected live capture agree on the same
-  outcome -- but the root cause was not isolated further, since doing so is evidence-gathering
-  tooling, not product behaviour. Noted here rather than silently discarded, per this project's
-  own evidence-disclosure convention.
+
+  Getting clean captures of this and the focused-not-active frame above took real correction,
+  disclosed rather than smoothed over. Response 307 caught that my first
+  `focused-tab-distinct-from-active-tab.png` did not show what its own caption claimed -- no tab
+  in that frame was actually focused, because the `Tab, Tab, ArrowRight` sequence had silently had
+  no effect. Read against the account already written for the Enter capture in this same session
+  (a pixel-identical "no effect" result on the first two attempts, despite `xdotool windowfocus
+  --sync` beforehand), this was the identical quirk hitting a neighbouring capture that had not
+  been re-checked. Both screenshots above were re-taken with the same fix: a real mouse click on
+  empty window space, establishing genuine compositor-level input focus, immediately before the
+  `Tab, Tab, ArrowRight[, Return]` sequence. Both now show exactly what their captions describe.
+  My read is still an `xdotool`/niri/XWayland synthetic-focus delivery quirk in this
+  evidence-gathering harness, not an application defect -- the automated test
+  (`enter_on_a_highlighted_project_tab_switches_to_that_project`) already proved the handler logic
+  correct independent of any live capture -- but the root cause was not isolated further, since
+  that is tooling, not product behaviour. The lesson carried forward: when a quirk is found and
+  worked around in one capture, every capture taken in the same session needs the same check, not
+  just the one where the symptom was first noticed.
 - Process terminated cleanly with `SIGTERM` after capture; no terminal was ever launched this
   session, so `test-process-leak.md`'s defect class does not apply.
 
