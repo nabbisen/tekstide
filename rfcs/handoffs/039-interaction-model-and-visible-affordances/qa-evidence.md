@@ -118,8 +118,9 @@ there.
 by `tab_active_style`'s background-fill channel alone -- colour-only (its `border` field responds
 to `focused`, not `active`), and measured well under WCAG 2.1 SC 1.4.11's 3:1 floor for a non-text
 indicator: `background` (`rgb(0.08, 0.08, 0.09)`) against `surface_elevated`
-(`rgb(0.12, 0.12, 0.12)`) is 1.11:1, the same class of defect this project already found and fixed
-twice (`0.11.0`'s unfocused-pane border at 2.63:1, `0.12.0`'s modal scrim at 2.40:1). Fixed by
+(`rgb(0.12, 0.12, 0.12)`) is 1.107:1 (response 309's own correction of the figure first cited in
+response 308), the same class of defect this project already found and fixed twice (`0.11.0`'s
+unfocused-pane border at 2.63:1, `0.12.0`'s modal scrim at 2.40:1). Fixed by
 wrapping the home tab's name in square brackets when active (`home_tab_label`'s new `active`
 parameter) -- a shape distinct from `tab_marker`'s own circle vocabulary, so it cannot be misread
 as a second active project, and legible with no colour at all, the same property `focus_marker`
