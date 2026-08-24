@@ -322,7 +322,7 @@ booleans pending the classifier and reload-gating work below.
 Reviewer notes:
 
 ```text
-Final Acceptance recorded 2026-08-22 (review request 284, response 285). Suite re-run by
+Final Acceptance recorded 2026-08-22 (review request 284, and its response). Suite re-run by
 the reviewer: 1024 passed, 0 failed.
 
 Accepted with required follow-up -- the follow-up is not a defect in the work, and no code

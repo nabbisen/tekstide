@@ -63,9 +63,9 @@ the `(action, binding)` pair for a `Reserved` or unbound action never reaches
 the moment that action is promoted to `Candidate` with a real binding, its catalog key starts
 mattering, with nothing having ever checked it.
 
-Same shape as report 287's finding 4: a real property with no test that can fail on it.
+Same shape as finding 4 of the first-run verification report: a real property with no test that can fail on it.
 
-**Required follow-up, assigned to the dev team (response 289):** a direct unit test of
+**Required follow-up, assigned to the dev team (response to request 288):** a direct unit test of
 `action_catalog_key`'s own contract, not routed through `keyboard_help_lines`, asserting the
 biconditional —
 
@@ -75,7 +75,7 @@ biconditional —
 The expected set derived from the policy rather than written as a literal list, and ablated by
 changing exactly one thing.
 
-**DISCHARGED 2026-08-22** — `7e8d8c2`, request 290, response 291.
+**DISCHARGED 2026-08-22** — `7e8d8c2`, request 290 and its response.
 `action_catalog_key_is_some_iff_the_action_is_live` iterates `linux_mvp().rules` and asserts
 `key.is_some() == (status == Candidate && default_binding.is_some())` for every rule, with the
 expected side taken from the policy so a status change cannot make it stale.
@@ -98,7 +98,7 @@ established.
 
 ## Audit evidence (request 288)
 
-Performed by the dev team on `ca456c7` as committed, after report 287 disclosed that the
+Performed by the dev team on `ca456c7` as committed, after the first-run verification report disclosed that the
 architect had implemented the release himself.
 
 - Full gates re-run: 318 + 714 tests, 0 failed; `fmt` clean; `clippy -D warnings` clean.
@@ -115,7 +115,7 @@ architect had implemented the release himself.
   **Correction, 2026-08-22 (request 292).** This bullet originally read *"This is the first
   cold-start evidence in this repository's history."* That sentence was false in two independent
   ways, and it was the one claim in this document not established by running anything — flagged
-  as such in response 291 and checked by the dev team, who found the first error. Checking theirs
+  as such in the response to request 290 and checked by the dev team, who found the first error. Checking theirs
   surfaced the second.
 
   1. **It was not the first.** `handoffs/015-application-shell-and-rendered-surface-model/
@@ -156,7 +156,7 @@ architect had implemented the release himself.
 
 The architect implemented this release directly, which the operating instructions prohibit
 absent explicit emergency authorization from the human owner, and which was reported to the
-owner and to the dev team (report 287). The practical consequence was not only the missing
+owner and to the dev team (the first-run verification report). The practical consequence was not only the missing
 review — that was supplied afterwards by request 288 — but the missing artifacts: no task
 breakdown, no acceptance checklist, no evidence file, and, until this document, no traceable
 link from the release back to what was verified.
