@@ -246,7 +246,151 @@ clean.
 
 ## PR-039-C — close a project
 
-_Pending._
+**Build.** `ProjectCloseModal`/`ProjectCloseButton`, mirroring `TranscriptPurgeModal`'s existing
+shape -- with one deliberate departure: `Cancel` is a real decision here (`safe_close_decision`'s
+`Cancelled` outcome), not a silent close, so both `ModalActivate` and, uniquely among this crate's
+modals, `ModalDismiss`/Escape both record it. `×` on every project tab (never the home tab) --
+`iced` does not nest interactive widgets, so it is a sibling `button` next to the switch button,
+both wrapped in one `container` that now carries the shared border/fill (`tab_active_style`
+renamed `tab_container_style`, moved from `button::Style` to `container::Style`; the two inner
+buttons get a new transparent `tab_inner_button_style`).
+
+`attempt_close_project_tab` -- §1's split: `SafeToClose` closes directly (no modal, ever);
+`NeedsConfirmation` opens the dialog, defaulted to `Cancel` (§4a: closing is irreversible, the
+safe default is not closing); `UnsupportedOrUnknown` leaves the project untouched. `apply_project_close_confirmation`/
+`terminate_project_live_work` implement §6's confirmed sequence exactly: `record_safe_close_authorized`,
+then `request_terminate` on every live terminal (`TerminalPane::request_terminate`, its first
+production caller, via each pane's own runtime -- each `TerminalPane` owns one), then
+`close_project`, then `record_safe_close_decision`. Each terminated terminal is additionally
+recorded through the pre-existing `record_plain_terminal_terminated` (best-effort, the same
+`OrphanedUnknown`/`Failed` → `NotRequired` handling it already has). Agent-run ownership is
+checked per terminal and, when present, routed through `apply_agent_terminal_outcome_for_project`
+(response 310's foundation) rather than the plain-terminal path, so a project's own agent run
+status is retired correctly even when that project is not the active one. `finish_project_close_navigation`:
+if closing removed the active project and none remains, routes back to the board; otherwise
+leaves the route alone, so closing a background tab never disturbs whatever the user was doing.
+
+**A pre-existing core defect found and fixed along the way (response 311).**
+`CloseResourceSummary::provider_state` defaulted to `Unavailable` for every `ProjectSession`, and
+nothing in production code ever upgraded it -- `set_runtime_summary`, the only setter that could,
+is `#[cfg(test)]`. `close_project` had zero production callers before this slice, so the defect
+was never exercised end to end: `assess_project_close` could never return `SafeToClose` for any
+real project, idle or not, ever. Confirmed directly, not inferred: four of this slice's own tests
+hit it, each landing on `UnsupportedOrUnknown { reason: "active-resource state is unavailable" }`
+where `SafeToClose` was expected. Fixed by giving `CloseResourceSummary` a real `Default` (provider
+`Complete` -- every count it holds except `dirty_files` is tracked in-memory and incrementally
+from construction, and `dirty_files` starts at 0 honestly too, since a fresh project has no open
+buffers); `provider_missing()` keeps its own role for the genuinely exceptional case. A second
+defect this exposed: `set_file_state`'s downgrade to `Unavailable` was one-way, never restoring
+`Complete` even when handed a complete file state -- invisible while the default was already
+`Unavailable` forever, a real latch once the default became `Complete`. Made symmetric in the same
+change. Three existing core tests updated to the corrected behaviour; one new test
+(`recovering_file_provider_completeness_restores_the_close_assessment`) proves the recovery path,
+ablated to confirm it exercises the fix. Committed separately from this slice's own GUI work
+(`641a5ac`), after the foundation commit (`ca2245f`) both responses 310 and 311 reviewed.
+
+**Security.** `switch_to_project_tab`'s own `ensure_explorer_scanned` discipline does not apply
+here (there is nothing to scan after a project disappears); instead, `finish_project_close_navigation`
+only re-scans when a *different* project became active, the same "never trust a stale listing"
+principle applied to the one case where it's reachable. No new call to `add_project_from_path` or
+any audit producer beyond the two explicitly required (`record_safe_close_authorized`/
+`record_safe_close_decision`, plus the pre-existing `record_plain_terminal_terminated`). `×` and
+the confirmation both operate only on `ProjectId`s already present in `AppState::projects()`.
+
+**Gates.** `cargo build`, `cargo test --workspace --all-targets --all-features` (383 tekstide + 734
+tekstide-core, up from 373/728; 0 failed), `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`, `git diff --check` -- all
+clean.
+
+**Ablations.**
+
+- `recovering_file_provider_completeness_restores_the_close_assessment` (core): the one-way
+  downgrade briefly restored (removing the upgrade branch of `set_file_state`) -- the test failed
+  with `provider_state` stuck `Unavailable` after a recovered `Complete` file state, confirming the
+  test actually exercises the symmetric fix. Reverted.
+- The confirmed-close flow's own correctness is proven by construction, not a single ablatable
+  line: `confirming_the_close_terminates_the_real_process_and_removes_the_project` drives a real
+  `/bin/sh` through the full sequence and checks the pane is gone, the project is gone, and both
+  audit phases share one `operation_id` -- any one of the three orchestration steps landing out of
+  order or being skipped fails a specific assertion in that test, which is the same proof-by-
+  construction shape `granting_trust_through_the_real_route_records_both_audit_records` already
+  established for a comparable two-phase flow.
+
+**Tests, at the level this crate always tests rendering: the string, not the `Element` tree, plus
+real end-to-end flows against a real process.**
+
+- `project_close_dialog_escapes_a_bidi_override_in_the_canonical_path` -- §2's own falsifiable
+  claim, the bidi-override fixture this project always uses for it.
+- `project_close_dialog_body_names_the_canonical_path` -- the path, not only the display name,
+  reaches the confirmation text.
+- `project_close_dialog_reasons_line_states_the_real_counts` -- §1's "counts, not vague warning
+  text," proven against real `CloseReason` messages, with an explicit check that generic warning
+  text ("unsaved work") never appears.
+- `closing_an_idle_project_removes_it_with_no_confirmation` -- §1's idle half.
+- `closing_a_project_with_a_live_terminal_opens_a_confirmation_defaulted_to_cancel` -- §1's
+  confirmation half, plus §4a's safe default.
+- `cancelling_the_close_confirmation_leaves_everything_running_and_records_it` /
+  `escaping_the_close_confirmation_also_records_a_cancelled_decision` -- §4's declined outcome,
+  reached both ways RFC-039 treats as the same decision; both prove the project and its real
+  terminal are untouched and exactly one single-phase `Cancelled` record (`operation_id: None`)
+  is written.
+- `confirming_the_close_terminates_the_real_process_and_removes_the_project` -- §6's full sequence
+  against a real `/bin/sh`: the pane is gone (not orphaned), the project is gone, and both audit
+  phases (`Authorized` then `Applied`, sharing one `operation_id`) are persisted.
+- `closing_a_project_leaves_its_transcripts_and_audit_records_intact` -- §3, required verbatim: a
+  real transcript file on disk and a pre-existing audit record for the project both survive an
+  idle close, byte-for-byte for the transcript.
+- `closing_a_background_project_does_not_disturb_the_active_one` -- response 310's own point,
+  proven live rather than only at the core layer: `×` works on a project that is not the active
+  one, and closing it does not change which project is active.
+
+**A test-isolation hazard found, not fixed (per response 311's instruction, recorded here as its
+own, distinct hypothesis rather than folded into `test-process-leak.md`'s table).**
+`command_approval_family_produces_real_durable_audit_records_through_the_pipeline` (a pre-existing
+test, already one of the four names in that document's own table) failed under a full parallel
+`cargo test -p tekstide` run in this session, but passed reliably alone and under
+`--test-threads=1`. This slice's new tests add several more real-`AuditStore`-touching tests to
+`shell/tests.rs` (`open_real_audit_store` resolves to one real, shared location for the whole test
+binary), which increases the chance of two tests racing on it concurrently -- a **different cause**
+from the `Child::drop`-leak mechanism that document tracks, even though the symptom landed on the
+same test name. Not investigated further or fixed here, per instruction; noted so the next person
+who sees this specific test flake under full-suite parallelism does not attribute it to the leak.
+
+**Live evidence.** `cargo build --release -p tekstide`, launched
+`env -u WAYLAND_DISPLAY XDG_STATE_HOME=<mktemp -d> ./target/release/tekstide <mktemp -d>/tsd-pr039c-alpha <mktemp -d>/tsd-pr039c-beta`
+-- two real projects, both from CLI arguments. The same `xdotool`/`niri msg action
+screenshot-window`/`wl-paste` capture method every prior slice established.
+
+- `evidence/pr-039-c/before-cold-start-two-tabs.png` -- cold start: both project tabs show a real
+  `×`, never the `[Projects]` home tab.
+- Real click on `alpha`'s `×` (idle, nothing running):
+  `evidence/pr-039-c/after-clicking-close-on-idle-project.png` -- `alpha` gone immediately, no
+  modal, the Project Board's own recent-projects row for it now shows an "Open" button (RFC-038's
+  own reopen affordance correctly picking it up).
+- Real `Ctrl+Alt+T` in `beta`, then a real click on `beta`'s `×`:
+  `evidence/pr-039-c/confirmation-names-path-and-counts.png` -- **the required proof for §1/§2**:
+  "Close this project?", the real canonical path (`/tmp/tmp.xxxxxxxxxx/tsd-pr039c-beta`), "This
+  will end: 1 running process" (a real count, not vague text), focus defaulted to `Cancel`.
+- From that dialog, real `Tab` then `Return` (`xdotool key --clearmodifiers Tab` then `Return`):
+  `evidence/pr-039-c/after-confirmed-close-real-termination.png` -- the real terminal pane is gone,
+  `beta` is gone, route returned to the Project Board (no project remained active). Getting the
+  `Return` press to register took a second attempt with an explicit `xdotool windowactivate --sync`
+  first -- the same synthetic-focus delivery quirk in this evidence-gathering harness already
+  disclosed for PR-039-B's own live-Enter captures, not a new one. The mouse click on the "Close"/
+  "Cancel" text lines themselves does nothing at all, by design: unlike the tab strip's own
+  buttons, `ProjectCloseModal`'s two lines are plain `text`, not `iced::widget::button` -- this
+  modal is keyboard-only, the same convention every other modal in this crate already follows
+  (`TranscriptPurgeModal` included), stated explicitly in its own on-screen hint
+  ("Tab/Shift+Tab moves focus; Enter activates; Escape always cancels") which never mentions
+  clicking.
+- A fresh single-project launch, real `Ctrl+Alt+T`, real click on `×`, then real `Escape`:
+  `evidence/pr-039-c/escape-cancels-terminal-still-running.png` -- the project and its real,
+  still-`Running` terminal both untouched, proving §4's declined outcome live, not only through
+  the unit tests above.
+- Processes terminated cleanly with `SIGTERM` after each capture session; the one real terminal
+  genuinely still running at the end of the last session was the one the test itself was
+  demonstrating survives cancellation, so `test-process-leak.md`'s defect class does not apply to
+  the evidence-gathering process itself either way.
 
 ## PR-039-D — affordance audit and closeout
 

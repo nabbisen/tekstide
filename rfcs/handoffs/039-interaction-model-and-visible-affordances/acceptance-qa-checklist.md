@@ -49,15 +49,40 @@ Every unchecked line at closeout carries a stated reason.
 
 ## Closing — `what-closing-a-project-must-not-lose.md`
 
-- [ ] Idle project closes with no confirmation.
-- [ ] Live terminals or an active agent run raise a confirmation naming **counts**.
-- [ ] Confirmation identifies the project by **canonical path**, escaped and bounded.
-- [ ] `close_project` wired — its first production caller.
-- [ ] **`safe_close_decision` wired, both outcomes** (closed and cancelled). Unwired audit
+- [x] Idle project closes with no confirmation.
+      `closing_an_idle_project_removes_it_with_no_confirmation`; live:
+      `evidence/pr-039-c/after-clicking-close-on-idle-project.png`.
+- [x] Live terminals or an active agent run raise a confirmation naming **counts**.
+      `project_close_dialog_reasons_line_states_the_real_counts`,
+      `closing_a_project_with_a_live_terminal_opens_a_confirmation_defaulted_to_cancel`; live:
+      `evidence/pr-039-c/confirmation-names-path-and-counts.png` ("This will end: 1 running
+      process", not vague text).
+- [x] Confirmation identifies the project by **canonical path**, escaped and bounded.
+      `project_close_dialog_escapes_a_bidi_override_in_the_canonical_path`,
+      `project_close_dialog_body_names_the_canonical_path`; live: the same screenshot above shows
+      the real path.
+- [x] `close_project` wired — its first production caller. `attempt_close_project_tab` /
+      `apply_project_close_confirmation`.
+- [x] **`safe_close_decision` wired, both outcomes** (closed and cancelled). Unwired audit
       families noted as two → one.
-- [ ] Test proves closing leaves transcripts and audit records intact.
-- [ ] `close_project`'s child-process contract read, not assumed; escalated if it does not stop
-      them.
+      `confirming_the_close_terminates_the_real_process_and_removes_the_project` (`Authorized`
+      then `Applied`, one shared `operation_id`),
+      `cancelling_the_close_confirmation_leaves_everything_running_and_records_it` /
+      `escaping_the_close_confirmation_also_records_a_cancelled_decision` (`Cancelled`, no
+      `operation_id`).
+- [x] Test proves closing leaves transcripts and audit records intact.
+      `closing_a_project_leaves_its_transcripts_and_audit_records_intact`.
+- [x] `close_project`'s child-process contract read, not assumed; escalated if it does not stop
+      them. §6 already answers this (response 299) -- `close_project` never touches the runtime;
+      `terminate_project_live_work` calls `TerminalPane::request_terminate` (its first production
+      caller) before `close_project`, per the confirmed sequence. Escalation was not needed:
+      `request_terminate` terminated the real `/bin/sh` correctly in every live capture
+      (`evidence/pr-039-c/after-confirmed-close-real-termination.png`) and in
+      `confirming_the_close_terminates_the_real_process_and_removes_the_project`. A separate,
+      pre-existing defect **was** found and escalated along the way (response 311): `close_project`
+      could never return `SafeToClose` for any real project, idle or not, because
+      `CloseResourceSummary::provider_state` defaulted to `Unavailable` with no production upgrade
+      path -- fixed at its source (`641a5ac`), not compensated for in this slice's own surface.
 
 ## The affordance audit
 

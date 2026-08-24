@@ -133,8 +133,8 @@ use tekstide_core::domain::TerminalSession;
 use tekstide_core::project::{ProjectId, ProjectSession};
 use tekstide_core::runtime::terminal::{
     BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalDimensions, TerminalLaunchError,
-    TerminalLaunchSpec, TerminalReader, TerminalRuntimeError, TerminalRuntimeHandle,
-    TerminationOutcome,
+    TerminalLaunchSpec, TerminalReader, TerminalRuntimeError, TerminalRuntimeEvent,
+    TerminalRuntimeHandle, TerminationOutcome, TerminationRequest,
 };
 
 use filter::SecurityFilter;
@@ -455,6 +455,26 @@ impl TerminalPane {
             .wait_for_exit(&self.handle, Duration::ZERO)
             .ok()
             .flatten()
+    }
+
+    /// RFC-039 PR-039-C: `request_terminate`'s first production caller
+    /// (`what-closing-a-project-must-not-lose.md` §6 -- treat it as new
+    /// code, not plumbing). Each `TerminalPane` owns its own
+    /// `LinuxTerminalRuntime`, so termination has to go through
+    /// whichever pane's own runtime launched it; there is no shared
+    /// runtime a caller could reach independently. Blocks the caller for
+    /// up to `sigterm_timeout + sigkill_timeout` -- the same
+    /// synchronous-runtime-call shape every other `LinuxTerminalRuntime`
+    /// method in this crate already has (agent-run launch, plain-shell
+    /// launch), not a new one introduced here.
+    pub fn request_terminate(
+        &mut self,
+        request: TerminationRequest,
+        sigterm_timeout: Duration,
+        sigkill_timeout: Duration,
+    ) -> Result<Vec<TerminalRuntimeEvent>, TerminalRuntimeError> {
+        self.runtime
+            .request_terminate(&self.handle, request, sigterm_timeout, sigkill_timeout)
     }
 
     /// This pane's real, live `TerminalId` -- what a caller compares a

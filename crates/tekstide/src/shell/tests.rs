@@ -6,14 +6,16 @@ use tekstide_core::shell::ApplicationShell;
 use super::{
     AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ExternalChangeButton,
     FolderBrowserModal, MAX_PATH_FIELD_CHARS, Message, ModalButton, ModalContent,
-    PasteConfirmButton, PathFieldError, State, TerminalPasteRefusal, TranscriptPurgeButton,
-    TrustGrantButton, agent_run_launch_refusal_text, attempt_agent_run_launch_with_profile,
-    attempt_agent_run_launch_with_profile_and_state_root,
+    PasteConfirmButton, PathFieldError, ProjectCloseButton, State, TerminalPasteRefusal,
+    TranscriptPurgeButton, TrustGrantButton, agent_run_launch_refusal_text,
+    attempt_agent_run_launch_with_profile, attempt_agent_run_launch_with_profile_and_state_root,
     attempt_agent_run_launch_with_profile_state_root_and_capture, content_within_bound,
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
-    open_real_audit_store, path_field_error_text, poll_approval_channels, sidebar_label,
-    status_bar_summary, terminal_paste_refusal_text, transcript_local_data_summary_for,
-    trust_grant_dialog_body, trusted_ui_state, verify_restored_trust_against, zone_style,
+    open_real_audit_store, path_field_error_text, poll_approval_channels,
+    project_close_dialog_body, project_close_dialog_path, project_close_dialog_reasons_line,
+    sidebar_label, status_bar_summary, terminal_paste_refusal_text,
+    transcript_local_data_summary_for, trust_grant_dialog_body, trusted_ui_state,
+    verify_restored_trust_against, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -9616,5 +9618,495 @@ fn switching_tabs_works_from_inside_terminal_immersion() {
     assert_eq!(
         state.app_shell.state().active_project_id(),
         Some(&second_id)
+    );
+}
+
+// RFC-039 PR-039-C: closing a project -- the only destructive action in
+// this RFC. `what-closing-a-project-must-not-lose.md` is required
+// reading before any of this; each test below cites the section it
+// proves.
+
+fn project_close_modal_fixture(
+    reasons: Vec<tekstide_core::close::CloseReason>,
+    canonical_path: &str,
+) -> super::ProjectCloseModal {
+    super::ProjectCloseModal {
+        project_id: tekstide_core::project::ProjectId::new_uuid(),
+        reasons,
+        canonical_path: PathBuf::from(canonical_path),
+        focus: ProjectCloseButton::Cancel,
+    }
+}
+
+/// §2's own falsifiable claim, the same shape
+/// `trust_grant_dialog_escapes_a_bidi_override_in_the_canonical_path`
+/// already proves for a different dialog.
+///
+/// **Ablated**: temporarily replaced `project_close_dialog_path`'s
+/// `quote_untrusted` call with a raw `.display().to_string()`, ran this
+/// test -- it failed, the raw override character present in the
+/// panic's own printed output. Reverted before commit.
+#[test]
+fn project_close_dialog_escapes_a_bidi_override_in_the_canonical_path() {
+    let modal = project_close_modal_fixture(Vec::new(), "/home/user/work/safe-project\u{202E}gpj");
+
+    let escaped = project_close_dialog_path(&modal);
+
+    assert!(
+        escaped.as_str().contains("<U+202E>"),
+        "expected the escaped marker in {escaped:?}"
+    );
+    assert!(
+        !escaped.as_str().contains('\u{202E}'),
+        "the raw override character must never reach the dialog, got {escaped:?}"
+    );
+}
+
+#[test]
+fn project_close_dialog_body_names_the_canonical_path() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let modal = project_close_modal_fixture(Vec::new(), "/home/user/work/real-project");
+
+    let body = project_close_dialog_body(&catalog, &modal);
+
+    assert!(
+        body.contains("/home/user/work/real-project"),
+        "the confirmation must name the canonical path, got {body:?}"
+    );
+}
+
+/// §1: "counts, not vague warning text" -- `CloseReason::message` is
+/// already the real count `assess_project_close` computed
+/// ("2 running processes"), not a generic warning, so this proves the
+/// dialog's own reasons line states that count verbatim rather than
+/// summarizing it away.
+#[test]
+fn project_close_dialog_reasons_line_states_the_real_counts() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let modal = project_close_modal_fixture(
+        vec![
+            tekstide_core::close::CloseReason {
+                code: tekstide_core::close::CloseReasonCode::RunningProcess,
+                message: "2 running processes".to_owned(),
+            },
+            tekstide_core::close::CloseReason {
+                code: tekstide_core::close::CloseReasonCode::DirtyFile,
+                message: "1 dirty file".to_owned(),
+            },
+        ],
+        "/home/user/work/project",
+    );
+
+    let line = project_close_dialog_reasons_line(&catalog, &modal);
+
+    assert!(
+        line.contains("2 running processes"),
+        "expected the real count, got {line:?}"
+    );
+    assert!(
+        line.contains("1 dirty file"),
+        "expected the second real count too, got {line:?}"
+    );
+    assert!(
+        !line.contains("unsaved work"),
+        "must never fall back to vague warning text: {line:?}"
+    );
+}
+
+fn state_with_a_real_terminal_on_its_own_project(
+    label: &str,
+) -> (
+    State,
+    tekstide_core::project::ProjectId,
+    tekstide_core::domain::TerminalId,
+) {
+    let mut app_shell = ApplicationShell::new();
+    let project_id = app_shell
+        .add_project_from_path(fresh_project_dir(label))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+
+    let (pane, session) = crate::surface::terminal::TerminalPane::launch(
+        project_id.clone(),
+        "close-test pane",
+        fresh_project_dir(&format!("{label}-pane")),
+        PathBuf::from("/bin/sh"),
+    )
+    .expect("launch a real shell for a project-close test");
+    let terminal_id = session.id.clone();
+    app_shell
+        .state_mut()
+        .attach_terminal_session(session)
+        .expect("registering a session on its own project must succeed");
+
+    let mut state = state_with(app_shell);
+    state.terminal_panes = vec![pane];
+    (state, project_id, terminal_id)
+}
+
+/// §1's required split, the idle half: a project with no running
+/// terminal and no active agent run closes directly -- no modal, ever.
+#[test]
+fn closing_an_idle_project_removes_it_with_no_confirmation() {
+    let (mut state, project_id) = state_with_a_real_project("close-idle");
+
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+
+    assert!(
+        state.modal.is_none(),
+        "an idle close must never open a confirmation"
+    );
+    assert!(
+        state.app_shell.state().project(&project_id).is_none(),
+        "the project must actually be gone"
+    );
+}
+
+/// §1's required split, the confirmation half: a project with a real,
+/// live terminal must not close on the first press -- it opens the
+/// confirmation instead, defaulted to `Cancel` (§4a: closing is
+/// irreversible, the safe default is not closing).
+#[test]
+fn closing_a_project_with_a_live_terminal_opens_a_confirmation_defaulted_to_cancel() {
+    let (mut state, project_id, _terminal_id) =
+        state_with_a_real_terminal_on_its_own_project("close-needs-confirmation");
+
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+
+    match &state.modal {
+        Some(ModalContent::ProjectClose(modal)) => {
+            assert_eq!(modal.project_id, project_id);
+            assert_eq!(modal.focus, ProjectCloseButton::Cancel);
+            assert!(
+                modal
+                    .reasons
+                    .iter()
+                    .any(|reason| reason.code
+                        == tekstide_core::close::CloseReasonCode::RunningProcess),
+                "expected a running-process reason, got {:?}",
+                modal.reasons
+            );
+        }
+        other => panic!("expected a ProjectClose confirmation, got {other:?}"),
+    }
+    assert!(
+        state.app_shell.state().project(&project_id).is_some(),
+        "the project must still be open until the user decides"
+    );
+}
+
+/// §4's declined outcome, reached via a real focus move and `ModalActivate`
+/// on `Cancel` -- the project and its terminal are untouched, and a
+/// single `Cancelled` `safe_close_decision` record is written (no
+/// preceding `Authorized` phase: nothing was ever authorized).
+#[test]
+fn cancelling_the_close_confirmation_leaves_everything_running_and_records_it() {
+    let (mut state, project_id, terminal_id) =
+        state_with_a_real_terminal_on_its_own_project("close-cancel");
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+    assert!(state.modal.is_some(), "test precondition: modal opened");
+
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert!(state.modal.is_none(), "the dialog must close");
+    assert!(
+        state.app_shell.state().project(&project_id).is_some(),
+        "cancelling must leave the project open"
+    );
+    assert!(
+        state
+            .terminal_panes
+            .iter()
+            .any(|pane| pane.terminal_id() == &terminal_id),
+        "cancelling must not touch the real terminal"
+    );
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let records: Vec<_> = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .filter(|record| {
+            record.project_id.as_ref() == Some(&project_id)
+                && record.family == tekstide_core::audit::AuditEventFamily::SafeCloseDecision
+        })
+        .collect();
+    assert_eq!(records.len(), 1, "cancelling is single-phase: {records:?}");
+    assert_eq!(
+        records[0].outcome,
+        tekstide_core::audit::AuditOutcome::Cancelled
+    );
+    assert!(records[0].operation_id.is_none());
+}
+
+/// Escape is the same decision as focusing `Cancel` and activating --
+/// RFC-039's one departure from every other modal in this crate, where
+/// Escape closes with nothing recorded.
+#[test]
+fn escaping_the_close_confirmation_also_records_a_cancelled_decision() {
+    let (mut state, project_id, _terminal_id) =
+        state_with_a_real_terminal_on_its_own_project("close-escape");
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+
+    let _ = super::update(&mut state, Message::ModalDismiss);
+
+    assert!(state.modal.is_none());
+    assert!(state.app_shell.state().project(&project_id).is_some());
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let cancelled = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .unwrap()
+        .records
+        .into_iter()
+        .any(|sequenced| {
+            sequenced.record.project_id.as_ref() == Some(&project_id)
+                && sequenced.record.family
+                    == tekstide_core::audit::AuditEventFamily::SafeCloseDecision
+                && sequenced.record.outcome == tekstide_core::audit::AuditOutcome::Cancelled
+        });
+    assert!(
+        cancelled,
+        "Escape must record the same Cancelled decision an explicit Cancel does"
+    );
+}
+
+/// §6's own confirmed sequence, proven end to end against a real
+/// process: focusing `Close` and activating terminates the real shell
+/// (`request_terminate`'s first production caller), removes the pane,
+/// and only then removes the project -- and §4's other outcome,
+/// `Applied`, is recorded with the same `operation_id` its own
+/// `Authorized` phase used.
+#[test]
+fn confirming_the_close_terminates_the_real_process_and_removes_the_project() {
+    let (mut state, project_id, terminal_id) =
+        state_with_a_real_terminal_on_its_own_project("close-confirm");
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+    assert!(state.modal.is_some(), "test precondition: modal opened");
+
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    match &state.modal {
+        Some(ModalContent::ProjectClose(modal)) => {
+            assert_eq!(modal.focus, ProjectCloseButton::Close);
+        }
+        other => panic!("expected the confirmation still open, got {other:?}"),
+    }
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert!(state.modal.is_none());
+    assert!(
+        state.app_shell.state().project(&project_id).is_none(),
+        "confirmed close must actually remove the project"
+    );
+    assert!(
+        !state
+            .terminal_panes
+            .iter()
+            .any(|pane| pane.terminal_id() == &terminal_id),
+        "the real terminal's pane must be gone, not orphaned"
+    );
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let mut records: Vec<_> = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .filter(|record| {
+            record.project_id.as_ref() == Some(&project_id)
+                && record.family == tekstide_core::audit::AuditEventFamily::SafeCloseDecision
+        })
+        .collect();
+    records.reverse();
+    assert_eq!(
+        records.len(),
+        2,
+        "a confirmed close writes exactly two phases: {records:?}"
+    );
+    assert_eq!(
+        records[0].outcome,
+        tekstide_core::audit::AuditOutcome::Authorized
+    );
+    assert_eq!(
+        records[1].outcome,
+        tekstide_core::audit::AuditOutcome::Applied,
+        "a clean real shell exit must record Applied, not Failed: {records:?}"
+    );
+    assert_eq!(
+        records[0].operation_id, records[1].operation_id,
+        "both phases must share one operation_id"
+    );
+}
+
+/// §3, required verbatim: closing a project must not delete its
+/// transcripts or its audit records. A project with existing capture
+/// history, currently idle (no running terminal -- that path is proven
+/// separately above), closes directly; the transcript file on disk and
+/// the project's own pre-existing audit record (written by
+/// `add_project_from_path` itself) both survive.
+#[test]
+fn closing_a_project_leaves_its_transcripts_and_audit_records_intact() {
+    let (mut state, project_id) = state_with_a_real_project("close-preserves-history");
+    let transcript_dir = fresh_state_root_dir();
+    let transcript_path = transcript_dir.join("transcript.log");
+    std::fs::write(&transcript_path, b"real, sensitive transcript content").unwrap();
+    // A finished agent run's own terminal: `add_transcript` requires the
+    // transcript's `terminal_id` to already be a registered terminal on
+    // this project (`ensure_terminal_exists`), and `Exited` keeps this
+    // project idle -- the point of this test is transcript/audit
+    // survival on the idle-close path, proven separately from the
+    // confirmation-flow tests above.
+    let mut terminal = tekstide_core::domain::TerminalSession::new(
+        project_id.clone(),
+        tekstide_core::domain::TerminalKind::Supervised,
+        "Agent",
+        fresh_project_dir("close-preserves-history-terminal"),
+        "agent-cli",
+    );
+    terminal
+        .transition_to(tekstide_core::domain::TerminalStatus::Running)
+        .unwrap();
+    terminal
+        .transition_to(tekstide_core::domain::TerminalStatus::Exited)
+        .unwrap();
+    let terminal_id = terminal.id.clone();
+    let transcript = tekstide_core::domain::Transcript::metadata(
+        project_id.clone(),
+        terminal_id,
+        None,
+        &transcript_path,
+        "local-bounded-agent-run",
+    );
+    {
+        let project = state
+            .app_shell
+            .state_mut()
+            .project_mut(&project_id)
+            .expect("test precondition: the project exists");
+        project
+            .add_terminal_session(terminal)
+            .expect("registering the terminal on its own project must succeed");
+        project
+            .add_transcript(transcript)
+            .expect("attaching a transcript to its own project must succeed");
+    }
+
+    // A real, deliberate audit record for this project -- not relying on
+    // whichever side effect `add_project_from_path` itself may or may
+    // not already have produced, so this test's own precondition does
+    // not depend on that unrelated behavior.
+    {
+        let mut audit_store =
+            open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+        let mut audit_health = tekstide_core::audit::AuditHealth::default();
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health)
+            .record_project_added(project_id.clone());
+    }
+    let audit_store_before =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let records_before_count = audit_store_before
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|sequenced| sequenced.record.project_id.as_ref() == Some(&project_id))
+        .count();
+    assert!(
+        records_before_count > 0,
+        "test precondition: at least one audit record exists for this project before closing"
+    );
+
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+
+    assert!(
+        state.app_shell.state().project(&project_id).is_none(),
+        "test precondition: the idle project actually closed"
+    );
+    assert!(
+        transcript_path.exists(),
+        "closing must not delete the transcript file"
+    );
+    assert_eq!(
+        std::fs::read(&transcript_path).unwrap(),
+        b"real, sensitive transcript content",
+        "closing must not touch the transcript's own content"
+    );
+    let audit_store_after =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let records_after_count = audit_store_after
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|sequenced| sequenced.record.project_id.as_ref() == Some(&project_id))
+        .count();
+    assert!(
+        records_after_count >= records_before_count,
+        "closing must not delete any pre-existing audit record: before={records_before_count} \
+         after={records_after_count}"
+    );
+}
+
+/// Response 310's own point, proven live rather than only at the core
+/// layer: `×` must work on a project that is not the active one --
+/// closing a background tab must not require switching to it first, and
+/// must not disturb whichever project actually is active.
+#[test]
+fn closing_a_background_project_does_not_disturb_the_active_one() {
+    let mut app_shell = ApplicationShell::new();
+    let active_id = app_shell
+        .add_project_from_path(fresh_project_dir("close-background-active"))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    let background_id = app_shell
+        .add_project_from_path(fresh_project_dir("close-background-idle"))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    assert_eq!(
+        app_shell.state().active_project_id(),
+        Some(&active_id),
+        "test precondition: the first project stays active"
+    );
+    let mut state = state_with(app_shell);
+
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(background_id.clone()),
+    );
+
+    assert!(
+        state.app_shell.state().project(&background_id).is_none(),
+        "the background project must actually close"
+    );
+    assert_eq!(
+        state.app_shell.state().active_project_id(),
+        Some(&active_id),
+        "closing a background tab must not change which project is active"
     );
 }

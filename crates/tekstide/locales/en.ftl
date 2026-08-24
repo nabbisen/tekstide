@@ -136,6 +136,14 @@ project-board-recent-open-button = Open
 # alongside the pre-existing `Ctrl+Alt+P` accelerator.
 project-tab-strip-home = Projects
 
+# RFC-039 PR-039-C: the close control on every project tab -- never on
+# the permanent home tab above, which is not a project to close. A
+# symbol, not a word, so it reads the same regardless of locale; still
+# routed through the catalog rather than a Rust literal, the same
+# "nothing user-visible bypasses en.ftl" discipline every other tab
+# strip label already follows.
+project-tab-strip-close = ×
+
 # RFC-038 PR-038-A: `$reason` is a compile-time symbol
 # (`PathFieldError`'s own shape), the same division of labour
 # `terminal-launch-refused` already uses -- never the error's Rust
@@ -605,6 +613,24 @@ transcript-purge-dialog-body = This permanently deletes { $count ->
 transcript-purge-dialog-purge = Purge
 transcript-purge-dialog-cancel = Cancel
 transcript-purge-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.
+
+# RFC-039 PR-039-C, `what-closing-a-project-must-not-lose.md` §2: names
+# the project by its canonical path, not display name alone -- the same
+# minimal "{ $path }" shape `trust-grant-dialog-body` above already uses,
+# since closing shares that dialog's own reason for needing the real
+# path: a wrong belief here becomes a destructive action against the
+# wrong target, unlike switching.
+project-close-dialog-title = Close this project?
+project-close-dialog-body = { $path }
+# §1: prefixes the real counts `assess_project_close` computed
+# ("2 running processes, 1 dirty file"), appended in Rust rather than
+# through this template -- those counts are trusted but not yet
+# catalog-driven text, the same disclosed limitation
+# `surface::board`'s own `trust_label`/`availability_label` already have.
+project-close-dialog-live-work-prefix = This will end:
+project-close-dialog-close = Close
+project-close-dialog-cancel = Cancel
+project-close-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.
 
 
 # 0.12.1: descriptions for `keyboard_help::keyboard_help_lines`, one per

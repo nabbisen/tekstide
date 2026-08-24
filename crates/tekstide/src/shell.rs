@@ -40,13 +40,15 @@ use iced::widget::{button, center, column, container, opaque, row, scrollable, s
 use iced::{Background, Border, Element, Length, Subscription, Task, keyboard};
 
 use tekstide_core::command::AppCommand;
-use tekstide_core::domain::TerminalId;
+use tekstide_core::domain::{TerminalId, TerminalStatus};
 use tekstide_core::navigation::{KeybindingPolicy, NavigationAction};
 use tekstide_core::project::{ProjectMode, ProjectOpenSurface};
 use tekstide_core::route::AppRoute;
 use tekstide_core::runtime::terminal::{
-    LinuxTerminalRuntime, TerminalInputDecision, TerminalInputDecisionReason, TerminalInputPolicy,
-    TerminalInputSource, TerminalLaunchError, TerminalRuntimeHandle, TerminalTrustedUiState,
+    BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalInputDecision,
+    TerminalInputDecisionReason, TerminalInputPolicy, TerminalInputSource, TerminalLaunchError,
+    TerminalRuntimeEvent, TerminalRuntimeHandle, TerminalTrustedUiState, TerminationOutcome,
+    TerminationRequest, TerminationRequestSource,
 };
 use tekstide_core::shell::ApplicationShell;
 
@@ -237,6 +239,56 @@ pub(crate) struct TranscriptPurgeModal {
     transcript_count: u64,
     retained_bytes: u64,
     focus: TranscriptPurgeButton,
+}
+
+/// RFC-039 PR-039-C: the close-confirmation dialog's own focus targets --
+/// the same two-item cycle shape as [`TranscriptPurgeButton`], a distinct
+/// type for the same reason: "Close"/"Cancel" name what *this* dialog's
+/// buttons decide, not a generic pair reused across every confirmation
+/// in this crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectCloseButton {
+    Close,
+    Cancel,
+}
+
+impl ProjectCloseButton {
+    const ORDER: [ProjectCloseButton; 2] = [ProjectCloseButton::Close, ProjectCloseButton::Cancel];
+
+    fn next(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + 1) % Self::ORDER.len()]
+    }
+
+    fn previous(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + Self::ORDER.len() - 1) % Self::ORDER.len()]
+    }
+}
+
+/// RFC-039 PR-039-C, `what-closing-a-project-must-not-lose.md` §§1-2: the
+/// project a close-confirmation dialog is deciding about. `reasons` and
+/// `canonical_path` are captured once, at open time, from
+/// `assess_project_close`'s own real `NeedsConfirmation` reasons and
+/// `ProjectSession::canonical_root_path` -- the same "captured, not
+/// re-read" shape `TranscriptPurgeModal` above already uses, so what the
+/// confirmation states cannot drift from what was true when the user
+/// opened it. `canonical_path` is required here specifically (§2): a
+/// display name alone is not enough to identify *which* project is about
+/// to be destroyed, unlike switching, where a wrong belief has no wrong
+/// action.
+#[derive(Debug)]
+pub(crate) struct ProjectCloseModal {
+    project_id: tekstide_core::project::ProjectId,
+    reasons: Vec<tekstide_core::close::CloseReason>,
+    canonical_path: std::path::PathBuf,
+    focus: ProjectCloseButton,
 }
 
 /// RFC-019 PR-019-D: the reload/dismiss targets of the real external-
@@ -515,6 +567,19 @@ pub(crate) enum ModalContent {
     /// folder). Unlike `Help`, has real state to navigate and a real
     /// decision (`FolderBrowserModal`'s own doc).
     FolderBrowser(FolderBrowserModal),
+    /// RFC-039 PR-039-C: the tab strip's `×` handler
+    /// (`Message::CloseProjectTabPressed`) opens this only when
+    /// `assess_project_close` returns `NeedsConfirmation` --
+    /// `what-closing-a-project-must-not-lose.md` §1's "idle closes
+    /// directly" requirement means a project with nothing live never
+    /// reaches this variant at all. Unlike `TranscriptPurge` above,
+    /// **both** focus positions are real decisions here, the approval
+    /// dialog's shape rather than the paste dialog's: `Close` runs the
+    /// confirmed termination-then-close sequence, and `Cancel` --
+    /// like `ModalDismiss`/Escape -- still records a real
+    /// `safe_close_decision` (§4: "both outcomes, not only the
+    /// destructive one"), just a different one, not a silent no-op.
+    ProjectClose(ProjectCloseModal),
 }
 
 /// RFC-038 PR-038-G: `scan`/`highlight` are always a **valid** scan --
@@ -1102,6 +1167,11 @@ pub enum Message {
     /// visible control workflow 5 names, alongside the pre-existing
     /// `Ctrl+Alt+P` accelerator (unchanged, not replaced).
     GoToProjectBoardTabPressed,
+    /// RFC-039 PR-039-C: the tab strip's own `×`, one per project tab
+    /// (never on the permanent home tab -- `Projects` is not a project
+    /// to close). [`attempt_close_project_tab`]'s own doc explains the
+    /// idle-vs-confirmation split this dispatches into.
+    CloseProjectTabPressed(tekstide_core::project::ProjectId),
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -1413,6 +1483,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::GoToProjectBoardTabPressed => {
             go_to_project_board(state);
         }
+        Message::CloseProjectTabPressed(project_id) => {
+            attempt_close_project_tab(state, project_id);
+        }
         Message::Input(RoutedInput::FocusNext) => state.focus = state.focus.next(),
         Message::Input(RoutedInput::FocusPrevious) => state.focus = state.focus.previous(),
         Message::ModalFocusNext => match state.modal.as_mut() {
@@ -1422,6 +1495,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.next(),
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.next(),
             Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.next(),
+            Some(ModalContent::ProjectClose(modal)) => modal.focus = modal.focus.next(),
             // RFC-038 PR-038-C: nothing to focus -- a read-only surface,
             // not a dialog with buttons.
             Some(ModalContent::Help) => {}
@@ -1445,6 +1519,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.previous(),
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.previous(),
+            Some(ModalContent::ProjectClose(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::Help) => {}
             Some(ModalContent::FolderBrowser(modal)) => {
                 modal.highlight = modal.highlight.saturating_sub(1);
@@ -1515,6 +1590,23 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 {
                     apply_transcript_purge(state, &modal);
                 }
+                // RFC-039 PR-039-C: unlike every guarded arm above,
+                // `ProjectCloseModal` has no "closes without
+                // consequence" reading at all -- `Cancel` is a real
+                // decision too, `safe_close_decision`'s own `Cancelled`
+                // outcome, not a silent drop. This guarded arm handles
+                // `Close`; the unguarded `ProjectClose` arm a few lines
+                // below catches `Cancel` (the guard having failed falls
+                // through to the next matching pattern, the same
+                // mechanism every other guarded arm here relies on).
+                Some(ModalContent::ProjectClose(modal))
+                    if modal.focus == ProjectCloseButton::Close =>
+                {
+                    apply_project_close_confirmation(state, &modal);
+                }
+                Some(ModalContent::ProjectClose(modal)) => {
+                    record_project_close_cancelled(state, &modal.project_id);
+                }
                 // RFC-038 PR-038-G: unlike every arm above, this one
                 // does not represent a final decision -- `Enter`
                 // navigates the browser, it does not close it. `modal`
@@ -1547,7 +1639,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             evaluate_promotion(state);
         }
         Message::ModalDismiss => {
-            state.modal = None;
+            // RFC-039 PR-039-C: Escape on a `ProjectClose` dialog is a
+            // real decision too (`safe_close_decision`'s `Cancelled`),
+            // the one departure from every other modal's own "Escape
+            // closes without consequence" shape -- so this arm has to
+            // inspect what was open, not blindly discard it the way the
+            // plain `= None` below still correctly does for every other
+            // variant.
+            if let Some(ModalContent::ProjectClose(modal)) = state.modal.take() {
+                record_project_close_cancelled(state, &modal.project_id);
+            }
             // RFC-022 PR-022-E, response 227: re-evaluate on every modal
             // close, not only this dialog's own -- dismissing the paste
             // dialog can free the slot a queued Destructive proposal for
@@ -3073,6 +3174,276 @@ fn handle_tab_strip_key(state: &mut State, key: &input::KeyPress) {
     }
 }
 
+/// RFC-039 PR-039-C: `request_terminate`'s own SIGTERM grace period
+/// before the SIGKILL fallback, mirroring the 2-second figure this
+/// crate's own runtime tests already use for the same call
+/// (`linux_runtime_terminates_process_group_with_sigterm` and its
+/// siblings) -- long enough for a cooperative shell to exit cleanly on
+/// SIGTERM, short enough that closing a project with several terminals
+/// does not visibly freeze the window for many seconds. `wait_for_process_group_outcome`
+/// polls in 10ms steps, so this is a ceiling, not a fixed wait.
+const PROJECT_CLOSE_SIGTERM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+/// The SIGKILL fallback's own ceiling, once SIGTERM has not been
+/// observed to work -- shorter than the SIGTERM grace period since a
+/// process that survived SIGKILL this long is the `OrphanedUnknown`
+/// case §6 already names, not one still cooperatively shutting down.
+const PROJECT_CLOSE_SIGKILL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// RFC-039 PR-039-C: `×`'s own handler
+/// (`Message::CloseProjectTabPressed`). `what-closing-a-project-must-not-lose.md`
+/// §1's own required split: idle closes directly, live work opens the
+/// confirmation naming real counts. Guards on `state.modal.is_some()`
+/// the same way `open_transcript_purge_dialog` does -- never replace an
+/// already-open modal.
+fn attempt_close_project_tab(state: &mut State, project_id: tekstide_core::project::ProjectId) {
+    if state.modal.is_some() {
+        return;
+    }
+    let Some(project) = state.app_shell.state().project(&project_id) else {
+        return;
+    };
+    match state.app_shell.state().assess_project_close(&project_id) {
+        tekstide_core::close::CloseAssessment::SafeToClose => {
+            let _ = state.app_shell.state_mut().close_project(&project_id);
+            finish_project_close_navigation(state);
+        }
+        tekstide_core::close::CloseAssessment::NeedsConfirmation { reasons } => {
+            let canonical_path = project.canonical_root_path().clone();
+            state.modal = Some(ModalContent::ProjectClose(ProjectCloseModal {
+                project_id,
+                reasons,
+                canonical_path,
+                // §4a: closing is destructive and irreversible; the safe
+                // default is not closing, the same "Cancel by default"
+                // reasoning `open_transcript_purge_dialog` already
+                // documents for the identical shape.
+                focus: ProjectCloseButton::Cancel,
+            }));
+        }
+        // No confirmation is possible to build (the close-resource
+        // provider itself is unavailable/unknown) -- leaves the project
+        // open rather than guessing at reasons that were never computed.
+        // The pre-PR-039-C behavior for this case was identical: no GUI
+        // caller of `close_project` existed at all, so it always left
+        // the project untouched.
+        tekstide_core::close::CloseAssessment::UnsupportedOrUnknown { .. } => {}
+    }
+}
+
+/// §4: the declined half of `safe_close_decision` -- reachable from both
+/// `ModalActivate` (focus on `Cancel`) and `ModalDismiss` (Escape),
+/// since RFC-039 treats them as the same decision, unlike every other
+/// modal in this crate where Escape and an explicit Cancel both simply
+/// close with nothing recorded. Single-phase: `Cancelled` never has a
+/// preceding `record_safe_close_authorized` call, because no operation
+/// began.
+fn record_project_close_cancelled(
+    state: &mut State,
+    project_id: &tekstide_core::project::ProjectId,
+) {
+    if let Some(mut audit_store) = open_real_audit_store(&state.app_shell) {
+        let mut audit_health = tekstide_core::audit::AuditHealth::default();
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health)
+            .record_safe_close_decision(
+                project_id.clone(),
+                tekstide_core::audit::SafeCloseDecision::Cancelled,
+            );
+    }
+}
+
+/// RFC-039 PR-039-C, `what-closing-a-project-must-not-lose.md` §6's
+/// confirmed sequence: `request_terminate` on each of the project's live
+/// terminals, wait for the runtime to observe the group gone (its first
+/// production caller -- treat it as new code, not plumbing), *then*
+/// `close_project`. Never the reverse, never bypassing
+/// `assess_project_close`. The `AuditStore` handle is opened once, here,
+/// before `close_project` can remove the project from
+/// `AppState::projects()` -- `open_real_audit_store` reads that list to
+/// build its own project-root allowlist, so opening it after removal
+/// would silently narrow what it allows. `record_safe_close_authorized`
+/// runs first (response 310's confirmed two-phase requirement:
+/// `AuditStore` rejects a bare `Applied`/`Failed` record with no
+/// matching `Authorized` for the same `operation_id`, the same
+/// discipline `ManagedProcessLifecycle` already follows), `record_safe_close_decision`
+/// last.
+fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal) {
+    let project_id = modal.project_id.clone();
+    let operation_id = tekstide_core::domain::AuditOperationId::new_uuid();
+    let mut audit_store = open_real_audit_store(&state.app_shell);
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+
+    if let Some(store) = audit_store.as_mut() {
+        tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
+            .record_safe_close_authorized(project_id.clone(), operation_id.clone());
+    }
+
+    let fully_confirmed =
+        terminate_project_live_work(state, &project_id, &mut audit_store, &mut audit_health);
+
+    let assessment = state.app_shell.state_mut().close_project(&project_id);
+    let closed = matches!(
+        assessment,
+        Ok(tekstide_core::close::CloseAssessment::SafeToClose)
+    );
+
+    if let Some(store) = audit_store.as_mut() {
+        tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
+            .record_safe_close_decision(
+                project_id.clone(),
+                tekstide_core::audit::SafeCloseDecision::Closed {
+                    operation_id,
+                    fully_confirmed: fully_confirmed && closed,
+                },
+            );
+    }
+
+    if closed {
+        finish_project_close_navigation(state);
+    }
+    // If `close_project` still refused (something other than terminals
+    // or an agent run is blocking -- dirty files, pending approvals),
+    // the project stays open. The modal is already closed
+    // (`Message::ModalActivate`'s own `state.modal.take()`), so this is
+    // a known, disclosed limitation -- the user sees the project still
+    // present, not a silently-eaten close -- rather than a forced bypass
+    // of the assessment, which §6 explicitly forbids.
+}
+
+/// §6's own step 2, generalized to every terminal `assess_project_close`
+/// already counts as live -- both a plain terminal
+/// (`terminal_status_is_active` directly) and one an agent run owns (an
+/// active run with no active terminal of its own is the other half of
+/// `running_processes`' computation) end up retired before step 3 runs.
+/// `live_terminal_ids` is a snapshot taken once, before any mutation --
+/// the same reason every other multi-step orchestration in this module
+/// reads its work list up front rather than re-deriving it mid-loop.
+/// Returns whether every terminated terminal's own outcome was a
+/// confirmed exit, not `OrphanedUnknown`/`Failed` -- the same ambiguity
+/// `record_plain_terminal_terminated`'s own `NotRequired` branch already
+/// refuses to guess a reason code for, threaded up so the caller can
+/// record an honest `Applied` vs. `Failed`.
+fn terminate_project_live_work(
+    state: &mut State,
+    project_id: &tekstide_core::project::ProjectId,
+    audit_store: &mut Option<tekstide_core::audit::AuditStore>,
+    audit_health: &mut tekstide_core::audit::AuditHealth,
+) -> bool {
+    let Some(project) = state.app_shell.state().project(project_id) else {
+        return true;
+    };
+    let live_terminal_ids: Vec<TerminalId> = project
+        .terminal_sessions()
+        .iter()
+        .filter(|terminal| tekstide_core::project::terminal_status_is_active(terminal.status()))
+        .map(|terminal| terminal.id.clone())
+        .collect();
+
+    let mut fully_confirmed = true;
+    for terminal_id in live_terminal_ids {
+        let Some(pane_index) = state
+            .terminal_panes
+            .iter()
+            .position(|pane| pane.terminal_id() == &terminal_id)
+        else {
+            // No live pane for a terminal the project still lists as
+            // active -- cannot terminate a process this crate holds no
+            // handle to; not confirmed, but not fatal to the rest of the
+            // close either.
+            fully_confirmed = false;
+            continue;
+        };
+        let mut pane = state.terminal_panes.remove(pane_index);
+
+        let request = TerminationRequest {
+            source: TerminationRequestSource::ProjectClose,
+            reason: BoundedRuntimeSummary::new("project closed with live work"),
+        };
+        let outcome = match pane.request_terminate(
+            request,
+            PROJECT_CLOSE_SIGTERM_TIMEOUT,
+            PROJECT_CLOSE_SIGKILL_TIMEOUT,
+        ) {
+            Ok(events) => events.into_iter().rev().find_map(|event| match event {
+                TerminalRuntimeEvent::Terminated { outcome, .. } => Some(outcome),
+                _ => None,
+            }),
+            Err(_) => None,
+        };
+        let Some(outcome) = outcome else {
+            fully_confirmed = false;
+            continue;
+        };
+
+        let confirmed = matches!(
+            outcome,
+            TerminationOutcome::Exited { .. }
+                | TerminationOutcome::TerminatedBySignal { .. }
+                | TerminationOutcome::KilledAfterTimeout { .. }
+        );
+        fully_confirmed &= confirmed;
+
+        let owning_agent_run_id = state
+            .app_shell
+            .state()
+            .project(project_id)
+            .and_then(|project| {
+                project
+                    .agent_runs()
+                    .iter()
+                    .find(|run| run.terminal_id.as_ref() == Some(&terminal_id))
+                    .map(|run| run.id.clone())
+            });
+        if let Some(agent_run_id) = owning_agent_run_id {
+            let _ = state
+                .app_shell
+                .state_mut()
+                .apply_agent_terminal_outcome_for_project(
+                    project_id,
+                    &agent_run_id,
+                    &terminal_id,
+                    &outcome,
+                );
+        } else if let Some(project) = state.app_shell.state_mut().project_mut(project_id) {
+            // Mirrors `record_terminal_exit`'s own outcome mapping for a
+            // plain terminal: a clean exit records the real exit code,
+            // anything else transitions to `Failed` via the more general
+            // status API -- the session bar stops lying either way.
+            let _ = match &outcome {
+                TerminationOutcome::Exited { exit_status } => {
+                    project.mark_terminal_exited(&terminal_id, Some(*exit_status))
+                }
+                _ => project.transition_terminal_status(&terminal_id, TerminalStatus::Failed),
+            };
+        }
+
+        if let Some(store) = audit_store.as_mut() {
+            tekstide_core::audit::AuditCoordinator::new(store, audit_health)
+                .record_plain_terminal_terminated(project_id.clone(), terminal_id, &outcome);
+        }
+    }
+
+    fully_confirmed
+}
+
+/// After a close actually removed the project: if no project is active
+/// any more, the board is the only sensible place left to show (an
+/// `ActiveProjectWorkspace` route with no active project renders
+/// nothing meaningful) -- `go_to_project_board` already exists for
+/// exactly this. If a different project became active (`close_project`'s
+/// own `remove_active_project_session` picks `projects().first()`),
+/// leave the route as it is: closing a background tab must not yank the
+/// user away from whatever they were doing, and closing the active tab
+/// naturally shows whichever project took its place, the same "closing
+/// the active tab lands you on the next one" convention every tab strip
+/// already has.
+fn finish_project_close_navigation(state: &mut State) {
+    if state.app_shell.state().active_project_id().is_none() {
+        go_to_project_board(state);
+    } else {
+        ensure_explorer_scanned(state);
+    }
+}
+
 /// RFC-038 PR-038-A/B: the Project Board's path field, in both the
 /// places it can appear. Mirrors the shape
 /// [`handle_editor_key`]/[`handle_trust_settings_key`] already establish
@@ -3573,7 +3944,11 @@ fn trusted_ui_state(state: &State) -> TerminalTrustedUiState {
         | Some(ModalContent::TranscriptPurge(_))
         | Some(ModalContent::Help)
         // RFC-038 PR-038-G: same generic bucket, same reason.
-        | Some(ModalContent::FolderBrowser(_)) => TerminalTrustedUiState::SecurityDialogActive,
+        | Some(ModalContent::FolderBrowser(_))
+        // RFC-039 PR-039-C: same generic bucket, same reason -- not a
+        // terminal-paste concern, but modal exclusivity still needs it
+        // to read as active while it is open.
+        | Some(ModalContent::ProjectClose(_)) => TerminalTrustedUiState::SecurityDialogActive,
     }
 }
 
@@ -4207,6 +4582,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ModalContent::TranscriptPurge(modal) => transcript_purge_dialog_view(state, modal),
             ModalContent::Help => help_modal_view(state),
             ModalContent::FolderBrowser(modal) => folder_browser_modal_view(state, modal),
+            ModalContent::ProjectClose(modal) => project_close_dialog_view(state, modal),
         };
         let scrim = center(modal_view).style(modal_scrim_style(state.theme));
         stack![base, opaque(scrim)].into()
@@ -4580,22 +4956,45 @@ fn project_tab_strip(state: &State) -> Element<'_, Message> {
 
     let home_active = state.app_shell.route() == tekstide_core::route::AppRoute::ProjectBoard;
     let home_focused = strip_focused && highlight == 0;
-    let home_tab = button(
+    let home_button = button(
         text(home_tab_label(&state.catalog, home_active, home_focused))
             .size(state.theme.font_size_body()),
     )
     .padding(6)
-    .style(tab_active_style(state.theme, home_focused, home_active))
+    .style(tab_inner_button_style(state.theme))
     .on_press(Message::GoToProjectBoardTabPressed);
+    let home_tab =
+        container(home_button).style(tab_container_style(state.theme, home_focused, home_active));
 
     let mut tabs: Vec<Element<'_, Message>> = vec![home_tab.into()];
     tabs.extend(projects.iter().enumerate().map(|(index, project)| {
         let active = Some(project.id()) == active_id;
         let focused = strip_focused && highlight == index + 1;
-        button(text(project_tab_label(project, active, focused)).size(state.theme.font_size_body()))
-            .padding(6)
-            .style(tab_active_style(state.theme, focused, active))
-            .on_press(Message::SwitchActiveProjectTabPressed(project.id().clone()))
+        // RFC-039 PR-039-C: `×` has to be a sibling button, not nested
+        // inside the switch button -- `iced` does not support one
+        // interactive widget inside another. The shared border/fill
+        // (`tab_container_style`) moves to the wrapping `container` so
+        // both buttons read as one tab, not two separately-outlined
+        // boxes; each inner `button` itself is transparent
+        // (`tab_inner_button_style`), the same "container draws the
+        // chrome, buttons draw only their own content" split
+        // `surface::board::row_view`'s "Open" button already
+        // establishes for its own row.
+        let switch_button = button(
+            text(project_tab_label(project, active, focused)).size(state.theme.font_size_body()),
+        )
+        .padding(6)
+        .style(tab_inner_button_style(state.theme))
+        .on_press(Message::SwitchActiveProjectTabPressed(project.id().clone()));
+        let close_button = button(
+            text(state.catalog.get("project-tab-strip-close")).size(state.theme.font_size_body()),
+        )
+        .padding([6, 10])
+        .style(tab_inner_button_style(state.theme))
+        .on_press(Message::CloseProjectTabPressed(project.id().clone()));
+
+        container(row![switch_button, close_button])
+            .style(tab_container_style(state.theme, focused, active))
             .into()
     }));
 
@@ -4606,30 +5005,57 @@ fn project_tab_strip(state: &State) -> Element<'_, Message> {
 /// doc for the full reasoning): border colour/width for `focused` --
 /// the same `border_focused`/`border_default` and `2.0`/`1.0` values
 /// `zone_style` itself uses, not reused directly only because `iced`
-/// gives `button`/`container` distinct `Style` types with no shared
+/// gives `container`/`button` distinct `Style` types with no shared
 /// trait between them -- and background fill for `active`. A project
 /// that is both, the common case, shows both without either
 /// overwriting the other.
-fn tab_active_style(
+///
+/// RFC-039 PR-039-C: moved from a `button::Style` to a `container::Style`
+/// -- a project tab is now two sibling buttons (switch, `×`), not one,
+/// so the border/fill has to live on the wrapping `container` both share
+/// rather than on either button alone; see [`project_tab_strip`]'s own
+/// doc for why the buttons cannot nest.
+fn tab_container_style(
     theme: Theme,
     focused: bool,
     active: bool,
+) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_base_theme: &iced::Theme| container::Style {
+        background: Some(Background::Color(if active {
+            theme.surface_elevated()
+        } else {
+            theme.background()
+        })),
+        text_color: Some(theme.foreground()),
+        border: Border {
+            color: if focused {
+                theme.border_focused()
+            } else {
+                theme.border_default()
+            },
+            width: if focused { 2.0 } else { 1.0 },
+            radius: 0.0.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+/// RFC-039 PR-039-C: the tab strip's own buttons draw no chrome of their
+/// own -- [`tab_container_style`] above draws the shared border/fill on
+/// the wrapping `container`, so a button styled with its own border or
+/// background here would draw a second, redundant box around itself
+/// (or, for the two-button project tab, two separate boxes where one is
+/// wanted).
+fn tab_inner_button_style(
+    theme: Theme,
 ) -> impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style {
     move |_base_theme: &iced::Theme, _status: iced::widget::button::Status| {
         iced::widget::button::Style {
-            background: Some(Background::Color(if active {
-                theme.surface_elevated()
-            } else {
-                theme.background()
-            })),
+            background: None,
             text_color: theme.foreground(),
             border: Border {
-                color: if focused {
-                    theme.border_focused()
-                } else {
-                    theme.border_default()
-                },
-                width: if focused { 2.0 } else { 1.0 },
+                color: iced::Color::TRANSPARENT,
+                width: 0.0,
                 radius: 0.0.into(),
             },
             ..iced::widget::button::Style::default()
@@ -6830,6 +7256,77 @@ fn transcript_purge_dialog_view<'a>(
         )
         .into(),
         text(state.catalog.get("transcript-purge-dialog-hint"))
+            .size(state.theme.font_size_status())
+            .into(),
+    ];
+
+    modal_dialog_box(state, column(lines).spacing(10).into())
+}
+
+/// RFC-039 PR-039-C, `what-closing-a-project-must-not-lose.md` §2:
+/// escapes the canonical path this dialog names -- `text_safety::quote_untrusted`,
+/// the same primitive every other untrusted-text site in this crate
+/// uses, no second one. Factored out from [`project_close_dialog_body`]
+/// for the same testability reason `trust_grant_dialog_paths` already
+/// is: directly checkable without going through `iced`'s `Element` tree.
+fn project_close_dialog_path(modal: &ProjectCloseModal) -> tekstide_core::text_safety::DisplayText {
+    tekstide_core::text_safety::quote_untrusted(&modal.canonical_path.display().to_string())
+}
+
+fn project_close_dialog_body(catalog: &Catalog, modal: &ProjectCloseModal) -> String {
+    let path = project_close_dialog_path(modal);
+    catalog.get_with_args(
+        "project-close-dialog-body",
+        &CatalogArgs::new().untrusted("path", &path),
+    )
+}
+
+/// §1: the real counts, not vague warning text -- `modal.reasons` is
+/// exactly what `assess_project_close` computed at open time
+/// (`ProjectCloseModal`'s own doc), so this can only ever say "2 running
+/// processes, 1 dirty file," never "this project has unsaved work."
+/// Joined and appended in Rust, not through the Fluent template, for the
+/// same reason [`project_close_dialog_path`] is factored the way it is:
+/// `CloseReason::message` is trusted, fixed-set text with no
+/// `CatalogArgs` constructor that fits it (not a number, not untrusted
+/// filesystem text, not a `&'static str` literal) -- the same disclosed
+/// limitation `surface::board`'s own `trust_label`/`availability_label`
+/// already carry.
+fn project_close_dialog_reasons_line(catalog: &Catalog, modal: &ProjectCloseModal) -> String {
+    let joined = modal
+        .reasons
+        .iter()
+        .map(|reason| reason.message.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{} {joined}",
+        catalog.get("project-close-dialog-live-work-prefix")
+    )
+}
+
+fn project_close_dialog_view<'a>(
+    state: &'a State,
+    modal: &'a ProjectCloseModal,
+) -> Element<'a, Message> {
+    let button_line = |target: ProjectCloseButton, label_key: &str| {
+        let marker = if modal.focus == target { "> " } else { "  " };
+        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+    };
+
+    let lines: Vec<Element<'_, Message>> = vec![
+        text(state.catalog.get("project-close-dialog-title"))
+            .size(state.theme.font_size_heading())
+            .into(),
+        text(project_close_dialog_body(&state.catalog, modal))
+            .size(state.theme.font_size_body())
+            .into(),
+        text(project_close_dialog_reasons_line(&state.catalog, modal))
+            .size(state.theme.font_size_body())
+            .into(),
+        button_line(ProjectCloseButton::Close, "project-close-dialog-close").into(),
+        button_line(ProjectCloseButton::Cancel, "project-close-dialog-cancel").into(),
+        text(state.catalog.get("project-close-dialog-hint"))
             .size(state.theme.font_size_status())
             .into(),
     ];
