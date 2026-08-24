@@ -322,16 +322,22 @@ fn this_surface_no_longer_references_the_keyboard_list_at_all() {
     );
 }
 
-/// RFC-038 PR-038-G: the first genuine `iced::widget::button` in this
-/// crate -- every earlier "button" (`TrustSettings`, `ApprovalHistory`)
-/// is a `"> Label"`-marker-prefixed `text()`, keyboard-only, never
-/// mouse-clickable (see this module's own `path_field_section` doc).
-/// A source-level check, the same shape
-/// `this_surface_no_longer_references_the_keyboard_list_at_all` already
-/// uses, since `iced::Element` gives a test no way to introspect
-/// whether a rendered tree is a real widget or an inert label -- proves
-/// the control is a real `button(...).on_press(...)`, not a repeat of
-/// the "named nothing" defect `the_two_action_labels_that_named_nothing_are_gone_from_the_catalogue`
+/// RFC-038 PR-038-G: **the first genuine `iced::widget::button` on
+/// *this* surface** -- `board.rs` had none before (only text and the
+/// path field). **Correction, not a first for the crate**: `shell.rs`'s
+/// `TrustSettings` (Grant/Revoke, capture toggle, purge) and
+/// `ApprovalHistory` (`OpenApprovalHistoryEntry`) surfaces already use
+/// real `button(...).on_press(...)` controls (`shell.rs:5691` onward) --
+/// an earlier claim in this module's own doc comment and in this PR's
+/// `qa-evidence.md`/review request that those were `"> Label"`-marker
+/// text only was wrong, found and corrected while starting PR-038-D
+/// (see `qa-evidence.md`'s own correction note). A source-level check,
+/// the same shape `this_surface_no_longer_references_the_keyboard_list_at_all`
+/// already uses, since `iced::Element` gives a test no way to
+/// introspect whether a rendered tree is a real widget or an inert
+/// label -- proves the control is a real `button(...).on_press(...)`,
+/// not a repeat of the "named nothing" defect
+/// `the_two_action_labels_that_named_nothing_are_gone_from_the_catalogue`
 /// exists to prevent.
 #[test]
 fn the_browse_button_is_a_real_clickable_widget_not_an_inert_label() {

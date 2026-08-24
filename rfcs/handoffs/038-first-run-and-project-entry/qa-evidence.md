@@ -329,9 +329,8 @@ decision on where it belongs -- a new PR, or folded into `test-process-leak.md`'
 is not an acceptable *primary* way to choose a folder.
 
 **Build.** A real, clickable `iced::widget::button` ("Browse...") on the Project Board's path
-field section (`board::path_field_section`) -- the first genuine `button` in this crate; every
-earlier "button" (`TrustSettings`, `ApprovalHistory`) is a `"> Label"`-marker-prefixed `text()`,
-keyboard-only. `Ctrl+Alt+B` is the accelerator alongside it, not the only route (task breakdown:
+field section (`board::path_field_section`) -- the first genuine `button` on *this surface*
+(`board.rs` had none before). `Ctrl+Alt+B` is the accelerator alongside it, not the only route (task breakdown:
 "a button, not only a key"). Both converge on `open_folder_browser`, opening
 `ModalContent::FolderBrowser` at `$HOME` (falling back to the filesystem root). `Enter`
 navigates the highlighted row (a subdirectory, or `Parent`); `Space` commits the directory
@@ -460,6 +459,30 @@ removed between the scan and the commit, since a real race is not reliably repro
 `shell::tests::a_commit_failure_renders_the_error_and_keeps_the_modal_open`, the same
 "never a silent no-op" shape `a_bad_path_renders_a_notice_and_the_application_keeps_running`
 already proves for the field.
+
+**Correction, found while starting PR-038-D.** This PR's own review request (300) and this
+section, as first written, claimed the "Browse..." button was "the first genuine
+`iced::widget::button` in this crate," naming `TrustSettings` and `ApprovalHistory` as
+counter-examples ("a `\"> Label\"`-marker-prefixed `text()`, keyboard-only"). That is wrong.
+`shell.rs` already imports `button` from `iced::widget` at its top-level import list and uses
+real `button(...).on_press(...)` five times before this PR: `trust_settings_view`'s Grant/Revoke
+(`Message::RevokeWorkspaceTrust`/`OpenTrustGrantDialog`, `shell.rs:5691`/`5700`), its capture
+toggle (`ToggleTranscriptCaptureDeclined`, `:5725`), its purge control
+(`OpenTranscriptPurgeDialog`, `:5757`), and `approval_history_entry_view`'s open control
+(`OpenApprovalHistoryEntry`, `:5869`). Confirmed by direct grep, not by re-reading a summary.
+
+**What is still true**: this PR's button is the first on `board.rs` *specifically* -- that
+surface genuinely had none before. **What is now known to be untrue**: that mouse clicks and
+modals had never coexisted in this crate before this PR, and (in the accepted response to
+review request 300) that "there was nothing to click" before this button existed. The
+independently-checked conclusion in that response -- that `opaque(center(...))` already blocks
+clicks reaching anything beneath an open modal, `shell.rs:3824` -- is unaffected: it was verified
+directly against the render code, not inferred from the false "first button" premise, and the
+five pre-existing buttons above sit on `active_project_workspace_view`'s own `MainArea` content,
+under the exact same `stack![base, opaque(scrim)]` composition, so they were already covered by
+the same mechanism. Nothing here changes PR-038-G's acceptance; this is a correction to the
+written record, not a reopened question. `board/tests.rs`'s own doc comment for
+`the_browse_button_is_a_real_clickable_widget_not_an_inert_label` corrected to match.
 
 ## PR-038-D — recent projects
 
