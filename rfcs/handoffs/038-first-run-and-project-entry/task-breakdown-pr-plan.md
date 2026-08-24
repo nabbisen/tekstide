@@ -9,7 +9,7 @@ created: "2026-08-24"
 
 # Slices, and the order they run in
 
-**Execution order: A, B, C, G, D, F, E.** Letters are allocation order, not execution order —
+**Execution order: A, B, C, G, D, F, I, E.** Letters are allocation order, not execution order —
 C, G and F were added or re-scoped after A and B shipped. This project has already lost a day
 to slice letters that implied an order they did not have (PR-020-B/C), so the order is stated
 here once and the letters are never renamed.
@@ -148,6 +148,34 @@ be deletable; if it is not, say why, because that is a third instance hiding.
 the PR-038-B route test fails.
 
 Additive to core's public API, so no breaking change and no version implication.
+
+## PR-038-I — one guard, so two renderers cannot diverge on escaping
+
+**Added 2026-08-24 from PR-038-G's review, and it replaces a shared-render refactor rather than
+deferring one.** PR-038-G shipped `browse_row_line`/`browse_node_line`/`browse_tree_lines` as a
+near line-for-line parallel of `surface/explorer.rs`'s originals, disclosed by the implementer,
+because the core scan types genuinely differ: `ExplorerDirectoryScan` carries project-root-
+*relative* paths and a folder browser exists to choose that root.
+
+The risk in two renderers is **not** volume, it is escaping divergence. Both render
+filesystem-derived names; if one later gains a fix the other does not, that is a security
+divergence. Both escape correctly today (`explorer.rs:89` and `:220`).
+
+**Build:** a count-equality invariant over `surface/explorer.rs` — the number of `.untrusted(`
+call sites equals the number of `quote_untrusted(` calls. Verified satisfiable before this was
+assigned: both are **4** today. Per `ARCHITECTURE.md`'s enumeration-test unit rule the unit is
+the call site, not the file, so a future renderer cannot pass an unescaped name and still pass.
+
+`board.rs` reads 0 and 3 — it escapes and renders directly rather than through `.untrusted(`.
+**Do not extend the invariant there** without deciding what it should mean; an invariant that is
+false for a correct file is worse than none.
+
+**Ablate** by removing one `quote_untrusted` call and confirming the count test fails.
+
+A shared render helper is explicitly **not** required. Requiring an abstraction to enforce a
+property a test enforces directly is the wrong trade, and forcing `BrowseNode` through
+`ExplorerNode`'s shape is what PR-038-G's core split exists to avoid. If a third browser ever
+appears, revisit then.
 
 ## PR-038-E — closeout
 
