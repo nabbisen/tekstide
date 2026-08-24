@@ -17,7 +17,7 @@ Related RFCs:
   this RFC does not replace; it supplies the missing layer between that model and the user.
 - [RFC-005](../done/005-application-shell-and-project-board.md) — owns the Project Board whose
   rows are, today, inert text.
-- [RFC-038](../accepted/038-first-run-and-project-entry.md) — project entry. Overlaps
+- [RFC-038](../done/038-first-run-and-project-entry.md) — project entry. Overlaps
   deliberately and is bounded in §Relationship below.
 - [RFC-036](../accepted/036-dormant-capability-closure.md) — `close_project` joins its list.
 

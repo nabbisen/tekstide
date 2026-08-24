@@ -1,8 +1,8 @@
 ---
 title: "RFC-038: Acceptance / QA Checklist"
 rfc: "RFC-038"
-rfc_file: "../../accepted/038-first-run-and-project-entry.md"
-source_rfc_status: "Accepted 2026-08-24 — M12, first"
+rfc_file: "../../done/038-first-run-and-project-entry.md"
+source_rfc_status: "Implemented and closed 2026-08-24 — RFC-038 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-24"
 ---
@@ -189,12 +189,48 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Final Acceptance recorded 2026-08-24 (review request 305). Suite re-run by the reviewer:
+359 + 727 + 2, zero failed; fmt clean; clippy -D warnings clean.
+
+RFC-038 is closed. The product has a door: a person who has read nothing can open a project
+from the window, by typing a path, by browsing to a folder, or by reopening a remembered one
+with a single key -- and can find out what else exists from a Help modal reachable anywhere.
+
+Verified at closeout rather than accepted from the request:
+  - The DisplayText constructor guard, ablated by the reviewer with a second constructor
+    added: exactly_one_function_in_the_crate_returns_displaytext failed, restored, green.
+  - 0.13.0 prepared and deliberately NOT shipped -- version bumped, changelog written, no
+    tag at HEAD, nothing published. Correct: that decision is the owner's.
+  - README's keyboard table now carries all five bindings it was missing.
+
+Four instructions in this RFC's own pack rested on unchecked claims about the code, and the
+implementer caught every one by checking before executing rather than after something broke:
+reuse the explorer tree (impossible -- the scanner needs a ProjectRootHandle), the PR-038-F
+route ablation (inert against the tree as PR-038-B left it), Guard 1 (redundant with a
+compile-time guarantee), and now "ProjectBoardEmptyState's fields are read by nothing"
+(false -- core's render_project_board read both, with a test asserting the exact string).
+
+That last one is worth naming precisely, because it is the same shape as this project's worst
+published defect. The locale comment said the fields "exist but are not read", meaning the
+GUI renders catalog text instead. I widened a scoped observation into an unscoped claim
+without checking core -- exactly how "no transcript is ever written" reached two releases
+from a grep of one crate. A true premise, a false conclusion, and the widening invisible in
+the sentence that carries it.
+
+Also delivered beyond the pack: a positive enumeration for acceptance criterion 2 (every
+catalog key board.rs renders, listed and reasoned about by name) after finding only negative
+checks existed; the trust-restoration gap found and fixed retroactively across PR-038-A and
+PR-038-G (request 302), which the reviewer had accepted without catching.
+
+Known limitations at closeout are in qa-evidence.md and are real: recent-projects.json is
+still only rewritten at boot, --help's framing sentences remain English-only, and the
+render duplication between the explorer and browse renderers stands, deliberately -- the
+type system, not a test, is what keeps it safe.
 ```

@@ -1,19 +1,19 @@
 ---
 title: "RFC-038: First-Run and Project Entry — implementation handoff"
 rfc: "RFC-038"
-rfc_file: "../../accepted/038-first-run-and-project-entry.md"
-source_rfc_status: "Accepted 2026-08-24 — M12, first"
+rfc_file: "../../done/038-first-run-and-project-entry.md"
+source_rfc_status: "Implemented and closed 2026-08-24 — RFC-038 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-24"
 ---
 
 # Give the product a door
 
-Source RFC: [RFC-038](../../accepted/038-first-run-and-project-entry.md)
+Source RFC: [RFC-038](../../done/038-first-run-and-project-entry.md)
 
 | # | Read | Why |
 | --- | --- | --- |
-| 1 | [RFC-038](../../accepted/038-first-run-and-project-entry.md) | Goals, non-goals, and the five decisions already made — do not re-open them |
+| 1 | [RFC-038](../../done/038-first-run-and-project-entry.md) | Goals, non-goals, and the five decisions already made — do not re-open them |
 | 2 | [`what-a-path-field-must-not-trust.md`](./what-a-path-field-must-not-trust.md) | **Security-critical. Read before writing any code.** A user-typed path is untrusted input that gets echoed back |
 | 3 | [`task-breakdown-pr-plan.md`](./task-breakdown-pr-plan.md) | Five slices, in order, with what each may and may not touch |
 | 4 | [`acceptance-qa-checklist.md`](./acceptance-qa-checklist.md) | What must be true and evidenced before Final Acceptance |

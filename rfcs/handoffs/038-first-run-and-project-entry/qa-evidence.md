@@ -1,8 +1,8 @@
 ---
 title: "RFC-038: QA evidence"
 rfc: "RFC-038"
-rfc_file: "../../accepted/038-first-run-and-project-entry.md"
-source_rfc_status: "Accepted 2026-08-24 — M12, first"
+rfc_file: "../../done/038-first-run-and-project-entry.md"
+source_rfc_status: "Implemented and closed 2026-08-24 — RFC-038 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-24"
 ---
