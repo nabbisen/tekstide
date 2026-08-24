@@ -1,0 +1,120 @@
+# RFC-039: Interaction Model and Visible Affordances
+
+Status: **Proposed 2026-08-24.** Written after the human owner reviewed `0.12.1` and RFC-038's
+first two slices and said: *"What is the most important is to design user workflow(s) and make
+UI/UX to help them. Currently, no button or link to open project tab, close it, return to the
+entrance etc."*
+Target milestone: to be set by the human owner. This RFC argues it precedes RFC-020 and RFC-034.
+Date: 2026-08-24
+
+Related RFCs:
+
+- [RFC-003](../done/003-information-architecture-and-ui-mode-model.md) — the IA and mode model
+  this RFC does not replace; it supplies the missing layer between that model and the user.
+- [RFC-005](../done/005-application-shell-and-project-board.md) — owns the Project Board whose
+  rows are, today, inert text.
+- [RFC-038](../accepted/038-first-run-and-project-entry.md) — project entry. Overlaps
+  deliberately and is bounded in §Relationship below.
+- [RFC-036](../accepted/036-dormant-capability-closure.md) — `close_project` joins its list.
+
+## Summary
+
+**This product has no interaction design. It has a keybinding policy that has been mistaken for
+one.**
+
+Every capability shipped so far was built, reviewed, tested, and then made reachable by binding
+a `Ctrl+Alt+<letter>` to it. Each slice asked, correctly, *can a user reach this?* — and answered
+it with a keystroke. No slice asked *what is the user trying to do, and what do they see?*
+
+The result is measurable, not a matter of taste:
+
+| | |
+| --- | --- |
+| Buttons in the entire application | **5**, all inside Trust Settings and Approval History |
+| Buttons on the Project Board — the surface a user arrives at | **0** |
+| Project Board rows that can be clicked to enter a project | **0** — they are text |
+| Visible way to return to the Project Board | none; `Ctrl+Alt+P` if you know it |
+| Visible way to close a project | none — and `close_project` has **no production caller** |
+
+The last row is the tell. Closing a project is not a missing button; it is a **dormant
+capability**, built and reviewed in core and never reached from anywhere, the same orphan
+pattern as `set_resource_limits`, `to_ai_cli_profile` and the `sensitive_config_changed`
+producer. The reachability audit found seven of those and never noticed this one, because it
+searched for functions with no callers and not for *actions a user cannot take*.
+
+## The workflows, and what each is missing
+
+This is the substance of the RFC: the product's work, described as a person experiences it.
+
+| # | The user wants to | Today | Missing |
+| --- | --- | --- | --- |
+| 1 | **Arrive and understand what this is** | A wall of nine shortcuts on the main pane | One clear action; reference material moved to Help |
+| 2 | **Open a project** | Type or paste a filesystem path | A folder browser (RFC-038, owner-directed) |
+| 3 | **See which projects are open, and pick one** | Inert rows of text | Selectable, activatable rows |
+| 4 | **Enter a project and work in it** | `Ctrl+Alt+M` toggles mode, if known | A visible route from a board row into the project |
+| 5 | **Return to the entrance** | `Ctrl+Alt+P` | A visible, always-present way back |
+| 6 | **Close a project** | Impossible from the GUI | A control, and `close_project` wired to it |
+| 7 | **Find out what the app can do** | Read `navigation.rs`, or the board's shortcut list | A Help surface that owns this material |
+
+## Principles
+
+Three, and they are the RFC's real content — every decision below follows from them.
+
+**1. Every action a user needs has a visible control.** A keyboard shortcut is an *accelerator
+for an action that is already visible*, never the only route to it. This project has shipped
+nine bindings and five buttons; that ratio is the defect.
+
+**2. Reference material does not live on a working surface.** The keyboard list belongs in Help.
+It was put on the Project Board in `0.12.1` because there was nowhere else for it — a real
+discoverability gap papered over by pushing reference text onto the primary surface. Help is the
+answer; the board is not.
+
+**3. A capability with no visible affordance is not shipped.** The existing reachability
+doctrine says *name the path a user takes to reach it*. That was satisfied, repeatedly, by
+naming a keystroke. It is hereby not sufficient: name the **control the user sees**. A binding
+alone means the capability is reachable by someone who has read the source.
+
+## Scope
+
+- **Project Board rows become interactive**: selectable, and activating one enters that project.
+- **A visible route back to the board** from any project surface.
+- **Close a project**, with `close_project` wired to a real control — including what happens to
+  its running terminals and agent runs, which is a real question this RFC must answer and not
+  assume.
+- **A Help surface** owning the keyboard reference, and its removal from the Project Board.
+- **An affordance audit**: every `NavigationAction`, and every capability a user is expected to
+  perform, listed against the visible control that invokes it. Actions with none are findings.
+
+## Non-goals
+
+- A theme, icon set, or visual redesign. This is about *what exists to interact with*, not how
+  it looks.
+- Mouse-only interaction. Everything added must remain keyboard-operable; RFC-015's focus model
+  and RFC-018's trusted-UI rules apply unchanged to every new control.
+- Replacing RFC-003's information architecture. That model is sound; nothing was built on top
+  of it.
+- Tabs specifically. The owner's phrase was "project tab"; whether the answer is tabs, a
+  sidebar, or board-plus-back is a design question this RFC owns and does not prejudge.
+
+## Relationship to RFC-038
+
+RFC-038 keeps **project entry**: the folder browser, the path field, `Ctrl+Alt+O`, recent
+projects, and the Help surface (which it was already building, and which now also removes the
+board's shortcut list).
+
+RFC-039 takes **everything after entry**: rows that respond, entering and leaving a project,
+closing one, and the affordance audit. RFC-038 must not grow into this; a slice quietly becoming
+a redesign is how scope stops being reviewable.
+
+## Open questions
+
+- **OQ1.** What happens to a project's running terminals and agent runs when it is closed? A
+  confirmation is the obvious answer, and `safe_close_decision` is an audit family that has
+  never had a producer, blocked on exactly this dialog. This RFC likely unblocks it — but must
+  decide deliberately, not inherit it.
+- **OQ2.** Board-plus-back, tabs, or a persistent project sidebar? The owner said "project tab";
+  the underlying need is workflows 3–5, and the form should follow an explicit comparison rather
+  than the first word used to describe it.
+- **OQ3.** Does an interactive row need a trusted-UI treatment? RFC-018 governs surfaces that
+  can be spoofed. A clickable row rendering an untrusted project name is a new case, and the
+  answer may be "the existing escaping is sufficient" — but it must be asked, not assumed.

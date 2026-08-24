@@ -89,8 +89,23 @@ the product; it also asks a user to type a path, which is exactly the friction t
 CLI-only route feel broken. A native picker means an XDG desktop portal dependency and a
 capability this project has so far avoided entirely.
 
-**Decided: the text field, this milestone.** It closes the goal completely and adds no new
-external surface. A portal picker would introduce an XDG desktop portal dependency — the first
+**OVERTURNED BY THE HUMAN OWNER 2026-08-24.** *"Input form for folder select is very bad to
+users. Folder select UI is required."* A **folder browser is now required**, built in-app from
+RFC-019's explorer tree — which already scans directories, renders a parent entry, and escapes
+untrusted names — rather than from an XDG desktop portal. The owner chose the in-app form over
+a native picker: no new dependency, works on every setup, and testable from real key events
+like everything else here.
+
+The path field built in PR-038-A **stays as a secondary route** for pasting a known path, and
+stops being the primary affordance. *If the owner intended the field removed outright rather
+than demoted, say so and it goes.*
+
+The original reasoning is kept below because it was wrong in a way worth remembering: it
+optimised for what was cheapest to build and testable, and never asked what a person choosing a
+folder expects to see. That is the same capability-first instinct RFC-039 exists to correct.
+
+~~**Decided: the text field, this milestone.** It closes the goal completely and adds no new
+external surface.~~ A portal picker would introduce an XDG desktop portal dependency — the first
 in this project — and blocking the fix for an unusable product on a dependency decision is the
 wrong trade. A picker remains a separable later improvement and is explicitly not foreclosed.
 

@@ -25,9 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-
-*(empty — and that is the correct state. An empty `proposed/` means nothing is awaiting review,
-not that a folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
+| 039 | [Interaction Model and Visible Affordances](./proposed/039-interaction-model-and-visible-affordances.md) | **Proposed 2026-08-24**, after the owner reviewed RFC-038's first slices: *"design user workflow(s) and make UI/UX to help them. Currently, no button or link to open project tab, close it, return to the entrance."* The product has no interaction design — 5 buttons application-wide, **0** on the surface a user arrives at, inert board rows, no visible way back, and `close_project` built in core with **no production caller**. Names the seven workflows and what each is missing. Argues it precedes RFC-020 and RFC-034 |
 
 ## Accepted
 

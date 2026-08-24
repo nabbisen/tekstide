@@ -96,6 +96,12 @@ every row.
   delete / document decision should know that the obvious consumer went elsewhere on purpose**,
   and that "wire it" would not have served that consumer even if taken.
 - **`purge_project_transcripts`** → RFC-033.
+- **`close_project`** → **RFC-039, added 2026-08-24.** Missed by the reachability audit
+  entirely, and the miss is instructive: the audit searched for functions with no callers, and
+  found seven, but nothing searched for **actions a user cannot take**. `close_project` is
+  reviewed, tested core API that no GUI code has ever called, so a user cannot close a project
+  at all. Found by the owner asking why there was no button for it, not by any sweep this
+  project runs.
 - **`add_detected_generated_change_set`**, **`capture_agent_run_filesystem_baseline`**,
   **`apply_agent_terminal_outcome`** → discharged by `change-detection-wiring` (`0.11.0`).
 

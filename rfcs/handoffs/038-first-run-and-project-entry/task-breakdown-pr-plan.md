@@ -7,7 +7,12 @@ target_milestone: "M12"
 created: "2026-08-24"
 ---
 
-# Five slices, in order
+# Slices, and the order they run in
+
+**Execution order: A, B, C, G, D, F, E.** Letters are allocation order, not execution order —
+C, G and F were added or re-scoped after A and B shipped. This project has already lost a day
+to slice letters that implied an order they did not have (PR-020-B/C), so the order is stated
+here once and the letters are never renamed.
 
 Order matters and is not negotiable in one place: **PR-038-A lands the render arm before
 PR-038-B binds a key to it.** That is the ordering rule PR-020-B established after this project
@@ -60,6 +65,17 @@ reachable when a project is already open — the second-project case PR-038-A do
 
 ## PR-038-C — a help surface that does not need the board
 
+**Re-scoped 2026-08-24 by the human owner:** *"Short cuts should not be shown in the app main
+pane. It should be in Help."* This slice now also **removes the keyboard list from the Project
+Board** — both the empty-state and populated arms. `0.12.1` put it there because there was
+nowhere else for it, which was reference material pushed onto the primary working surface. Help
+is where it belongs.
+
+`every_board_state_renders_the_keyboard_list` exists to stop that list disappearing; it must be
+**replaced**, not deleted — by an equivalent guard that the Help surface renders every live
+binding. The property was never "the board shows it", it was "somewhere a user can reach shows
+all of it".
+
 **Build:** a surface rendering `keyboard_help_lines`, on its own binding, reachable from
 anywhere — including Terminal Immersion, which is the case `0.12.1` left unserved.
 
@@ -82,6 +98,29 @@ existing rows are.
 
 **This is the droppable slice** if A–C run long — droppable by the human owner via the
 architect, not by you. Escalate, do not descope.
+
+## PR-038-G — the folder browser
+
+**Added 2026-08-24 by the human owner's direction**, overturning RFC-038's D1: a typed path is
+not an acceptable primary way to choose a folder.
+
+**Build:** a folder browser for choosing a project directory, reached from a **visible control**
+on the Project Board — a button, not only a key. Reuse RFC-019's explorer tree: it already
+renders an `ExplorerDirectoryScan`, has a parent entry for navigating up, and escapes every
+untrusted name. Do not write a second directory renderer, and do not walk the filesystem in the
+surface — `tekstide-core` owns scanning, bounded by `FileExplorerScanPolicy`.
+
+- The chosen folder goes through the same `add_project_from_path` entry point PR-038-A uses,
+  with the same audit record and the same `Restricted` outcome. The browser chooses a path; it
+  does not gain a second way to open one.
+- `what-a-path-field-must-not-trust.md` applies unchanged — a directory name from the
+  filesystem is untrusted exactly as a typed one is.
+- The path field from PR-038-A remains as a secondary route for pasting a known path.
+- Keyboard-operable throughout, per RFC-015's focus model. A control that only responds to a
+  mouse is not finished.
+
+**Evidence:** a cold start in which a project is opened **without typing a path** — navigate and
+choose — proven from real key events, plus a screenshot of the browser itself.
 
 ## PR-038-F — give core a scan-only entry point
 
