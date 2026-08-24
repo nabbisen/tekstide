@@ -4581,7 +4581,8 @@ fn project_tab_strip(state: &State) -> Element<'_, Message> {
     let home_active = state.app_shell.route() == tekstide_core::route::AppRoute::ProjectBoard;
     let home_focused = strip_focused && highlight == 0;
     let home_tab = button(
-        text(home_tab_label(&state.catalog, home_focused)).size(state.theme.font_size_body()),
+        text(home_tab_label(&state.catalog, home_active, home_focused))
+            .size(state.theme.font_size_body()),
     )
     .padding(6)
     .style(tab_active_style(state.theme, home_focused, home_active))
@@ -4690,24 +4691,25 @@ pub(crate) fn project_tab_label(
 /// derived, so unlike [`project_tab_label`] it is never escaped: there
 /// is nothing untrusted in it to escape.
 ///
-/// Deliberately carries only [`focus_marker`], not [`tab_marker`]'s
-/// `"\u{25CF}"`/`"\u{25CB}"` pair (response 307's own finding): that
-/// symbol's one meaning everywhere else in the strip is "this is
-/// `AppState::active_project_id()`", a fact about a project session.
-/// The home tab is not a project session, so giving it the same symbol
-/// for a different fact ("`route() == ProjectBoard`") reads as a second
-/// active project when the board is showing -- two filled circles
-/// answering two different questions the same way. "You are here" is
-/// still shown, honestly, through [`tab_active_style`]'s own background
-/// fill and border (`project_tab_strip` passes `home_active` there
-/// unchanged) -- just not through the symbol reserved for project
-/// identity.
-pub(crate) fn home_tab_label(catalog: &Catalog, focused: bool) -> String {
-    format!(
-        "{}{}",
-        focus_marker(focused),
-        catalog.get("project-tab-strip-home")
-    )
+/// Deliberately never carries [`tab_marker`]'s `"\u{25CF}"`/`"\u{25CB}"`
+/// pair (response 307): that symbol's one meaning everywhere else in the
+/// strip is "this is `AppState::active_project_id()`", a fact about a
+/// project session the home tab is not.
+///
+/// Response 308's own follow-on finding: dropping that symbol left
+/// "you are on the board" carried by [`tab_active_style`]'s background
+/// fill alone -- a colour-only channel (`border` there varies with
+/// `focused`, not `active`), and measured well under the 3:1 WCAG 2.1
+/// SC 1.4.11 floor this project has already corrected twice (`0.11.0`'s
+/// unfocused-pane border, `0.12.0`'s modal scrim). Square brackets
+/// around the name when `active` is the second, non-colour channel --
+/// a shape distinct from `tab_marker`'s own vocabulary, so it cannot be
+/// misread as a second active project, and legible with no colour at
+/// all, same as [`focus_marker`].
+pub(crate) fn home_tab_label(catalog: &Catalog, active: bool, focused: bool) -> String {
+    let name = catalog.get("project-tab-strip-home");
+    let name = if active { format!("[{name}]") } else { name };
+    format!("{}{name}", focus_marker(focused))
 }
 
 /// The route symbol `status_bar_summary` selects on -- a compile-time

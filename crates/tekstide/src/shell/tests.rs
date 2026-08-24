@@ -9285,31 +9285,45 @@ fn project_tab_label_truncates_a_long_display_name_with_an_ellipsis_marker() {
 }
 
 /// The home tab's own label is trusted, catalog-driven text -- no
-/// escaping applies (there is nothing untrusted in it). Unlike a
-/// project tab it carries only the focus marker, deliberately never
-/// `tab_marker`'s active-project symbol (response 307): that symbol
-/// means "this is `AppState::active_project_id()`" everywhere else in
-/// the strip, a claim the home tab -- not a project -- must not make.
+/// escaping applies (there is nothing untrusted in it). It never
+/// renders `tab_marker`'s active-project symbol (response 307): that
+/// symbol means "this is `AppState::active_project_id()`" everywhere
+/// else in the strip, a claim the home tab -- not a project -- must not
+/// make. Being on the board is instead shown by wrapping the name in
+/// square brackets (response 308): a shape distinct from `tab_marker`'s
+/// own vocabulary, and, unlike the background-fill channel alone, not
+/// colour-dependent.
 #[test]
-fn home_tab_label_carries_the_catalog_text_and_only_the_focus_marker() {
+fn home_tab_label_marks_being_on_the_board_with_brackets_not_colour_or_the_project_symbol() {
     let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let name = catalog.get("project-tab-strip-home");
 
-    let focused = super::home_tab_label(&catalog, true);
-    let unfocused = super::home_tab_label(&catalog, false);
+    let active_focused = super::home_tab_label(&catalog, true, true);
+    let active_unfocused = super::home_tab_label(&catalog, true, false);
+    let inactive_focused = super::home_tab_label(&catalog, false, true);
+    let inactive_unfocused = super::home_tab_label(&catalog, false, false);
 
-    assert!(focused.contains(&catalog.get("project-tab-strip-home")));
-    assert_eq!(
-        focused,
-        format!("> {}", catalog.get("project-tab-strip-home"))
+    assert_eq!(active_focused, format!("> [{name}]"));
+    assert_eq!(active_unfocused, format!("  [{name}]"));
+    assert_eq!(inactive_focused, format!("> {name}"));
+    assert_eq!(inactive_unfocused, format!("  {name}"));
+
+    assert_ne!(
+        active_unfocused, inactive_unfocused,
+        "active and inactive must render differently with no colour involved"
     );
-    assert_eq!(
-        unfocused,
-        format!("  {}", catalog.get("project-tab-strip-home"))
-    );
-    assert!(
-        !focused.contains('\u{25CF}') && !focused.contains('\u{25CB}'),
-        "the home tab must never render the active-project symbol: {focused:?}"
-    );
+
+    for label in [
+        &active_focused,
+        &active_unfocused,
+        &inactive_focused,
+        &inactive_unfocused,
+    ] {
+        assert!(
+            !label.contains('\u{25CF}') && !label.contains('\u{25CB}'),
+            "the home tab must never render the active-project symbol: {label:?}"
+        );
+    }
 }
 
 // RFC-039 PR-039-B: switching, and going home -- both mouse- and

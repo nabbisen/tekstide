@@ -107,16 +107,28 @@ below.
 
 **Response 307's required correction and its own follow-on fix.** The home tab's `active` symbol
 does not mean the same thing a project tab's does. `home_tab_label` no longer calls `tab_marker`
-at all -- it carries only `focus_marker`, never `"●"`/`"○"`. `"●"` means one thing everywhere it
-appears now: "this is `AppState::active_project_id()`", a fact about a project session, which the
-home tab is not. "You are on the board" is still shown, honestly, through `tab_active_style`'s
-background fill alone (`project_tab_strip` still passes `home_active` there unchanged) -- just not
-through the symbol reserved for project identity. Response 307 also caught that
-`focused-tab-distinct-from-active-tab.png` did not show what its own caption claimed (no tab in
-that frame was actually focused) -- the same synthetic-focus quirk described below for the
-Enter-activation capture, hit on a neighbouring capture and not re-checked there. All five
-screenshots in this section were re-captured against the rebuilt binary after both fixes; the
-descriptions below match what is actually in each file.
+at all -- it never renders `"●"`/`"○"`. `"●"` means one thing everywhere it appears now: "this is
+`AppState::active_project_id()`", a fact about a project session, which the home tab is not.
+Response 307 also caught that `focused-tab-distinct-from-active-tab.png` did not show what its own
+caption claimed (no tab in that frame was actually focused) -- the same synthetic-focus quirk
+described below for the Enter-activation capture, hit on a neighbouring capture and not re-checked
+there.
+
+**Response 308's own follow-on finding.** Dropping the symbol left "you are on the board" carried
+by `tab_active_style`'s background-fill channel alone -- colour-only (its `border` field responds
+to `focused`, not `active`), and measured well under WCAG 2.1 SC 1.4.11's 3:1 floor for a non-text
+indicator: `background` (`rgb(0.08, 0.08, 0.09)`) against `surface_elevated`
+(`rgb(0.12, 0.12, 0.12)`) is 1.11:1, the same class of defect this project already found and fixed
+twice (`0.11.0`'s unfocused-pane border at 2.63:1, `0.12.0`'s modal scrim at 2.40:1). Fixed by
+wrapping the home tab's name in square brackets when active (`home_tab_label`'s new `active`
+parameter) -- a shape distinct from `tab_marker`'s own circle vocabulary, so it cannot be misread
+as a second active project, and legible with no colour at all, the same property `focus_marker`
+already has. The project tabs' own background fill is not a parallel defect: `tab_marker`'s
+`"●"`/`"○"` already carries RFC-015 compliance for `active` there, independent of the fill: the
+fill is redundant reinforcement, not the sole channel, for those tabs specifically.
+
+All five screenshots in this section were re-captured against the rebuilt binary after every fix
+in this slice's own review history; the descriptions below match what is actually in each file.
 
 **`FocusZone::TabStrip` and the reviewed router.** `route_non_modal_input`'s precedence is
 unchanged: global keybinding match, then `Tab`/`Shift+Tab` (shell focus-cycle, never reaches a
@@ -162,8 +174,9 @@ clean.
   `project_tab_label_truncates_a_long_display_name_with_an_ellipsis_marker` -- PR-039-A's
   escaping/truncation proofs, carried forward against the renamed, now-focus-aware label
   functions.
-- `home_tab_label_carries_the_catalog_text_and_only_the_focus_marker` -- response 307's fix:
-  proves the home tab's label carries `focus_marker` and never `"●"`/`"○"`.
+- `home_tab_label_marks_being_on_the_board_with_brackets_not_colour_or_the_project_symbol` --
+  response 308's fix: all four `active`×`focused` combinations render distinctly, active never
+  equals inactive at the same focus state, and none of the four ever contains `"●"`/`"○"`.
 - `switch_active_project_tab_pressed_switches_and_enters_the_workspace` /
   `go_to_project_board_tab_pressed_returns_to_the_board` -- both `Message` arms proven directly
   against a real `State`: active project and route both change (or return), together.
@@ -184,17 +197,17 @@ clean.
 `niri msg action screenshot-window`/`wl-paste` capture method every prior slice established.
 
 - `evidence/pr-039-b/before-cold-start-two-tabs.png` -- cold start: `Project Board` route,
-  `alpha` (the auto-activated first project) shows `●`, `beta` shows `○`. `Projects` carries no
-  symbol at all -- only the background-fill "you are here" treatment (visibly lighter than
-  `alpha`'s own background) -- since `"●"` means "active project" and the board is not a project.
+  `alpha` (the auto-activated first project) shows `●`, `beta` shows `○`. `Projects` renders as
+  `[Projects]` -- brackets, not `"●"`, since that symbol means "active project" and the board is
+  not a project. Legible with no colour involved, unlike the background fill alone.
 - Real mouse click on the `beta` tab (`xdotool mousemove --sync` + `click 1`):
   `evidence/pr-039-b/after-clicking-beta-tab.png` -- `beta` now `●`, route becomes
   `ActiveProjectWorkspace` (status bar: "Project Workspace | 2 projects"), explorer/editor panes
   visible.
 - Real mouse click on the `Projects` tab:
   `evidence/pr-039-b/after-clicking-projects-home-tab.png` -- route returns to `ProjectBoard`;
-  `beta` still shows `●` (still the active project); `Projects` again shows no symbol, only the
-  background fill, now carried by a real click rather than only the unit tests above.
+  `beta` still shows `●` (still the active project); `Projects` again renders as `[Projects]`,
+  now carried by a real click rather than only the unit test above.
 - Real click on `beta` (making it active), a real click on empty window space (clearing native
   button focus -- see below), then `Tab`, `Tab` (`xdotool key --clearmodifiers Tab` twice:
   `MainArea → Sidebar → TabStrip`), then `ArrowRight` (highlight moves off the home tab onto
