@@ -75,6 +75,27 @@ biconditional —
 The expected set derived from the policy rather than written as a literal list, and ablated by
 changing exactly one thing.
 
+**DISCHARGED 2026-08-22** — `7e8d8c2`, request 290, response 291.
+`action_catalog_key_is_some_iff_the_action_is_live` iterates `linux_mvp().rules` and asserts
+`key.is_some() == (status == Candidate && default_binding.is_some())` for every rule, with the
+expected side taken from the policy so a status change cannot make it stale.
+
+Ablated independently by the reviewer, one variable per run, `navigation.rs` untouched in both:
+
+| Ablation | Result |
+| --- | --- |
+| `OpenCommandPalette` (Reserved) gains a key | **1 test fails** — the new one, uniquely. This is the gap that existed |
+| `OpenTrustSettings` (live) loses its key | 3 tests fail, the new one among them |
+
+The first is the one that matters: before `7e8d8c2` nothing in the suite failed on it, which is
+what made the original ablation's two-variable result look like evidence. The second direction
+was already covered by two composed-behaviour tests; the new test states it as the function's
+own contract instead, so it survives a change of caller.
+
+**The correction above is therefore closed.** `ca456c7`'s "five ablations" claim remains
+inaccurate as written and is not rewritten; the property it failed to establish is now
+established.
+
 ## Audit evidence (request 288)
 
 Performed by the dev team on `ca456c7` as committed, after report 287 disclosed that the
