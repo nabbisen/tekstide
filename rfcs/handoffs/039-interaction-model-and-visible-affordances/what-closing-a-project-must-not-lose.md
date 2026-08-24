@@ -62,6 +62,27 @@ more interesting record.
 That takes unwired audit families from two to one. Do not let it slip to a closeout: producers
 wired at closeout are how `safe_close_decision` got skipped the first time.
 
+## 4a. `SafeCloseAbandon` is not offered, and this is why
+
+Added 2026-08-24 after request 310 asked what it is for and found nothing in these documents
+answering.
+
+RFC-013 named **terminate/abandon** as the two selectable safe-close actions, abandon meaning
+close the project and leave its running work running. RFC-031 recorded both action kinds as
+unused and disclosed, blocked on a surface that did not exist.
+
+**It stays unused, now as a deliberate exclusion rather than an omission.** Offering "close this
+project but leave its terminals and agent run running" would produce processes that **nothing
+owns**: `close_project` removes the `ProjectSession` from `AppState` while `TerminalRuntime`
+keeps its `RunningTerminal` values, with no project referencing them and no route to reach or
+stop them. That is exactly the orphaning §6 exists to prevent, and the shape that stranded 4023
+shells during PR-038-C.
+
+RFC-013 envisioned abandon before it was known that nothing in this product terminates a process
+group and that `close_project` never touches the runtime. **Abandon becomes offerable when there
+is a real detach model** — something that still owns those processes and can reattach to them —
+and not before. Until then the dialog offers terminate or cancel.
+
 ## 5. The strip is trusted chrome
 
 RFC-016's grid exception applies to terminal output. It does **not** apply to chrome, and the
