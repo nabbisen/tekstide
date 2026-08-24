@@ -71,6 +71,7 @@ pub fn view<'a, Message: 'a>(
     theme: &'a Theme,
     path_field: &'a str,
     path_field_notice: Option<String>,
+    show_field_on_populated_board: bool,
 ) -> Element<'a, Message> {
     if let Some(_empty_state) = &view_model.empty_state {
         return empty_state_view(catalog, theme, path_field, path_field_notice);
@@ -82,13 +83,33 @@ pub fn view<'a, Message: 'a>(
         .map(|row| row_view(row, catalog, theme))
         .collect();
 
+    let mut sections: Vec<Element<'a, Message>> = vec![column(rows).spacing(12).into()];
+
+    // RFC-038 PR-038-B: `Ctrl+Alt+O`'s own render arm -- the
+    // second-project case, since the empty state's own field
+    // (`empty_state_view`) only shows while there are no rows at all.
+    // `show_field_on_populated_board` is `shell::path_field_is_showing`,
+    // computed once and threaded down, so this cannot independently
+    // decide differently than `handle_project_board_path_field_key`
+    // does about whether a keystroke should reach the field.
+    if show_field_on_populated_board {
+        sections.push(path_field_section(
+            catalog,
+            theme,
+            path_field,
+            path_field_notice,
+        ));
+    }
+
     // The keyboard list is rendered here too, not only in the empty
     // state. Shipping it only when the board is empty would have made
     // help disappear at the exact moment a user started using the
     // product -- and the Project Board is where the status bar's hint
     // sends them, so it has to be here whether or not any project is
     // open.
-    container(column![column(rows).spacing(12), keyboard_help_view(catalog, theme),].spacing(20))
+    sections.push(keyboard_help_view(catalog, theme));
+
+    container(column(sections).spacing(20))
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(16)
@@ -161,6 +182,51 @@ fn empty_state_view<'a, Message: 'a>(
     path_field: &'a str,
     path_field_notice: Option<String>,
 ) -> Element<'a, Message> {
+    let mut lines = column![
+        text(catalog.get("project-board-empty-heading")).size(theme.font_size_heading()),
+        text(catalog.get("project-board-empty-open-a-project")).size(theme.font_size_body()),
+        text(catalog.get("project-board-empty-command-example")).size(theme.font_size_body()),
+        path_field_section(catalog, theme, path_field, path_field_notice),
+    ]
+    .spacing(6);
+
+    lines = lines.push(keyboard_help_view(catalog, theme));
+
+    container(lines)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(16)
+        .into()
+}
+
+/// The path field itself -- label, box, and its optional failure notice
+/// -- factored out so both [`empty_state_view`] and `view`'s own
+/// populated-board branch (RFC-038 PR-038-B's `Ctrl+Alt+O` case) render
+/// the exact same field, rather than two copies that could drift.
+///
+/// **Not `iced::widget::text_input`.** This project routes every
+/// keystroke through one reviewed router (`input::route_non_modal_input`)
+/// so global keybindings always win and a modal can suppress input
+/// structurally, not by a guard a future surface could forget.
+/// `text_input` maintains its own internal keyboard capture independent
+/// of that router -- introducing it here would open a second,
+/// unreviewed path for a keystroke to reach the application, exactly
+/// what `input`'s module doc says this crate does not do anywhere else.
+/// The field is instead a plain rendering of `path_field`, a `String`
+/// `shell.rs` owns and appends to one `KeyPress` at a time, the same
+/// shape [`crate::surface::editor::apply_edit_key`] already established
+/// for the (multi-line) editor.
+///
+/// `path_field` is untyped, untrusted input -- routed through
+/// `text_safety::quote_untrusted` here, same as every other
+/// filesystem-derived string this module renders, never handed to
+/// `text(...)` raw.
+fn path_field_section<'a, Message: 'a>(
+    catalog: &'a Catalog,
+    theme: &'a Theme,
+    path_field: &'a str,
+    path_field_notice: Option<String>,
+) -> Element<'a, Message> {
     let field_box =
         container(text(path_field_display_text(path_field)).size(theme.font_size_body()))
             .width(Length::Fill)
@@ -179,10 +245,7 @@ fn empty_state_view<'a, Message: 'a>(
             );
 
     let mut lines = column![
-        text(catalog.get("project-board-empty-heading")).size(theme.font_size_heading()),
-        text(catalog.get("project-board-empty-open-a-project")).size(theme.font_size_body()),
-        text(catalog.get("project-board-empty-command-example")).size(theme.font_size_body()),
-        text(catalog.get("project-board-empty-path-field-label")).size(theme.font_size_body()),
+        text(catalog.get("project-board-path-field-label")).size(theme.font_size_body()),
         field_box,
     ]
     .spacing(6);
@@ -196,13 +259,7 @@ fn empty_state_view<'a, Message: 'a>(
         lines = lines.push(text(notice).size(theme.font_size_body()));
     }
 
-    lines = lines.push(keyboard_help_view(catalog, theme));
-
-    container(lines)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .padding(16)
-        .into()
+    lines.into()
 }
 
 /// The path field's own rendered content -- factored out of

@@ -60,8 +60,8 @@ fn every_live_binding_is_described_to_the_user() {
 
     assert_eq!(
         lines.len(),
-        9,
-        "expected the nine Candidate rules with a default binding to be described; \
+        10,
+        "expected the ten Candidate rules with a default binding to be described; \
          got {}: {:?}",
         lines.len(),
         lines.iter().map(|line| line.binding).collect::<Vec<_>>()
@@ -157,16 +157,24 @@ fn usage_text_lists_every_binding_the_gui_lists() {
     }
 }
 
-/// `tekstide --help` printed `folder does not exist: --help` before this
-/// release, because every argument was treated as a project path. The
+/// `tekstide --help` printed `folder does not exist: --help` before
+/// `0.12.1`, because every argument was treated as a project path. The
 /// usage text has to say the one thing a user who just opened an empty
-/// window needs: how a project gets onto the board.
+/// window needs: how a project gets onto the board -- as of RFC-038
+/// PR-038-A/B, that is no longer "there is no in-app way," so this
+/// asserts the *current* truth rather than the correction-release-era
+/// limitation it used to.
 #[test]
 fn usage_text_says_how_to_open_a_project() {
     let usage = usage_text(&real_catalog(), "tekstide");
     assert!(usage.contains("PROJECT_PATH"));
     assert!(
-        usage.contains("no in-app way to add a project"),
-        "usage must state the limitation rather than implying the GUI can add one"
+        usage.contains("a field to type or paste"),
+        "usage must describe the real in-app path field, not claim one still does not exist: \
+         {usage:?}"
+    );
+    assert!(
+        !usage.contains("no in-app way to add a project"),
+        "this claim is stale as of RFC-038 PR-038-A -- an in-app way exists now: {usage:?}"
     );
 }

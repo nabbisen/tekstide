@@ -710,6 +710,17 @@ pub struct State {
     /// the one source `path_field_error_text` reads the (still-live,
     /// still-editable) typed value from when rendering this.
     path_field_notice: Option<PathFieldError>,
+    /// RFC-038 PR-038-B: set by `Ctrl+Alt+O`
+    /// (`NavigationAction::OpenProjectEntryField`), cleared on a
+    /// successful open or `Escape`. The empty board's field is always
+    /// showing on its own (`empty_state.is_some()`); this is what makes
+    /// the field available on the *populated* board too, for the
+    /// second-project case PR-038-A's field does not serve. `board::view`
+    /// and `handle_project_board_path_field_key` both read this, the
+    /// same single-signal shape `empty_state.is_some()` already is for
+    /// the empty-board case, so the two cannot independently drift about
+    /// when the field is showing.
+    path_field_requested: bool,
 }
 
 impl State {
@@ -793,6 +804,7 @@ impl State {
             agent_run_change_detection_status: std::collections::HashMap::new(),
             path_field: String::new(),
             path_field_notice: None,
+            path_field_requested: false,
         }
     }
 
@@ -1056,6 +1068,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if action == NavigationAction::SaveActiveDocument {
                 attempt_save_active_document(state);
             }
+            // RFC-038 PR-038-B: no real I/O, unlike the two special
+            // cases above, but the route change still needs the real
+            // `dispatch` -- called directly here rather than through
+            // `app_command_for`'s `Some` branch, which would also run
+            // `ensure_explorer_scanned` and immediately undo this route
+            // change (see `app_command_for`'s own doc on this action for
+            // why).
+            if action == NavigationAction::OpenProjectEntryField {
+                state.app_shell.dispatch(AppCommand::OpenProjectBoard);
+                state.path_field_requested = true;
+            }
         }
         Message::Input(RoutedInput::Surface(surface_input)) => {
             // RFC-019 PR-019-B: the explorer tree is the first real
@@ -1205,12 +1228,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::PathFieldPasteResolved(content) => {
             // Same "state changed enough during the round trip" silent
-            // no-op precedent `TerminalPasteResolved` sets, checked the
-            // same way `handle_project_board_path_field_key` itself
-            // does: the board may no longer be empty by the time this
-            // arrives (a CLI-launched second window is not possible
-            // today, but nothing about this arm should assume that).
-            if state.app_shell.project_board().empty_state.is_none() {
+            // no-op precedent `TerminalPasteResolved` sets, checked with
+            // the same [`path_field_is_showing`]
+            // `handle_project_board_path_field_key` itself reads: the
+            // field may have been dismissed (`Escape`) or already
+            // submitted by the time this async read resolves.
+            if !path_field_is_showing(state) {
                 return Task::none();
             }
             if let Some(content) = content {
@@ -2621,17 +2644,28 @@ fn handle_trust_settings_key(state: &mut State, key: &input::KeyPress) {
 /// §3.
 const MAX_PATH_FIELD_CHARS: usize = 4096;
 
-/// RFC-038 PR-038-A: the Project Board empty state's path field. Mirrors
-/// the shape [`handle_editor_key`]/[`handle_trust_settings_key`] already
-/// establish for their own `MainArea` zones -- a no-op guard, then a
-/// direct match on the key -- but has no `active_project()` to check:
-/// this is exactly the state that exists *because* there is none.
-/// `state.app_shell.project_board().empty_state.is_some()` is the same
-/// signal `board::view` itself branches on (`ProjectBoardViewModel::
-/// from_app_state`), so the two cannot independently drift about when
-/// the field is showing.
+/// The one signal deciding whether the path field is showing at all --
+/// read by [`handle_project_board_path_field_key`] and `board::view`'s
+/// call site alike, so the two cannot independently drift about it.
+/// `true` in two disjoint cases: the board is genuinely empty
+/// (`ProjectBoardViewModel::from_app_state`'s own `empty_state`), or
+/// `Ctrl+Alt+O` asked for it on a populated board
+/// (`state.path_field_requested`, RFC-038 PR-038-B's own addition for
+/// the second-project case).
+fn path_field_is_showing(state: &State) -> bool {
+    state.app_shell.project_board().empty_state.is_some() || state.path_field_requested
+}
+
+/// RFC-038 PR-038-A/B: the Project Board's path field, in both the
+/// places it can appear. Mirrors the shape
+/// [`handle_editor_key`]/[`handle_trust_settings_key`] already establish
+/// for their own `MainArea` zones -- a no-op guard, then a direct match
+/// on the key -- but has no `active_project()` to check: the empty-board
+/// case is exactly the state that exists *because* there is none, and
+/// the populated-board case (PR-038-B) is deliberately independent of
+/// which project, if any, is active.
 fn handle_project_board_path_field_key(state: &mut State, key: &input::KeyPress) -> Task<Message> {
-    if state.app_shell.project_board().empty_state.is_none() {
+    if !path_field_is_showing(state) {
         return Task::none();
     }
     match &key.key {
@@ -2653,6 +2687,17 @@ fn handle_project_board_path_field_key(state: &mut State, key: &input::KeyPress)
         }
         keyboard::Key::Named(keyboard::key::Named::Enter) => {
             attempt_open_project_from_path_field(state);
+        }
+        // RFC-038 PR-038-B: only meaningful when the field was *asked*
+        // for (`Ctrl+Alt+O`) rather than being the empty board's own
+        // permanent fixture -- there is nothing else on an empty board
+        // for `Escape` to reveal by dismissing the field, so it is a
+        // no-op there, matching every other MainArea handler's own
+        // "guard, then act" shape rather than a special case here.
+        keyboard::Key::Named(keyboard::key::Named::Escape) if state.path_field_requested => {
+            state.path_field_requested = false;
+            state.path_field.clear();
+            state.path_field_notice = None;
         }
         _ => {}
     }
@@ -2695,11 +2740,13 @@ fn attempt_open_project_from_path_field(state: &mut State) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
             record_path_field_project_added(state, project_id);
             state.path_field.clear();
+            state.path_field_requested = false;
         }
         Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
             // Same as `open_cli_project_path_and_record`'s own
             // `FocusedExisting` arm: nothing new happened, so no record.
             state.path_field.clear();
+            state.path_field_requested = false;
         }
         Err(error) => {
             // Deliberately does not clear `path_field`: a rejected path
@@ -3478,6 +3525,18 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         // `update`'s `Shell` arm special-cases it directly, the same shape
         // `PasteIntoTerminal` uses above.
         | NavigationAction::SaveActiveDocument
+        // RFC-038 PR-038-B: not `Some(AppCommand::OpenProjectBoard)` --
+        // routing this through `app_command_for`'s `Some` branch would
+        // also trigger `ensure_explorer_scanned`, which unconditionally
+        // navigates a freshly-scanned active project to
+        // `ActiveProjectWorkspace`, undoing the very route change this
+        // action exists to make. `update`'s `Shell` arm dispatches
+        // `AppCommand::OpenProjectBoard` directly instead, the same
+        // "no core route/mode change through this path" shape
+        // `PasteIntoTerminal`/`SaveActiveDocument` already use, deliberately
+        // skipping the explorer-scan trigger since this action never
+        // shows the explorer.
+        | NavigationAction::OpenProjectEntryField
         | NavigationAction::OpenCommandPalette
         | NavigationAction::SwitchActiveProject
         | NavigationAction::CycleVisibleTerminalSession
@@ -3929,6 +3988,7 @@ fn content_area(state: &State) -> Element<'_, Message> {
                     &state.theme,
                     &state.path_field,
                     path_field_notice_text,
+                    state.path_field_requested,
                 )
             }
             AppRoute::ActiveProjectWorkspace => active_project_workspace_view(state),

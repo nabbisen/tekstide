@@ -47,6 +47,7 @@ pub struct KeyboardHelpLine {
 fn action_catalog_key(action: NavigationAction) -> Option<&'static str> {
     match action {
         NavigationAction::OpenProjectBoard => Some("keyboard-help-open-project-board"),
+        NavigationAction::OpenProjectEntryField => Some("keyboard-help-open-project-entry-field"),
         NavigationAction::ToggleProjectMode => Some("keyboard-help-toggle-project-mode"),
         NavigationAction::LaunchTerminal => Some("keyboard-help-launch-terminal"),
         NavigationAction::PasteIntoTerminal => Some("keyboard-help-paste-into-terminal"),
@@ -95,8 +96,8 @@ pub fn usage_text(catalog: &Catalog, executable: &str) -> String {
     out.push_str("USAGE:\n");
     out.push_str(&format!("    {executable} [PROJECT_PATH]...\n\n"));
     out.push_str("Opens each PROJECT_PATH as a project. With no path, the Project Board\n");
-    out.push_str("opens empty -- there is no in-app way to add a project yet, so a path\n");
-    out.push_str("given here is currently the only way to put one on the board.\n\n");
+    out.push_str("opens empty, with a field to type or paste one (Ctrl+Alt+O opens the\n");
+    out.push_str("same field once a project is already open).\n\n");
     out.push_str("OPTIONS:\n");
     out.push_str("    -h, --help       Print this help\n");
     out.push_str("    -V, --version    Print version\n\n");

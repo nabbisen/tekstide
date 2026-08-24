@@ -64,10 +64,13 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
 
 ## Bindings and help
 
-- [ ] `Ctrl+Alt+O` proven unclaimed **mechanically** against `KeybindingPolicy`. Pending
-      PR-038-B — not started.
-- [ ] The new action has a `keyboard_help` catalog key; the live-binding count updated from
-      nine to ten deliberately, assertion not loosened. Pending PR-038-B.
+- [x] `Ctrl+Alt+O` proven unclaimed **mechanically** against `KeybindingPolicy`.
+      `navigation::tests::open_project_entry_field_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+      ablated (binding changed to a colliding one, test failed, reverted).
+- [x] The new action has a `keyboard_help` catalog key; the live-binding count updated from
+      nine to ten deliberately, assertion not loosened.
+      `keyboard-help-open-project-entry-field`; both count sites updated (`keyboard_help/tests.rs`,
+      `board/tests.rs`).
 - [ ] The help surface is reachable from Terminal Immersion, not only from the board. Pending
       PR-038-C.
 - [ ] If modal: scrim, keystroke suppression, focus and Escape all met per RFC-018. Pending
@@ -89,15 +92,19 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
       the task breakdown's scope boundary.
 - [ ] Recorded in the changelog as a **breaking change**, with the version implication stated.
       Pending PR-038-E.
-- [x] Every ablation in this slice was **single-variable**. Three performed this slice (the
-      audit record removed alone; a duplicated call site added alone; the field-growth bound
-      exercised directly at the pure-function level), each reverted after confirming the
-      expected failure. See `qa-evidence.md`.
+- [x] Every ablation in this slice was **single-variable**. Three in PR-038-A (the audit record
+      removed alone; a duplicated call site added alone; the field-growth bound exercised
+      directly at the pure-function level), three more in PR-038-B (the binding changed to a
+      colliding one alone; the `Escape` arm's guard disabled alone; the collision test itself
+      run against the ablated binding). Each reverted after confirming the expected failure. See
+      `qa-evidence.md`.
 - [x] Flakes disclosed, not re-run past; any fifth symptom of the approval/socket flake reported
-      as a disclosure rather than attributed to this work. None observed in this slice's own
-      gate runs — nothing to disclose.
-- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, this slice's
-      own state (326 tekstide + 714 tekstide-core, 0 failed).
+      as a disclosure rather than attributed to this work. PR-038-B's own full-suite run hit
+      three failures, all three already-named in `test-process-leak.md`'s table (not a new,
+      fifth symptom) — confirmed non-deterministic by re-running each in isolation, where all
+      three passed; not chased further, per that document's own instruction.
+- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-B's
+      own state (330 tekstide + 715 tekstide-core, 0 failed).
 - [x] Known limitations stated, including anything this slice leaves unreachable.
       `qa-evidence.md`'s "Known limitations" section, scoped explicitly to "as of PR-038-A only."
 

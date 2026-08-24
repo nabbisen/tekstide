@@ -201,6 +201,33 @@ fn open_approval_history_shortcut_is_a_candidate_that_collides_with_no_other_rul
     );
 }
 
+/// RFC-038 PR-038-B: `Ctrl+Alt+O` reveals and focuses the path field for
+/// the second-project case (a project already open, the user wants
+/// another) -- checked mechanically, not by inspection alone, the same
+/// shape every other real binding above already uses.
+#[test]
+fn open_project_entry_field_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::OpenProjectEntryField)
+        .expect("Open Project Entry Field should have a keyboard policy");
+
+    assert_eq!(rule.default_binding, Some("Ctrl+Alt+O"));
+    assert_eq!(rule.status, KeybindingStatus::Candidate);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::OpenProjectEntryField)
+        .filter(|other| other.default_binding == rule.default_binding)
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Alt+O must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
 /// pr-020-b-report-surface.md: `AgentRunDetail` is this slice's own
 /// real render arm, with no other route to open it -- a
 /// `Configurable`/`None` binding here would leave it unreachable by any
@@ -280,6 +307,7 @@ fn advertised_bindings_are_exactly_the_live_ones() {
         bindings,
         vec![
             "Ctrl+Alt+P",
+            "Ctrl+Alt+O",
             "Ctrl+Alt+M",
             "Ctrl+Alt+T",
             "Ctrl+Shift+V",

@@ -237,12 +237,14 @@ cargo install tekstide
 tekstide /path/to/project
 ```
 
-**Give it a path.** There is no in-app way to add a project yet
-(RFC-038), so a path on the command line is currently the only way to
-put one on the Project Board — `tekstide` with no argument opens an
-empty board. Until `0.12.1` this section said to run `tekstide` bare and
-mentioned the path second, as an option, which left a first-time user
-looking at a window with nothing to do and no way to change that.
+**Give it a path, or run it bare.** `tekstide` with no argument opens an
+empty board with a field to type or paste a path into — press Enter to
+open it. `Ctrl+Alt+O` opens the same field once a project is already
+open, for adding another. Until `0.12.1` this section said to run
+`tekstide` bare and mentioned the path second, as an option, which left
+a first-time user looking at a window with nothing to do and no way to
+change that; RFC-038 PR-038-A/B added the in-app route this section now
+describes.
 
 You can open more than one:
 

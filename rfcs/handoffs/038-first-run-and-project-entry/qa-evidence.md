@@ -124,13 +124,105 @@ the message-arm wiring (`Message::PathFieldPasteResolved`) is a direct structura
 already-reviewed `TerminalPasteResolved` arm.
 
 **Scope discipline.** Did not touch `boot()`'s CLI argument handling, `keyboard_help`, or the
-populated-board arm, per the task breakdown. `Ctrl+Alt+O` (PR-038-B), the standalone help surface
-(PR-038-C), recent-projects reopen (PR-038-D), and `ProjectBoardEmptyState`'s dead-field removal
-(PR-038-E) are unstarted -- see those sections below.
+populated-board arm, per the task breakdown -- PR-038-B (below) touches both of the latter two,
+deliberately, as its own separately-reviewed slice.
 
 ## PR-038-B — `Ctrl+Alt+O`
 
-_Pending._
+**Build.** `NavigationAction::OpenProjectEntryField`, `Candidate` with `Some("Ctrl+Alt+O")`,
+reveals and focuses the same `path_field_section` PR-038-A built, now also on the *populated*
+board -- the second-project case the empty-board-only field could not serve. `Escape` dismisses
+it without submitting (no-op on the permanently-shown empty-board field, which has nothing else
+to reveal by dismissing).
+
+**Gates.** `cargo build`, `cargo test --workspace --all-targets --all-features` (330 tekstide +
+715 tekstide-core, up from 326/714; 0 failed), `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`, `git diff --check` --
+all clean.
+
+**Mechanically unclaimed, not by inspection.**
+`navigation::tests::open_project_entry_field_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+the same shape `open_current_agent_run_detail_shortcut_is_a_candidate_that_collides_with_no_other_rule`
+already established. **Ablated**: changed the binding to `Ctrl+Alt+P` (colliding with
+`OpenProjectBoard`) -- the test failed; reverted.
+
+**The catalog key and the count.** `action_catalog_key`'s exhaustive match gained
+`OpenProjectEntryField => Some("keyboard-help-open-project-entry-field")` --
+`action_catalog_key_is_some_iff_the_action_is_live` (request 290's own biconditional) now covers
+it automatically, no separate test needed. `every_live_binding_is_described_to_the_user` and
+`the_empty_state_lists_every_live_keybinding` both updated from `9` to `10` **deliberately**, not
+loosened to `>=`. Live: the cold-start screenshot below shows all ten, including
+`Ctrl+Alt+O   Add a project by path`.
+
+**A real bug found and fixed while wiring the dispatch.** The obvious mapping --
+`app_command_for(OpenProjectEntryField) = Some(AppCommand::OpenProjectBoard)`, reusing the
+existing route-change command -- compiles and looks right, but is wrong: routing through
+`app_command_for`'s `Some` branch also runs `ensure_explorer_scanned`, which (via
+`ApplicationShell::scan_active_project_explorer_directory`) unconditionally navigates a
+freshly-scanned active project to `ActiveProjectWorkspace`, silently undoing the very route
+change this action exists to make. Caught by
+`ctrl_alt_o_opens_a_second_project_through_real_keys_on_a_populated_board` itself failing
+(`route()` came back `ActiveProjectWorkspace`, not `ProjectBoard`) -- diagnosed with targeted
+`eprintln!` at each stage (command chosen → route after `dispatch` → route after
+`ensure_explorer_scanned`), which isolated the flip to the last of those three. Fixed by moving
+this action out of `app_command_for`'s `Some` arm entirely (grouped with
+`PasteIntoTerminal`/`SaveActiveDocument`'s "no core route/mode change through this path"
+category) and dispatching `AppCommand::OpenProjectBoard` directly in `update`'s `Shell` arm,
+which never reaches `ensure_explorer_scanned` -- correct, since this action never shows the
+explorer. Recorded in both `app_command_for`'s and the dispatch site's own doc comments so the
+"obvious" mapping is not silently reintroduced later.
+
+**A second real finding, disclosed rather than asserted around**: opening a second project
+through the field does not make it active -- `AppState::add_project_session`'s own
+`if self.active_project_id.is_none()` guard is pre-existing, deliberate core behaviour (so
+`boot()`'s multi-path CLI loop does not fight itself over which of several paths ends up
+active), and the field correctly inherits it rather than special-casing around it. A user who
+adds a second project through `Ctrl+Alt+O` sees it appear on the board but stays on whichever
+project was already active; nothing in this RFC provides a way to switch
+(`NavigationAction::SwitchActiveProject` remains `Configurable`/`None`, a pre-existing gap
+`future-work.md` already names). Proven in
+`shell::tests::ctrl_alt_o_opens_a_second_project_through_real_keys_on_a_populated_board`, which
+asserts this explicitly rather than assuming the more surprising "switches to it" behaviour.
+
+**`Escape`, ablated.**
+`shell::tests::escape_dismisses_the_on_demand_field_without_submitting_or_touching_the_open_project`
+and `shell::tests::escape_is_a_no_op_on_the_permanently_shown_empty_board_field`. **Ablated**
+(single-variable: the `Escape` match arm's guard changed to `if false && state.path_field_requested`,
+nothing else touched): the dismiss test failed (`"Escape must hide the on-demand field"`);
+reverted, re-ran green.
+
+**Response 297's required follow-up.** The field's own hint now reads "Type a project path and
+press Enter (Ctrl+V to paste):" -- catalog key renamed from `project-board-empty-path-field-label`
+to `project-board-path-field-label` since `path_field_section` now renders it on the populated
+board too, where "empty" no longer describes anything. `Ctrl+Shift+V` was **not** retargeted, per
+the response's own explicit instruction (a paste action silently changing its destination based
+on focus is exactly the surprise RFC-018 exists to prevent). Proven:
+`shell::tests::the_path_field_hint_names_the_paste_gesture_that_actually_works_here`.
+
+**Two stale claims found and corrected, beyond this PR's own diff, disclosed as scope beyond the
+task breakdown's literal list**: `keyboard_help::usage_text`'s hardcoded English (`tekstide
+--help`) and `README.md`'s Quick Start both still said "there is no in-app way to add a project"
+-- true when written (0.12.1), false as of PR-038-A. Both corrected;
+`keyboard_help::tests::usage_text_says_how_to_open_a_project` updated to assert the *current*
+claim rather than the stale one. Not part of PR-038-B's own task list, but leaving one of two
+copies of the same now-false sentence fixed and the other broken seemed worse than the small
+scope addition -- flagged here for your judgement rather than silently expanded past.
+
+**Live, against the release binary**: `cargo build --release -p tekstide`, launched with one
+project already open via CLI argument (`env -u WAYLAND_DISPLAY XDG_STATE_HOME=<mktemp -d>
+./target/release/tekstide /tmp/tsd-pr038b-first`), same `xdotool`/`niri` capture method as
+PR-038-A.
+
+- `evidence/pr-038-b/before-one-project-no-field.png` -- one project on the board, ten
+  keybindings listed (`Ctrl+Alt+O` among them), no field.
+- Real `Ctrl+Alt+O` (`xdotool key --window <id> --clearmodifiers ctrl+alt+o`): the field appears
+  above the keyboard list, below the existing row, hint naming `Ctrl+V`.
+- Real path typed one keystroke at a time, real `Return`:
+  `evidence/pr-038-b/after-second-project-added.png` -- both projects now on the board (`1
+  project` → `2 projects` in the status bar), field gone again.
+
+**Scope discipline.** `boot()`'s CLI argument handling untouched. PR-038-C (standalone help
+surface), PR-038-D (recent projects), and PR-038-E (closeout) remain unstarted.
 
 ## PR-038-C — the help surface
 
@@ -146,10 +238,8 @@ _Pending._
 
 ## Known limitations (RFC-038-wide)
 
-As of PR-038-A only:
+As of PR-038-A/B:
 
-- **No `Ctrl+Alt+O`.** A user with a project already open still has no keyboard route to open a
-  second one -- only the empty board's field. PR-038-B.
 - **No help surface independent of the board.** A user inside Terminal Immersion still needs
   `Ctrl+Alt+P` first, same as before this slice. PR-038-C.
 - **No recent-projects reopen.** A previously-opened project not currently on the board must be
@@ -159,6 +249,11 @@ As of PR-038-A only:
   unread by anything, same as `0.12.1` left them. PR-038-E.
 - **`Ctrl+V` paste is not exercised by a live/synthetic-input test**, only by its resource bound
   -- see PR-038-A's own section above.
+- **Adding a second project through `Ctrl+Alt+O` does not switch to it.** It lands on the board,
+  active project unchanged -- pre-existing, deliberate core behaviour
+  (`AppState::add_project_session`), inherited rather than special-cased around. Switching
+  requires `NavigationAction::SwitchActiveProject`, still `Configurable`/`None` and unrelated to
+  this RFC's own scope (see PR-038-B's own qa-evidence.md section).
 - Unchanged from `0.12.1`: the configuration system loads nothing, no screen-reader support, no
   cross-platform evidence beyond Linux, the real Claude Code CLI never exercised by the test
   suite, `NFR-PERF-004` still unverified.

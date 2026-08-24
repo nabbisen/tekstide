@@ -115,7 +115,11 @@ project-board-empty-command-example = tekstide /path/to/project
 # `iced::widget::text_input` (this project routes every keystroke
 # through one reviewed router; a second, widget-internal capture path
 # would bypass it).
-project-board-empty-path-field-label = Or type a project path and press Enter:
+# RFC-038 PR-038-B: renamed from `project-board-empty-path-field-label` --
+# `path_field_section` now renders this on the populated board too
+# (`Ctrl+Alt+O`, the second-project case), where "empty" no longer
+# describes the board it's showing on.
+project-board-path-field-label = Type a project path and press Enter (Ctrl+V to paste):
 project-board-empty-keyboard-heading = Keyboard
 
 # RFC-038 PR-038-A: `$reason` is a compile-time symbol
@@ -573,6 +577,7 @@ transcript-purge-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escap
 # the commonest way to conclude this product is broken is to press a key
 # whose precondition is not met and watch nothing happen.
 keyboard-help-open-project-board = Project Board
+keyboard-help-open-project-entry-field = Add a project by path
 keyboard-help-toggle-project-mode = Switch between Content and Terminal (needs an open project)
 keyboard-help-launch-terminal = New terminal (needs an open project)
 keyboard-help-paste-into-terminal = Paste into the focused terminal

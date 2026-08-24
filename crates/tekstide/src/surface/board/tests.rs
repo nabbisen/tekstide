@@ -284,7 +284,7 @@ fn the_empty_state_lists_every_live_keybinding() {
     let lines = crate::keyboard_help::keyboard_help_lines(&catalog);
     assert_eq!(
         lines.len(),
-        9,
+        10,
         "the empty state must describe every live binding"
     );
     assert!(

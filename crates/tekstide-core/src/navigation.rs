@@ -1,6 +1,14 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NavigationAction {
     OpenProjectBoard,
+    /// RFC-038 PR-038-B: reveals the path field on the Project Board and
+    /// focuses it -- the second-project case PR-038-A's own field does
+    /// not serve, since that one only shows while the board is empty.
+    /// Distinct from `SwitchActiveProject`: that action is for cycling
+    /// between projects already open (`AppState::switch_active_project`,
+    /// still `Configurable`/`None`, unrelated to this one); this one is
+    /// for adding a project that is not open yet.
+    OpenProjectEntryField,
     SwitchActiveProject,
     ToggleProjectMode,
     /// Terminal launch UX handoff: launches a new terminal in the active
@@ -100,6 +108,20 @@ impl KeybindingPolicy {
                 KeybindingRule::new(
                     NavigationAction::OpenProjectBoard,
                     Some("Ctrl+Alt+P"),
+                    KeybindingStatus::Candidate,
+                ),
+                // RFC-038 PR-038-B: `Ctrl+Alt+O` (Open), following the
+                // existing `Ctrl+Alt+<letter>` shape (`P`, `M`, `T`, `A`,
+                // `R`, `H`, `U` elsewhere in this list) -- unclaimed by
+                // any other rule here and not `Ctrl+Shift+P`'s `Reserved`
+                // command-palette binding, so it collides with nothing
+                // (checked mechanically by
+                // `open_project_entry_field_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone). RFC-038's own D2 named this
+                // letter directly.
+                KeybindingRule::new(
+                    NavigationAction::OpenProjectEntryField,
+                    Some("Ctrl+Alt+O"),
                     KeybindingStatus::Candidate,
                 ),
                 KeybindingRule::new(

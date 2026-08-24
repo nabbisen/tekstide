@@ -8020,3 +8020,152 @@ fn the_path_field_stops_growing_at_its_bound_rather_than_unbounded() {
          paste"
     );
 }
+
+// RFC-038 PR-038-B: `Ctrl+Alt+O`, the second-project case.
+
+fn press_ctrl_alt_o(state: &mut State) {
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenProjectEntryField,
+    );
+    let _ = super::update(
+        state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+}
+
+/// **The acceptance criterion this slice exists for**: a user with a
+/// project already open, who cannot use the empty board's own field
+/// (there are rows, so `empty_state` is `None`), can still add a second
+/// project -- real `Ctrl+Alt+O`, every character of a real path typed
+/// through the real router, a real Enter.
+///
+/// **A real finding while writing this test, disclosed rather than
+/// asserted around**: the second project genuinely lands on the board,
+/// but does *not* become active. `AppState::add_project_session`'s own
+/// `if self.active_project_id.is_none() { ... }` guard is deliberate,
+/// pre-existing, already-reviewed core behaviour -- it exists so
+/// `boot()`'s multi-path CLI loop does not fight itself over which of
+/// several paths given at once ends up active. This test proves the
+/// field inherits that behaviour rather than special-casing around it
+/// (`switch_active_project` would be the way to bring the second
+/// project into focus, and it has no live binding today --
+/// `NavigationAction::SwitchActiveProject` is still `Configurable`/
+/// `None`, a pre-existing gap `future-work.md` already names, unrelated
+/// to this slice).
+#[test]
+fn ctrl_alt_o_opens_a_second_project_through_real_keys_on_a_populated_board() {
+    let (mut state, first_project_id) = state_with_a_real_project("path-field-o-first");
+    assert!(
+        state.app_shell.project_board().empty_state.is_none(),
+        "test precondition: one open project means the board is not empty"
+    );
+
+    press_ctrl_alt_o(&mut state);
+    assert!(
+        state.path_field_requested,
+        "Ctrl+Alt+O must reveal the field on a populated board"
+    );
+    assert_eq!(
+        state.app_shell.route(),
+        tekstide_core::route::AppRoute::ProjectBoard
+    );
+
+    let second_dir = fresh_project_dir("path-field-o-second");
+    type_through_the_real_path_field(&mut state, &second_dir.display().to_string());
+    press_enter_in_the_real_path_field(&mut state);
+
+    let rows = state.app_shell.project_board().rows;
+    assert_eq!(
+        rows.len(),
+        2,
+        "both projects must be on the board: {rows:?}"
+    );
+    let second_row = rows
+        .iter()
+        .find(|row| row.project_id != first_project_id)
+        .expect("a second, distinct project must be on the board");
+    assert_eq!(second_row.root_path_hint, second_dir.display().to_string());
+    assert_eq!(
+        state.app_shell.state().active_project_id(),
+        Some(&first_project_id),
+        "adding a second project must not silently switch which one is active -- matches \
+         AppState::add_project_session's own pre-existing, deliberate first-project-only \
+         auto-activation"
+    );
+    assert!(
+        !state.path_field_requested,
+        "the field must hide itself again once it has done its job"
+    );
+}
+
+/// `Escape` backs out of the on-demand field without submitting or
+/// touching the already-open project -- the field has no other dismiss
+/// gesture, so this is the one way to recover from `Ctrl+Alt+O` pressed
+/// by mistake.
+#[test]
+fn escape_dismisses_the_on_demand_field_without_submitting_or_touching_the_open_project() {
+    let (mut state, project_id) = state_with_a_real_project("path-field-o-escape");
+    press_ctrl_alt_o(&mut state);
+    type_through_the_real_path_field(&mut state, "/tmp/whatever-was-being-typed");
+    assert!(!state.path_field.is_empty());
+
+    press_named_key_in_the_real_path_field(&mut state, iced::keyboard::key::Named::Escape);
+
+    assert!(
+        !state.path_field_requested,
+        "Escape must hide the on-demand field"
+    );
+    assert!(
+        state.path_field.is_empty(),
+        "Escape must discard whatever was typed, not leave it for a later Ctrl+Alt+O to reveal"
+    );
+    assert_eq!(
+        state.app_shell.state().active_project_id(),
+        Some(&project_id),
+        "Escape must not have touched the already-open project"
+    );
+    assert_eq!(
+        state.app_shell.project_board().rows.len(),
+        1,
+        "Escape must not have added anything"
+    );
+}
+
+/// The empty board's own field has nothing else in `MainArea` for
+/// `Escape` to usefully reveal by dismissing it -- confirms this is a
+/// deliberate no-op there, not an oversight that happens to look the
+/// same.
+#[test]
+fn escape_is_a_no_op_on_the_permanently_shown_empty_board_field() {
+    let mut state = state_with(ApplicationShell::new());
+    type_through_the_real_path_field(&mut state, "partial");
+
+    press_named_key_in_the_real_path_field(&mut state, iced::keyboard::key::Named::Escape);
+
+    assert_eq!(
+        state.path_field, "partial",
+        "Escape must not clear the empty board's own permanent field"
+    );
+    assert!(
+        state.app_shell.project_board().empty_state.is_some(),
+        "the board must still be empty and still showing its own field"
+    );
+}
+
+/// `Ctrl+Alt+O` is proven unclaimed mechanically in
+/// `navigation::tests::open_project_entry_field_shortcut_is_a_candidate_that_collides_with_no_other_rule`;
+/// this proves the GUI-side half -- the field's own hint names the
+/// paste gesture the response accepting PR-038-A required
+/// (`Ctrl+Shift+V` is what the rest of the product teaches, but does
+/// nothing in this field; response 297 required naming `Ctrl+V` here
+/// instead of retargeting the binding).
+#[test]
+fn the_path_field_hint_names_the_paste_gesture_that_actually_works_here() {
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let hint = catalog.get("project-board-path-field-label");
+    assert!(
+        hint.contains("Ctrl+V"),
+        "the field must name the paste gesture that actually works in it, not the one the \
+         rest of the product teaches (Ctrl+Shift+V): {hint:?}"
+    );
+}
