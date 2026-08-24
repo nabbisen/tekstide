@@ -204,6 +204,30 @@ So the older rule (*a green ablation is a defect in the ablation*) has a twin: *
 ablation that needed two edits is a defect in the ablation too.** Only single-variable results
 are evidence.
 
+**The unit is the design decision, not the line.** The mirror failure showed up reviewing
+RFC-038 PR-038-B: the slice deliberately dispatches one action outside `app_command_for`'s
+`Some` arm, so the reviewer's ablation added the "obvious" mapping back — one line, one
+variable — and the suite stayed green. It stayed green because the special case was still
+present and repaired the route immediately afterwards. The ablation had changed a line without
+changing the *decision*. Re-run as "use the obvious mapping **instead of** the special case" —
+two mechanical edits expressing one design choice — it failed on exactly the right test.
+
+Both halves of the rule are about the same thing: an ablation must express the alternative a
+future maintainer would actually write. Two edits that are one decision are fine. One edit that
+leaves an existing repair standing is not.
+
+**If your slice makes a shipped statement false, correcting it is part of your slice.** Not
+scope creep, and not something to file for later. RFC-038 PR-038-A added the in-app way to open
+a project, which falsified the same sentence in two shipped places — `tekstide --help`'s usage
+text and the README's Quick Start, both saying "there is no in-app way to add a project." The
+implementer fixed both and asked whether that was the right amount of scope. It was.
+
+The reasoning is this project's own history: a false claim in user-facing text survived twelve
+releases because correcting it was always somebody else's slice. A statement your work
+falsifies has a known author, a known location and a known fix, at exactly the moment you
+falsify it, and never again so cheaply. Adding capability outside your slice is scope creep;
+correcting a claim your slice just made untrue is finishing it.
+
 **A premise that would surprise a user is a finding.** When narrow reasoning reaches for a
 fact about the product to support itself, ask whether that fact would startle someone who had
 just installed it. If so it is not scaffolding, it is a finding, and it belongs at the top of

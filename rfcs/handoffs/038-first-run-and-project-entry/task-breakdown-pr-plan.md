@@ -83,6 +83,33 @@ existing rows are.
 **This is the droppable slice** if A–C run long — droppable by the human owner via the
 architect, not by you. Escalate, do not descope.
 
+## PR-038-F — give core a scan-only entry point
+
+**Added 2026-08-24 from PR-038-B's review.** Small, structural, and it closes a trap that has
+now caught two slices.
+
+`ApplicationShell::scan_active_project_explorer_directory` does two things: it scans, and it
+**unconditionally sets `route = ActiveProjectWorkspace`**. `ensure_explorer_scanned` calls it
+for background cache-priming, where only the scan is wanted — so every user-visible side effect
+has to be undone afterwards. The code already does this once, saving and restoring
+`open_surface` around the call, after response 233 found `OpenActiveProjectSurface` being
+silently overwritten back to `TextEditor`. PR-038-B found the second: `route`, silently flipped
+back one line after `dispatch` set it, worked around by routing the action out of
+`app_command_for` entirely.
+
+Two different pieces of state, two different workarounds, one conflation. A third caller will
+hit a third.
+
+**Build:** a scan-only entry point in `tekstide-core` — scanning without navigating — and have
+`ensure_explorer_scanned` call it. The existing navigating method stays for `handle_explorer_key`,
+where navigating on scan is genuinely correct. The `open_surface` save/restore dance should then
+be deletable; if it is not, say why, because that is a third instance hiding.
+
+**Ablate** by pointing `ensure_explorer_scanned` back at the navigating method and confirming
+the PR-038-B route test fails.
+
+Additive to core's public API, so no breaking change and no version implication.
+
 ## PR-038-E — closeout
 
 - **Remove `ProjectBoardEmptyState`'s `primary_action` and `secondary_action`** from
