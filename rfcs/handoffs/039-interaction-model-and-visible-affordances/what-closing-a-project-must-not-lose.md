@@ -1,8 +1,8 @@
 ---
 title: "What closing a project must not lose"
 rfc: "RFC-039"
-rfc_file: "../../accepted/039-interaction-model-and-visible-affordances.md"
-source_rfc_status: "Accepted 2026-08-24 — M12, after RFC-038"
+rfc_file: "../../done/039-interaction-model-and-visible-affordances.md"
+source_rfc_status: "Implemented and closed 2026-08-25 — RFC-039 is in rfcs/done/"
 status: "Required reading before any RFC-039 close code"
 created: "2026-08-24"
 ---

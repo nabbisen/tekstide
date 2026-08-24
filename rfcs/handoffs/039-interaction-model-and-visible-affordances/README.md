@@ -1,19 +1,19 @@
 ---
 title: "RFC-039: Interaction Model and Visible Affordances — implementation handoff"
 rfc: "RFC-039"
-rfc_file: "../../accepted/039-interaction-model-and-visible-affordances.md"
-source_rfc_status: "Accepted 2026-08-24 — M12, after RFC-038"
+rfc_file: "../../done/039-interaction-model-and-visible-affordances.md"
+source_rfc_status: "Implemented and closed 2026-08-25 — RFC-039 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-24"
 ---
 
 # Give the product workflows
 
-Source RFC: [RFC-039](../../accepted/039-interaction-model-and-visible-affordances.md)
+Source RFC: [RFC-039](../../done/039-interaction-model-and-visible-affordances.md)
 
 | # | Read | Why |
 | --- | --- | --- |
-| 1 | [RFC-039](../../accepted/039-interaction-model-and-visible-affordances.md) | The seven workflows, three principles, and three decisions already made |
+| 1 | [RFC-039](../../done/039-interaction-model-and-visible-affordances.md) | The seven workflows, three principles, and three decisions already made |
 | 2 | [`what-closing-a-project-must-not-lose.md`](./what-closing-a-project-must-not-lose.md) | **Required reading before any close code.** The only destructive action in this RFC |
 | 3 | [`task-breakdown-pr-plan.md`](./task-breakdown-pr-plan.md) | Four slices and their order |
 | 4 | [`acceptance-qa-checklist.md`](./acceptance-qa-checklist.md) | What must be true and evidenced |

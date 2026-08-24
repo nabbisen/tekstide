@@ -1,8 +1,8 @@
 ---
 title: "RFC-039 PR-039-D: the affordance audit"
 rfc: "RFC-039"
-rfc_file: "../../accepted/039-interaction-model-and-visible-affordances.md"
-source_rfc_status: "Accepted 2026-08-24 — M12, after RFC-038"
+rfc_file: "../../done/039-interaction-model-and-visible-affordances.md"
+source_rfc_status: "Implemented and closed 2026-08-25 — RFC-039 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-25"
 ---

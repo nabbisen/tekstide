@@ -1,8 +1,8 @@
 ---
 title: "RFC-039: Acceptance / QA Checklist"
 rfc: "RFC-039"
-rfc_file: "../../accepted/039-interaction-model-and-visible-affordances.md"
-source_rfc_status: "Accepted 2026-08-24 — M12, after RFC-038"
+rfc_file: "../../done/039-interaction-model-and-visible-affordances.md"
+source_rfc_status: "Implemented and closed 2026-08-25 — RFC-039 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-24"
 ---
@@ -134,12 +134,36 @@ Every unchecked line at closeout carries a stated reason.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Final Acceptance recorded 2026-08-25 (review request 314). Suite re-run by the reviewer under
+full parallelism, three consecutive runs: 383 + 734 + 2, zero failed.
+
+RFC-039 met its acceptance criterion. A user who has read nothing can see which projects are
+open, move between them, close one, and get home, using controls in front of them -- proven
+from real events with live evidence, including a tab focused-but-not-active frame that no
+string-level test could supply.
+
+Its own PR-039-D audit then reported that three of thirteen live actions have a visible
+control, and that every modal in the crate is keyboard-only for its own decision. That is a
+finding about the RFC's scope, not its delivery: the criterion was specific to moving between
+projects and was satisfied. Closing this RFC without carrying that forward would have been
+the dishonest move, so RFC-040 is filed in this same commit with all six findings as its
+inputs.
+
+Two defects fixed inside PR-039-C that predated this RFC and belonged to nobody:
+close_project could never return SafeToClose for any real project (provider_state had no
+upgrade path -- its only setter is #[cfg(test)]), and set_file_state's one-way downgrade
+would have permanently poisoned any project whose file provider hiccuped. The first had gone
+unnoticed because close_project had no production caller, the same shape as the for_test id
+defect found a slice earlier: an unwired producer hides defects in everything it would have
+exercised.
+
+One correction carried into RFC-040 rather than left in the audit: Finding 2's heading said
+nine and its own list named ten. Ten is right (13 live, 3 with controls).
 ```
