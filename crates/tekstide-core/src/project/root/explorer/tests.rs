@@ -1,6 +1,6 @@
 use super::{
-    ExplorerNodeKind, ExplorerNodeState, ExplorerScanError, FileExplorerScanPolicy,
-    FileExplorerScanner,
+    BrowseNodeState, DirectoryBrowseError, ExplorerNodeKind, ExplorerNodeState, ExplorerScanError,
+    FileExplorerScanPolicy, FileExplorerScanner, browse_directory,
 };
 use crate::project::root::{
     FileAccessBlockedReason, FileAccessSymlinkStatus, ProjectRootHandle, ProjectRootValidator,
@@ -291,4 +291,134 @@ impl Drop for TestSandbox {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
     }
+}
+
+// RFC-038 PR-038-G: `browse_directory`, the folder browser's own,
+// project-independent scanner.
+
+#[test]
+fn browse_directory_lists_only_subdirectories_sorted() {
+    let sandbox = TestSandbox::new("browse-dirs-only");
+    let dir = sandbox.create_dir("start");
+    sandbox.create_file("start/readme.md");
+    sandbox.create_dir("start/zeta");
+    sandbox.create_dir("start/alpha");
+
+    let scan =
+        browse_directory(&dir, &FileExplorerScanPolicy::linux_mvp()).expect("dir should scan");
+
+    let names: Vec<_> = scan.nodes.iter().map(|node| node.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["alpha", "zeta"],
+        "files must not appear at all -- a folder browser chooses a project root, not a file"
+    );
+    assert!(!scan.truncated);
+}
+
+#[test]
+fn browse_directory_bounds_child_count() {
+    let sandbox = TestSandbox::new("browse-bound");
+    let dir = sandbox.create_dir("start");
+    for index in 0..5 {
+        sandbox.create_dir(&format!("start/dir-{index}"));
+    }
+    let policy = FileExplorerScanPolicy {
+        max_children_per_directory: 3,
+        collapsed_directory_names: Vec::new(),
+    };
+
+    let scan = browse_directory(&dir, &policy).expect("dir should scan");
+
+    assert_eq!(scan.nodes.len(), 3);
+    assert!(scan.truncated);
+}
+
+#[test]
+fn browse_directory_collapses_ignored_directory_names() {
+    let sandbox = TestSandbox::new("browse-collapse");
+    let dir = sandbox.create_dir("start");
+    sandbox.create_dir("start/.git");
+    sandbox.create_dir("start/real-project");
+
+    let scan =
+        browse_directory(&dir, &FileExplorerScanPolicy::linux_mvp()).expect("dir should scan");
+
+    let git_node = scan
+        .nodes
+        .iter()
+        .find(|node| node.name == ".git")
+        .expect("the same shared FileExplorerScanPolicy must still list it, just collapsed");
+    assert_eq!(git_node.state, BrowseNodeState::Collapsed);
+    let real_node = scan
+        .nodes
+        .iter()
+        .find(|node| node.name == "real-project")
+        .expect("an ordinary directory must be listed and available");
+    assert_eq!(real_node.state, BrowseNodeState::Available);
+}
+
+#[test]
+fn browse_directory_parent_dir_is_some_except_at_filesystem_root() {
+    let sandbox = TestSandbox::new("browse-parent");
+    let dir = sandbox.create_dir("start/nested");
+
+    let scan =
+        browse_directory(&dir, &FileExplorerScanPolicy::linux_mvp()).expect("dir should scan");
+    assert!(scan.parent_dir.is_some());
+
+    let root_scan = browse_directory("/", &FileExplorerScanPolicy::linux_mvp())
+        .expect("filesystem root should scan");
+    assert_eq!(
+        root_scan.parent_dir, None,
+        "there is nothing above the filesystem root to navigate up into"
+    );
+}
+
+#[test]
+fn browse_directory_rejects_a_file_path() {
+    let sandbox = TestSandbox::new("browse-file");
+    let file = sandbox.create_file("not-a-directory.txt");
+
+    let error = browse_directory(&file, &FileExplorerScanPolicy::linux_mvp())
+        .expect_err("a file path must be refused");
+
+    assert!(matches!(error, DirectoryBrowseError::NotDirectory { .. }));
+}
+
+#[test]
+fn browse_directory_rejects_a_path_that_does_not_exist() {
+    let sandbox = TestSandbox::new("browse-missing");
+    let missing = sandbox.path("does-not-exist-at-all");
+
+    let error = browse_directory(&missing, &FileExplorerScanPolicy::linux_mvp())
+        .expect_err("a nonexistent path must be refused");
+
+    assert!(matches!(
+        error,
+        DirectoryBrowseError::CannotReadDirectory { .. }
+    ));
+}
+
+#[test]
+fn browse_directory_resolves_a_real_symlinked_directory_rather_than_refusing_it() {
+    // The whole point of BrowseNode's own doc comment: browsing follows
+    // symlinks freely, since there is no root to escape and whatever is
+    // chosen is re-validated at commit time by add_project_from_path.
+    let sandbox = TestSandbox::new("browse-symlink");
+    let real_dir = sandbox.create_dir("real");
+    sandbox.create_dir("real/child");
+    let link_path = sandbox.path("link-to-real");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real_dir, &link_path).expect("symlink must be creatable");
+
+    let scan = browse_directory(&link_path, &FileExplorerScanPolicy::linux_mvp())
+        .expect("a symlinked directory must scan, not be refused");
+
+    assert_eq!(
+        scan.current_dir, real_dir,
+        "current_dir must be the canonical (resolved) path, not the symlink's own path"
+    );
+    assert_eq!(scan.nodes.len(), 1);
+    assert_eq!(scan.nodes[0].name, "child");
 }

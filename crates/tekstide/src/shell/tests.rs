@@ -5,9 +5,9 @@ use tekstide_core::shell::ApplicationShell;
 
 use super::{
     AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ExternalChangeButton,
-    MAX_PATH_FIELD_CHARS, Message, ModalButton, ModalContent, PasteConfirmButton, PathFieldError,
-    State, TerminalPasteRefusal, TranscriptPurgeButton, TrustGrantButton,
-    agent_run_launch_refusal_text, attempt_agent_run_launch_with_profile,
+    FolderBrowserModal, MAX_PATH_FIELD_CHARS, Message, ModalButton, ModalContent,
+    PasteConfirmButton, PathFieldError, State, TerminalPasteRefusal, TranscriptPurgeButton,
+    TrustGrantButton, agent_run_launch_refusal_text, attempt_agent_run_launch_with_profile,
     attempt_agent_run_launch_with_profile_and_state_root,
     attempt_agent_run_launch_with_profile_state_root_and_capture, content_within_bound,
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
@@ -7839,7 +7839,7 @@ fn a_project_opened_through_the_field_refuses_an_agent_run_until_trust_is_grante
 /// `opening_a_real_new_project_from_the_cli_path_writes_exactly_one_real_project_added_record`
 /// already gives the CLI path. **Ablated**: temporarily commenting out
 /// `attempt_open_project_from_path_field`'s call to
-/// `record_path_field_project_added` makes this assertion fail (0
+/// `record_new_project_added` makes this assertion fail (0
 /// records, not 1) -- confirmed by hand while writing this test, then
 /// restored; not left as a standing ablation in the tree since this
 /// crate's tests do not carry a runtime toggle for it, matching every
@@ -8204,7 +8204,7 @@ fn opening_help_through_a_real_key_event_shows_every_live_binding() {
     let lines = crate::keyboard_help::keyboard_help_lines(&state.catalog);
     assert_eq!(
         lines.len(),
-        11,
+        12,
         "the Help modal's own data source must list every live binding, Ctrl+Alt+K included"
     );
 }
@@ -8272,5 +8272,431 @@ fn help_modal_view_reuses_the_shared_keyboard_help_derivation_not_a_second_list(
         source.contains("crate::keyboard_help::keyboard_help_lines(&state.catalog)"),
         "help_modal_view must call the shared keyboard_help_lines derivation, not a \
          hand-written list"
+    );
+}
+
+// RFC-038 PR-038-G: the folder browser -- overturns D1 (a typed path is
+// not an acceptable *primary* way to choose a folder). `Ctrl+Alt+B` and
+// the real "Browse..." button converge on the same `open_folder_browser`
+// setup; `Enter` navigates, `Space` commits, `Escape` cancels -- proven
+// below the same way PR-038-C's Help modal already is, through real
+// messages and real `update`, not the widget tree.
+
+fn press_ctrl_alt_b(state: &mut State) {
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenFolderBrowser,
+    );
+    let _ = super::update(
+        state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+}
+
+fn folder_browser_scan_of(
+    dir: &std::path::Path,
+) -> tekstide_core::project::root::DirectoryBrowseScan {
+    tekstide_core::project::root::browse_directory(
+        dir,
+        &tekstide_core::project::root::FileExplorerScanPolicy::linux_mvp(),
+    )
+    .expect("a freshly created real directory must scan successfully")
+}
+
+fn folder_browser_modal_fixture(dir: &std::path::Path) -> FolderBrowserModal {
+    FolderBrowserModal {
+        scan: folder_browser_scan_of(dir),
+        highlight: 0,
+        navigate_failed: false,
+        open_error: None,
+    }
+}
+
+/// **The real acceptance criterion RFC-038's task breakdown states for
+/// this PR**: `Ctrl+Alt+B` opens a real, live scan -- not a placeholder
+/// -- of a real starting directory (`starting_browse_directory`'s own
+/// doc: `$HOME`, falling back to the filesystem root).
+#[test]
+fn ctrl_alt_b_opens_the_folder_browser_with_a_real_scan() {
+    let mut state = state_with(ApplicationShell::new());
+    assert!(state.modal.is_none(), "test precondition: no modal open");
+
+    press_ctrl_alt_b(&mut state);
+
+    match &state.modal {
+        Some(ModalContent::FolderBrowser(modal)) => {
+            assert_eq!(
+                modal.scan.current_dir,
+                super::starting_browse_directory(),
+                "Ctrl+Alt+B must open the browser at the real starting directory"
+            );
+            assert_eq!(modal.highlight, 0);
+        }
+        other => panic!("Ctrl+Alt+B must open the FolderBrowser modal: {other:?}"),
+    }
+}
+
+/// The real "Browse..." button and `Ctrl+Alt+B` must converge on the
+/// exact same setup (`open_folder_browser`'s own doc) -- proven here by
+/// dispatching the button's own message directly, exactly as `iced`
+/// would when the real click lands.
+#[test]
+fn the_real_browse_button_message_opens_the_same_modal_the_keyboard_shortcut_does() {
+    let mut state = state_with(ApplicationShell::new());
+
+    let _ = super::update(&mut state, Message::OpenFolderBrowserButtonPressed);
+
+    match &state.modal {
+        Some(ModalContent::FolderBrowser(modal)) => {
+            assert_eq!(modal.scan.current_dir, super::starting_browse_directory());
+        }
+        other => panic!("the Browse button's message must open the FolderBrowser modal: {other:?}"),
+    }
+}
+
+/// Mirrors `ctrl_alt_k_opens_help_from_inside_terminal_immersion`: the
+/// folder browser must be reachable from anywhere, not only the Project
+/// Board.
+#[test]
+fn ctrl_alt_b_opens_the_folder_browser_from_inside_terminal_immersion() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("browse-from-terminal-immersion"))
+        .expect("a freshly created directory is a valid project root");
+    app_shell.dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+    let mut state = state_with(app_shell);
+
+    press_ctrl_alt_b(&mut state);
+
+    assert!(
+        matches!(state.modal, Some(ModalContent::FolderBrowser(_))),
+        "Ctrl+Alt+B must open the folder browser from Terminal Immersion too: {:?}",
+        state.modal
+    );
+}
+
+/// Mirrors `escape_closes_the_help_modal`.
+#[test]
+fn escape_closes_the_folder_browser_modal() {
+    let mut state = state_with(ApplicationShell::new());
+    press_ctrl_alt_b(&mut state);
+    assert!(matches!(state.modal, Some(ModalContent::FolderBrowser(_))));
+
+    let _ = super::update(&mut state, Message::ModalDismiss);
+
+    assert!(
+        state.modal.is_none(),
+        "Escape must close the folder browser"
+    );
+}
+
+/// `Enter` navigates the highlighted row -- into a subdirectory, or,
+/// with `Parent` highlighted, back up. Both hops proven against a real
+/// directory tree, exercising a real `browse_directory` re-scan each
+/// time, not a stubbed one.
+#[test]
+fn enter_navigates_into_a_subdirectory_and_back_up_via_the_parent_row() {
+    let mut state = state_with(ApplicationShell::new());
+    let base = fresh_project_dir("browse-nav-base");
+    let child = base.join("child");
+    std::fs::create_dir(&child).expect("real child directory must be creatable");
+
+    let mut modal = folder_browser_modal_fixture(&base);
+    assert!(
+        modal.scan.parent_dir.is_some(),
+        "test precondition: a temp directory must have a real parent"
+    );
+    let rows = crate::surface::explorer::visible_browse_rows(&modal.scan);
+    let child_row_index = rows
+        .iter()
+        .position(|row| {
+            matches!(row, crate::surface::explorer::BrowseRow::Node(node) if node.name == "child")
+        })
+        .expect("the freshly created child directory must appear in the scan");
+    modal.highlight = child_row_index;
+    state.modal = Some(ModalContent::FolderBrowser(modal));
+
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    let expected_child = child.canonicalize().expect("child must be canonicalizable");
+    match &state.modal {
+        Some(ModalContent::FolderBrowser(modal)) => {
+            assert_eq!(modal.scan.current_dir, expected_child);
+            assert_eq!(modal.highlight, 0, "highlight must reset after navigating");
+            assert!(!modal.navigate_failed);
+        }
+        other => panic!("Enter must keep the modal open, navigated: {other:?}"),
+    }
+
+    // The child's Parent row is always row 0 when present -- navigate
+    // back up the same way.
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    let expected_base = base.canonicalize().expect("base must be canonicalizable");
+    match &state.modal {
+        Some(ModalContent::FolderBrowser(modal)) => {
+            assert_eq!(
+                modal.scan.current_dir, expected_base,
+                "the Parent row must navigate back to the real parent directory"
+            );
+        }
+        other => panic!("Enter on Parent must keep the modal open, navigated up: {other:?}"),
+    }
+}
+
+/// A navigation target that no longer exists (a raced removal, simulated
+/// directly here since a real race is not reliably reproducible) must
+/// leave `scan`/`highlight` exactly where they were and set
+/// `navigate_failed`, instead of a silent no-op or a corrupted shown
+/// state -- the same "keep the last good state, render the failure
+/// alongside it" shape `PathFieldError` already established.
+#[test]
+fn a_failed_navigation_leaves_the_last_good_scan_untouched_and_sets_navigate_failed() {
+    let mut state = state_with(ApplicationShell::new());
+    let base = fresh_project_dir("browse-nav-failure");
+    let missing = base.join("removed-before-navigation");
+
+    let scan = tekstide_core::project::root::DirectoryBrowseScan {
+        current_dir: base.clone(),
+        parent_dir: None,
+        nodes: vec![tekstide_core::project::root::BrowseNode {
+            name: "removed-before-navigation".to_string(),
+            path: missing,
+            state: tekstide_core::project::root::BrowseNodeState::Available,
+        }],
+        truncated: false,
+    };
+    state.modal = Some(ModalContent::FolderBrowser(FolderBrowserModal {
+        scan: scan.clone(),
+        highlight: 0,
+        navigate_failed: false,
+        open_error: None,
+    }));
+
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    match &state.modal {
+        Some(ModalContent::FolderBrowser(modal)) => {
+            assert!(
+                modal.navigate_failed,
+                "a target that no longer exists must set navigate_failed"
+            );
+            assert_eq!(
+                modal.scan, scan,
+                "the last good scan must be left exactly as it was"
+            );
+            assert_eq!(
+                modal.highlight, 0,
+                "highlight must not move on a failed navigation"
+            );
+        }
+        other => panic!("a failed navigation must keep the modal open: {other:?}"),
+    }
+}
+
+/// `ModalFocusNext`/`ModalFocusPrevious` move the highlighted row,
+/// clamped rather than wrapping -- the same shape `handle_explorer_key`
+/// already uses for the project explorer's own Up/Down list navigation.
+#[test]
+fn modal_focus_next_and_previous_move_the_folder_browser_highlight_clamped_not_wrapping() {
+    let mut state = state_with(ApplicationShell::new());
+    let base = fresh_project_dir("browse-highlight-clamp-base");
+    for name in ["a", "b"] {
+        std::fs::create_dir(base.join(name)).expect("real child directories must be creatable");
+    }
+    let modal = folder_browser_modal_fixture(&base);
+    let row_count = crate::surface::explorer::visible_browse_rows(&modal.scan).len();
+    assert!(
+        row_count >= 3,
+        "test precondition: Parent plus two real children must be visible"
+    );
+    state.modal = Some(ModalContent::FolderBrowser(modal));
+
+    for _ in 0..(row_count + 2) {
+        let _ = super::update(&mut state, Message::ModalFocusNext);
+    }
+    match &state.modal {
+        Some(ModalContent::FolderBrowser(modal)) => {
+            assert_eq!(
+                modal.highlight,
+                row_count - 1,
+                "ModalFocusNext must clamp at the last row, not wrap"
+            );
+        }
+        other => panic!("unexpected modal: {other:?}"),
+    }
+
+    for _ in 0..(row_count + 2) {
+        let _ = super::update(&mut state, Message::ModalFocusPrevious);
+    }
+    match &state.modal {
+        Some(ModalContent::FolderBrowser(modal)) => {
+            assert_eq!(
+                modal.highlight, 0,
+                "ModalFocusPrevious must clamp at the first row, not wrap"
+            );
+        }
+        other => panic!("unexpected modal: {other:?}"),
+    }
+}
+
+/// **The RFC's own acceptance criterion**: a project chosen by browsing
+/// -- never typed -- opens through the exact same `add_project_from_path`
+/// entry point the path field uses, arriving `Restricted` exactly like
+/// every other route (`what-a-path-field-must-not-trust.md` §4 applies
+/// unchanged; there is no shortcut around it for the browser).
+#[test]
+fn space_commits_the_shown_directory_as_a_new_restricted_project_and_closes_the_modal() {
+    let mut state = state_with(ApplicationShell::new());
+    let project_dir = fresh_project_dir("browse-commit-real-open");
+    let modal = folder_browser_modal_fixture(&project_dir);
+    let expected_root = modal.scan.current_dir.clone();
+    state.modal = Some(ModalContent::FolderBrowser(modal));
+
+    let _ = super::update(&mut state, Message::FolderBrowserChooseCurrentDirectory);
+
+    let active = state
+        .app_shell
+        .state()
+        .active_project()
+        .expect("Space must open and activate the shown directory as a project");
+    assert_eq!(active.root_path(), expected_root.as_path());
+    assert_eq!(
+        active.trust_state(),
+        tekstide_core::project::WorkspaceTrust::Restricted,
+        "a project added through the browser must arrive Restricted, exactly like every \
+         other route"
+    );
+    assert!(
+        state.modal.is_none(),
+        "a successful commit must close the modal"
+    );
+}
+
+/// what-a-path-field-must-not-trust.md §5's audit guard, proven for the
+/// browser's own call site (`choose_current_browsed_directory`), the
+/// same way `opening_a_project_through_the_real_field_writes_exactly_
+/// one_real_project_added_record` already proves it for the path field.
+/// **Ablated**: temporarily commenting out `choose_current_browsed_
+/// directory`'s call to `record_new_project_added` makes this
+/// assertion fail (0 records, not 1) -- confirmed by hand while writing
+/// this test, then restored; not left as a standing ablation, matching
+/// this codebase's convention.
+#[test]
+fn choosing_a_directory_through_the_real_browser_writes_exactly_one_real_project_added_record() {
+    let mut state = state_with(ApplicationShell::new());
+    let project_dir = fresh_project_dir("browse-commit-audit-record");
+    state.modal = Some(ModalContent::FolderBrowser(folder_browser_modal_fixture(
+        &project_dir,
+    )));
+
+    let _ = super::update(&mut state, Message::FolderBrowserChooseCurrentDirectory);
+
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .expect("test precondition: the browser must have opened a project");
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let records: Vec<_> = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .expect("querying the real audit store must succeed")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .filter(|record| record.project_id.as_ref() == Some(&project_id))
+        .filter(|record| record.family == tekstide_core::audit::AuditEventFamily::ProjectAdded)
+        .collect();
+
+    assert_eq!(
+        records.len(),
+        1,
+        "exactly one ProjectAdded record must exist for a project opened through the real \
+         browser: {records:?}"
+    );
+}
+
+/// Mirrors `resubmitting_the_same_path_through_the_field_focuses_it_
+/// without_a_second_record`: browsing to an already-open project's own
+/// root a second time must focus it, not duplicate it or write a second
+/// record.
+#[test]
+fn committing_an_already_open_project_a_second_time_focuses_it_without_a_second_record() {
+    let mut state = state_with(ApplicationShell::new());
+    let project_dir = fresh_project_dir("browse-commit-refocus");
+    state.modal = Some(ModalContent::FolderBrowser(folder_browser_modal_fixture(
+        &project_dir,
+    )));
+    let _ = super::update(&mut state, Message::FolderBrowserChooseCurrentDirectory);
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .expect("test precondition: the first commit must succeed");
+
+    state.modal = Some(ModalContent::FolderBrowser(folder_browser_modal_fixture(
+        &project_dir,
+    )));
+    let _ = super::update(&mut state, Message::FolderBrowserChooseCurrentDirectory);
+
+    assert_eq!(
+        state.app_shell.state().active_project_id(),
+        Some(&project_id),
+        "resubmitting the same directory must focus the same project, not create a second one"
+    );
+    assert!(
+        state.modal.is_none(),
+        "a FocusedExisting commit must also close the modal"
+    );
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let record_count = audit_store
+        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .expect("querying the real audit store must succeed")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .filter(|record| record.project_id.as_ref() == Some(&project_id))
+        .filter(|record| record.family == tekstide_core::audit::AuditEventFamily::ProjectAdded)
+        .count();
+    assert_eq!(
+        record_count, 1,
+        "re-focusing an already-open project through the browser must not write a second record"
+    );
+}
+
+/// A commit failure (here: the directory is removed between the scan
+/// and the commit, simulated directly since a real race is not reliably
+/// reproducible) must render the error and leave the modal open, the
+/// same as `a_bad_path_renders_a_notice_and_the_application_keeps_running`
+/// already proves for the path field -- never a silent no-op, never
+/// closing the modal on nothing.
+#[test]
+fn a_commit_failure_renders_the_error_and_keeps_the_modal_open() {
+    let mut state = state_with(ApplicationShell::new());
+    let base = fresh_project_dir("browse-commit-failure");
+    let modal = folder_browser_modal_fixture(&base);
+    std::fs::remove_dir(&base).expect("the directory must be removable to simulate the race");
+    state.modal = Some(ModalContent::FolderBrowser(modal));
+
+    let _ = super::update(&mut state, Message::FolderBrowserChooseCurrentDirectory);
+
+    match &state.modal {
+        Some(ModalContent::FolderBrowser(modal)) => {
+            assert_eq!(
+                modal.open_error,
+                Some(PathFieldError::DoesNotExist),
+                "a removed directory must be refused with the specific reason"
+            );
+        }
+        other => panic!("a commit failure must keep the modal open, not close it: {other:?}"),
+    }
+    assert!(
+        state.app_shell.state().active_project().is_none(),
+        "a refused commit must not have added anything"
     );
 }

@@ -82,6 +82,36 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
       `ModalFocusNext`/`Previous` are no-ops against it, documented on `ModalContent::Help`
       itself. Escape: `escape_closes_the_help_modal`, live in `after-escape-closes-help.png`.
 
+## Folder browser (PR-038-G)
+
+- [x] Reached from a **visible control**, not only a key: a real `iced::widget::button`
+      ("Browse..."), live in `evidence/pr-038-g/before-cold-start-empty-board.png` and clicked
+      for real in `after-real-mouse-click-opens-browser.png`.
+      `board/tests.rs::the_browse_button_is_a_real_clickable_widget_not_an_inert_label`.
+- [x] The chosen folder goes through the same `add_project_from_path` entry point PR-038-A uses,
+      with the same audit record and the same `Restricted` outcome.
+      `shell::tests::space_commits_the_shown_directory_as_a_new_restricted_project_and_closes_the_modal`,
+      `choosing_a_directory_through_the_real_browser_writes_exactly_one_real_project_added_record`
+      (ablated).
+- [x] `what-a-path-field-must-not-trust.md` applies unchanged. `qa-evidence.md`'s own
+      PR-038-G "Security" paragraph.
+- [x] The path field remains as a secondary route. Untouched; confirmed by diff.
+- [x] Keyboard-operable throughout. `Tab`/`Shift+Tab`/`Arrow` keys move the highlight (clamped),
+      `Enter` navigates, `Space` commits, `Escape` cancels -- all proven by real message
+      dispatch in `shell/tests.rs`, and by real `xdotool` key events live.
+- [x] Evidence: a cold start in which a project is opened **without typing a path** -- navigate
+      and choose -- proven from real key events (and, additionally, a real mouse click on the
+      button itself), plus a screenshot of the browser itself.
+      `evidence/pr-038-g/after-real-mouse-click-opens-browser.png` through
+      `after-space-commits-project-without-typing.png`.
+- [ ] **Disclosed, not silently resolved**: does not reuse RFC-019's explorer renderer as the
+      task breakdown asked ("do not write a second directory renderer") -- `browse_view` and its
+      siblings are a near-duplicate of `view`/`node_line`/`tree_lines`. Core scanning could not
+      honestly reuse `FileExplorerScanner`/`ExplorerDirectoryScan` (project-root-relative by
+      construction; no project exists yet at browse time) -- see `qa-evidence.md`'s own PR-038-G
+      section for the full reasoning. Left unchecked deliberately: this is a question for the
+      architect's decision, not a completed item.
+
 ## Recent projects (PR-038-D)
 
 - [ ] Remembered names and paths escaped as untrusted. Pending PR-038-D — not started, not
@@ -99,21 +129,22 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
 - [ ] Recorded in the changelog as a **breaking change**, with the version implication stated.
       Pending PR-038-E.
 - [x] Every ablation in this slice was **single-variable**. Three in PR-038-A, three in PR-038-B,
-      four in PR-038-C (the collision test against a colliding binding; the negative
-      board.rs-reference check against a reintroduced dead call; the reachability test against
-      the dispatch guarded off, which caught both the plain-board and Terminal-Immersion cases
-      together). Each reverted after confirming the expected failure. See `qa-evidence.md`.
+      four in PR-038-C, two in PR-038-G (the collision test against a colliding binding, which
+      also caught `open_help_shortcut...` failing as its own collision victim; the audit-record
+      guard against the new call site's record write commented out). Each reverted after
+      confirming the expected failure. See `qa-evidence.md`.
 - [x] Flakes disclosed, not re-run past; any fifth symptom of the approval/socket flake reported
       as a disclosure rather than attributed to this work. PR-038-B's run hit three (all
       already-named). PR-038-C's own run separately hit a fourth already-named symptom
       (`command_approval_family_produces_real_durable_audit_records_through_the_pipeline`,
       confirmed passing in isolation) — and, distinctly, the PTY-exhaustion cascade recorded in
       `qa-evidence.md`'s own PR-038-C section, which is a different, newly-disclosed defect, not
-      a fifth symptom of the approval/socket one.
-- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-C's
-      own state (334 tekstide + 716 tekstide-core, 0 failed).
+      a fifth symptom of the approval/socket one. PR-038-G's own run hit none.
+- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-G's
+      own state (346 tekstide + 724 tekstide-core, 0 failed).
 - [x] Known limitations stated, including anything this slice leaves unreachable.
-      `qa-evidence.md`'s "Known limitations" section, scoped explicitly to "as of PR-038-A only."
+      `qa-evidence.md`'s "Known limitations" section, now "as of PR-038-A/B/C/G," including the
+      render-layer duplication disclosed and flagged for the architect above.
 
 ## Final Acceptance Decision
 

@@ -510,6 +510,34 @@ pub(crate) enum ModalContent {
     /// against it; only `ModalDismiss`/Escape does anything, and that
     /// handler is already generic across every `ModalContent` variant.
     Help,
+    /// RFC-038 PR-038-G: the folder browser -- overturns RFC-038's own
+    /// D1 (a typed path is not an acceptable *primary* way to choose a
+    /// folder). Unlike `Help`, has real state to navigate and a real
+    /// decision (`FolderBrowserModal`'s own doc).
+    FolderBrowser(FolderBrowserModal),
+}
+
+/// RFC-038 PR-038-G: `scan`/`highlight` are always a **valid** scan --
+/// a failed navigation attempt (`navigate_error`) or a failed commit
+/// (`open_error`) never replaces them, the same "keep the last good
+/// state, render the failure alongside it" shape `PathFieldError`
+/// already established for the path field (`what-a-path-field-must-
+/// not-trust.md` applies here too: whatever directory is ultimately
+/// chosen is untrusted and re-validated in full by `add_project_from_path`,
+/// exactly as a typed path is).
+#[derive(Debug, Clone)]
+pub(crate) struct FolderBrowserModal {
+    scan: tekstide_core::project::root::DirectoryBrowseScan,
+    highlight: usize,
+    /// Set when the last `Enter` (navigate into a row) failed --
+    /// cleared on the next navigation attempt, successful or not, so it
+    /// never describes a stale attempt.
+    navigate_failed: bool,
+    /// Set when the last `Space` (commit `scan.current_dir` as the new
+    /// project) failed. Reuses [`PathFieldError`] -- the same
+    /// `add_project_from_path` call, the same failure shapes, the same
+    /// "never a raw path in the error type itself" discipline.
+    open_error: Option<PathFieldError>,
 }
 
 impl Default for ModalContent {
@@ -995,6 +1023,24 @@ pub enum Message {
     /// -- `None` (empty or unreadable clipboard) is a silent no-op, the
     /// same as an empty terminal paste.
     PathFieldPasteResolved(Option<String>),
+    /// RFC-038 PR-038-G: the Project Board's real, clickable "Browse..."
+    /// button -- `iced`'s own click dispatch, not the reviewed keyboard
+    /// router (mouse input was never part of that router's threat
+    /// model; see `board::empty_state_view`'s own doc on why keyboard
+    /// input specifically needed one). `NavigationAction::
+    /// OpenFolderBrowser`'s `Shell` handler and this arm both call
+    /// [`open_folder_browser`], so a mouse click and `Ctrl+Alt+B` open
+    /// the exact same modal through the exact same setup, not two
+    /// independently-maintained copies of it.
+    OpenFolderBrowserButtonPressed,
+    /// RFC-038 PR-038-G: `Space` while the folder browser is open --
+    /// commits `scan.current_dir` as the new project, through the same
+    /// `add_project_from_path` entry point every other route uses.
+    /// `modal_subscription`'s own doc explains why this is a new
+    /// recognised key rather than reusing `ModalActivate` (`Enter`):
+    /// `Enter` already means "navigate into the highlighted row," and a
+    /// folder browser genuinely needs both actions distinguishable.
+    FolderBrowserChooseCurrentDirectory,
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -1096,6 +1142,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // no modal is already open, so this can never overwrite one.
             if action == NavigationAction::OpenHelp {
                 state.modal = Some(ModalContent::Help);
+            }
+            // RFC-038 PR-038-G: the keyboard accelerator alongside the
+            // real button (`Message::OpenFolderBrowserButtonPressed`) --
+            // both converge on `open_folder_browser`.
+            if action == NavigationAction::OpenFolderBrowser {
+                open_folder_browser(state);
             }
         }
         Message::Input(RoutedInput::Surface(surface_input)) => {
@@ -1258,6 +1310,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 push_to_path_field(state, &content);
             }
         }
+        Message::OpenFolderBrowserButtonPressed => {
+            open_folder_browser(state);
+        }
+        Message::FolderBrowserChooseCurrentDirectory => {
+            choose_current_browsed_directory(state);
+        }
         Message::Input(RoutedInput::FocusNext) => state.focus = state.focus.next(),
         Message::Input(RoutedInput::FocusPrevious) => state.focus = state.focus.previous(),
         Message::ModalFocusNext => match state.modal.as_mut() {
@@ -1269,7 +1327,19 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.next(),
             // RFC-038 PR-038-C: nothing to focus -- a read-only surface,
             // not a dialog with buttons.
-            Some(ModalContent::Help) | None => {}
+            Some(ModalContent::Help) => {}
+            // RFC-038 PR-038-G: moves the highlighted row, clamped (not
+            // wrapping) -- the same shape `handle_explorer_key` already
+            // uses for the project explorer's own Up/Down, since this is
+            // a list to move through, not a small Tab-cycled button set
+            // like every other modal above.
+            Some(ModalContent::FolderBrowser(modal)) => {
+                let row_count = crate::surface::explorer::visible_browse_rows(&modal.scan).len();
+                if row_count > 0 {
+                    modal.highlight = (modal.highlight + 1).min(row_count - 1);
+                }
+            }
+            None => {}
         },
         Message::ModalFocusPrevious => match state.modal.as_mut() {
             Some(ModalContent::LayerDemo { focus }) => *focus = focus.previous(),
@@ -1278,7 +1348,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.previous(),
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.previous(),
-            Some(ModalContent::Help) | None => {}
+            Some(ModalContent::Help) => {}
+            Some(ModalContent::FolderBrowser(modal)) => {
+                modal.highlight = modal.highlight.saturating_sub(1);
+            }
+            None => {}
         },
         // RFC-018 PR-018-C: the layer-demo placeholder still has no
         // decision to record (RFC-022's real dialogs own that). The
@@ -1343,6 +1417,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     if modal.focus == TranscriptPurgeButton::Purge =>
                 {
                     apply_transcript_purge(state, &modal);
+                }
+                // RFC-038 PR-038-G: unlike every arm above, this one
+                // does not represent a final decision -- `Enter`
+                // navigates the browser, it does not close it. `modal`
+                // is `state.modal.take()`'s own owned value (this whole
+                // match runs against it, not a `state.modal.as_mut()`
+                // borrow), so it must be explicitly put back; every
+                // other arm's implicit "stays closed" is what this one
+                // deliberately does not do.
+                Some(ModalContent::FolderBrowser(mut modal)) => {
+                    navigate_folder_browser(&mut modal);
+                    state.modal = Some(ModalContent::FolderBrowser(modal));
                 }
                 Some(ModalContent::LayerDemo { .. })
                 | Some(ModalContent::PasteConfirmation(_))
@@ -2763,7 +2849,7 @@ fn attempt_open_project_from_path_field(state: &mut State) {
     let path = state.path_field.clone();
     match state.app_shell.add_project_from_path(&path) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
-            record_path_field_project_added(state, project_id);
+            record_new_project_added(state, project_id);
             state.path_field.clear();
             state.path_field_requested = false;
         }
@@ -2790,13 +2876,136 @@ fn attempt_open_project_from_path_field(state: &mut State) {
 /// `shell.rs` already owns this exact `open_real_audit_store` +
 /// `AuditCoordinator::new` shape for every other GUI-triggered producer
 /// (`apply_workspace_trust_grant`, `revoke_workspace_trust`).
-fn record_path_field_project_added(state: &State, project_id: tekstide_core::project::ProjectId) {
+/// The shared audit write behind both of this crate's non-CLI
+/// `add_project_from_path` call sites (the path field,
+/// `attempt_open_project_from_path_field`, and the folder browser,
+/// `choose_current_browsed_directory`) -- same shape `main.rs`'s
+/// `record_project_added_if_possible` uses (best-effort: a failed audit
+/// write must never turn a real, already-successful project add into a
+/// visible failure), reached directly rather than through that private
+/// `main.rs` function, since `shell.rs` already owns this exact
+/// `open_real_audit_store` + `AuditCoordinator::new` shape for every
+/// other GUI-triggered producer (`apply_workspace_trust_grant`,
+/// `revoke_workspace_trust`).
+fn record_new_project_added(state: &State, project_id: tekstide_core::project::ProjectId) {
     let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
         return;
     };
     let mut audit_health = tekstide_core::audit::AuditHealth::default();
     let _ = tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health)
         .record_project_added(project_id);
+}
+
+/// RFC-038 PR-038-G: opens the folder browser, at `$HOME` (falling back
+/// to the filesystem root -- see [`starting_browse_directory`]). Both
+/// `Ctrl+Alt+B` and the real "Browse..." button call this, so a
+/// keyboard user and a mouse user reach the exact same setup, not two
+/// independently-maintained copies of it.
+///
+/// If even the fallback somehow fails to scan (a pathological
+/// environment with no readable filesystem root at all), this is a
+/// silent no-op -- the same "nothing sensible to do" precedent
+/// `attempt_terminal_launch`'s own "no active project" branch already
+/// sets, rather than opening a modal with nothing real to show.
+fn open_folder_browser(state: &mut State) {
+    let start = starting_browse_directory();
+    if let Ok(scan) = tekstide_core::project::root::browse_directory(
+        &start,
+        &tekstide_core::project::root::FileExplorerScanPolicy::linux_mvp(),
+    ) {
+        state.modal = Some(ModalContent::FolderBrowser(FolderBrowserModal {
+            scan,
+            highlight: 0,
+            navigate_failed: false,
+            open_error: None,
+        }));
+    }
+}
+
+/// `$HOME`, falling back to the filesystem root if unset or not a real,
+/// readable directory -- the same `std::env::var_os("HOME")` convention
+/// `tekstide-core`'s own config/profile/recent-project-store code
+/// already uses (`config/path.rs`, `agent/profile.rs`,
+/// `project/recent/store.rs`), read directly here since this crate has
+/// no shared home-directory helper of its own yet to reuse.
+fn starting_browse_directory() -> std::path::PathBuf {
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|home| home.is_dir())
+        .unwrap_or_else(|| std::path::PathBuf::from("/"))
+}
+
+/// RFC-038 PR-038-G: `Space`'s real handler -- commits
+/// `scan.current_dir` (the directory currently being *shown*, not
+/// whichever row is highlighted) as the new project, through the exact
+/// same `add_project_from_path` entry point every other route uses.
+/// Mirrors [`attempt_open_project_from_path_field`]'s own shape: never
+/// exits, never touches core's canonicalisation/symlink logic directly
+/// (`what-a-path-field-must-not-trust.md` §6 applies unchanged -- a
+/// directory found by browsing is untrusted exactly as a typed one is),
+/// and a failure is recorded on the modal rather than closing it, so
+/// the user can back out or try another folder.
+fn choose_current_browsed_directory(state: &mut State) {
+    let Some(ModalContent::FolderBrowser(modal)) = state.modal.as_mut() else {
+        return;
+    };
+    modal.open_error = None;
+    let path = modal.scan.current_dir.clone();
+
+    match state.app_shell.add_project_from_path(&path) {
+        Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
+            record_new_project_added(state, project_id);
+            state.modal = None;
+        }
+        Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
+            state.modal = None;
+        }
+        Err(error) => {
+            if let Some(ModalContent::FolderBrowser(modal)) = state.modal.as_mut() {
+                modal.open_error = Some(PathFieldError::from_validation_error(&error));
+            }
+        }
+    }
+}
+
+/// RFC-038 PR-038-G: `Enter`'s real handler for the folder browser --
+/// navigates into the highlighted row (`Parent` or a subdirectory),
+/// re-scanning at the new location. Distinct from
+/// [`choose_current_browsed_directory`] (`Space`): this never calls
+/// `add_project_from_path` and never closes the modal -- it only moves
+/// where the browser is looking.
+///
+/// A failed navigation (permission changed, directory removed, racing
+/// the earlier scan) leaves `scan`/`highlight` at the last good state
+/// and sets `navigate_failed` instead -- the same "keep the last good
+/// state, render the failure alongside it" shape `PathFieldError`
+/// already established.
+fn navigate_folder_browser(modal: &mut FolderBrowserModal) {
+    let rows = crate::surface::explorer::visible_browse_rows(&modal.scan);
+    let Some(row) = rows.get(modal.highlight) else {
+        return;
+    };
+    let target = match row {
+        crate::surface::explorer::BrowseRow::Parent => modal.scan.parent_dir.clone(),
+        crate::surface::explorer::BrowseRow::Node(node) => Some(node.path.clone()),
+    };
+    let Some(target) = target else {
+        return;
+    };
+
+    match tekstide_core::project::root::browse_directory(
+        &target,
+        &tekstide_core::project::root::FileExplorerScanPolicy::linux_mvp(),
+    ) {
+        Ok(new_scan) => {
+            modal.scan = new_scan;
+            modal.highlight = 0;
+            modal.navigate_failed = false;
+        }
+        Err(_) => {
+            modal.navigate_failed = true;
+        }
+    }
 }
 
 /// Shared between [`handle_approval_history_key`]'s Enter handling and
@@ -3040,7 +3249,9 @@ fn trusted_ui_state(state: &State) -> TerminalTrustedUiState {
         | Some(ModalContent::ExternalChange(_))
         | Some(ModalContent::TrustGrant(_))
         | Some(ModalContent::TranscriptPurge(_))
-        | Some(ModalContent::Help) => TerminalTrustedUiState::SecurityDialogActive,
+        | Some(ModalContent::Help)
+        // RFC-038 PR-038-G: same generic bucket, same reason.
+        | Some(ModalContent::FolderBrowser(_)) => TerminalTrustedUiState::SecurityDialogActive,
     }
 }
 
@@ -3574,6 +3785,10 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         // routed through this function. `update`'s `Shell` arm sets
         // `state.modal` directly.
         | NavigationAction::OpenHelp
+        // RFC-038 PR-038-G: same reason as `OpenHelp` immediately
+        // above -- opening the folder-browser modal is shell-local UI
+        // state, not a core route/mode change.
+        | NavigationAction::OpenFolderBrowser
         | NavigationAction::OpenCommandPalette
         | NavigationAction::SwitchActiveProject
         | NavigationAction::CycleVisibleTerminalSession
@@ -3649,6 +3864,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ModalContent::TrustGrant(modal) => trust_grant_dialog_view(state, modal),
             ModalContent::TranscriptPurge(modal) => transcript_purge_dialog_view(state, modal),
             ModalContent::Help => help_modal_view(state),
+            ModalContent::FolderBrowser(modal) => folder_browser_modal_view(state, modal),
         };
         let scrim = center(modal_view).style(modal_scrim_style(state.theme));
         stack![base, opaque(scrim)].into()
@@ -3898,10 +4114,35 @@ fn modal_subscription() -> Subscription<Message> {
             key: keyboard::Key::Named(keyboard::key::Named::Tab),
             ..
         } => Some(Message::ModalFocusNext),
+        // RFC-038 PR-038-G: `Up`/`Down` alias `Tab`/`Shift+Tab` --
+        // harmless for every existing modal (a small, Tab-cycled button
+        // set has no reason to also respond to arrow keys, but nothing
+        // stops it from doing so identically), and the folder browser's
+        // own list navigation is what actually needs them; no modal-
+        // specific dispatch lives here, matching every other message
+        // this function already produces unconditionally.
+        keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::ArrowUp),
+            ..
+        } => Some(Message::ModalFocusPrevious),
+        keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::ArrowDown),
+            ..
+        } => Some(Message::ModalFocusNext),
         keyboard::Event::KeyPressed {
             key: keyboard::Key::Named(keyboard::key::Named::Enter),
             ..
         } => Some(Message::ModalActivate),
+        // RFC-038 PR-038-G: `Space` -- distinct from `Enter`
+        // (`ModalActivate`, which navigates *into* the highlighted
+        // row): this commits the folder currently being *shown*. Every
+        // modal but the folder browser ignores it, the same "produced
+        // unconditionally, each modal's own handler decides" shape
+        // every message above already has.
+        keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Space),
+            ..
+        } => Some(Message::FolderBrowserChooseCurrentDirectory),
         keyboard::Event::KeyPressed {
             key: keyboard::Key::Named(keyboard::key::Named::Escape),
             ..
@@ -4027,6 +4268,7 @@ fn content_area(state: &State) -> Element<'_, Message> {
                     &state.path_field,
                     path_field_notice_text,
                     state.path_field_requested,
+                    Message::OpenFolderBrowserButtonPressed,
                 )
             }
             AppRoute::ActiveProjectWorkspace => active_project_workspace_view(state),
@@ -4537,6 +4779,51 @@ fn help_modal_view(state: &State) -> Element<'_, Message> {
 
     lines = lines
         .push(text(state.catalog.get("help-dialog-hint")).size(state.theme.font_size_status()));
+
+    modal_dialog_box(state, lines.into())
+}
+
+/// RFC-038 PR-038-G: the folder browser's own modal chrome (title,
+/// notices, hint) around [`crate::surface::explorer::browse_view`]'s
+/// rendering of the scan itself -- the same "surface renders the data,
+/// `shell.rs` composes the modal around it" split [`help_modal_view`]
+/// already uses for `keyboard_help_lines`.
+fn folder_browser_modal_view<'a>(
+    state: &'a State,
+    modal: &'a FolderBrowserModal,
+) -> Element<'a, Message> {
+    let mut lines = column![
+        text(state.catalog.get("browse-dialog-title")).size(state.theme.font_size_heading()),
+    ]
+    .spacing(6);
+
+    lines = lines.push(crate::surface::explorer::browse_view(
+        &modal.scan,
+        modal.highlight,
+        &state.catalog,
+        &state.theme,
+    ));
+
+    if modal.navigate_failed {
+        lines = lines.push(
+            text(state.catalog.get("browse-navigate-error")).size(state.theme.font_size_body()),
+        );
+    }
+    // `path_field_error_text` reused as-is (see its own doc comment):
+    // the same `add_project_from_path` call, the same failure shapes,
+    // the same bound-then-escape discipline -- `modal.scan.current_dir`
+    // is the exact path that was just handed to it.
+    if let Some(error) = modal.open_error {
+        let notice = path_field_error_text(
+            &state.catalog,
+            &modal.scan.current_dir.display().to_string(),
+            error,
+        );
+        lines = lines.push(text(notice).size(state.theme.font_size_body()));
+    }
+
+    lines = lines
+        .push(text(state.catalog.get("browse-dialog-hint")).size(state.theme.font_size_status()));
 
     modal_dialog_box(state, lines.into())
 }

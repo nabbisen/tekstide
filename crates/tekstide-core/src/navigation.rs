@@ -67,6 +67,11 @@ pub enum NavigationAction {
     /// keyboard list), not a working surface -- RFC-039's second
     /// principle is exactly this distinction, named a slice early.
     OpenHelp,
+    /// RFC-038 PR-038-G: opens the folder browser (`ModalContent::
+    /// FolderBrowser`) -- the owner's overturn of D1, a visible-control
+    /// accelerator alongside the real button on the Project Board, not
+    /// the only route to it.
+    OpenFolderBrowser,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -285,6 +290,20 @@ impl KeybindingPolicy {
                 KeybindingRule::new(
                     NavigationAction::OpenHelp,
                     Some("Ctrl+Alt+K"),
+                    KeybindingStatus::Candidate,
+                ),
+                // RFC-038 PR-038-G: `Ctrl+Alt+B` (Browse), following the
+                // existing `Ctrl+Alt+<letter>` shape -- unclaimed by any
+                // other rule here and not `Ctrl+Shift+P`'s `Reserved`
+                // command-palette binding, so it collides with nothing
+                // (checked mechanically by
+                // `open_folder_browser_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone). An accelerator alongside the
+                // real button, not the only route -- RFC-038-G's own
+                // task breakdown: "a button, not only a key."
+                KeybindingRule::new(
+                    NavigationAction::OpenFolderBrowser,
+                    Some("Ctrl+Alt+B"),
                     KeybindingStatus::Candidate,
                 ),
             ],

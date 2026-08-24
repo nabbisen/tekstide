@@ -59,6 +59,7 @@ fn action_catalog_key(action: NavigationAction) -> Option<&'static str> {
         NavigationAction::OpenApprovalHistory => Some("keyboard-help-open-approval-history"),
         NavigationAction::OpenTrustSettings => Some("keyboard-help-open-trust-settings"),
         NavigationAction::OpenHelp => Some("keyboard-help-open-help"),
+        NavigationAction::OpenFolderBrowser => Some("keyboard-help-open-folder-browser"),
         NavigationAction::SwitchActiveProject
         | NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenDiffReview

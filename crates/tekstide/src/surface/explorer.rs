@@ -21,8 +21,8 @@ use iced::{Element, Length};
 
 use tekstide_core::project::ProjectExplorerStatus;
 use tekstide_core::project::root::{
-    ExplorerDirectoryScan, ExplorerNode, ExplorerNodeKind, ExplorerNodeState,
-    FileAccessSymlinkStatus,
+    BrowseNode, BrowseNodeState, DirectoryBrowseScan, ExplorerDirectoryScan, ExplorerNode,
+    ExplorerNodeKind, ExplorerNodeState, FileAccessSymlinkStatus,
 };
 use tekstide_core::text_safety;
 
@@ -176,6 +176,109 @@ pub fn view<'a, Message: 'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+/// RFC-038 PR-038-G: the folder browser's own rows -- the direct
+/// analogue of [`ExplorerRow`], for
+/// `tekstide_core::project::root::DirectoryBrowseScan` rather than
+/// `ExplorerDirectoryScan` (see that type's own doc for why the two are
+/// genuinely different scans, not one reused as two).
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum BrowseRow<'a> {
+    Parent,
+    Node(&'a BrowseNode),
+}
+
+/// The direct analogue of [`visible_rows`]: `Parent` shows whenever
+/// there is anywhere to go up to (`scan.parent_dir.is_some()`), unlike
+/// the project explorer's "not yet at the project root" rule -- a
+/// folder browser has no fixed root to stop climbing at short of the
+/// filesystem root itself, which `DirectoryBrowseScan::parent_dir`
+/// already encodes as `None`.
+pub(crate) fn visible_browse_rows(scan: &DirectoryBrowseScan) -> Vec<BrowseRow<'_>> {
+    let mut rows = Vec::with_capacity(scan.nodes.len() + 1);
+    if scan.parent_dir.is_some() {
+        rows.push(BrowseRow::Parent);
+    }
+    rows.extend(scan.nodes.iter().map(BrowseRow::Node));
+    rows
+}
+
+fn browse_node_state_symbol(state: BrowseNodeState) -> &'static str {
+    match state {
+        BrowseNodeState::Available => "available",
+        BrowseNodeState::Collapsed => "collapsed",
+        BrowseNodeState::Unreadable => "unreadable",
+    }
+}
+
+/// The direct analogue of [`node_line`]: `node.name` is untrusted
+/// (a real directory can be named anything, including a bidi-override
+/// sequence) and escaped before it reaches the catalog, same discipline,
+/// same reason.
+pub(crate) fn browse_node_line(catalog: &Catalog, node: &BrowseNode) -> String {
+    let name = text_safety::quote_untrusted(&node.name);
+    catalog.get_with_args(
+        "browse-node-entry",
+        &CatalogArgs::new()
+            .untrusted("name", &name)
+            .trusted_symbol("state", browse_node_state_symbol(node.state)),
+    )
+}
+
+pub(crate) fn browse_row_line(catalog: &Catalog, row: BrowseRow<'_>) -> String {
+    match row {
+        BrowseRow::Parent => catalog.get("browse-parent-entry"),
+        BrowseRow::Node(node) => browse_node_line(catalog, node),
+    }
+}
+
+/// The direct analogue of [`tree_lines`]: the currently-browsed
+/// directory's own path first (untrusted -- a real path on a real
+/// filesystem can contain anything a file name can), then every row
+/// with its focus marker, then a truncation notice if core's scan was
+/// bounded.
+pub(crate) fn browse_tree_lines(
+    catalog: &Catalog,
+    scan: &DirectoryBrowseScan,
+    highlight: usize,
+) -> Vec<String> {
+    let current = text_safety::quote_untrusted(&scan.current_dir.display().to_string());
+    let mut lines = vec![catalog.get_with_args(
+        "browse-dialog-current",
+        &CatalogArgs::new().untrusted("path", &current),
+    )];
+
+    let rows = visible_browse_rows(scan);
+    if rows.is_empty() {
+        lines.push(catalog.get("browse-empty"));
+    }
+    for (index, row) in rows.into_iter().enumerate() {
+        let marker = if index == highlight { "> " } else { "  " };
+        lines.push(format!("{marker}{}", browse_row_line(catalog, row)));
+    }
+    if scan.truncated {
+        lines.push(catalog.get("browse-truncated-notice"));
+    }
+    lines
+}
+
+/// No `Message` interest of its own, matching [`view`]'s own shape --
+/// navigation is driven by the modal keyboard messages `shell.rs`
+/// already routes to every modal (`ModalFocusNext`/`ModalFocusPrevious`/
+/// `ModalActivate`), not by anything this function constructs.
+pub fn browse_view<'a, Message: 'a>(
+    scan: &DirectoryBrowseScan,
+    highlight: usize,
+    catalog: &'a Catalog,
+    theme: &'a Theme,
+) -> Element<'a, Message> {
+    let lines = browse_tree_lines(catalog, scan, highlight);
+    let rows: Vec<Element<'a, Message>> = lines
+        .into_iter()
+        .map(|line| text(line).size(theme.font_size_body()).into())
+        .collect();
+    column(rows).spacing(4).into()
 }
 
 #[cfg(test)]

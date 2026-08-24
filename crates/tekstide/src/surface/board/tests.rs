@@ -245,6 +245,8 @@ fn empty_state_keys_resolve_to_real_catalog_text() {
         // this list -- the keyboard list itself moved off this surface
         // entirely into `shell::help_modal_view` (PR-038-C).
         "project-board-path-field-label",
+        // RFC-038 PR-038-G: the folder browser's own visible control.
+        "project-board-browse-button",
     ] {
         let rendered = catalog.get(key);
         assert_ne!(
@@ -317,5 +319,33 @@ fn this_surface_no_longer_references_the_keyboard_list_at_all() {
         !source.contains("keyboard_help_lines") && !source.contains("keyboard_help_view"),
         "board.rs must not render the keyboard list -- it moved to shell::help_modal_view \
          (RFC-038 PR-038-C)"
+    );
+}
+
+/// RFC-038 PR-038-G: the first genuine `iced::widget::button` in this
+/// crate -- every earlier "button" (`TrustSettings`, `ApprovalHistory`)
+/// is a `"> Label"`-marker-prefixed `text()`, keyboard-only, never
+/// mouse-clickable (see this module's own `path_field_section` doc).
+/// A source-level check, the same shape
+/// `this_surface_no_longer_references_the_keyboard_list_at_all` already
+/// uses, since `iced::Element` gives a test no way to introspect
+/// whether a rendered tree is a real widget or an inert label -- proves
+/// the control is a real `button(...).on_press(...)`, not a repeat of
+/// the "named nothing" defect `the_two_action_labels_that_named_nothing_are_gone_from_the_catalogue`
+/// exists to prevent.
+#[test]
+fn the_browse_button_is_a_real_clickable_widget_not_an_inert_label() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/surface/board.rs"),
+    )
+    .expect("board.rs must be readable");
+
+    assert!(
+        source.contains("iced::widget::button("),
+        "the Browse control must be a real iced::widget::button, not a marker-prefixed text()"
+    );
+    assert!(
+        source.contains(".on_press(open_browser_message)"),
+        "the Browse button must dispatch a real message on click"
     );
 }

@@ -121,6 +121,12 @@ project-board-empty-command-example = tekstide /path/to/project
 # describes the board it's showing on.
 project-board-path-field-label = Type a project path and press Enter (Ctrl+V to paste):
 
+# RFC-038 PR-038-G: the folder browser's own visible control -- a real,
+# clickable button, not only the `Ctrl+Alt+B` accelerator, per D1's
+# overturn (a typed path is not an acceptable primary way to choose a
+# folder).
+project-board-browse-button = Browse...
+
 # RFC-038 PR-038-A: `$reason` is a compile-time symbol
 # (`PathFieldError`'s own shape), the same division of labour
 # `terminal-launch-refused` already uses -- never the error's Rust
@@ -299,6 +305,36 @@ explorer-truncated-notice = Listing truncated — not all entries are shown.
 # Escaped via `text_safety::quote_untrusted` before it reaches
 # `CatalogArgs::untrusted`, same as `$name`.
 explorer-status-error = Explorer error: { $message }
+
+# RFC-038 PR-038-G: the folder browser -- `browse-node-entry` is
+# `explorer-node-entry`'s own shape, narrowed: no `$kind` selector
+# (every row is a directory by construction, `DirectoryBrowseScan`
+# never lists anything else) and no `$symlink` selector (`BrowseNode`
+# carries no symlink-status field at all -- see its own doc comment for
+# why browsing follows symlinks rather than tracking them). `$name` is
+# untrusted, escaped via `text_safety::quote_untrusted` before it
+# reaches `CatalogArgs::untrusted`, same discipline as the project
+# explorer's own node names.
+browse-node-entry = { $name }{ $state ->
+    [collapsed] {" (collapsed)"}
+    [unreadable] {" (unreadable)"}
+   *[available] {""}
+}
+
+browse-parent-entry = [UP] ..
+
+browse-empty = This directory has no subdirectories.
+
+browse-truncated-notice = Listing truncated — not all entries are shown.
+
+browse-dialog-title = Choose a project folder
+# `$path` is `DirectoryBrowseScan::current_dir` -- a real, canonical
+# filesystem path, untrusted exactly as a node name is (escaped by the
+# caller, `surface::explorer::browse_tree_lines`, before this key ever
+# sees it).
+browse-dialog-current = Current: { $path }
+browse-dialog-hint = Enter opens a folder; Space chooses the folder shown above; Escape cancels.
+browse-navigate-error = Couldn't open that folder.
 
 # RFC-019 PR-019-C: the editor's chrome header -- everything here is
 # chrome (RFC-016's editor exception applies only to the text area
@@ -586,6 +622,7 @@ keyboard-help-open-current-agent-run-detail = AgentRun Report for the latest run
 keyboard-help-open-approval-history = Approval History (needs an open project)
 keyboard-help-open-trust-settings = Trust Settings: grant trust, transcript capture and purge
 keyboard-help-open-help = This list
+keyboard-help-open-folder-browser = Browse for a project folder
 
 # RFC-038 PR-038-C: the Help modal itself. Reachable from anywhere;
 # replaces the Project Board's own former keyboard list.

@@ -59,16 +59,23 @@ use iced::{Element, Length};
 use crate::i18n::{Catalog, CatalogArgs};
 use crate::theme::Theme;
 
-pub fn view<'a, Message: 'a>(
+pub fn view<'a, Message: 'a + Clone>(
     view_model: &ProjectBoardViewModel,
     catalog: &'a Catalog,
     theme: &'a Theme,
     path_field: &'a str,
     path_field_notice: Option<String>,
     show_field_on_populated_board: bool,
+    open_browser_message: Message,
 ) -> Element<'a, Message> {
     if let Some(_empty_state) = &view_model.empty_state {
-        return empty_state_view(catalog, theme, path_field, path_field_notice);
+        return empty_state_view(
+            catalog,
+            theme,
+            path_field,
+            path_field_notice,
+            open_browser_message,
+        );
     }
 
     let rows: Vec<Element<'a, Message>> = view_model
@@ -92,6 +99,7 @@ pub fn view<'a, Message: 'a>(
             theme,
             path_field,
             path_field_notice,
+            open_browser_message,
         ));
     }
 
@@ -134,17 +142,24 @@ pub fn view<'a, Message: 'a>(
 /// `text_safety::quote_untrusted` here, same as every other
 /// filesystem-derived string this module renders, never handed to
 /// `text(...)` raw.
-fn empty_state_view<'a, Message: 'a>(
+fn empty_state_view<'a, Message: 'a + Clone>(
     catalog: &'a Catalog,
     theme: &'a Theme,
     path_field: &'a str,
     path_field_notice: Option<String>,
+    open_browser_message: Message,
 ) -> Element<'a, Message> {
     let lines = column![
         text(catalog.get("project-board-empty-heading")).size(theme.font_size_heading()),
         text(catalog.get("project-board-empty-open-a-project")).size(theme.font_size_body()),
         text(catalog.get("project-board-empty-command-example")).size(theme.font_size_body()),
-        path_field_section(catalog, theme, path_field, path_field_notice),
+        path_field_section(
+            catalog,
+            theme,
+            path_field,
+            path_field_notice,
+            open_browser_message
+        ),
     ]
     .spacing(6);
 
@@ -177,11 +192,12 @@ fn empty_state_view<'a, Message: 'a>(
 /// `text_safety::quote_untrusted` here, same as every other
 /// filesystem-derived string this module renders, never handed to
 /// `text(...)` raw.
-fn path_field_section<'a, Message: 'a>(
+fn path_field_section<'a, Message: 'a + Clone>(
     catalog: &'a Catalog,
     theme: &'a Theme,
     path_field: &'a str,
     path_field_notice: Option<String>,
+    open_browser_message: Message,
 ) -> Element<'a, Message> {
     let field_box =
         container(text(path_field_display_text(path_field)).size(theme.font_size_body()))
@@ -200,9 +216,24 @@ fn path_field_section<'a, Message: 'a>(
                 },
             );
 
+    // RFC-038 PR-038-G: the real, mouse-clickable control the owner's
+    // D1 overturn asked for -- "a button, not only a key." Safe to be a
+    // genuine `iced::widget::button` (unlike a keyboard-routed control,
+    // this crate's "one reviewed router" principle is specifically
+    // about *keyboard* input; mouse clicks were never part of that
+    // threat model, so `iced`'s own native click dispatch is the
+    // ordinary, unproblematic path here). `Ctrl+Alt+B` is the same
+    // action's keyboard accelerator, not the only route to it --
+    // `shell::open_folder_browser` is what both converge on.
+    let browse_button = iced::widget::button(
+        text(catalog.get("project-board-browse-button")).size(theme.font_size_body()),
+    )
+    .on_press(open_browser_message);
+
     let mut lines = column![
         text(catalog.get("project-board-path-field-label")).size(theme.font_size_body()),
         field_box,
+        browse_button,
     ]
     .spacing(6);
 

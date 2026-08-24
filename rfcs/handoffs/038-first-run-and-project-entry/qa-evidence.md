@@ -323,6 +323,144 @@ tests then passed cleanly. **Not fixed at its source this slice** -- that is cor
 PR-038-C's own scope, and is not this slice's to silently absorb. Flagged for the architect's
 decision on where it belongs -- a new PR, or folded into `test-process-leak.md`'s own tracking.
 
+## PR-038-G — the folder browser
+
+**Added 2026-08-24 by the human owner's direction**, overturning RFC-038's own D1: a typed path
+is not an acceptable *primary* way to choose a folder.
+
+**Build.** A real, clickable `iced::widget::button` ("Browse...") on the Project Board's path
+field section (`board::path_field_section`) -- the first genuine `button` in this crate; every
+earlier "button" (`TrustSettings`, `ApprovalHistory`) is a `"> Label"`-marker-prefixed `text()`,
+keyboard-only. `Ctrl+Alt+B` is the accelerator alongside it, not the only route (task breakdown:
+"a button, not only a key"). Both converge on `open_folder_browser`, opening
+`ModalContent::FolderBrowser` at `$HOME` (falling back to the filesystem root). `Enter`
+navigates the highlighted row (a subdirectory, or `Parent`); `Space` commits the directory
+currently *shown* through the exact same `add_project_from_path` entry point PR-038-A's field
+uses -- same audit record (`record_new_project_added`, the field's own
+`record_path_field_project_added` renamed to name both callers honestly), same `Restricted`
+outcome, no second way to open a project. The path field remains as the secondary route,
+untouched. Keyboard-operable throughout: `Tab`/`Shift+Tab` and `ArrowUp`/`ArrowDown` move the
+highlight (clamped, not wrapping), `Enter` navigates, `Space` commits, `Escape` cancels --
+`modal_subscription`'s pre-existing generic dispatch, extended with Arrow and Space.
+
+**A disclosed deviation from the task breakdown's own instruction, first and most important
+item in this report.** The task breakdown says: "Reuse RFC-019's explorer tree: it already
+renders an `ExplorerDirectoryScan`... Do not write a second directory renderer, and do not walk
+the filesystem in the surface." What shipped instead:
+
+- **Core scanning**: a new, separate function, `project::root::browse_directory`, producing a
+  new `DirectoryBrowseScan`/`BrowseNode`/`BrowseNodeState`, rather than reusing
+  `FileExplorerScanner::scan_directory`. Judged unavoidable, not a preference: that scanner's
+  only constructor path requires a `ProjectRootHandle` (in turn built from a live
+  `ProjectSession`), and its output type, `ExplorerDirectoryScan`, carries a `FileAccessTarget`
+  whose `selected_relative_path`/`canonical_path` are project-root-*relative* by construction --
+  containment/symlink-escape semantics that only mean something once a project root exists. A
+  folder browser exists specifically *to choose* that root; there is no project yet for a path to
+  be relative to. Building a `FileAccessTarget` for it would mean inventing fields with no honest
+  referent -- exactly the "text that asserts something false" this codebase's own convention
+  (`ExplorerNode.relative_path`, if reused for an absolute path) already teaches against.
+  `browse_directory` follows symlinks freely rather than escape-checking them, for the same
+  reason: there is no root to escape from yet -- whatever is ultimately chosen is independently
+  re-validated in full by `add_project_from_path`'s own `ProjectRootValidator` at commit time
+  (`what-a-path-field-must-not-trust.md` applies unchanged, cited in the module's own doc
+  comment).
+- **Rendering**: this is the part that is honestly closer to "a second directory renderer" than
+  the scanning split above. `surface/explorer.rs` gained `BrowseRow`/`visible_browse_rows`/
+  `browse_node_line`/`browse_row_line`/`browse_tree_lines`/`browse_view` -- a near line-for-line
+  parallel of this module's own pre-existing `ExplorerRow`/`visible_rows`/`node_line`/`row_line`/
+  `tree_lines`/`view`, differing only in the narrower `BrowseNodeState` (no `Blocked`, since
+  `browse_directory` never constructs it) and the absence of a symlink-status column (`BrowseNode`
+  tracks none, for the reason above). No filesystem walking was added to the surface either way.
+  Not reworked into a shared renderer this slice: doing so would mean either forcing
+  `BrowseNode` through `ExplorerNode`'s shape (reintroducing the dishonest-field problem the core
+  split exists to avoid) or extracting a smaller shared trait/helper over just the
+  name/kind-symbol/state-symbol/line-assembly logic, which was judged a genuine design decision
+  for the reviewer, not mine to make unilaterally mid-slice.
+
+  **Flagged explicitly for the architect's decision**: accept the current split (a new,
+  honestly-typed scanner is required either way; the renderer duplication is small,
+  independently tested, and isolated), or require a follow-up PR extracting the shared
+  render-layer logic. Not blocked on an answer before filing this review -- the code compiles,
+  is tested, and gates clean either way; this is a request for the architect's judgment on
+  in-tree duplication, not a defect report.
+
+**Gates.** `cargo build`, `cargo test --workspace --all-targets --all-features` (346 tekstide +
+724 tekstide-core, up from 334/716 before this slice; 0 failed), `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`, `git diff --check` --
+all clean.
+
+**Mechanically unclaimed, not by inspection.**
+`navigation::tests::open_folder_browser_shortcut_is_a_candidate_that_collides_with_no_other_rule`.
+**Ablated**: changed the binding to `Ctrl+Alt+K` (colliding with `OpenHelp`) -- both that test
+and `open_help_shortcut_is_a_candidate_that_collides_with_no_other_rule` failed; reverted.
+`every_live_binding_is_described_to_the_user` and `advertised_bindings_are_exactly_the_live_ones`
+both updated from eleven to **twelve** deliberately.
+
+**The audit guard.** `add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else`'s
+allow-list widened: `shell.rs`'s own count from one to two, naming both call sites
+(`attempt_open_project_from_path_field`, `choose_current_browsed_directory`) explicitly rather
+than the map simply reading `2`. **Ablated**: temporarily commented out
+`choose_current_browsed_directory`'s call to `record_new_project_added` --
+`shell::tests::choosing_a_directory_through_the_real_browser_writes_exactly_one_real_project_added_record`
+failed (0 records, not 1); reverted.
+
+**The acceptance criterion.** Proven from **real key events through production code**, both
+mouse and keyboard, not from dispatched messages:
+
+- Automated (`shell/tests.rs`): `ctrl_alt_b_opens_the_folder_browser_with_a_real_scan`,
+  `the_real_browse_button_message_opens_the_same_modal_the_keyboard_shortcut_does`,
+  `ctrl_alt_b_opens_the_folder_browser_from_inside_terminal_immersion`,
+  `escape_closes_the_folder_browser_modal`,
+  `enter_navigates_into_a_subdirectory_and_back_up_via_the_parent_row`,
+  `a_failed_navigation_leaves_the_last_good_scan_untouched_and_sets_navigate_failed`,
+  `modal_focus_next_and_previous_move_the_folder_browser_highlight_clamped_not_wrapping`,
+  `space_commits_the_shown_directory_as_a_new_restricted_project_and_closes_the_modal`,
+  `committing_an_already_open_project_a_second_time_focuses_it_without_a_second_record`,
+  `a_commit_failure_renders_the_error_and_keeps_the_modal_open`. `board/tests.rs`:
+  `the_browse_button_is_a_real_clickable_widget_not_an_inert_label` -- a source-level check
+  (the same shape `this_surface_no_longer_references_the_keyboard_list_at_all` already uses,
+  since `iced::Element` gives a test no way to introspect whether a rendered tree is a real
+  widget or an inert label) that the control is a genuine `button(...).on_press(...)`, not a
+  repeat of the "named nothing" defect PR-038-A's own evidence already named.
+- Live, against the release binary: `cargo build --release -p tekstide`, launched
+  `env -u WAYLAND_DISPLAY XDG_STATE_HOME=<mktemp -d> HOME=<mktemp -d> ./target/release/tekstide`,
+  no arguments. `HOME` overridden to a synthetic temp directory (containing only
+  `projects/tsd-pr038g-demo`) rather than the real one, so the captured screenshots show no real
+  personal file or folder names -- same `xdotool`/`niri msg action screenshot-window`/`wl-paste`
+  capture method PR-038-A/B/C already established, this time also exercising a **real mouse
+  click** (`xdotool mousemove --sync <x> <y>` then `xdotool click 1`, at the real, on-screen
+  "Browse..." button's coordinates) rather than only synthetic key events:
+  - `evidence/pr-038-g/before-cold-start-empty-board.png` -- the empty board, the real "Browse..."
+    button visible next to the field.
+  - `evidence/pr-038-g/after-real-mouse-click-opens-browser.png` -- a real mouse click on the
+    button opens the browser at the synthetic `$HOME`, scrim visible, board dimmed beneath.
+  - `evidence/pr-038-g/after-arrow-down-highlights-projects.png` -- real `Down` (`xdotool key
+    --clearmodifiers Down`) moves the highlight onto `projects`.
+  - `evidence/pr-038-g/after-enter-navigates-into-projects.png` -- real `Return` navigates into
+    it; `tsd-pr038g-demo` now listed.
+  - `evidence/pr-038-g/after-navigated-into-demo-dir.png` -- real `Down` then `Return` navigates
+    into `tsd-pr038g-demo` itself (empty; only the `Parent` row remains).
+  - `evidence/pr-038-g/after-space-commits-project-without-typing.png` -- real `space` commits
+    it: the board now shows `tsd-pr038g-demo`, `/tmp/.../projects/tsd-pr038g-demo`, `Restricted`,
+    `Project Board | 1 project`. **No path was ever typed** -- every character of the chosen
+    directory's name came from navigation, matching the task breakdown's own evidence
+    requirement exactly.
+  - Process terminated cleanly with `SIGTERM` after capture (no leaked shell -- no terminal was
+    ever launched in this session, so `test-process-leak.md`'s defect class does not apply
+    here); synthetic `$HOME`/`$XDG_STATE_HOME` temp directories left for the OS to reclaim.
+
+**Security -- `what-a-path-field-must-not-trust.md`.** Applies unchanged, per the module's own
+doc comment: a directory found by browsing is untrusted exactly as a typed one is.
+`add_project_from_path` re-validates in full regardless of how the path arrived; no
+canonicalisation, symlink policy, or root validation was added to `shell.rs` or to the surface --
+confirmed by diff, the only new calls are `browse_directory` (bounded, read-only, core) and the
+one, already-reviewed `add_project_from_path`. A commit failure (simulated: the chosen directory
+removed between the scan and the commit, since a real race is not reliably reproducible) renders
+`PathFieldError::DoesNotExist` and leaves the modal open rather than closing on nothing --
+`shell::tests::a_commit_failure_renders_the_error_and_keeps_the_modal_open`, the same
+"never a silent no-op" shape `a_bad_path_renders_a_notice_and_the_application_keeps_running`
+already proves for the field.
+
 ## PR-038-D — recent projects
 
 _Pending._
@@ -333,8 +471,13 @@ _Pending._
 
 ## Known limitations (RFC-038-wide)
 
-As of PR-038-A/B/C:
+As of PR-038-A/B/C/G:
 
+- **The folder browser's render layer duplicates the project explorer's own** (`browse_view` and
+  siblings, alongside `view`/`node_line`/`tree_lines`), rather than sharing it -- disclosed and
+  flagged for the architect's decision in PR-038-G's own qa-evidence.md section above, not
+  silently absorbed. Possible follow-up: extract a shared render helper once the reviewer decides
+  the shape it should take.
 - **No recent-projects reopen.** A previously-opened project not currently on the board must be
   retyped by path; `restore_recent_projects`'s data remains unread by any surface for this
   purpose. PR-038-D.

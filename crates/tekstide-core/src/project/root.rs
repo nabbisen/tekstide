@@ -8,8 +8,9 @@ use super::{ProjectId, ProjectSession};
 mod explorer;
 
 pub use explorer::{
-    ExplorerDirectoryScan, ExplorerNode, ExplorerNodeKind, ExplorerNodeState, ExplorerScanError,
-    FileExplorerScanPolicy, FileExplorerScanner,
+    BrowseNode, BrowseNodeState, DirectoryBrowseError, DirectoryBrowseScan, ExplorerDirectoryScan,
+    ExplorerNode, ExplorerNodeKind, ExplorerNodeState, ExplorerScanError, FileExplorerScanPolicy,
+    FileExplorerScanner, browse_directory,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

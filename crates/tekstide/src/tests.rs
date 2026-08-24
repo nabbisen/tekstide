@@ -162,16 +162,28 @@ fn restoring_recent_projects_on_boot_writes_no_project_added_record() {
 ///
 /// RFC-038 PR-038-A widened this from one file to two: `shell.rs`'s
 /// `attempt_open_project_from_path_field` is the field's own real call
-/// site, wiring `record_path_field_project_added` directly rather than
+/// site, wiring `record_new_project_added` directly rather than
 /// reusing `main.rs`'s `open_cli_project_path_and_record` (whose caller,
 /// `boot()`, exits on `Err` -- catastrophic reached from a text field,
 /// per `what-a-path-field-must-not-trust.md` §2). Kept a `HashMap` of
 /// exact counts, not widened to a presence check, for the same reason
 /// response 264 gave: a *third*, unreviewed call added inside either
 /// already-allowed file must still fail this test.
+///
+/// RFC-038 PR-038-G widened `shell.rs`'s own count from one to two:
+/// `choose_current_browsed_directory` is the folder browser's real call
+/// site, the same "wire the record deliberately" shape
+/// `attempt_open_project_from_path_field` already established, not a
+/// second, unreviewed one -- both are named explicitly below rather
+/// than the file simply reading `2`, so a reviewer checking this list
+/// against the source does not have to first find both call sites
+/// themselves.
 fn files_with_one_allowed_call_to_add_project_from_path()
 -> std::collections::HashMap<&'static str, usize> {
-    std::collections::HashMap::from([("main.rs", 1), ("shell.rs", 1)])
+    // main.rs: boot()'s CLI-argument loop, via open_cli_project_path_and_record.
+    // shell.rs: attempt_open_project_from_path_field (the path field)
+    //           and choose_current_browsed_directory (the folder browser).
+    std::collections::HashMap::from([("main.rs", 1), ("shell.rs", 2)])
 }
 
 fn crate_src_dir() -> PathBuf {
