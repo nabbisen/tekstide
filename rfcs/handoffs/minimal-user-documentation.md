@@ -1,7 +1,7 @@
 ---
 title: "Minimal user documentation — implementation handoff"
 rfc: "none — pulled forward from RFC-029"
-status: "Scheduled to M9 by the owner 2026-08-01 (\"as soon as possible\")"
+status: "Scheduled 2026-08-01, unstarted for three weeks; re-scoped and re-scheduled 2026-08-25 as the third of three. Items 1 and 2 were overtaken by RFC-038 and are struck below."
 target_milestone: "M9, alongside RFC-017"
 created: "2026-08-01"
 ---
@@ -24,15 +24,40 @@ The sharpest instance, and the reason this got pulled forward:
 
 That is a *contributor* instruction — it runs from a checkout. Someone who ran `cargo install tekstide` has **no correct command anywhere in the repository.** They installed a GUI application and the documentation tells them to build from source they do not have.
 
+## Re-scoped 2026-08-25
+
+Scheduled 2026-08-01 "as soon as possible" and never started. In the three weeks since, the
+product gained a path field, a folder browser, a Help modal, `--help`, a project tab strip,
+project switching, closing a project, and transcript controls — and this document still describes
+the application as it stood at `0.4.1`.
+
+**That is the reason it kept slipping**: it was written against a moving target, and every week
+it waited it described the product less accurately. So it is now scoped to **the release being
+cut**, not to the product in general. Document what ships in that release. If the product moves
+again afterwards, that is a later document's problem, not a reason to wait.
+
+**Items 1 and 2 are done and are struck below** — not by this work, but by RFC-038's, which had
+to fix them to keep its own claims true. Do not redo them; verify they are still accurate and say
+so.
+
+**Items 3, 4 and 5 stand**, and three subjects have been added that did not exist when this was
+written: the tab strip and project switching, closing a project and what that ends, and the
+transcript capture opt-out and purge. All three are user-facing, none is documented for users,
+and the third is a privacy control a user currently discovers only by opening Trust Settings and
+looking.
+
+**If this slips again, escalate rather than deferring.** Three weeks of silent slippage is how a
+scheduled item becomes a permanent one.
+
 ## The five items
 
 None require design decisions. If one turns out to, raise it rather than deciding it here.
 
-### 1. Quick Start, for the people who now exist
+### 1. ~~Quick Start, for the people who now exist~~ — DONE (RFC-038 PR-038-B/E)
 
 Lead with the installed path (`cargo install tekstide`, then `tekstide`), and keep the from-checkout instructions clearly marked as being for contributors. Both are legitimate; only one is currently present, and it is the wrong one to lead with.
 
-### 2. Keyboard reference
+### 2. ~~Keyboard reference~~ — DONE (`0.12.1`, extended by RFC-038/039): the README table, the in-app Help modal (`Ctrl+Alt+K`) and `--help` all render it, derived from `KeybindingPolicy` so it cannot drift. **Verify it is still complete; do not rewrite it.**
 
 These exist and are documented **nowhere a user would look**:
 

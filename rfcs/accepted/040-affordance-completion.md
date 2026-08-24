@@ -2,7 +2,11 @@
 
 Status: **Proposed 2026-08-25**, filed in the same commit that closed RFC-039, so that RFC's
 audit findings are carried rather than left in a review thread.
-Target milestone: to be set by the human owner.
+Target milestone: **M12** — accepted by the human owner 2026-08-25, scheduled first of three,
+ahead of RFC-020's remaining surface and the minimal user documentation.
+
+Its three open questions were **decided by the architect on acceptance**; an implementer must not
+inherit an unresolved architecture decision.
 Date: 2026-08-25
 
 Related RFCs:
@@ -78,17 +82,41 @@ the three options — the last ends the class rather than the instances.
   with.
 - Deciding RFC-020's or RFC-034's surfaces. Actions owned by unbuilt RFCs stay theirs.
 
-## Open questions
+## Decisions (were open questions; settled on acceptance)
 
-- **OQ1.** Should the affordance audit become a test? A mechanical check — every `Candidate`
-  `NavigationAction` either appears in the `.on_press` inventory or is on an explicit
-  keyboard-only allow-list — would make the count fail loudly instead of drifting. It is the same
-  shape as `action_catalog_key_is_some_iff_the_action_is_live`, and this project's record is that
-  hand-audits go stale and enumerations do not.
-- **OQ2.** Where do controls for terminal, mode, save and agent-run *live*? A toolbar, per-surface
-  buttons, and a command palette are three different answers with different costs, and
-  `OpenCommandPalette` is already `Reserved` for the third.
-- **OQ3.** Is `PasteIntoTerminal` genuinely keyboard-only by convention, or unexamined? Terminals
-  conventionally paste by keyboard, and this product has RFC-018's paste-protection model around
-  it — but "it is conventional" is what was said about every other missing control until someone
-  counted.
+**D1 — the audit becomes a test, and it is the first slice.**
+
+Yes, and it goes first so everything after it is measured rather than asserted. Every
+`Candidate` `NavigationAction` either appears in the `.on_press` inventory or is on an explicit,
+reasoned keyboard-only allow-list. Same shape as
+`action_catalog_key_is_some_iff_the_action_is_live`.
+
+This project's record decides it: RFC-039's audit was accurate on Monday and its own count was
+wrong by Tuesday. Hand audits go stale; enumerations do not. Doing it first also means the
+allow-list is written **before** anyone is tempted to add to it under deadline.
+
+**D2 — per-surface controls. Not a toolbar, not a command palette.**
+
+The actions are context-dependent: `SaveActiveDocument` needs an open file, `LaunchAgentRun`
+needs a trusted project, `PasteIntoTerminal` needs a focused terminal. A toolbar would either
+show permanently disabled buttons — noise that teaches people to ignore the toolbar — or change
+contents as context shifts, which is worse. Put each control where its action applies.
+
+**Modals get real buttons**, which is the sharpest finding and the one that strands people: a
+dialog reached by clicking must be completable and cancellable by clicking. That is not a
+toolbar question; it is per-modal by definition.
+
+`OpenCommandPalette` stays `Reserved`. A palette is discoverable only by someone who already
+knows to open it, so it does not answer the problem this RFC exists for — it is a keyboard
+accelerator wearing a discovery costume. It remains a legitimate future addition and is not
+foreclosed.
+
+**D3 — `PasteIntoTerminal`'s invocation stays keyboard-only; its confirmation does not.**
+
+Terminals conventionally paste by keyboard, and a paste button on a terminal grid would be
+unusual enough to confuse rather than help. Recorded as a **deliberate** keyboard-only
+convention with that reason, and it goes on D1's allow-list rather than being quietly excluded
+from the count.
+
+The confirmation it raises is a different matter and is covered by D2: RFC-018's paste dialog is
+one of the nine keyboard-only modals, and it gets buttons like the rest.

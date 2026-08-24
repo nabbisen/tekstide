@@ -25,7 +25,9 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 040 | [Affordance Completion](./proposed/040-affordance-completion.md) | **Proposed 2026-08-25**, filed in the same commit that closed RFC-039 so its audit is carried rather than lost. That audit found **three of thirteen** live actions have a visible control, and **every modal in the crate is keyboard-only for its own decision** — several opened by a real button, so a mouse user is stranded mid-flow. A user still cannot launch a terminal, switch modes, save a file or start an AI CLI run from anything the window shows. Method exhaustive rather than sampled: the crate's only click mechanism is `button` + `.on_press`, and there are exactly ten such sites |
+
+*(empty — and that is the correct state. An empty `proposed/` means nothing is awaiting review,
+not that a folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
 
 ## Accepted
 
@@ -35,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 040 | [Affordance Completion](./accepted/040-affordance-completion.md) | **Accepted 2026-08-25. M12, first of three.** RFC-039's audit counted three of thirteen live actions with a visible control, and **every one of the nine modals is keyboard-only for its own decision** — several opened by a real button, so a mouse user is stranded mid-flow. Three decisions settled on acceptance: the audit becomes a test and goes **first**, so the keyboard-only allow-list is written before anyone is tempted to add to it under deadline; controls are per-surface, not a toolbar or a palette; `PasteIntoTerminal` stays keyboard-only by stated convention while its confirmation does not. [Handoff pack](./handoffs/040-affordance-completion/README.md) |
 | 020 | [Diff Review and AgentRun Report Surfaces](./accepted/020-diff-review-and-agentrun-report.md) | **Accepted, partially implemented.** PR-020-B (transcript reader + AgentRun report surface) implemented in full 2026-08-18, `Ctrl+Alt+R` reachable from a real key press. PR-020-C (change review surface) and PR-020-D (closeout) remain, PR-020-C blocked on its own `DetectedChanges` projection. [Handoff pack](./handoffs/020-diff-review-and-agentrun-report/README.md); PR-020-B's own slice handoff and evidence in the same pack |
 | 034 | [Change Review Actions and Review State](./accepted/034-change-review-actions-and-review-state.md) | **Accepted 2026-08-18.** Gives `transition_change_set_review_state` a route, and decides the question RFC-020's Q3 deferred: whether a review decision is a record or an operation. Blocked on RFC-020 |
 | 035 | [Change Detection Coverage and Disclosure](./accepted/035-change-detection-coverage-and-disclosure.md) | **Accepted 2026-08-18.** The `.git/hooks/` supervision hole and `max_changed_paths` discarding a computed list; the exit-only trigger and non-persistent baseline recorded and deferred |
@@ -91,6 +94,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 018 | [Rendered Paste Protection and Trusted-UI Evidence](./handoffs/018-paste-protection-and-trusted-ui-evidence/README.md) |
 | 019 | [Editor and Explorer Surfaces](./handoffs/019-editor-and-explorer-surfaces/README.md) |
 | 020 | [Diff Review and AgentRun Report Surfaces](./handoffs/020-diff-review-and-agentrun-report/README.md) — **PR-020-B implemented in full 2026-08-18** ([slice handoff](./handoffs/020-diff-review-and-agentrun-report/pr-020-b-report-surface.md)): reader landed 2026-08-15, the AgentRun report surface (`Ctrl+Alt+R`, escaped transcript content, reader-window-vs-writer-truncation rendered distinctly) landed 2026-08-18. PR-020-C (change review surface) remains blocked on its own `DetectedChanges` projection |
+| 040 | [Affordance Completion](./handoffs/040-affordance-completion/README.md) — **M12, first of three**; finishes the sentence RFC-039 started |
 | 039 | [Interaction Model and Visible Affordances](./handoffs/039-interaction-model-and-visible-affordances/README.md) — **M12, after RFC-038**; the workflows the product never had |
 | 038 | [First-Run and Project Entry](./handoffs/038-first-run-and-project-entry/README.md) — **M12, first**; the product's missing door |
 | 024 | [Diff Preview Policy](./handoffs/024-diff-preview-policy/README.md) |

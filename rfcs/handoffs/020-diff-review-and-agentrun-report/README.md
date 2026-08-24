@@ -91,3 +91,9 @@ State it as a claim that could be false, and test it. It is the strongest argume
 escaping this surface: a reviewer deciding whether to accept AI-generated code most needs
 to see `U+202E` precisely when it is there, and a surface rendering it faithfully hides
 the most dangerous thing it could contain.
+
+## The change review surface (scheduled 2026-08-25)
+
+[`change-review-surface.md`](./change-review-surface.md) — the remaining slice, named by surface
+rather than by letter because this RFC's own Slices section has the two letters swapped and that
+has already misled once. Scoped and unblocked; see RFC-020's scoping addendum.
