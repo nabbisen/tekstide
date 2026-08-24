@@ -7,8 +7,20 @@ use crate::domain::{
 };
 use crate::project::{ProjectId, ProjectMode, ProjectTerminalError};
 
+/// RFC-039 PR-039-C, response 311: this test's own name and assertion
+/// used to state the opposite -- that a collection-derived count must
+/// not be read as proof the whole close-resource picture is known, so
+/// `provider_state` stayed `Unavailable` even after a real terminal was
+/// attached and counted. That guarded against a risk that does not
+/// actually exist: `running_processes`/`pending_approvals`/
+/// `review_ready_changes` are always genuinely current here
+/// (`refresh_runtime_summary_from_collections` runs on every mutation),
+/// and `dirty_files` is independently tracked through `set_file_state`,
+/// not this function -- so a fresh project's provider state is
+/// genuinely `Complete` from construction (`CloseResourceSummary`'s own
+/// `Default`), and adding a terminal has no reason to change that.
 #[test]
-fn terminal_collection_updates_project_runtime_counts_without_claiming_safe_close() {
+fn terminal_collection_updates_project_runtime_counts_and_provider_state_stays_complete() {
     let mut project = project_session(1);
     let mut terminal = TerminalSession::new(
         project.id().clone(),
@@ -30,8 +42,9 @@ fn terminal_collection_updates_project_runtime_counts_without_claiming_safe_clos
     assert_eq!(project.close_resource_summary().running_processes, 1);
     assert_eq!(
         project.close_resource_summary().provider_state,
-        CloseResourceProviderState::Unavailable,
-        "collection-derived counts must not prove all close resources are known"
+        CloseResourceProviderState::Complete,
+        "a fresh project's resource state is genuinely known; adding a terminal must not \
+         change that"
     );
 }
 

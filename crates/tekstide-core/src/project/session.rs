@@ -1222,20 +1222,30 @@ impl ProjectSession {
         Ok(self.content_workspace.active_file_launch_assessment())
     }
 
+    /// RFC-039 PR-039-C, response 311's second required fix: symmetric,
+    /// not a one-way downgrade. The previous version only ever moved
+    /// `close_resources.provider_state` from `Complete` to `Unavailable`
+    /// when the file provider was incomplete, and never moved it back
+    /// even when handed `ProjectProviderState::Complete` again -- fine
+    /// while the field's own default made it `Unavailable` forever
+    /// regardless, but a real defect once the default becomes `Complete`
+    /// (this same response): the first incomplete file-provider state
+    /// would permanently poison this project's close assessment for the
+    /// rest of the session, with no way back. `Complete` in, `Complete`
+    /// out; incomplete in, `Unavailable` out -- this project's own
+    /// `provider_state` now always mirrors `file_state.provider_state`
+    /// directly, not a latch.
     pub fn set_file_state(&mut self, file_state: ProjectFileState) {
         self.runtime_summary.dirty_files = file_state.dirty_file_count;
-        self.runtime_summary.close_resources.dirty_files =
-            if file_state.provider_state == ProjectProviderState::Complete {
-                file_state.dirty_file_count
-            } else {
-                if self.runtime_summary.close_resources.provider_state
-                    == CloseResourceProviderState::Complete
-                {
-                    self.runtime_summary.close_resources.provider_state =
-                        CloseResourceProviderState::Unavailable;
-                }
-                0
-            };
+        if file_state.provider_state == ProjectProviderState::Complete {
+            self.runtime_summary.close_resources.dirty_files = file_state.dirty_file_count;
+            self.runtime_summary.close_resources.provider_state =
+                CloseResourceProviderState::Complete;
+        } else {
+            self.runtime_summary.close_resources.dirty_files = 0;
+            self.runtime_summary.close_resources.provider_state =
+                CloseResourceProviderState::Unavailable;
+        }
         self.file_state = file_state;
         self.record_activity();
     }

@@ -40,9 +40,42 @@ pub struct CloseResourceSummary {
 }
 
 impl CloseResourceSummary {
+    /// RFC-039 PR-039-C, response 311: the exceptional case -- a
+    /// project whose resource state genuinely cannot be read (recorded
+    /// as `Unavailable` even though every count here is 0, since 0 is
+    /// not the same claim as "known to be 0"). **Not** the default state
+    /// of a freshly constructed project; see [`Default`] below for that.
     pub fn provider_missing() -> Self {
         Self {
             provider_state: CloseResourceProviderState::Unavailable,
+            running_processes: 0,
+            dirty_files: 0,
+            pending_approvals: 0,
+            review_ready_changes: 0,
+        }
+    }
+}
+
+/// RFC-039 PR-039-C, response 311's confirmed fix: every count here
+/// except `dirty_files` is tracked in-memory and incrementally
+/// (`refresh_runtime_summary_from_collections`, called from every
+/// mutation site that could change a terminal, agent run, approval, or
+/// change set) and is genuinely known -- zero, not unknown -- from the
+/// moment a project is constructed. `dirty_files` is the one count that
+/// depends on an external scan (`content_workspace`), and a fresh
+/// project has no open buffers, so 0 is honest there too.
+/// `provider_state: Complete` is therefore the correct *default*;
+/// [`Self::provider_missing`] above is for the genuinely exceptional
+/// case, not the routine one. Before this fix, every `ProjectSession`
+/// defaulted through `provider_missing()` instead, which made
+/// `close_project` return `SafeToClose` for no project, ever --
+/// `close_project` had zero production callers before this slice, so
+/// the defect was never exercised end to end until PR-039-C's own tests
+/// were the first to try.
+impl Default for CloseResourceSummary {
+    fn default() -> Self {
+        Self {
+            provider_state: CloseResourceProviderState::Complete,
             running_processes: 0,
             dirty_files: 0,
             pending_approvals: 0,

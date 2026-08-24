@@ -490,11 +490,23 @@ fn declining_transcript_capture_persists_and_survives_a_reopen() {
     );
 }
 
+/// RFC-039 PR-039-C, response 311: `provider_missing()` is now the
+/// genuinely exceptional case, not a fresh project's own default (see
+/// `CloseResourceSummary`'s own `Default` impl) -- constructed
+/// explicitly here, since nothing in production ever produces it for a
+/// project that has simply never had its file state synced.
 #[test]
 fn active_project_with_missing_close_provider_is_not_closed() {
     let mut state = AppState::default();
     let project_id =
         state.add_project_session("Project", "/workspace/project", "/workspace/project");
+    state
+        .project_mut(&project_id)
+        .unwrap()
+        .set_runtime_summary(ProjectRuntimeSummary {
+            close_resources: CloseResourceSummary::provider_missing(),
+            ..ProjectRuntimeSummary::default()
+        });
 
     let assessment = state
         .close_project(&project_id)
@@ -593,6 +605,12 @@ fn active_project_with_resources_needs_confirmation_and_stays_open() {
     assert!(state.project(&project_id).is_some());
 }
 
+/// RFC-039 PR-039-C, response 311: no longer carries a spurious
+/// `ProviderUnavailable` reason alongside the real one -- that was the
+/// defect's own symptom (a fresh project's provider state defaulting to
+/// `Unavailable` when it should have been `Complete`), not a second,
+/// independent fact about this project. A running terminal is the one
+/// and only reason to confirm here.
 #[test]
 fn active_project_with_real_running_terminal_needs_confirmation_and_stays_open() {
     let mut state = AppState::default();
@@ -619,16 +637,10 @@ fn active_project_with_real_running_terminal_needs_confirmation_and_stays_open()
     assert_eq!(
         assessment,
         CloseAssessment::NeedsConfirmation {
-            reasons: vec![
-                CloseReason {
-                    code: CloseReasonCode::RunningProcess,
-                    message: "1 running process".to_owned(),
-                },
-                CloseReason {
-                    code: CloseReasonCode::ProviderUnavailable,
-                    message: "active-resource state is unavailable".to_owned(),
-                },
-            ],
+            reasons: vec![CloseReason {
+                code: CloseReasonCode::RunningProcess,
+                message: "1 running process".to_owned(),
+            }],
         }
     );
     assert!(state.project(&project_id).is_some());

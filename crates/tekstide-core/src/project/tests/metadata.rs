@@ -188,6 +188,63 @@ fn incomplete_file_provider_dirty_count_does_not_make_close_resources_authoritat
     );
 }
 
+/// RFC-039 PR-039-C, response 311's required ablation: the transition
+/// this slice made symmetric, proven in the direction the old,
+/// one-way-downgrade `set_file_state` could never take. Before this
+/// fix, a project whose file provider had ever gone incomplete stayed
+/// permanently `Unavailable` for the rest of the session -- even after
+/// the file provider recovered and started reporting `Complete` again
+/// -- because nothing ever moved `close_resources.provider_state` back
+/// up. This is a *different* property from
+/// [`incomplete_file_provider_dirty_count_does_not_make_close_resources_authoritative`]
+/// above (which proves the downgrade); this one proves there is a way
+/// back.
+#[test]
+fn recovering_file_provider_completeness_restores_the_close_assessment() {
+    let mut project = project_session(1);
+    project.set_file_state(ProjectFileState {
+        provider_state: ProjectProviderState::NotImplemented,
+        open_buffer_count: 0,
+        dirty_file_count: 3,
+        active_path_hint: None,
+    });
+    assert_eq!(
+        project.close_resource_summary().provider_state,
+        CloseResourceProviderState::Unavailable,
+        "test precondition: the provider is incomplete"
+    );
+    assert_eq!(
+        assess_close(project.close_resource_summary()),
+        CloseAssessment::UnsupportedOrUnknown {
+            reason: "active-resource state is unavailable".to_owned()
+        },
+        "test precondition: closing is refused while incomplete"
+    );
+
+    project.set_file_state(ProjectFileState {
+        provider_state: ProjectProviderState::Complete,
+        open_buffer_count: 0,
+        dirty_file_count: 0,
+        active_path_hint: None,
+    });
+
+    assert_eq!(
+        project.close_resource_summary().provider_state,
+        CloseResourceProviderState::Complete,
+        "recovery must restore Complete, not leave the project latched Unavailable"
+    );
+    assert_eq!(
+        project.close_resource_summary().dirty_files,
+        0,
+        "the recovered, real dirty-file count, not the stale value from the incomplete read"
+    );
+    assert_eq!(
+        assess_close(project.close_resource_summary()),
+        CloseAssessment::SafeToClose,
+        "an idle project must be closable again once its resource state is known"
+    );
+}
+
 #[test]
 fn provider_backed_metadata_helpers_do_not_treat_values_as_known_when_provider_is_incomplete() {
     let file_state = ProjectFileState {

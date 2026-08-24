@@ -1,6 +1,12 @@
 use crate::close::CloseResourceSummary;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+// RFC-039 PR-039-C, response 311: `#[derive(Default)]` now that
+// `CloseResourceSummary` has its own `Default` (provider `Complete`) --
+// every other field here already derives to the right value (`false`,
+// `0`, `None`). See `CloseResourceSummary`'s own `Default` impl for why
+// a freshly constructed project's resource state is genuinely known,
+// not exceptional (`provider_missing()`'s own role).
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProjectRuntimeSummary {
     pub risk_warning: bool,
     pub pending_approvals: u32,
@@ -11,20 +17,4 @@ pub struct ProjectRuntimeSummary {
     pub terminal_count: Option<u32>,
     pub agent_run_count: Option<u32>,
     pub close_resources: CloseResourceSummary,
-}
-
-impl Default for ProjectRuntimeSummary {
-    fn default() -> Self {
-        Self {
-            risk_warning: false,
-            pending_approvals: 0,
-            review_ready_changes: 0,
-            failed_processes: 0,
-            running_processes: 0,
-            dirty_files: 0,
-            terminal_count: None,
-            agent_run_count: None,
-            close_resources: CloseResourceSummary::provider_missing(),
-        }
-    }
 }
