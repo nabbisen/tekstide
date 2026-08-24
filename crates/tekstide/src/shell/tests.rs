@@ -9831,18 +9831,25 @@ fn cancelling_the_close_confirmation_leaves_everything_running_and_records_it() 
         "cancelling must not touch the real terminal"
     );
 
+    // Filters server-side (`project_id`/`family` on `AuditQuery` itself,
+    // not `latest(50)` plus a client-side filter): under real parallel
+    // test execution, other tests' own writes to this same, shared
+    // `AuditStore` can push this project's own records outside a bare
+    // `latest(50)` window entirely (response 312's own finding, on a
+    // sibling test) -- querying by this project's real id instead means
+    // the window only ever has to hold *this project's* own records.
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let records: Vec<_> = audit_store
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::SafeCloseDecision),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .unwrap()
         .records
         .into_iter()
         .map(|sequenced| sequenced.record)
-        .filter(|record| {
-            record.project_id.as_ref() == Some(&project_id)
-                && record.family == tekstide_core::audit::AuditEventFamily::SafeCloseDecision
-        })
         .collect();
     assert_eq!(records.len(), 1, "cancelling is single-phase: {records:?}");
     assert_eq!(
@@ -9868,19 +9875,19 @@ fn escaping_the_close_confirmation_also_records_a_cancelled_decision() {
 
     assert!(state.modal.is_none());
     assert!(state.app_shell.state().project(&project_id).is_some());
+    // Server-side filter, same reason as the sibling test above.
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
-    let cancelled = audit_store
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+    let cancelled = !audit_store
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::SafeCloseDecision),
+            outcome: Some(tekstide_core::audit::AuditOutcome::Cancelled),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .unwrap()
         .records
-        .into_iter()
-        .any(|sequenced| {
-            sequenced.record.project_id.as_ref() == Some(&project_id)
-                && sequenced.record.family
-                    == tekstide_core::audit::AuditEventFamily::SafeCloseDecision
-                && sequenced.record.outcome == tekstide_core::audit::AuditOutcome::Cancelled
-        });
+        .is_empty();
     assert!(
         cancelled,
         "Escape must record the same Cancelled decision an explicit Cancel does"
@@ -9925,18 +9932,28 @@ fn confirming_the_close_terminates_the_real_process_and_removes_the_project() {
         "the real terminal's pane must be gone, not orphaned"
     );
 
+    // Server-side filter (response 312's own finding): a bare
+    // `latest(50)` window over this shared `AuditStore`, filtered
+    // client-side, is unreliable by construction the moment any other
+    // test writes fifty-plus records to the same store between this
+    // test's own `Authorized` write and this query -- exactly what
+    // happened under real parallel `cargo test`, dropping `Authorized`
+    // out of the window while the later `Applied` stayed in it.
+    // `project_id`/`family` on `AuditQuery` itself apply in the SQL
+    // `WHERE` clause before the limit, so the window only ever has to
+    // hold this one project's own records.
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let mut records: Vec<_> = audit_store
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::SafeCloseDecision),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .unwrap()
         .records
         .into_iter()
         .map(|sequenced| sequenced.record)
-        .filter(|record| {
-            record.project_id.as_ref() == Some(&project_id)
-                && record.family == tekstide_core::audit::AuditEventFamily::SafeCloseDecision
-        })
         .collect();
     records.reverse();
     assert_eq!(
@@ -10023,15 +10040,19 @@ fn closing_a_project_leaves_its_transcripts_and_audit_records_intact() {
         tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health)
             .record_project_added(project_id.clone());
     }
+    // Server-side `project_id` filter, same reason as the confirmed-close
+    // test above: a shared store under real parallel execution can push
+    // this project's own records outside a bare `latest(50)` window.
     let audit_store_before =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let records_before_count = audit_store_before
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .unwrap()
         .records
-        .into_iter()
-        .filter(|sequenced| sequenced.record.project_id.as_ref() == Some(&project_id))
-        .count();
+        .len();
     assert!(
         records_before_count > 0,
         "test precondition: at least one audit record exists for this project before closing"
@@ -10058,12 +10079,13 @@ fn closing_a_project_leaves_its_transcripts_and_audit_records_intact() {
     let audit_store_after =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let records_after_count = audit_store_after
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .unwrap()
         .records
-        .into_iter()
-        .filter(|sequenced| sequenced.record.project_id.as_ref() == Some(&project_id))
-        .count();
+        .len();
     assert!(
         records_after_count >= records_before_count,
         "closing must not delete any pre-existing audit record: before={records_before_count} \

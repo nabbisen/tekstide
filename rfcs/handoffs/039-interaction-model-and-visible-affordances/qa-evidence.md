@@ -344,17 +344,43 @@ real end-to-end flows against a real process.**
   proven live rather than only at the core layer: `×` works on a project that is not the active
   one, and closing it does not change which project is active.
 
-**A test-isolation hazard found, not fixed (per response 311's instruction, recorded here as its
-own, distinct hypothesis rather than folded into `test-process-leak.md`'s table).**
+**A test-isolation hazard, mechanism now confirmed rather than suspected (response 312).**
 `command_approval_family_produces_real_durable_audit_records_through_the_pipeline` (a pre-existing
-test, already one of the four names in that document's own table) failed under a full parallel
-`cargo test -p tekstide` run in this session, but passed reliably alone and under
-`--test-threads=1`. This slice's new tests add several more real-`AuditStore`-touching tests to
-`shell/tests.rs` (`open_real_audit_store` resolves to one real, shared location for the whole test
-binary), which increases the chance of two tests racing on it concurrently -- a **different cause**
-from the `Child::drop`-leak mechanism that document tracks, even though the symptom landed on the
-same test name. Not investigated further or fixed here, per instruction; noted so the next person
-who sees this specific test flake under full-suite parallelism does not attribute it to the leak.
+test, already one of the four names in `test-process-leak.md`'s own table) first surfaced this
+session as a flake under full parallel `cargo test -p tekstide`, passing reliably alone and under
+`--test-threads=1` -- a **different cause** from the `Child::drop`-leak mechanism that document
+tracks, even though the symptom landed on the same test name (recorded here as its own hypothesis,
+per response 311's instruction, rather than folded into that document).
+
+Response 312 caught a **second, deterministic instance of the identical mechanism**, in this
+slice's own `confirming_the_close_terminates_the_real_process_and_removes_the_project`: `cargo
+test --workspace --all-targets --all-features`, run three times in a row, failed the same
+assertion every time (`a confirmed close writes exactly two phases: ... left: 1 right: 2`), while
+`--test-threads=1` passed 383/383 all three times. Diagnosis: the test queried
+`AuditQuery::latest(50)` and filtered the results client-side by `project_id` -- a window over the
+*entire* store, shared by the whole test binary. Under real parallel execution, other tests wrote
+more than fifty records to that same store between this test's own `Authorized` write and its
+query, pushing `Authorized` out of the 50-record window while the later `Applied` stayed in. Not
+a flake in the close logic itself -- `AuditStore` structurally cannot persist an `Applied` record
+without a matching `Authorized` one already present (response 310's own two-phase enforcement), so
+`Applied` being visible already proved `Authorized` existed; the test just wasn't looking for it
+correctly.
+
+**Fixed by querying server-side instead of windowing-then-filtering**: `AuditQuery`'s own
+`project_id`/`family`/`outcome` fields apply as SQL `WHERE` clauses before the `LIMIT`
+(`store.rs`'s own `query`), so passing this project's real id (and, where useful, the family/
+outcome) means the fifty-record window only ever has to hold *this project's own* records,
+regardless of how much unrelated traffic the shared store carries concurrently. Fixed in all five
+call sites this slice added that used the vulnerable `latest(50)`-plus-client-filter shape.
+Verified against the exact command and cadence that found it: `cargo test --workspace
+--all-targets --all-features`, three consecutive runs, all clean (383 tekstide + 734
+tekstide-core, 0 failed).
+
+**This generalizes past both instances**: any `latest(N)`-plus-client-filter query against this
+shared `AuditStore` is unreliable by construction the moment a concurrent test writes more than
+`N` records of its own -- not particular to close, or to this file. The fix here is local (the
+five call sites this slice touched); the general shape is worth remembering the next time an
+audit-store-backed test is added anywhere in this workspace.
 
 **Live evidence.** `cargo build --release -p tekstide`, launched
 `env -u WAYLAND_DISPLAY XDG_STATE_HOME=<mktemp -d> ./target/release/tekstide <mktemp -d>/tsd-pr039c-alpha <mktemp -d>/tsd-pr039c-beta`
