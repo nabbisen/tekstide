@@ -169,7 +169,30 @@ that the scan actually happened. All three accessors are public from core (`shel
 **Ablate** by making the scan-only method call the navigating one, GUI untouched, and confirm the
 **core** test fails — so the failure is attributable to the contract, not to a caller.
 
-## Guard 1 — so two renderers cannot diverge on escaping
+## Guard 1 — WITHDRAWN 2026-08-24, and replaced
+
+**Do not build this. If it was built, delete it.** The count-equality invariant below was
+specified by the reviewer on a false premise and PR-038-I landed it before the premise was
+checked.
+
+`CatalogArgs::untrusted` takes `&DisplayText`. `DisplayText` is a newtype with a private field
+and **exactly one function in the crate returns one** — `quote_untrusted` (`text_safety.rs:295`),
+whose own doc states the intent: *"if the type system can make untrusted text unrenderable
+without passing through this function, prefer that."* Demonstrated, not reasoned: an attempt to
+pass an unescaped `&String` to `.untrusted(` fails to compile with `expected &DisplayText`.
+
+So the property is **unrepresentable otherwise**, has been since RFC-016, and no runtime test
+adds to it. Worse, the counts are only incidentally equal: the moment `explorer.rs` legitimately
+escapes something it renders directly — exactly what `board.rs` already does, 0 against 3 — they
+diverge and the test fails on correct code.
+
+**Replaced by:** a guard on the invariant nobody checks — that `DisplayText` keeps **exactly
+one** constructor. Add a second, or make the field `pub`, and the compile-time guarantee
+silently becomes a convention with every `.untrusted(` call site instantly unproven and nothing
+failing. Assert exactly one `-> DisplayText` in `crates/tekstide-core/src`; the unit is the
+constructor, not the file. Ablate by adding a second and confirming the count fails.
+
+~~Guard 1 — so two renderers cannot diverge on escaping~~
 
 **Added 2026-08-24 from PR-038-G's review, and it replaces a shared-render refactor rather than
 deferring one.** PR-038-G shipped `browse_row_line`/`browse_node_line`/`browse_tree_lines` as a
