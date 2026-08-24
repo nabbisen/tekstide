@@ -1141,6 +1141,27 @@ impl ProjectSession {
         result
     }
 
+    /// RFC-038 PR-038-F: the scan-only counterpart to
+    /// [`Self::scan_content_explorer_directory`] -- that method also sets
+    /// `open_surface`/`mode`, correct for a user's own explicit directory
+    /// selection (`handle_explorer_key`'s "browsing the file tree
+    /// legitimately means show me the editor"), wrong for a caller that
+    /// only wants a fresh scan without navigating anywhere. This one
+    /// touches nothing but `ContentWorkspace`'s own scan state -- no
+    /// `open_surface`, no `mode`, and (at the `ApplicationShell` layer
+    /// above) no `route` either.
+    pub fn scan_content_explorer_directory_without_navigating(
+        &mut self,
+        selected_relative_path: impl Into<PathBuf>,
+    ) -> Result<(), ProjectContentError> {
+        let root = ProjectRootHandle::from_project_session(self);
+        self.content_workspace.scan_explorer_directory(
+            &root,
+            selected_relative_path,
+            &FileExplorerScanPolicy::linux_mvp(),
+        )
+    }
+
     pub fn replace_active_text(
         &mut self,
         text: impl Into<String>,

@@ -431,6 +431,19 @@ impl AppState {
         project.scan_content_explorer_directory(selected_relative_path)
     }
 
+    /// RFC-038 PR-038-F: see [`ProjectSession::scan_content_explorer_directory_without_navigating`]'s
+    /// own doc -- the scan-only counterpart, threaded through unchanged.
+    pub fn scan_active_project_explorer_directory_without_navigating(
+        &mut self,
+        selected_relative_path: impl Into<std::path::PathBuf>,
+    ) -> Result<(), ProjectContentError> {
+        let Some(project) = self.active_project_mut() else {
+            return Err(ProjectContentError::NoActiveProject);
+        };
+
+        project.scan_content_explorer_directory_without_navigating(selected_relative_path)
+    }
+
     pub fn replace_active_project_text(
         &mut self,
         text: impl Into<String>,

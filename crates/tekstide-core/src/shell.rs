@@ -127,6 +127,20 @@ impl ApplicationShell {
         result
     }
 
+    /// RFC-038 PR-038-F: the scan-only counterpart to
+    /// [`Self::scan_active_project_explorer_directory`] -- that method
+    /// unconditionally sets `route` to `ActiveProjectWorkspace`, correct
+    /// for a user's own explicit navigation, wrong for a caller that
+    /// only wants a background re-scan without changing what route the
+    /// user is looking at. This one never touches `self.route` at all.
+    pub fn scan_active_project_explorer_directory_without_navigating(
+        &mut self,
+        selected_relative_path: impl Into<std::path::PathBuf>,
+    ) -> Result<(), ProjectContentError> {
+        self.state
+            .scan_active_project_explorer_directory_without_navigating(selected_relative_path)
+    }
+
     pub fn replace_active_project_text(
         &mut self,
         text: impl Into<String>,

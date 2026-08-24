@@ -1145,15 +1145,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if action == NavigationAction::SaveActiveDocument {
                 attempt_save_active_document(state);
             }
-            // RFC-038 PR-038-B: no real I/O, unlike the two special
-            // cases above, but the route change still needs the real
-            // `dispatch` -- called directly here rather than through
-            // `app_command_for`'s `Some` branch, which would also run
-            // `ensure_explorer_scanned` and immediately undo this route
-            // change (see `app_command_for`'s own doc on this action for
-            // why).
+            // RFC-038 PR-038-B: the route change itself now goes through
+            // the normal `Some(command)` branch above
+            // (`app_command_for`'s own doc on this action explains why
+            // that is safe again as of PR-038-F) -- this only sets the
+            // one piece of shell-local UI state `dispatch` has no way to
+            // express.
             if action == NavigationAction::OpenProjectEntryField {
-                state.app_shell.dispatch(AppCommand::OpenProjectBoard);
                 state.path_field_requested = true;
             }
             // RFC-038 PR-038-C: reachable from anywhere, any route or
@@ -2486,6 +2484,23 @@ fn attempt_agent_run_launch_with_profile_state_root_and_capture(
 /// by `ProjectContentWorkspace` itself and rendered by
 /// `surface::explorer::view`, not silently dropped; the `Result` here is
 /// therefore intentionally not propagated further.
+///
+/// RFC-038 PR-038-F: calls the scan-only entry point
+/// (`scan_active_project_explorer_directory_without_navigating`), not
+/// the navigating one. Response 233's own finding was that the
+/// navigating method's `open_surface` side effect silently overwrote
+/// `OpenActiveProjectSurface(surface)` for any surface but `TextEditor`,
+/// worked around here by saving and restoring `open_surface` around the
+/// call; PR-038-B found a second instance of the identical root cause
+/// (the navigating method's `route` side effect undoing
+/// `OpenProjectEntryField`'s own route change), worked around by
+/// routing that action out of `app_command_for` entirely
+/// (`app_command_for`'s own doc on `NavigationAction::OpenProjectEntryField`).
+/// Two different pieces of state, two different workarounds, one
+/// conflation -- closed at the root here instead of waiting for a third
+/// workaround. The `open_surface` save/restore dance is gone: the
+/// scan-only method never touches `open_surface` (or `mode`, or
+/// `route`) in the first place, so there is nothing to save or restore.
 fn ensure_explorer_scanned(state: &mut State) {
     let Some(project) = state.app_shell.state().active_project() else {
         return;
@@ -2496,28 +2511,9 @@ fn ensure_explorer_scanned(state: &mut State) {
     if project.content_workspace().explorer_scan().is_some() {
         return;
     }
-    // Response 233: `scan_active_project_explorer_directory`
-    // (`ProjectSession::scan_content_explorer_directory`) also sets
-    // `open_surface` to `TextEditor` as a side effect -- appropriate for
-    // `handle_explorer_key`'s own explicit rescan (browsing the file
-    // tree legitimately means "show me the editor"), wrong for this
-    // function's incidental, background priming of the explorer cache
-    // the first time a project enters Content mode for *any* reason.
-    // Without restoring it, `OpenActiveProjectSurface(surface)` for any
-    // surface other than `TextEditor` was silently overwritten back to
-    // `TextEditor` by this very call, one line after `dispatch` set it
-    // correctly -- found by
-    // `opening_approval_history_from_navigation_sets_the_open_surface_and_forces_content_mode`,
-    // the first real reader `open_surface` has ever had (response 233's
-    // own finding: every variant was previously set and never read).
-    let project_id = project.id().clone();
-    let open_surface_before_scan = project.open_surface();
     let _ = state
         .app_shell
-        .scan_active_project_explorer_directory(std::path::PathBuf::new());
-    if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
-        project.set_open_surface(open_surface_before_scan);
-    }
+        .scan_active_project_explorer_directory_without_navigating(std::path::PathBuf::new());
     state.explorer_highlight = 0;
 }
 
@@ -3887,6 +3883,27 @@ fn terminal_wake_stream(
 fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
     match action {
         NavigationAction::OpenProjectBoard => Some(AppCommand::OpenProjectBoard),
+        // RFC-038 PR-038-B: the second-project case -- `Ctrl+Alt+O` needs
+        // exactly the same route change `OpenProjectBoard` above does,
+        // just on a populated board. **Was** special-cased entirely
+        // outside this function (`update`'s `Shell` arm dispatching
+        // `AppCommand::OpenProjectBoard` directly) because routing it
+        // through this `Some` branch also triggers `ensure_explorer_
+        // scanned` right after `dispatch`, and that function's own
+        // navigating scan method used to unconditionally flip `route`
+        // back to `ActiveProjectWorkspace`, undoing the very route
+        // change this action exists to make. **Restored to the normal
+        // path by PR-038-F**: `ensure_explorer_scanned` now calls a
+        // scan-only entry point that touches no route at all, so the
+        // failure mode this special case existed to dodge no longer
+        // exists -- `ctrl_alt_o_opens_a_second_project_through_real_keys_on_a_populated_board`'s
+        // own `route()` assertion is what proves it, and what an
+        // ablation back to the navigating method fails against
+        // (`ensure_explorer_scanned`'s own doc has the full account).
+        // `update`'s `Shell` arm still sets `state.path_field_requested`
+        // separately -- that part is shell-local UI state with no core
+        // equivalent, not a route/mode change `dispatch` can express.
+        NavigationAction::OpenProjectEntryField => Some(AppCommand::OpenProjectBoard),
         NavigationAction::ToggleProjectMode => Some(AppCommand::ToggleActiveProjectMode),
         NavigationAction::LaunchTerminal => Some(AppCommand::LaunchTerminal),
         // RFC-022 PR-022-D: mirrors `LaunchTerminal` -- the actual launch
@@ -3928,18 +3945,6 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         // `update`'s `Shell` arm special-cases it directly, the same shape
         // `PasteIntoTerminal` uses above.
         | NavigationAction::SaveActiveDocument
-        // RFC-038 PR-038-B: not `Some(AppCommand::OpenProjectBoard)` --
-        // routing this through `app_command_for`'s `Some` branch would
-        // also trigger `ensure_explorer_scanned`, which unconditionally
-        // navigates a freshly-scanned active project to
-        // `ActiveProjectWorkspace`, undoing the very route change this
-        // action exists to make. `update`'s `Shell` arm dispatches
-        // `AppCommand::OpenProjectBoard` directly instead, the same
-        // "no core route/mode change through this path" shape
-        // `PasteIntoTerminal`/`SaveActiveDocument` already use, deliberately
-        // skipping the explorer-scan trigger since this action never
-        // shows the explorer.
-        | NavigationAction::OpenProjectEntryField
         // RFC-038 PR-038-C: opening a modal is shell-local UI state
         // (`state.modal`), never part of `tekstide-core`'s `AppState`/
         // `AppRoute` model -- there is no `AppCommand` for it, the same

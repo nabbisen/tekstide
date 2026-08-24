@@ -6394,17 +6394,20 @@ fn terminal_input_policy_evaluate_has_exactly_one_production_call_site() {
 /// themselves. What this test pins is the state that confirmation left
 /// behind, the same shape
 /// [`terminal_input_policy_evaluate_has_exactly_one_production_call_site`]
-/// uses: **exactly two** named, intentional production
-/// `.scan_active_project_explorer_directory(` call sites --
-/// [`ensure_explorer_scanned`] (the first scan, triggered on entering
-/// Content mode with none yet) and [`handle_explorer_key`] (a rescan,
-/// triggered by the user selecting a directory) -- named explicitly
-/// rather than hidden, the same shape
-/// `write_terminal_input_has_exactly_the_three_named_production_call_sites`
-/// uses for a different property. A third call site fails this test by
-/// name.
+/// uses.
+///
+/// RFC-038 PR-038-F narrowed this from two call sites to **exactly
+/// one**: [`ensure_explorer_scanned`] now calls the scan-only entry
+/// point ([`scan_active_project_explorer_directory_without_navigating_has_exactly_one_named_production_call_site`],
+/// immediately below) instead of this navigating one, closing the
+/// conflation response 233 and PR-038-B each found and separately
+/// worked around (`ensure_explorer_scanned`'s own doc comment has the
+/// full account). Only [`handle_explorer_key`] remains, where
+/// navigating on scan is genuinely correct (browsing the file tree
+/// legitimately means "show me the editor"). A second call site fails
+/// this test by name.
 #[test]
-fn scan_active_project_explorer_directory_has_exactly_the_two_named_production_call_sites() {
+fn scan_active_project_explorer_directory_has_exactly_one_named_production_call_site() {
     let shell_rs_path = format!("{}/src/shell.rs", env!("CARGO_MANIFEST_DIR"));
     let source = std::fs::read_to_string(&shell_rs_path).expect("shell.rs must be readable");
     let enclosing_functions =
@@ -6412,9 +6415,34 @@ fn scan_active_project_explorer_directory_has_exactly_the_two_named_production_c
 
     assert_eq!(
         enclosing_functions,
-        vec!["ensure_explorer_scanned", "handle_explorer_key"],
-        "scan_active_project_explorer_directory must have exactly these two named production \
-         call sites: {enclosing_functions:?}"
+        vec!["handle_explorer_key"],
+        "scan_active_project_explorer_directory must have exactly this one named production \
+         call site: {enclosing_functions:?}"
+    );
+}
+
+/// The other half of PR-038-F's narrowing above: the scan-only entry
+/// point has exactly one named production call site,
+/// [`ensure_explorer_scanned`] -- the same "named explicitly rather
+/// than hidden" shape
+/// `write_terminal_input_has_exactly_the_three_named_production_call_sites`
+/// uses for a different property. A second call site fails this test by
+/// name, the same as its navigating counterpart above.
+#[test]
+fn scan_active_project_explorer_directory_without_navigating_has_exactly_one_named_production_call_site()
+ {
+    let shell_rs_path = format!("{}/src/shell.rs", env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(&shell_rs_path).expect("shell.rs must be readable");
+    let enclosing_functions = enclosing_functions_for_call_site(
+        &source,
+        ".scan_active_project_explorer_directory_without_navigating(",
+    );
+
+    assert_eq!(
+        enclosing_functions,
+        vec!["ensure_explorer_scanned"],
+        "scan_active_project_explorer_directory_without_navigating must have exactly this one \
+         named production call site: {enclosing_functions:?}"
     );
 }
 

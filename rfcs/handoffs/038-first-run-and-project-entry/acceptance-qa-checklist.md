@@ -142,22 +142,25 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
       guard against the new call site's record write commented out), four in PR-038-D (the new
       call site's own audit-record guard; the new call site's own trust-confirmation fix; the
       same trust-confirmation fix retroactively ablated at both of the two pre-existing call
-      sites it also closed). Each reverted after confirming the expected failure. See
-      `qa-evidence.md`.
+      sites it also closed), two in PR-038-F (`ensure_explorer_scanned` pointed back at the
+      navigating method, checked against both of the two pre-existing regression tests its own
+      side effects used to break -- `open_surface`, response 233's own test; `route`, PR-038-B's
+      own test, only meaningful once that slice's route workaround was itself reverted). Each
+      reverted after confirming the expected failure. See `qa-evidence.md`.
 - [x] Flakes disclosed, not re-run past; any fifth symptom of the approval/socket flake reported
       as a disclosure rather than attributed to this work. PR-038-B's run hit three (all
       already-named). PR-038-C's own run separately hit a fourth already-named symptom
       (`command_approval_family_produces_real_durable_audit_records_through_the_pipeline`,
       confirmed passing in isolation) — and, distinctly, the PTY-exhaustion cascade recorded in
       `qa-evidence.md`'s own PR-038-C section, which is a different, newly-disclosed defect, not
-      a fifth symptom of the approval/socket one. PR-038-G's own run hit none. PR-038-D's own run
-      hit none either.
-- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-D's
-      own state (357 tekstide + 724 tekstide-core, 0 failed).
+      a fifth symptom of the approval/socket one. PR-038-G's own run hit none. PR-038-D's and
+      PR-038-F's own runs hit none either.
+- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-F's
+      own state (358 tekstide + 724 tekstide-core, 0 failed).
 - [x] Known limitations stated, including anything this slice leaves unreachable.
-      `qa-evidence.md`'s "Known limitations" section, now "as of PR-038-A/B/C/D/G," including the
-      render-layer duplication and the recent-cache staleness note both disclosed and flagged
-      above.
+      `qa-evidence.md`'s "Known limitations" section, now "as of PR-038-A/B/C/D/F/G," including
+      the render-layer duplication and the recent-cache staleness note both disclosed and
+      flagged above. PR-038-F itself left no new limitation -- structural only.
 
 ## Final Acceptance Decision
 

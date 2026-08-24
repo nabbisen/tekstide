@@ -606,13 +606,90 @@ again incidentally. Pre-existing behaviour (`upsert_open_project_recent` already
 in-memory list; only the file write is boot-only), not introduced by this slice, and out of its
 scope to fix -- named here so it is not mistaken for something this PR verified and got wrong.
 
-## PR-038-E — closeout
+## PR-038-F — a scan-only core entry point
 
-_Pending._
+**Added 2026-08-24 from PR-038-B's own review.** Small and structural: closed a trap that had
+already caught two slices.
+
+**Build.** `ApplicationShell::scan_active_project_explorer_directory` did two things: scan, and
+unconditionally set `route = ActiveProjectWorkspace`. One layer down,
+`ProjectSession::scan_content_explorer_directory` did two things of its own: scan, and
+unconditionally set `open_surface = TextEditor` and `mode = Content`. `ensure_explorer_scanned`
+(background cache-priming, called after every command that could have changed which project or
+mode is active) wanted only the scan -- every one of those side effects had to be undone
+afterwards, or worked around structurally. Response 233 found the first (`open_surface` silently
+overwriting `OpenActiveProjectSurface(surface)`), worked around by saving and restoring it.
+PR-038-B found the second (`route` silently undoing `OpenProjectEntryField`'s own route change),
+worked around by routing that action out of `app_command_for` entirely.
+
+Added `scan_content_explorer_directory_without_navigating` (`ProjectSession`),
+`scan_active_project_explorer_directory_without_navigating` (`AppState`, `ApplicationShell`) --
+each the exact scan, none of the navigation. `ContentWorkspace::scan_explorer_directory` itself
+was already scan-only (confirmed by reading it: it touches only `selected_explorer_path`/
+`explorer_scan`/`explorer_status`); the conflation was introduced one layer up
+(`ProjectSession`) and two layers up (`ApplicationShell`), so the new methods are additive at
+every layer -- no breaking change, no version implication, matching the task breakdown's own
+note. `ensure_explorer_scanned` now calls the new entry point.
+
+**Both workarounds removed, not just documented as removable.**
+
+- The `open_surface` save/restore dance in `ensure_explorer_scanned` is gone outright -- the new
+  method never touches `open_surface` (or `mode`) in the first place, so there is nothing to
+  save or restore.
+- `app_command_for`'s `NavigationAction::OpenProjectEntryField` arm moved back into the normal
+  `Some(AppCommand::OpenProjectBoard)` group it would have been in from the start, out of the
+  `None`-returning group PR-038-B had to place it in. `update`'s `Shell` arm keeps a much smaller
+  special case: only `state.path_field_requested = true` (shell-local UI state with no
+  `AppCommand` to express it), not the route dispatch itself anymore.
+
+**A design question resolved by checking, not assuming.** The task breakdown's own ablation
+instruction ("point `ensure_explorer_scanned` back at the navigating method and confirm the
+PR-038-B route test fails") does not hold against the tree as PR-038-B left it: that slice's own
+workaround routes `OpenProjectEntryField` *around* `ensure_explorer_scanned` entirely, so
+pointing the scan back at the navigating method changes nothing the existing route test can see
+-- confirmed empirically (ablated, test still passed) before concluding this. That is what
+mid-implementation testing is for: the instruction implicitly assumed the workaround itself would
+also be reverted, which is what makes the ablation meaningful again. Reverted it, on the reasoning
+that leaving the workaround in place while its own root cause is fixed elsewhere is exactly the
+"stale text about a mechanism" defect this project keeps having to correct after the fact, this
+time as stale *behaviour* rather than a stale comment. Flagging this rather than silently
+resolving it, since it is a judgement call about how literally to read the task's own build note,
+not a fact check.
+
+**Gates.** `cargo build`, `cargo test --workspace --all-targets --all-features` (358 tekstide +
+724 tekstide-core, unchanged tekstide-core count -- no new core tests; the properties this slice
+protects were already covered by two pre-existing GUI-level regression tests, re-verified below --
+0 failed), `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D
+warnings`, `git diff --check` -- all clean.
+
+**Ablated, both dances, both against pre-existing tests, not new ones written to fit the fix.**
+
+- `open_surface`: `opening_approval_history_from_navigation_sets_the_open_surface_and_forces_content_mode`
+  (response 233's own regression test). Ablated: pointed `ensure_explorer_scanned` back at the
+  navigating method -- failed (`open_surface` read back as `TextEditor`, not `ApprovalHistory`);
+  reverted.
+- `route`: `ctrl_alt_o_opens_a_second_project_through_real_keys_on_a_populated_board` (PR-038-B's
+  own regression test), **only meaningful after** the `OpenProjectEntryField` workaround was
+  itself reverted (see above). Ablated the same way -- failed (`route()` read back
+  `ActiveProjectWorkspace`, not `ProjectBoard`); reverted.
+
+**The call-site enumeration, narrowed and split.**
+`scan_active_project_explorer_directory_has_exactly_the_two_named_production_call_sites` (formerly
+naming `ensure_explorer_scanned` and `handle_explorer_key`) is now
+`scan_active_project_explorer_directory_has_exactly_one_named_production_call_site`, naming only
+`handle_explorer_key` -- the one caller where navigating on scan is genuinely correct (browsing
+the file tree legitimately means "show me the editor"). A new, parallel test,
+`scan_active_project_explorer_directory_without_navigating_has_exactly_one_named_production_call_site`,
+names `ensure_explorer_scanned` as the scan-only method's own one caller -- the same "named
+explicitly, not merely counted" shape every enumeration test in this crate already uses.
+
+**Security.** No new untrusted-text render path, no new I/O, no new call to
+`add_project_from_path` or any audit producer -- purely a structural split of an existing,
+already-reviewed scan into two entry points that do less than the one they were carved from.
 
 ## Known limitations (RFC-038-wide)
 
-As of PR-038-A/B/C/D/G:
+As of PR-038-A/B/C/D/F/G:
 
 - **The folder browser's render layer duplicates the project explorer's own** (`browse_view` and
   siblings, alongside `view`/`node_line`/`tree_lines`), rather than sharing it -- disclosed and
