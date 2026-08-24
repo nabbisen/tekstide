@@ -188,10 +188,25 @@ impl KeybindingPolicy {
                     Some("Ctrl+Alt+A"),
                     KeybindingStatus::Candidate,
                 ),
+                // RFC-039 PR-039-B: `Ctrl+Alt+N` (Next) -- the global
+                // accelerator alongside the real, visible controls
+                // (clicking a tab, or Left/Right + Enter across the tab
+                // strip's own keyboard focus) that the RFC's Principle 1
+                // requires every action to have: cycles to the next open
+                // project in `AppState::projects()`'s own order,
+                // wrapping, a no-op with fewer than two projects open.
+                // Not `Ctrl+Alt+S` (sWitch) -- too easily confused with
+                // plain `Ctrl+S` (`SaveActiveDocument`) one modifier away.
+                // Unclaimed by any other rule here and not `Ctrl+Shift+P`'s
+                // `Reserved` command-palette binding, so it collides with
+                // nothing (checked mechanically by
+                // `switch_active_project_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone). Takes RFC-036's dead-action
+                // count from four to three.
                 KeybindingRule::new(
                     NavigationAction::SwitchActiveProject,
-                    None,
-                    KeybindingStatus::Configurable,
+                    Some("Ctrl+Alt+N"),
+                    KeybindingStatus::Candidate,
                 ),
                 KeybindingRule::new(
                     NavigationAction::CycleVisibleTerminalSession,
@@ -318,9 +333,10 @@ impl KeybindingPolicy {
     /// the point of deriving this instead of writing a list:
     ///
     /// - `Configurable` with no `default_binding` is **dead**, not
-    ///   pending. `SwitchActiveProject`, `CycleVisibleTerminalSession`,
-    ///   `OpenDiffReview` and `OpenSafeCloseDialog` are all in this
-    ///   state; advertising them would promise four actions no key can
+    ///   pending. `CycleVisibleTerminalSession`, `OpenDiffReview` and
+    ///   `OpenSafeCloseDialog` are in this state (RFC-039 PR-039-B moved
+    ///   `SwitchActiveProject` out of it, down from four to three);
+    ///   advertising a dead one would promise an action no key can
     ///   reach. This project has already had to fix that exact category
     ///   error three times in the policy itself (`OpenTrustSettings`,
     ///   `OpenApprovalHistory`, `OpenCurrentAgentRunDetail`) -- help

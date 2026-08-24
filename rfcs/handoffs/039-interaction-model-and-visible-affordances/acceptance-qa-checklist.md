@@ -30,15 +30,22 @@ Every unchecked line at closeout carries a stated reason.
 - [x] Active project distinguishable **without relying on colour alone**.
       `shell::tests::tab_label_marks_the_active_project_and_not_the_inactive_one` -- a textual
       marker (`focus_marker`) independent of the border-colour channel (`zone_style`).
-- [ ] Every control keyboard-operable as well as clickable. **Not yet -- PR-039-A is read-only by
-      its own design** ("it shows, it does not yet act"); no control exists yet to be either
-      clickable or keyboard-operable. Pending PR-039-B, which adds the first ones.
+- [x] Every control keyboard-operable as well as clickable. PR-039-B: `FocusZone::TabStrip` +
+      `ArrowLeft`/`ArrowRight`/`Enter` (`handle_tab_strip_key`), proven live via
+      `evidence/pr-039-b/focused-tab-distinct-from-active-tab.png` and
+      `evidence/pr-039-b/after-enter-switches-to-highlighted-tab.png`, and by unit test
+      (`enter_on_a_highlighted_project_tab_switches_to_that_project`).
 
 ## Switching and going home
 
-- [ ] Activating a tab switches projects.
-- [ ] A permanent, visible route back to the board — not only `Ctrl+Alt+P`.
-- [ ] `SwitchActiveProject` has a real route; RFC-036's dead-action count noted as four → three.
+- [x] Activating a tab switches projects. `switch_active_project_tab_pressed_switches_and_enters_the_workspace`;
+      live: `evidence/pr-039-b/after-clicking-beta-tab.png`.
+- [x] A permanent, visible route back to the board — not only `Ctrl+Alt+P`. The leftmost
+      `Projects` tab, real click and real `Enter` both proven;
+      `evidence/pr-039-b/after-clicking-projects-home-tab.png`.
+- [x] `SwitchActiveProject` has a real route; RFC-036's dead-action count noted as four → three.
+      `Ctrl+Alt+N`, `ctrl_alt_n_cycles_to_the_next_open_project_wrapping`;
+      `keyboard_help::tests::no_action_without_a_working_binding_is_advertised`'s three-action list.
 
 ## Closing — `what-closing-a-project-must-not-lose.md`
 

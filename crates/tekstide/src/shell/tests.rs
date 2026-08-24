@@ -403,12 +403,17 @@ fn a_toggle_project_mode_shell_input_dispatches_the_real_app_command() {
 /// which only proved `FocusNext`/`FocusPrevious` were legitimate no-ops
 /// -- correct then, with one variant; the comment predicted this test
 /// would need updating the day a second one arrived, and it did.
+///
+/// **RFC-039 PR-039-B added a third** (`TabStrip`), which is why this
+/// one MainArea-to-Sidebar-and-back hop is no longer the *whole* cycle
+/// -- it still passes unchanged (`MainArea.next() == Sidebar` and
+/// `Sidebar.previous() == MainArea` both still hold with three zones),
+/// but it is now only proving one adjacent pair, not the full loop.
+/// `focus_cycles_through_all_three_zones_and_back` (below) is the one
+/// that proves the whole thing, including the new zone this test's own
+/// comment did not anticipate by name.
 #[test]
 fn focus_next_and_previous_route_through_update() {
-    // RFC-015 PR-015-E: with a second `FocusZone` variant, cycling is a
-    // genuine toggle -- this replaces the PR-015-C-era version of this
-    // test, which only asserted focus stayed put, correct back when
-    // `MainArea` was the only zone and cycling was necessarily a no-op.
     let mut state = state_with(ApplicationShell::new());
     let focus_before = state.focus;
     assert_eq!(focus_before, FocusZone::MainArea);
@@ -424,6 +429,50 @@ fn focus_next_and_previous_route_through_update() {
         Message::Input(crate::input::RoutedInput::FocusPrevious),
     );
     assert_eq!(state.focus, focus_before);
+}
+
+/// RFC-039 PR-039-B: the full three-zone cycle, both directions --
+/// `TabStrip`'s own addition to `FocusZone` proven at the `update()`
+/// level, not only against `FocusZone::next()`/`previous()` in
+/// isolation, the same "proven against the real State" shape
+/// `focus_next_and_previous_route_through_update` above already
+/// establishes for the two-zone case it still covers.
+#[test]
+fn focus_cycles_through_all_three_zones_and_back() {
+    let mut state = state_with(ApplicationShell::new());
+    assert_eq!(state.focus, FocusZone::MainArea);
+
+    let next = |state: &mut State| {
+        let _ = super::update(state, Message::Input(crate::input::RoutedInput::FocusNext));
+    };
+    next(&mut state);
+    assert_eq!(state.focus, FocusZone::Sidebar);
+    next(&mut state);
+    assert_eq!(state.focus, FocusZone::TabStrip);
+    next(&mut state);
+    assert_eq!(
+        state.focus,
+        FocusZone::MainArea,
+        "the cycle must wrap back to where it started, not stop at TabStrip"
+    );
+
+    let previous = |state: &mut State| {
+        let _ = super::update(
+            state,
+            Message::Input(crate::input::RoutedInput::FocusPrevious),
+        );
+    };
+    previous(&mut state);
+    assert_eq!(
+        state.focus,
+        FocusZone::TabStrip,
+        "reverse cycling must be the true inverse of forward cycling with three zones, \
+         not `next`'s own alias (correct only when there were two)"
+    );
+    previous(&mut state);
+    assert_eq!(state.focus, FocusZone::Sidebar);
+    previous(&mut state);
+    assert_eq!(state.focus, FocusZone::MainArea);
 }
 
 /// RFC-015 PR-015-E, `NFR-UX-002`: the focus indicator must not rely on
@@ -8232,7 +8281,7 @@ fn opening_help_through_a_real_key_event_shows_every_live_binding() {
     let lines = crate::keyboard_help::keyboard_help_lines(&state.catalog);
     assert_eq!(
         lines.len(),
-        12,
+        13,
         "the Help modal's own data source must list every live binding, Ctrl+Alt+K included"
     );
 }
@@ -9119,11 +9168,18 @@ fn browsing_to_a_cached_trusted_but_unconfirmed_recent_project_demotes_to_restri
     );
 }
 
-// RFC-039 PR-039-A: the project tab strip -- read-only this slice.
-// `tab_label` is the pure, testable half (the rendered string); the
-// strip's own presence/absence (`project_tab_strip`) is checked at the
-// `Option` boundary, the same "test the string, not the Element tree"
-// split every other rendered surface in this crate already uses.
+// RFC-039 PR-039-A/B: the project tab strip. PR-039-A shipped it
+// read-only, using `zone_style`/`focus_marker` (the shell's own focus
+// vocabulary) to mark the *active* project -- response 306 required
+// correcting that: focus and active are two different, independently
+// true things once tabs are focusable, and the strip must show both at
+// once without either overwriting the other. `tab_marker` is the pure,
+// directly-testable proof of that; `project_tab_label`/`home_tab_label`
+// build on it. The strip's own presence (`project_tab_strip`) is no
+// longer optional (D1's permanent leftmost "Projects" tab means there
+// is always at least one to show), so there is no `Option` boundary
+// left to test there -- coverage moved to the marker/label functions
+// and to the real state transitions below.
 
 fn fixture_project_session(display_name: &str) -> tekstide_core::project::ProjectSession {
     tekstide_core::project::ProjectSession::new(
@@ -9134,20 +9190,41 @@ fn fixture_project_session(display_name: &str) -> tekstide_core::project::Projec
     )
 }
 
-/// The colour-independence rule (RFC-015) applied to the tab strip's
-/// own marker, the same shape `focus_marker_differs_and_is_not_colour_dependent`
-/// already establishes for the generic helper -- proven here at the
-/// call site that actually uses it for a tab.
+/// **Response 306's own required property, proven directly**: focus and
+/// active are independent channels -- all four combinations must be
+/// distinct, and the "both at once" case (the common one: the active
+/// project is very often also the one with keyboard focus) must carry
+/// both markers legibly, neither erased by the other.
 #[test]
-fn tab_label_marks_the_active_project_and_not_the_inactive_one() {
-    let project = fixture_project_session("demo-project");
+fn tab_marker_combines_focus_and_active_independently() {
+    let neither = super::tab_marker(false, false);
+    let focused_only = super::tab_marker(true, false);
+    let active_only = super::tab_marker(false, true);
+    let both = super::tab_marker(true, true);
 
-    let active_label = super::tab_label(&project, true);
-    let inactive_label = super::tab_label(&project, false);
+    assert_eq!(neither, "  \u{25CB} ");
+    assert_eq!(focused_only, "> \u{25CB} ");
+    assert_eq!(active_only, "  \u{25CF} ");
+    assert_eq!(both, "> \u{25CF} ");
 
-    assert_ne!(active_label, inactive_label);
-    assert!(active_label.starts_with("> "));
-    assert!(inactive_label.starts_with("  "));
+    // All four genuinely distinct -- neither channel is a no-op relative
+    // to the other in any combination.
+    let markers = [&neither, &focused_only, &active_only, &both];
+    for (i, a) in markers.iter().enumerate() {
+        for (j, b) in markers.iter().enumerate() {
+            if i != j {
+                assert_ne!(a, b, "marker {i} and {j} must not collide: {a:?} vs {b:?}");
+            }
+        }
+    }
+
+    // The "both at once" case carries both signals, not one masking the
+    // other.
+    assert!(both.starts_with('>'), "focus marker must survive: {both:?}");
+    assert!(
+        both.contains('\u{25CF}'),
+        "active marker must survive alongside it: {both:?}"
+    );
 }
 
 /// **D3's own requirement, and `what-closing-a-project-must-not-lose.md`
@@ -9156,10 +9233,10 @@ fn tab_label_marks_the_active_project_and_not_the_inactive_one() {
 /// render escaped, the same bidi-override fixture this project already
 /// uses for the recent-projects state (RFC-032/038).
 #[test]
-fn tab_label_escapes_a_bidi_override_in_the_display_name() {
+fn project_tab_label_escapes_a_bidi_override_in_the_display_name() {
     let project = fixture_project_session("proj\u{202E}gpj.exe");
 
-    let label = super::tab_label(&project, false);
+    let label = super::project_tab_label(&project, false, false);
 
     assert!(
         label.contains("<U+202E>"),
@@ -9176,10 +9253,10 @@ fn tab_label_escapes_a_bidi_override_in_the_display_name() {
 /// marker, so the bidi test above is exercising real escaping, not a
 /// coincidence of that particular fixture.
 #[test]
-fn an_ordinary_tab_name_renders_without_any_escape_marker() {
+fn an_ordinary_project_tab_name_renders_without_any_escape_marker() {
     let project = fixture_project_session("demo-project");
 
-    let label = super::tab_label(&project, false);
+    let label = super::project_tab_label(&project, false, false);
 
     assert!(label.contains("demo-project"));
     assert!(!label.contains("<U+"));
@@ -9191,11 +9268,11 @@ fn an_ordinary_tab_name_renders_without_any_escape_marker() {
 /// truncate-then-escape order `path_field_error_text` already
 /// establishes, proven here for the strip's own, shorter bound.
 #[test]
-fn tab_label_truncates_a_long_display_name_with_an_ellipsis_marker() {
+fn project_tab_label_truncates_a_long_display_name_with_an_ellipsis_marker() {
     let long_name = "a".repeat(200);
     let project = fixture_project_session(&long_name);
 
-    let label = super::tab_label(&project, false);
+    let label = super::project_tab_label(&project, false, false);
 
     assert!(
         label.contains('\u{2026}'),
@@ -9207,48 +9284,308 @@ fn tab_label_truncates_a_long_display_name_with_an_ellipsis_marker() {
     );
 }
 
-/// The strip renders nothing when no project is open -- there is
-/// nothing yet to show a tab for.
+/// The home tab's own label is trusted, catalog-driven text -- no
+/// escaping applies (there is nothing untrusted in it), but it still
+/// carries the same marker composition every project tab does.
 #[test]
-fn the_project_tab_strip_shows_nothing_with_no_project_open() {
-    let state = state_with(ApplicationShell::new());
+fn home_tab_label_carries_the_catalog_text_and_the_marker() {
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
 
-    assert!(super::project_tab_strip(&state).is_none());
+    let label = super::home_tab_label(&catalog, true, true);
+
+    assert!(label.contains(&catalog.get("project-tab-strip-home")));
+    assert!(label.starts_with("> \u{25CF} "));
 }
 
-/// The strip shows something once a real project is open -- proven
-/// against the real `State`, not just the `Option` boundary in
-/// isolation, so a wiring mistake (e.g. reading the wrong `AppState`
-/// accessor) would be caught the same way `sidebar_label_reflects_focus`
-/// already catches an equivalent mistake for the sidebar.
-#[test]
-fn the_project_tab_strip_shows_something_once_a_project_is_open() {
-    let (state, _project_id) = state_with_a_real_project("tab-strip-presence");
+// RFC-039 PR-039-B: switching, and going home -- both mouse- and
+// keyboard-operable, per the task breakdown's own requirement.
 
-    assert!(super::project_tab_strip(&state).is_some());
+/// **D1's own workflow 4** ("Enter a project and work in it"): clicking
+/// a tab (`Message::SwitchActiveProjectTabPressed`) switches which
+/// project is active *and* enters its workspace -- both are one call,
+/// `ApplicationShell::switch_active_project`'s own doc explains why.
+#[test]
+fn switch_active_project_tab_pressed_switches_and_enters_the_workspace() {
+    let mut app_shell = ApplicationShell::new();
+    let first_id = app_shell
+        .add_project_from_path(fresh_project_dir("tab-switch-first"))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    let second_id = app_shell
+        .add_project_from_path(fresh_project_dir("tab-switch-second"))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    assert_eq!(
+        app_shell.state().active_project_id(),
+        Some(&first_id),
+        "test precondition: the first project auto-activates, not the second"
+    );
+    let mut state = state_with(app_shell);
+
+    let _ = super::update(
+        &mut state,
+        Message::SwitchActiveProjectTabPressed(second_id.clone()),
+    );
+
+    assert_eq!(
+        state.app_shell.state().active_project_id(),
+        Some(&second_id)
+    );
+    assert_eq!(
+        state.app_shell.route(),
+        tekstide_core::route::AppRoute::ActiveProjectWorkspace,
+        "clicking a tab must enter that project's workspace, not just mark it active"
+    );
 }
 
-/// **PR-039-A's own evidence requirement**: the strip survives Terminal
-/// Immersion, not only Content mode -- `view()`'s own `column![top_bar,
-/// content_area, status_bar]` composition runs in every mode, and this
-/// proves the strip specifically (not just the composition) does too,
-/// since `top_bar` reads `state.app_shell.state()` directly rather than
-/// anything mode-gated.
+/// **D1's own workflow 5** ("Return to the entrance"): clicking the
+/// strip's own permanent leftmost tab returns to the board -- proven
+/// from a real `ActiveProjectWorkspace` route, not merely "was already
+/// there."
 #[test]
-fn the_project_tab_strip_survives_terminal_immersion() {
-    let (mut state, _project_id) = state_with_a_real_project("tab-strip-terminal-immersion");
+fn go_to_project_board_tab_pressed_returns_to_the_board() {
+    let (mut state, _project_id) = state_with_a_real_project("tab-strip-home-button");
     state
         .app_shell
-        .dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+        .dispatch(tekstide_core::command::AppCommand::OpenActiveProjectWorkspace);
     assert_eq!(
-        state
-            .app_shell
+        state.app_shell.route(),
+        tekstide_core::route::AppRoute::ActiveProjectWorkspace,
+        "test precondition: starting inside the workspace, not already on the board"
+    );
+
+    let _ = super::update(&mut state, Message::GoToProjectBoardTabPressed);
+
+    assert_eq!(
+        state.app_shell.route(),
+        tekstide_core::route::AppRoute::ProjectBoard
+    );
+}
+
+/// The strip's own keyboard navigation -- `ArrowLeft`/`ArrowRight` move
+/// `tab_strip_highlight`, clamped, not wrapping, the same shape every
+/// other highlight in this crate already uses. A no-op outside
+/// `FocusZone::TabStrip`, proven both ways: acts when focused there,
+/// does nothing when focus is elsewhere.
+#[test]
+fn arrow_keys_move_the_tab_strip_highlight_only_while_the_strip_is_focused() {
+    let mut app_shell = ApplicationShell::new();
+    for label in ["tab-strip-arrows-a", "tab-strip-arrows-b"] {
+        app_shell
+            .add_project_from_path(fresh_project_dir(label))
+            .expect("a freshly created directory is a valid project root");
+    }
+    let mut state = state_with(app_shell);
+    // Home tab (index 0) + two projects = three items.
+    let item_count = 3;
+
+    // Not focused on the strip yet -- Right must be a no-op.
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight),
+    );
+    assert_eq!(state.tab_strip_highlight, 0);
+
+    state.focus = FocusZone::TabStrip;
+    for _ in 0..(item_count + 2) {
+        let routed = crate::input::RoutedInput::Surface(crate::input::surface_input_for_test(
+            FocusZone::TabStrip,
+            press(iced::keyboard::Key::Named(
+                iced::keyboard::key::Named::ArrowRight,
+            )),
+        ));
+        let _ = super::update(&mut state, Message::Input(routed));
+    }
+    assert_eq!(
+        state.tab_strip_highlight,
+        item_count - 1,
+        "ArrowRight must clamp at the last item, not wrap"
+    );
+
+    for _ in 0..(item_count + 2) {
+        let routed = crate::input::RoutedInput::Surface(crate::input::surface_input_for_test(
+            FocusZone::TabStrip,
+            press(iced::keyboard::Key::Named(
+                iced::keyboard::key::Named::ArrowLeft,
+            )),
+        ));
+        let _ = super::update(&mut state, Message::Input(routed));
+    }
+    assert_eq!(
+        state.tab_strip_highlight, 0,
+        "ArrowLeft must clamp at the first item, not wrap"
+    );
+}
+
+/// `Enter` with the home tab (index 0) highlighted returns to the
+/// board -- the keyboard route to workflow 5, converging on the same
+/// [`go_to_project_board`] the button's own message reaches.
+#[test]
+fn enter_on_the_highlighted_home_tab_returns_to_the_board() {
+    let (mut state, _project_id) = state_with_a_real_project("tab-strip-enter-home");
+    state
+        .app_shell
+        .dispatch(tekstide_core::command::AppCommand::OpenActiveProjectWorkspace);
+    state.focus = FocusZone::TabStrip;
+    state.tab_strip_highlight = 0;
+
+    let routed = crate::input::RoutedInput::Surface(crate::input::surface_input_for_test(
+        FocusZone::TabStrip,
+        press(iced::keyboard::Key::Named(
+            iced::keyboard::key::Named::Enter,
+        )),
+    ));
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert_eq!(
+        state.app_shell.route(),
+        tekstide_core::route::AppRoute::ProjectBoard
+    );
+}
+
+/// `Enter` with a project tab (index `1..=N`) highlighted switches to
+/// that specific project -- the keyboard route to workflow 4,
+/// converging on the same [`switch_to_project_tab`] a real click on
+/// that tab reaches.
+#[test]
+fn enter_on_a_highlighted_project_tab_switches_to_that_project() {
+    let mut app_shell = ApplicationShell::new();
+    let first_id = app_shell
+        .add_project_from_path(fresh_project_dir("tab-strip-enter-project-first"))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    let second_id = app_shell
+        .add_project_from_path(fresh_project_dir("tab-strip-enter-project-second"))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    let mut state = state_with(app_shell);
+    state.focus = FocusZone::TabStrip;
+    // Index 0 is the home tab; index 2 is the second project.
+    state.tab_strip_highlight = 2;
+
+    let routed = crate::input::RoutedInput::Surface(crate::input::surface_input_for_test(
+        FocusZone::TabStrip,
+        press(iced::keyboard::Key::Named(
+            iced::keyboard::key::Named::Enter,
+        )),
+    ));
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert_eq!(
+        state.app_shell.state().active_project_id(),
+        Some(&second_id)
+    );
+    assert_ne!(state.app_shell.state().active_project_id(), Some(&first_id));
+}
+
+// RFC-039 PR-039-B: `SwitchActiveProject` (`Ctrl+Alt+N`) -- the global
+// accelerator, RFC-036's dead-action count now four to three.
+
+fn press_ctrl_alt_n(state: &mut State) {
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::SwitchActiveProject,
+    );
+    let _ = super::update(
+        state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+}
+
+/// Cycles to the next project in `AppState::projects()`'s own order,
+/// wrapping back to the first once past the last -- proven with three
+/// real projects and three real `Ctrl+Alt+N` presses, not assumed from
+/// two.
+#[test]
+fn ctrl_alt_n_cycles_to_the_next_open_project_wrapping() {
+    let mut app_shell = ApplicationShell::new();
+    let ids: Vec<_> = [
+        "tab-strip-cycle-a",
+        "tab-strip-cycle-b",
+        "tab-strip-cycle-c",
+    ]
+    .into_iter()
+    .map(|label| {
+        app_shell
+            .add_project_from_path(fresh_project_dir(label))
+            .expect("a freshly created directory is a valid project root")
+            .project_id()
+            .clone()
+    })
+    .collect();
+    let mut state = state_with(app_shell);
+    assert_eq!(state.app_shell.state().active_project_id(), Some(&ids[0]));
+
+    press_ctrl_alt_n(&mut state);
+    assert_eq!(state.app_shell.state().active_project_id(), Some(&ids[1]));
+
+    press_ctrl_alt_n(&mut state);
+    assert_eq!(state.app_shell.state().active_project_id(), Some(&ids[2]));
+
+    press_ctrl_alt_n(&mut state);
+    assert_eq!(
+        state.app_shell.state().active_project_id(),
+        Some(&ids[0]),
+        "cycling past the last project must wrap back to the first"
+    );
+}
+
+/// With fewer than two projects open, there is nothing to cycle to --
+/// a real `Ctrl+Alt+N` press must be a harmless no-op, not a panic on
+/// an empty or single-element index computation.
+#[test]
+fn ctrl_alt_n_is_a_no_op_with_fewer_than_two_projects_open() {
+    let mut state = state_with(ApplicationShell::new());
+    press_ctrl_alt_n(&mut state);
+    assert!(state.app_shell.state().active_project_id().is_none());
+
+    let (mut state, project_id) = state_with_a_real_project("tab-strip-cycle-single");
+    press_ctrl_alt_n(&mut state);
+    assert_eq!(
+        state.app_shell.state().active_project_id(),
+        Some(&project_id)
+    );
+}
+
+/// **PR-039-A's own evidence requirement, still true after PR-039-B's
+/// rework**: the strip survives Terminal Immersion, not only Content
+/// mode. Proven behaviourally here (a tab click still reaches the right
+/// project from inside immersion); the live screenshot is this slice's
+/// own evidence for the render side.
+#[test]
+fn switching_tabs_works_from_inside_terminal_immersion() {
+    let mut app_shell = ApplicationShell::new();
+    let first_id = app_shell
+        .add_project_from_path(fresh_project_dir("tab-strip-immersion-first"))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    let second_id = app_shell
+        .add_project_from_path(fresh_project_dir("tab-strip-immersion-second"))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    app_shell.dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+    assert_eq!(
+        app_shell
             .state()
-            .active_project()
+            .project(&first_id)
             .map(tekstide_core::project::ProjectSession::mode),
         Some(tekstide_core::project::ProjectMode::TerminalImmersion),
         "test precondition: the active project must be in Terminal Immersion"
     );
+    let mut state = state_with(app_shell);
 
-    assert!(super::project_tab_strip(&state).is_some());
+    let _ = super::update(
+        &mut state,
+        Message::SwitchActiveProjectTabPressed(second_id.clone()),
+    );
+
+    assert_eq!(
+        state.app_shell.state().active_project_id(),
+        Some(&second_id)
+    );
 }

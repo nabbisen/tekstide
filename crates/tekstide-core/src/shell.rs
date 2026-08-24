@@ -35,6 +35,23 @@ impl ApplicationShell {
         &mut self.state
     }
 
+    /// RFC-039 PR-039-B: switching which project is active is also
+    /// "enter that project and work in it" (D1's own workflow 4), so
+    /// this mirrors `scan_active_project_explorer_directory`'s own
+    /// shape -- the real state change (`AppState::switch_active_project`)
+    /// plus the route change that makes it visible, in the one place a
+    /// caller reaches either. Returns `false`, and leaves `route`
+    /// untouched, when `project_id` does not name a currently-open
+    /// project -- the same "nothing to navigate to" precedent every
+    /// other route-changing wrapper here already sets.
+    pub fn switch_active_project(&mut self, project_id: &ProjectId) -> bool {
+        let switched = self.state.switch_active_project(project_id);
+        if switched {
+            self.route = AppRoute::ActiveProjectWorkspace;
+        }
+        switched
+    }
+
     pub fn restore_recent_projects(&mut self, recent_project_state: RecentProjectState) {
         self.state.restore_recent_projects(recent_project_state);
     }

@@ -84,7 +84,129 @@ render addition over data `AppState::projects()` already exposed.
 
 ## PR-039-B — switch, and go home
 
-_Pending._
+**Build.** Real tabs: `project_tab_strip` now returns `Element` unconditionally (no longer
+`Option`), each project tab an `iced::widget::button` dispatching
+`Message::SwitchActiveProjectTabPressed(ProjectId)`, plus a permanent leftmost "Projects" tab
+(`project-tab-strip-home`) dispatching `Message::GoToProjectBoardTabPressed` -- D1's two required
+routes ("enter a project", "return to the entrance") both now real, both mouse- and
+keyboard-operable. A third `FocusZone::TabStrip` makes the strip keyboard-focusable in the same
+`Tab`/`Shift+Tab` cycle as `MainArea`/`Sidebar`; `ArrowLeft`/`ArrowRight` move a clamped
+`tab_strip_highlight` index inside it, `Enter` activates whichever tab is highlighted
+(`handle_tab_strip_key`). A global `Ctrl+Alt+N` (`NavigationAction::SwitchActiveProject`, now
+`Candidate` with a real binding) cycles the active project forward with wraparound -- a coarser,
+one-shot accelerator distinct from the strip's own precise per-tab selection, both converging on
+`ApplicationShell::switch_active_project`.
+
+**Response 306's required change, done first.** Focus and active are now two independent visual
+channels, not one reused pair: focus stays exactly what every other zone already uses (border via
+`zone_style`'s colour/width pair, `focus_marker`'s `"> "`/`"  "` textual prefix); active moves to a
+distinct pair (`tab_active_style`'s background fill, `tab_marker`'s `"●"`/`"○"` symbol). Both
+legible at once is the common case (a tab that is both focused and active) and the rare case (one
+tab focused, a different tab active) alike -- see `focused-tab-distinct-from-active-tab.png`
+below.
+
+**`FocusZone::TabStrip` and the reviewed router.** `route_non_modal_input`'s precedence is
+unchanged: global keybinding match, then `Tab`/`Shift+Tab` (shell focus-cycle, never reaches a
+surface), then `terminal_focus` if set, then `RoutedInput::Surface`. `#[non_exhaustive]` has no
+effect within this crate, so every exhaustive match on `FocusZone` had to be extended by hand;
+`cargo build` confirmed none broke silently (the existing checks all compare with `==`, not
+exhaustive matches). `handle_tab_strip_key` is reached only through this same router, as a new
+arm alongside the pre-existing `Sidebar` branch -- no second, widget-internal capture path.
+
+**Security.** `switch_to_project_tab` and `go_to_project_board` both call
+`ensure_explorer_scanned` after dispatch, the same re-scan-on-entry discipline PR-038-F's
+scan-only entry point established -- switching to a project never trusts a stale explorer listing
+left over from whichever project was active before. No new call to `add_project_from_path` or any
+audit producer; `cycle_to_next_active_project` and `switch_to_project_tab` only ever route to
+`ProjectId`s already present in `AppState::projects()`.
+
+**Gates.** `cargo build`, `cargo test --workspace --all-targets --all-features` (373 tekstide +
+728 tekstide-core, up from 366/727; 0 failed), `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`, `git diff --check` -- all
+clean.
+
+**Ablations.**
+
+- `ctrl_alt_n_cycles_to_the_next_open_project_wrapping` / the collision-test family: rebinding
+  `SwitchActiveProject` to `Ctrl+Alt+K` (already claimed by `OpenHelp`) made both
+  `switch_active_project_shortcut_is_a_candidate_that_collides_with_no_other_rule` and
+  `open_help_shortcut...` fail together, confirming the collision check is live, not vacuous.
+  Reverted.
+- `tab_marker_combines_focus_and_active_independently`: collapsing `active` into `focus_marker`
+  alone (dropping the `active_symbol` half of `tab_marker`) produced `"   "` where the test
+  expected `"  ○ "`, confirming the four focus×active combinations are actually independent, not
+  coincidentally distinguishable. Reverted.
+
+**Tests, at the level this crate always tests rendering: the string, not the `Element` tree.**
+
+- `focus_cycles_through_all_three_zones_and_back` -- the full `MainArea → Sidebar → TabStrip →
+  MainArea` cycle and its true reverse, both directions, through `update()` -- `previous()`'s own
+  doc comment had anticipated this third zone before it existed.
+- `tab_marker_combines_focus_and_active_independently` -- all four combinations, pairwise
+  distinct (see ablation above).
+- `project_tab_label_escapes_a_bidi_override_in_the_display_name`,
+  `an_ordinary_project_tab_name_renders_without_any_escape_marker`,
+  `project_tab_label_truncates_a_long_display_name_with_an_ellipsis_marker`,
+  `home_tab_label_carries_the_catalog_text_and_the_marker` -- PR-039-A's escaping/truncation
+  proofs, carried forward against the renamed, now-focus-aware label functions.
+- `switch_active_project_tab_pressed_switches_and_enters_the_workspace` /
+  `go_to_project_board_tab_pressed_returns_to_the_board` -- both `Message` arms proven directly
+  against a real `State`: active project and route both change (or return), together.
+- `arrow_keys_move_the_tab_strip_highlight_only_while_the_strip_is_focused` -- no-op outside
+  `FocusZone::TabStrip`, clamped movement inside it.
+- `enter_on_the_highlighted_home_tab_returns_to_the_board` /
+  `enter_on_a_highlighted_project_tab_switches_to_that_project` -- a real routed `Enter`
+  `SurfaceInput` dispatched through `update`, the same path a live keypress takes.
+- `ctrl_alt_n_cycles_to_the_next_open_project_wrapping` /
+  `ctrl_alt_n_is_a_no_op_with_fewer_than_two_projects_open` -- three real projects, three presses,
+  wraps to the first; the coarser accelerator's own bound.
+- `switching_tabs_works_from_inside_terminal_immersion` -- the strip's action-handling, not only
+  its rendering, survives the same route PR-039-A already proved rendering survives.
+
+**Live evidence.** `cargo build --release -p tekstide`, launched
+`env -u WAYLAND_DISPLAY XDG_STATE_HOME=<mktemp -d> ./target/release/tekstide <mktemp -d>/tsd-pr039b-alpha <mktemp -d>/tsd-pr039b-beta`
+-- two real projects, both from CLI arguments. The same `xdotool`/
+`niri msg action screenshot-window`/`wl-paste` capture method every prior slice established.
+
+- `evidence/pr-039-b/before-cold-start-two-tabs.png` -- cold start: `Project Board` route,
+  `alpha` (the auto-activated first project) and `Projects` both show `●` (route is
+  `ProjectBoard` *and* `alpha` is the active project -- two independently true facts, one symbol
+  each), `beta` shows `○`.
+- Real mouse click on the `beta` tab (`xdotool mousemove --sync` + `click 1`):
+  `evidence/pr-039-b/after-clicking-beta-tab.png` -- `beta` now `●`, route becomes
+  `ActiveProjectWorkspace` (status bar: "Project Workspace | 2 projects"), explorer/editor panes
+  visible.
+- Real mouse click on the `Projects` tab:
+  `evidence/pr-039-b/after-clicking-projects-home-tab.png` -- route returns to `ProjectBoard`;
+  `Projects` and `beta` both show `●` (`beta` is still the active project, `Projects` is active
+  because the route is `ProjectBoard` -- independence holding under a real click, not only in the
+  unit tests above).
+- Real `Tab`, `Tab` (`xdotool key --clearmodifiers Tab` twice: `MainArea → Sidebar → TabStrip`),
+  then `ArrowRight` (highlight moves off the home tab onto `alpha`):
+  `evidence/pr-039-b/focused-tab-distinct-from-active-tab.png` -- **response 306's required
+  evidence**. `alpha` shows the focus border and `"> ○"` (focused, not active); `beta` shows
+  `"●"` with no border (active, not focused). Both legible at once, from a real keypress sequence,
+  not a constructed `State`.
+- From that same highlighted state, real `Return`
+  (`xdotool key --window "$WID" --clearmodifiers Return`):
+  `evidence/pr-039-b/after-enter-switches-to-highlighted-tab.png` -- `alpha` becomes active (`●`
+  and the focus border together) and the route switches to `ActiveProjectWorkspace`, proving the
+  strip is keyboard-operable end to end through the real built binary, not only through
+  `enter_on_a_highlighted_project_tab_switches_to_that_project`'s equivalent constructed scenario.
+  Getting a clean capture of this took three attempts: the first two, run immediately after the
+  `ArrowRight` capture above without an intervening real click inside the window, produced a
+  pixel-identical "no effect" screenshot despite `xdotool windowfocus --sync` beforehand -- the
+  automated test already proved `handle_tab_strip_key`'s own logic correct for the identical
+  scenario, which localized the discrepancy to live key delivery rather than the handler. The
+  capture above succeeded once preceded by a real mouse click on empty window space (establishing
+  genuine compositor-level input focus) before repeating `Tab, Tab, ArrowRight, Return`. This
+  reads as an `xdotool`/niri/XWayland synthetic-focus quirk in this test harness, not an
+  application defect -- both the unit test and this corrected live capture agree on the same
+  outcome -- but the root cause was not isolated further, since doing so is evidence-gathering
+  tooling, not product behaviour. Noted here rather than silently discarded, per this project's
+  own evidence-disclosure convention.
+- Process terminated cleanly with `SIGTERM` after capture; no terminal was ever launched this
+  session, so `test-process-leak.md`'s defect class does not apply.
 
 ## PR-039-C — close a project
 

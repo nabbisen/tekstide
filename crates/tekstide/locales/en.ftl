@@ -131,6 +131,11 @@ project-board-browse-button = Browse...
 # project's own row.
 project-board-recent-open-button = Open
 
+# RFC-039 D1: the tab strip's own permanent leftmost entry, always
+# present -- the visible route back to the Project Board (workflow 5),
+# alongside the pre-existing `Ctrl+Alt+P` accelerator.
+project-tab-strip-home = Projects
+
 # RFC-038 PR-038-A: `$reason` is a compile-time symbol
 # (`PathFieldError`'s own shape), the same division of labour
 # `terminal-launch-refused` already uses -- never the error's Rust
@@ -627,6 +632,7 @@ keyboard-help-open-approval-history = Approval History (needs an open project)
 keyboard-help-open-trust-settings = Trust Settings: grant trust, transcript capture and purge
 keyboard-help-open-help = This list
 keyboard-help-open-folder-browser = Browse for a project folder
+keyboard-help-switch-active-project = Switch to the next open project
 
 # RFC-038 PR-038-C: the Help modal itself. Reachable from anywhere;
 # replaces the Project Board's own former keyboard list.

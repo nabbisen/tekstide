@@ -60,8 +60,8 @@ fn every_live_binding_is_described_to_the_user() {
 
     assert_eq!(
         lines.len(),
-        12,
-        "expected the twelve Candidate rules with a default binding to be described; \
+        13,
+        "expected the thirteen Candidate rules with a default binding to be described; \
          got {}: {:?}",
         lines.len(),
         lines.iter().map(|line| line.binding).collect::<Vec<_>>()
@@ -118,10 +118,11 @@ fn no_action_without_a_working_binding_is_advertised() {
         "the reserved command-palette binding must never be advertised"
     );
 
-    // The four dead actions, named so this test states the fact rather
-    // than only computing it.
+    // The three dead actions remaining, named so this test states the
+    // fact rather than only computing it. RFC-039 PR-039-B gave
+    // `SwitchActiveProject` a real binding (`Ctrl+Alt+N`), removing it
+    // from this list -- RFC-036's dead-action count, four to three.
     for dead in [
-        NavigationAction::SwitchActiveProject,
         NavigationAction::CycleVisibleTerminalSession,
         NavigationAction::OpenDiffReview,
         NavigationAction::OpenSafeCloseDialog,

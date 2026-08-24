@@ -87,37 +87,48 @@ pub struct KeyPress {
 }
 
 /// The shell's own focus zones. PR-015-B shipped a single real variant;
-/// PR-015-E adds `Sidebar`, the scaffolding for RFC-017/019/020's real
-/// sidebar content -- `#[non_exhaustive]` was kept specifically so this
+/// PR-015-E added `Sidebar`, the scaffolding for RFC-017/019/020's real
+/// sidebar content -- `#[non_exhaustive]` was kept specifically so that
 /// addition would not need `route_non_modal_input`'s structure to
 /// change, the same reason `LocalePreference`'s fields exist ahead of
 /// their real callers. It did not; only this enum and its `next`/
-/// `previous` grew.
+/// `previous` grew. RFC-039 PR-039-B adds `TabStrip`, the anticipated
+/// third: this project's own tab strip needs a real focus target
+/// distinct from `MainArea`/`Sidebar` (response 306's own requirement --
+/// a tab must be keyboard-*focusable* independently of which project is
+/// *active*, and the two must remain visually distinguishable at once).
+/// Again, only this enum and its two methods changed;
+/// `route_non_modal_input` did not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FocusZone {
     MainArea,
     Sidebar,
+    TabStrip,
 }
 
 impl FocusZone {
-    /// Two zones, so cycling is a genuine toggle now, not the no-op it
-    /// was with one.
+    /// Three zones now (RFC-039 PR-039-B) -- `TabStrip` inserted after
+    /// `Sidebar`, matching the chrome's own top-to-bottom order (strip
+    /// above content) once cycling wraps back around to `MainArea`.
     pub fn next(self) -> Self {
         match self {
             Self::MainArea => Self::Sidebar,
-            Self::Sidebar => Self::MainArea,
+            Self::Sidebar => Self::TabStrip,
+            Self::TabStrip => Self::MainArea,
         }
     }
 
     pub fn previous(self) -> Self {
-        // Two zones: reverse cycling is identical to forward cycling.
-        // Kept as its own function (not aliased to `next`) so a third
-        // zone later does not need callers of `previous` to notice a
-        // silent behaviour change -- the same reasoning `ModalButton`'s
-        // `next`/`previous` in `shell.rs` already applies to its own
-        // two-item cycle.
-        self.next()
+        // A genuine reverse, not `next`'s own alias, now that three
+        // zones make the two directions actually differ -- this is
+        // exactly the "third zone later" `next`'s own doc comment
+        // anticipated needing a real `previous` for.
+        match self {
+            Self::MainArea => Self::TabStrip,
+            Self::Sidebar => Self::MainArea,
+            Self::TabStrip => Self::Sidebar,
+        }
     }
 }
 

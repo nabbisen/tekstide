@@ -60,8 +60,8 @@ fn action_catalog_key(action: NavigationAction) -> Option<&'static str> {
         NavigationAction::OpenTrustSettings => Some("keyboard-help-open-trust-settings"),
         NavigationAction::OpenHelp => Some("keyboard-help-open-help"),
         NavigationAction::OpenFolderBrowser => Some("keyboard-help-open-folder-browser"),
-        NavigationAction::SwitchActiveProject
-        | NavigationAction::CycleVisibleTerminalSession
+        NavigationAction::SwitchActiveProject => Some("keyboard-help-switch-active-project"),
+        NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenDiffReview
         | NavigationAction::OpenSafeCloseDialog
         | NavigationAction::OpenCommandPalette => None,

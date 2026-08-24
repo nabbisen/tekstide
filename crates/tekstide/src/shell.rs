@@ -762,14 +762,25 @@ pub struct State {
     /// `project_board().rows` -- the direct analogue of
     /// `approval_history_highlight` for a third, independent list.
     /// Moves over every row (active sessions included); only `Enter` on
-    /// a `Recent*`-kind row acts on it (see
-    /// `handle_project_board_row_key`'s own doc for why `ActiveSession`
-    /// rows are inert here rather than switching to them --
-    /// `NavigationAction::SwitchActiveProject` is still out of scope).
-    /// Clamped defensively on every read, the same "not tracked by id"
-    /// limitation `explorer_highlight`/`approval_history_highlight`
-    /// already carry relative to the list changing between key presses.
+    /// a `Recent*`-kind row acts on it -- an `ActiveSession` row is
+    /// already open, so `Enter` on one is still inert here
+    /// (`handle_project_board_row_key`'s own doc); switching to it is
+    /// now RFC-039 PR-039-B's own tab strip, a different control
+    /// entirely, not this one. Clamped defensively on every read, the
+    /// same "not tracked by id" limitation `explorer_highlight`/
+    /// `approval_history_highlight` already carry relative to the list
+    /// changing between key presses.
     project_board_row_highlight: usize,
+    /// RFC-039 PR-039-B: the tab strip's own keyboard cursor -- the
+    /// fourth of this shape (`explorer_highlight`, `approval_history_
+    /// highlight`, `project_board_row_highlight` are the other three).
+    /// Index 0 is the permanent "Projects" home tab; indices `1..=N`
+    /// are the `N` open projects, in `AppState::projects()`'s own
+    /// order. Meaningful only while `focus == FocusZone::TabStrip`
+    /// (`handle_tab_strip_key`'s own guard); left as-is otherwise, the
+    /// same "stale but re-clamped on next use" shape every sibling
+    /// highlight field already has.
+    tab_strip_highlight: usize,
 }
 
 impl State {
@@ -867,6 +878,7 @@ impl State {
             path_field_notice: None,
             path_field_requested: false,
             project_board_row_highlight: 0,
+            tab_strip_highlight: 0,
         }
     }
 
@@ -1075,6 +1087,21 @@ pub enum Message {
     /// one-key reopen (RFC-038's own OQ1: "offering it as one-key
     /// reopen") converge on the exact same setup.
     ReopenRecentProjectRowPressed(tekstide_core::project::ProjectId),
+    /// RFC-039 PR-039-B: a real, clickable tab on the strip -- both this
+    /// arm and `handle_tab_strip_key`'s own `Enter` case (when the
+    /// highlighted item is index `1..=N`, not the home tab) call
+    /// [`switch_to_project_tab`], so a mouse click and the strip's own
+    /// keyboard navigation converge on the exact same setup. Distinct
+    /// from `NavigationAction::SwitchActiveProject`'s global `Ctrl+Alt+N`
+    /// accelerator, which *cycles*; this switches to the one specific
+    /// project the user clicked or highlighted.
+    SwitchActiveProjectTabPressed(tekstide_core::project::ProjectId),
+    /// RFC-039 D1: the strip's permanent leftmost "Projects" tab -- both
+    /// this arm and `handle_tab_strip_key`'s own `Enter` case (when the
+    /// highlighted item is index 0) call [`go_to_project_board`], the
+    /// visible control workflow 5 names, alongside the pre-existing
+    /// `Ctrl+Alt+P` accelerator (unchanged, not replaced).
+    GoToProjectBoardTabPressed,
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -1181,6 +1208,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if action == NavigationAction::OpenFolderBrowser {
                 open_folder_browser(state);
             }
+            // RFC-039 PR-039-B: no single `AppCommand` can express
+            // "switch to the next project" -- *which* project that is
+            // depends on `AppState::projects()`'s own current order and
+            // the currently active id, both shell-layer computations
+            // core has no route/mode command for. The global
+            // accelerator alongside the strip's own real, visible
+            // controls (a tab click, or the strip's own keyboard
+            // navigation) -- `app_command_for`'s own doc on this action
+            // explains why it is not in that function's `Some` group.
+            if action == NavigationAction::SwitchActiveProject {
+                cycle_to_next_active_project(state);
+            }
         }
         Message::Input(RoutedInput::Surface(surface_input)) => {
             // RFC-019 PR-019-B: the explorer tree is the first real
@@ -1190,6 +1229,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // to consume it.
             if surface_input.target() == FocusZone::Sidebar {
                 handle_explorer_key(state, surface_input.key());
+            }
+            // RFC-039 PR-039-B: the tab strip is the first, and so far
+            // only, `TabStrip` consumer -- naturally mutually exclusive
+            // with every `Sidebar`/`MainArea` consumer below, since
+            // `surface_input.target()` is always exactly one zone.
+            if surface_input.target() == FocusZone::TabStrip {
+                handle_tab_strip_key(state, surface_input.key());
             }
             // RFC-019 PR-019-D: the editor is the second real consumer --
             // a key routed to `MainArea` while in Content mode with an
@@ -1360,6 +1406,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::ReopenRecentProjectRowPressed(project_id) => {
             reopen_recent_project(state, &project_id);
+        }
+        Message::SwitchActiveProjectTabPressed(project_id) => {
+            switch_to_project_tab(state, &project_id);
+        }
+        Message::GoToProjectBoardTabPressed => {
+            go_to_project_board(state);
         }
         Message::Input(RoutedInput::FocusNext) => state.focus = state.focus.next(),
         Message::Input(RoutedInput::FocusPrevious) => state.focus = state.focus.previous(),
@@ -2922,6 +2974,105 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
     }
 }
 
+/// RFC-039 PR-039-B: workflow 4 ("Enter a project and work in it"),
+/// reached by clicking a tab or by the strip's own keyboard navigation
+/// landing `Enter` on one -- both converge here. `ApplicationShell::
+/// switch_active_project` is the real state change *and* the route
+/// change that makes it visible (own doc comment); `ensure_explorer_
+/// scanned` afterward matches every other route-changing path in this
+/// function, so entering a project this way primes its explorer cache
+/// exactly as entering it any other way already does. A `project_id`
+/// that no longer names an open project (the strip and the live project
+/// set having somehow diverged between render and this call) is a
+/// silent no-op -- the same precedent `reopen_recent_project`'s own
+/// `FocusedExisting` arm already sets for an equivalent impossible case.
+fn switch_to_project_tab(state: &mut State, project_id: &tekstide_core::project::ProjectId) {
+    let _ = state.app_shell.switch_active_project(project_id);
+    ensure_explorer_scanned(state);
+}
+
+/// RFC-039 D1: workflow 5 ("Return to the entrance"), reached by
+/// clicking the strip's own permanent leftmost tab, by `Enter` with it
+/// highlighted, or by the pre-existing `Ctrl+Alt+P` accelerator
+/// (`app_command_for`'s own `OpenProjectBoard` arm) -- all three
+/// converge on the same `AppCommand::OpenProjectBoard` dispatch, not
+/// three independent copies of it.
+fn go_to_project_board(state: &mut State) {
+    state.app_shell.dispatch(AppCommand::OpenProjectBoard);
+    ensure_explorer_scanned(state);
+}
+
+/// RFC-039 PR-039-B: `Ctrl+Alt+N`'s own handler -- cycles to the next
+/// project in `AppState::projects()`'s own order, wrapping; a no-op
+/// with fewer than two projects open (nothing to cycle to), and starts
+/// from index 0 if, somehow, no project is currently active despite one
+/// being open (defensive; `active_project_id()` should always be `Some`
+/// whenever `projects()` is non-empty, but this function does not rely
+/// on that holding to stay correct).
+fn cycle_to_next_active_project(state: &mut State) {
+    let project_count = state.app_shell.state().projects().len();
+    if project_count < 2 {
+        return;
+    }
+    let current_index = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .and_then(|active_id| {
+            state
+                .app_shell
+                .state()
+                .projects()
+                .iter()
+                .position(|project| project.id() == active_id)
+        });
+    let next_index = match current_index {
+        Some(index) => (index + 1) % project_count,
+        None => 0,
+    };
+    let next_id = state.app_shell.state().projects()[next_index].id().clone();
+    switch_to_project_tab(state, &next_id);
+}
+
+/// RFC-039 PR-039-B: the tab strip's own keyboard navigation --
+/// `ArrowLeft`/`ArrowRight` move `tab_strip_highlight` among the
+/// strip's own items (index 0 is the permanent "Projects" home tab;
+/// indices `1..=N` are the `N` open projects), clamped, not wrapping,
+/// the same shape every other highlight in this crate already uses,
+/// just along the strip's own horizontal axis rather than a vertical
+/// list's. `Enter` activates whichever is highlighted. A no-op outside
+/// `FocusZone::TabStrip` -- this is the zone's own guard, the same
+/// "each MainArea consumer checks its own precondition" shape this
+/// function's siblings use, just for a zone rather than a mode/surface.
+fn handle_tab_strip_key(state: &mut State, key: &input::KeyPress) {
+    if state.focus != FocusZone::TabStrip {
+        return;
+    }
+    let item_count = 1 + state.app_shell.state().projects().len();
+    state.tab_strip_highlight = state.tab_strip_highlight.min(item_count - 1);
+
+    match &key.key {
+        keyboard::Key::Named(keyboard::key::Named::ArrowRight) => {
+            state.tab_strip_highlight = (state.tab_strip_highlight + 1).min(item_count - 1);
+        }
+        keyboard::Key::Named(keyboard::key::Named::ArrowLeft) => {
+            state.tab_strip_highlight = state.tab_strip_highlight.saturating_sub(1);
+        }
+        keyboard::Key::Named(keyboard::key::Named::Enter) => {
+            if state.tab_strip_highlight == 0 {
+                go_to_project_board(state);
+            } else {
+                let index = state.tab_strip_highlight - 1;
+                if let Some(project) = state.app_shell.state().projects().get(index) {
+                    let project_id = project.id().clone();
+                    switch_to_project_tab(state, &project_id);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 /// RFC-038 PR-038-A/B: the Project Board's path field, in both the
 /// places it can appear. Mirrors the shape
 /// [`handle_editor_key`]/[`handle_trust_settings_key`] already establish
@@ -3924,6 +4075,18 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         // alongside this command rather than inside it, the same split
         // `LaunchTerminal` already uses.
         NavigationAction::LaunchAgentRun => Some(AppCommand::LaunchAgentRun),
+        // RFC-039 PR-039-B: not `Some(AppCommand::...)` -- no single core
+        // command can express "switch to the next project", since
+        // *which* project that is depends on `AppState::projects()`'s
+        // own current order and the currently active id, both
+        // shell-layer computations with no route/mode `AppCommand` to
+        // carry them. `update`'s `Shell` arm special-cases it directly
+        // (`cycle_to_next_active_project`), the same "no core route/mode
+        // change through this path" shape `PasteIntoTerminal`/
+        // `SaveActiveDocument` already use, just for a different reason
+        // (theirs need real I/O this function has no room to attempt;
+        // this one needs a target id core cannot compute for itself).
+        NavigationAction::SwitchActiveProject => None,
         // RFC-022 PR-022-D: the route to an already-running run's detail
         // view -- no I/O, so no `update` special-case is needed the way
         // `LaunchAgentRun` above needs one.
@@ -3970,7 +4133,6 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         // state, not a core route/mode change.
         | NavigationAction::OpenFolderBrowser
         | NavigationAction::OpenCommandPalette
-        | NavigationAction::SwitchActiveProject
         | NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenDiffReview
         | NavigationAction::OpenSafeCloseDialog => None,
@@ -4368,12 +4530,11 @@ fn chrome_style(
 /// new needs to be threaded through that composition for the strip to
 /// survive every route/mode the title already does.
 fn top_bar(state: &State) -> Element<'_, Message> {
-    let mut content =
-        column![text(state.window_title()).size(state.theme.font_size_heading())].spacing(6);
-
-    if let Some(strip) = project_tab_strip(state) {
-        content = content.push(strip);
-    }
+    let content = column![
+        text(state.window_title()).size(state.theme.font_size_heading()),
+        project_tab_strip(state),
+    ]
+    .spacing(6);
 
     container(content)
         .width(Length::Fill)
@@ -4386,37 +4547,107 @@ fn top_bar(state: &State) -> Element<'_, Message> {
         .into()
 }
 
-/// RFC-039 PR-039-A: the project tab strip -- read-only this slice (it
-/// shows which projects are open; PR-039-B wires switching and going
-/// home, adding the permanent leftmost "Projects" entry D1 describes,
-/// absent here on purpose). One tab per open project, in
-/// `AppState::projects()`'s own order, the active one distinguished
-/// through two independent channels: `zone_style`'s border treatment
-/// (colour and width, the same focused/unfocused pair every other zone
-/// in this crate already uses) and `focus_marker`'s textual prefix --
-/// RFC-015's own rule that a focus indicator must never depend on
-/// colour alone. Renders nothing when no project is open: there is
-/// nothing yet to show a tab for, and `top_bar` simply omits this row
-/// in that case.
-fn project_tab_strip(state: &State) -> Option<Element<'_, Message>> {
+/// RFC-039 D1/PR-039-B: the project tab strip -- one real, clickable
+/// `iced::widget::button` per open project (in `AppState::projects()`'s
+/// own order), plus a permanent leftmost "Projects" button (workflow 5,
+/// always present, even with no project open -- unlike PR-039-A's own
+/// per-project tabs, which simply have nothing to render for). Both
+/// mouse- and keyboard-operable: a click dispatches directly
+/// (`Message::SwitchActiveProjectTabPressed`/`GoToProjectBoardTabPressed`);
+/// `FocusZone::TabStrip`'s own `Left`/`Right` + `Enter` navigation
+/// (`handle_tab_strip_key`) reaches the exact same [`switch_to_project_tab`]/
+/// [`go_to_project_board`] either way, so a mouse user and a keyboard
+/// user converge on the same setup, the same shape every other
+/// button-plus-accelerator control in this crate already establishes.
+///
+/// **Two independent visual channels, deliberately not one** (response
+/// 306's own required correction to PR-039-A, which had used the same
+/// pair for both): *focus* -- `FocusZone::TabStrip`'s own keyboard
+/// cursor, `tab_strip_highlight` -- keeps `zone_style`'s border
+/// treatment and `focus_marker`'s `"> "` prefix, **unchanged**, since
+/// focus indication must stay one consistent language across the whole
+/// shell. *Active* -- which project is actually current -- moves to a
+/// background-fill channel (`tab_active_style`) plus its own distinct
+/// textual marker (`"\u{25CF} "` active / `"\u{25CB} "` inactive,
+/// [`tab_marker`]), so a tab that is both focused and highlighted *and*
+/// active (the common case) shows both signals at once, legibly,
+/// instead of one meaning silently overwriting the other.
+fn project_tab_strip(state: &State) -> Element<'_, Message> {
     let projects = state.app_shell.state().projects();
-    if projects.is_empty() {
-        return None;
-    }
     let active_id = state.app_shell.state().active_project_id();
+    let strip_focused = state.focus == FocusZone::TabStrip;
+    let highlight = state.tab_strip_highlight.min(projects.len());
 
-    let tabs: Vec<Element<'_, Message>> = projects
-        .iter()
-        .map(|project| {
-            let active = Some(project.id()) == active_id;
-            container(text(tab_label(project, active)).size(state.theme.font_size_body()))
-                .padding(6)
-                .style(zone_style(state.theme, active))
-                .into()
-        })
-        .collect();
+    let home_active = state.app_shell.route() == tekstide_core::route::AppRoute::ProjectBoard;
+    let home_focused = strip_focused && highlight == 0;
+    let home_tab = button(
+        text(home_tab_label(&state.catalog, home_active, home_focused))
+            .size(state.theme.font_size_body()),
+    )
+    .padding(6)
+    .style(tab_active_style(state.theme, home_focused, home_active))
+    .on_press(Message::GoToProjectBoardTabPressed);
 
-    Some(row(tabs).spacing(4).into())
+    let mut tabs: Vec<Element<'_, Message>> = vec![home_tab.into()];
+    tabs.extend(projects.iter().enumerate().map(|(index, project)| {
+        let active = Some(project.id()) == active_id;
+        let focused = strip_focused && highlight == index + 1;
+        button(text(project_tab_label(project, active, focused)).size(state.theme.font_size_body()))
+            .padding(6)
+            .style(tab_active_style(state.theme, focused, active))
+            .on_press(Message::SwitchActiveProjectTabPressed(project.id().clone()))
+            .into()
+    }));
+
+    row(tabs).spacing(4).into()
+}
+
+/// **Two independent visual channels** (see [`project_tab_strip`]'s own
+/// doc for the full reasoning): border colour/width for `focused` --
+/// the same `border_focused`/`border_default` and `2.0`/`1.0` values
+/// `zone_style` itself uses, not reused directly only because `iced`
+/// gives `button`/`container` distinct `Style` types with no shared
+/// trait between them -- and background fill for `active`. A project
+/// that is both, the common case, shows both without either
+/// overwriting the other.
+fn tab_active_style(
+    theme: Theme,
+    focused: bool,
+    active: bool,
+) -> impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style {
+    move |_base_theme: &iced::Theme, _status: iced::widget::button::Status| {
+        iced::widget::button::Style {
+            background: Some(Background::Color(if active {
+                theme.surface_elevated()
+            } else {
+                theme.background()
+            })),
+            text_color: theme.foreground(),
+            border: Border {
+                color: if focused {
+                    theme.border_focused()
+                } else {
+                    theme.border_default()
+                },
+                width: if focused { 2.0 } else { 1.0 },
+                radius: 0.0.into(),
+            },
+            ..iced::widget::button::Style::default()
+        }
+    }
+}
+
+/// The active-project marker, textually independent of [`focus_marker`]
+/// -- `"\u{25CF} "` (a filled circle) for the active project, `"\u{25CB} "`
+/// (a hollow one) otherwise, so a screen or terminal that cannot render
+/// colour still shows which channel means what: `focus_marker`'s `"> "`/
+/// `"  "` prefix for keyboard focus, this one for which project is
+/// actually active. Composed with `focus_marker` by the two callers
+/// ([`project_tab_label`], [`home_tab_label`]), never used alone --
+/// there is always a focus state to render alongside an active one.
+fn tab_marker(focused: bool, active: bool) -> String {
+    let active_symbol = if active { '\u{25CF}' } else { '\u{25CB}' };
+    format!("{}{active_symbol} ", focus_marker(focused))
 }
 
 /// The strip's own bound -- shorter than
@@ -4429,24 +4660,43 @@ fn project_tab_strip(state: &State) -> Option<Element<'_, Message>> {
 /// truncating after escaping could cut one in half.
 const MAX_TAB_NAME_DISPLAY_CHARS: usize = 24;
 
-/// A tab's own rendered label -- the marker plus the escaped, bounded
-/// display name -- factored out from [`project_tab_strip`] for the same
-/// testability reason every other rendered-string function in this
-/// crate already is: the rendered string, not the `Element` tree.
+/// A project tab's own rendered label -- the marker plus the escaped,
+/// bounded display name -- factored out from [`project_tab_strip`] for
+/// the same testability reason every other rendered-string function in
+/// this crate already is: the rendered string, not the `Element` tree.
 /// `project.display_name()` is filesystem-derived and untrusted
 /// (RFC-016), the same discipline `board::row_lines` already applies to
 /// the identical field on the Project Board -- this is trusted chrome
 /// (the top bar), not the RFC-016 terminal-grid exception, so escaping
 /// is required here too
 /// (`what-closing-a-project-must-not-lose.md` §5, D3).
-pub(crate) fn tab_label(project: &tekstide_core::project::ProjectSession, active: bool) -> String {
+pub(crate) fn project_tab_label(
+    project: &tekstide_core::project::ProjectSession,
+    active: bool,
+    focused: bool,
+) -> String {
     let raw_name = project.display_name();
     let mut truncated: String = raw_name.chars().take(MAX_TAB_NAME_DISPLAY_CHARS).collect();
     if raw_name.chars().count() > MAX_TAB_NAME_DISPLAY_CHARS {
         truncated.push('\u{2026}');
     }
     let quoted = tekstide_core::text_safety::quote_untrusted(&truncated);
-    format!("{}{}", focus_marker(active), quoted)
+    format!("{}{quoted}", tab_marker(focused, active))
+}
+
+/// The permanent leftmost "Projects" tab's own label -- trusted,
+/// catalog-driven text (D1's own workflow 5 name), not filesystem-
+/// derived, so unlike [`project_tab_label`] it is never escaped: there
+/// is nothing untrusted in it to escape. `active` is true exactly when
+/// `route() == ProjectBoard` -- the same "which one are you looking at"
+/// honesty every other active/focus marker in this strip gives a real
+/// project.
+pub(crate) fn home_tab_label(catalog: &Catalog, active: bool, focused: bool) -> String {
+    format!(
+        "{}{}",
+        tab_marker(focused, active),
+        catalog.get("project-tab-strip-home")
+    )
 }
 
 /// The route symbol `status_bar_summary` selects on -- a compile-time
