@@ -35,6 +35,20 @@ Immersion, showing it survives both.
 
 ## PR-039-B — the strip acts: switch, and go home
 
+**Carried in from PR-039-A's review (request 306): separate "active" from "focused".**
+PR-039-A renders the active project with `zone_style` + `focus_marker` — this shell's **focus**
+indicators, the same pair the sidebar and main-area zones use. Harmless while the strip is
+read-only. The moment tabs are keyboard-operable, a user tabbing to a non-active project must
+see where their keyboard is, and "focused tab" and "active project" would render identically —
+on the first `Tab` press, not in some corner case.
+
+**Focus keeps `zone_style` + `focus_marker` unchanged** — focus indication stays consistent
+across the whole shell, because a user learns that border means "where my keyboard is".
+**Active-project moves to a different channel**, your choice of which, non-colour-only per
+RFC-015, and legible when a tab is both active and focused. **Evidence: a screenshot of a tab
+focused but not active, beside the active one** — that frame is the proof, and string-level
+tests cannot supply it.
+
 **Build:** activating a tab switches to that project. A permanent leftmost **Projects** entry
 returns to the board. Both mouse- and keyboard-operable.
 
