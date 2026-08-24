@@ -13,11 +13,21 @@ Every unchecked line at closeout carries a stated reason.
 
 ## The acceptance criterion
 
-- [ ] **A person who has read nothing opens two projects, moves between them, closes one, and
-      returns to the board — using only what the window shows them.**
-- [ ] Every workflow claimed as served names **the control the user sees**, not the keystroke
-      that also works.
-- [ ] Proven from real events through production code, with a cold-start capture.
+- [x] **A person who has read nothing opens two projects, moves between them, closes one, and
+      returns to the board — using only what the window shows them.** `qa-evidence.md`'s own
+      "RFC-039's acceptance criterion, answered in its own words" -- every step in this sentence
+      has a real, clicked-in-live-evidence control across PR-039-A/B/C.
+- [x] Every workflow claimed as served names **the control the user sees**, not the keystroke
+      that also works. True of everything PR-039-A/B/C themselves built. **Not** true of the wider
+      application -- `affordance-audit.md`'s Finding 2 found nine live, pre-existing actions this
+      RFC did not touch with no visible control at all. Answered for what shipped, not as a claim
+      about the whole product; see `qa-evidence.md`'s own worded answer and the "Known
+      limitations" section below.
+- [x] Proven from real events through production code, with a cold-start capture. Every
+      PR-039-A/B/C screenshot is a real `xdotool`/`niri`/`wl-paste` capture against the real
+      release binary launched cold, never a description of intended behaviour -- including the two
+      cases (PR-039-B, PR-039-C) where a capture needed correction, disclosed rather than silently
+      replaced.
 
 ## The strip
 
@@ -86,18 +96,41 @@ Every unchecked line at closeout carries a stated reason.
 
 ## The affordance audit
 
-- [ ] Every `NavigationAction` listed against the visible control that invokes it.
-- [ ] Every capability a user is expected to perform listed the same way.
-- [ ] Anything with no control **reported as a finding**, not given a keybinding.
+- [x] Every `NavigationAction` listed against the visible control that invokes it. All seventeen
+      `linux_mvp()` rules, in `affordance-audit.md`'s Finding 2 table (thirteen live) plus
+      Findings 3-5 (the four dead/reserved).
+- [x] Every capability a user is expected to perform listed the same way. The application's
+      *entire* mouse-clickable inventory (ten `.on_press` sites, the complete set — verified by
+      grep, not sampled) cross-referenced against both `NavigationAction` and every modal's own
+      decision (`affordance-audit.md`'s Finding 1).
+- [x] Anything with no control **reported as a finding**, not given a keybinding. Nine live
+      actions and all nine modals' own decisions -- reported in `affordance-audit.md`, nothing
+      quietly wired.
 
 ## Closeout
 
-- [ ] Every ablation single-variable, unit being the design decision.
-- [ ] Flakes checked against `test-process-leak.md` before reporting.
-- [ ] Statements this work falsifies — README, `--help` — corrected in the slice that falsified
-      them.
-- [ ] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`.
-- [ ] Known limitations stated.
+- [x] Every ablation single-variable, unit being the design decision. Listed per-PR in
+      `qa-evidence.md`: PR-039-A's marker/colour independence, PR-039-B's `Ctrl+Alt+N` collision
+      and `tab_marker` independence, PR-039-C's `set_file_state` recovery symmetry.
+- [x] Flakes checked against `test-process-leak.md` before reporting.
+      `command_approval_family_produces_real_durable_audit_records_through_the_pipeline` is
+      already one of that document's own four named tests; this session's own recurrence is
+      recorded in PR-039-C's `qa-evidence.md` section as a *distinct, now-confirmed* mechanism
+      (a shared-`AuditStore` query race, not the `Child::drop` leak), per response 312's own
+      instruction not to fold the two together.
+- [x] Statements this work falsifies — README, `--help` — corrected in the slice that falsified
+      them. README: the "no safe-close dialog" / "safe-close dialog does not exist yet" claims,
+      the safe-close audit-producer claim, the modal-layer enumeration (four → six, and the new
+      keyboard-only-decision limitation), the keybinding table (missing `Ctrl+Alt+N`), and a new
+      bullet for the tab strip itself, none of which existed in the README before this RFC.
+      `--help` (`keyboard_help::usage_text`) is generated mechanically from `linux_mvp()`, already
+      covered by `keyboard_help::tests::usage_text_lists_every_binding_the_gui_lists`; no manual
+      edit needed or made.
+- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. 383 tekstide + 734
+      tekstide-core, three consecutive clean runs of the full default command (response 313's own
+      verification), all clean.
+- [x] Known limitations stated. `qa-evidence.md`'s own "Known limitations (RFC-039-wide)" section,
+      citing `affordance-audit.md` throughout.
 
 ## Final Acceptance Decision
 

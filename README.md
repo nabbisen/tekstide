@@ -40,6 +40,10 @@ switching. It includes:
   indicator, i18n-backed text and a compiled theme, and a Project Board surface
   rendering live `ApplicationShell` state with untrusted project names and paths
   escaped, never trusted;
+- multiple projects open at once, with a real project tab strip (RFC-039, M12): click
+  a tab or press `Ctrl+Alt+N` to switch, click `×` to close (naming a live-work count
+  and the canonical path when there is something to lose, closing directly when there
+  is not), a permanent tab back to the Project Board;
 - Content ↔ Terminal mode switching for an active project, with a real,
   user-reachable terminal (`Ctrl+Alt+T`): a security-filtered PTY session
   rendering real output, with a bounded terminal-count limit and exit
@@ -165,7 +169,10 @@ does and does not reach. What `0.11.0`'s change detection changed is the
 reason diff review is now **buildable, not reachable** — the input is there,
 the change-review surface itself is not. There
 is also no Git-based change detection, file watcher, or overwrite-confirmation
-UI, no safe-close dialog, and no cross-platform evidence beyond Linux. The **approval-history surface** built in `0.10.0` now opens
+UI, and no cross-platform evidence beyond Linux. RFC-039 (M12) built a real
+close-confirmation dialog — `×` on a project tab, naming live-work counts and
+the canonical path when there is something to lose, closing directly when
+there is not. The **approval-history surface** built in `0.10.0` now opens
 (`Ctrl+Alt+H`), but that makes only the *surface* reachable, not command
 approval itself: no shipping AI CLI speaks RFC-021's protocol, so
 `Managed` command approval is still exercisable only by this project's own
@@ -198,8 +205,10 @@ producer for the first time: granting or revoking workspace trust writes to the 
 RFC-031 (PR-031-A/B) added the restricted-feature producer (a real launch refused for
 lacking workspace-discovery trust) and the project-added producer (a real project
 opened from the CLI-argument path, distinct from a remembered project merely restored
-on boot, which writes nothing). Safe-close, configuration-change, and transcript-purge
-producers are defined in the audit schema but not yet wired.
+on boot, which writes nothing). RFC-039 (M12) wired the safe-close producer: closing a
+project with live terminals or an active agent run records the decision, both outcomes
+(closed and cancelled). Configuration-change producers remain defined in the audit
+schema but not yet wired.
 
 ### Command approval
 
@@ -274,6 +283,7 @@ The shell is keyboard-navigable by design. These bindings exist today
 | Binding | Action |
 | --- | --- |
 | `Ctrl+Alt+P` | Open the Project Board |
+| `Ctrl+Alt+N` | Switch to the next open project, cycling with wraparound (RFC-039) |
 | `Ctrl+Alt+O` | Open a field to type or paste a project path (RFC-038) |
 | `Ctrl+Alt+B` | Open a folder browser to choose a project without typing a path (RFC-038) |
 | `Ctrl+Alt+M` | Toggle Content / Terminal mode for the active project |
@@ -299,12 +309,16 @@ main area, typing edits the open document at the real cursor position, `Up`/
 and `Backspace` deletes the character before the cursor.
 
 `Esc` (dismiss) and `Enter` (activate) work on the shell's modal layer — real
-today for the paste-confirmation, file-changed-on-disk, workspace-trust, and
-command-approval dialogs (RFC-018, RFC-019, RFC-032, RFC-022); the
-developer-only demo modal gated behind an environment variable still exists
-too. Of those four, only the approval dialog is unreachable in practice, and
-because no AI CLI speaks the protocol that would raise it — not because it is
-unbuilt. The safe-close dialog does not exist yet.
+today for the paste-confirmation, file-changed-on-disk, workspace-trust,
+transcript-purge, command-approval, and project-close dialogs (RFC-018,
+RFC-019, RFC-032, RFC-033, RFC-022, RFC-039); the developer-only demo modal
+gated behind an environment variable still exists too. Of those six, only the
+approval dialog is unreachable in practice, and because no AI CLI speaks the
+protocol that would raise it — not because it is unbuilt. Every modal here,
+including the project-close dialog, is reachable and completable by keyboard
+only — its own decision buttons are not yet mouse-clickable, a known,
+disclosed limitation (`rfcs/handoffs/039-interaction-model-and-visible-affordances/affordance-audit.md`),
+not particular to any one of them.
 
 ## Local Data and Privacy
 

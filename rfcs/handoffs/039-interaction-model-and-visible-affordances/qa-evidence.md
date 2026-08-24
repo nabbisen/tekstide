@@ -420,8 +420,84 @@ screenshot-window`/`wl-paste` capture method every prior slice established.
 
 ## PR-039-D — affordance audit and closeout
 
-_Pending._
+**Build nothing. Find things** — per the task breakdown, no code changes in this section. Full
+findings, with the exhaustive method behind each, in
+[`affordance-audit.md`](./affordance-audit.md). Summary:
+
+- **Every one of this crate's nine modals has zero mouse-clickable controls for its own
+  decision** -- `Approve`/`Reject`, `Grant`/`Cancel`, `Purge`/`Cancel`, `Reload`/`Dismiss`,
+  `Close`/`Cancel`, the folder browser's own row navigation, all plain `text`, keyboard-only.
+  Confirmed by direct inspection of every modal's own view function (`button(` count: 0, in all
+  nine, no exception). Generalizes response 312's own question about `ProjectCloseModal`
+  specifically to the whole crate.
+- **Nine of thirteen live global actions have no visible control anywhere in the
+  application** -- `ToggleProjectMode`, `LaunchTerminal`, `PasteIntoTerminal`,
+  `SaveActiveDocument`, `LaunchAgentRun`, `OpenCurrentAgentRunDetail`, `OpenApprovalHistory`,
+  `OpenTrustSettings`, `OpenHelp`, and (more defensibly, since `OpenFolderBrowser`'s own button
+  already serves the underlying workflow) `OpenProjectEntryField`. Confirmed against the
+  application's *entire* mouse-clickable inventory -- ten `.on_press` call sites, full stop,
+  verified by grep across every file in the crate. `OpenProjectBoard`, `SwitchActiveProject`, and
+  `OpenFolderBrowser` are the only three of thirteen with one.
+- **`OpenSafeCloseDialog` stays dead, now for a sharper reason**: PR-039-C built the real
+  capability its name promises, wired to `×` instead of to this action.
+- **`CycleVisibleTerminalSession`/`OpenDiffReview`** remain dead, unchanged, exactly the task
+  breakdown's own starting point.
+- **`OpenCommandPalette`** stays `Reserved`, nothing behind it, unchanged.
+- **Nine tests share the exact query-race shape response 312 found and fixed five instances
+  of** (`AuditQuery::latest(50)` plus a client-side project filter, against the crate's one real,
+  shared `AuditStore`) -- named by test, not only by line number, in the audit document per
+  response 312's own instruction. Not converted here: the choice between converting all nine,
+  recording the risk, or making the store per-test is a real decision, not a mechanical follow-up.
+
+None of the above is new code; nothing in this section changes gates, tests, or live evidence
+already recorded for PR-039-A through PR-039-C.
+
+## RFC-039's acceptance criterion, answered in its own words
+
+*"A person who has read nothing opens two projects, moves between them, closes one, and returns
+to the board — using only what the window shows them."* Yes, for exactly this scenario: the
+Project Board's own "Browse..." button opens a project (PR-038-G); the tab strip's own per-project
+tabs move between open projects (PR-039-B); `×` on a tab closes it, with a real, visible
+confirmation naming counts and the canonical path when there is live work to lose (PR-039-C); the
+permanent leftmost "Projects" tab returns to the board (PR-039-A/B). Every step in this specific
+sentence has a real, clicked-in-live-evidence control — `before-cold-start-two-tabs.png` through
+`after-clicking-close-on-idle-project.png`/`after-confirmed-close-real-termination.png` across
+PR-039-A/B/C's own evidence directories.
+
+*"Every workflow claimed as served names the control the user sees, not the keystroke that also
+works."* True of every workflow this RFC's own three build slices (A/B/C) actually built. **Not**
+true of the wider application -- the affordance audit above found nine live, pre-existing actions
+this RFC did not touch that have no visible control at all. This criterion is answered for what
+RFC-039 shipped, not as a claim about the whole product; the audit is what keeps that distinction
+honest rather than implicit.
+
+*"Proven from real events through production code, with a cold-start capture."* Every PR-039-A/B/C
+screenshot is a real `xdotool`/`niri`/`wl-paste` capture against the real release binary, launched
+cold with real CLI-argument projects -- never a description of intended behaviour. Each PR's own
+`qa-evidence.md` section states its capture command and, where a capture needed correction (the
+two synthetic-focus-quirk cases in PR-039-B/C's own sections), the correction rather than a
+silently replaced file.
 
 ## Known limitations (RFC-039-wide)
 
-_Pending._
+- **Nine of the application's thirteen live global actions have no visible control** --
+  `affordance-audit.md`'s Finding 2, table and both notes. Out of this RFC's own fix-scope (it
+  built the tab strip and the close flow, not a whole-application affordance pass); recorded so it
+  is a stated limitation, not a silent gap.
+- **Every modal in the crate is keyboard-only for its own decision, including the three this RFC
+  built or touched** (`TranscriptPurge`'s pre-existing shape, and the new `ProjectClose`) --
+  `affordance-audit.md`'s Finding 1. A user who reaches a modal by mouse (clicking `×`, "Browse...",
+  the Trust Settings buttons) cannot complete or cancel it without a keyboard. Disclosed rather
+  than fixed quietly in PR-039-C, per response 312's own instruction that this is an audit finding,
+  not a cleanup commit.
+- **Nine tests share an unaddressed query-race shape** against the crate's one real, shared
+  `AuditStore` -- `affordance-audit.md`'s Finding 6, named by test. PR-039-C's own five instances
+  of the identical shape are fixed; these nine pass today but are not proven robust against the
+  same failure under sufficient concurrent audit-store traffic.
+- **`OpenSafeCloseDialog` remains a dead action** even though the capability it names now exists,
+  reachable through `×` rather than through this `NavigationAction` -- `affordance-audit.md`'s
+  Finding 3. Whether it should gain a binding as a coarser accelerator (the same shape
+  `SwitchActiveProject` has for the tab strip) is an open design question, not decided here.
+- **`CycleVisibleTerminalSession`/`OpenDiffReview` remain dead**, and **`OpenCommandPalette`
+  remains `Reserved` with nothing behind it** -- unchanged by this RFC, restated for completeness
+  rather than re-discovered.
