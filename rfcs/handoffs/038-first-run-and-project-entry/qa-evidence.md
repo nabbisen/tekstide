@@ -221,12 +221,107 @@ PR-038-A.
   `evidence/pr-038-b/after-second-project-added.png` -- both projects now on the board (`1
   project` → `2 projects` in the status bar), field gone again.
 
-**Scope discipline.** `boot()`'s CLI argument handling untouched. PR-038-C (standalone help
-surface), PR-038-D (recent projects), and PR-038-E (closeout) remain unstarted.
+**Scope discipline.** `boot()`'s CLI argument handling untouched. PR-038-C (below) touches
+`keyboard_help` and the board's own render arms, deliberately, as its own separately-reviewed
+slice.
 
 ## PR-038-C — the help surface
 
-_Pending._
+**Build.** A modal (`ModalContent::Help`, `Ctrl+Alt+K`), reachable from anywhere -- global
+keybindings are matched before terminal focus or shell zone are even consulted, and the modal
+composes in `view()` regardless of `AppRoute`/`ProjectMode`. Renders
+`keyboard_help::keyboard_help_lines` directly (no second list), in a `modal_dialog_box`, no
+buttons -- `ModalFocusNext`/`ModalFocusPrevious`/`ModalActivate` are all no-ops against it (the
+first two truly no-op, `ModalActivate` closes it the same way every other modal's "no real
+decision for this focus" arm already does); only `Escape` (`ModalDismiss`, already generic
+across every `ModalContent` variant) does anything.
+
+Removed the keyboard list from the Project Board entirely -- both the empty-state and populated
+arms (`board.rs`'s own `keyboard_help_view` function and its two call sites deleted, along with
+`project-board-empty-keyboard-heading`, now unused).
+
+**Gates.** `cargo build`, `cargo test --workspace --all-targets --all-features` (334 tekstide +
+716 tekstide-core, up from 330/715; 0 failed), `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`, `git diff --check` --
+all clean.
+
+**Mechanically unclaimed, not by inspection.**
+`navigation::tests::open_help_shortcut_is_a_candidate_that_collides_with_no_other_rule`, same
+shape as PR-038-B's own. **Ablated**: changed the binding to `Ctrl+Alt+H` (colliding with
+`OpenApprovalHistory`) -- test failed; reverted.
+
+**The catalog key and the count.** `action_catalog_key`'s exhaustive match gained
+`OpenHelp => Some("keyboard-help-open-help")` -- `action_catalog_key_is_some_iff_the_action_is_live`
+covers it automatically. `every_live_binding_is_described_to_the_user` and
+`advertised_bindings_are_exactly_the_live_ones` both updated from ten to **eleven**
+deliberately.
+
+**The replacement guard -- task breakdown's own instruction: "must be replaced, not deleted."**
+`board::tests::every_board_state_renders_the_keyboard_list`'s own property (every arm of
+`board::view` shows the keyboard list) no longer applies: no arm shows it any more,
+deliberately. Replaced with two halves:
+
+- Negative, in `board/tests.rs`:
+  `this_surface_no_longer_references_the_keyboard_list_at_all` -- board.rs's source text
+  contains neither `keyboard_help_lines` nor `keyboard_help_view`. **Ablated**: temporarily
+  reintroduced a dead call to `keyboard_help::keyboard_help_lines` in `board::view`'s first
+  line -- test failed; reverted.
+- Positive, in `shell/tests.rs`:
+  `opening_help_through_a_real_key_event_shows_every_live_binding` -- a real `Ctrl+Alt+K` key
+  event opens the modal, whose data source lists every live binding (the same count
+  `every_live_binding_is_described_to_the_user` establishes for that source directly). **Ablated**
+  (single-variable: only the `state.modal = Some(ModalContent::Help)` assignment guarded behind
+  `if false &&`, nothing else touched): both this test and
+  `ctrl_alt_k_opens_help_from_inside_terminal_immersion` failed (`None`, modal never opened);
+  reverted, re-ran green.
+
+Also: `help_modal_view_reuses_the_shared_keyboard_help_derivation_not_a_second_list` -- source-text
+proof `help_modal_view` calls the shared `keyboard_help_lines`, satisfying the task breakdown's
+"reuse `keyboard_help`; do not build a second list" directly, not only by review.
+
+**Reachable from Terminal Immersion -- the case `0.12.1` left unserved, named explicitly in the
+task breakdown.**
+`shell::tests::ctrl_alt_k_opens_help_from_inside_terminal_immersion` -- a real project, real
+`ToggleActiveProjectMode` dispatch into genuine Terminal Immersion mode, then a real `Ctrl+Alt+K`
+-- the modal opens. Live, in the capture below: cold start, then `Ctrl+Alt+K`, then `Escape`
+(Terminal Immersion itself not separately screenshotted this slice -- the unit test above is the
+proof for that specific route; the live capture proves the modal renders correctly and
+dismisses cleanly).
+
+**Live, against the release binary**: `cargo build --release -p tekstide`, launched
+`env -u WAYLAND_DISPLAY XDG_STATE_HOME=<mktemp -d> ./target/release/tekstide`, no arguments.
+
+- `evidence/pr-038-c/before-cold-start-no-keyboard-list.png` -- the empty board; confirms the
+  keyboard list is genuinely gone, not merely untested-for.
+- Real `Ctrl+Alt+K` (`xdotool key --window <id> --clearmodifiers ctrl+alt+k`):
+  `evidence/pr-038-c/after-help-modal-open.png` -- all eleven bindings, scrim visible, board
+  dimmed beneath -- trusted chrome over untrusted-nothing (no project names in this capture, but
+  the scrim/composition is the same `stack![base, opaque(scrim)]` every other modal uses).
+- Real `Escape`: `evidence/pr-038-c/after-escape-closes-help.png` -- back to the plain empty
+  board, nothing left behind.
+
+**A significant environmental finding this slice's own testing surfaced, disclosed rather than
+worked around.** Running the full suite repeatedly hit `PTY exhaustion (os error 28, "No space
+left on device")`, cascading into ~70 unrelated test failures across the terminal/approval
+subsystems. Traced to **~4023 orphaned, idle `/bin/sh` processes** (`PS1=tekstide$`, reparented
+to `systemd --user`, ages from 72 seconds to ~2.5 hours), confirmed via `/proc/<pid>/environ`
+and `/proc/<pid>/fd` before any cleanup. This is `test-process-leak.md`'s own documented
+`Child::drop`-does-not-kill defect, but for a code path that fix's own evidence explicitly
+scoped out: `runtime/terminal/launch.rs`, the *production* real-shell-spawn path
+`shell/tests.rs`'s many real-terminal tests exercise directly. A panicking terminal test leaks
+its spawned shell exactly as approval-family tests did before `KillOnDropChild`; this appears to
+have accumulated silently across this session's many test runs until it exhausted the
+system-wide PTY pool (a shared, hard-capped OS resource, unlike the approval leak's effect on
+`bind_recovers_from_a_stale_socket_file` alone).
+
+Cleaned up with the human owner's explicit authorization, after investigation and a first pass
+at `SIGTERM` (silently ignored by these shells -- confirmed via `SigIgn`, bit 14 set --
+`SIGKILL` used instead): PTY count recovered from 4096/4096 to single digits, all 334 + 716
+tests then passed cleanly. **Not fixed at its source this slice** -- that is core work
+(`runtime/terminal/launch.rs` needs the same `KillOnDropChild` treatment
+`test-process-leak.md`'s evidence already gave `approval::tests`' two call sites), out of
+PR-038-C's own scope, and is not this slice's to silently absorb. Flagged for the architect's
+decision on where it belongs -- a new PR, or folded into `test-process-leak.md`'s own tracking.
 
 ## PR-038-D — recent projects
 
@@ -238,10 +333,8 @@ _Pending._
 
 ## Known limitations (RFC-038-wide)
 
-As of PR-038-A/B:
+As of PR-038-A/B/C:
 
-- **No help surface independent of the board.** A user inside Terminal Immersion still needs
-  `Ctrl+Alt+P` first, same as before this slice. PR-038-C.
 - **No recent-projects reopen.** A previously-opened project not currently on the board must be
   retyped by path; `restore_recent_projects`'s data remains unread by any surface for this
   purpose. PR-038-D.
@@ -254,6 +347,10 @@ As of PR-038-A/B:
   (`AppState::add_project_session`), inherited rather than special-cased around. Switching
   requires `NavigationAction::SwitchActiveProject`, still `Configurable`/`None` and unrelated to
   this RFC's own scope (see PR-038-B's own qa-evidence.md section).
+- **`runtime/terminal/launch.rs`'s real shell-spawn path still leaks a process when a caller
+  panics** -- the `Child::drop` defect `test-process-leak.md` documents for two `approval::tests`
+  call sites, present here too and out of scope for either fix. Discovered and disclosed this
+  slice (PR-038-C's own qa-evidence.md section); not fixed at its source.
 - Unchanged from `0.12.1`: the configuration system loads nothing, no screen-reader support, no
   cross-platform evidence beyond Linux, the real Claude Code CLI never exercised by the test
   suite, `NFR-PERF-004` still unverified.

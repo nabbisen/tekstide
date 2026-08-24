@@ -53,17 +53,11 @@ use tekstide_core::project_board::{
 };
 use tekstide_core::text_safety;
 
-use iced::widget::{column, container, row, text};
+use iced::widget::{column, container, text};
 use iced::{Element, Length};
 
 use crate::i18n::{Catalog, CatalogArgs};
 use crate::theme::Theme;
-
-/// Width of the binding column in the empty state's keyboard list, so
-/// the descriptions line up. Fixed rather than derived from text
-/// measurement: the longest binding the policy can produce today is
-/// `Ctrl+Shift+V` (12 characters) and this is comfortably wider.
-const KEYBOARD_HELP_BINDING_COLUMN_PX: f32 = 110.0;
 
 pub fn view<'a, Message: 'a>(
     view_model: &ProjectBoardViewModel,
@@ -101,14 +95,6 @@ pub fn view<'a, Message: 'a>(
         ));
     }
 
-    // The keyboard list is rendered here too, not only in the empty
-    // state. Shipping it only when the board is empty would have made
-    // help disappear at the exact moment a user started using the
-    // product -- and the Project Board is where the status bar's hint
-    // sends them, so it has to be here whether or not any project is
-    // open.
-    sections.push(keyboard_help_view(catalog, theme));
-
     container(column(sections).spacing(20))
         .width(Length::Fill)
         .height(Length::Fill)
@@ -116,48 +102,20 @@ pub fn view<'a, Message: 'a>(
         .into()
 }
 
-/// The keyboard list, shared by the empty state and the populated board
-/// so the two cannot drift. Derived from `KeybindingPolicy` -- see
-/// `keyboard_help`'s module doc.
-fn keyboard_help_view<'a, Message: 'a>(
-    catalog: &'a Catalog,
-    theme: &'a Theme,
-) -> Element<'a, Message> {
-    let mut lines = column![
-        text(catalog.get("project-board-empty-keyboard-heading")).size(theme.font_size_heading()),
-    ]
-    .spacing(6);
-
-    // `binding` is a `&'static str` from the policy (trusted, fixed-set,
-    // not filesystem-derived), so it is rendered as-is; `description`
-    // comes from the catalog. Neither is untrusted text, so neither is
-    // routed through `text_safety::quote_untrusted` -- unlike every
-    // project field this surface renders elsewhere.
-    for line in crate::keyboard_help::keyboard_help_lines(catalog) {
-        lines = lines.push(
-            row![
-                text(line.binding)
-                    .size(theme.font_size_body())
-                    .width(Length::Fixed(KEYBOARD_HELP_BINDING_COLUMN_PX)),
-                text(line.description).size(theme.font_size_body()),
-            ]
-            .spacing(8),
-        );
-    }
-
-    lines.into()
-}
-
 /// What a first-time user sees, and until `0.12.1` the whole reason the
 /// product looked broken: this rendered "Add Project" and "Open from
 /// path" as inert `text()` widgets for two actions that do not exist,
 /// while naming none of the nine live keybindings. `0.12.1` said how a
-/// project actually gets opened and listed every binding, derived.
-/// RFC-038 PR-038-A adds the missing action itself: a path field,
-/// focused by construction (there is nothing else in `MainArea` to
-/// route a keystroke to while the board is empty --
+/// project actually gets opened and listed every binding, derived, on
+/// this surface itself. RFC-038 PR-038-A added the missing action: a
+/// path field, focused by construction (there is nothing else in
+/// `MainArea` to route a keystroke to while the board is empty --
 /// `shell::handle_project_board_path_field_key`'s own doc explains why
-/// no separate "is this focused" state is needed).
+/// no separate "is this focused" state is needed). RFC-038 PR-038-C then
+/// moved the keyboard list itself off this surface entirely, into
+/// `shell::help_modal_view` (`Ctrl+Alt+K`, reachable from anywhere) --
+/// RFC-039's own principle that reference material does not live on a
+/// working surface. This board no longer renders any binding.
 ///
 /// **Not `iced::widget::text_input`.** This project routes every
 /// keystroke through one reviewed router (`input::route_non_modal_input`)
@@ -182,15 +140,13 @@ fn empty_state_view<'a, Message: 'a>(
     path_field: &'a str,
     path_field_notice: Option<String>,
 ) -> Element<'a, Message> {
-    let mut lines = column![
+    let lines = column![
         text(catalog.get("project-board-empty-heading")).size(theme.font_size_heading()),
         text(catalog.get("project-board-empty-open-a-project")).size(theme.font_size_body()),
         text(catalog.get("project-board-empty-command-example")).size(theme.font_size_body()),
         path_field_section(catalog, theme, path_field, path_field_notice),
     ]
     .spacing(6);
-
-    lines = lines.push(keyboard_help_view(catalog, theme));
 
     container(lines)
         .width(Length::Fill)

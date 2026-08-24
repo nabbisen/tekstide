@@ -8169,3 +8169,108 @@ fn the_path_field_hint_names_the_paste_gesture_that_actually_works_here() {
          rest of the product teaches (Ctrl+Shift+V): {hint:?}"
     );
 }
+
+// RFC-038 PR-038-C: the Help modal, reachable from anywhere.
+
+fn press_ctrl_alt_k(state: &mut State) {
+    let shell_input =
+        crate::input::shell_input_for_test(tekstide_core::navigation::NavigationAction::OpenHelp);
+    let _ = super::update(
+        state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+}
+
+/// The replacement for `board::tests::every_board_state_renders_the_
+/// keyboard_list`'s own property (RFC-038 PR-038-C's task breakdown:
+/// "must be replaced, not deleted"). That test enumerated render call
+/// sites on one surface; this proves the functional equivalent that
+/// matters now there is only one surface -- a real key event opens the
+/// modal, and its data source lists every live binding, the same count
+/// `keyboard_help::tests::every_live_binding_is_described_to_the_user`
+/// already establishes for that source directly.
+#[test]
+fn opening_help_through_a_real_key_event_shows_every_live_binding() {
+    let mut state = state_with(ApplicationShell::new());
+    assert!(state.modal.is_none(), "test precondition: no modal open");
+
+    press_ctrl_alt_k(&mut state);
+
+    assert!(
+        matches!(state.modal, Some(ModalContent::Help)),
+        "Ctrl+Alt+K must open the Help modal: {:?}",
+        state.modal
+    );
+    let lines = crate::keyboard_help::keyboard_help_lines(&state.catalog);
+    assert_eq!(
+        lines.len(),
+        11,
+        "the Help modal's own data source must list every live binding, Ctrl+Alt+K included"
+    );
+}
+
+/// **The case `0.12.1` left unserved, named explicitly in RFC-038
+/// PR-038-C's own task breakdown**: a user inside Terminal Immersion
+/// previously had no route to any keyboard reference at all. Proven
+/// with a real project in real Terminal Immersion mode, not merely
+/// asserted from the Project Board.
+#[test]
+fn ctrl_alt_k_opens_help_from_inside_terminal_immersion() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("help-from-terminal-immersion"))
+        .expect("a freshly created directory is a valid project root");
+    app_shell.dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+    assert_eq!(
+        app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "test precondition: the active project must be in Terminal Immersion"
+    );
+    let mut state = state_with(app_shell);
+
+    press_ctrl_alt_k(&mut state);
+
+    assert!(
+        matches!(state.modal, Some(ModalContent::Help)),
+        "Ctrl+Alt+K must open Help from Terminal Immersion, not only from the Project Board: \
+         {:?}",
+        state.modal
+    );
+}
+
+/// `Escape` closes the Help modal -- `ModalDismiss`'s handler is already
+/// generic across every `ModalContent` variant, proven here for this
+/// one specifically since it is the newest.
+#[test]
+fn escape_closes_the_help_modal() {
+    let mut state = state_with(ApplicationShell::new());
+    press_ctrl_alt_k(&mut state);
+    assert!(matches!(state.modal, Some(ModalContent::Help)));
+
+    let _ = super::update(&mut state, Message::ModalDismiss);
+
+    assert!(state.modal.is_none(), "Escape must close the Help modal");
+}
+
+/// `board::tests::this_surface_no_longer_references_the_keyboard_list_at_all`
+/// proves the board side of the move; this proves the receiving side --
+/// `help_modal_view` genuinely calls the shared derivation
+/// (`keyboard_help::keyboard_help_lines`) rather than a second,
+/// hand-written list, the "one derivation feeds every consumer"
+/// requirement PR-038-C's task breakdown states explicitly.
+#[test]
+fn help_modal_view_reuses_the_shared_keyboard_help_derivation_not_a_second_list() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/shell.rs"),
+    )
+    .expect("shell.rs must be readable");
+
+    assert!(
+        source.contains("crate::keyboard_help::keyboard_help_lines(&state.catalog)"),
+        "help_modal_view must call the shared keyboard_help_lines derivation, not a \
+         hand-written list"
+    );
+}

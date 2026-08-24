@@ -71,10 +71,16 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
       nine to ten deliberately, assertion not loosened.
       `keyboard-help-open-project-entry-field`; both count sites updated (`keyboard_help/tests.rs`,
       `board/tests.rs`).
-- [ ] The help surface is reachable from Terminal Immersion, not only from the board. Pending
-      PR-038-C.
-- [ ] If modal: scrim, keystroke suppression, focus and Escape all met per RFC-018. Pending
-      PR-038-C.
+- [x] The help surface is reachable from Terminal Immersion, not only from the board.
+      `shell::tests::ctrl_alt_k_opens_help_from_inside_terminal_immersion` -- real project, real
+      mode dispatch into genuine Terminal Immersion, real `Ctrl+Alt+K`.
+- [x] If modal: scrim, keystroke suppression, focus and Escape all met per RFC-018. Modal
+      (`ModalContent::Help`, `Ctrl+Alt+K`). Scrim: same `stack![base, opaque(scrim)]`/
+      `modal_scrim_style` every other modal uses, live in `after-help-modal-open.png`. Keystroke
+      suppression: structural, via the same `SubscriptionMode`/`ModalAbsent` mechanism every
+      modal already gets, nothing new required. Focus: nothing to focus (no buttons) --
+      `ModalFocusNext`/`Previous` are no-ops against it, documented on `ModalContent::Help`
+      itself. Escape: `escape_closes_the_help_modal`, live in `after-escape-closes-help.png`.
 
 ## Recent projects (PR-038-D)
 
@@ -92,19 +98,20 @@ Reference for form: `../first-run-correction/evidence/cold-start-empty-board.md`
       the task breakdown's scope boundary.
 - [ ] Recorded in the changelog as a **breaking change**, with the version implication stated.
       Pending PR-038-E.
-- [x] Every ablation in this slice was **single-variable**. Three in PR-038-A (the audit record
-      removed alone; a duplicated call site added alone; the field-growth bound exercised
-      directly at the pure-function level), three more in PR-038-B (the binding changed to a
-      colliding one alone; the `Escape` arm's guard disabled alone; the collision test itself
-      run against the ablated binding). Each reverted after confirming the expected failure. See
-      `qa-evidence.md`.
+- [x] Every ablation in this slice was **single-variable**. Three in PR-038-A, three in PR-038-B,
+      four in PR-038-C (the collision test against a colliding binding; the negative
+      board.rs-reference check against a reintroduced dead call; the reachability test against
+      the dispatch guarded off, which caught both the plain-board and Terminal-Immersion cases
+      together). Each reverted after confirming the expected failure. See `qa-evidence.md`.
 - [x] Flakes disclosed, not re-run past; any fifth symptom of the approval/socket flake reported
-      as a disclosure rather than attributed to this work. PR-038-B's own full-suite run hit
-      three failures, all three already-named in `test-process-leak.md`'s table (not a new,
-      fifth symptom) — confirmed non-deterministic by re-running each in isolation, where all
-      three passed; not chased further, per that document's own instruction.
-- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-B's
-      own state (330 tekstide + 715 tekstide-core, 0 failed).
+      as a disclosure rather than attributed to this work. PR-038-B's run hit three (all
+      already-named). PR-038-C's own run separately hit a fourth already-named symptom
+      (`command_approval_family_produces_real_durable_audit_records_through_the_pipeline`,
+      confirmed passing in isolation) — and, distinctly, the PTY-exhaustion cascade recorded in
+      `qa-evidence.md`'s own PR-038-C section, which is a different, newly-disclosed defect, not
+      a fifth symptom of the approval/socket one.
+- [x] Gates: `fmt`, `clippy -D warnings`, full suite, `git diff --check`. All clean, PR-038-C's
+      own state (334 tekstide + 716 tekstide-core, 0 failed).
 - [x] Known limitations stated, including anything this slice leaves unreachable.
       `qa-evidence.md`'s "Known limitations" section, scoped explicitly to "as of PR-038-A only."
 

@@ -61,6 +61,12 @@ pub enum NavigationAction {
     OpenDiffReview,
     OpenSafeCloseDialog,
     OpenCommandPalette,
+    /// RFC-038 PR-038-C: opens the Help modal, reachable from anywhere
+    /// -- including Terminal Immersion, which `0.12.1`'s board-only
+    /// keyboard list left unserved. Reference material (the derived
+    /// keyboard list), not a working surface -- RFC-039's second
+    /// principle is exactly this distinction, named a slice early.
+    OpenHelp,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -266,6 +272,20 @@ impl KeybindingPolicy {
                     NavigationAction::OpenSafeCloseDialog,
                     None,
                     KeybindingStatus::Configurable,
+                ),
+                // RFC-038 PR-038-C: `Ctrl+Alt+K`. No strong mnemonic
+                // available -- `H` (Help) is `OpenApprovalHistory`'s and
+                // `P` is `OpenProjectBoard`'s, the same constraint `U`
+                // (trUst) was chosen under for `OpenTrustSettings`.
+                // Unclaimed by any other rule here and not
+                // `Ctrl+Shift+P`'s `Reserved` command-palette binding, so
+                // it collides with nothing (checked mechanically by
+                // `open_help_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone).
+                KeybindingRule::new(
+                    NavigationAction::OpenHelp,
+                    Some("Ctrl+Alt+K"),
+                    KeybindingStatus::Candidate,
                 ),
             ],
         }

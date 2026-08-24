@@ -228,6 +228,32 @@ fn open_project_entry_field_shortcut_is_a_candidate_that_collides_with_no_other_
     );
 }
 
+/// RFC-038 PR-038-C: `Ctrl+Alt+K` opens the Help modal -- checked
+/// mechanically, not by inspection alone, the same shape every other
+/// real binding above already uses.
+#[test]
+fn open_help_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::OpenHelp)
+        .expect("Open Help should have a keyboard policy");
+
+    assert_eq!(rule.default_binding, Some("Ctrl+Alt+K"));
+    assert_eq!(rule.status, KeybindingStatus::Candidate);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::OpenHelp)
+        .filter(|other| other.default_binding == rule.default_binding)
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Alt+K must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
 /// pr-020-b-report-surface.md: `AgentRunDetail` is this slice's own
 /// real render arm, with no other route to open it -- a
 /// `Configurable`/`None` binding here would leave it unreachable by any
@@ -316,6 +342,7 @@ fn advertised_bindings_are_exactly_the_live_ones() {
             "Ctrl+Alt+R",
             "Ctrl+Alt+H",
             "Ctrl+Alt+U",
+            "Ctrl+Alt+K",
         ],
     );
 

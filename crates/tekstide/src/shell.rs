@@ -501,6 +501,15 @@ pub(crate) enum ModalContent {
     /// without deleting anything -- the paste dialog's shape, not the
     /// approval dialog's.
     TranscriptPurge(TranscriptPurgeModal),
+    /// RFC-038 PR-038-C: the keyboard reference, moved off the Project
+    /// Board (RFC-039's second principle: reference material does not
+    /// live on a working surface) into a modal reachable from anywhere,
+    /// `Ctrl+Alt+K`. Unlike every other variant here, there is nothing
+    /// to focus or activate -- no fields, a unit variant -- so
+    /// `ModalFocusNext`/`ModalFocusPrevious`/`ModalActivate` are no-ops
+    /// against it; only `ModalDismiss`/Escape does anything, and that
+    /// handler is already generic across every `ModalContent` variant.
+    Help,
 }
 
 impl Default for ModalContent {
@@ -1079,6 +1088,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.app_shell.dispatch(AppCommand::OpenProjectBoard);
                 state.path_field_requested = true;
             }
+            // RFC-038 PR-038-C: reachable from anywhere, any route or
+            // mode -- global keybindings are matched by
+            // `route_non_modal_input` before terminal focus or shell
+            // zone are even consulted, and `non_modal_subscription`
+            // (the only source of `RoutedInput::Shell`) only runs while
+            // no modal is already open, so this can never overwrite one.
+            if action == NavigationAction::OpenHelp {
+                state.modal = Some(ModalContent::Help);
+            }
         }
         Message::Input(RoutedInput::Surface(surface_input)) => {
             // RFC-019 PR-019-B: the explorer tree is the first real
@@ -1249,7 +1267,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.next(),
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.next(),
             Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.next(),
-            None => {}
+            // RFC-038 PR-038-C: nothing to focus -- a read-only surface,
+            // not a dialog with buttons.
+            Some(ModalContent::Help) | None => {}
         },
         Message::ModalFocusPrevious => match state.modal.as_mut() {
             Some(ModalContent::LayerDemo { focus }) => *focus = focus.previous(),
@@ -1258,7 +1278,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.previous(),
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.previous(),
-            None => {}
+            Some(ModalContent::Help) | None => {}
         },
         // RFC-018 PR-018-C: the layer-demo placeholder still has no
         // decision to record (RFC-022's real dialogs own that). The
@@ -1329,6 +1349,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 | Some(ModalContent::ExternalChange(_))
                 | Some(ModalContent::TrustGrant(_))
                 | Some(ModalContent::TranscriptPurge(_))
+                // RFC-038 PR-038-C: nothing to activate -- closes the
+                // same way `ModalDismiss` does, the same "no real
+                // decision for this arm" shape every other no-op case
+                // above already has.
+                | Some(ModalContent::Help)
                 | None => {}
             }
             // RFC-022 PR-022-E, response 227: re-evaluate after every
@@ -3008,10 +3033,14 @@ fn trusted_ui_state(state: &State) -> TerminalTrustedUiState {
         // exclusivity still needs it to read as active, not `Inactive`.
         // RFC-033 PR-033-C: the purge-confirmation dialog falls into the
         // same generic bucket, for the same reason `TrustGrant` does.
+        // RFC-038 PR-038-C: the Help modal falls into the same generic
+        // bucket -- not a terminal-paste concern, but modal exclusivity
+        // still needs it to read as active while it is open.
         Some(ModalContent::LayerDemo { .. })
         | Some(ModalContent::ExternalChange(_))
         | Some(ModalContent::TrustGrant(_))
-        | Some(ModalContent::TranscriptPurge(_)) => TerminalTrustedUiState::SecurityDialogActive,
+        | Some(ModalContent::TranscriptPurge(_))
+        | Some(ModalContent::Help) => TerminalTrustedUiState::SecurityDialogActive,
     }
 }
 
@@ -3537,6 +3566,14 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         // skipping the explorer-scan trigger since this action never
         // shows the explorer.
         | NavigationAction::OpenProjectEntryField
+        // RFC-038 PR-038-C: opening a modal is shell-local UI state
+        // (`state.modal`), never part of `tekstide-core`'s `AppState`/
+        // `AppRoute` model -- there is no `AppCommand` for it, the same
+        // reason `OpenTrustGrantDialog`/`OpenTranscriptPurgeDialog` are
+        // dedicated `Message` variants rather than `NavigationAction`s
+        // routed through this function. `update`'s `Shell` arm sets
+        // `state.modal` directly.
+        | NavigationAction::OpenHelp
         | NavigationAction::OpenCommandPalette
         | NavigationAction::SwitchActiveProject
         | NavigationAction::CycleVisibleTerminalSession
@@ -3611,6 +3648,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ModalContent::Approval(dialog) => approval_dialog_view(state, dialog),
             ModalContent::TrustGrant(modal) => trust_grant_dialog_view(state, modal),
             ModalContent::TranscriptPurge(modal) => transcript_purge_dialog_view(state, modal),
+            ModalContent::Help => help_modal_view(state),
         };
         let scrim = center(modal_view).style(modal_scrim_style(state.theme));
         stack![base, opaque(scrim)].into()
@@ -4458,6 +4496,49 @@ fn modal_dialog_box<'a>(state: &'a State, content: Element<'a, Message>) -> Elem
             ..container::Style::default()
         })
         .into()
+}
+
+/// Width of the binding column, so descriptions line up -- the same
+/// number and reasoning `board.rs`'s own `KEYBOARD_HELP_BINDING_COLUMN_PX`
+/// used before this list moved here (RFC-038 PR-038-C, RFC-039's second
+/// principle: reference material does not live on a working surface).
+const HELP_MODAL_BINDING_COLUMN_PX: f32 = 110.0;
+
+/// RFC-038 PR-038-C: the keyboard reference, reachable from anywhere via
+/// `Ctrl+Alt+K` -- replaces the Project Board's own former keyboard list
+/// (`board.rs`'s `keyboard_help_view`, deleted this slice). Derives from
+/// `keyboard_help::keyboard_help_lines`, the one place `KeybindingPolicy`
+/// becomes user-facing text -- not a second, hand-written list. No
+/// buttons: `ModalFocusNext`/`ModalFocusPrevious`/`ModalActivate` are all
+/// no-ops against `ModalContent::Help` (see that variant's own doc);
+/// only `Escape` does anything, and `ModalDismiss`'s handler is already
+/// generic.
+fn help_modal_view(state: &State) -> Element<'_, Message> {
+    let mut lines = column![
+        text(state.catalog.get("help-dialog-title")).size(state.theme.font_size_heading()),
+    ]
+    .spacing(6);
+
+    // `binding` is a `&'static str` from the policy (trusted, fixed-set,
+    // not filesystem-derived); `description` comes from the catalog --
+    // the same "neither is untrusted" reasoning `board.rs`'s own
+    // (now-deleted) `keyboard_help_view` stated for this exact loop.
+    for line in crate::keyboard_help::keyboard_help_lines(&state.catalog) {
+        lines = lines.push(
+            row![
+                text(line.binding)
+                    .size(state.theme.font_size_body())
+                    .width(Length::Fixed(HELP_MODAL_BINDING_COLUMN_PX)),
+                text(line.description).size(state.theme.font_size_body()),
+            ]
+            .spacing(8),
+        );
+    }
+
+    lines = lines
+        .push(text(state.catalog.get("help-dialog-hint")).size(state.theme.font_size_status()));
+
+    modal_dialog_box(state, lines.into())
 }
 
 fn layer_composition_demo_modal(state: &State, focus: ModalButton) -> Element<'_, Message> {

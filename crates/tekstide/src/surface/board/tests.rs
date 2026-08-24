@@ -239,7 +239,12 @@ fn empty_state_keys_resolve_to_real_catalog_text() {
         "project-board-empty-heading",
         "project-board-empty-open-a-project",
         "project-board-empty-command-example",
-        "project-board-empty-keyboard-heading",
+        // RFC-038 PR-038-B/C: the field's own label (shared with the
+        // populated-board `Ctrl+Alt+O` case, so no longer "empty-"
+        // prefixed); `project-board-empty-keyboard-heading` removed from
+        // this list -- the keyboard list itself moved off this surface
+        // entirely into `shell::help_modal_view` (PR-038-C).
+        "project-board-path-field-label",
     ] {
         let rendered = catalog.get(key);
         assert_ne!(
@@ -276,17 +281,12 @@ fn the_two_action_labels_that_named_nothing_are_gone_from_the_catalogue() {
     }
 }
 
-/// The empty state is the only place a first-time user can learn any of
-/// this, so it must carry the whole live binding list, not a sample.
+/// The empty state must still say how a project actually gets opened,
+/// independent of the keyboard list's own move off this surface
+/// entirely (RFC-038 PR-038-C, RFC-039's second principle).
 #[test]
-fn the_empty_state_lists_every_live_keybinding() {
+fn the_empty_state_shows_the_actual_open_command() {
     let catalog = real_catalog();
-    let lines = crate::keyboard_help::keyboard_help_lines(&catalog);
-    assert_eq!(
-        lines.len(),
-        10,
-        "the empty state must describe every live binding"
-    );
     assert!(
         catalog
             .get("project-board-empty-command-example")
@@ -295,27 +295,27 @@ fn the_empty_state_lists_every_live_keybinding() {
     );
 }
 
-/// The first cut of `0.12.1` put the keyboard list in the empty state
-/// only, which meant help vanished the moment a user opened their first
-/// project -- a fix that stops working exactly when the product starts
-/// being used. Both arms of `view` must render it.
-///
-/// An occurrence count, not a `contains`, per `ARCHITECTURE.md`'s
-/// enumeration-test unit rule: the property is "every arm of `view`
-/// also renders help", so a third arm added later without help must
-/// fail this. A boolean check would pass on the empty-state call alone.
+/// The other half of `every_board_state_renders_the_keyboard_list`'s
+/// replacement (RFC-038 PR-038-C's task breakdown: "must be replaced,
+/// not deleted"). That test's own property -- every arm of `view` shows
+/// the keyboard list -- no longer applies: no arm of `view` shows it
+/// any more, deliberately (RFC-039's second principle: reference
+/// material does not live on a working surface). This is the negative
+/// half of the replacement: proves the move was real, not merely
+/// unused-but-still-callable. The positive half -- the Help modal,
+/// reachable from anywhere, lists every live binding -- lives in
+/// `shell::tests` (`opening_help_through_a_real_key_event_shows_every_live_binding`),
+/// next to the code that now owns it.
 #[test]
-fn every_board_state_renders_the_keyboard_list() {
+fn this_surface_no_longer_references_the_keyboard_list_at_all() {
     let source = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/surface/board.rs"),
     )
     .expect("board.rs must be readable");
 
-    let call_sites = source.matches("keyboard_help_view(catalog, theme)").count();
-    assert_eq!(
-        call_sites, 2,
-        "expected `view`'s empty-state arm and its populated arm each to render the \
-         keyboard list; found {call_sites} call sites. If a new board state was added, \
-         it needs help too -- see RFC-038 for why this is not optional yet."
+    assert!(
+        !source.contains("keyboard_help_lines") && !source.contains("keyboard_help_view"),
+        "board.rs must not render the keyboard list -- it moved to shell::help_modal_view \
+         (RFC-038 PR-038-C)"
     );
 }

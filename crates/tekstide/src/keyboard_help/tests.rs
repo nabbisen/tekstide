@@ -60,8 +60,8 @@ fn every_live_binding_is_described_to_the_user() {
 
     assert_eq!(
         lines.len(),
-        10,
-        "expected the ten Candidate rules with a default binding to be described; \
+        11,
+        "expected the eleven Candidate rules with a default binding to be described; \
          got {}: {:?}",
         lines.len(),
         lines.iter().map(|line| line.binding).collect::<Vec<_>>()

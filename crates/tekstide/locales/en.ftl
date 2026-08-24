@@ -120,7 +120,6 @@ project-board-empty-command-example = tekstide /path/to/project
 # (`Ctrl+Alt+O`, the second-project case), where "empty" no longer
 # describes the board it's showing on.
 project-board-path-field-label = Type a project path and press Enter (Ctrl+V to paste):
-project-board-empty-keyboard-heading = Keyboard
 
 # RFC-038 PR-038-A: `$reason` is a compile-time symbol
 # (`PathFieldError`'s own shape), the same division of labour
@@ -586,6 +585,12 @@ keyboard-help-launch-agent-run = Launch an AI CLI run (needs a trusted project)
 keyboard-help-open-current-agent-run-detail = AgentRun Report for the latest run
 keyboard-help-open-approval-history = Approval History (needs an open project)
 keyboard-help-open-trust-settings = Trust Settings: grant trust, transcript capture and purge
+keyboard-help-open-help = This list
+
+# RFC-038 PR-038-C: the Help modal itself. Reachable from anywhere;
+# replaces the Project Board's own former keyboard list.
+help-dialog-title = Keyboard reference
+help-dialog-hint = Escape closes this.
 
 # 0.12.1: rendered beside `status-bar-summary`, on the same line so the
 # status bar's height -- which `content_area_height` subtracts to size
