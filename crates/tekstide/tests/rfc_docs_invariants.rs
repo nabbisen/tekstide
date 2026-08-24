@@ -148,7 +148,11 @@ fn every_pack_status_field_agrees_with_its_rfc_folder() {
 }
 
 /// Every relative link inside `rfcs/` -- to another document (`.md`) or
-/// to an image (`.png`/`.jpg`/`.svg`) -- resolves to a real file.
+/// to an image (`.png`/`.jpg`/`.svg`) -- resolves to a real file. Matches
+/// a bare relative target (`foo.png`) as well as one written with a
+/// leading `./` or `../`; a URL (`://`), an absolute path (leading `/`),
+/// or a same-document anchor (leading `#`) is not a link into this tree
+/// and is excluded before it ever reaches the extension check.
 ///
 /// `RFC-000` is excluded: it teaches the lifecycle using invented
 /// example filenames (`./done/010-revoke-tokens.md`) that are not meant
@@ -176,11 +180,21 @@ fn every_relative_link_in_the_rfc_tree_resolves() {
             continue;
         };
 
-        for (index, _) in source.match_indices("](.") {
+        for (index, _) in source.match_indices("](") {
             let tail = &source[index + 2..];
             let Some(end) = tail.find(')') else { continue };
-            let target = &tail[..end];
-            let target = target.split('#').next().unwrap_or(target);
+            let raw_target = &tail[..end];
+            // A URL, an absolute path, or a same-document anchor is not a
+            // relative link into the RFC tree -- skip before even
+            // stripping the anchor, so `#foo` alone is excluded here
+            // rather than by falling out of the extension check below.
+            if raw_target.contains("://")
+                || raw_target.starts_with('/')
+                || raw_target.starts_with('#')
+            {
+                continue;
+            }
+            let target = raw_target.split('#').next().unwrap_or(raw_target);
             let is_checked_target = [".md", ".png", ".jpg", ".svg"]
                 .iter()
                 .any(|ext| target.ends_with(ext));
