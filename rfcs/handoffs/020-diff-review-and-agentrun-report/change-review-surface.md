@@ -60,8 +60,30 @@ makes, not inventing them.
 
 `OpenDiffReview` needs a binding **and** a visible control. RFC-039's third reachability
 principle — *naming a keystroke is not naming the path a user takes; name the control the user
-sees* — applies here, and RFC-040 lands its pattern first precisely so this slice can follow it
-rather than invent one.
+sees* — applies here, and **RFC-040 closed on 2026-08-25 having established the pattern**, so
+follow it rather than inventing one:
+
+- A real `iced::widget::button` with `.on_press`, and a keyboard accelerator, **converging on the
+  same function** — `open_folder_browser`'s "one setup, two routes" shape.
+- Placed on the surface its action applies to (D2: per-surface, not a toolbar).
+- Every new click message classified in `click_message_kind` as `BackgroundControl` or
+  `ModalDecision`, and every new action given a `control_coverage` entry.
+
+## What will fail, and should
+
+Adding a live action trips five things by design. None is an obstacle; each is a decision point
+someone must pass through deliberately, which is the whole reason they exist:
+
+| What fails | Why, and what to do |
+| --- | --- |
+| `control_coverage`'s exhaustive match | Does not compile until `OpenDiffReview` is classified. Give it `VisibleControl` with a real `on_press_snippet` — which the coverage test then greps for in live source |
+| `every_live_binding_is_described_to_the_user` | Asserts exactly **13**. It becomes 14. Update the count deliberately; do not loosen it to `>=` |
+| `no_action_without_a_working_binding_is_advertised` | Names three dead actions explicitly. `OpenDiffReview` leaves that list — **RFC-036's dead-action count goes three to two**, worth stating in the evidence since RFC-036 is still open and tracking it |
+| `click_message_kind`'s exhaustive match | Does not compile until the new button's message is classified |
+| The keyboard-help catalog | A new live action with no `en.ftl` entry renders as its own catalog key, caught by the description check |
+
+Prove the binding unclaimed **mechanically** against `KeybindingPolicy`, not by reading the list —
+`open_project_entry_field_shortcut_is_a_candidate_that_collides_with_no_other_rule` is the shape.
 
 Prove the binding unclaimed mechanically against `KeybindingPolicy`, not by reading the list.
 Giving `OpenDiffReview` a real route takes RFC-036's dead-action count from three to two.
