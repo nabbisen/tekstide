@@ -240,6 +240,42 @@ suite repeatedly (as gates in this project require) should expect the leaked-pro
 climb by ~28 per run until something cleans them up, and should not mistake that for a
 regression in this fix.
 
+**Reviewer addition, 2026-08-25 — this reaches the audit trail, which the finding as filed did
+not say.**
+
+RFC-039 PR-039-C's close path computes `fully_confirmed` from the termination outcome
+(`shell.rs:3740`):
+
+```rust
+let confirmed = matches!(
+    outcome,
+    TerminationOutcome::Exited { .. }
+        | TerminationOutcome::TerminatedBySignal { .. }
+        | TerminationOutcome::KilledAfterTimeout { .. }
+);
+```
+
+`KilledAfterTimeout` counts as confirmation — and `KilledAfterTimeout` is exactly what the
+investigation above observed `request_terminate` returning **while the backgrounded job was still
+alive**. So `SafeCloseDecision::Closed { fully_confirmed: true }` can be written to the durable
+audit store while a process that terminal launched keeps running.
+
+RFC-013 anticipated half of this and does **not** cover this half. Its rule — *"a safe-close
+`applied` outcome means Tekstide issued the selected terminate/abandon action; it does not mean
+the process exited"* — makes the *outcome kind* honest. `fully_confirmed` is a separate, stronger
+field added later by RFC-039 PR-039-C, and its name and meaning assert that termination **was**
+confirmed. That assertion can be false.
+
+This is the class this project treats most seriously: a durable record claiming more than it
+knows, like the transcript privacy claim and restricted mode's blocked-feature count. Bounded —
+it needs a backgrounded job — and not urgent, but not cosmetic either.
+
+**The question to answer, not decided here:** is `KilledAfterTimeout` confirmation at all? It
+means the escalation ran and observation was given up on, which is weaker than `Exited` or
+`TerminatedBySignal`. Narrowing `confirmed` to exclude it, re-checking group emptiness after the
+kill, or renaming the field to what it can support are three answers with different costs.
+Whoever takes the third cause takes this with it.
+
 ## Why it matters beyond tidiness
 
 The affected area is **the command-approval and socket path** — the security-critical machinery
