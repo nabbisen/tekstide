@@ -1,8 +1,8 @@
 ---
 title: "RFC-041: Acceptance / QA Checklist"
 rfc: "RFC-041"
-rfc_file: "../../accepted/041-change-content-preview.md"
-source_rfc_status: "Accepted 2026-08-25 — M12, third of three"
+rfc_file: "../../done/041-change-content-preview.md"
+source_rfc_status: "Implemented and closed 2026-08-26 — RFC-041 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-25"
 ---
@@ -86,12 +86,50 @@ Every unchecked line at closeout carries a stated reason.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted 2026-08-26 at review 330 (requests 329 + 330, commits de07dbd and 8f63d66).
+
+Verified independently by the reviewer, not taken on report:
+
+- The "not a diff" ablation the checklist singles out. Replacing
+  change-review-content-not-a-diff's text with neutral wording failed
+  change_review_content_modified_content_is_labelled_not_a_diff; restored, green.
+  (The reviewer's first attempt at this ablation targeted the wrong catalog key,
+  change-review-content-heading, and proved nothing. Caught because nothing failed
+  that should have, and redone. Recorded because a green ablation is a defect in
+  the ablation.)
+- Debug for DiffContent is hand-implemented and prints len and baseline, never bytes (D3).
+- Three consecutive full-workspace runs by the reviewer on de07dbd: runs 1 and 3 clean,
+  run 2 failed two tests, one of them the sixth candidate row now in test-process-leak.md.
+
+Two required items from response 329, both delivered in 8f63d66 and verified here:
+
+1. The gate re-run as three consecutive full-workspace runs and recorded against
+   test-process-leak.md. Run 2 recurred row 5's flake; fifteen further runs did not
+   reproduce it. The assertion message was not captured, disclosed rather than
+   papered over, with instructions for whoever hits it next.
+2. The click-path evidence gap named in qa-evidence.md: this control was never
+   clicked by a human-equivalent input in this arc, and a live click has
+   independently found three defects the suite did not.
+
+What the slice delivers beyond what was asked: the "not a diff" label states the
+security document's section 2 requirement in the user's own terms rather than
+paraphrasing it -- "Whether the agent's own edit is still there, was reverted, or
+was overwritten by something else since, this screen cannot tell you."
+
+One defect found by running the product rather than by the suite: the
+TEKSTIDE_CHANGESET_DEMO seed built a real ChangeSet and never populated the new
+retention map, because only &mut ApplicationShell exists at its call site. Fifth
+such defect in this arc; nothing in the suite could have crossed that seam.
+
+Not a condition of acceptance, carried forward: two stale dates corrected in the
+same commit as this closeout (the sixth flake row and the recurrence section were
+both dated 2026-08-25 for work done on 2026-08-26; the reviewer wrote the first
+one and the dev team followed it).
 ```

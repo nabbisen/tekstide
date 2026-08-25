@@ -1,8 +1,8 @@
 ---
 title: "What a content preview must not claim"
 rfc: "RFC-041"
-rfc_file: "../../accepted/041-change-content-preview.md"
-source_rfc_status: "Accepted 2026-08-25 — M12, third of three"
+rfc_file: "../../done/041-change-content-preview.md"
+source_rfc_status: "Implemented and closed 2026-08-26 — RFC-041 is in rfcs/done/"
 status: "Required reading before any RFC-041 code"
 created: "2026-08-25"
 ---

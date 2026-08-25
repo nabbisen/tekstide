@@ -25,7 +25,7 @@ resulting pressure, each disclosed separately and each moved past:
 | `command_approval_family_produces_real_durable_audit_records_through_the_pipeline` | request 276 |
 | `shell::tests::a_real_low_risk_proposal_is_received_mirrored_and_stays_queued_without_promoting` | request 296 (2026-08-24) |
 | `approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` | request 326 (2026-08-25) |
-| `shell::tests::change_review_surface_renders_a_real_change_set_from_a_real_agent_run` | request 329 (2026-08-25) — **candidate, not confirmed** |
+| `shell::tests::change_review_surface_renders_a_real_change_set_from_a_real_agent_run` | request 329 (2026-08-26) — **candidate, not confirmed** |
 
 **The fourth was added 2026-08-24 and the count above was edited with it**, because "three
 distinct tests" is a count, and `ARCHITECTURE.md` records counts as state-asserting text that a
@@ -302,7 +302,7 @@ That is a weaker record than the other five and is stated as such rather than dr
 recurs, capture the message first — that is the difference between a sixth symptom and a sixth
 guess.
 
-## Recurrence, 2026-08-25 — response 329's required re-gate
+## Recurrence, 2026-08-26 — response 329's required re-gate
 
 Response 329 (RFC-041) required three consecutive full-workspace runs, recorded against this
 table, after an earlier single-run gate was judged insufficient. Run 1: clean. **Run 2:
@@ -315,6 +315,11 @@ the omission was noticed. Fifteen further full-workspace runs immediately afterw
 in full this time, did not reproduce it — consistent with the low, intermittent rate already
 recorded for this row rather than a new or worsening cause. Whoever next hits this: redirect to a
 file first (`cargo test ... > run.log 2>&1`), not a live grep, so the message survives.
+
+*(Both this section and row 6 were first dated 2026-08-25 for work done on 2026-08-26; corrected
+in RFC-041's closeout commit. The reviewer wrote the first wrong date and the dev team followed
+it. In a table whose only purpose is correlating an intermittent failure over time, the date is
+the data.)*
 
 ## Why it matters beyond tidiness
 

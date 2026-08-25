@@ -1,8 +1,8 @@
 ---
 title: "RFC-041: task breakdown and PR plan"
 rfc: "RFC-041"
-rfc_file: "../../accepted/041-change-content-preview.md"
-source_rfc_status: "Accepted 2026-08-25 — M12, third of three"
+rfc_file: "../../done/041-change-content-preview.md"
+source_rfc_status: "Implemented and closed 2026-08-26 — RFC-041 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-25"
 ---

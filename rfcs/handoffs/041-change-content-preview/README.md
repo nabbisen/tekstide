@@ -1,19 +1,19 @@
 ---
 title: "RFC-041: Change Content Preview — implementation handoff"
 rfc: "RFC-041"
-rfc_file: "../../accepted/041-change-content-preview.md"
-source_rfc_status: "Accepted 2026-08-25 — M12, third of three for 0.14.0"
+rfc_file: "../../done/041-change-content-preview.md"
+source_rfc_status: "Implemented and closed 2026-08-26 — RFC-041 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-25"
 ---
 
 # Reach what `0.7.0` already built
 
-Source RFC: [RFC-041](../../accepted/041-change-content-preview.md)
+Source RFC: [RFC-041](../../done/041-change-content-preview.md)
 
 | # | Read | Why |
 | --- | --- | --- |
-| 1 | [RFC-041](../../accepted/041-change-content-preview.md) | Three decisions already made; do not re-open them |
+| 1 | [RFC-041](../../done/041-change-content-preview.md) | Three decisions already made; do not re-open them |
 | 2 | [RFC-024](../../done/024-diff-preview-policy.md) | **Read this before writing code.** It decided the policy and built the machinery; your job is to call it |
 | 3 | [`what-a-content-preview-must-not-claim.md`](./what-a-content-preview-must-not-claim.md) | **Required.** The naming risk is the largest one here |
 | 4 | [`task-breakdown-pr-plan.md`](./task-breakdown-pr-plan.md) | Two slices |

@@ -1,7 +1,8 @@
 # RFC-041: Change Content Preview
 
-Status: **Proposed 2026-08-25.** Scoped at the human owner's request as the second theme for
-`0.14.0`, after RFC-035.
+Status: **Implemented and closed 2026-08-26.** Proposed and accepted 2026-08-25, scoped at the
+human owner's request as the second theme for `0.14.0`, after RFC-035. Shipped in `de07dbd`;
+accepted at review 330.
 Target milestone: **M12** — accepted by the human owner 2026-08-25, third of three for `0.14.0`,
 after RFC-035 and the safe-close honesty fix.
 
