@@ -1,7 +1,7 @@
 ---
 title: "Minimal user documentation — implementation handoff"
 rfc: "none — pulled forward from RFC-029"
-status: "Scheduled 2026-08-01, unstarted for three weeks; re-scoped 2026-08-25 and **pinned to commit 711be4b** the same day, after the re-scope was itself overtaken within hours. Items 1 and 2 struck as done, pending verification at the pin."
+status: "Implemented 2026-08-25 against the 711be4b pin. Items 1 and 2 verified accurate at the pin (item 2's own verification found and fixed a pre-existing defect: two duplicate rows in README's keyboard table). Items 3, 4, 5 confirmed already present and accurate, untouched. The five subjects at the pin (tab strip, closing a project, transcript privacy controls, Change Review and its limits, folder browser/path field) written as a new README section, 'Working With Projects'."
 target_milestone: "M9, alongside RFC-017"
 created: "2026-08-01"
 ---
