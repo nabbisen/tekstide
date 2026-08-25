@@ -148,6 +148,19 @@ would have passed a test whose own name promised it could not. Corrected to a co
 Related and older: a needle must not match its own definition line, and a scan that matches a
 bare identifier will match doc comments mentioning it. Require the call syntax, not the name.
 
+**The definition site can be a whole file, not a line.** RFC-040 PR-040-A's coverage test
+searched the crate for each control's `.on_press(...)` snippet — and scanned the module where
+those snippets are *defined* as string literals, so every needle found itself and the test was
+vacuous. The older rule says "definition line" and this was a definition file, which is why the
+rule did not prevent it.
+
+Found by the implementer running the required ablation: a fabricated snippet made the test
+**pass** when it should have failed. That is a green ablation used exactly as intended — it is
+the only thing that distinguishes a test which holds a property from one which cannot fail. A
+test whose subject is text has to exclude the place that text is authored, and the exclusion
+belongs in the test's own doc comment with the reason, so nobody widens the scan back later on
+the grounds that it looks arbitrary.
+
 **Reachability comes before correctness.** Before a surface is scheduled, name the path a
 user takes to reach it and the production code that populates what it renders. Not "which
 RFC owns it" — the actual call site.
