@@ -170,10 +170,18 @@ fn empty_state_view<'a, Message: 'a + Clone>(
     path_field_notice: Option<String>,
     open_browser_message: Message,
 ) -> Element<'a, Message> {
+    // Release gate finding, 0.13.0 ("the first screen leads with the command
+    // line"): the path field and Browse button -- what actually works
+    // *inside* this window -- must render before the command-line mention,
+    // not after it. Before this fix, a first-time user reading top-down hit
+    // "start Tekstide with its path" (an instruction to leave the app) two
+    // lines before reaching the field and button that make leaving
+    // unnecessary. The strings were each individually true; the screen read
+    // wrong. Demoted, not removed -- `tekstide /path/to/project` is still
+    // genuinely useful and someone who learned it from the README should
+    // find it confirmed here, just no longer first.
     let lines = column![
         text(catalog.get("project-board-empty-heading")).size(theme.font_size_heading()),
-        text(catalog.get("project-board-empty-open-a-project")).size(theme.font_size_body()),
-        text(catalog.get("project-board-empty-command-example")).size(theme.font_size_body()),
         path_field_section(
             catalog,
             theme,
@@ -181,6 +189,8 @@ fn empty_state_view<'a, Message: 'a + Clone>(
             path_field_notice,
             open_browser_message
         ),
+        text(catalog.get("project-board-empty-open-a-project")).size(theme.font_size_body()),
+        text(catalog.get("project-board-empty-command-example")).size(theme.font_size_body()),
     ]
     .spacing(6);
 

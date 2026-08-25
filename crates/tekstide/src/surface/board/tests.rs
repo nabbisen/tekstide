@@ -476,6 +476,9 @@ fn every_catalog_key_this_module_renders_is_enumerated_and_none_names_a_dead_act
         ],
         "board.rs's own catalog.get( keys, in source order -- a new one added here must be \
          named explicitly in this test's own doc comment and reasoned about, not merely \
-         counted: {keys:?}"
+         counted: {keys:?}. Unchanged by the 0.13.0 release gate finding's reorder: that fix \
+         moved a `path_field_section(...)` *call* earlier inside `empty_state_view`'s column, \
+         which changes render order without moving any `catalog.get(\"` literal in the file --\
+         those still appear in this same textual order, inside their own function bodies."
     );
 }

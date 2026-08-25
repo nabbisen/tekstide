@@ -113,7 +113,13 @@ project-board-empty-heading = No projects yet
 # reworded so nothing can render them again by accident; the matching
 # fields on `tekstide-core`'s `ProjectBoardEmptyState` still hold the old
 # pre-baked English and are still never read (RFC-038 owns removing them).
-project-board-empty-open-a-project = To open a project, start Tekstide with its path:
+#
+# Release gate finding, 0.13.0: reworded from an imperative primary
+# instruction ("To open a project, start Tekstide with its path:") to an
+# explicit alternative, now that it renders *after* the path field and
+# Browse button rather than before them -- see `board.rs`'s own comment
+# at this key's call site.
+project-board-empty-open-a-project = You can also open a project from the command line:
 project-board-empty-command-example = tekstide /path/to/project
 # RFC-038 PR-038-A: the field itself. Focused on arrival at an empty
 # board -- see `board.rs`'s own doc for why this is not an
