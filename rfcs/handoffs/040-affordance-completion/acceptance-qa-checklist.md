@@ -66,10 +66,20 @@ Every unchecked line at closeout carries a stated reason.
 
 ## PR-040-C — controls
 
-- [ ] Eight actions gain a control, each placed where its action applies.
-- [ ] Every control keyboard-operable.
-- [ ] For context-dependent actions: hidden or visibly unavailable is **decided and stated**, not
-      left to silently do nothing.
+- [x] Eight actions gain a control, each placed where its action applies: mode toggle on the
+      workspace, "+ New Terminal" on Terminal Immersion (including its own empty-panes arm),
+      Save on the editor, three buttons on Trust Settings (agent run, report, approval history),
+      Trust Settings/Help in the top bar. Count moves 3 → 11 of 13 (`control_coverage`, PR-040-A's
+      own measurement), stated before and after.
+- [x] Every control keyboard-operable — each converges on the identical function its own existing
+      keyboard accelerator already calls (`toggle_active_project_mode`,
+      `launch_terminal_in_active_project`, etc.), the same "one setup, two routes" shape
+      `open_folder_browser` established in PR-040-B; no keyboard behaviour changed.
+- [x] For context-dependent actions: hidden or visibly unavailable is **decided and stated**, not
+      left to silently do nothing. `LaunchAgentRun`: always shown, reuses the real, already-tested
+      refusal-notice path when untrusted (not hidden). `OpenTrustSettings`: hidden with no active
+      project (`top_bar_offers_trust_settings`, tested directly) — nothing to configure trust
+      *for*. Both decided explicitly, in `qa-evidence.md`.
 
 ## Closeout
 

@@ -201,7 +201,112 @@ no flake hit this round. `git diff --check` clean.
 
 ## PR-040-C — visible controls
 
-_Pending._
+**Build.** Eight real, clickable buttons, one per `TrackedGap` action PR-040-A's own allow-list
+named, each placed per D2 on the surface its own action applies to, not a toolbar or palette:
+
+- `ToggleProjectMode` — `mode_toggle_row`, a small header above whichever mode's own content is
+  showing in `main_area_view` (present in both Content and Terminal Immersion; absent with no
+  active project, since there is no mode to switch with nothing open).
+- `LaunchTerminal` — `launch_terminal_button`, "+ New Terminal," on Terminal Immersion's own
+  session bar. Also required a new `empty_terminal_workspace_view` arm: `terminal_workspace_view`
+  was never reachable with zero panes before this slice (its own caller guard excludes that case),
+  so without a second arm the very first terminal in a project would have had no button at all --
+  exactly the gap this RFC exists to close, reintroduced by a naive placement.
+- `SaveActiveDocument` — the editor's own "Save" button (`surface::editor::view`'s new `on_save`
+  parameter, the same "surface renders, `shell.rs` supplies the message" split
+  `board::empty_state_view` already established), shown whenever a document is open.
+- `LaunchAgentRun`, `OpenCurrentAgentRunDetail`, `OpenApprovalHistory` — three more buttons on
+  `TrustSettings`, per the task breakdown's own "agent run where a trusted project's actions
+  live." `LaunchAgentRun` is shown always, even Restricted -- it reuses the exact real-refusal
+  path `Ctrl+Alt+A` already has (a typed notice, not a silent no-op), a decision stated rather
+  than defaulted.
+- `OpenTrustSettings`, `OpenHelp` — the top bar's own new `top_bar_actions_row`. `OpenHelp` is
+  shown always; `OpenTrustSettings` only with an active project (nothing to configure trust *for*
+  at the Project Board) -- factored into `top_bar_offers_trust_settings` for the same testability
+  reason `main_area_label`/`sidebar_label` already are, since an `Element` is not directly
+  inspectable.
+
+Keyboard accelerators and the new buttons converge on the same functions throughout
+(`toggle_active_project_mode`, `launch_terminal_in_active_project`,
+`save_active_document_button_pressed`, `launch_agent_run_in_active_project`,
+`open_current_agent_run_detail`, `open_approval_history`, `open_trust_settings`, `open_help`),
+mirroring `open_folder_browser`'s own "one setup, two routes to it" precedent from PR-040-B. Every
+one of the eight also carries the `state.modal.is_some()` guard PR-040-B's own review (response
+317) required be exhaustive, not sampled -- see the click-message classification below.
+
+**The count moves from 3 to 11.** `keyboard_help::control_coverage`'s own tally, PR-040-A's own
+measurement: all eight `TrackedGap` entries move to `VisibleControl`, each `on_press_snippet`
+checked against real source by the existing coverage test
+(`every_live_action_has_a_visible_control_or_a_reasoned_allow_list_entry`, unmodified). 11 of 13
+live actions now have a real control; the remaining 2 (`PasteIntoTerminal`, `OpenProjectEntryField`)
+are PR-040-A's own permanent, reasoned allow-list entries, not a gap.
+
+**Carried over from response 317's required follow-up.** `click_message_kind`
+(`shell.rs`): exhaustive over every one of `Message`'s variants, the same discipline
+`control_coverage` already established for `NavigationAction` -- classifies each as
+`BackgroundControl` (must refuse while a modal is open), `ModalDecision` (a modal's own decision,
+must act), or not click-originated at all. A new variant fails to *compile* until classified.
+Ablated: temporarily added an unclassified variant, two separate matches (this one and `update`'s
+own) failed to compile, confirmed, reverted. `click_message_kind_classifies_every_real_on_press_message`
+exercises it against real constructed values (18 `BackgroundControl`, 10 `ModalDecision`, a sample
+of `None`), matching every real `.on_press` site PR-040-A/B/C's own coverage tests already verify
+exists.
+
+**A real bug found live, not by a test.** The first version of `empty_terminal_workspace_view`
+rendered no launch-refusal notice at all -- live-clicking "Launch AI CLI Run" on an untrusted,
+terminal-less project landed silently in Terminal Immersion with nothing explaining why. Fixed by
+factoring `terminal_launch_notice_rows` out of `terminal_workspace_view` so both views share the
+identical three-notice logic (`terminal_launch_notice`/`terminal_paste_notice`/
+`agent_run_launch_notice`), rather than the second view silently omitting them. Re-verified live:
+the real refusal text ("This project isn't trusted yet — grant trust to start an agent run.") now
+renders. This is the third time in RFC-038/039/040 that live verification found something the
+test suite did not -- worth stating in those terms, not only as a bug count.
+
+**Live GUI verification.** Built release, launched against a real temp project. A single
+click-through covered most of the surface at once: clicked "Trust Settings" (top bar) -- landed on
+the real surface, showing "Switch to Terminal" (mode toggle), "Grant Trust…", "Decline Future
+Capture", "Purge Project Transcripts…", "Launch AI CLI Run", "AgentRun Report", "Approval
+History", all six real buttons rendering together. Clicked "Launch AI CLI Run" -- landed in
+Terminal Immersion's new empty-panes view, showing the real refusal notice (post-fix) plus
+"Switch to Content" and "+ New Terminal". Clicked "+ New Terminal" -- a real, running shell
+appeared ("Terminal 1 (Primary) — Running", a live `tekstide$` prompt), proving
+`launch_terminal_in_active_project` works end to end through a real click from the empty state.
+Screenshots in `evidence/pr-040-c/`. Not every one of the eight was individually clicked live
+(disclosed, not hidden) -- each shares the identical `.on_press(Message::...)` construction the
+crate-wide premise test already asserts is the only click mechanism, and each is verified at the
+`update()` level by its own `clicking_*` test below.
+
+**Tests, one new fact each**, mirroring an existing keyboard-path test's own real assertion rather
+than a synthetic stand-in:
+
+- `clicking_the_mode_toggle_switches_the_real_active_project_mode`
+- `clicking_new_terminal_switches_modes_and_launches_a_real_session`
+- `clicking_save_writes_the_real_edited_document_to_disk`
+- `clicking_launch_ai_cli_run_shows_the_real_trust_refusal_when_untrusted`
+- `clicking_the_agent_run_report_button_opens_the_real_report_surface`
+- `clicking_approval_history_sets_the_open_surface_and_forces_content_mode`
+- `clicking_trust_settings_routes_to_the_real_trust_settings_surface`
+- `clicking_the_top_bar_help_button_opens_the_real_help_modal`
+- `the_top_bar_trust_settings_button_is_hidden_without_an_active_project_and_shown_with_one` --
+  context-dependent, D2's own required decision, tested directly against
+  `top_bar_offers_trust_settings` rather than an uninspectable `Element`.
+
+`a_control_behind_an_open_modal_cannot_be_clicked` (PR-040-B) extended with a third sample drawn
+from this slice's own `OpenTrustSettingsButtonPressed`, ablated the same way (removed
+`open_trust_settings`'s own guard, the test failed naming the leaked surface change, restored) --
+proving the exclusivity pattern generalises to the new background controls, not only the original
+ten.
+
+**Gates.** `cargo build`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
+--all-features -- -D warnings` -- clean throughout. `cargo test --workspace --all-targets
+--all-features`, three consecutive runs under default parallelism, all clean: 404 tekstide + 736
+tekstide-core (tekstide-core's own count reflects the separate, already-reviewed
+`runtime/terminal/launch.rs` leak fix, response 319 -- no test in this slice touches that file).
+Gated only after that fix landed, per the architect's own required order (response 318): a leak
+this slice did not cause was making its own three-run gate unmeasurable, so the gate waited for
+the fix rather than absorbing the noise. Leaked-process count settled at a constant 32/run
+throughout (the fix's own disclosed, bounded ~28/run from one unrelated benchmark test, plus 2
+pre-existing) -- not climbing, not this slice's own concern. `git diff --check` clean.
 
 ## PR-040-D — closeout
 

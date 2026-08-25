@@ -1038,6 +1038,46 @@ pub enum Message {
     /// `Message::FolderBrowserChooseCurrentDirectory` directly rather
     /// than adding a second message for it.
     FolderBrowserRowPressed(usize),
+    /// RFC-040 PR-040-C: the workspace's own real, clickable mode
+    /// toggle -- `main_area_view`'s new small header, visible in both
+    /// Content and Terminal Immersion. `Ctrl+Alt+M` is the same action's
+    /// keyboard accelerator, not the only route to it -- both converge
+    /// on [`toggle_active_project_mode`].
+    ToggleProjectModeButtonPressed,
+    /// RFC-040 PR-040-C: Terminal Immersion's own real "+ New Terminal"
+    /// button (`terminal_workspace_view`'s session bar). `Ctrl+Alt+T` is
+    /// the accelerator; both converge on
+    /// [`launch_terminal_in_active_project`].
+    LaunchTerminalButtonPressed,
+    /// RFC-040 PR-040-C: the editor's own real "Save" button
+    /// (`content_mode_editor_view`'s chrome, shown whenever a document
+    /// is open). `Ctrl+S` is the accelerator; both converge on
+    /// `attempt_save_active_document` (via
+    /// [`save_active_document_button_pressed`]'s own guard).
+    SaveActiveDocumentButtonPressed,
+    /// RFC-040 PR-040-C: `TrustSettings`'s own real "Launch AI CLI Run"
+    /// button -- D2's "agent run where a trusted project's actions
+    /// live." `Ctrl+Alt+A` is the accelerator; both converge on
+    /// [`launch_agent_run_in_active_project`].
+    LaunchAgentRunButtonPressed,
+    /// RFC-040 PR-040-C: `TrustSettings`'s own real "AgentRun Report"
+    /// button. `Ctrl+Alt+R` is the accelerator; both converge on
+    /// [`open_current_agent_run_detail`].
+    OpenCurrentAgentRunDetailButtonPressed,
+    /// RFC-040 PR-040-C: `TrustSettings`'s own real "Approval History"
+    /// button. `Ctrl+Alt+H` is the accelerator; both converge on
+    /// [`open_approval_history`].
+    OpenApprovalHistoryButtonPressed,
+    /// RFC-040 PR-040-C: the top bar's own real "Trust Settings" button
+    /// -- global, visible whenever a project is active, the entry point
+    /// to the surface every other `TrustSettings`-hosted button above
+    /// lives on. `Ctrl+Alt+U` is the accelerator; both converge on
+    /// [`open_trust_settings`].
+    OpenTrustSettingsButtonPressed,
+    /// RFC-040 PR-040-C: the top bar's own real "?" button -- global,
+    /// visible always. `Ctrl+Alt+K` is the accelerator; both converge on
+    /// [`open_help`].
+    OpenHelpButtonPressed,
     /// RFC-015 PR-015-F: a synthetic measurement keystroke arrived; the
     /// `Instant` is when the measurement subscription first saw it, not
     /// when `update` gets around to handling it -- the gap between the
@@ -1228,6 +1268,115 @@ pub enum Message {
     CloseProjectTabPressed(tekstide_core::project::ProjectId),
 }
 
+/// RFC-040 PR-040-C, response 317's required follow-up: which of two
+/// obligations a real click's own `Message` carries -- never neither,
+/// for any message a `.on_press` anywhere in this crate can actually
+/// produce.
+///
+/// `#[cfg(test)]`, the same reasoning [`keyboard_help::ControlCoverage`]
+/// already states: nothing in production needs to ask this question,
+/// only this crate's own test suite does.
+#[cfg(test)]
+pub(crate) enum ClickMessageKind {
+    /// A background (non-modal) control's own click -- must refuse (a
+    /// no-op) while `state.modal` is `Some`, so a control behind an
+    /// open modal can never act. Response 317's finding: twelve guards
+    /// existed, only two were exhaustively enumerated by a test: this
+    /// classification is what makes "every one, not a sample" checkable
+    /// again the moment a thirteenth background message is added.
+    BackgroundControl,
+    /// A modal's own decision button -- must act unconditionally: by
+    /// construction, nothing but that modal's own view can ever have
+    /// produced this message, so there is no "another modal is open"
+    /// case for it to refuse against (only one modal can ever be open
+    /// at a time -- `state.modal: Option<ModalContent>`, not a stack).
+    ModalDecision,
+}
+
+/// Exhaustive over every `Message` variant, the same discipline
+/// [`keyboard_help::control_coverage`] already established for
+/// `NavigationAction`: a new variant fails to *compile* here until
+/// someone decides whether it is a background control, a modal
+/// decision, or (the common case -- most of `Message` is keyboard
+/// routing, async resolutions, timers, and window/terminal events, none
+/// of which any `.on_press` ever constructs) not click-originated at
+/// all, returning `None`.
+///
+/// Payload fields are matched with `_`/`..` throughout -- this function
+/// classifies *which variant*, never inspects *what it carries*, so a
+/// `ProjectId`/`ApprovalId`/`usize` payload needs no real value to
+/// pattern-match against.
+#[cfg(test)]
+fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
+    match message {
+        // -- background controls (`reopen_recent_project`'s own doc
+        // names every one of these ten background handler functions,
+        // each carrying the identical `state.modal.is_some()` guard) --
+        Message::GoToProjectBoardTabPressed
+        | Message::SwitchActiveProjectTabPressed(_)
+        | Message::CloseProjectTabPressed(_)
+        | Message::ReopenRecentProjectRowPressed(_)
+        | Message::OpenFolderBrowserButtonPressed
+        | Message::RevokeWorkspaceTrust
+        | Message::OpenTrustGrantDialog
+        | Message::ToggleTranscriptCaptureDeclined
+        | Message::OpenTranscriptPurgeDialog
+        | Message::OpenApprovalHistoryEntry(_)
+        // RFC-040 PR-040-C's own eight new background controls:
+        | Message::ToggleProjectModeButtonPressed
+        | Message::LaunchTerminalButtonPressed
+        | Message::SaveActiveDocumentButtonPressed
+        | Message::LaunchAgentRunButtonPressed
+        | Message::OpenCurrentAgentRunDetailButtonPressed
+        | Message::OpenApprovalHistoryButtonPressed
+        | Message::OpenTrustSettingsButtonPressed
+        | Message::OpenHelpButtonPressed => Some(ClickMessageKind::BackgroundControl),
+
+        // -- modal decisions (RFC-040 PR-040-B): the destructive/
+        // decision-committing half of a two-button modal, a folder
+        // browser row or its commit button, or `ModalDismiss` itself --
+        // the literal message seven different "safe" buttons dispatch
+        // directly, alongside `Escape` (see `project_close_dialog_view`'s
+        // own doc for why `Cancel` is one of them, not a thirteenth
+        // message of its own) --
+        Message::PasteConfirmAcceptPressed
+        | Message::ExternalChangeReloadPressed
+        | Message::ApprovalApproveOncePressed
+        | Message::ApprovalRejectPressed
+        | Message::TrustGrantGrantPressed
+        | Message::TranscriptPurgePressed
+        | Message::ProjectCloseClosePressed
+        | Message::FolderBrowserRowPressed(_)
+        | Message::FolderBrowserChooseCurrentDirectory
+        | Message::ModalDismiss => Some(ClickMessageKind::ModalDecision),
+
+        // -- not click-originated: `ModalActivate`/`ModalFocusNext`/
+        // `ModalFocusPrevious` are `Enter`/`Tab`/`Shift+Tab`-only --
+        // no button anywhere in this crate dispatches any of the three
+        // (a click reaches a decision through its own dedicated
+        // message instead, set-focus-then-`activate_current_modal`, not
+        // through `ModalActivate` itself) -- and everything below is
+        // keyboard routing, an async resolution, a timer, or a
+        // window/terminal event, none of which a `.on_press` call
+        // anywhere in this crate ever constructs.
+        Message::ModalActivate
+        | Message::ModalFocusNext
+        | Message::ModalFocusPrevious
+        | Message::Input(_)
+        | Message::MeasuredKey(_)
+        | Message::MeasurementTick
+        | Message::MeasurementFrame(_)
+        | Message::MeasuredModeSwitch(_)
+        | Message::MeasuredTerminalInput(_)
+        | Message::TerminalWoke(_)
+        | Message::TerminalPasteResolved { .. }
+        | Message::ApprovalPollTick
+        | Message::WindowResized(_)
+        | Message::WindowOpened(_)
+        | Message::PathFieldPasteResolved(_) => None,
+    }
+}
+
 /// RFC-040 PR-040-B: the one place a modal's own decision is made,
 /// shared by `Enter` (`Message::ModalActivate`) and every modal's new
 /// click button -- a click sets `focus` to the button that was pressed,
@@ -1365,41 +1514,30 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::Input(RoutedInput::Shell(shell_input)) => {
             let action = shell_input.action();
             if let Some(command) = app_command_for(action) {
-                // Terminal launch UX handoff: `LaunchTerminal` is the one
-                // command needing real I/O (spawning a process) alongside
-                // the route/mode change `dispatch` itself performs --
-                // `tekstide-core` has no I/O to do that with, so this is
-                // the one place `update` acts before, not only through,
-                // `dispatch`. Attempted regardless of what `dispatch`
-                // will do next; the mode switch always happens, so a
-                // refused launch still lands the user where they can see
-                // the notice (`terminal_workspace_view`) explaining why.
+                // RFC-040 PR-040-C: `LaunchTerminal`/`LaunchAgentRun` --
+                // both need real I/O alongside the route/mode change
+                // `dispatch` itself performs -- are handled by
+                // [`launch_terminal_in_active_project`]/
+                // [`launch_agent_run_in_active_project`] instead of
+                // inline here, so the keyboard accelerator and this
+                // slice's own new buttons converge on the exact same
+                // function, the same "one setup, two routes to it" shape
+                // `open_folder_browser` already established.
                 if command == AppCommand::LaunchTerminal {
-                    state.terminal_launch_notice = None;
-                    if let Err(refusal) = attempt_terminal_launch(state) {
-                        state.terminal_launch_notice = Some(refusal);
-                    }
+                    launch_terminal_in_active_project(state);
+                } else if command == AppCommand::LaunchAgentRun {
+                    launch_agent_run_in_active_project(state);
+                } else {
+                    state.app_shell.dispatch(command);
+                    // RFC-019 PR-019-B: any command that could have
+                    // changed which project or mode is active is a point
+                    // where the explorer tree might now need a scan it
+                    // has never had -- `scan_active_project_explorer_directory`
+                    // had no production caller before this slice
+                    // (confirmed by enumeration), so nothing else
+                    // triggers the first one.
+                    ensure_explorer_scanned(state);
                 }
-                // RFC-022 PR-022-D: the same shape as `LaunchTerminal`
-                // just above -- real I/O before `dispatch`, attempted
-                // regardless of what `dispatch` will do next, so a
-                // refused launch still lands the user in Terminal
-                // Immersion where the notice is visible.
-                if command == AppCommand::LaunchAgentRun {
-                    state.agent_run_launch_notice = None;
-                    if let Err(refusal) = attempt_agent_run_launch(state) {
-                        record_restricted_mode_blocked_if_applicable(state, &refusal);
-                        state.agent_run_launch_notice = Some(refusal);
-                    }
-                }
-                state.app_shell.dispatch(command);
-                // RFC-019 PR-019-B: any command that could have changed
-                // which project or mode is active is a point where the
-                // explorer tree might now need a scan it has never had --
-                // `scan_active_project_explorer_directory` had no
-                // production caller before this slice (confirmed by
-                // enumeration), so nothing else triggers the first one.
-                ensure_explorer_scanned(state);
             }
             // RFC-018 PR-018-B: `PasteIntoTerminal` maps to no
             // `AppCommand` (there is no core route/mode change), so it
@@ -1433,8 +1571,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // zone are even consulted, and `non_modal_subscription`
             // (the only source of `RoutedInput::Shell`) only runs while
             // no modal is already open, so this can never overwrite one.
+            // RFC-040 PR-040-C: routed through [`open_help`] now, the
+            // same function this slice's own new "?" button uses --
+            // that function's own `state.modal.is_some()` guard is a
+            // no-op here (never true, per the doc above), not a change
+            // in keyboard behaviour.
             if action == NavigationAction::OpenHelp {
-                state.modal = Some(ModalContent::Help);
+                open_help(state);
             }
             // RFC-038 PR-038-G: the keyboard accelerator alongside the
             // real button (`Message::OpenFolderBrowserButtonPressed`) --
@@ -1748,6 +1891,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             activate_current_modal(state);
         }
+        Message::ToggleProjectModeButtonPressed => toggle_active_project_mode(state),
+        Message::LaunchTerminalButtonPressed => launch_terminal_in_active_project(state),
+        Message::SaveActiveDocumentButtonPressed => save_active_document_button_pressed(state),
+        Message::LaunchAgentRunButtonPressed => launch_agent_run_in_active_project(state),
+        Message::OpenCurrentAgentRunDetailButtonPressed => open_current_agent_run_detail(state),
+        Message::OpenApprovalHistoryButtonPressed => open_approval_history(state),
+        Message::OpenTrustSettingsButtonPressed => open_trust_settings(state),
+        Message::OpenHelpButtonPressed => open_help(state),
         Message::ModalDismiss => {
             // RFC-039 PR-039-C: Escape on a `ProjectClose` dialog is a
             // real decision too (`safe_close_decision`'s `Cancelled`),
@@ -2520,6 +2671,25 @@ fn attempt_agent_run_launch(state: &mut State) -> Result<(), AgentRunLaunchRefus
     )
 }
 
+/// RFC-040 PR-040-C: `Message::LaunchAgentRunButtonPressed`'s handler,
+/// and the same function the keyboard accelerator's `RoutedInput::Shell`
+/// arm now calls too -- the same "one setup, two routes to it" shape
+/// [`launch_terminal_in_active_project`] just established for
+/// `LaunchTerminal`. See `reopen_recent_project`'s own doc for why the
+/// guard exists alongside `opaque`'s layout capture.
+fn launch_agent_run_in_active_project(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    state.agent_run_launch_notice = None;
+    if let Err(refusal) = attempt_agent_run_launch(state) {
+        record_restricted_mode_blocked_if_applicable(state, &refusal);
+        state.agent_run_launch_notice = Some(refusal);
+    }
+    state.app_shell.dispatch(AppCommand::LaunchAgentRun);
+    ensure_explorer_scanned(state);
+}
+
 /// change-detection-wiring handoff, Slice C, review response 252's D4
 /// decision: the production entry cap, explicit rather than inherited
 /// from `GeneratedChangeDetectionPolicy::default()`'s `4,096`. This
@@ -3239,6 +3409,63 @@ fn go_to_project_board(state: &mut State) {
     ensure_explorer_scanned(state);
 }
 
+/// RFC-040 PR-040-C: `Message::ToggleProjectModeButtonPressed`'s
+/// handler -- the same "own function, same two statements the keyboard
+/// arm's generic `Some(command)` branch already runs, guard added for
+/// the click" shape `go_to_project_board` established for
+/// `OpenProjectBoard` above.
+fn toggle_active_project_mode(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    state
+        .app_shell
+        .dispatch(AppCommand::ToggleActiveProjectMode);
+    ensure_explorer_scanned(state);
+}
+
+/// RFC-040 PR-040-C: `Message::OpenCurrentAgentRunDetailButtonPressed`'s
+/// handler -- same shape as [`toggle_active_project_mode`] just above.
+fn open_current_agent_run_detail(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    state
+        .app_shell
+        .dispatch(AppCommand::OpenActiveProjectSurface(
+            ProjectOpenSurface::AgentRunDetail,
+        ));
+    ensure_explorer_scanned(state);
+}
+
+/// RFC-040 PR-040-C: `Message::OpenApprovalHistoryButtonPressed`'s
+/// handler -- same shape as [`toggle_active_project_mode`] above.
+fn open_approval_history(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    state
+        .app_shell
+        .dispatch(AppCommand::OpenActiveProjectSurface(
+            ProjectOpenSurface::ApprovalHistory,
+        ));
+    ensure_explorer_scanned(state);
+}
+
+/// RFC-040 PR-040-C: `Message::OpenTrustSettingsButtonPressed`'s
+/// handler -- same shape as [`toggle_active_project_mode`] above.
+fn open_trust_settings(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    state
+        .app_shell
+        .dispatch(AppCommand::OpenActiveProjectSurface(
+            ProjectOpenSurface::TrustSettings,
+        ));
+    ensure_explorer_scanned(state);
+}
+
 /// RFC-039 PR-039-B: `Ctrl+Alt+N`'s own handler -- cycles to the next
 /// project in `AppState::projects()`'s own order, wrapping; a no-op
 /// with fewer than two projects open (nothing to cycle to), and starts
@@ -3751,6 +3978,21 @@ fn open_folder_browser(state: &mut State) {
     }
 }
 
+/// RFC-040 PR-040-C: `Message::OpenHelpButtonPressed`'s handler, and the
+/// same function the keyboard accelerator's `RoutedInput::Shell` arm
+/// now calls too -- the same "one setup, two routes to it" shape
+/// `open_folder_browser` just above already established. The guard is
+/// a genuine no-op for the keyboard path (`non_modal_subscription`
+/// already keeps `RoutedInput::Shell` from firing while a modal is
+/// open), not a behaviour change for it -- see that call site's own
+/// doc.
+fn open_help(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    state.modal = Some(ModalContent::Help);
+}
+
 /// `$HOME`, falling back to the filesystem root if unset or not a real,
 /// readable directory -- the same `std::env::var_os("HOME")` convention
 /// `tekstide-core`'s own config/profile/recent-project-store code
@@ -3896,6 +4138,19 @@ fn attempt_save_active_document(state: &mut State) {
     }));
 }
 
+/// RFC-040 PR-040-C: `Message::SaveActiveDocumentButtonPressed`'s
+/// handler -- not shared with the keyboard arm the way
+/// `launch_terminal_in_active_project` is, since `attempt_save_active_document`
+/// is already a standalone function with no route/mode change to
+/// duplicate; this just adds the guard a real click needs and did not
+/// have before (see `reopen_recent_project`'s own doc).
+fn save_active_document_button_pressed(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    attempt_save_active_document(state);
+}
+
 /// Terminal launch UX handoff: the real `Ctrl+Alt+T` path, calling
 /// [`launch_terminal`] once for `VisibleSlot::Primary` -- a fresh launch
 /// always becomes the new `Primary` (bumping whichever session held it
@@ -3934,6 +4189,25 @@ fn attempt_terminal_launch(state: &mut State) -> Result<(), TerminalLaunchRefusa
     // leaving it at the launch-time default until the next live resize.
     apply_terminal_geometry(state);
     Ok(())
+}
+
+/// RFC-040 PR-040-C: `Message::LaunchTerminalButtonPressed`'s handler,
+/// and the same function the keyboard accelerator's `RoutedInput::Shell`
+/// arm now calls too -- the terminal launch UX handoff's own real I/O
+/// (`attempt_terminal_launch`) alongside the route/mode change, in one
+/// place, the same "one setup, two routes to it" shape `open_folder_browser`
+/// already established. See `reopen_recent_project`'s own doc for why
+/// the guard exists alongside `opaque`'s layout capture.
+fn launch_terminal_in_active_project(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    state.terminal_launch_notice = None;
+    if let Err(refusal) = attempt_terminal_launch(state) {
+        state.terminal_launch_notice = Some(refusal);
+    }
+    state.app_shell.dispatch(AppCommand::LaunchTerminal);
+    ensure_explorer_scanned(state);
 }
 
 /// RFC-018 PR-018-B: the one production call site for
@@ -5051,6 +5325,7 @@ fn top_bar(state: &State) -> Element<'_, Message> {
     let content = column![
         text(state.window_title()).size(state.theme.font_size_heading()),
         project_tab_strip(state),
+        top_bar_actions_row(state),
     ]
     .spacing(6);
 
@@ -5063,6 +5338,44 @@ fn top_bar(state: &State) -> Element<'_, Message> {
             state.theme.border_default(),
         ))
         .into()
+}
+
+/// RFC-040 PR-040-C, D2: two global actions, always in the chrome
+/// rather than a toolbar or palette. `Help` is shown always -- the
+/// keyboard reference applies with or without a project. `Trust
+/// Settings` is shown only with an active project: a decision, not a
+/// default, since there is nothing to configure trust *for* at the
+/// Project Board. Compare `LaunchAgentRunButtonPressed`'s own
+/// always-shown, refusal-based choice on `trust_settings_view` -- that
+/// button's precondition (an active project) already always holds by
+/// construction of where it lives; this one's does not, since `top_bar`
+/// renders on every route.
+/// Factored out of [`top_bar_actions_row`] for the same testability
+/// reason [`main_area_label`]/[`sidebar_label`] already are -- an
+/// `Element` is not directly inspectable, so the decision itself is a
+/// plain function a test can call.
+fn top_bar_offers_trust_settings(state: &State) -> bool {
+    state.app_shell.state().active_project().is_some()
+}
+
+fn top_bar_actions_row(state: &State) -> Element<'_, Message> {
+    let mut actions: Vec<Element<'_, Message>> = Vec::new();
+    if top_bar_offers_trust_settings(state) {
+        actions.push(
+            button(
+                text(state.catalog.get("top-bar-trust-settings-button"))
+                    .size(state.theme.font_size_body()),
+            )
+            .on_press(Message::OpenTrustSettingsButtonPressed)
+            .into(),
+        );
+    }
+    actions.push(
+        button(text(state.catalog.get("top-bar-help-button")).size(state.theme.font_size_body()))
+            .on_press(Message::OpenHelpButtonPressed)
+            .into(),
+    );
+    row(actions).spacing(8).into()
 }
 
 /// RFC-039 D1/PR-039-B: the project tab strip -- one real, clickable
@@ -5512,6 +5825,13 @@ fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Messa
     // job).
     let content: Element<'_, Message> = match (mode, state.terminal_panes.is_empty()) {
         (Some(ProjectMode::TerminalImmersion), false) => terminal_workspace_view(state),
+        // RFC-040 PR-040-C: `terminal_workspace_view` is never called
+        // with zero panes (its own caller guard above already excludes
+        // that case), so the very first terminal in a project needed
+        // its own arm here -- otherwise the "+ New Terminal" button
+        // this slice adds would only ever appear once a terminal already
+        // exists, never for the launch that creates the first one.
+        (Some(ProjectMode::TerminalImmersion), true) => empty_terminal_workspace_view(state),
         // RFC-019 PR-019-C: real content, the same shape the
         // `TerminalImmersion` arm above already established for its own
         // mode -- substitute the placeholder with a real surface rather
@@ -5521,11 +5841,38 @@ fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Messa
             .spacing(6)
             .into(),
     };
-    container(content)
+    // RFC-040 PR-040-C, D2: "mode switching... on the workspace" -- one
+    // real, clickable control above whichever mode's own content is
+    // showing, present in both (unlike `terminal_workspace_view`'s own
+    // session bar or the editor's own "Save" button, which are each
+    // specific to one mode). `None` (no active project) renders nothing
+    // here -- there is no mode to switch with nothing open.
+    let body: Element<'_, Message> = match mode {
+        Some(current) => column![mode_toggle_row(state, current), content]
+            .spacing(8)
+            .into(),
+        None => content,
+    };
+    container(body)
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(16)
         .style(zone_style(state.theme, focused))
+        .into()
+}
+
+/// RFC-040 PR-040-C: `Ctrl+Alt+M`'s real, clickable equivalent -- both
+/// converge on [`toggle_active_project_mode`]. The label names the
+/// mode a click switches *to*, matching the trust-grant/purge dialogs'
+/// own "the button says what happens, not what state you're in"
+/// convention.
+fn mode_toggle_row(state: &State, mode: ProjectMode) -> Element<'_, Message> {
+    let label_key = match mode {
+        ProjectMode::Content => "main-area-switch-to-terminal-button",
+        ProjectMode::TerminalImmersion => "main-area-switch-to-content-button",
+    };
+    button(text(state.catalog.get(label_key)).size(state.theme.font_size_body()))
+        .on_press(Message::ToggleProjectModeButtonPressed)
         .into()
 }
 
@@ -5638,6 +5985,7 @@ fn content_mode_editor_view(state: &State) -> Element<'_, Message> {
             workspace.status(),
             &state.catalog,
             &state.theme,
+            Message::SaveActiveDocumentButtonPressed,
         ),
         None => text(main_area_label(state, Some(ProjectMode::Content))).into(),
     }
@@ -5652,48 +6000,82 @@ fn content_mode_editor_view(state: &State) -> Element<'_, Message> {
 /// shows only the `Primary` pane rather than rendering a clipped
 /// two-column split (see `surface::terminal::layout`'s module doc for
 /// why the refusal threshold is a full pane's worth of real columns).
+/// RFC-040 PR-040-C: `Ctrl+Alt+T`'s real, clickable equivalent -- both
+/// converge on [`launch_terminal_in_active_project`]. Shared between
+/// [`terminal_workspace_view`] (at least one pane already exists) and
+/// [`empty_terminal_workspace_view`] (none do yet), so the button reads
+/// identically in both.
+fn launch_terminal_button(state: &State) -> Element<'_, Message> {
+    button(
+        text(state.catalog.get("terminal-workspace-launch-button"))
+            .size(state.theme.font_size_body()),
+    )
+    .on_press(Message::LaunchTerminalButtonPressed)
+    .into()
+}
+
+/// RFC-040 PR-040-C: the very first terminal in a project -- reached
+/// with `mode == TerminalImmersion` and `state.terminal_panes.is_empty()`,
+/// the one case [`terminal_workspace_view`]'s own caller guard excludes.
+/// Without this arm the "+ New Terminal" button would only ever appear
+/// once a terminal already existed, never for the launch that creates
+/// the first one.
+/// Terminal launch UX handoff / RFC-022 PR-022-D: "the user pressed a
+/// key (or clicked a button) and is owed a visible answer" -- factored
+/// out so both [`terminal_workspace_view`] (at least one pane already
+/// exists) and [`empty_terminal_workspace_view`] (RFC-040 PR-040-C: none
+/// do yet, the one case where a refused *first* launch has nowhere else
+/// to land) show the identical three notices, rather than the empty
+/// case silently dropping them -- a refusal a user cannot see is the
+/// same "Add Project" defect this whole arc began with. Independent of
+/// each other: a launch notice and a paste notice can never both be
+/// relevant to the same keypress, but nothing prevents a paste notice
+/// surviving from an earlier attempt while a later, unrelated launch
+/// notice also exists, so all three render rather than one silently
+/// winning.
+fn terminal_launch_notice_rows(state: &State) -> Vec<Element<'_, Message>> {
+    let mut rows = Vec::new();
+    if let Some(refusal) = state.terminal_launch_notice.as_ref() {
+        rows.push(
+            text(terminal_launch_refusal_text(&state.catalog, refusal))
+                .size(state.theme.font_size_body())
+                .into(),
+        );
+    }
+    if let Some(refusal) = state.terminal_paste_notice.as_ref() {
+        rows.push(
+            text(terminal_paste_refusal_text(&state.catalog, refusal))
+                .size(state.theme.font_size_body())
+                .into(),
+        );
+    }
+    if let Some(refusal) = state.agent_run_launch_notice.as_ref() {
+        rows.push(
+            text(agent_run_launch_refusal_text(&state.catalog, refusal))
+                .size(state.theme.font_size_body())
+                .into(),
+        );
+    }
+    rows
+}
+
+fn empty_terminal_workspace_view(state: &State) -> Element<'_, Message> {
+    let mut rows = terminal_launch_notice_rows(state);
+    rows.push(
+        text(main_area_label(state, Some(ProjectMode::TerminalImmersion)))
+            .size(state.theme.font_size_body())
+            .into(),
+    );
+    rows.push(launch_terminal_button(state));
+    column(rows).spacing(8).into()
+}
+
 fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
     let font_size = state.theme.font_size_body();
     let theme = state.theme;
     let sessions = active_project_terminal_sessions(state);
 
-    // Terminal launch UX handoff: "the user pressed a key and is owed a
-    // visible answer" -- rendered above the session bar so it's the
-    // first thing seen, and only ever present right after a refused
-    // attempt (`terminal_launch_notice` is cleared at the start of every
-    // new one).
-    let notice: Option<Element<'_, Message>> =
-        state.terminal_launch_notice.as_ref().map(|refusal| {
-            text(terminal_launch_refusal_text(&state.catalog, refusal))
-                .size(state.theme.font_size_body())
-                .into()
-        });
-
-    // RFC-018 PR-018-B: same "owed a visible answer" shape, for a
-    // refused paste rather than a refused launch. Independent of
-    // `notice` above -- a launch notice and a paste notice can never
-    // both be relevant to the same keypress, but nothing prevents a
-    // paste notice surviving from an earlier attempt while a later,
-    // unrelated launch notice also exists, so both render rather than
-    // one silently winning.
-    let paste_notice: Option<Element<'_, Message>> =
-        state.terminal_paste_notice.as_ref().map(|refusal| {
-            text(terminal_paste_refusal_text(&state.catalog, refusal))
-                .size(state.theme.font_size_body())
-                .into()
-        });
-
-    // RFC-022 PR-022-D: the same "owed a visible answer" shape as
-    // `notice` above, for `LaunchAgentRun`'s own refusals -- rendered
-    // here rather than in a separate detail view since a refused agent
-    // run still lands the user in Terminal Immersion (`AppCommand::LaunchAgentRun`
-    // reuses the same route `LaunchTerminal` does).
-    let agent_run_notice: Option<Element<'_, Message>> =
-        state.agent_run_launch_notice.as_ref().map(|refusal| {
-            text(agent_run_launch_refusal_text(&state.catalog, refusal))
-                .size(state.theme.font_size_body())
-                .into()
-        });
+    let notice_rows = terminal_launch_notice_rows(state);
 
     let entries: Vec<crate::surface::terminal::session_bar::SessionBarEntry> = sessions
         .iter()
@@ -5758,17 +6140,9 @@ fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
         .into()
     };
 
-    let mut rows: Vec<Element<'_, Message>> = Vec::new();
-    if let Some(notice) = notice {
-        rows.push(notice);
-    }
-    if let Some(paste_notice) = paste_notice {
-        rows.push(paste_notice);
-    }
-    if let Some(agent_run_notice) = agent_run_notice {
-        rows.push(agent_run_notice);
-    }
+    let mut rows: Vec<Element<'_, Message>> = notice_rows;
     rows.push(bar);
+    rows.push(launch_terminal_button(state));
     rows.push(panes_view);
     column(rows).spacing(8).into()
 }
@@ -6938,6 +7312,39 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
                 .size(state.theme.font_size_body()),
         )
         .on_press(Message::OpenTranscriptPurgeDialog)
+        .into(),
+    );
+
+    // RFC-040 PR-040-C, D2: "agent run where a trusted project's
+    // actions live" -- three more real buttons, always rendered
+    // regardless of trust state. `LaunchAgentRunButtonPressed` reuses
+    // the exact real-refusal path `Ctrl+Alt+A` already has when
+    // untrusted (see `launch_agent_run_in_active_project`'s own doc);
+    // the report and history buttons have no precondition of their own
+    // to gate on -- each surface's own empty state (RFC-020, RFC-022
+    // PR-022-E) already handles "nothing yet" honestly.
+    lines.push(
+        button(
+            text(state.catalog.get("trust-settings-launch-agent-run-button"))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(Message::LaunchAgentRunButtonPressed)
+        .into(),
+    );
+    lines.push(
+        button(
+            text(state.catalog.get("trust-settings-agent-run-report-button"))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(Message::OpenCurrentAgentRunDetailButtonPressed)
+        .into(),
+    );
+    lines.push(
+        button(
+            text(state.catalog.get("trust-settings-approval-history-button"))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(Message::OpenApprovalHistoryButtonPressed)
         .into(),
     );
 

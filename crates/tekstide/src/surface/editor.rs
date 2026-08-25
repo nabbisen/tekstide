@@ -17,7 +17,7 @@
 //! producer) is not called anywhere here; `TextDocumentState` renders
 //! through `Catalog` via `editor-chrome`'s `$state` selector instead.
 
-use iced::widget::{column, container, text};
+use iced::widget::{button, column, container, text};
 use iced::{Element, Length};
 
 use tekstide_core::content::{TextCursor, TextDocument, TextDocumentState};
@@ -311,13 +311,21 @@ pub(crate) fn navigate_cursor(
     }
 }
 
-/// No `Message` interest of its own, the same shape `board::view` and
-/// `explorer::view` use -- this function only ever reads state.
-pub fn view<'a, Message: 'a>(
+/// RFC-040 PR-040-C: `on_save` is the one real click message this view
+/// now has an interest in -- the same "surface renders, `shell.rs`
+/// supplies the message" split [`crate::surface::board::empty_state_view`]'s
+/// own `open_browser_message` parameter already established. Only used
+/// in the `Some(document)` branch (there is nothing to save with no
+/// document open), but taken unconditionally rather than as an
+/// `Option<Message>`: unlike `board::row_view`'s own `open_message`,
+/// this surface's caller always has a real message to offer, so there
+/// is no `None` case to thread through.
+pub fn view<'a, Message: 'a + Clone>(
     document: Option<&TextDocument>,
     status: &ProjectContentStatus,
     catalog: &'a Catalog,
     theme: &'a Theme,
+    on_save: Message,
 ) -> Element<'a, Message> {
     let content: Element<'a, Message> = match document {
         Some(document) => {
@@ -325,6 +333,8 @@ pub fn view<'a, Message: 'a>(
             column![
                 text(chrome_line(catalog, document)).size(theme.font_size_body()),
                 text(cursor_line(catalog, document)).size(theme.font_size_status()),
+                button(text(catalog.get("editor-save-button")).size(theme.font_size_body()))
+                    .on_press(on_save),
                 body,
             ]
             .spacing(6)

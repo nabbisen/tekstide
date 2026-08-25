@@ -10237,6 +10237,82 @@ fn closing_a_background_project_does_not_disturb_the_active_one() {
     );
 }
 
+/// RFC-040 PR-040-C, response 317's required follow-up: `click_message_kind`'s
+/// own match is exhaustive over every `Message` variant at compile time
+/// (a new one fails to compile here, the same guarantee
+/// `every_live_action_has_a_visible_control_or_a_reasoned_allow_list_entry`'s
+/// `control_coverage` already has for `NavigationAction`) -- this test's
+/// job is only to exercise it against real values and lock the split in
+/// evidence, not to re-derive the guarantee at runtime. Every
+/// `BackgroundControl`/`ModalDecision` entry named here corresponds to a
+/// real `.on_press` site somewhere in the crate (PR-040-A's and
+/// PR-040-B's own coverage tests already verify each one exists); a
+/// sample of the `None` bucket proves that arm is reachable too, not
+/// only the two `Some` ones.
+#[test]
+fn click_message_kind_classifies_every_real_on_press_message() {
+    let background_controls = [
+        Message::GoToProjectBoardTabPressed,
+        Message::SwitchActiveProjectTabPressed(tekstide_core::project::ProjectId::new_uuid()),
+        Message::CloseProjectTabPressed(tekstide_core::project::ProjectId::new_uuid()),
+        Message::ReopenRecentProjectRowPressed(tekstide_core::project::ProjectId::new_uuid()),
+        Message::OpenFolderBrowserButtonPressed,
+        Message::RevokeWorkspaceTrust,
+        Message::OpenTrustGrantDialog,
+        Message::ToggleTranscriptCaptureDeclined,
+        Message::OpenTranscriptPurgeDialog,
+        Message::OpenApprovalHistoryEntry(tekstide_core::domain::ApprovalId::new_uuid()),
+        Message::ToggleProjectModeButtonPressed,
+        Message::LaunchTerminalButtonPressed,
+        Message::SaveActiveDocumentButtonPressed,
+        Message::LaunchAgentRunButtonPressed,
+        Message::OpenCurrentAgentRunDetailButtonPressed,
+        Message::OpenApprovalHistoryButtonPressed,
+        Message::OpenTrustSettingsButtonPressed,
+        Message::OpenHelpButtonPressed,
+    ];
+    for message in &background_controls {
+        assert!(
+            matches!(
+                super::click_message_kind(message),
+                Some(super::ClickMessageKind::BackgroundControl)
+            ),
+            "{message:?} must classify as BackgroundControl"
+        );
+    }
+
+    let modal_decisions = [
+        Message::PasteConfirmAcceptPressed,
+        Message::ExternalChangeReloadPressed,
+        Message::ApprovalApproveOncePressed,
+        Message::ApprovalRejectPressed,
+        Message::TrustGrantGrantPressed,
+        Message::TranscriptPurgePressed,
+        Message::ProjectCloseClosePressed,
+        Message::FolderBrowserRowPressed(0),
+        Message::FolderBrowserChooseCurrentDirectory,
+        Message::ModalDismiss,
+    ];
+    for message in &modal_decisions {
+        assert!(
+            matches!(
+                super::click_message_kind(message),
+                Some(super::ClickMessageKind::ModalDecision)
+            ),
+            "{message:?} must classify as ModalDecision"
+        );
+    }
+
+    assert!(
+        super::click_message_kind(&Message::ModalActivate).is_none(),
+        "Enter-only, no button dispatches it directly"
+    );
+    assert!(
+        super::click_message_kind(&Message::ModalFocusNext).is_none(),
+        "Tab-only, no button dispatches it directly"
+    );
+}
+
 // RFC-040 PR-040-B: modals get real, clickable buttons for their own
 // decision -- `what-a-clickable-modal-must-not-become.md`'s required
 // tests, below.
@@ -10255,12 +10331,17 @@ fn closing_a_background_project_does_not_disturb_the_active_one() {
 /// `stack!` puts the scrim on top, full-window); this guard is defense
 /// in depth that does not depend on that layout fact holding -- "a
 /// property that holds by accident of layout is one refactor from not
-/// holding." Two of the crate's ten background controls, on two
-/// different surfaces (Trust Settings, the Project Board) -- not all
-/// ten: every one of them now shares the identical one-line
-/// `if state.modal.is_some() { return; }` guard (see
+/// holding." Three of the crate's eighteen background controls, on
+/// three different surfaces (Trust Settings, the Project Board, the top
+/// bar) -- not all eighteen: every one of them now shares the identical
+/// one-line `if state.modal.is_some() { return; }` guard (see
 /// `reopen_recent_project`'s own doc for the full list), so this is a
-/// proof of the shared mechanism, not ten copies of the same assertion.
+/// proof of the shared mechanism, not eighteen copies of the same
+/// assertion. `click_message_kind`'s own exhaustive match (response
+/// 317's required follow-up) is what keeps the *set* of eighteen honest
+/// as the crate grows -- a new background message fails to compile
+/// there until someone classifies it -- which is a stronger guarantee
+/// than this dispatch-based sample could ever give by itself.
 #[test]
 fn a_control_behind_an_open_modal_cannot_be_clicked() {
     let (mut state, project_id) = state_with_a_real_project("modal-exclusivity-click");
@@ -10288,6 +10369,29 @@ fn a_control_behind_an_open_modal_cannot_be_clicked() {
     assert!(
         matches!(state.modal, Some(ModalContent::LayerDemo { .. })),
         "the open modal must not be replaced by a background control's click while it is up"
+    );
+
+    // RFC-040 PR-040-C: a third sample, drawn from this slice's own new
+    // background controls -- proving the pattern the two PR-040-B
+    // samples above already establish generalises to the eight new
+    // messages, not only the original ten.
+    let surface_before = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .unwrap()
+        .open_surface();
+    let _ = super::update(&mut state, Message::OpenTrustSettingsButtonPressed);
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .open_surface(),
+        surface_before,
+        "a PR-040-C background control's click message must have no effect while a modal is open \
+         either"
     );
 
     state.modal = None;
@@ -10738,4 +10842,216 @@ fn clicking_a_row_navigates_into_it_regardless_of_current_highlight() {
         }
         other => panic!("clicking a row must navigate into it, keeping the modal open: {other:?}"),
     }
+}
+
+// RFC-040 PR-040-C: eight background controls for the actions
+// PR-040-A's own audit found none for -- one test per button, each
+// mirroring an existing keyboard-path test's own real assertion but
+// dispatching the click message directly, proving the button reaches
+// the identical effect through the identical function (see each
+// handler's own doc in `shell.rs` for which keyboard test it mirrors).
+
+/// Mirrors `a_toggle_project_mode_shell_input_dispatches_the_real_app_command`.
+#[test]
+fn clicking_the_mode_toggle_switches_the_real_active_project_mode() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("toggle-project-mode-click"))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let _ = super::update(&mut state, Message::ToggleProjectModeButtonPressed);
+
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "clicking the mode toggle must reach the real AppCommand, not be silently swallowed"
+    );
+}
+
+/// Mirrors `launch_terminal_shell_input_switches_to_terminal_immersion_and_launches_a_real_session`.
+#[test]
+fn clicking_new_terminal_switches_modes_and_launches_a_real_session() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("launch-terminal-click"))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let _ = super::update(&mut state, Message::LaunchTerminalButtonPressed);
+
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "clicking + New Terminal must switch into Terminal Immersion"
+    );
+    assert_eq!(
+        state.terminal_panes.len(),
+        1,
+        "exactly one real pane must be launched"
+    );
+}
+
+/// Mirrors `ctrl_s_saves_the_real_edited_document_to_disk`.
+#[test]
+fn clicking_save_writes_the_real_edited_document_to_disk() {
+    let (mut state, dir) = state_with_an_open_document("editor-real-save-click", "hello");
+    let _ = state.app_shell.replace_active_project_text("hello!");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("file.txt")).unwrap(),
+        "hello",
+        "test precondition: the edit must not have reached disk yet"
+    );
+
+    let _ = super::update(&mut state, Message::SaveActiveDocumentButtonPressed);
+
+    assert_eq!(
+        std::fs::read_to_string(dir.join("file.txt")).unwrap(),
+        "hello!",
+        "clicking Save must write the real edit to the real file"
+    );
+}
+
+/// Mirrors `agent_run_launch_shell_input_switches_to_terminal_immersion_and_shows_the_real_trust_refusal`
+/// -- a fresh, untrusted project's refusal is real, typed, and visible,
+/// not silently swallowed, whether the attempt was a keypress or this
+/// slice's own click.
+#[test]
+fn clicking_launch_ai_cli_run_shows_the_real_trust_refusal_when_untrusted() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("agent-run-click"))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let _ = super::update(&mut state, Message::LaunchAgentRunButtonPressed);
+
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "a refused agent run launch must still land in Terminal Immersion, where the notice is \
+         visible"
+    );
+    assert!(
+        matches!(
+            state.agent_run_launch_notice,
+            Some(AgentRunLaunchRefusal::Validation(
+                tekstide_core::agent::AgentRunLaunchValidationError::WorkspaceDiscoveryBlocked { .. }
+            ))
+        ),
+        "a fresh, untrusted project must refuse with WorkspaceDiscoveryBlocked: {:?}",
+        state.agent_run_launch_notice
+    );
+}
+
+/// Mirrors `opening_help_through_a_real_key_event_shows_every_live_binding`.
+#[test]
+fn clicking_the_agent_run_report_button_opens_the_real_report_surface() {
+    let (mut state, project_id) = state_with_a_real_project("agent-run-report-click");
+
+    let _ = super::update(&mut state, Message::OpenCurrentAgentRunDetailButtonPressed);
+
+    let project = state.app_shell.state().project(&project_id).unwrap();
+    assert_eq!(
+        project.open_surface(),
+        tekstide_core::project::ProjectOpenSurface::AgentRunDetail,
+        "clicking the AgentRun Report button must reach the real AppCommand"
+    );
+    assert_eq!(project.mode(), tekstide_core::project::ProjectMode::Content);
+}
+
+/// Mirrors `opening_approval_history_from_navigation_sets_the_open_surface_and_forces_content_mode`.
+#[test]
+fn clicking_approval_history_sets_the_open_surface_and_forces_content_mode() {
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("approval-history-click"))
+        .expect("a freshly created directory is a valid project root");
+    app_shell
+        .state_mut()
+        .open_active_project_terminal_workspace();
+    assert_eq!(
+        app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "test precondition: starting in TerminalImmersion, not already the mode this action \
+         would leave behind by accident"
+    );
+    let mut state = state_with(app_shell);
+
+    let _ = super::update(&mut state, Message::OpenApprovalHistoryButtonPressed);
+
+    let project = state.app_shell.state().active_project().unwrap();
+    assert_eq!(
+        project.open_surface(),
+        tekstide_core::project::ProjectOpenSurface::ApprovalHistory,
+        "clicking Approval History must reach the real AppCommand"
+    );
+    assert_eq!(project.mode(), tekstide_core::project::ProjectMode::Content);
+}
+
+/// Mirrors `open_trust_settings_shell_input_routes_to_the_trust_settings_surface`.
+#[test]
+fn clicking_trust_settings_routes_to_the_real_trust_settings_surface() {
+    let (mut state, project_id) = state_with_a_real_project("trust-settings-button-click");
+
+    let _ = super::update(&mut state, Message::OpenTrustSettingsButtonPressed);
+
+    let project = state.app_shell.state().project(&project_id).unwrap();
+    assert_eq!(
+        project.open_surface(),
+        tekstide_core::project::ProjectOpenSurface::TrustSettings
+    );
+    assert_eq!(project.mode(), tekstide_core::project::ProjectMode::Content);
+}
+
+/// Mirrors `opening_help_through_a_real_key_event_shows_every_live_binding`.
+#[test]
+fn clicking_the_top_bar_help_button_opens_the_real_help_modal() {
+    let mut state = state_with(ApplicationShell::new());
+    assert!(state.modal.is_none(), "test precondition: no modal open");
+
+    let _ = super::update(&mut state, Message::OpenHelpButtonPressed);
+
+    assert!(
+        matches!(state.modal, Some(ModalContent::Help)),
+        "clicking \"?\" must open the Help modal: {:?}",
+        state.modal
+    );
+}
+
+/// `top_bar_offers_trust_settings`'s own context-dependent decision (D2,
+/// RFC-040 PR-040-C): "Trust Settings" is hidden with no active
+/// project, not shown-and-silently-refusing -- factored out of
+/// `top_bar_actions_row` for the same testability reason
+/// `main_area_label`/`sidebar_label` already are, since an `Element` is
+/// not directly inspectable.
+#[test]
+fn the_top_bar_trust_settings_button_is_hidden_without_an_active_project_and_shown_with_one() {
+    let empty_state = state_with(ApplicationShell::new());
+    assert!(
+        !super::top_bar_offers_trust_settings(&empty_state),
+        "no active project: nothing to configure trust for, so the button must not render"
+    );
+
+    let (populated_state, _project_id) =
+        state_with_a_real_project("top-bar-trust-settings-visibility");
+    assert!(
+        super::top_bar_offers_trust_settings(&populated_state),
+        "an active project exists: the button must render"
+    );
 }

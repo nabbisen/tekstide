@@ -54,6 +54,11 @@ sidebar-placeholder-title = Sidebar
 main-area-content-mode-placeholder = Content Mode. RFC-019 adds the editor and explorer here.
 main-area-terminal-mode-placeholder = Terminal / Agent Immersion Mode. RFC-017 adds the terminal here.
 
+# RFC-040 PR-040-C: `mode_toggle_row`'s own two labels -- each names the
+# mode a click switches *to*, not the mode currently showing.
+main-area-switch-to-terminal-button = Switch to Terminal
+main-area-switch-to-content-button = Switch to Content
+
 status-bar-summary = { $route ->
     [project-board] Project Board
    *[active-project-workspace] Project Workspace
@@ -244,6 +249,12 @@ session-bar-entry = Terminal { $number } ({ $slot ->
    *[unknown] Unknown
 }
 
+# RFC-040 PR-040-C, D2: "terminal launch on the workspace" -- always
+# shown in Terminal Immersion, panes empty or not; `terminal-launch-refused`
+# above already renders the honest reason when the limit is reached, so
+# this button is never hidden, only sometimes followed by that notice.
+terminal-workspace-launch-button = + New Terminal
+
 # Terminal launch UX handoff: "refusal must be a typed error the shell
 # can render... the user pressed a key and is owed a visible answer."
 # One message, `$reason` a compile-time symbol
@@ -377,6 +388,12 @@ editor-chrome = { $path }{ $state ->
 # only (two numbers); nothing here is attacker-influenced.
 editor-cursor = Line {$line}, Column {$column}
 
+# RFC-040 PR-040-C, D2: "save on the editor" -- shown whenever a
+# document is open, regardless of dirty state, matching `Ctrl+S`'s own
+# always-available behaviour (`attempt_save_active_document` is a safe
+# no-op-shaped call on a clean document, not an error).
+editor-save-button = Save
+
 editor-empty = No file is open. Select a file in the explorer and press Enter.
 
 # `$message` is `TextDocumentOpenError`'s own `Display`, which -- like
@@ -500,6 +517,11 @@ approval-history-entry = { $command }
     }
 approval-history-entry-open = Open
 
+# RFC-040 PR-040-C, D2: `top_bar_actions_row`'s own two labels -- global
+# actions, in the chrome on every route.
+top-bar-trust-settings-button = Trust Settings
+top-bar-help-button = ?
+
 # RFC-032: `ProjectOpenSurface::TrustSettings`'s own view. `$state` is a
 # compile-time literal symbol (`trust_state_symbol`), never
 # `WorkspaceTrust`'s own `Debug` text.
@@ -536,6 +558,15 @@ trust-settings-retained-transcripts = Retained locally: { $count ->
    *[other] {$count} transcripts
 } ({ $bytes } bytes)
 trust-settings-purge-button = Purge Project Transcripts…
+
+# RFC-040 PR-040-C, D2: "agent run where a trusted project's actions
+# live" -- always shown, not hidden while Restricted: `Ctrl+Alt+A`
+# already allows the attempt and shows the real refusal notice when
+# untrusted, so the button reuses that same honest, already-tested
+# behaviour rather than a second, silent-when-untrusted path.
+trust-settings-launch-agent-run-button = Launch AI CLI Run
+trust-settings-agent-run-report-button = AgentRun Report
+trust-settings-approval-history-button = Approval History
 
 # PR-020-B: `ProjectOpenSurface::AgentRunDetail`'s own view -- the most
 # recently launched run in the active project (this slice's own answer

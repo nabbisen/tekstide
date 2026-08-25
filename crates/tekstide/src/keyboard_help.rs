@@ -135,16 +135,48 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
              alternate input path for that same workflow, not a workflow with no visible \
              route. Permanent.",
         )),
-        NavigationAction::ToggleProjectMode
-        | NavigationAction::LaunchTerminal
-        | NavigationAction::SaveActiveDocument
-        | NavigationAction::LaunchAgentRun
-        | NavigationAction::OpenCurrentAgentRunDetail
-        | NavigationAction::OpenApprovalHistory
-        | NavigationAction::OpenTrustSettings
-        | NavigationAction::OpenHelp => Some(ControlCoverage::KeyboardOnly(
-            "no visible control yet -- tracked for RFC-040 PR-040-C.",
-        )),
+        NavigationAction::ToggleProjectMode => Some(ControlCoverage::VisibleControl {
+            description: "the workspace's own mode-toggle row (mode_toggle_row, RFC-040 PR-040-C)",
+            on_press_snippet: ".on_press(Message::ToggleProjectModeButtonPressed)",
+        }),
+        NavigationAction::LaunchTerminal => Some(ControlCoverage::VisibleControl {
+            description: "Terminal Immersion's own \"+ New Terminal\" button \
+                          (launch_terminal_button, RFC-040 PR-040-C)",
+            on_press_snippet: ".on_press(Message::LaunchTerminalButtonPressed)",
+        }),
+        // Not `.on_press(Message::SaveActiveDocumentButtonPressed` -- the
+        // editor surface's own `view` is generic over `Message` (the same
+        // "surface renders, shell.rs supplies the message" split
+        // `board::empty_state_view` already uses), so the real button
+        // lives in `surface::editor::view` while the concrete message is
+        // only named at `content_mode_editor_view`'s own call site. The
+        // snippet below is that call site's own argument, which
+        // disappears exactly when the wiring does.
+        NavigationAction::SaveActiveDocument => Some(ControlCoverage::VisibleControl {
+            description: "the editor's own \"Save\" button (surface::editor::view, RFC-040 PR-040-C)",
+            on_press_snippet: "Message::SaveActiveDocumentButtonPressed,",
+        }),
+        NavigationAction::LaunchAgentRun => Some(ControlCoverage::VisibleControl {
+            description: "TrustSettings's own \"Launch AI CLI Run\" button (RFC-040 PR-040-C)",
+            on_press_snippet: ".on_press(Message::LaunchAgentRunButtonPressed)",
+        }),
+        NavigationAction::OpenCurrentAgentRunDetail => Some(ControlCoverage::VisibleControl {
+            description: "TrustSettings's own \"AgentRun Report\" button (RFC-040 PR-040-C)",
+            on_press_snippet: ".on_press(Message::OpenCurrentAgentRunDetailButtonPressed)",
+        }),
+        NavigationAction::OpenApprovalHistory => Some(ControlCoverage::VisibleControl {
+            description: "TrustSettings's own \"Approval History\" button (RFC-040 PR-040-C)",
+            on_press_snippet: ".on_press(Message::OpenApprovalHistoryButtonPressed)",
+        }),
+        NavigationAction::OpenTrustSettings => Some(ControlCoverage::VisibleControl {
+            description: "the top bar's own \"Trust Settings\" button (top_bar_actions_row, \
+                          RFC-040 PR-040-C)",
+            on_press_snippet: ".on_press(Message::OpenTrustSettingsButtonPressed)",
+        }),
+        NavigationAction::OpenHelp => Some(ControlCoverage::VisibleControl {
+            description: "the top bar's own \"?\" button (top_bar_actions_row, RFC-040 PR-040-C)",
+            on_press_snippet: ".on_press(Message::OpenHelpButtonPressed)",
+        }),
         NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenDiffReview
         | NavigationAction::OpenSafeCloseDialog
