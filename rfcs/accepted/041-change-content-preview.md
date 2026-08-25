@@ -2,7 +2,11 @@
 
 Status: **Proposed 2026-08-25.** Scoped at the human owner's request as the second theme for
 `0.14.0`, after RFC-035.
-Target milestone: to be set by the human owner.
+Target milestone: **M12** — accepted by the human owner 2026-08-25, third of three for `0.14.0`,
+after RFC-035 and the safe-close honesty fix.
+
+Its three open questions were **decided by the architect on acceptance**; an implementer must not
+inherit an unresolved architecture decision.
 Date: 2026-08-25
 
 Related RFCs:
@@ -96,21 +100,51 @@ already persists in substance. The retention delta is metadata this project alre
 - Acting on a change. RFC-034's job, and it should follow this rather than precede it — approving
   a change you cannot inspect is the ordering this RFC exists to fix.
 
+## Decisions (were open questions; settled on acceptance)
+
+**D1 — retain `DetectedChanges` beside the `ChangeSet`, keyed by `ChangeSetId`, session-scoped.**
+
+Not as a field on the persisted `ChangeSet`. `ChangeSet` is a domain type that outlives the
+session and is designed to hold metadata; `DetectedChanges` is a detector output whose usefulness
+expires with its baseline's authority. Fusing them makes the second look as durable as the first.
+
+A session-scoped map keyed by `ChangeSetId` makes the lifetime honest and makes the expiry
+expressible: **the retained value may be dropped without the `ChangeSet` becoming wrong**, which
+is exactly the relationship. Dropping it means content preview stops being offered for that change
+set; the metadata the surface already shows is unaffected.
+
+**D2 — a stale baseline refuses, and says which.**
+
+`diff_content_is_stale` exists and RFC-024 deliberately did not reuse `ExternalChangeDecision`'s
+variants, because its `Conflict` state cannot arise in a read-only flow. Reuse RFC-024's, not a
+third shape.
+
+Refuse rather than render-with-a-warning. A file's current content shown under a change set whose
+baseline has expired is content that may have nothing to do with that run — and the whole point of
+this surface is answering "what did the agent do", where a plausible wrong answer is worse than
+none. RFC-019 PR-019-E already found this exact class once: a status derived from a source that
+had stopped being authoritative.
+
+**Say which**: "this change set's baseline is no longer authoritative" is actionable; "cannot show
+content" is not.
+
+**D3 — `DiffContent` loses its `Debug` derive, and the move-out gap is documented rather than
+closed.**
+
+RFC-024 recorded both as harmless while nothing called it. This RFC is what makes them reachable.
+
+The `Debug` derive goes: an unredacted `Debug` on a type holding file content is one `dbg!`,
+one panic message, or one `tracing` field away from putting a user's source into a log. Implement
+`Debug` by hand printing kind and length, never bytes — the shape `BoundedRuntimeSummary` and
+`DisplayText` already establish.
+
+The move-out gap — non-retention protects the wrapper but not bytes a consumer moves out after a
+pattern match — **stays open and is documented at the type**, not closed. Closing it properly
+means a lifetime-bound `DiffContent`, which RFC-024 raised and is a larger change than this RFC
+should smuggle. Documenting it at the definition, where the next consumer reads it, is the
+proportionate answer; a comment on the type is worth more than a sentence in a closed RFC nobody
+opens.
+
 ## Open questions
 
-- **OQ1 — what shape is retained, and where?** `DetectedChanges` alongside the `ChangeSet` on
-  `ProjectSession` is the obvious answer and probably right. But `ChangeSet` is a persisted domain
-  type and `DetectedChanges` is a detector output; whether the second belongs beside the first, or
-  in a session-scoped side table keyed by `ChangeSetId`, is a real modelling decision with a
-  lifetime consequence — a retained `DetectedChanges` that outlives its baseline's authority is
-  the stale-baseline defect wearing a new coat.
-- **OQ2 — what does the surface show when the baseline has gone stale?** `diff_content_is_stale`
-  exists and RFC-024 deliberately did not reuse `ExternalChangeDecision`'s variants, because its
-  `Conflict` state cannot arise in a read-only flow. Rendering "this may no longer be accurate" is
-  a different UX problem from refusing, and this RFC owns the choice.
-- **OQ3 — is `DiffContent`'s `Debug` derive acceptable once it is reachable?** RFC-024 recorded it
-  as a known limitation: `DiffContent` derives `Debug` **unredacted**, and its non-retention
-  protection blocks storing the wrapper but not a consumer moving the unwrapped bytes out after a
-  pattern match. Both were harmless while nothing called it. **This RFC is what makes them
-  reachable**, and it should decide them rather than inherit them — RFC-024 explicitly carried
-  them forward to whoever did.
+None. The three above were the open questions.
