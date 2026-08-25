@@ -1,7 +1,7 @@
 ---
 title: "RFC-020: Diff Review and AgentRun Report Surfaces — handoff pack"
 rfc: "RFC-020"
-rfc_file: "../../accepted/020-diff-review-and-agentrun-report.md"
+rfc_file: "../../done/020-diff-review-and-agentrun-report.md"
 status: "Both surfaces implemented — AgentRun report (0.12.0), change review surface (2026-08-25, accepted with one required closeout item, also delivered)"
 target_milestone: "M10"
 created: "2026-08-15"

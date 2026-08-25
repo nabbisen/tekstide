@@ -1,7 +1,7 @@
 ---
 title: "RFC-020: Diff Review and AgentRun Report Surfaces — Task Breakdown / PR Plan"
 rfc: "RFC-020"
-rfc_file: "../../accepted/020-diff-review-and-agentrun-report.md"
+rfc_file: "../../done/020-diff-review-and-agentrun-report.md"
 status: "PR-020-B implemented 2026-08-18 in full -- core (responses 198/199, commits b74d8d5/c92d97e) and surface (pr-020-b-report-surface.md), awaiting review. PR-020-C (change review surface) remains blocked on its own DetectedChanges projection; PR-020-D (closeout) not started."
 target_milestone: "M10"
 created: "2026-08-15"

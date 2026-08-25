@@ -1,6 +1,6 @@
 # RFC-034: Change Review Actions and Review State
 
-Status: **Accepted by the human owner 2026-08-18.** Blocked on RFC-020: a user cannot act on a change set they cannot see.
+Status: **Accepted by the human owner 2026-08-18. UNBLOCKED 2026-08-25** — RFC-020 shipped the change review surface, so a user can now see a change set. The original blocker read: *"Blocked on RFC-020: a user cannot act on a change set they cannot see."* Note what RFC-020 shipped is **metadata only**: file paths, counts, detection status, review state. Diff *content* is still not rendered, so an action taken here is taken on the same metadata the surface shows, not on inspected content — decide deliberately whether that is sufficient for the actions this RFC defines.
 Target milestone: M12
 Date: 2026-08-18
 
@@ -13,7 +13,7 @@ Depends on:
 
 - [RFC-012](../done/012-generated-change-review-foundations.md) — `ReviewState` and
   `transition_change_set_review_state`, both built, neither reachable.
-- [RFC-020](./020-diff-review-and-agentrun-report.md) — **hard prerequisite.** A user cannot
+- [RFC-020](../done/020-diff-review-and-agentrun-report.md) — **hard prerequisite.** A user cannot
   act on a change set they cannot see. RFC-020's own answer to its Q3 is "read-only," and
   this RFC is the follow-on that question deferred.
 

@@ -1,7 +1,7 @@
 ---
 title: "RFC-020: Diff Review and AgentRun Report Surfaces - Acceptance / QA Checklist"
 rfc: "RFC-020"
-rfc_file: "../../accepted/020-diff-review-and-agentrun-report.md"
+rfc_file: "../../done/020-diff-review-and-agentrun-report.md"
 status: "Open"
 target_milestone: "M10"
 created: "2026-08-15"
@@ -161,8 +161,39 @@ this slice was never scoped to do.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted
+- [x] Accepted
 - [ ] Accepted with required follow-up
 - [ ] Rejected
 
-Reviewer notes:
+Reviewer notes: Final Acceptance recorded 2026-08-25 (review request 323). Suite re-run by the
+reviewer, three consecutive runs under default parallelism: all four targets ok, zero failures,
+no flake.
+
+RFC-020 closes with both surfaces shipped. The AgentRun report landed in `0.12.0`; the change
+review surface landed now, metadata-only, with the two disclosures the RFC made non-optional
+rendered **on the surface itself** rather than in documentation. The reviewer ablated the one
+that mattered most — collapsing `Partial`'s status symbol into `Complete` — and the distinctness
+test failed, so *a truncated scan is not "nothing changed"* is guarded rather than intended.
+
+The populated surface has now been seen, via an env-gated seeding path calling the same three
+production functions a real agent run's exit calls, with `agent_run_id: None` so it claims no run
+produced it. One gap stays open and is recorded: a `ChangeSet` produced by a **real** agent run
+has never been observed live, only at string level.
+
+**One disclosure required of the seeding path itself**, carried into the limitations: unlike
+`TEKSTIDE_LAYER_DEMO` and `TEKSTIDE_TERMINAL_DEMO`, this demo **writes a file into the user's
+project root and does not remove it**. "The same env-gated-demo convention" reads as though the
+three are equivalent in effect. They are not, and the difference is the one a user would care
+about.
+
+Two items the implementer deliberately did not decide, decided here:
+
+- **RFC-034 is unblocked.** Its stated blocker was "a user cannot act on a change set they cannot
+  see"; a user can now see them.
+- "What this hands forward to RFC-030" stays unchecked with its stated reason — not assessed in
+  this slice.
+
+The checklist rewrite is the right handling of a descoped slice: striking items that assumed the
+full diff-content shape, with reasons, rather than leaving them open and implying this slice left
+work unfinished. The bidi item split correctly — bidi in a file *path* is checked, bidi in file
+*content* stays blocked for a now-confirmed rather than provisional reason.

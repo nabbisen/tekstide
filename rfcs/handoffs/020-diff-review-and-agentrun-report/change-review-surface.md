@@ -1,8 +1,8 @@
 ---
 title: "RFC-020: the change review surface — slice handoff"
 rfc: "RFC-020"
-rfc_file: "../../accepted/020-diff-review-and-agentrun-report.md"
-source_rfc_status: "Accepted, partially implemented — the AgentRun report shipped in 0.12.0"
+rfc_file: "../../done/020-diff-review-and-agentrun-report.md"
+source_rfc_status: "Implemented and closed 2026-08-25 — RFC-020 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-25"
 ---
