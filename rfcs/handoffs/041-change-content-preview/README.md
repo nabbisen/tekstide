@@ -24,8 +24,8 @@ Source RFC: [RFC-041](../../accepted/041-change-content-preview.md)
 
 `0.13.0` shows **which** files an agent run touched and cannot show **what it did to them**.
 
-The model is not missing. `read_diff_content` (`project/diff.rs:403`) and
-`gate_diff_content_read` (`:280`) were built, gated, reviewed across four slices and shipped in
+The model is not missing. `read_diff_content` and `gate_diff_content_read`, both in
+`project/diff.rs`, were built, gated, reviewed across four slices and shipped in
 `0.7.0` — with bounds, non-text classification before any read, and staleness detection. **Both
 have zero production callers.**
 
@@ -59,3 +59,18 @@ change kind, the staleness refusal (D2), and `DiffContent`'s `Debug` (D3).
 **Out:** re-deciding any of RFC-024 — bounds, refusal-not-truncation, non-text classification,
 baseline authority, escaping. A two-sided diff. Retaining content. Acting on a change, which is
 RFC-034's and should follow this.
+
+## Premise re-verified 2026-08-25, after RFC-035 landed
+
+RFC-035 modified `add_detected_generated_change_set` — the exact function this slice's premise
+rests on — so the premise was re-checked rather than assumed still true:
+
+- `add_detected_generated_change_set` still takes `detected: &DetectedChanges` **by reference and
+  keeps none of it**. RFC-035 added an omitted *count* through it; the value itself is still
+  dropped at the end of the call.
+- `read_diff_content` and `gate_diff_content_read` still have **zero production callers**.
+
+Both premises hold. Citations here name functions rather than line numbers, deliberately: a
+sibling handoff written the same morning had two line citations go stale within hours when
+RFC-035 shifted them. **If a citation in this document does not resolve, the citation is wrong,
+not the code** — find it by name and say so in your evidence.

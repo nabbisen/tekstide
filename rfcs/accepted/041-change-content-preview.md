@@ -28,9 +28,9 @@ days ago, and has never been called.**
 `0.13.0` shipped a change review surface that shows *which files* an agent run touched. It cannot
 show *what it did to them*. The reason is not a missing model:
 
-- `read_diff_content` exists (`project/diff.rs:403`), with per-change-kind delivery, bounds,
+- `read_diff_content` exists in `project/diff.rs`, with per-change-kind delivery, bounds,
   non-text classification and staleness detection.
-- `gate_diff_content_read` exists (`:280`), refusing above a measured 4 MiB-per-side bound and
+- `gate_diff_content_read` exists in the same module, refusing above a measured 4 MiB-per-side bound and
   classifying binary content **before any read**, with the ordering ablated rather than asserted.
 - Both have **zero production callers.** Built in `0.7.0`, reviewed across four slices, unreached
   ever since.
