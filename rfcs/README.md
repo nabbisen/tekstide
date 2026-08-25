@@ -25,8 +25,9 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 041 | [Change Content Preview](./proposed/041-change-content-preview.md) | **Proposed 2026-08-25** as `0.14.0`'s second theme. `0.13.0` shows *which* files an agent run touched and cannot show *what it did to them* — but the model is not missing: `read_diff_content` and `gate_diff_content_read` were built, gated and reviewed in `0.7.0` and have **zero production callers**. The one missing link is that `add_detected_generated_change_set` discards the `DetectedChanges` they require. Delivers **content preview, not a diff**: a two-sided diff for a modified file is structurally impossible until Git-backed detection exists, because the before-bytes were never captured |
 
-*(empty — and that is the correct state. An empty `proposed/` means nothing is awaiting review,
+*(the entry above is the only proposed RFC. An empty `proposed/` means nothing is awaiting review,
 not that a folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
 
 ## Accepted
