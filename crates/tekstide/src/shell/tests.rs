@@ -10080,6 +10080,145 @@ fn confirming_the_close_terminates_the_real_process_and_removes_the_project() {
     );
 }
 
+/// `safe-close-confirmation-honesty.md`'s own required evidence: a real
+/// terminal whose shell backgrounds a SIGTERM-ignoring descendant into
+/// its own, separate process group -- the exact real shape response 319
+/// reproduced, and the same shell one-liner
+/// `linux_runtime_does_not_overclaim_when_child_outlives_direct_shell_after_sigterm`
+/// already proves reaches `KilledAfterTimeout` at the
+/// `LinuxTerminalRuntime` level -- closed through the real production
+/// path (`Message::CloseProjectTabPressed`/`ModalActivate`), not
+/// constructed. Proves both halves of the decision this slice made:
+/// the recorded outcome is still `Applied` (`KilledAfterTimeout` is
+/// confirmation of the shell's own process group, exactly like
+/// `Exited`/`TerminatedBySignal` -- not narrowed out), and the
+/// backgrounded descendant is a real, still-alive orphan afterward, by
+/// a real OS-level check rather than an inference from the outcome --
+/// the gap `terminal_process_groups_confirmed_empty`'s own rename now
+/// discloses in its name and doc comment rather than implying closed.
+///
+/// No behavioural ablation applies here (see `qa-evidence.md`): this
+/// slice renames a field and corrects what it claims; the underlying
+/// `confirmed` predicate is unchanged by design, so there is no old
+/// predicate to restore and watch fail. What this test ablates instead
+/// is the *old name's* implicit claim -- if `fully_confirmed: true` had
+/// been read as "every process this terminal launched is gone," this
+/// test is the concrete case that reads false.
+#[test]
+fn closing_a_project_with_a_backgrounded_descendant_still_records_applied_while_it_survives() {
+    let (mut state, project_id, terminal_id) =
+        state_with_a_real_terminal_on_its_own_project("close-backgrounded-descendant");
+
+    // `$!` from the *parent* shell, not `$$` inside the subshell --
+    // `$$` inside `(...)` is not reliably the subshell's own PID across
+    // shells (a first attempt using it here named the wrong process:
+    // `/bin/sh`'s own job-control line reported a different PID than
+    // `$$` did). `$!` is POSIX-guaranteed to be the PID of the most
+    // recently backgrounded job, which is also its process group
+    // leader -- exactly the process this test needs to check.
+    state.terminal_panes[0].write_input(
+        b"(trap '' TERM; while :; do sleep 1; done) & echo \"descendant-pid:$!\"; wait\n",
+    );
+    assert!(
+        poll_demo_pane_until(&mut state, "descendant-pid:"),
+        "the backgrounded descendant must report its own PID before the close attempt begins"
+    );
+    // `rendered_text()` is a fixed-width terminal grid, each row padded
+    // with spaces to the pane's column width -- not newline-delimited
+    // prose. Find the marker as a substring and take the digits
+    // immediately following it, rather than assuming a `.lines()` split
+    // lands on it.
+    // `rsplit_once`, not `split_once`: the echoed input line itself
+    // contains the literal source text `descendant-pid:$$` before the
+    // shell ever substitutes and prints the real value, so the first
+    // occurrence in the rendered pane is not the one with real digits
+    // after it -- the last one is.
+    let rendered = rendered_demo_pane_text(&state);
+    let after_marker = rendered
+        .rsplit_once("descendant-pid:")
+        .map(|(_, rest)| rest)
+        .unwrap_or_else(|| panic!("the marker must appear in the rendered pane: {rendered:?}"));
+    let digits: String = after_marker
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    let descendant_pid: u32 = digits.parse().unwrap_or_else(|_| {
+        panic!("the marker must be followed by a real, parseable PID: {rendered:?}")
+    });
+
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+    assert!(state.modal.is_some(), "test precondition: modal opened");
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert!(state.modal.is_none());
+    assert!(
+        state.app_shell.state().project(&project_id).is_none(),
+        "confirmed close must actually remove the project"
+    );
+    assert!(
+        !state
+            .terminal_panes
+            .iter()
+            .any(|pane| pane.terminal_id() == &terminal_id),
+        "the real terminal's own pane must be gone, not orphaned"
+    );
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let mut records: Vec<_> = audit_store
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::SafeCloseDecision),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .collect();
+    records.reverse();
+    assert_eq!(
+        records.len(),
+        2,
+        "a confirmed close still writes exactly two phases: {records:?}"
+    );
+    assert_eq!(
+        records[1].outcome,
+        tekstide_core::audit::AuditOutcome::Applied,
+        "KilledAfterTimeout is confirmation of the shell's own process group -- Applied is the \
+         honest outcome for it, exactly as for Exited/TerminatedBySignal: {records:?}"
+    );
+
+    // The real, decisive check -- not inferred from the outcome above.
+    // `kill -0` reports whether the PID still exists, the same
+    // signal-0 technique `process_group_exists_by_id` uses internally
+    // in `tekstide-core`, shelled out to rather than linked, since this
+    // crate has no `libc` dependency of its own to reach for.
+    let still_alive = std::process::Command::new("kill")
+        .args(["-0", &descendant_pid.to_string()])
+        .status()
+        .expect("running `kill -0` as a command must succeed regardless of its exit status")
+        .success();
+    assert!(
+        still_alive,
+        "the backgrounded descendant (pid {descendant_pid}) must still be alive -- proving \
+         a recorded Applied does not mean every process this terminal launched is gone"
+    );
+
+    // This test deliberately leaves an orphan behind to prove it exists
+    // -- clean it up rather than leaking it for the rest of the test
+    // process's life. Not this project's own job in production (that is
+    // `test-process-leak.md`'s disclosed, unaddressed third cause); it
+    // is this test's own job.
+    let _ = std::process::Command::new("kill")
+        .args(["-9", &descendant_pid.to_string()])
+        .status();
+}
+
 /// §3, required verbatim: closing a project must not delete its
 /// transcripts or its audit records. A project with existing capture
 /// history, currently idle (no running terminal -- that path is proven

@@ -85,20 +85,47 @@ pub struct AuditActionResult<T> {
 /// rather than left for the caller to get right by hand -- the same
 /// reasoning behind this project's other recent move from a
 /// runtime-checked invariant to one the type system makes
-/// unrepresentable. `Closed::fully_confirmed` is `false` when any
-/// terminated terminal's own outcome was `OrphanedUnknown`/`Failed` (see
-/// `record_plain_terminal_terminated`'s own `NotRequired` branch for
-/// that same ambiguity) -- honest that the project was removed from the
-/// session, not that every process it owned is confirmed gone, matching
-/// `what-closing-a-project-must-not-lose.md` §6's warning that an
-/// unconfirmed termination is the orphaned-shell failure mode this whole
-/// slice exists to close off. `Cancelled` never has a phase-one call at
-/// all -- no operation began, so there is nothing to authorize.
+/// unrepresentable. `Cancelled` never has a phase-one call at all -- no
+/// operation began, so there is nothing to authorize.
+///
+/// **`Closed::terminal_process_groups_confirmed_empty`, renamed from
+/// `fully_confirmed` (`safe-close-confirmation-honesty.md`): the old
+/// name claimed more than any of its possible values can support.** It
+/// is `false` when any terminated terminal's own outcome was
+/// `OrphanedUnknown`/`Failed` (see `record_plain_terminal_terminated`'s
+/// own `NotRequired` branch for that same ambiguity), or when a
+/// project-tracked terminal had no live pane, or `request_terminate`
+/// itself errored or produced no `Terminated` event.
+///
+/// **It is `true` for `Exited`/`TerminatedBySignal`/`KilledAfterTimeout`
+/// alike -- deliberately not narrowed to exclude `KilledAfterTimeout`.**
+/// All three outcomes come from the identical observation:
+/// `request_terminate`'s own polling confirmed the *one process group it
+/// directly signaled* had become empty. `KilledAfterTimeout` is not a
+/// weaker, give-up kind of confirmation -- `request_terminate` only ever
+/// produces it when that polling loop *did* observe the group empty
+/// (the genuinely-gave-up case is `OrphanedUnknown`, already excluded
+/// above); narrowing to exclude it would have fixed nothing but the one
+/// scenario response 319 happened to reproduce, while leaving the
+/// identical gap live under `Exited`/`TerminatedBySignal` -- which is
+/// the more common case, not a rarer one.
+///
+/// **What `true` does not mean, for any of the three:** that every
+/// process this terminal ever launched is gone. A shell with job
+/// control puts a backgrounded job (`cmd &`) in its *own* process
+/// group, separate from the shell's -- `request_terminate` signals and
+/// polls only the shell's own group, so a backgrounded descendant can
+/// (and, per response 319's real reproduction, does) outlive a
+/// termination this field reports as confirmed. Watching sibling
+/// process groups a terminal may have spawned is real, separate scope
+/// (`test-process-leak.md`'s own third, disclosed, unaddressed cause)
+/// -- this rename does not close that gap, it stops the field's own
+/// name from implying it is already closed.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SafeCloseDecision {
     Closed {
         operation_id: AuditOperationId,
-        fully_confirmed: bool,
+        terminal_process_groups_confirmed_empty: bool,
     },
     Cancelled,
 }
@@ -882,9 +909,9 @@ fn safe_close_decision_record(
     let (outcome, operation_id) = match decision {
         SafeCloseDecision::Closed {
             operation_id,
-            fully_confirmed,
+            terminal_process_groups_confirmed_empty,
         } => (
-            if fully_confirmed {
+            if terminal_process_groups_confirmed_empty {
                 AuditOutcome::Applied
             } else {
                 AuditOutcome::Failed

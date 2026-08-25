@@ -1,7 +1,7 @@
 ---
 title: "safe_close_decision must not claim more than it knows — implementation handoff"
 rfc: "none — a correctness fix in a durable security record"
-status: "Scheduled 2026-08-25, second of three for 0.14.0"
+status: "Implemented 2026-08-25. Decided option 3 (rename): `SafeCloseDecision::Closed::fully_confirmed` renamed to `terminal_process_groups_confirmed_empty`, with the doc comment stating precisely what it does and does not attest to. No behaviour change -- Exited/TerminatedBySignal/KilledAfterTimeout all still count as confirmation, deliberately not narrowed. See the review request for the full reasoning and evidence."
 target_milestone: "M12"
 created: "2026-08-25"
 ---
