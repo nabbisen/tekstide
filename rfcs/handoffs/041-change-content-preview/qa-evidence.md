@@ -158,6 +158,12 @@ reachability (`Ctrl+Alt+D`, `Enter` on the row) live; the automated test suite's
 `change_review_surface_shows_real_content_from_a_real_agent_run` (which dispatches the real
 `Message::ChangeReviewFileRowPressed` through `update`, not the click event itself) cover the
 click path's own code, just not with a literal mouse click observed on screen this round.
+Worth naming plainly: in this arc, a live human-equivalent click has independently found three
+defects the suite did not (a dropped keystroke, a missing refusal notice, an affordance gap with
+a passing test over its own strings), so this control was never actually clicked by such an
+input and is carrying somewhat less evidence than its predecessors on that specific axis — the
+keyboard route and the two `update()`-dispatching tests above are real coverage of the same code
+path, not a claim that they are equivalent to having watched a click land.
 
 ## Known limitations (RFC-041-wide)
 

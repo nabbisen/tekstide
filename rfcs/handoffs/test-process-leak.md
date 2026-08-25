@@ -302,6 +302,20 @@ That is a weaker record than the other five and is stated as such rather than dr
 recurs, capture the message first — that is the difference between a sixth symptom and a sixth
 guess.
 
+## Recurrence, 2026-08-25 — response 329's required re-gate
+
+Response 329 (RFC-041) required three consecutive full-workspace runs, recorded against this
+table, after an earlier single-run gate was judged insufficient. Run 1: clean. **Run 2:
+`approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` failed** —
+row 5 above, recurring, not a new test. Run 3: clean.
+
+**The assertion message was not captured here either**, for the same reason as row 6: the run was
+filtered to `test result:|FAILED` lines only, so the panic detail scrolled past uncaptured before
+the omission was noticed. Fifteen further full-workspace runs immediately afterward, each logged
+in full this time, did not reproduce it — consistent with the low, intermittent rate already
+recorded for this row rather than a new or worsening cause. Whoever next hits this: redirect to a
+file first (`cargo test ... > run.log 2>&1`), not a live grep, so the message survives.
+
 ## Why it matters beyond tidiness
 
 The affected area is **the command-approval and socket path** — the security-critical machinery
