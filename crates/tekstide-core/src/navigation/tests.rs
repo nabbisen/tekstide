@@ -280,6 +280,32 @@ fn open_folder_browser_shortcut_is_a_candidate_that_collides_with_no_other_rule(
     );
 }
 
+/// RFC-020, the change review surface: `Ctrl+Alt+D` -- checked
+/// mechanically, not by inspection alone, the same shape every other
+/// real binding above already uses.
+#[test]
+fn open_diff_review_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::OpenDiffReview)
+        .expect("Open Diff Review should have a keyboard policy");
+
+    assert_eq!(rule.default_binding, Some("Ctrl+Alt+D"));
+    assert_eq!(rule.status, KeybindingStatus::Candidate);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::OpenDiffReview)
+        .filter(|other| other.default_binding == rule.default_binding)
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Alt+D must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
 /// RFC-039 PR-039-B: `Ctrl+Alt+N` cycles to the next open project --
 /// checked mechanically, not by inspection alone, the same shape every
 /// other real binding above already uses.
@@ -395,6 +421,7 @@ fn advertised_bindings_are_exactly_the_live_ones() {
             "Ctrl+Alt+R",
             "Ctrl+Alt+H",
             "Ctrl+Alt+U",
+            "Ctrl+Alt+D",
             "Ctrl+Alt+K",
             "Ctrl+Alt+B",
         ],

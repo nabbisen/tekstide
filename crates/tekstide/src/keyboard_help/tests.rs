@@ -60,8 +60,8 @@ fn every_live_binding_is_described_to_the_user() {
 
     assert_eq!(
         lines.len(),
-        13,
-        "expected the thirteen Candidate rules with a default binding to be described; \
+        14,
+        "expected the fourteen Candidate rules with a default binding to be described; \
          got {}: {:?}",
         lines.len(),
         lines.iter().map(|line| line.binding).collect::<Vec<_>>()
@@ -118,13 +118,14 @@ fn no_action_without_a_working_binding_is_advertised() {
         "the reserved command-palette binding must never be advertised"
     );
 
-    // The three dead actions remaining, named so this test states the
+    // The two dead actions remaining, named so this test states the
     // fact rather than only computing it. RFC-039 PR-039-B gave
     // `SwitchActiveProject` a real binding (`Ctrl+Alt+N`), removing it
-    // from this list -- RFC-036's dead-action count, four to three.
+    // from this list (four to three); the change review surface handoff
+    // gave `OpenDiffReview` one (`Ctrl+Alt+D`), removing it too --
+    // RFC-036's dead-action count, three to two.
     for dead in [
         NavigationAction::CycleVisibleTerminalSession,
-        NavigationAction::OpenDiffReview,
         NavigationAction::OpenSafeCloseDialog,
     ] {
         let rule = policy

@@ -1078,6 +1078,11 @@ pub enum Message {
     /// visible always. `Ctrl+Alt+K` is the accelerator; both converge on
     /// [`open_help`].
     OpenHelpButtonPressed,
+    /// RFC-020, the change review surface: `TrustSettings`'s own real
+    /// "Change Review" button, alongside the other three PR-040-C hosted
+    /// there. `Ctrl+Alt+D` is the accelerator; both converge on
+    /// [`open_diff_review`].
+    OpenDiffReviewButtonPressed,
     /// RFC-015 PR-015-F: a synthetic measurement keystroke arrived; the
     /// `Instant` is when the measurement subscription first saw it, not
     /// when `update` gets around to handling it -- the gap between the
@@ -1349,7 +1354,8 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::OpenCurrentAgentRunDetailButtonPressed
         | Message::OpenApprovalHistoryButtonPressed
         | Message::OpenTrustSettingsButtonPressed
-        | Message::OpenHelpButtonPressed => Some(ClickMessageKind::BackgroundControl),
+        | Message::OpenHelpButtonPressed
+        | Message::OpenDiffReviewButtonPressed => Some(ClickMessageKind::BackgroundControl),
 
         // -- modal decisions (RFC-040 PR-040-B): the destructive/
         // decision-committing half of a two-button modal, a folder
@@ -1934,6 +1940,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::OpenApprovalHistoryButtonPressed => open_approval_history(state),
         Message::OpenTrustSettingsButtonPressed => open_trust_settings(state),
         Message::OpenHelpButtonPressed => open_help(state),
+        Message::OpenDiffReviewButtonPressed => open_diff_review(state),
         Message::ModalDismiss => {
             // RFC-039 PR-039-C: Escape on a `ProjectClose` dialog is a
             // real decision too (`safe_close_decision`'s `Cancelled`),
@@ -4937,6 +4944,15 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         NavigationAction::OpenTrustSettings => Some(AppCommand::OpenActiveProjectSurface(
             ProjectOpenSurface::TrustSettings,
         )),
+        // RFC-020, the change review surface: the same "no I/O, no
+        // `update` special-case" shape as `OpenApprovalHistory`/
+        // `OpenTrustSettings` above -- this surface only ever reads
+        // `ProjectSession::change_sets()`, already populated by
+        // `attempt_generated_change_detection` at agent-run exit, so
+        // opening it is a pure route/mode change.
+        NavigationAction::OpenDiffReview => Some(AppCommand::OpenActiveProjectSurface(
+            ProjectOpenSurface::DiffReview,
+        )),
         // RFC-018 PR-018-B: paste needs no core route/mode change --
         // `update`'s `Shell` arm special-cases it directly, the same
         // shape `LaunchTerminal` uses for the half of its own work that
@@ -4960,7 +4976,6 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         | NavigationAction::OpenFolderBrowser
         | NavigationAction::OpenCommandPalette
         | NavigationAction::CycleVisibleTerminalSession
-        | NavigationAction::OpenDiffReview
         | NavigationAction::OpenSafeCloseDialog => None,
     }
 }
@@ -5959,6 +5974,10 @@ fn content_mode_view(state: &State) -> Element<'_, Message> {
         // non-editor surface applies, so a second surface joining that
         // classification would have silently rendered as the wrong one.
         Some(ProjectOpenSurface::AgentRunDetail) => agent_run_detail_view(state),
+        // RFC-020, the change review surface: its own explicit arm, the
+        // same reason `AgentRunDetail` above has one rather than falling
+        // into the generic `!surface_renders_editor` arm below.
+        Some(ProjectOpenSurface::DiffReview) => change_review_view(state),
         Some(surface) if !surface_renders_editor(surface) => approval_history_view(state),
         Some(_) | None => content_mode_editor_view(state),
     }
@@ -5990,11 +6009,15 @@ fn surface_renders_editor(surface: ProjectOpenSurface) -> bool {
         // it. Not `TrustSettings`'s side: that surface has real Enter-
         // driven actions of its own reachable while a background
         // document is still technically "open," this one has none.
-        ProjectOpenSurface::ApprovalHistory | ProjectOpenSurface::AgentRunDetail => false,
+        // RFC-020, the change review surface: the same side, for the
+        // same reason -- "Render only" (this handoff's own scope
+        // boundary), no interactive elements of its own to protect.
+        ProjectOpenSurface::ApprovalHistory
+        | ProjectOpenSurface::AgentRunDetail
+        | ProjectOpenSurface::DiffReview => false,
         ProjectOpenSurface::ProjectDashboard
         | ProjectOpenSurface::TextEditor
         | ProjectOpenSurface::GitStatus
-        | ProjectOpenSurface::DiffReview
         | ProjectOpenSurface::HandoffReport
         | ProjectOpenSurface::TrustSettings => true,
     }
@@ -7387,6 +7410,19 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
         .on_press(Message::OpenApprovalHistoryButtonPressed)
         .into(),
     );
+    // RFC-020, the change review surface: the fourth report-style button
+    // hosted here, same reasoning as the other three -- "where a trusted
+    // project's actions live." Always shown, same "the surface's own
+    // empty state handles nothing-yet honestly" reasoning
+    // `OpenCurrentAgentRunDetailButtonPressed`/`OpenApprovalHistoryButtonPressed`
+    // already established, not hidden pending a real change set.
+    lines.push(
+        button(
+            text(state.catalog.get("change-review-open-button")).size(state.theme.font_size_body()),
+        )
+        .on_press(Message::OpenDiffReviewButtonPressed)
+        .into(),
+    );
 
     column(lines).spacing(12).into()
 }
@@ -7563,6 +7599,219 @@ fn approval_history_entry_state_symbol(
         ApprovalDecision::Rejected => "rejected",
         ApprovalDecision::EditedAndApproved => "edited-and-approved",
     }
+}
+
+/// RFC-020, the change review surface (`change-review-surface.md`):
+/// `ProjectOpenSurface::DiffReview`'s own real render arm. Read-only --
+/// RFC-034's own job is acting on a `ChangeSet`, not this one. Renders
+/// the most recent change set in the active project, the same
+/// "most-recently-launched, no selector" answer `agent_run_detail_view`
+/// already gives for the analogous question -- a selector is a second
+/// surface with its own navigation decisions this slice is not for.
+/// `ChangeSet::default_summary()` is the projection this whole slice was
+/// unblocked by (`change-review-surface.md`'s own "the projection is
+/// better placed than the RFC's age suggests"): the surface renders
+/// distinctions core already makes, not new ones.
+fn change_review_view(state: &State) -> Element<'_, Message> {
+    let Some(project) = state.app_shell.state().active_project() else {
+        // Unreachable while routed to `ActiveProjectWorkspace`, the same
+        // "fail visible, not panic" fallback every other surface here
+        // uses for this case.
+        return text(state.catalog.get("change-review-empty"))
+            .size(state.theme.font_size_body())
+            .into();
+    };
+    let Some(change_set) = project.change_sets().last() else {
+        return text(state.catalog.get("change-review-no-changes-yet"))
+            .size(state.theme.font_size_body())
+            .into();
+    };
+    let summary = change_set.default_summary();
+
+    let mut lines: Vec<Element<'_, Message>> = vec![
+        text(state.catalog.get("change-review-heading"))
+            .size(state.theme.font_size_heading())
+            .into(),
+        // The RFC's own required, non-optional disclosure -- rendered
+        // unconditionally, every time this surface renders, not only
+        // when a real limitation was actually hit. "Detected changes
+        // only, not all changes... this is not a review, an approval,
+        // or a claim that a change is safe."
+        text(state.catalog.get("change-review-disclosure"))
+            .size(state.theme.font_size_status())
+            .into(),
+        text(change_review_detection_status_line(
+            &state.catalog,
+            &summary,
+        ))
+        .size(state.theme.font_size_body())
+        .into(),
+        text(state.catalog.get_with_args(
+            "change-review-file-count",
+            &CatalogArgs::new().number("count", summary.changed_file_count as u64),
+        ))
+        .size(state.theme.font_size_body())
+        .into(),
+    ];
+
+    for path in &summary.shown_changed_files {
+        lines.push(
+            text(change_review_file_entry_line(&state.catalog, path))
+                .size(state.theme.font_size_body())
+                .into(),
+        );
+    }
+    // The **display** limit -- distinct from the detection-status line's
+    // own **scan** limit above, per the RFC's own required distinction:
+    // "a truncated scan is not 'nothing changed.'" Rendered only when
+    // real, not as a permanent zero line.
+    if summary.omitted_changed_file_count > 0 {
+        lines.push(
+            text(state.catalog.get_with_args(
+                "change-review-omitted-files",
+                &CatalogArgs::new().number("count", summary.omitted_changed_file_count as u64),
+            ))
+            .size(state.theme.font_size_status())
+            .into(),
+        );
+    }
+
+    lines.push(
+        text(change_review_state_line(&state.catalog, &summary))
+            .size(state.theme.font_size_status())
+            .into(),
+    );
+
+    scrollable(column(lines).spacing(8))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+/// A compile-time literal symbol for `ChangeDetectionStatus`, the same
+/// `trusted_symbol` division of labour `trust_state_symbol` already
+/// uses -- the words live in `en.ftl`'s own select expression, not
+/// here. `Partial`/`Failed` carry their own payload (`limit`/`reason`),
+/// resolved separately below rather than folded into the symbol itself.
+fn change_detection_status_symbol(
+    status: tekstide_core::domain::ChangeDetectionStatus,
+) -> &'static str {
+    use tekstide_core::domain::ChangeDetectionStatus;
+    match status {
+        ChangeDetectionStatus::Complete => "complete",
+        ChangeDetectionStatus::Unavailable => "unavailable",
+        ChangeDetectionStatus::Unsupported => "unsupported",
+        ChangeDetectionStatus::Partial { .. } => "partial",
+        ChangeDetectionStatus::Failed { .. } => "failed",
+    }
+}
+
+/// The same symbol split, for `ChangeDetectionFailureReason` -- only
+/// ever read when `detection_status` is `Failed`, so its own resolved
+/// text is a second lookup rather than a nested `select`, matching the
+/// "one message, one lookup" convention `agent_run_detail_unavailable_key`
+/// already established for a different enum.
+fn change_detection_failure_reason_key(
+    reason: tekstide_core::domain::ChangeDetectionFailureReason,
+) -> &'static str {
+    use tekstide_core::domain::ChangeDetectionFailureReason;
+    match reason {
+        ChangeDetectionFailureReason::CrossProjectBaseline => {
+            "change-review-detection-failure-cross-project-baseline"
+        }
+        ChangeDetectionFailureReason::MetadataReadFailed => {
+            "change-review-detection-failure-metadata-read-failed"
+        }
+        ChangeDetectionFailureReason::PathOutsideRoot => {
+            "change-review-detection-failure-path-outside-root"
+        }
+        ChangeDetectionFailureReason::RootUnavailable => {
+            "change-review-detection-failure-root-unavailable"
+        }
+    }
+}
+
+/// Factored out of [`change_review_view`] for the same testability
+/// reason every other rendered-string helper in this module already
+/// is -- the resolved text, not the `Element` tree. `$limit` is real
+/// only for `Partial`; Fluent's own select ignores an unused variable
+/// in every other branch, the same shape `agent-run-detail-window-full`/
+/// `-partial` already rely on for their own unused args.
+fn change_review_detection_status_line(
+    catalog: &Catalog,
+    summary: &tekstide_core::domain::ChangeSetSummary,
+) -> String {
+    use tekstide_core::domain::ChangeDetectionStatus;
+    let limit = match summary.detection_status {
+        ChangeDetectionStatus::Partial { limit } => limit,
+        _ => 0,
+    };
+    let status_line = catalog.get_with_args(
+        "change-review-detection-status",
+        &CatalogArgs::new()
+            .trusted_symbol(
+                "status",
+                change_detection_status_symbol(summary.detection_status),
+            )
+            .number("limit", limit as u64),
+    );
+    if let ChangeDetectionStatus::Failed { reason } = summary.detection_status {
+        format!(
+            "{status_line} ({})",
+            catalog.get(change_detection_failure_reason_key(reason))
+        )
+    } else {
+        status_line
+    }
+}
+
+/// File paths are untrusted -- filesystem-derived, attacker-influenceable
+/// -- escaped through `text_safety::quote_untrusted` before they ever
+/// reach the catalog, the same discipline `surface::explorer::node_line`
+/// already established for a real node name.
+fn change_review_file_entry_line(catalog: &Catalog, path: &std::path::Path) -> String {
+    let escaped = tekstide_core::text_safety::quote_untrusted(&path.display().to_string());
+    catalog.get_with_args(
+        "change-review-file-entry",
+        &CatalogArgs::new().untrusted("path", &escaped),
+    )
+}
+
+fn change_review_state_line(
+    catalog: &Catalog,
+    summary: &tekstide_core::domain::ChangeSetSummary,
+) -> String {
+    use tekstide_core::domain::ReviewState;
+    let symbol = match summary.review_state {
+        ReviewState::Unreviewed => "unreviewed",
+        ReviewState::Accepted => "accepted",
+        ReviewState::PartiallyAccepted => "partially-accepted",
+        ReviewState::Rejected => "rejected",
+        ReviewState::Superseded => "superseded",
+    };
+    catalog.get_with_args(
+        "change-review-review-state",
+        &CatalogArgs::new().trusted_symbol("state", symbol),
+    )
+}
+
+/// RFC-020, the change review surface: `Message::OpenDiffReviewButtonPressed`'s
+/// handler, and the same function the keyboard accelerator's
+/// `RoutedInput::Shell` arm reaches through the generic `Some(command)`
+/// branch -- the same "own function, guard added for the click" shape
+/// `open_current_agent_run_detail`/`open_approval_history`/
+/// `open_trust_settings` already established for the other three
+/// `TrustSettings`-hosted buttons PR-040-C built.
+fn open_diff_review(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    state
+        .app_shell
+        .dispatch(AppCommand::OpenActiveProjectSurface(
+            ProjectOpenSurface::DiffReview,
+        ));
+    ensure_explorer_scanned(state);
 }
 
 /// PR-020-B: why a real key press reaches transcript content the way

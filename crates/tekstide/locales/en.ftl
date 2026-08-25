@@ -604,6 +604,63 @@ agent-run-detail-window-partial = Showing the most recent { $shown_len } bytes o
 # size could recover.
 agent-run-detail-writer-truncated = This transcript's own storage was truncated while it was being captured -- some of what this run produced was never saved, independent of the window shown above.
 
+# RFC-020, the change review surface (`change-review-surface.md`): renders
+# `ChangeSet::bounded_summary`, the most recent change set for the active
+# project. Read-only -- RFC-034's own job is acting on one.
+change-review-empty = No active project.
+change-review-no-changes-yet = No changes have been detected in this project yet.
+change-review-heading = Change Review
+# The RFC's own required, non-optional disclosure -- stated on the
+# surface itself, not only in documentation, every time this surface
+# renders, not only when something was actually excluded.
+change-review-disclosure = Detected changes only, not all changes: detection is metadata-only and conservative, and excludes .git/, target/, and node_modules/ by design. This is not a review, an approval, or a claim that a change is safe.
+# `$status` is a compile-time literal symbol (`change_detection_status_symbol`),
+# never `ChangeDetectionStatus`'s own `Debug` text. A truncated *scan*
+# (`partial`) is a distinct fact from a *display* limit
+# (`change-review-omitted-files` below) -- this line is never allowed to
+# collapse into "nothing changed" the way `what-a-clickable-modal-must-not-become.md`'s
+# own sibling documents already require elsewhere in this crate for a
+# different kind of truncation.
+change-review-detection-status = Detection: { $status ->
+    [unavailable] Unavailable -- change detection could not run for this project
+    [unsupported] Unsupported -- this project's detection source does not support this operation
+    [partial] Partial -- the scan itself was bounded at { $limit } entries; more changes may exist and were never counted
+    [failed] Failed -- { $reason }
+   *[complete] Complete
+}
+change-review-detection-failure-cross-project-baseline = the baseline snapshot belonged to a different project
+change-review-detection-failure-metadata-read-failed = a file's metadata could not be read
+change-review-detection-failure-path-outside-root = a detected path resolved outside the project root
+change-review-detection-failure-root-unavailable = the project root was not available to scan
+# `$count` is `ChangeSetSummary::changed_file_count` -- the real total,
+# independent of how many of `shown_changed_files` this surface actually
+# lists below.
+change-review-file-count = { $count ->
+    [one] { $count } file changed
+   *[other] { $count } files changed
+}
+# `$path` is untrusted -- filesystem-derived, attacker-influenceable,
+# escaped through `text_safety::quote_untrusted` before it ever reaches
+# this key, the same discipline every other rendered path in this crate
+# already uses.
+change-review-file-entry = { $path }
+# The **display** limit, distinct from `change-review-detection-status`'s
+# own `partial` branch above (the **scan** limit) -- `$count` is
+# `ChangeSetSummary::omitted_changed_file_count`, always zero or more
+# real files that were detected but are not individually listed above.
+change-review-omitted-files = { $count ->
+    [one] 1 more changed file is not shown above
+   *[other] { $count } more changed files are not shown above
+}
+change-review-review-state = Review state: { $state ->
+    [accepted] Accepted
+    [partially-accepted] Partially accepted
+    [rejected] Rejected
+    [superseded] Superseded
+   *[unreviewed] Unreviewed
+}
+change-review-open-button = Change Review
+
 # RFC-032 `what-the-trust-dialog-must-say.md`: `$path` is the project's
 # **canonical** path -- what trust actually binds to
 # (`docs/src/contributors/security-decisions.md`) -- escaped via
@@ -691,6 +748,7 @@ keyboard-help-launch-agent-run = Launch an AI CLI run (needs a trusted project)
 keyboard-help-open-current-agent-run-detail = AgentRun Report for the latest run
 keyboard-help-open-approval-history = Approval History (needs an open project)
 keyboard-help-open-trust-settings = Trust Settings: grant trust, transcript capture and purge
+keyboard-help-open-diff-review = Change Review: what the most recent agent run changed
 keyboard-help-open-help = This list
 keyboard-help-open-folder-browser = Browse for a project folder
 keyboard-help-switch-active-project = Switch to the next open project

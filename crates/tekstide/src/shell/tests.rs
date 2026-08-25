@@ -8387,7 +8387,7 @@ fn opening_help_through_a_real_key_event_shows_every_live_binding() {
     let lines = crate::keyboard_help::keyboard_help_lines(&state.catalog);
     assert_eq!(
         lines.len(),
-        13,
+        14,
         "the Help modal's own data source must list every live binding, Ctrl+Alt+K included"
     );
 }
@@ -11053,5 +11053,346 @@ fn the_top_bar_trust_settings_button_is_hidden_without_an_active_project_and_sho
     assert!(
         super::top_bar_offers_trust_settings(&populated_state),
         "an active project exists: the button must render"
+    );
+}
+
+// RFC-020, the change review surface (`change-review-surface.md`).
+
+fn change_set_summary_fixture(
+    detection_status: tekstide_core::domain::ChangeDetectionStatus,
+    shown_changed_files: Vec<std::path::PathBuf>,
+    omitted_changed_file_count: usize,
+    review_state: tekstide_core::domain::ReviewState,
+) -> tekstide_core::domain::ChangeSetSummary {
+    let now = tekstide_core::domain::DomainTimestamp::now_utc();
+    tekstide_core::domain::ChangeSetSummary {
+        id: tekstide_core::domain::ChangeSetId::new_uuid(),
+        project_id: tekstide_core::project::ProjectId::new_uuid(),
+        agent_run_id: None,
+        changed_file_count: shown_changed_files.len() + omitted_changed_file_count,
+        shown_changed_files,
+        omitted_changed_file_count,
+        artifact_ref_count: 0,
+        detection_source: tekstide_core::domain::ChangeDetectionSource::FilesystemSnapshot,
+        detection_status,
+        association_confidence: tekstide_core::domain::ChangeAssociationConfidence::Unlinked,
+        review_state,
+        created_at: now.clone(),
+        updated_at: now,
+    }
+}
+
+/// File paths are untrusted -- the bidi fixture the RFC's own required
+/// check names, the same shape
+/// `project_close_dialog_escapes_a_bidi_override_in_the_canonical_path`
+/// already establishes for a different path.
+#[test]
+fn change_review_file_entry_line_escapes_a_bidi_override_in_the_path() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let path = std::path::PathBuf::from("safe-file\u{202E}txt.exe");
+
+    let line = super::change_review_file_entry_line(&catalog, &path);
+
+    assert!(
+        line.contains("<U+202E>"),
+        "expected the escaped marker in {line:?}"
+    );
+    assert!(
+        !line.contains('\u{202E}'),
+        "the raw override character must never reach the surface, got {line:?}"
+    );
+}
+
+/// The RFC's own required distinction: "a truncated scan is not
+/// 'nothing changed.'" Every `ChangeDetectionStatus` variant must
+/// render its own distinct text, not collapse into one generic
+/// "unavailable" string.
+#[test]
+fn change_review_detection_status_line_renders_each_status_distinctly() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    use tekstide_core::domain::{ChangeDetectionFailureReason, ChangeDetectionStatus, ReviewState};
+
+    let complete = change_set_summary_fixture(
+        ChangeDetectionStatus::Complete,
+        Vec::new(),
+        0,
+        ReviewState::Unreviewed,
+    );
+    let unavailable = change_set_summary_fixture(
+        ChangeDetectionStatus::Unavailable,
+        Vec::new(),
+        0,
+        ReviewState::Unreviewed,
+    );
+    let unsupported = change_set_summary_fixture(
+        ChangeDetectionStatus::Unsupported,
+        Vec::new(),
+        0,
+        ReviewState::Unreviewed,
+    );
+    let partial = change_set_summary_fixture(
+        ChangeDetectionStatus::Partial { limit: 4096 },
+        Vec::new(),
+        0,
+        ReviewState::Unreviewed,
+    );
+    let failed = change_set_summary_fixture(
+        ChangeDetectionStatus::Failed {
+            reason: ChangeDetectionFailureReason::RootUnavailable,
+        },
+        Vec::new(),
+        0,
+        ReviewState::Unreviewed,
+    );
+
+    let lines: Vec<String> = [&complete, &unavailable, &unsupported, &partial, &failed]
+        .into_iter()
+        .map(|summary| super::change_review_detection_status_line(&catalog, summary))
+        .collect();
+
+    let unique: std::collections::HashSet<&String> = lines.iter().collect();
+    assert_eq!(
+        unique.len(),
+        lines.len(),
+        "every detection status must render its own distinct line, got {lines:?}"
+    );
+    assert!(
+        lines[3].contains("4096"),
+        "the partial status must state the real scan limit, got {:?}",
+        lines[3]
+    );
+    assert!(
+        !lines[0].to_lowercase().contains("unavailable")
+            && !lines[0].to_lowercase().contains("partial")
+            && !lines[0].to_lowercase().contains("failed"),
+        "the complete status must not read as any of the others, got {:?}",
+        lines[0]
+    );
+}
+
+#[test]
+fn change_review_state_line_renders_each_review_state_distinctly() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    use tekstide_core::domain::{ChangeDetectionStatus, ReviewState};
+
+    let states = [
+        ReviewState::Unreviewed,
+        ReviewState::Accepted,
+        ReviewState::PartiallyAccepted,
+        ReviewState::Rejected,
+        ReviewState::Superseded,
+    ];
+    let lines: Vec<String> = states
+        .iter()
+        .map(|state| {
+            let summary =
+                change_set_summary_fixture(ChangeDetectionStatus::Complete, Vec::new(), 0, *state);
+            super::change_review_state_line(&catalog, &summary)
+        })
+        .collect();
+
+    let unique: std::collections::HashSet<&String> = lines.iter().collect();
+    assert_eq!(
+        unique.len(),
+        lines.len(),
+        "every review state must render its own distinct line, got {lines:?}"
+    );
+}
+
+/// Mirrors `clicking_trust_settings_routes_to_the_real_trust_settings_surface`.
+#[test]
+fn clicking_change_review_routes_to_the_real_change_review_surface() {
+    let (mut state, project_id) = state_with_a_real_project("change-review-button-click");
+
+    let _ = super::update(&mut state, Message::OpenDiffReviewButtonPressed);
+
+    let project = state.app_shell.state().project(&project_id).unwrap();
+    assert_eq!(
+        project.open_surface(),
+        tekstide_core::project::ProjectOpenSurface::DiffReview
+    );
+    assert_eq!(project.mode(), tekstide_core::project::ProjectMode::Content);
+}
+
+/// Mirrors `open_trust_settings_shell_input_routes_to_the_trust_settings_surface`.
+#[test]
+fn open_diff_review_shell_input_routes_to_the_change_review_surface() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("open-diff-review");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenDiffReview,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    assert_eq!(
+        project.open_surface(),
+        tekstide_core::project::ProjectOpenSurface::DiffReview
+    );
+    assert_eq!(project.mode(), tekstide_core::project::ProjectMode::Content);
+}
+
+/// A control behind an open modal cannot be clicked -- extending
+/// `a_control_behind_an_open_modal_cannot_be_clicked`'s own pattern
+/// (RFC-040 PR-040-B/D) to this slice's own new background control.
+#[test]
+fn clicking_change_review_while_a_modal_is_open_has_no_effect() {
+    let (mut state, project_id) = state_with_a_real_project("change-review-modal-exclusivity");
+    state.modal = Some(ModalContent::default());
+
+    let _ = super::update(&mut state, Message::OpenDiffReviewButtonPressed);
+
+    assert_ne!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .open_surface(),
+        tekstide_core::project::ProjectOpenSurface::DiffReview,
+        "a background control's click message must have no effect while a modal is open"
+    );
+    assert!(matches!(state.modal, Some(ModalContent::LayerDemo { .. })));
+
+    state.modal = None;
+    let _ = super::update(&mut state, Message::OpenDiffReviewButtonPressed);
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .open_surface(),
+        tekstide_core::project::ProjectOpenSurface::DiffReview,
+        "the identical message, sent after the modal closes, must reach its ordinary handler"
+    );
+}
+
+/// The end-to-end proof: a real managed agent run, a real file written
+/// to the real project directory, a real approval decided over the real
+/// socket, a real exit -- the exact pipeline
+/// `a_real_agent_run_exit_creates_a_real_change_set_from_a_real_file_change`
+/// already proves produces a real, strongly-associated `ChangeSet` --
+/// then a real click on the real "Change Review" button, and the
+/// surface's own rendered lines checked against the real file and real
+/// counts, not a synthesized `ChangeSetSummary`.
+#[test]
+fn change_review_surface_renders_a_real_change_set_from_a_real_agent_run() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("change-review-real-agent-run");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let agent_run_id = launch_real_managed_agent_run(&mut state);
+    std::fs::write(
+        project_dir.join("agent-created-file.txt"),
+        b"a real change, made after the baseline was captured\n",
+    )
+    .expect("writing a real file into the real project directory must succeed");
+
+    let received = poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    assert!(
+        received,
+        "the real adapter should send its proposal within the poll window"
+    );
+    let request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    let proposal_id = state.approval_proposal_ids[&request.id].clone();
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog::for_test(
+        request,
+        proposal_id,
+        ApprovalDialogButton::ApproveOnce,
+    ))));
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    let terminal_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .unwrap()
+        .terminal_id
+        .clone()
+        .expect("a launched agent run must have a real terminal id");
+    let status_of = |state: &State| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .agent_runs()
+            .iter()
+            .find(|run| run.id == agent_run_id)
+            .unwrap()
+            .status
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline
+        && matches!(
+            status_of(&state),
+            tekstide_core::domain::AgentRunStatus::Running
+                | tekstide_core::domain::AgentRunStatus::AwaitingApproval
+        )
+    {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(
+        status_of(&state),
+        tekstide_core::domain::AgentRunStatus::Completed
+    );
+
+    // The real, clickable control -- proving reachability, not assumed.
+    let _ = super::update(&mut state, Message::OpenDiffReviewButtonPressed);
+    let project = state.app_shell.state().active_project().unwrap();
+    assert_eq!(
+        project.open_surface(),
+        tekstide_core::project::ProjectOpenSurface::DiffReview,
+        "clicking Change Review must reach the real surface"
+    );
+
+    let change_set = project
+        .change_sets()
+        .iter()
+        .find(|change_set| change_set.agent_run_id.as_ref() == Some(&agent_run_id))
+        .expect("a real ChangeSet strongly associated with this agent run must exist");
+    let summary = change_set.default_summary();
+
+    assert_eq!(summary.changed_file_count, 1);
+    assert_eq!(summary.omitted_changed_file_count, 0);
+    let file_line =
+        super::change_review_file_entry_line(&state.catalog, &summary.shown_changed_files[0]);
+    assert!(
+        file_line.contains("agent-created-file.txt"),
+        "the real file the agent wrote must be the one real path rendered, got {file_line:?}"
+    );
+    let status_line = super::change_review_detection_status_line(&state.catalog, &summary);
+    assert!(
+        status_line.to_lowercase().contains("complete"),
+        "a normal, unbounded scan must render Complete, got {status_line:?}"
     );
 }

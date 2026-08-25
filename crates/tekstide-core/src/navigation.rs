@@ -283,10 +283,19 @@ impl KeybindingPolicy {
                     Some("Ctrl+Alt+U"),
                     KeybindingStatus::Candidate,
                 ),
+                // RFC-020, the change review surface handoff: `Ctrl+Alt+D`
+                // (Diff), following the existing `Ctrl+Alt+<letter>` shape
+                // (`P`, `M`, `T`, `A`, `N`, `R`, `H`, `U`, `K`, `B` above)
+                // -- unclaimed by any other rule here and not
+                // `Ctrl+Shift+P`'s `Reserved` command-palette binding, so
+                // it collides with nothing (checked mechanically by
+                // `open_diff_review_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone). Takes RFC-036's dead-action
+                // count from three to two.
                 KeybindingRule::new(
                     NavigationAction::OpenDiffReview,
-                    None,
-                    KeybindingStatus::Configurable,
+                    Some("Ctrl+Alt+D"),
+                    KeybindingStatus::Candidate,
                 ),
                 KeybindingRule::new(
                     NavigationAction::OpenSafeCloseDialog,
@@ -333,10 +342,11 @@ impl KeybindingPolicy {
     /// the point of deriving this instead of writing a list:
     ///
     /// - `Configurable` with no `default_binding` is **dead**, not
-    ///   pending. `CycleVisibleTerminalSession`, `OpenDiffReview` and
-    ///   `OpenSafeCloseDialog` are in this state (RFC-039 PR-039-B moved
-    ///   `SwitchActiveProject` out of it, down from four to three);
-    ///   advertising a dead one would promise an action no key can
+    ///   pending. `CycleVisibleTerminalSession` and `OpenSafeCloseDialog`
+    ///   are in this state (RFC-039 PR-039-B moved `SwitchActiveProject`
+    ///   out of it, down from four to three; the change review surface
+    ///   handoff moved `OpenDiffReview` out of it, down from three to
+    ///   two); advertising a dead one would promise an action no key can
     ///   reach. This project has already had to fix that exact category
     ///   error three times in the policy itself (`OpenTrustSettings`,
     ///   `OpenApprovalHistory`, `OpenCurrentAgentRunDetail`) -- help

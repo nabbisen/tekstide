@@ -61,8 +61,8 @@ fn action_catalog_key(action: NavigationAction) -> Option<&'static str> {
         NavigationAction::OpenHelp => Some("keyboard-help-open-help"),
         NavigationAction::OpenFolderBrowser => Some("keyboard-help-open-folder-browser"),
         NavigationAction::SwitchActiveProject => Some("keyboard-help-switch-active-project"),
+        NavigationAction::OpenDiffReview => Some("keyboard-help-open-diff-review"),
         NavigationAction::CycleVisibleTerminalSession
-        | NavigationAction::OpenDiffReview
         | NavigationAction::OpenSafeCloseDialog
         | NavigationAction::OpenCommandPalette => None,
     }
@@ -177,8 +177,12 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
             description: "the top bar's own \"?\" button (top_bar_actions_row, RFC-040 PR-040-C)",
             on_press_snippet: ".on_press(Message::OpenHelpButtonPressed)",
         }),
+        NavigationAction::OpenDiffReview => Some(ControlCoverage::VisibleControl {
+            description: "TrustSettings's own \"Change Review\" button (RFC-020, the change \
+                          review surface)",
+            on_press_snippet: ".on_press(Message::OpenDiffReviewButtonPressed)",
+        }),
         NavigationAction::CycleVisibleTerminalSession
-        | NavigationAction::OpenDiffReview
         | NavigationAction::OpenSafeCloseDialog
         | NavigationAction::OpenCommandPalette => None,
     }
