@@ -1,6 +1,6 @@
 ---
 title: "The leaked-child test flake — cause known since 2026-08-16, still unfixed"
-status: "Leak fixed at the two approval call sites 2026-08-20 (request 282). **The second cause — runtime/terminal/launch.rs — is SCHEDULED 2026-08-25**, owner-authorised after a second incident (3,899 shells, PTY pool exhausted), ahead of RFC-040 PR-040-C's re-gate. The socket flake is separate and also unfixed"
+status: "Leak fixed at the two approval call sites 2026-08-20 (request 282). **The second cause — runtime/terminal/launch.rs — FIXED 2026-08-25** (RunningTerminal now has a Drop impl); measured 3,899 leaked shells before, near-zero (the pre-existing baseline) after, across three clean full-suite runs. **A third, distinct, unaddressed cause found while verifying the second fix**: a backgrounded job inside a terminal gets its own process group that neither this Drop nor the production request_terminate path's process-group signal reaches — request_terminate reports Terminated/KilledAfterTimeout while the job survives, orphaned. Confirmed against both paths directly. Not fixed here; RFC-040 PR-040-C's re-gate is unblocked regardless, since it is a small, well-characterised, per-test-launched-count leak (~28/run from one benchmark test), not pool exhaustion. The socket flake is separate and also unfixed"
 rfc_file: "none — a test-harness defect, not product behaviour"
 target_milestone: "M12"
 created: "2026-08-19"
@@ -136,6 +136,109 @@ already run (it must be idempotent and must not block), and say what you decided
 - A test that a live terminal **survives** an unrelated sessions-map operation, if any of the
   five sites turns out to be a move.
 - Ablate by removing the `Drop` impl and confirming the leak test fails.
+
+## Evidence, 2026-08-25: the second cause fixed, and a third found
+
+**The five sites enumerated before writing the `Drop` impl**, per this document's own required
+discipline. `self.sessions.remove`/`.insert` in `runtime/terminal/launch.rs` and
+`termination.rs`: exactly three `remove`, two `insert` — grepped, not assumed. Both `insert`
+sites key on a freshly minted `TerminalId::new_uuid()` (`TerminalSession::new`'s own
+construction), so neither can ever evict a session actually stored under that key. All three
+`remove` sites are reached only after the child has exited on its own
+(`wait_for_child_outcome`, a real `try_wait` confirms it) or the process group is confirmed
+gone or given up on after a full SIGTERM/SIGKILL escalation
+(`wait_for_process_group_outcome`, `request_terminate`'s own final give-up arm). None removes a
+session the caller still expects to keep running — every one of the five is "this terminal is
+finished," never "this value is moving." No sixth site found (`grep -rn "\.sessions\b"` across
+the module returns exactly these seven references, the other two being read-only `get`/`get_mut`
+borrows).
+
+**The `Drop` impl.** `RunningTerminal::drop` signals `-process_group_id` (not just `child`) with
+`SIGKILL` directly — no SIGTERM grace period, since a destructor that blocks on a timeout is
+unacceptable and `request_terminate` is the normal path this is a last-resort net under, not a
+replacement for — guarded by the same `<= 1` refusal `send_signal_to_process_group` already
+applies, then reaps this value's own direct child (`child.wait()`, harmless/`Err` if already
+reaped). Idempotent by construction: fires on every one of the five sites above, not only a
+leak, and a signal to an already-dead group or a `wait` on an already-reaped child both no-op
+harmlessly.
+
+**Leak shown happening, then not happening — ablated.**
+`dropping_a_running_terminal_kills_the_real_process_group`
+(`runtime::terminal::tests`): launches a real shell through `LinuxTerminalRuntime`, panics inside
+`catch_unwind` before any explicit cleanup, asserts the real process is dead by the time
+`catch_unwind` returns. Temporarily removed the `Drop` impl's body, re-ran this test alone:
+failed, `process_is_alive` still `true` — the exact defect this fix exists to prevent,
+reproduced on demand. Restored, re-ran, green.
+
+**Insert-does-not-evict, proven against two real terminals.**
+`launching_a_second_terminal_does_not_kill_the_first`: launches two real shells in the same
+runtime, asserts the first is still alive after the second's own `insert`. Real cleanup via
+`request_terminate`, not relying on the guarantee this test is not the one proving.
+
+**Measured, the gate's own required form.** Before this fix (the incident that authorised it):
+3,899 leaked `/bin/sh` processes, `/dev/pts` at its 4,096 limit, ~80 tests failing in
+0.2–0.8 seconds — too fast to have run, meaning no PTY could be allocated at all. After: three
+consecutive `cargo test --workspace --all-targets --all-features` runs, all clean (404 tekstide +
+736 tekstide-core, the two new tests included), with the leaked-process count settling at a
+small, **constant** 32 after every run (2 pre-existing/unrelated + a consistent 28 from one
+specific test, not a growing pool) — see the third-cause finding below for what that 28 actually
+is. `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --all-features -- -D
+warnings` both clean throughout. `git diff --check` clean.
+
+**Do not chase symptoms individually — not done.** No change to
+`terminal_session_limit_headless_n_pane_wake_throughput_benchmark` or any other test that happens
+to trigger the third cause below; the harness/runtime defect enumerated and fixed here is
+`RunningTerminal`'s missing `Drop`, not any individual test's own shape.
+
+### A third, distinct cause, found while verifying the second fix was complete
+
+**Not fixed by this response. Disclosed, not chased into a fix, per this document's own standing
+instruction not to scope-creep a UI/harness slice into a deeper redesign.**
+
+Isolating `cargo test -p tekstide` alone (clean, 404/404, zero panics) still left 28 processes
+behind — the fix above only accounts for zero. Bisecting by test name found the source:
+`terminal_session_limit_headless_n_pane_wake_throughput_benchmark` alone leaks exactly 28
+(matching its own `1+3+6+8+10` pane counts across five loop passes) — every one confirmed, via a
+temporary diagnostic, to have had `Drop for RunningTerminal` actually fire and its `kill(-pgid,
+SIGKILL)` return success. The 28 processes still alive afterward are a **different** set of pids
+from every one that `Drop` signalled.
+
+**Root cause: a backgrounded job gets its own process group.** `FLOOD_SCRIPT` (this test's own
+helper, and `TerminalFlood`'s measurement path) ends its loop with `&`, "so the shell stays
+interactive." `/bin/sh` on this machine is `bash`, and bash places a background job into its own
+new process group when it has a controlling terminal — which every terminal this runtime launches
+does (`spawn_pty_child`'s own `TIOCSCTTY`) — regardless of whether the shell is "interactive" in
+the traditional sense. The leaked processes are each their own session/group leader (`PID ==
+PGID`), consistent with being the backgrounded job, not the original shell (which the `Drop`
+above did successfully kill, by pid, confirmed).
+
+**This is not new, and not specific to `Drop`.** `send_signal_to_process_group` — the
+already-reviewed, production `request_terminate` path — signals the identical single
+`-process_group_id`. Verified directly: launched a real shell, wrote a backgrounded loop into it,
+called `request_terminate` with real timeouts. It returned `Terminated { outcome:
+KilledAfterTimeout { .. } }` — **reporting success** — while the backgrounded job was still alive
+half a second later, orphaned to `systemd --user`. **The production termination path can report a
+terminal terminated while a process it launched keeps running.** Whether a shipped Tekstide can
+reach this (a user's own terminal running any command that backgrounds a job — `sleep 30 &`, a
+long build with `make -j &`, and so on — inside a session the user then closes) is not yet
+determined; this response only confirms the mechanism, against a synthetic script, not real usage
+patterns.
+
+**Why not fixed here:** the fix requires deciding what "closing a terminal" *should* mean for a
+job the user backgrounded inside it — kill it too (a bigger blast radius than today's contract
+describes), or leave it running by design (the way a real terminal emulator's own "close tab"
+often works, and `nohup`'s entire reason to exist) — a product decision, not a mechanical one,
+and out of a leak-fix response's own scope. A `cgroup`-based or PTY-session-wide (`kill(-sid)` /
+rely on `SIGHUP` reaching the whole session rather than one process group) approach would need its
+own investigation into whether it over-reaches (killing things the current single-group signal
+correctly leaves alone).
+
+**Practical effect on this document's own gate:** RFC-040 PR-040-C's re-gate is not blocked by
+this — 28 leaked processes per run of one specific benchmark test is a bounded, understood cost,
+not the unbounded pool-exhaustion cascade the second cause produced. Anyone re-running the full
+suite repeatedly (as gates in this project require) should expect the leaked-process count to
+climb by ~28 per run until something cleans them up, and should not mistake that for a
+regression in this fix.
 
 ## Why it matters beyond tidiness
 

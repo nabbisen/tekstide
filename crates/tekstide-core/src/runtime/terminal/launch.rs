@@ -462,6 +462,89 @@ pub(super) struct RunningTerminal {
     pub(super) transcript_capture_mode: Option<TranscriptCaptureMode>,
 }
 
+/// `test-process-leak.md`'s second, distinct cause, fixed: until this
+/// impl existed, dropping a `RunningTerminal` did nothing, so any path
+/// that dropped one without going through [`termination::request_terminate`]
+/// first -- most concretely, a panicking test, but structurally anything
+/// that drops `LinuxTerminalRuntime`/its `sessions` map without an
+/// explicit termination request first -- leaked a real shell process and
+/// its PTY indefinitely (found at 3,899 leaked processes with
+/// `/dev/pts` at its 4096 limit, 2026-08-25).
+///
+/// **Every one of the five sites that can drop a `RunningTerminal` was
+/// enumerated before this was written** (`self.sessions.remove`/`.insert`,
+/// three and two respectively -- see `termination.rs` and this file's
+/// own `launch_project_shell`/`launch_project_adapter`): all five are
+/// "this terminal is finished," never "this value is moving to survive
+/// under a different key."
+///
+/// - Both `insert` sites key on a freshly minted `TerminalId::new_uuid()`
+///   (`TerminalSession::new`'s own construction), so neither can ever
+///   evict a session actually stored under that key -- the discarded old
+///   value `HashMap::insert` would return is always `None` in practice.
+/// - All three `remove` sites in `termination.rs` are reached only after
+///   the child has either exited on its own (`wait_for_child_outcome`,
+///   confirmed via a real `try_wait` result) or the process group itself
+///   has been confirmed gone or given up on after a full SIGTERM/SIGKILL
+///   escalation (`wait_for_process_group_outcome`, `request_terminate`'s
+///   own final give-up arm). None removes a session the caller still
+///   expects to keep running.
+///
+/// A live terminal is therefore never at risk from this `Drop` firing
+/// where the codebase already drops one today -- confirmed by
+/// enumeration, not assumed, per this document's own required
+/// discipline for a destructor being made consequential.
+///
+/// **Signals the process group, not only `child`** -- `request_terminate`
+/// signals `-process_group_id` because a shell's own children share its
+/// group and a plain `child.kill()` would leave them running; this
+/// mirrors that, not the narrower single-process guard `test_support`'s
+/// `KillOnDropChild` uses for a bare adapter/reference-process `Child`
+/// with no group of its own to worry about.
+///
+/// **A last-resort safety net, not the normal path** -- RFC-039 PR-039-C
+/// made `request_terminate` (graceful `SIGTERM`, timeout, `SIGKILL`
+/// fallback, its own timeout) the normal way a user-initiated close
+/// ends a terminal. Replicating that same graceful-then-forceful
+/// escalation here, with its own timeouts, would mean a destructor that
+/// blocks for seconds -- unacceptable for a safety net that must run
+/// synchronously during an unrelated panic's unwind. This goes straight
+/// to `SIGKILL`: by the time nothing else asked this terminal to stop,
+/// escalation is not owed, only cleanup.
+///
+/// **Idempotent by construction, not merely intended to be**: on the
+/// normal path `request_terminate` already killed the group and this
+/// runs against an already-dead one (`libc::kill` on a vanished group
+/// returns `ESRCH`, silently ignored, matching
+/// `send_signal_to_process_group`'s own tolerance for it); `child.wait()`
+/// on an already-reaped child returns `ECHILD`, likewise discarded. Both
+/// are cheap, harmless no-ops in the common case -- this `Drop` fires on
+/// every one of the five sites above, not only the leak path, since
+/// `HashMap::remove`/a displaced `insert` drop their value unconditionally.
+impl Drop for RunningTerminal {
+    fn drop(&mut self) {
+        // Same `<= 1` refusal `send_signal_to_process_group` already
+        // applies before signalling -- group 0 means "this process's own
+        // group" (never correct to target here) and group 1 is not a
+        // real terminal's group on this platform; a `RunningTerminal`
+        // should never be constructed with either, but a destructor is
+        // exactly the place to not trust that invariant blindly.
+        if self.process_group_id > 1 {
+            unsafe {
+                libc::kill(-self.process_group_id, libc::SIGKILL);
+            }
+        }
+        // Reaps this value's own direct child specifically, so it does
+        // not linger as a zombie -- `SIGKILL` cannot be caught, ignored,
+        // or blocked, so the wait below returns essentially immediately
+        // once the kernel delivers it, not a genuine block. Harmless
+        // (`Err`, discarded) if the child was already reaped by an
+        // earlier `try_wait`/`wait` call before this value ever reached
+        // `Drop`.
+        let _ = self.child.wait();
+    }
+}
+
 fn transcript_write_error_summary(error: &TranscriptWriteError) -> BoundedRuntimeSummary {
     BoundedRuntimeSummary::new(format!(
         "transcript write failed: {:?} after {} bytes at {}",

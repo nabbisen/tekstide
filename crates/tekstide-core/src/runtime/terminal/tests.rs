@@ -590,3 +590,117 @@ fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
             .windows(needle.len())
             .any(|window| window == needle)
 }
+
+/// `test-process-leak.md`'s second cause, shown fixed: the gate's own
+/// required "leak happening, then not happening" form, the same shape
+/// `test_support`'s `kill_on_drop_child_does_not_leak_across_a_panic`
+/// already established for a bare `Child` -- here for a real,
+/// `LinuxTerminalRuntime`-launched terminal instead. `Drop::drop` runs
+/// synchronously during unwinding, so by the time `catch_unwind` returns
+/// control here, `RunningTerminal`'s own `Drop` impl has already fired.
+///
+/// **Ablated**: temporarily removed the `Drop for RunningTerminal` impl
+/// in `launch.rs`, re-ran this test alone -- failed, `process_is_alive`
+/// still `true`, reproducing the exact defect this fix exists to
+/// prevent. Restored, re-ran, green.
+#[test]
+fn dropping_a_running_terminal_kills_the_real_process_group() {
+    let _real_process_slot = crate::test_support::RealProcessLimiter::acquire();
+    let root = test_root("drop-kills-process-group");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+    let (terminal, _events) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let pid = runtime
+        .sessions
+        .get(&terminal.id)
+        .expect("just-launched session must be present")
+        .child
+        .id();
+    assert!(
+        crate::test_support::process_is_alive(pid),
+        "test precondition: the real shell must be alive before the panic"
+    );
+
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _runtime = runtime;
+        panic!("deliberate panic, before this closure's own cleanup would run");
+    }));
+    assert!(
+        panicked.is_err(),
+        "test precondition: the closure must actually have panicked"
+    );
+
+    assert!(
+        !crate::test_support::process_is_alive(pid),
+        "Drop for RunningTerminal must have killed the real process group during unwind, \
+         before catch_unwind returned control here"
+    );
+    cleanup_root(root);
+}
+
+/// The five sites that can drop a `RunningTerminal` were enumerated
+/// before writing its `Drop` impl (see that impl's own doc comment):
+/// both `sessions.insert` sites key on a freshly minted `TerminalId`, so
+/// neither can ever evict a session actually stored under it. Proven
+/// here against two real, independently launched terminals rather than
+/// merely asserted from reading `TerminalId::new_uuid`'s own guarantee
+/// -- the second launch's own `insert` must not have killed the first.
+#[test]
+fn launching_a_second_terminal_does_not_kill_the_first() {
+    let _real_process_slot = crate::test_support::RealProcessLimiter::acquire();
+    let root = test_root("insert-does-not-evict-a-live-session");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let spec_a = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell A", &root, "/bin/sh");
+    let (terminal_a, _events) = runtime
+        .launch_project_shell(&project, spec_a)
+        .expect("first plain shell launch should succeed");
+    let pid_a = runtime
+        .sessions
+        .get(&terminal_a.id)
+        .expect("just-launched session must be present")
+        .child
+        .id();
+
+    let spec_b = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell B", &root, "/bin/sh");
+    let (terminal_b, _events) = runtime
+        .launch_project_shell(&project, spec_b)
+        .expect("second plain shell launch should succeed");
+
+    assert_ne!(
+        terminal_a.id, terminal_b.id,
+        "test precondition: the two launches must have received distinct ids"
+    );
+    assert!(
+        crate::test_support::process_is_alive(pid_a),
+        "launching a second, independently-keyed terminal must not kill the first -- both \
+         `sessions.insert` sites key on a freshly minted TerminalId, so neither can ever evict \
+         a session actually stored under it"
+    );
+
+    // Real cleanup through the normal path, not relying on the `Drop`
+    // guarantee this test is not the one proving.
+    let handle_a = TerminalRuntimeHandle::new(terminal_a.id.clone(), project.id().clone());
+    let handle_b = TerminalRuntimeHandle::new(terminal_b.id.clone(), project.id().clone());
+    let request = TerminationRequest {
+        source: TerminationRequestSource::TestHarness,
+        reason: BoundedRuntimeSummary::new("insert-does-not-evict test cleanup"),
+    };
+    let _ = runtime.request_terminate(
+        &handle_a,
+        request.clone(),
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+    );
+    let _ = runtime.request_terminate(
+        &handle_b,
+        request,
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+    );
+    cleanup_root(root);
+}
