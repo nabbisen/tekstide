@@ -15,8 +15,9 @@ slips; the user documentation took three weeks proving that.
 
 ## The defect
 
-RFC-039 PR-039-C computes `fully_confirmed` from each terminal's termination outcome
-(`shell.rs:3740`):
+RFC-039 PR-039-C computes `fully_confirmed` from each terminal's termination outcome, in
+`terminate_project_live_work`'s per-terminal loop (`crates/tekstide/src/shell.rs` — **find it by
+name, not by line**; see the note at the end of this document):
 
 ```rust
 let confirmed = matches!(
@@ -88,7 +89,25 @@ If you find yourself changing termination behaviour, stop: that is the other que
 
 - The existing test that a confirmed close writes two phases must still pass, and must still use a
   **scoped** `AuditQuery` — request 313 fixed five `latest(50)` windows over a shared store, and
-  nine more of that shape remain in `shell/tests.rs`, named in RFC-039's affordance audit.
+  more of that shape remain in `shell/tests.rs`. **Count them yourself rather than trusting a
+  number here**: grep for `AuditQuery::latest(` followed within a few lines by a client-side
+  `.filter(` on `project_id` or `family`. If you add an audit-touching test in this slice, scope
+  its query; do not add a sixteenth instance of the shape that has already failed once
+  deterministically.
 - A test that reproduces the actual case: a terminal with a backgrounded job, closed, and the
   recorded `fully_confirmed` asserted against whichever answer you chose.
 - Ablate by restoring the old predicate and confirming that test fails.
+
+## A note on citations in this document, added the day it was written
+
+This handoff originally cited `shell.rs:3740` for the `confirmed` predicate and "nine" remaining
+`latest(50)` sites. **Both were stale within hours** — RFC-035 landed the same day, moved the
+predicate to line 3787, and changed the site count to seven.
+
+That is the defect this project has corrected in a folder migration, a status field, a flake
+table, a release note, an audit heading and a changelog, arriving in a document written to guide
+a fix for the same class of defect. The reviewer wrote it, and it went stale before anyone read
+it.
+
+**So: names, not lines. Derived counts, not frozen ones.** If a citation here does not resolve,
+that is the citation being wrong, not the code — find it by name and say so in your evidence.
