@@ -1,8 +1,8 @@
 ---
 title: "RFC-040: Acceptance / QA Checklist"
 rfc: "RFC-040"
-rfc_file: "../../accepted/040-affordance-completion.md"
-source_rfc_status: "Accepted 2026-08-25 — M12, first of three"
+rfc_file: "../../done/040-affordance-completion.md"
+source_rfc_status: "Implemented and closed 2026-08-25 — RFC-040 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-25"
 ---
@@ -106,12 +106,46 @@ Every unchecked line at closeout carries a stated reason.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Final Acceptance recorded 2026-08-25 (review request 321). Suite re-run by the reviewer, three
+consecutive runs under default parallelism: all four targets ok, zero failures, no flake hit.
+fmt and clippy -D warnings clean.
+
+The count moved 3 -> 11 of 13. The two remaining are permanent, reasoned allow-list entries
+with their reasons attached -- a decision somebody made, not a debt nobody noticed, which was
+goal 1 in the RFC's own words. Every modal in the crate can now be completed and abandoned
+with a mouse; no flow that begins with a click requires a keyboard to finish or abandon.
+
+The reviewer's own instruction in response 320 was wrong on its second half and the
+implementer proved it rather than working around it. The suggestion was: move the modal guard
+into update(), then the per-handler guards become removable. The first half is right and
+landed. The second is false: click_message_kind returns None for Message::Input(_), because
+that message carries a KeyPress rather than a destination -- the destination is decided by
+routing inside update. So a background handler reachable from a surface key handler
+(handle_trust_settings_key's Enter, handle_project_board_row_key, handle_tab_strip_key) is
+invisible to a message-level guard, and its own per-handler check is the only in-update
+protection for that path.
+
+The implementer built it, the suite caught the regression
+(open_trust_grant_dialog_does_not_replace_an_already_open_modal), and they traced it to the
+cause rather than patching the failing case: checked that all seventeen have the same
+two-entry-path shape, reverted the removal by checkout rather than seventeen hand-patches,
+and then demonstrated the layers are independently sufficient rather than assuming it --
+removing one per-handler guard with the central guard in place left the click test passing,
+which locates precisely where each layer is load-bearing.
+
+So the accurate statement, which is now in the code's own doc comment: the two layers overlap
+on the click path, and only the per-handler guard covers the key path. Additive, not
+redundant.
+
+Three defects in this arc were found by clicking the product rather than by the suite --
+including empty_terminal_workspace_view rendering no refusal notice, which is this RFC's own
+defect class reintroduced by the slice fixing it. That ratio is worth remembering the next
+time a slice's evidence is all green tests.
 ```

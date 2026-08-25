@@ -1,19 +1,19 @@
 ---
 title: "RFC-040: Affordance Completion — implementation handoff"
 rfc: "RFC-040"
-rfc_file: "../../accepted/040-affordance-completion.md"
-source_rfc_status: "Accepted 2026-08-25 — M12, first of three"
+rfc_file: "../../done/040-affordance-completion.md"
+source_rfc_status: "Implemented and closed 2026-08-25 — RFC-040 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-25"
 ---
 
 # Finish the sentence RFC-039 started
 
-Source RFC: [RFC-040](../../accepted/040-affordance-completion.md)
+Source RFC: [RFC-040](../../done/040-affordance-completion.md)
 
 | # | Read | Why |
 | --- | --- | --- |
-| 1 | [RFC-040](../../accepted/040-affordance-completion.md) | Six findings, three principles, three decisions already made |
+| 1 | [RFC-040](../../done/040-affordance-completion.md) | Six findings, three principles, three decisions already made |
 | 2 | [`what-a-clickable-modal-must-not-become.md`](./what-a-clickable-modal-must-not-become.md) | **Read before adding a button to any modal.** Modals are trusted chrome and carry destructive decisions |
 | 3 | [`task-breakdown-pr-plan.md`](./task-breakdown-pr-plan.md) | Four slices, order stated once |
 | 4 | [`acceptance-qa-checklist.md`](./acceptance-qa-checklist.md) | What must be true and evidenced |

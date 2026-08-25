@@ -1,8 +1,8 @@
 ---
 title: "What a clickable modal must not become"
 rfc: "RFC-040"
-rfc_file: "../../accepted/040-affordance-completion.md"
-source_rfc_status: "Accepted 2026-08-25 — M12, first of three"
+rfc_file: "../../done/040-affordance-completion.md"
+source_rfc_status: "Implemented and closed 2026-08-25 — RFC-040 is in rfcs/done/"
 status: "Required reading before adding a button to any modal"
 created: "2026-08-25"
 ---
