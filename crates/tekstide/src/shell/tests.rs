@@ -740,6 +740,106 @@ fn no_bulk_approval_or_multi_select_construct_exists_anywhere_in_the_crate() {
     }
 }
 
+// RFC-040 PR-040-A, D1: the audit becomes a test, before anything else in
+// this RFC is built. Two tests, matching the task breakdown's own two
+// required properties: the premise (button + `.on_press` is the only
+// click mechanism in the crate) and the coverage (every live action is
+// answered by a real control or a reasoned allow-list entry, never
+// neither).
+
+/// The premise `keyboard_help::control_coverage`'s whole design rests
+/// on. If this ever stops being true, that function's own
+/// `VisibleControl::on_press_snippet` checks below stop meaning what
+/// they claim to -- so this fails loudly first, the same "assert the
+/// premise, not just the conclusion" shape
+/// `no_raw_color_construction_anywhere_in_the_crate` already uses for a
+/// different premise.
+#[test]
+fn no_click_mechanism_other_than_button_on_press_exists_anywhere_in_the_crate() {
+    for path in scannable_source_files() {
+        let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
+        assert!(
+            !source.contains("mouse_area")
+                && !source.contains("MouseArea")
+                && !source.contains(".on_click("),
+            "{} must not introduce a second click mechanism -- RFC-040 PR-040-A's mechanical \
+             affordance audit assumes `button` + `.on_press` is the only one in this crate",
+            path.display()
+        );
+    }
+}
+
+/// D1's own required property: every `Candidate` action with a binding
+/// is in the `.on_press` inventory or on the allow-list, and the two
+/// are mutually exclusive -- an action claiming both would mean a stale
+/// allow-list entry sitting next to a real control nobody removed it
+/// for. `keyboard_help::control_coverage`'s own exhaustive match is
+/// what makes a new `NavigationAction` fail to *compile* here, not just
+/// fail this test at runtime -- this test's own job is only to check
+/// what that match already decided is actually true of the running
+/// source, for the `VisibleControl` half.
+///
+/// `keyboard_help.rs` itself is excluded from the scan -- it is the
+/// *definition* site of every `on_press_snippet` (each one is a string
+/// literal written there), so scanning it would find every snippet
+/// trivially, always, regardless of whether the real control it names
+/// still exists anywhere else. Caught by this test's own required
+/// ablation (see `qa-evidence.md`'s PR-040-A section): a first version
+/// without this exclusion passed even after the snippet was replaced
+/// with one that does not exist, because it was still finding its own
+/// definition.
+#[test]
+fn every_live_action_has_a_visible_control_or_a_reasoned_allow_list_entry() {
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let source_files: Vec<(PathBuf, String)> = scannable_source_files()
+        .into_iter()
+        .filter(|path| path.file_name().and_then(|name| name.to_str()) != Some("keyboard_help.rs"))
+        .map(|path| {
+            let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
+            (path, source)
+        })
+        .collect();
+
+    for rule in &policy.rules {
+        let is_live = rule.status == tekstide_core::navigation::KeybindingStatus::Candidate
+            && rule.default_binding.is_some();
+        if !is_live {
+            continue;
+        }
+        match super::super::keyboard_help::control_coverage(rule.action) {
+            Some(super::super::keyboard_help::ControlCoverage::VisibleControl {
+                description,
+                on_press_snippet,
+            }) => {
+                let found = source_files
+                    .iter()
+                    .any(|(_, source)| source.contains(on_press_snippet));
+                assert!(
+                    found,
+                    "{:?} claims a visible control ({description:?}, snippet {on_press_snippet:?}) \
+                     that no longer appears anywhere in the crate -- the control this action's \
+                     own coverage entry names has been removed or renamed",
+                    rule.action
+                );
+            }
+            Some(super::super::keyboard_help::ControlCoverage::KeyboardOnly(reason)) => {
+                assert!(
+                    !reason.is_empty(),
+                    "{:?} is on the keyboard-only allow-list with an empty reason -- D1 requires \
+                     a reason per entry, not just a name",
+                    rule.action
+                );
+            }
+            None => panic!(
+                "{:?} is live (Candidate, with a binding) but has no control_coverage entry at \
+                 all -- a new live action must be triaged into a visible control or a reasoned \
+                 allow-list entry, never left uncovered",
+                rule.action
+            ),
+        }
+    }
+}
+
 /// RFC-018 PR-018-G's own review gate: "a test that the scrim is present
 /// whenever the paste modal is open, at the layer where the two are
 /// bound together, so a future modal added without a scrim fails by

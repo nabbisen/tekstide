@@ -20,11 +20,20 @@ Every unchecked line at closeout carries a stated reason.
 
 ## PR-040-A — the audit as a test
 
-- [ ] Every `Candidate` action with a binding is in the `.on_press` inventory or the allow-list.
-- [ ] The test **asserts its own premise**: `button` + `.on_press` is the only click mechanism;
+- [x] Every `Candidate` action with a binding is in the `.on_press` inventory or the allow-list.
+      `every_live_action_has_a_visible_control_or_a_reasoned_allow_list_entry`, exhaustive over
+      `keyboard_help::control_coverage`.
+- [x] The test **asserts its own premise**: `button` + `.on_press` is the only click mechanism;
       `mouse_area` / `on_click` absent.
-- [ ] Allow-list entries carry a reason each, not just a name.
-- [ ] Ablated: remove one control, the test names that action.
+      `no_click_mechanism_other_than_button_on_press_exists_anywhere_in_the_crate`.
+- [x] Allow-list entries carry a reason each, not just a name. Two permanent entries with real
+      reasons (`PasteIntoTerminal`/D3, `OpenProjectEntryField`/workflow-served-elsewhere), eight
+      `TrackedGap` entries stating "no visible control yet -- tracked for RFC-040 PR-040-C" rather
+      than a bare name.
+- [x] Ablated: remove one control, the test names that action. `SwitchActiveProject`'s own
+      snippet replaced with a nonexistent one, test failed naming it. The first attempt at this
+      ablation surfaced a real bug in the test itself (see `qa-evidence.md`) -- fixed, then
+      re-ablated and confirmed correctly failing before revert.
 
 ## PR-040-B — modals — `what-a-clickable-modal-must-not-become.md`
 
