@@ -1,6 +1,6 @@
 ---
 title: "The leaked-child test flake — cause known since 2026-08-16, still unfixed"
-status: "Leak fixed at the two approval call sites 2026-08-20 (request 282); **a second, distinct cause remains unfixed** in runtime/terminal/launch.rs, found 2026-08-24 (request 299). The socket flake is separate and also unfixed"
+status: "Leak fixed at the two approval call sites 2026-08-20 (request 282). **The second cause — runtime/terminal/launch.rs — is SCHEDULED 2026-08-25**, owner-authorised after a second incident (3,899 shells, PTY pool exhausted), ahead of RFC-040 PR-040-C's re-gate. The socket flake is separate and also unfixed"
 rfc_file: "none — a test-harness defect, not product behaviour"
 target_milestone: "M12"
 created: "2026-08-19"
@@ -81,6 +81,61 @@ as unverified rather than as reassurance. What is certain: RFC-039 PR-039-C adds
 user-triggered close path, which is exactly the shape that would make it reachable. That slice
 is required to call `request_terminate` before closing — see
 `039-interaction-model-and-visible-affordances/what-closing-a-project-must-not-lose.md` §6.
+
+## The fix for the second cause — SCHEDULED 2026-08-25, ahead of RFC-040 PR-040-C's re-gate
+
+Authorised by the human owner after a **second incident**: 3,899 leaked shells, `/dev/pts` at
+4096, ~80 tests failing in 0.24 seconds because no PTY could be allocated. Everything leaked was
+under 3.3 hours old — one working session, not accumulated debt.
+
+**Its own slice, its own commit, its own review.** Not folded into a UI slice; RFC-040 PR-040-C
+is complete and waiting, and it re-gates *after* this lands, because three more full-suite runs
+against an unfixed leak recreate the problem the runs are meant to detect.
+
+### What to build
+
+`RunningTerminal` (`runtime/terminal/launch.rs`) holds a bare `Child` with **no `Drop` impl**.
+`KillOnDropChild` — the fix the two `approval::tests` call sites already have — lives in
+`test_support.rs`, which is `pub(crate)` and compiled in production, so it is reachable; whether
+to reuse it or give `RunningTerminal` its own `Drop` is yours, with one constraint below.
+
+### The constraint that makes this dangerous, and is not obvious
+
+**Today, dropping a `RunningTerminal` means nothing. After this change it means killing a user's
+running shell.** Every existing drop site was written when drop was harmless, and none of them
+was reviewed against the consequence you are about to give it.
+
+The sessions map (`HashMap<TerminalId, RunningTerminal>`) has **three `remove` and two `insert`
+sites**. An `insert` over an existing key drops the old value; a `remove` whose result is
+discarded drops it there.
+
+**Required before writing the `Drop` impl:** enumerate every one of those five sites and state,
+per site, whether a drop there means "this terminal is finished" or "this value is moving". If
+any is the second, a naive `Drop` kills a live terminal the user is still using — a far worse
+defect than the leak, and one no existing test would catch, because no existing test asserts that
+a terminal *survives* an unrelated map operation.
+
+That is the reachability discipline applied to a destructor: before making a drop consequential,
+name every place it happens.
+
+### The process group, not just the child
+
+`RunningTerminal` carries `process_group_id`, and this product's real termination path
+(`request_terminate`) signals the **group**, SIGTERM escalating to SIGKILL, guarded against
+signalling a group id ≤ 1. A `Drop` that kills only `child` leaves the rest of the group.
+
+Drop is a **last-resort safety net, not the normal path** — RFC-039 PR-039-C made
+`request_terminate` the normal one. Decide deliberately what Drop does when the normal path has
+already run (it must be idempotent and must not block), and say what you decided.
+
+### Evidence
+
+- **Show the leak happening, then not happening**, per this document's own standing instruction:
+  process count before and after a deliberately panicking terminal test. `test_support.rs`'s own
+  `KillOnDropChild` tests are the shape.
+- A test that a live terminal **survives** an unrelated sessions-map operation, if any of the
+  five sites turns out to be a move.
+- Ablate by removing the `Drop` impl and confirming the leak test fails.
 
 ## Why it matters beyond tidiness
 
