@@ -2,7 +2,7 @@
 
 ## 0.13.0 - Something To Do, And A Way To Do It
 
-Status: unreleased.
+Status: released on 2026-08-25.
 
 **`0.12.1` made the product describe itself. It still could not be used.** A user starting
 `tekstide` with no argument saw an honest empty board, a full keyboard reference, and no way to
