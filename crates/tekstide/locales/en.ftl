@@ -619,7 +619,13 @@ change-review-heading = Change Review
 # The RFC's own required, non-optional disclosure -- stated on the
 # surface itself, not only in documentation, every time this surface
 # renders, not only when something was actually excluded.
-change-review-disclosure = Detected changes only, not all changes: detection is metadata-only and conservative, and excludes .git/, target/, and node_modules/ by design. This is not a review, an approval, or a claim that a change is safe.
+#
+# RFC-035 PR-035-A closeout: corrected from "excludes .git/, target/,
+# and node_modules/" -- that was true when RFC-020 shipped and stopped
+# being true the moment .git/hooks/ and .git/config became watched.
+# This is the exact "shipped statement this slice falsifies" the
+# handoff's own closeout section names.
+change-review-disclosure = Detected changes only, not all changes: detection is metadata-only and conservative, and excludes target/ and node_modules/ by design. Most of .git/ is excluded too -- only .git/hooks/ and .git/config are watched, since those are the two places a change could install or redirect code that runs on your machine. This is not a review, an approval, or a claim that a change is safe.
 # `$status` is a compile-time literal symbol (`change_detection_status_symbol`),
 # never `ChangeDetectionStatus`'s own `Debug` text. A truncated *scan*
 # (`partial`) is a distinct fact from a *display* limit

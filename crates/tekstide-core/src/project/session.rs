@@ -1029,16 +1029,21 @@ impl ProjectSession {
                 changed_files,
                 summary,
             )
-            .with_detection(detected.source, detected.status),
+            .with_detection(detected.source, detected.status)
+            .with_changed_files_omitted_by_detection(detected.changed_paths_omitted_by_limit),
             Some(DetectedChangeAssociation::Ambiguous) => {
                 ChangeSet::unreviewed(self.id.clone(), None, changed_files, summary)
                     .with_detection(detected.source, detected.status)
                     .with_association_confidence(ChangeAssociationConfidence::Ambiguous)
                     .with_baseline_snapshot_ref(baseline.baseline_snapshot_ref.clone())
+                    .with_changed_files_omitted_by_detection(
+                        detected.changed_paths_omitted_by_limit,
+                    )
             }
             None => ChangeSet::unreviewed(self.id.clone(), None, changed_files, summary)
                 .with_detection(detected.source, detected.status)
-                .with_baseline_snapshot_ref(baseline.baseline_snapshot_ref.clone()),
+                .with_baseline_snapshot_ref(baseline.baseline_snapshot_ref.clone())
+                .with_changed_files_omitted_by_detection(detected.changed_paths_omitted_by_limit),
         };
         let change_set_id = change_set.id.clone();
 

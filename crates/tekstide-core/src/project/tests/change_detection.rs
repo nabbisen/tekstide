@@ -286,6 +286,134 @@ fn a_file_named_like_an_ignored_directory_is_not_skipped() {
     );
 }
 
+/// RFC-035 PR-035-A, the acceptance criterion itself: an agent that
+/// writes `.git/hooks/pre-commit` -- installed code that runs on the
+/// user's machine -- must be detected, not swallowed by the `.git/`
+/// exclusion the way it was before this slice. Real filesystem writes,
+/// real detector, not a constructed `DetectedChanges`. Churn paths
+/// (`.git/objects/`, `.git/refs/`, `.git/index`) are written alongside
+/// the hook, after the same baseline, to prove the narrow carve-out
+/// really is narrow: watching `hooks/` must not have quietly started
+/// watching all of `.git/`.
+#[test]
+fn git_hooks_pre_commit_is_watched_while_churn_paths_under_git_stay_excluded() {
+    let sandbox = TestSandbox::new("change-detection-git-hooks-watched");
+    let project = sandbox.project_session(1);
+    sandbox.create_dir("project/.git");
+    let detector = GeneratedChangeDetector::default();
+    let baseline = detector.capture_filesystem_baseline(&project);
+
+    sandbox.create_file_with_contents(
+        "project/.git/hooks/pre-commit",
+        b"#!/bin/sh\necho installed\n",
+    );
+    sandbox.create_file_with_contents("project/.git/objects/ab/cdef0123", b"git internals\n");
+    sandbox.create_file_with_contents("project/.git/refs/heads/main", b"deadbeef\n");
+    sandbox.create_file_with_contents("project/.git/index", b"not a real index\n");
+
+    let detected = detector.detect_filesystem_changes(&project, &baseline);
+
+    assert_eq!(detected.status, ChangeDetectionStatus::Complete);
+    let changed: Vec<&PathBuf> = detected
+        .changed_paths
+        .iter()
+        .map(|path| &path.relative_path)
+        .collect();
+    assert!(
+        changed.contains(&&PathBuf::from(".git/hooks/pre-commit")),
+        "a real, freshly-installed hook must appear as a changed path: {changed:?}"
+    );
+    assert!(
+        changed.iter().all(|path| !path.starts_with(".git/objects")
+            && !path.starts_with(".git/refs")
+            && path.as_path() != Path::new(".git/index")),
+        "watching hooks/ must not widen into watching all of .git/ -- churn paths appeared: \
+         {changed:?}"
+    );
+    assert!(
+        changed
+            .iter()
+            .all(|path| path.as_path() != Path::new(".git")),
+        ".git itself must never become an entry -- only its watched children can: {changed:?}"
+    );
+}
+
+/// The complementary half of the acceptance criterion (security doc §2:
+/// "the two watches are complementary, and neither alone is
+/// sufficient") -- `core.hooksPath` redirects or `[alias]`/`[filter]`
+/// entries in `.git/config` are their own execution surface, so
+/// `config` must be watched independently of `hooks/`, not merely
+/// alongside it as an afterthought.
+#[test]
+fn git_config_is_watched_while_churn_paths_under_git_stay_excluded() {
+    let sandbox = TestSandbox::new("change-detection-git-config-watched");
+    let project = sandbox.project_session(1);
+    sandbox.create_dir("project/.git");
+    let detector = GeneratedChangeDetector::default();
+    let baseline = detector.capture_filesystem_baseline(&project);
+
+    sandbox.create_file_with_contents(
+        "project/.git/config",
+        b"[core]\n\thooksPath = .githooks\n[alias]\n\tco = \"!sh -c 'echo hi'\"\n",
+    );
+    sandbox.create_file_with_contents("project/.git/objects/ab/cdef0123", b"git internals\n");
+    sandbox.create_file_with_contents("project/.git/refs/heads/main", b"deadbeef\n");
+
+    let detected = detector.detect_filesystem_changes(&project, &baseline);
+
+    assert_eq!(detected.status, ChangeDetectionStatus::Complete);
+    let changed: Vec<&PathBuf> = detected
+        .changed_paths
+        .iter()
+        .map(|path| &path.relative_path)
+        .collect();
+    assert!(
+        changed.contains(&&PathBuf::from(".git/config")),
+        "a real, freshly-written config -- the file that can redirect hooksPath or run an \
+         [alias]/[filter] command -- must appear as a changed path: {changed:?}"
+    );
+    assert!(
+        changed
+            .iter()
+            .all(|path| !path.starts_with(".git/objects") && !path.starts_with(".git/refs")),
+        "watching config must not widen into watching all of .git/ -- churn paths appeared: \
+         {changed:?}"
+    );
+}
+
+/// Security doc §2: `core.hooksPath` is deliberately not followed to
+/// wherever it points -- watching `.git/config` itself (proven above)
+/// already reports that the hook location changed. This proves the
+/// deferral is real: a directory the redirected path names is not
+/// specially discovered or scanned merely because `.git/config` mentions
+/// it. (It is still scanned as an *ordinary* project directory, the same
+/// as any other -- this test's own baseline/detect pair never mentions
+/// `.githooks/` at all, which is the point: nothing here resolves the
+/// config content to find it.)
+#[test]
+fn git_hooks_path_redirect_in_config_is_not_followed() {
+    let sandbox = TestSandbox::new("change-detection-git-hooks-path-not-followed");
+    let project = sandbox.project_session(1);
+    sandbox.create_dir("project/.git");
+    let detector = GeneratedChangeDetector::default();
+    let baseline = detector.capture_filesystem_baseline(&project);
+
+    sandbox.create_file_with_contents("project/.git/config", b"[core]\n\thooksPath = .githooks\n");
+
+    let detected = detector.detect_filesystem_changes(&project, &baseline);
+
+    assert_eq!(
+        detected
+            .changed_paths
+            .iter()
+            .map(|path| path.relative_path.clone())
+            .collect::<Vec<_>>(),
+        vec![PathBuf::from(".git/config")],
+        "only the config file itself changed -- nothing parsed its content or went looking for \
+         a redirected hooks directory"
+    );
+}
+
 /// The handoff's own required ablation shape: remove one entry from the
 /// ignore list and watch the specific, named directory it used to
 /// exclude reappear -- proving the mechanism above is real, not that it
@@ -449,7 +577,13 @@ fn explorer_and_change_detection_share_the_exact_same_ignored_directory_list() {
 }
 
 #[test]
-fn detector_suppresses_changed_paths_when_changed_path_limit_is_hit() {
+fn detector_keeps_the_first_n_changed_paths_and_reports_the_omitted_count() {
+    // RFC-035 PR-035-B: the pre-RFC-035 behaviour discarded `changed_paths`
+    // entirely and set `status` to `Partial` once the count exceeded
+    // `max_changed_paths` -- "we found 2 changes so we will show you
+    // none." This is that defect's own regression test, inverted: the
+    // scan completed, so `status` stays `Complete`, and the first N paths
+    // survive with an honest count of the rest.
     let sandbox = TestSandbox::new("change-detection-path-limit");
     let project = sandbox.project_session(1);
     let detector = GeneratedChangeDetector::new(GeneratedChangeDetectionPolicy {
@@ -463,8 +597,20 @@ fn detector_suppresses_changed_paths_when_changed_path_limit_is_hit() {
 
     let detected = detector.detect_filesystem_changes(&project, &baseline);
 
-    assert_eq!(detected.status, ChangeDetectionStatus::Partial { limit: 1 });
-    assert!(detected.changed_paths.is_empty());
+    assert_eq!(
+        detected.status,
+        ChangeDetectionStatus::Complete,
+        "a capped *list* is not an incomplete *scan* -- the scan itself finished"
+    );
+    assert_eq!(
+        detected.changed_paths.len(),
+        1,
+        "exactly max_changed_paths (1) of the 2 real changes must be kept, not 0 and not 2"
+    );
+    assert_eq!(
+        detected.changed_paths_omitted_by_limit, 1,
+        "the one path not kept must be counted, not silently dropped"
+    );
 }
 
 #[test]
@@ -570,16 +716,29 @@ fn projectsession_creates_strong_agent_run_changeset_only_from_complete_detectio
 
 #[test]
 fn projectsession_refuses_changeset_creation_from_non_complete_detection() {
+    // RFC-035 PR-035-B changed what `max_changed_paths` alone produces
+    // (a capped list, `status` staying `Complete` -- see
+    // `detector_keeps_the_first_n_changed_paths_and_reports_the_omitted_count`),
+    // so this property now needs a genuinely truncated *scan*
+    // (`max_entries`) to reach `Partial` at all -- exactly the case
+    // "max_entries' behaviour unchanged and correct" says must still
+    // refuse ChangeSet creation, since a truncated scan cannot
+    // distinguish "unchanged" from "not looked at."
     let sandbox = TestSandbox::new("change-detection-non-complete");
     let mut project = sandbox.project_session(1);
+    sandbox.create_file_with_contents("project/a.txt", b"a\n");
+    sandbox.create_file_with_contents("project/b.txt", b"b\n");
     let detector = GeneratedChangeDetector::new(GeneratedChangeDetectionPolicy {
-        max_entries: 8,
-        max_changed_paths: 1,
+        max_entries: 1,
+        max_changed_paths: 8,
         ignored_directory_names: crate::project::IGNORED_DIRECTORY_NAMES,
     });
     let baseline = detector.capture_filesystem_baseline(&project);
-    sandbox.create_file_with_contents("project/a.txt", b"a\n");
-    sandbox.create_file_with_contents("project/b.txt", b"b\n");
+    assert_eq!(
+        baseline.status,
+        ChangeDetectionStatus::Partial { limit: 1 },
+        "test precondition: the baseline capture itself must already be truncated"
+    );
     let detected = detector.detect_filesystem_changes(&project, &baseline);
 
     let error = project
@@ -784,6 +943,7 @@ fn projectsession_revalidates_detector_paths_before_changeset_creation() {
         }],
         status: ChangeDetectionStatus::Complete,
         scanned_entry_count: 1,
+        changed_paths_omitted_by_limit: 0,
     };
 
     let error = project

@@ -11397,6 +11397,128 @@ fn change_review_surface_renders_a_real_change_set_from_a_real_agent_run() {
     );
 }
 
+/// RFC-035 PR-035-A's own acceptance criterion, proven at the surface
+/// level rather than only at the detector level
+/// (`git_hooks_pre_commit_is_watched_while_churn_paths_under_git_stay_excluded`,
+/// `tekstide-core`): a real managed agent run that writes
+/// `.git/hooks/pre-commit` -- installed code that runs on the user's
+/// machine -- shows up on the real, clicked-into Change Review surface.
+/// The exact real-agent-run/real-approval/real-exit pipeline
+/// `change_review_surface_renders_a_real_change_set_from_a_real_agent_run`
+/// already proves for an ordinary file, with the one file it writes
+/// aimed at `.git/hooks/` instead -- this is the "real agent run" half
+/// of PR-035-A's evidence requirement, not a substitute.
+#[test]
+fn change_review_surface_shows_a_real_git_hook_a_real_agent_run_installed() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("change-review-real-git-hook");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    // A real `git init` leaves `.git/hooks/` populated with `.sample`
+    // files -- created here, *before* the launch below captures its
+    // baseline, so the one real change this test proves is the hook
+    // file itself, not "a hooks/ directory came into existence."
+    std::fs::create_dir_all(project_dir.join(".git/hooks"))
+        .expect("creating the real .git/hooks/ directory must succeed");
+    let mut state = state_with(app_shell);
+
+    let agent_run_id = launch_real_managed_agent_run(&mut state);
+    std::fs::write(
+        project_dir.join(".git/hooks/pre-commit"),
+        b"#!/bin/sh\necho installed by a real agent run\n",
+    )
+    .expect("writing a real hook into the real project directory must succeed");
+
+    let received = poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    assert!(
+        received,
+        "the real adapter should send its proposal within the poll window"
+    );
+    let request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    let proposal_id = state.approval_proposal_ids[&request.id].clone();
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog::for_test(
+        request,
+        proposal_id,
+        ApprovalDialogButton::ApproveOnce,
+    ))));
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    let terminal_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .unwrap()
+        .terminal_id
+        .clone()
+        .expect("a launched agent run must have a real terminal id");
+    let status_of = |state: &State| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .agent_runs()
+            .iter()
+            .find(|run| run.id == agent_run_id)
+            .unwrap()
+            .status
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline
+        && matches!(
+            status_of(&state),
+            tekstide_core::domain::AgentRunStatus::Running
+                | tekstide_core::domain::AgentRunStatus::AwaitingApproval
+        )
+    {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(
+        status_of(&state),
+        tekstide_core::domain::AgentRunStatus::Completed
+    );
+
+    let _ = super::update(&mut state, Message::OpenDiffReviewButtonPressed);
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project
+        .change_sets()
+        .iter()
+        .find(|change_set| change_set.agent_run_id.as_ref() == Some(&agent_run_id))
+        .expect("a real ChangeSet strongly associated with this agent run must exist");
+    let summary = change_set.default_summary();
+
+    assert_eq!(
+        summary.changed_file_count, 1,
+        "the .git/ exclusion must not have swallowed the hook -- expected exactly the one \
+         real change, the hook itself"
+    );
+    let file_line =
+        super::change_review_file_entry_line(&state.catalog, &summary.shown_changed_files[0]);
+    assert!(
+        file_line.contains(".git/hooks/pre-commit"),
+        "the real hook a real agent run installed must be the one real path rendered on the \
+         surface, got {file_line:?}"
+    );
+}
+
 /// RFC-020 closeout (review response 322 Required): the demo-seeding
 /// path used to get a populated surface into a screenshot, exercised
 /// through its own env-independent function -- not by setting

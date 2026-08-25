@@ -118,10 +118,19 @@ switching. It includes:
 - **Real change detection for agent runs (`0.11.0`).** Launching a run captures
   a filesystem baseline of the project **before the agent's process starts**,
   and when that run's terminal exits the two are compared, producing a real
-  change set naming the files the run actually touched. `.git/`, `target/` and
-  `node_modules/` are excluded by design — build output and VCS metadata would
-  drown the result — which means **a change an agent makes inside those
-  directories is not reported**, git hooks included. A scan that hits its entry
+  change set naming the files the run actually touched. `target/` and
+  `node_modules/` are excluded by design — build output and package caches
+  would drown the result — which means **a change an agent makes inside those
+  directories is not reported**. `.git/` is mostly excluded too, for the same
+  reason (`refs/`, `objects/`, and `index` churn on every ordinary git
+  operation), **except `.git/hooks/` and `.git/config` (`0.14.0`, RFC-035)** —
+  the two places a change could install or redirect code that runs on this
+  machine are watched like any other changed path, precisely because that is
+  a supervision hole a coverage exclusion should not create. `core.hooksPath`
+  redirects are not followed to wherever they point; watching `.git/config`
+  itself already reports that the hook location changed, which is the fact
+  that matters — see the RFC for why chasing the redirect is deferred, not
+  built. A scan that hits its entry
   limit is recorded as *truncated*, never as "nothing changed": those are
   different facts and the product does not collapse them. Two further limits
   are deliberate and disclosed: detection runs only at exit, so a long-lived
@@ -304,9 +313,11 @@ Settings).** After an AI CLI run exits, this surface lists the files it touched,
 detection-status line, and a review state. **Read its limits as closely as its existence**: it
 is metadata only — file paths, not a diff. There is no before/after content and no per-line
 comparison; reading actual diff content is future work, not built here (see *Current Status*
-below). Detection is conservative and excludes `.git/`, `target/`, and `node_modules/` by
-design, so a change made inside those is never reported. The surface states both of these
-itself, in its own disclosure text; nothing here should be read as promising more than that.
+below). Detection is conservative and excludes `target/`, `node_modules/`, and most of `.git/`
+by design, so a change made inside those is never reported — except `.git/hooks/` and
+`.git/config` (`0.14.0`), which are watched, since those are the two places a change could
+install or redirect code that runs on this machine. The surface states both of these itself, in
+its own disclosure text; nothing here should be read as promising more than that.
 
 **Transcript privacy controls** — declining capture for future runs, and purging what is
 already retained, both per project — live on the same Trust Settings surface (`Ctrl+Alt+U`).

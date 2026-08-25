@@ -85,6 +85,7 @@ fn detected(entries: &[(&str, ChangePathKind, ChangeLifecycle)]) -> DetectedChan
             .collect(),
         status: ChangeDetectionStatus::Complete,
         scanned_entry_count: entries.len(),
+        changed_paths_omitted_by_limit: 0,
     }
 }
 

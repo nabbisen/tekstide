@@ -108,6 +108,40 @@ fn changeset_bounded_summary_reports_metadata_without_content() {
     assert!(!debug_summary.contains("artifact:secret-reference"));
 }
 
+/// RFC-035 PR-035-B: two independent sources of "not everything that
+/// changed is shown" can now both be non-trivial on the same summary --
+/// display-level (`bounded_summary`'s own `path_limit`) and
+/// detection-level (`max_changed_paths`, carried on `ChangeSet` as
+/// `changed_files_omitted_by_detection`). This is the first slice where
+/// that composition is possible; `omitted_changed_file_count` must sum
+/// both rather than reporting only whichever one a caller thought to
+/// ask about, and `changed_file_count` must report the **true** total
+/// (what detection actually found), never merely what happened to be
+/// stored.
+#[test]
+fn changeset_bounded_summary_sums_display_and_detection_level_omission() {
+    let changeset = ChangeSet::unreviewed(
+        ProjectId::for_test(1),
+        Some(AgentRunId::for_test(1)),
+        vec!["a.rs".into(), "b.rs".into(), "c.rs".into()],
+        "capped by max_changed_paths upstream",
+    )
+    .with_changed_files_omitted_by_detection(5);
+
+    let summary = changeset.bounded_summary(2);
+
+    assert_eq!(
+        summary.changed_file_count, 8,
+        "the true total is the 3 stored plus the 5 detection never stored, not just the 3"
+    );
+    assert_eq!(summary.shown_changed_files.len(), 2);
+    assert_eq!(
+        summary.omitted_changed_file_count, 6,
+        "1 held back by the display limit (3 stored - 2 shown) plus the 5 detection already \
+         omitted -- both causes, summed, not either one alone"
+    );
+}
+
 #[test]
 fn changeset_review_transitions_are_explicit_and_non_destructive() {
     let mut changeset = ChangeSet::unreviewed(

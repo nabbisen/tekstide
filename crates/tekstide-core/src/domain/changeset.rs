@@ -12,6 +12,20 @@ pub struct ChangeSet {
     pub agent_run_id: Option<AgentRunId>,
     pub baseline_snapshot_ref: Option<String>,
     pub changed_files: Vec<PathBuf>,
+    /// RFC-035 PR-035-B: how many additional changed paths detection
+    /// found but did not include in `changed_files`, because the true
+    /// count exceeded `GeneratedChangeDetectionPolicy::max_changed_paths`
+    /// (`DetectedChanges::changed_paths_omitted_by_limit`, carried
+    /// forward unchanged). Zero whenever detection never hit that limit.
+    /// Distinct from `bounded_summary`'s own *display*-level omission (a
+    /// `path_limit` like `DEFAULT_CHANGESET_PATH_SUMMARY_LIMIT`) -- this
+    /// is a *detection*-level one. `bounded_summary` sums both into one
+    /// `ChangeSetSummary::omitted_changed_file_count`, since both are
+    /// the same fact from a reader's perspective ("not everything that
+    /// changed is listed here"); `detection_status`'s own
+    /// `Partial { limit }` stays the separate, scan-completeness fact it
+    /// always was.
+    pub changed_files_omitted_by_detection: usize,
     pub artifact_refs: Vec<String>,
     pub summary: String,
     pub detection_source: ChangeDetectionSource,
@@ -36,6 +50,7 @@ impl ChangeSet {
             agent_run_id,
             baseline_snapshot_ref: None,
             changed_files,
+            changed_files_omitted_by_detection: 0,
             artifact_refs: Vec::new(),
             summary: summary.into(),
             detection_source: ChangeDetectionSource::ExplicitPaths,
@@ -97,6 +112,11 @@ impl ChangeSet {
         self
     }
 
+    pub fn with_changed_files_omitted_by_detection(mut self, count: usize) -> Self {
+        self.changed_files_omitted_by_detection = count;
+        self
+    }
+
     pub fn transition_review_to(
         &mut self,
         next: ReviewState,
@@ -115,18 +135,25 @@ impl ChangeSet {
 
     pub fn bounded_summary(&self, path_limit: usize) -> ChangeSetSummary {
         let path_limit = path_limit.min(self.changed_files.len());
+        // RFC-035 PR-035-B: the true total, and the true omission, both
+        // sum the display-level cap (`path_limit`, applied to what is
+        // actually stored) with the detection-level one
+        // (`changed_files_omitted_by_detection`, already excluded from
+        // `changed_files` before this ever runs) -- a reader must never
+        // see a lower total than what detection genuinely found.
         ChangeSetSummary {
             id: self.id.clone(),
             project_id: self.project_id.clone(),
             agent_run_id: self.agent_run_id.clone(),
-            changed_file_count: self.changed_files.len(),
+            changed_file_count: self.changed_files.len() + self.changed_files_omitted_by_detection,
             shown_changed_files: self
                 .changed_files
                 .iter()
                 .take(path_limit)
                 .cloned()
                 .collect(),
-            omitted_changed_file_count: self.changed_files.len() - path_limit,
+            omitted_changed_file_count: (self.changed_files.len() - path_limit)
+                + self.changed_files_omitted_by_detection,
             artifact_ref_count: self.artifact_refs.len(),
             detection_source: self.detection_source,
             detection_status: self.detection_status,
