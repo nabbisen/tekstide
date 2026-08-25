@@ -9,6 +9,23 @@ created: "2026-08-25"
 
 # The affordance audit
 
+**Superseded 2026-08-25 by RFC-040, closed out the same day it was written.** This document is a
+point-in-time record of what was true when RFC-039 closed, kept as-is rather than rewritten --
+its value now is historical. What it found is no longer the current state:
+
+- **Finding 1** ("every modal's own decision is keyboard-only, without exception") -- fixed.
+  RFC-040 PR-040-B gave all nine modals real, clickable buttons for their own decision.
+- **Finding 2** ("ten of thirteen live global actions have no visible control anywhere") --
+  narrowed to two. RFC-040 PR-040-C built the eight it could (`ToggleProjectMode`,
+  `LaunchTerminal`, `SaveActiveDocument`, `LaunchAgentRun`, `OpenCurrentAgentRunDetail`,
+  `OpenApprovalHistory`, `OpenTrustSettings`, `OpenHelp`); the remaining two
+  (`OpenProjectEntryField`, `PasteIntoTerminal`) are RFC-040's own permanent, reasoned allow-list
+  entries, a decision rather than a gap -- see `keyboard_help::control_coverage`.
+- Findings 3–6 (the dead actions, `OpenCommandPalette`, and the nine query-race-shaped tests) are
+  untouched by RFC-040 and still describe the current state.
+
+See `rfcs/handoffs/040-affordance-completion/qa-evidence.md` for the current, complete count.
+
 Per the task breakdown: **build nothing, find things.** Every `NavigationAction` against the
 visible control that invokes it; every real button in the application inventoried; both inputs
 response 312 named (the keyboard-only-modal question, the query-race sites) resolved and recorded

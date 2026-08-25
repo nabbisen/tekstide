@@ -13,10 +13,14 @@ Every unchecked line at closeout carries a stated reason.
 
 ## The acceptance criterion
 
-- [ ] **No flow a user can begin with a mouse requires a keyboard to finish or abandon.**
-- [ ] Every live action has a visible control or a reasoned allow-list entry. The remaining count
-      is a number somebody chose.
-- [ ] Everything added is still keyboard-operable.
+- [x] **No flow a user can begin with a mouse requires a keyboard to finish or abandon.** All nine
+      modals (PR-040-B) and all eight PR-040-C actions. Two named, reasoned exceptions remain
+      (`PasteIntoTerminal`, `OpenProjectEntryField`) -- see `qa-evidence.md`'s own answer in this
+      RFC's words.
+- [x] Every live action has a visible control or a reasoned allow-list entry. The remaining count
+      is a number somebody chose. **11 of 13** — `control_coverage`, stated before (3) and after.
+- [x] Everything added is still keyboard-operable. No keyboard behaviour changed anywhere in this
+      RFC; every pre-existing keyboard-path test still passes unmodified.
 
 ## PR-040-A — the audit as a test
 
@@ -83,11 +87,22 @@ Every unchecked line at closeout carries a stated reason.
 
 ## Closeout
 
-- [ ] Count stated before and after.
-- [ ] README, `--help` and RFC-039's audit corrected where this work falsified them.
-- [ ] Ablations single-variable; flakes disclosed against both causes in `test-process-leak.md`.
-- [ ] Gates: `fmt`, `clippy -D warnings`, full suite **under default parallelism**, `git diff --check`.
-- [ ] Known limitations stated.
+- [x] Count stated before and after. 3 → 11 of 13.
+- [x] README, `--help` and RFC-039's audit corrected where this work falsified them. README's
+      modal paragraph corrected in place (PR-040-B); `affordance-audit.md` given a dated
+      correction note, not rewritten (its value is now historical); `--help`/the in-app reference
+      were never stale (both derived, not hand-written prose).
+- [x] Ablations single-variable; flakes disclosed against both causes in `test-process-leak.md`.
+      This slice's own: `command_approval_family_produces_real_durable_audit_records_through_the_pipeline`
+      hit twice in four gate runs -- the same already-documented, still-unfixed socket flake the
+      architect independently re-measured in response 319 ("two failures in nine runs"), not a
+      regression, not chased further per that document's own standing instruction.
+- [x] Gates: `fmt`, `clippy -D warnings`, full suite **under default parallelism**, `git diff --check`
+      — all clean; see `qa-evidence.md` for each slice's own run record.
+- [x] Known limitations stated — `qa-evidence.md`'s own closing section: the two permanent
+      keyboard-only actions, scrim-click-to-dismiss (out of scope from RFC-040's own start), the
+      background-job process-group gap found verifying the leak fix, the nine query-race-shaped
+      tests, and `OpenSafeCloseDialog`'s own still-open binding question.
 
 ## Final Acceptance Decision
 

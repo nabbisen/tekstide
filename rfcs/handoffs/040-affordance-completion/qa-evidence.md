@@ -310,8 +310,102 @@ pre-existing) -- not climbing, not this slice's own concern. `git diff --check` 
 
 ## PR-040-D — closeout
 
-_Pending._
+**Response 320's required central guard, built first.** `update`'s own new check, ahead of the
+real `match` (the same "checked once" shape the promoted-approval-dialog check already uses):
+`if state.modal.is_some() && click_message_kind(&message) == Some(ClickMessageKind::BackgroundControl)
+{ return Task::none(); }`. `click_message_kind`/`ClickMessageKind` are no longer `#[cfg(test)]` --
+this is now their real production caller, the same "has a real caller" distinction
+`keyboard_help::action_catalog_key` already draws against `control_coverage`.
+
+**Attempted, then corrected: not all twelve per-handler guards are actually removable.** Response
+320 predicted they would become removable. A first pass removed all seventeen `state.modal.is_some()`
+guards this RFC's own background handlers carried (keeping `write_terminal_input`'s and
+`evaluate_promotion`'s, which guard unrelated invariants). The full suite caught a real regression:
+`open_trust_grant_dialog_does_not_replace_an_already_open_modal` failed. Root cause, traced rather
+than patched around: `open_trust_grant_dialog` (and `revoke_workspace_trust`,
+`toggle_transcript_capture_declined`, `open_transcript_purge_dialog`, and in fact every one of the
+seventeen) is reachable not only through its own background-button `Message`, but also through a
+surface-specific keyboard handler (`handle_trust_settings_key`, `handle_project_board_row_key`,
+`handle_tab_strip_key`) whose own entry point is `Message::Input(RoutedInput::Surface(_))` --
+which `click_message_kind` classifies `None` (not click-originated) identically to every other
+kind of `Message::Input`, and which `update` itself has no internal check against (the real
+protection for that path is `non_modal_subscription`'s own `ModalAbsent` proof, external to
+`update`, and bypassable by a test -- or a future bug -- constructing the message directly). The
+central guard cannot single out "this `Input` came from a surface key handler reachable while a
+modal happens to be open" from "this one didn't," so removing the per-handler guard removed real
+protection a test was already relying on.
+
+**Resolution:** reverted the removal in full (`git checkout` back to the PR-040-C commit, then
+reapplied only the central guard, cleanly). All seventeen per-handler guards stay, alongside the
+new central one -- genuine belt-and-braces, the same shape `write_terminal_input`'s own doc already
+named ("defense in depth, not the modal-exclusivity boundary itself"), not redundancy. Demonstrated,
+not asserted: temporarily removed `toggle_transcript_capture_declined`'s own guard specifically
+(leaving the central one in place) and confirmed `a_control_behind_an_open_modal_cannot_be_clicked`
+still passed -- proving the two layers are independently sufficient for the click-message case, not
+one guard duplicated for no reason. Restored.
+
+**What the central guard actually adds, stated precisely**: not new protection for any message that
+already had a working per-handler guard -- exhaustive, compile-checked coverage of the click-message
+half of the property, so a *thirteenth* background button, added later with no per-handler guard of
+its own (a real, plausible mistake a per-handler-only design cannot catch until someone remembers),
+is refused anyway. That is what "the classification becomes the enforcement, not a parallel
+description of it" means once the keyboard-reachability nuance above is accounted for -- enforcement
+of the part it *can* prove exhaustively, alongside (not replacing) the part it cannot.
+
+**Ablated.** Added an unclassified `Message` variant: two independent matches (`click_message_kind`
+and `update`'s own) failed to compile, confirmed, reverted (PR-040-C's own ablation, unchanged by
+this correction). The belt-and-braces demonstration above is this slice's own additional one.
+
+### The acceptance criterion, answered in RFC-040's own words
+
+- **"No flow a user can begin with a mouse requires a keyboard to finish or abandon."** True for
+  every modal (PR-040-B: all nine have real buttons for their own decision, click and keystroke
+  routed through the identical handler) and for every one of the eight actions PR-040-C gave a
+  control. Two exceptions remain, both named and reasoned rather than silently missing:
+  `PasteIntoTerminal` (D3, terminal-convention keyboard-only, permanent) and
+  `OpenProjectEntryField` (its underlying workflow already has a visible route through
+  `OpenFolderBrowser`'s own button; the keystroke is an accelerator to an alternate input mode for
+  that same workflow, not a flow with no visible way to finish it).
+- **"Every live action has a visible control or a reasoned allow-list entry. The remaining count
+  is a number somebody chose."** 11 of 13. The two remaining are the same pair above --
+  `keyboard_help::control_coverage`'s own permanent entries, each with a reason attached, checked
+  by `every_live_action_has_a_visible_control_or_a_reasoned_allow_list_entry`. Not a residue: a
+  decision, stated where it can be read.
+- **"Everything added is still keyboard-operable."** Every new button converges on the same
+  function its own pre-existing keyboard accelerator already called (PR-040-B's `activate_current_modal`
+  precedent, PR-040-C's `open_folder_browser` "one setup, two routes" precedent) -- no keyboard
+  behaviour changed anywhere in this RFC; every existing keyboard-path test still passes unmodified.
+
+### Corrections this arc owed
+
+- **README's modal-decision paragraph** (PR-040-B): corrected in place -- no longer claims every
+  modal is keyboard-only for its own decision.
+- **`affordance-audit.md`** (RFC-039's own closed-out audit): a dated correction note added at the
+  top rather than a rewrite -- the document's value is now historical, so it says plainly what it
+  found, what RFC-040 fixed, and points to this file for the current count, instead of being
+  silently left to mislead the next reader who trusts a closed RFC's own record.
+- **`--help`/the in-app keyboard reference**: unchanged, correctly -- both are derived from
+  `keyboard_help::keyboard_help_lines`/`KeybindingPolicy::linux_mvp()` directly, not hand-maintained
+  prose, so neither ever asserted a stale affordance count to begin with.
+- **`test-process-leak.md`**: not this RFC's own document, but the leak-fix response (319) and its
+  own follow-up (320's audit-trail addendum) are the reason RFC-040 PR-040-C's own gate is
+  trustworthy at all -- see that document directly for its own evidence, not duplicated here.
 
 ## Known limitations (RFC-040-wide)
 
-_Pending._
+- **Two permanent keyboard-only actions**, by design, not oversight: `PasteIntoTerminal` (D3) and
+  `OpenProjectEntryField` (workflow served elsewhere). Stated in `control_coverage`'s own entries
+  and the acceptance-criterion answer above, not hidden.
+- **Scrim-click-to-dismiss** (`what-a-clickable-modal-must-not-become.md`'s own §5): explicitly out
+  of RFC-040's scope from the start, unimplemented -- a modal closes by its own buttons or Escape,
+  never by clicking the backdrop.
+- **The background-job process-group gap** (found verifying the leak fix, response 319/320's own
+  addendum): `request_terminate` can report a terminal terminated while a process it launched
+  (a user's own backgrounded job) keeps running, and `SafeCloseDecision::Closed { fully_confirmed:
+  true }` can be written to the durable audit store in that state. Not fixed by RFC-040; recorded
+  in `test-process-leak.md`, taken to the human owner by the architect.
+- **Nine query-race-shaped tests** (`affordance-audit.md`'s own Finding 6, RFC-039): unconverted,
+  unchanged by RFC-040 -- still whoever picks up that specific risk next, not folded into this arc.
+- **`OpenSafeCloseDialog`** stays `Configurable`/dead (`affordance-audit.md`'s Finding 3): whether
+  it should gain a binding as a coarser accelerator to the active project's own close is a real
+  design question RFC-040 did not decide, same as RFC-039 left it.

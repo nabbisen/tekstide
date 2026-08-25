@@ -1268,15 +1268,17 @@ pub enum Message {
     CloseProjectTabPressed(tekstide_core::project::ProjectId),
 }
 
-/// RFC-040 PR-040-C, response 317's required follow-up: which of two
-/// obligations a real click's own `Message` carries -- never neither,
-/// for any message a `.on_press` anywhere in this crate can actually
-/// produce.
+/// RFC-040 PR-040-C/D, response 317's required follow-up, made
+/// load-bearing by response 320's: which of two obligations a real
+/// click's own `Message` carries -- never neither, for any message a
+/// `.on_press` anywhere in this crate can actually produce.
 ///
-/// `#[cfg(test)]`, the same reasoning [`keyboard_help::ControlCoverage`]
-/// already states: nothing in production needs to ask this question,
-/// only this crate's own test suite does.
-#[cfg(test)]
+/// **Not `#[cfg(test)]`**, unlike [`keyboard_help::ControlCoverage`]:
+/// `update`'s own central guard (below) is now this type's real
+/// production caller, the same "has a real caller, not just a test's
+/// own question" distinction [`keyboard_help::action_catalog_key`]
+/// already draws against `control_coverage`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClickMessageKind {
     /// A background (non-modal) control's own click -- must refuse (a
     /// no-op) while `state.modal` is `Some`, so a control behind an
@@ -1306,7 +1308,24 @@ pub(crate) enum ClickMessageKind {
 /// classifies *which variant*, never inspects *what it carries*, so a
 /// `ProjectId`/`ApprovalId`/`usize` payload needs no real value to
 /// pattern-match against.
-#[cfg(test)]
+///
+/// Response 320's own required change: this classification now drives
+/// `update`'s own central guard (an exhaustive, compile-enforced proof
+/// that every `BackgroundControl` message refuses while a modal is
+/// open), in addition to -- not instead of -- each handler's own
+/// existing `state.modal.is_some()` check. Both stay: the per-handler
+/// guards are the actual defense-in-depth (several are also reachable
+/// from a surface-specific keyboard handler --
+/// `handle_trust_settings_key`, `handle_project_board_row_key`,
+/// `handle_tab_strip_key` -- whose own `Message::Input(RoutedInput::
+/// Surface(_))` this classification cannot single out from
+/// `RoutedInput::Shell`'s, so removing them would have silently
+/// widened what "an already-open modal is never replaced" actually
+/// covers; found by a real test failure
+/// (`open_trust_grant_dialog_does_not_replace_an_already_open_modal`)
+/// during review, not left as a hypothetical). This classification's
+/// own job is narrower and still real: proving the click-message half
+/// of that property exhaustively rather than by a two-message sample.
 fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
     match message {
         // -- background controls (`reopen_recent_project`'s own doc
@@ -1506,6 +1525,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         && dialog
             .ignore_input_until
             .is_some_and(|until| std::time::Instant::now() < until)
+    {
+        return Task::none();
+    }
+
+    // RFC-040 PR-040-D, response 320's required addition: an
+    // exhaustive, compile-enforced proof that every `BackgroundControl`
+    // click message refuses while a modal is open, ahead of the real
+    // `match`, the same "checked once" shape the promoted-approval-dialog
+    // check immediately above already uses. `click_message_kind`'s own
+    // exhaustive match over `Message` is what makes this exhaustive
+    // rather than sampled -- a new `BackgroundControl` message is
+    // covered here the moment it is classified as one. Additive, not a
+    // replacement for each handler's own `state.modal.is_some()` check
+    // (see `click_message_kind`'s own doc for why both stay).
+    if state.modal.is_some()
+        && click_message_kind(&message) == Some(ClickMessageKind::BackgroundControl)
     {
         return Task::none();
     }
@@ -6955,7 +6990,12 @@ fn revoke_workspace_trust(state: &mut State) {
 fn toggle_transcript_capture_declined(state: &mut State) {
     // RFC-040 PR-040-B: see `revoke_workspace_trust`'s own doc, right
     // above -- the same "never had a modal guard because it never
-    // opened a dialog" gap.
+    // opened a dialog" gap. RFC-040 PR-040-D: kept alongside `update`'s
+    // own new central guard, not replaced by it -- see
+    // `click_message_kind`'s own doc for why (this function is also
+    // reachable from `handle_trust_settings_key`'s own `Space` case,
+    // which that classification cannot single out from any other
+    // `RoutedInput::Surface` message).
     if state.modal.is_some() {
         return;
     }
