@@ -11408,6 +11408,314 @@ fn change_review_omitted_lines_are_absent_when_both_are_zero() {
     assert!(super::change_review_detection_omitted_files_line(&catalog, &summary).is_none());
 }
 
+// RFC-041, the change content preview
+// (`what-a-content-preview-must-not-claim.md`).
+
+/// A real project with a real `ChangeSet` and its real, retained
+/// `DetectedChanges` -- one file modified, one added -- built without
+/// the full real-agent-run pipeline (`GeneratedChangeDetector`'s own
+/// baseline capture and detection need no process spawn at all;
+/// `change_review_surface_shows_a_real_git_hook_a_real_agent_run_installed`
+/// already reserves the heavy pipeline for the one test that
+/// specifically needs a *launched agent run*, not merely a real
+/// `ChangeSet`). Mirrors `attempt_generated_change_detection`'s own
+/// retention step exactly, by calling the same production functions
+/// it does.
+fn state_with_a_real_change_set_and_retained_detection(
+    label: &str,
+) -> (
+    State,
+    tekstide_core::domain::ChangeSetId,
+    std::path::PathBuf,
+) {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir(label);
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+
+    std::fs::write(project_dir.join("existing.txt"), b"before\n")
+        .expect("writing the pre-existing file must succeed");
+
+    let detector = tekstide_core::project::GeneratedChangeDetector::new(
+        super::generated_change_detection_policy(),
+    );
+    let baseline = {
+        let project = app_shell.state().active_project().unwrap();
+        detector.capture_filesystem_baseline(project)
+    };
+
+    std::fs::write(project_dir.join("existing.txt"), b"after\n")
+        .expect("modifying the pre-existing file must succeed");
+    std::fs::write(project_dir.join("new.txt"), b"brand new\n")
+        .expect("writing the new file must succeed");
+
+    let detected = {
+        let project = app_shell.state().active_project().unwrap();
+        detector.detect_filesystem_changes(project, &baseline)
+    };
+
+    let change_set_id = app_shell
+        .state_mut()
+        .add_detected_generated_change_set(&baseline, &detected, None, "test fixture")
+        .expect("a completed detection with real changes must create a real ChangeSet")
+        .expect("at least one real changed file must produce Some(ChangeSetId)");
+
+    let mut state = state_with(app_shell);
+    state
+        .detected_changes_by_change_set
+        .insert(change_set_id.clone(), detected);
+    (state, change_set_id, project_dir)
+}
+
+/// The acceptance criterion's own second half: modified content is
+/// labelled "not a diff" on the screen. Ablated below.
+#[test]
+fn change_review_content_modified_content_is_labelled_not_a_diff() {
+    let (mut state, _change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("content-modified-label");
+    super::select_change_review_file(&mut state, std::path::PathBuf::from("existing.txt"));
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    let lines = super::change_review_content_lines(&state, project, change_set);
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.to_lowercase().contains("not a diff")),
+        "modified content must be labelled 'not a diff' on the screen, got {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("after")),
+        "the real current content must still be shown, got {lines:?}"
+    );
+}
+
+/// Added content is the whole change by definition -- no "not a diff"
+/// label, since nothing here claims to be a comparison of two states.
+#[test]
+fn change_review_content_added_content_has_no_not_a_diff_label() {
+    let (mut state, _change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("content-added-no-label");
+    super::select_change_review_file(&mut state, std::path::PathBuf::from("new.txt"));
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    let lines = super::change_review_content_lines(&state, project, change_set);
+
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.to_lowercase().contains("not a diff")),
+        "added content is the whole change; it must not carry the modified-only label, got \
+         {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("brand new")),
+        "the real added content must still be shown, got {lines:?}"
+    );
+}
+
+/// RFC-041 D1's own required ablation: retention dropped must not
+/// break metadata rendering, and content preview must say so honestly
+/// rather than silently show nothing.
+#[test]
+fn change_review_content_is_unavailable_when_retention_was_dropped() {
+    let (mut state, change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("content-retention-dropped");
+    super::select_change_review_file(&mut state, std::path::PathBuf::from("existing.txt"));
+    state
+        .detected_changes_by_change_set
+        .remove(&change_set_id)
+        .expect("test precondition: the fixture must have retained something to drop");
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    let summary = change_set.default_summary();
+    let content_lines = super::change_review_content_lines(&state, project, change_set);
+
+    assert!(
+        content_lines
+            .iter()
+            .any(|line| line.to_lowercase().contains("no longer available")),
+        "dropped retention must render its own honest refusal, got {content_lines:?}"
+    );
+    assert_eq!(
+        summary.changed_file_count, 2,
+        "the metadata (file count, from ChangeSet alone) must be completely unaffected by \
+         dropping only the retained DetectedChanges"
+    );
+}
+
+/// D2: refuse rather than render-with-a-warning once the file has
+/// moved since the moment this selection was made, and name the
+/// reason.
+#[test]
+fn change_review_content_refuses_when_the_file_changes_after_selection() {
+    let (mut state, _change_set_id, project_dir) =
+        state_with_a_real_change_set_and_retained_detection("content-stale-baseline");
+    super::select_change_review_file(&mut state, std::path::PathBuf::from("existing.txt"));
+
+    // A real, later write -- after the selection above already captured
+    // its own baseline snapshot.
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    std::fs::write(
+        project_dir.join("existing.txt"),
+        b"changed again, after selection\n",
+    )
+    .expect("the later write must succeed");
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    let lines = super::change_review_content_lines(&state, project, change_set);
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.to_lowercase().contains("no longer authoritative")),
+        "a file that moved since selection must refuse and name the reason, got {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains("changed again")),
+        "the newer content must never render under a selection made against an earlier state, \
+         got {lines:?}"
+    );
+}
+
+/// `what-a-content-preview-must-not-claim.md` §5: file content is
+/// untrusted text in trusted chrome. A bidi override in real file
+/// content must render as the escaped marker, never raw -- the same
+/// fixture shape `project_close_dialog_escapes_a_bidi_override_in_the_canonical_path`
+/// already establishes for a different untrusted value.
+#[test]
+fn change_review_content_escapes_a_bidi_override_in_file_content() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("content-bidi-escape");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+
+    let detector = tekstide_core::project::GeneratedChangeDetector::new(
+        super::generated_change_detection_policy(),
+    );
+    let baseline = {
+        let project = app_shell.state().active_project().unwrap();
+        detector.capture_filesystem_baseline(project)
+    };
+    let mut bytes = b"safe ".to_vec();
+    bytes.extend_from_slice("\u{202E}evil.exe".as_bytes());
+    std::fs::write(project_dir.join("bidi.txt"), &bytes).expect("writing bidi.txt must succeed");
+    let detected = {
+        let project = app_shell.state().active_project().unwrap();
+        detector.detect_filesystem_changes(project, &baseline)
+    };
+    let change_set_id = app_shell
+        .state_mut()
+        .add_detected_generated_change_set(&baseline, &detected, None, "bidi test fixture")
+        .expect("detection must succeed")
+        .expect("a real added file must produce a real ChangeSet");
+
+    let mut state = state_with(app_shell);
+    state
+        .detected_changes_by_change_set
+        .insert(change_set_id, detected);
+    super::select_change_review_file(&mut state, std::path::PathBuf::from("bidi.txt"));
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    let lines = super::change_review_content_lines(&state, project, change_set);
+    let rendered = lines.join("\n");
+
+    assert!(
+        rendered.contains("<U+202E>"),
+        "a real bidi override in file content must render as a visible, escaped marker: \
+         {rendered:?}"
+    );
+    assert!(
+        !rendered.contains('\u{202E}'),
+        "the raw override character must never reach the rendered surface: {rendered:?}"
+    );
+}
+
+/// The real, clickable control -- proving reachability by row click, not
+/// assumed. Mirrors `clicking_change_review_routes_to_the_real_change_review_surface`'s
+/// own shape for the surface-level button, one layer in for this row's
+/// own button.
+#[test]
+fn clicking_a_change_review_row_selects_it_for_preview() {
+    let (mut state, _change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("content-row-click");
+
+    let _ = super::update(
+        &mut state,
+        Message::ChangeReviewFileRowPressed(std::path::PathBuf::from("new.txt")),
+    );
+
+    let selection = state
+        .change_review_selection
+        .as_ref()
+        .expect("clicking a row must select it");
+    assert_eq!(selection.relative_path, std::path::PathBuf::from("new.txt"));
+}
+
+/// Keyboard reachability -- the same row, selected via `ArrowDown`/
+/// `Enter` instead of a click, converging on the identical function.
+#[test]
+fn change_review_key_navigation_selects_the_highlighted_row_on_enter() {
+    let (mut state, _change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("content-row-keyboard");
+    state.app_shell.dispatch(
+        tekstide_core::command::AppCommand::OpenActiveProjectSurface(
+            tekstide_core::project::ProjectOpenSurface::DiffReview,
+        ),
+    );
+
+    let shown = {
+        let project = state.app_shell.state().active_project().unwrap();
+        project
+            .change_sets()
+            .last()
+            .unwrap()
+            .default_summary()
+            .shown_changed_files
+    };
+    assert_eq!(shown.len(), 2, "test precondition: two real changed files");
+
+    let routed = crate::input::RoutedInput::Surface(crate::input::surface_input_for_test(
+        FocusZone::MainArea,
+        press(iced::keyboard::Key::Named(
+            iced::keyboard::key::Named::Enter,
+        )),
+    ));
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    let selection = state
+        .change_review_selection
+        .as_ref()
+        .expect("Enter on the highlighted row must select it");
+    assert_eq!(selection.relative_path, shown[0]);
+}
+
+/// A control behind an open modal cannot be clicked -- extending the
+/// established pattern to this surface's new row button.
+#[test]
+fn clicking_a_change_review_row_while_a_modal_is_open_has_no_effect() {
+    let (mut state, _change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("content-row-modal-exclusivity");
+    state.modal = Some(ModalContent::default());
+
+    let _ = super::update(
+        &mut state,
+        Message::ChangeReviewFileRowPressed(std::path::PathBuf::from("new.txt")),
+    );
+
+    assert!(
+        state.change_review_selection.is_none(),
+        "a background control's click message must have no effect while a modal is open"
+    );
+}
+
 #[test]
 fn change_review_state_line_renders_each_review_state_distinctly() {
     let catalog = state_with(ApplicationShell::new()).catalog;
@@ -11757,6 +12065,140 @@ fn change_review_surface_shows_a_real_git_hook_a_real_agent_run_installed() {
     );
 }
 
+/// RFC-041's own acceptance criterion, end to end: a real managed agent
+/// run, a real file write, a real approval, a real exit -- the exact
+/// pipeline `change_review_surface_shows_a_real_git_hook_a_real_agent_run_installed`
+/// already proves for the RFC-035 case -- then a **real click on the
+/// real row button**, and the rendered content lines checked against
+/// the real bytes the agent run actually wrote, not a synthesized
+/// `DiffContent`. This is the "reached from a visible control" half of
+/// the acceptance criterion, proven by dispatching the real
+/// `Message::ChangeReviewFileRowPressed`, not by calling
+/// `select_change_review_file` directly the way the unit tests above
+/// do for speed.
+#[test]
+fn change_review_surface_shows_real_content_from_a_real_agent_run() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("change-review-real-content");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let agent_run_id = launch_real_managed_agent_run(&mut state);
+    std::fs::write(
+        project_dir.join("agent-created-file.txt"),
+        b"a real line an agent run really wrote\n",
+    )
+    .expect("writing a real file into the real project directory must succeed");
+
+    let received = poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    assert!(
+        received,
+        "the real adapter should send its proposal within the poll window"
+    );
+    let request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    let proposal_id = state.approval_proposal_ids[&request.id].clone();
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog::for_test(
+        request,
+        proposal_id,
+        ApprovalDialogButton::ApproveOnce,
+    ))));
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    let terminal_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .unwrap()
+        .terminal_id
+        .clone()
+        .expect("a launched agent run must have a real terminal id");
+    let status_of = |state: &State| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .agent_runs()
+            .iter()
+            .find(|run| run.id == agent_run_id)
+            .unwrap()
+            .status
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline
+        && matches!(
+            status_of(&state),
+            tekstide_core::domain::AgentRunStatus::Running
+                | tekstide_core::domain::AgentRunStatus::AwaitingApproval
+        )
+    {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(
+        status_of(&state),
+        tekstide_core::domain::AgentRunStatus::Completed
+    );
+
+    // The real, visible control -- opening the surface, then the row.
+    let _ = super::update(&mut state, Message::OpenDiffReviewButtonPressed);
+    let real_path = {
+        let project = state.app_shell.state().active_project().unwrap();
+        let change_set = project
+            .change_sets()
+            .iter()
+            .find(|change_set| change_set.agent_run_id.as_ref() == Some(&agent_run_id))
+            .expect("a real ChangeSet strongly associated with this agent run must exist");
+        change_set.default_summary().shown_changed_files[0].clone()
+    };
+    assert_eq!(
+        real_path,
+        std::path::PathBuf::from("agent-created-file.txt")
+    );
+    let _ = super::update(
+        &mut state,
+        Message::ChangeReviewFileRowPressed(real_path.clone()),
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project
+        .change_sets()
+        .iter()
+        .find(|change_set| change_set.agent_run_id.as_ref() == Some(&agent_run_id))
+        .unwrap();
+    let lines = super::change_review_content_lines(&state, project, change_set);
+    let rendered = lines.join("\n");
+
+    assert!(
+        rendered.contains("a real line an agent run really wrote"),
+        "the real content the real agent run wrote must be the one real content rendered, got \
+         {rendered:?}"
+    );
+    assert!(
+        !rendered.to_lowercase().contains("not a diff"),
+        "a newly added file is the whole change, not a diff of anything -- must not carry the \
+         modified-only label, got {rendered:?}"
+    );
+}
+
 /// RFC-020 closeout (review response 322 Required): the demo-seeding
 /// path used to get a populated surface into a screenshot, exercised
 /// through its own env-independent function -- not by setting
@@ -11772,9 +12214,9 @@ fn seed_change_review_demo_change_set_creates_a_real_unlinked_change_set() {
         .add_project_from_path(&project_dir)
         .expect("a freshly created directory is a valid project root");
 
-    super::seed_change_review_demo_change_set(&mut app_shell);
+    let seeded = super::seed_change_review_demo_change_set(&mut app_shell);
 
-    let (agent_run_id_is_none, changed_file_count, shown_first_file) = {
+    let (agent_run_id_is_none, changed_file_count, shown_first_file, real_change_set_id) = {
         let project = app_shell.state().active_project().unwrap();
         let change_set = project
             .change_sets()
@@ -11785,6 +12227,7 @@ fn seed_change_review_demo_change_set_creates_a_real_unlinked_change_set() {
             change_set.agent_run_id.is_none(),
             summary.changed_file_count,
             summary.shown_changed_files[0].clone(),
+            change_set.id.clone(),
         )
     };
     assert!(
@@ -11792,6 +12235,26 @@ fn seed_change_review_demo_change_set_creates_a_real_unlinked_change_set() {
         "no real agent run produced this write -- the association must not claim one"
     );
     assert_eq!(changed_file_count, 1);
+
+    // RFC-041 D1: confirmed live once already (the demo-seeded change
+    // set showed "no longer available" for content preview before this
+    // fix, since `State::new` had nothing to seed
+    // `detected_changes_by_change_set` from) -- this is that fix's own
+    // regression test. `seed_change_review_demo_change_set` must return
+    // exactly the pair `State::new` needs to seed retention with, keyed
+    // by the real `ChangeSetId` the real `ChangeSet` above actually got.
+    let (returned_change_set_id, returned_detected) =
+        seeded.expect("a real ChangeSet was created above -- the pair must come back too");
+    assert_eq!(
+        returned_change_set_id, real_change_set_id,
+        "the returned id must be the exact id State::new will key retention on"
+    );
+    assert_eq!(
+        returned_detected.changed_paths.len(),
+        1,
+        "the returned DetectedChanges must be the real one the real ChangeSet was built from"
+    );
+
     let state = state_with(app_shell);
     let file_line = super::change_review_file_entry_line(&state.catalog, &shown_first_file);
     assert!(

@@ -584,6 +584,13 @@ fn generic_args() -> CatalogArgs<'static> {
         // covers both keys' transcript-count selector; no new entry
         // needed for it.
         .number("bytes", 1u64)
+        // RFC-041 PR-041-B: `change-review-content-non-text`'s real byte
+        // length and `change-review-content-error-too-large`'s length
+        // against its own bound -- both real, trusted numbers (never
+        // untrusted text), the same reasoning `shown_len`/`total_len`
+        // above already establish for this file's other byte counts.
+        .number("len", 1u64)
+        .number("max", 1u64)
 }
 
 fn shipped_additional_locales() -> Vec<String> {

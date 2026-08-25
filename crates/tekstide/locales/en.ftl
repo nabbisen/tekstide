@@ -684,6 +684,53 @@ change-review-review-state = Review state: { $state ->
 }
 change-review-open-button = Change Review
 
+# RFC-041, the change content preview (`what-a-content-preview-must-not-claim.md`).
+# `$path` is untrusted -- filesystem-derived, escaped through
+# `text_safety::quote_untrusted` before it ever reaches this key, the
+# same discipline `change-review-file-entry` already uses.
+change-review-content-heading = Preview: { $path }
+# §1's own required, non-optional claim -- rendered on the screen,
+# beside the content, every time a modified file's *current* content is
+# shown. Never true for Added (the whole file is the whole change) or
+# for anything else that reaches this surface.
+change-review-content-not-a-diff = This is the file's current content, not a diff. It cannot show what changed -- only what the file looks like now. Whether the agent's own edit is still there, was reverted, or was overwritten by something else since, this screen cannot tell you.
+change-review-content-deleted = This path was deleted. It was a { $kind ->
+    [directory] directory
+    [symlink] symlink
+    [other] filesystem entry
+   *[file] file
+} before it was removed -- there is no content to preview.
+change-review-content-non-text = This file is not text ({ $len ->
+    [one] 1 byte
+   *[other] { $len } bytes
+}) -- no preview is attempted.
+change-review-content-non-file = This path exists but is not a file (it is a { $kind ->
+    [directory] directory
+    [symlink] symlink
+   *[other] filesystem entry
+}) -- there is no content to preview.
+# D2: refuse rather than render-with-a-warning. "Say which" -- this
+# names the reason rather than a generic "cannot show content".
+change-review-content-stale = This change set's baseline is no longer authoritative: the file has changed on disk since this preview was opened. Re-select it to see the current content, labelled honestly against what is on disk now.
+# RFC-041 D1's own ablation case: retention was dropped (or never
+# survived the application closing -- the same in-memory-only
+# limitation `agent_run_change_baselines` already discloses). The
+# metadata above is unaffected; only content preview is unavailable.
+change-review-content-unavailable = Content preview is no longer available for this change set.
+change-review-content-error-not-detected = This path is not part of the detected change set.
+change-review-content-error-access = This file could not be opened for preview ({ $reason ->
+    [absolute-path-not-allowed] an absolute path is not allowed here
+    [invalid-relative-path] the path is not valid for this project
+    [missing-path] the file no longer exists at this path
+    [permission-denied] permission was denied
+    [cannot-read-path] the path could not be read
+    [root-escape] the path resolves outside the project root
+   *[symlink-escape] a symlink in the path resolves outside the project root
+}).
+change-review-content-error-metadata-unavailable = This file's metadata could not be read.
+change-review-content-error-too-large = This file is too large to preview: { $len } bytes exceeds the { $max } byte limit. Refused whole, not shown truncated.
+change-review-content-error-read-failed = Reading this file's content failed.
+
 # RFC-032 `what-the-trust-dialog-must-say.md`: `$path` is the project's
 # **canonical** path -- what trust actually binds to
 # (`docs/src/contributors/security-decisions.md`) -- escaped via

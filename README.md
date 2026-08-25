@@ -105,8 +105,15 @@ switching. It includes:
   As of `0.11.0` the change set itself is real, and as of `0.13.0` it is
   reachable: `Ctrl+Alt+D` (or the "Change Review" button on Workspace Trust)
   opens the **Change Review** surface, showing the files a run touched, a
-  count, detection status, and review state. It is metadata only — **not a
-  diff**: no before/after content, no per-line comparison. Reading **what the
+  count, detection status, and review state. As of `0.14.0` (RFC-041) you can
+  click through to a file's own content: whole content for a newly added
+  file, and **current content, explicitly labelled not a diff**, for a
+  modified one — this surface still cannot show a before/after comparison,
+  only what the file looks like now, because the before-bytes for a modified
+  file were never captured and are gone by request time. A stale preview (the
+  file changed again after you opened it) refuses and says so, rather than
+  silently showing the newer content as though it still matched what you
+  selected. Reading **what the
   run said** is a separate surface: see the AgentRun report entry below. What
   it said and what it changed remain two different, separately-reachable
   things.
@@ -173,12 +180,14 @@ It is not yet the full AI CLI workbench. The editor has no undo (a mid-buffer
 edit is unrecoverable within the session past what Backspace can still
 reach), no syntax highlighting, language server, multi-cursor, or search,
 and files above 4 MiB are not editable. The **Change Review surface**
-(`Ctrl+Alt+D`, `0.13.0`) now shows the files a run changed, but **still no
-diff**: file paths, a count, detection status, and review state only — no
-before/after content, no per-line comparison. Reading actual diff content is
-blocked on retaining `DetectedChanges` past the point it is currently
-discarded (RFC-020's own scoping addendum records this as future work, not
-built). The **AgentRun report surface** (`Ctrl+Alt+R`) does now
+(`Ctrl+Alt+D`, `0.13.0`) shows the files a run changed, and as of `0.14.0`
+(RFC-041) you can click through to a file's own content — but **still no
+two-sided diff**: whole content for an added file, current content
+explicitly labelled not a diff for a modified one, never a before/after
+comparison, because the before-bytes for a modified file were never
+captured and are gone by request time. That comparison is blocked on a real
+before-source, which only RFC-030 (Git integration, unauthored) could
+provide. The **AgentRun report surface** (`Ctrl+Alt+R`) does now
 exist — real, escaped transcript content for the most recently launched run,
 what it *said*, not what it *changed*; see the caveat below about what that
 does and does not reach. There
@@ -310,10 +319,13 @@ keystroke away.
 
 **Reviewing what an AI agent changed (`Ctrl+Alt+D`, or the "Change Review" button on Trust
 Settings).** After an AI CLI run exits, this surface lists the files it touched, a count, a
-detection-status line, and a review state. **Read its limits as closely as its existence**: it
-is metadata only — file paths, not a diff. There is no before/after content and no per-line
-comparison; reading actual diff content is future work, not built here (see *Current Status*
-below). Detection is conservative and excludes `target/`, `node_modules/`, and most of `.git/`
+detection-status line, and a review state — click a file (or highlight it and press `Enter`) to
+preview its content, bounded at 4 MiB and refused whole above that, never truncated. **Read its
+limits as closely as its existence**: whole content for an added file; **current content,
+explicitly labelled not a diff**, for a modified one — there is still no before/after comparison,
+because the before-bytes for a modified file were never captured and are gone by request time. A
+genuine two-sided diff is future work, blocked on a real before-source (RFC-030); this surface
+will not approximate one. Detection is conservative and excludes `target/`, `node_modules/`, and most of `.git/`
 by design, so a change made inside those is never reported — except `.git/hooks/` and
 `.git/config` (`0.14.0`), which are watched, since those are the two places a change could
 install or redirect code that runs on this machine. The surface states both of these itself, in

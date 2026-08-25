@@ -322,7 +322,26 @@ fn sniff_is_binary(canonical_path: &Path) -> Result<bool, ()> {
 ///
 /// Deliberately derives neither `Clone` nor `Serialize`. See
 /// `read_diff_content`'s doc comment for why.
-#[derive(Debug, Eq, PartialEq)]
+///
+/// **Deliberately does not derive `Debug` either (RFC-041 D3).** An
+/// unredacted `Debug` on a type holding real file content is one
+/// `dbg!`, one panic message, or one `tracing` field away from putting
+/// a user's source into a log -- see the hand-written `impl` below,
+/// which prints kind and length only, exactly as `BoundedRuntimeSummary`
+/// and `DisplayText` already do for their own untrusted payloads, and
+/// never the bytes themselves.
+///
+/// **The move-out gap stays open, and is documented here rather than
+/// closed (RFC-041 D3):** non-retention protects this wrapper -- it
+/// cannot be stored, cloned, or serialized -- but not bytes a consumer
+/// destructures out of `bytes: Vec<u8>` after a pattern match. Closing
+/// that means a lifetime-bound `DiffContent` tied to the read it came
+/// from, which is a larger change than RFC-041 takes on. Any future
+/// consumer of `Added`/`Modified`/`NonTextContent` that moves `bytes`
+/// out of this type inherits Decision 1's non-retention obligation by
+/// convention from that point forward, not by anything the compiler
+/// enforces past this boundary.
+#[derive(Eq, PartialEq)]
 pub enum DiffContent {
     /// Whole-file content for a newly added path. Not a diff -- the whole
     /// change, by definition (RFC-024 §Correction).
@@ -350,6 +369,48 @@ pub enum DiffContent {
     },
     /// Present but not a `File` -- `Directory`, `Symlink`, or `Other`.
     NonFile { kind: ChangePathKind },
+}
+
+/// RFC-041 D3: kind and length only, matching every other `Debug` this
+/// project hand-writes for a type that might hold untrusted or
+/// sensitive payload (`BoundedRuntimeSummary`, `DisplayText`) --
+/// `bytes` is never printed, for `Added`, `Modified`, or any variant
+/// added here in the future. `baseline` (a `FileSnapshot`, metadata
+/// only -- no content) is printed via its own derived `Debug`, which is
+/// safe by construction.
+impl std::fmt::Debug for DiffContent {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Added { bytes, baseline } => formatter
+                .debug_struct("Added")
+                .field("len", &bytes.len())
+                .field("baseline", baseline)
+                .finish(),
+            Self::Modified { bytes, baseline } => formatter
+                .debug_struct("Modified")
+                .field("len", &bytes.len())
+                .field("baseline", baseline)
+                .finish(),
+            Self::Deleted { kind } => formatter
+                .debug_struct("Deleted")
+                .field("kind", kind)
+                .finish(),
+            Self::NonTextContent {
+                len,
+                lifecycle,
+                baseline,
+            } => formatter
+                .debug_struct("NonTextContent")
+                .field("len", len)
+                .field("lifecycle", lifecycle)
+                .field("baseline", baseline)
+                .finish(),
+            Self::NonFile { kind } => formatter
+                .debug_struct("NonFile")
+                .field("kind", kind)
+                .finish(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

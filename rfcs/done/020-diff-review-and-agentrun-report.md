@@ -230,6 +230,15 @@ Reading actual diff content is still blocked, on retaining `DetectedChanges` pas
 table implied by never listing "diff content" among what exists. That remains future work, not
 this slice's gap.
 
+**Note, 2026-08-25 (RFC-041) — the paragraph above is now stale; left in place as the historical
+record of this RFC's own closeout, corrected here rather than rewritten.** RFC-041 retained the
+`DetectedChanges` this paragraph says is discarded, and reached the already-built
+`read_diff_content`/`gate_diff_content_read` from this surface. Content is now shown — current
+content, per change kind, explicitly labelled not a diff for the modified case. What remains
+genuinely blocked is a **two-sided** diff for a modified file (no before-source exists short of
+RFC-030), which this paragraph's own framing did not distinguish from "no content at all." See
+RFC-041 and its own handoff pack for the corrected, current state.
+
 ## Risks
 
 - **Mis-sized as a rendering RFC.** The whole point of the section above. Mitigated by the Option A/B decision being made before implementation starts.

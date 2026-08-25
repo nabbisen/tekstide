@@ -794,6 +794,53 @@ pub struct State {
         tekstide_core::domain::AgentRunId,
         tekstide_core::domain::ChangeDetectionStatus,
     >,
+    /// RFC-041 D1: the `DetectedChanges` `attempt_generated_change_detection`
+    /// would otherwise discard, retained session-scoped and keyed by
+    /// `ChangeSetId` -- **not** a field on the persisted `ChangeSet`
+    /// itself. `ChangeSet` is a domain type designed to hold metadata
+    /// and outlive the session; `DetectedChanges` is a detector output
+    /// whose usefulness expires with its baseline's authority. The
+    /// relationship this shape protects: an entry here may be dropped
+    /// (or simply never survive the application closing, the same
+    /// in-memory-only limitation `agent_run_change_baselines` above
+    /// already discloses) without the matching `ChangeSet` becoming
+    /// wrong -- dropping it only means content preview stops being
+    /// offered for that change set, never that the metadata the surface
+    /// already shows is affected. `read_diff_content`/`gate_diff_content_read`
+    /// borrow this by reference and read a bounded amount per call; this
+    /// map is never the thing that holds file content itself.
+    detected_changes_by_change_set: std::collections::HashMap<
+        tekstide_core::domain::ChangeSetId,
+        tekstide_core::project::DetectedChanges,
+    >,
+    /// RFC-041 PR-041-B: the Change Review surface's own keyboard cursor
+    /// over `summary.shown_changed_files` -- the direct analogue of
+    /// `approval_history_highlight`/`project_board_row_highlight` for a
+    /// fourth, independent list. Moving it does not itself change what
+    /// is previewed; `Enter` (or a row's own click) is the real
+    /// activation, the same "cursor position is not a decision" shape
+    /// `explorer_highlight` already establishes.
+    change_review_highlight: usize,
+    /// RFC-041 D1/D2: which file the Change Review surface is currently
+    /// previewing, and the disk snapshot its first read captured --
+    /// never the content itself. Content cannot be retained here even
+    /// by mistake: `DiffContent` derives neither `Clone` nor
+    /// `Serialize` (RFC-024 PR-024-C), so a field holding one would not
+    /// compile, the same structural argument that already protects
+    /// `ProjectSession` and every `AuditCoordinator::record_*` call.
+    /// `baseline` is `None` when the first read never resolved a real
+    /// file to snapshot (`Deleted`/`NonFile`/a gate refusal) -- nothing
+    /// to go stale against, so every render simply re-evaluates fresh
+    /// for those. `Some(snapshot)` is the reference point
+    /// `diff_content_is_stale` (D2) checks on every subsequent render:
+    /// if the file has moved since the moment this selection was made,
+    /// the surface refuses rather than silently showing newer content
+    /// under a selection the user made against an earlier state.
+    /// `change_set_id`-scoped so a newer change set (a later agent run
+    /// completing) does not silently keep a selection from an older one
+    /// alive -- `change_review_view` checks this against the change set
+    /// it is actually rendering, not merely trusts a selection exists.
+    change_review_selection: Option<ChangeReviewSelection>,
     /// RFC-038 PR-038-A: the Project Board empty state's path field.
     /// Shell-local, transient UI state -- the same shape `typing_doc`
     /// already is -- not part of `tekstide-core`'s model, since it holds
@@ -871,7 +918,7 @@ impl State {
         // This call covers only the CLI-argument projects already live
         // when `State::new` runs.
         verify_restored_trust(&mut app_shell);
-        seed_change_review_demo_data(&mut app_shell);
+        let seeded_change_review_demo = seed_change_review_demo_data(&mut app_shell);
         let measurement = Measurement::from_env();
         let typing_doc = if matches!(
             measurement.as_ref().map(Measurement::criterion),
@@ -940,6 +987,9 @@ impl State {
             window_size: None,
             agent_run_change_baselines: std::collections::HashMap::new(),
             agent_run_change_detection_status: std::collections::HashMap::new(),
+            detected_changes_by_change_set: seeded_change_review_demo.into_iter().collect(),
+            change_review_highlight: 0,
+            change_review_selection: None,
             path_field: String::new(),
             path_field_notice: None,
             path_field_requested: false,
@@ -1084,6 +1134,14 @@ pub enum Message {
     /// there. `Ctrl+Alt+D` is the accelerator; both converge on
     /// [`open_diff_review`].
     OpenDiffReviewButtonPressed,
+    /// RFC-041 PR-041-B: a shown file's own row button on the Change
+    /// Review surface -- converges with `handle_change_review_key`'s own
+    /// `Enter` case on [`select_change_review_file`], the same "one
+    /// setup, two routes" shape `OpenDiffReviewButtonPressed` above
+    /// already uses. Carries the path directly rather than an index: a
+    /// row is a specific file, not a position a keyboard cursor happens
+    /// to occupy.
+    ChangeReviewFileRowPressed(std::path::PathBuf),
     /// RFC-015 PR-015-F: a synthetic measurement keystroke arrived; the
     /// `Instant` is when the measurement subscription first saw it, not
     /// when `update` gets around to handling it -- the gap between the
@@ -1356,7 +1414,13 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::OpenApprovalHistoryButtonPressed
         | Message::OpenTrustSettingsButtonPressed
         | Message::OpenHelpButtonPressed
-        | Message::OpenDiffReviewButtonPressed => Some(ClickMessageKind::BackgroundControl),
+        | Message::OpenDiffReviewButtonPressed
+        // RFC-041 PR-041-B: a row on the Change Review surface selecting
+        // which file to preview -- not a `NavigationAction` (no global
+        // keybinding names it, the same shape explorer/approval-history
+        // row activation already has), so `control_coverage` has no
+        // entry for it; this classification is what governs it instead.
+        | Message::ChangeReviewFileRowPressed(_) => Some(ClickMessageKind::BackgroundControl),
 
         // -- modal decisions (RFC-040 PR-040-B): the destructive/
         // decision-committing half of a two-button modal, a folder
@@ -1680,6 +1744,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 // `open_surface` itself" mutual-exclusion shape the
                 // comment above already establishes for the other three.
                 handle_trust_settings_key(state, surface_input.key());
+                // RFC-041 PR-041-B: a seventh `MainArea` consumer, the
+                // same "checks `open_surface` itself, naturally
+                // mutually exclusive with the others" shape.
+                handle_change_review_key(state, surface_input.key());
                 // RFC-038 PR-038-D: a sixth `MainArea` consumer, checking
                 // `route() == ProjectBoard` in place of the first four's
                 // `active_project()`/`open_surface()` guards, plus
@@ -1942,6 +2010,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::OpenTrustSettingsButtonPressed => open_trust_settings(state),
         Message::OpenHelpButtonPressed => open_help(state),
         Message::OpenDiffReviewButtonPressed => open_diff_review(state),
+        Message::ChangeReviewFileRowPressed(path) => select_change_review_file(state, path),
         Message::ModalDismiss => {
             // RFC-039 PR-039-C: Escape on a `ProjectClose` dialog is a
             // real decision too (`safe_close_decision`'s `Cancelled`),
@@ -2356,10 +2425,11 @@ fn record_terminal_exit(
 /// project, or detection already ran once for this run) is not an
 /// error, just nothing further to do.
 ///
-/// **Makes a real `ChangeSet` buildable in production, not diff review
-/// reachable.** RFC-020's own surface still renders nothing -- see the
-/// handoff's own gate for why that distinction is stated explicitly
-/// rather than left implicit.
+/// Makes a real `ChangeSet` buildable in production, and -- as of
+/// RFC-041 PR-041-A -- keeps what content preview needs alongside it.
+/// RFC-020's own change review surface (`Ctrl+Alt+D`) has rendered this
+/// function's metadata output since `0.13.0`; RFC-041 is what makes the
+/// same run's *content* reachable from that surface too.
 ///
 /// **D2**: always records `detected.status` in
 /// `state.agent_run_change_detection_status`, whether or not a
@@ -2367,6 +2437,15 @@ fn record_terminal_exit(
 /// distinguishable from a genuinely clean one (`Complete`, zero
 /// changes), never collapse into the same "no `ChangeSet` for this run"
 /// shape both currently produce in `project.change_sets()` alone.
+///
+/// **RFC-041 D1**: `detected` is moved into
+/// `state.detected_changes_by_change_set`, keyed by the real
+/// `ChangeSetId` `add_detected_generated_change_set` returns -- only
+/// when a `ChangeSet` was actually created. A run whose detection
+/// produced no `ChangeSet` (nothing changed, or the association was
+/// ambiguous and validation still failed) has no id to key on and
+/// nothing worth retaining; `detected` is simply dropped, the same
+/// outcome as if this slice did not exist.
 fn attempt_generated_change_detection(
     state: &mut State,
     agent_run_id: &tekstide_core::domain::AgentRunId,
@@ -2383,10 +2462,7 @@ fn attempt_generated_change_detection(
     state
         .agent_run_change_detection_status
         .insert(agent_run_id.clone(), detected.status);
-    // Not localized: nothing renders a `ChangeSet.summary` in production
-    // yet (RFC-020 does not exist) -- see the handoff's own reachability
-    // note. Revisit once a real surface reads this field.
-    let _ = state
+    let change_set_id = state
         .app_shell
         .state_mut()
         .add_detected_generated_change_set(
@@ -2394,7 +2470,14 @@ fn attempt_generated_change_detection(
             &detected,
             Some(agent_run_id),
             "Filesystem changes detected after this run exited",
-        );
+        )
+        .ok()
+        .flatten();
+    if let Some(change_set_id) = change_set_id {
+        state
+            .detected_changes_by_change_set
+            .insert(change_set_id, detected);
+    }
 }
 
 /// Terminal launch UX handoff: why a real launch was refused -- a typed
@@ -3204,6 +3287,61 @@ fn handle_approval_history_key(state: &mut State, key: &input::KeyPress) {
                 let approval_id = highlighted.id.clone();
                 open_approval_history_entry(state, &approval_id);
             }
+        }
+        _ => {}
+    }
+}
+
+/// RFC-041 PR-041-B: keyboard access to the Change Review surface's own
+/// file list -- the direct analogue of [`handle_approval_history_key`]
+/// for a second, independent `MainArea` list, same shape throughout.
+/// `Enter` converges with the row's own button
+/// (`Message::ChangeReviewFileRowPressed`) on [`select_change_review_file`],
+/// RFC-040's "one setup, two routes" pattern. A no-op outside Content
+/// mode, off the `DiffReview` surface, or with nothing shown to
+/// navigate -- the same guard shape [`handle_explorer_key`]/
+/// [`handle_approval_history_key`] already use for their own zones.
+fn handle_change_review_key(state: &mut State, key: &input::KeyPress) {
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    if project.mode() != ProjectMode::Content
+        || project.open_surface() != ProjectOpenSurface::DiffReview
+    {
+        return;
+    }
+    let Some(change_set) = project.change_sets().last() else {
+        return;
+    };
+    let row_count = change_set.default_summary().shown_changed_files.len();
+    if row_count == 0 {
+        return;
+    }
+    state.change_review_highlight = state.change_review_highlight.min(row_count - 1);
+
+    match &key.key {
+        keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
+            state.change_review_highlight = (state.change_review_highlight + 1).min(row_count - 1);
+        }
+        keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
+            state.change_review_highlight = state.change_review_highlight.saturating_sub(1);
+        }
+        keyboard::Key::Named(keyboard::key::Named::Enter) => {
+            let Some(project) = state.app_shell.state().active_project() else {
+                return;
+            };
+            let Some(change_set) = project.change_sets().last() else {
+                return;
+            };
+            let Some(relative_path) = change_set
+                .default_summary()
+                .shown_changed_files
+                .get(state.change_review_highlight)
+                .cloned()
+            else {
+                return;
+            };
+            select_change_review_file(state, relative_path);
         }
         _ => {}
     }
@@ -4585,11 +4723,16 @@ fn launch_terminal_demo_panes(
 /// skipped, the same "diagnostic path, not a user-facing feature" shape
 /// those two use) -- but unlike those two, do not set this in a shell
 /// profile or a CI environment and leave it set.
-fn seed_change_review_demo_data(app_shell: &mut ApplicationShell) {
+fn seed_change_review_demo_data(
+    app_shell: &mut ApplicationShell,
+) -> Option<(
+    tekstide_core::domain::ChangeSetId,
+    tekstide_core::project::DetectedChanges,
+)> {
     if std::env::var("TEKSTIDE_CHANGESET_DEMO").is_err() {
-        return;
+        return None;
     }
-    seed_change_review_demo_change_set(app_shell);
+    seed_change_review_demo_change_set(app_shell)
 }
 
 /// The env check and the seeding itself are two functions, not one --
@@ -4599,40 +4742,53 @@ fn seed_change_review_demo_data(app_shell: &mut ApplicationShell) {
 /// established for `TEKSTIDE_TERMINAL_DEMO`'s own shape:
 /// `std::env::var` is process-global and races against
 /// concurrently-running tests that also construct a `State`.
-fn seed_change_review_demo_change_set(app_shell: &mut ApplicationShell) {
+///
+/// **RFC-041 D1**: returns `(ChangeSetId, DetectedChanges)` on success
+/// so `State::new` can seed `state.detected_changes_by_change_set` with
+/// it -- this function only ever has an `&mut ApplicationShell`, not the
+/// `State` that field lives on (`State::new` is still assembling `Self`
+/// at this call site), so it hands the pair back rather than reaching
+/// for state that does not exist yet. Without this, the demo seed's own
+/// `ChangeSet` would predate RFC-041's retention entirely, and content
+/// preview would always show "no longer available" for a demo-seeded
+/// change set specifically -- confirmed live before this fix, not
+/// assumed.
+fn seed_change_review_demo_change_set(
+    app_shell: &mut ApplicationShell,
+) -> Option<(
+    tekstide_core::domain::ChangeSetId,
+    tekstide_core::project::DetectedChanges,
+)> {
     let detector =
         tekstide_core::project::GeneratedChangeDetector::new(generated_change_detection_policy());
-    let Some((baseline, demo_file)) = app_shell.state().active_project().map(|project| {
+    let (baseline, demo_file) = app_shell.state().active_project().map(|project| {
         (
             detector.capture_filesystem_baseline(project),
             project
                 .canonical_root_path()
                 .join("tekstide-changeset-demo.txt"),
         )
-    }) else {
-        return;
-    };
-    if std::fs::write(
+    })?;
+    std::fs::write(
         &demo_file,
         b"Seeded by TEKSTIDE_CHANGESET_DEMO for RFC-020 evidence -- not a real agent run.\n",
     )
-    .is_err()
-    {
-        return;
-    }
-    let Some(detected) = app_shell
+    .ok()?;
+    let detected = app_shell
         .state()
         .active_project()
-        .map(|project| detector.detect_filesystem_changes(project, &baseline))
-    else {
-        return;
-    };
-    let _ = app_shell.state_mut().add_detected_generated_change_set(
-        &baseline,
-        &detected,
-        None,
-        "Seeded by TEKSTIDE_CHANGESET_DEMO (RFC-020 evidence, not a real agent run)",
-    );
+        .map(|project| detector.detect_filesystem_changes(project, &baseline))?;
+    let change_set_id = app_shell
+        .state_mut()
+        .add_detected_generated_change_set(
+            &baseline,
+            &detected,
+            None,
+            "Seeded by TEKSTIDE_CHANGESET_DEMO (RFC-020 evidence, not a real agent run)",
+        )
+        .ok()
+        .flatten()?;
+    Some((change_set_id, detected))
 }
 
 /// RFC-017 PR-017-G: the background output flood for the `TerminalFlood`
@@ -7701,6 +7857,14 @@ fn approval_history_entry_state_symbol(
     }
 }
 
+/// RFC-041 D1/D2 -- see `State::change_review_selection`'s own doc
+/// comment for the reasoning; this is just the shape.
+struct ChangeReviewSelection {
+    change_set_id: tekstide_core::domain::ChangeSetId,
+    relative_path: std::path::PathBuf,
+    baseline: Option<tekstide_core::content::FileSnapshot>,
+}
+
 /// RFC-020, the change review surface (`change-review-surface.md`):
 /// `ProjectOpenSurface::DiffReview`'s own real render arm. Read-only --
 /// RFC-034's own job is acting on a `ChangeSet`, not this one. Renders
@@ -7712,6 +7876,13 @@ fn approval_history_entry_state_symbol(
 /// unblocked by (`change-review-surface.md`'s own "the projection is
 /// better placed than the RFC's age suggests"): the surface renders
 /// distinctions core already makes, not new ones.
+///
+/// **RFC-041**: each shown file is now a real button (RFC-040's "one
+/// setup, two routes" shape, converging with `handle_change_review_key`'s
+/// own `Enter` case on [`select_change_review_file`]), and the currently
+/// selected one renders its content preview beneath the list --
+/// re-evaluated fresh on every call, per [`change_review_content_lines`]'s
+/// own doc, never cached in `State`.
 fn change_review_view(state: &State) -> Element<'_, Message> {
     let Some(project) = state.app_shell.state().active_project() else {
         // Unreachable while routed to `ActiveProjectWorkspace`, the same
@@ -7754,10 +7925,28 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
         .into(),
     ];
 
-    for path in &summary.shown_changed_files {
+    for (index, path) in summary.shown_changed_files.iter().enumerate() {
+        // RFC-041 PR-041-B, `what-a-content-preview-must-not-claim.md`
+        // ("reaching content needs a visible control, not only a
+        // keystroke"): a real, clickable button per row -- RFC-040's
+        // "one setup, two routes" shape, converging with
+        // `handle_change_review_key`'s own `Enter` case on
+        // `select_change_review_file`. The "> "/"  " highlight prefix
+        // matches `board::highlighted_row_lines`' own convention, the
+        // same shape every other keyboard-navigable list in this crate
+        // already uses.
+        let label = format!(
+            "{}{}",
+            if index == state.change_review_highlight {
+                "> "
+            } else {
+                "  "
+            },
+            change_review_file_entry_line(&state.catalog, path)
+        );
         lines.push(
-            text(change_review_file_entry_line(&state.catalog, path))
-                .size(state.theme.font_size_body())
+            button(text(label).size(state.theme.font_size_body()))
+                .on_press(Message::ChangeReviewFileRowPressed(path.clone()))
                 .into(),
         );
     }
@@ -7799,6 +7988,25 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
             .size(state.theme.font_size_status())
             .into(),
     );
+
+    // RFC-041 PR-041-B: the content preview for whichever row is
+    // currently selected, if any -- see `change_review_content_lines`'s
+    // own doc for why this is re-evaluated fresh on every render rather
+    // than read from anything stored.
+    for (index, content_line) in change_review_content_lines(state, project, change_set)
+        .into_iter()
+        .enumerate()
+    {
+        lines.push(
+            text(content_line)
+                .size(if index == 0 {
+                    state.theme.font_size_heading()
+                } else {
+                    state.theme.font_size_body()
+                })
+                .into(),
+        );
+    }
 
     scrollable(column(lines).spacing(8))
         .width(Length::Fill)
@@ -7968,6 +8176,262 @@ fn open_diff_review(state: &mut State) {
             ProjectOpenSurface::DiffReview,
         ));
     ensure_explorer_scanned(state);
+}
+
+/// RFC-041 PR-041-B: `Message::ChangeReviewFileRowPressed`'s handler,
+/// and the same function `handle_change_review_key`'s own `Enter` case
+/// reaches -- the "one setup, two routes" shape [`open_diff_review`]
+/// above already uses. Performs exactly one real content read, purely
+/// to capture whatever `FileSnapshot` baseline it produces (or does
+/// not) for [`ChangeReviewSelection::baseline`] to later check
+/// staleness against (D2) -- the bytes this read produces are used for
+/// nothing and dropped at the end of this function; `change_review_view`
+/// reads fresh again on every render it actually needs content for. See
+/// `State::change_review_selection`'s own doc for the full reasoning.
+fn select_change_review_file(state: &mut State, relative_path: std::path::PathBuf) {
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    let Some(change_set) = project.change_sets().last() else {
+        return;
+    };
+    let change_set_id = change_set.id.clone();
+    let baseline = state
+        .detected_changes_by_change_set
+        .get(&change_set_id)
+        .and_then(|detected| {
+            let root =
+                tekstide_core::project::root::ProjectRootHandle::from_project_session(project);
+            tekstide_core::project::read_diff_content(
+                detected,
+                &root,
+                &relative_path,
+                tekstide_core::project::DiffPreviewPolicy::default(),
+            )
+            .ok()
+        })
+        .and_then(change_review_diff_content_baseline);
+    state.change_review_selection = Some(ChangeReviewSelection {
+        change_set_id,
+        relative_path,
+        baseline,
+    });
+}
+
+/// `Deleted`/`NonFile` never resolved a real file to snapshot (see
+/// `DiffContent`'s own doc comment) -- `None` for both, matching
+/// exactly what `read_diff_content` itself would produce if asked
+/// again for the same path.
+fn change_review_diff_content_baseline(
+    content: tekstide_core::project::DiffContent,
+) -> Option<tekstide_core::content::FileSnapshot> {
+    use tekstide_core::project::DiffContent;
+    match content {
+        DiffContent::Added { baseline, .. }
+        | DiffContent::Modified { baseline, .. }
+        | DiffContent::NonTextContent { baseline, .. } => Some(baseline),
+        DiffContent::Deleted { .. } | DiffContent::NonFile { .. } => None,
+    }
+}
+
+/// RFC-041 PR-041-B: the content preview's own lines, as plain resolved
+/// text -- `change_review_view` wraps each into a real `text()`
+/// element, the same "resolved string, not the `Element` tree" split
+/// every other rendered line on this surface already uses (and the same
+/// reason those are independently testable). **Re-evaluated fresh on
+/// every call**: this is `what-a-content-preview-must-not-claim.md`'s
+/// own §3 answer -- "if rendering seems to need content in state, that
+/// is the design telling you something: render from a value that lives
+/// for the request." `read_diff_content` runs again here, every single
+/// time this is called while a selection is active; its result is
+/// consumed entirely inside this function and never leaves it, matching
+/// `DiffContent`'s own structural guarantee (derives neither `Clone`
+/// nor `Serialize` -- a field holding one would not compile, the same
+/// argument that already protects `ProjectSession` and every
+/// `AuditCoordinator::record_*` call). Empty when nothing is selected,
+/// or the selection belongs to a change set this call is not rendering
+/// (a newer one superseded it, per `ChangeReviewSelection`'s own
+/// `change_set_id` scoping).
+fn change_review_content_lines(
+    state: &State,
+    project: &tekstide_core::project::ProjectSession,
+    change_set: &tekstide_core::domain::ChangeSet,
+) -> Vec<String> {
+    let Some(selection) = &state.change_review_selection else {
+        return Vec::new();
+    };
+    if selection.change_set_id != change_set.id {
+        return Vec::new();
+    }
+
+    let mut lines = vec![state.catalog.get_with_args(
+        "change-review-content-heading",
+        &CatalogArgs::new().untrusted(
+            "path",
+            &tekstide_core::text_safety::quote_untrusted(
+                &selection.relative_path.display().to_string(),
+            ),
+        ),
+    )];
+
+    let root = tekstide_core::project::root::ProjectRootHandle::from_project_session(project);
+
+    // D2: refuse rather than render-with-a-warning when the file has
+    // moved since the moment this selection was made -- `baseline` is
+    // exactly that moment's own snapshot (captured once, in
+    // `select_change_review_file`, never updated by this function).
+    if let Some(baseline) = &selection.baseline {
+        match tekstide_core::project::diff_content_is_stale(
+            baseline,
+            &root,
+            &selection.relative_path,
+        ) {
+            Ok(true) => {
+                lines.push(state.catalog.get("change-review-content-stale"));
+                return lines;
+            }
+            Ok(false) => {}
+            Err(_) => {
+                lines.push(
+                    state
+                        .catalog
+                        .get("change-review-content-error-metadata-unavailable"),
+                );
+                return lines;
+            }
+        }
+    }
+
+    // RFC-041 D1's own ablation: dropped retention must not break
+    // metadata rendering (already unaffected -- this function is the
+    // only thing that reads this map) and must render its own honest,
+    // distinct refusal rather than silently showing nothing.
+    let Some(detected) = state.detected_changes_by_change_set.get(&change_set.id) else {
+        lines.push(state.catalog.get("change-review-content-unavailable"));
+        return lines;
+    };
+
+    match tekstide_core::project::read_diff_content(
+        detected,
+        &root,
+        &selection.relative_path,
+        tekstide_core::project::DiffPreviewPolicy::default(),
+    ) {
+        Ok(content) => lines.extend(change_review_diff_content_lines(&state.catalog, content)),
+        Err(error) => lines.push(change_review_content_error_line(&state.catalog, &error)),
+    }
+
+    lines
+}
+
+/// Per `DiffContent` variant -- reusing exactly what RFC-024 already
+/// classified, never re-deriving Added/Modified/Deleted from
+/// `ChangePathKind` (RFC-024 PR-024-C's own review gate).
+fn change_review_diff_content_lines(
+    catalog: &Catalog,
+    content: tekstide_core::project::DiffContent,
+) -> Vec<String> {
+    use tekstide_core::project::DiffContent;
+    match content {
+        // Added: the whole file is the whole change -- no "not a diff"
+        // label, since nothing here claims to be a comparison.
+        DiffContent::Added { bytes, .. } => vec![change_review_content_body_text(&bytes)],
+        // Modified: RFC-041's own required, non-optional claim --
+        // current content, explicitly labelled not a diff, on the
+        // screen beside the content itself. Ablated:
+        // `change_review_content_modified_content_is_labelled_not_a_diff`
+        // removes this line and confirms the test fails.
+        DiffContent::Modified { bytes, .. } => vec![
+            catalog.get("change-review-content-not-a-diff"),
+            change_review_content_body_text(&bytes),
+        ],
+        DiffContent::Deleted { kind } => vec![catalog.get_with_args(
+            "change-review-content-deleted",
+            &CatalogArgs::new().trusted_symbol("kind", change_path_kind_symbol(kind)),
+        )],
+        DiffContent::NonTextContent { len, .. } => vec![catalog.get_with_args(
+            "change-review-content-non-text",
+            &CatalogArgs::new().number("len", len),
+        )],
+        DiffContent::NonFile { kind } => vec![catalog.get_with_args(
+            "change-review-content-non-file",
+            &CatalogArgs::new().trusted_symbol("kind", change_path_kind_symbol(kind)),
+        )],
+    }
+}
+
+/// `what-a-content-preview-must-not-claim.md` §5: file content is
+/// untrusted text in trusted chrome, exactly like a path or a project
+/// name -- `quote_untrusted` applies. `bytes` may not be perfectly
+/// valid UTF-8 even after the gate's own NUL-byte sniff passed (RFC-024
+/// Decision 4 deliberately chose that sniff over a strict UTF-8 decode);
+/// `from_utf8_lossy` is the same tolerant conversion this project's
+/// other untrusted-bytes-to-text paths already use rather than a second
+///, stricter one invented here.
+fn change_review_content_body_text(bytes: &[u8]) -> String {
+    tekstide_core::text_safety::quote_untrusted(&String::from_utf8_lossy(bytes)).to_string()
+}
+
+fn change_path_kind_symbol(kind: tekstide_core::project::ChangePathKind) -> &'static str {
+    use tekstide_core::project::ChangePathKind;
+    match kind {
+        ChangePathKind::File => "file",
+        ChangePathKind::Directory => "directory",
+        ChangePathKind::Symlink => "symlink",
+        ChangePathKind::Other => "other",
+    }
+}
+
+/// Every refusal `read_diff_content` can produce, named -- reusing
+/// RFC-024's own gate rather than a second, informal error path.
+/// `PathNotDetected` is structurally near-unreachable from this surface
+/// (every selectable row already comes from a detected path), kept as
+/// an explicit arm rather than a wildcard so a future change that made
+/// it reachable would be forced to give it real words, not inherit
+/// whatever the wildcard said.
+fn change_review_content_error_line(
+    catalog: &Catalog,
+    error: &tekstide_core::project::DiffContentError,
+) -> String {
+    use tekstide_core::project::{DiffContentError, DiffGateRefusal};
+    match error {
+        DiffContentError::Gate(DiffGateRefusal::PathNotDetected) => {
+            catalog.get("change-review-content-error-not-detected")
+        }
+        DiffContentError::Gate(DiffGateRefusal::Access(access_error)) => catalog.get_with_args(
+            "change-review-content-error-access",
+            &CatalogArgs::new().trusted_symbol(
+                "reason",
+                file_access_blocked_reason_symbol(access_error.reason),
+            ),
+        ),
+        DiffContentError::Gate(DiffGateRefusal::MetadataUnavailable { .. }) => {
+            catalog.get("change-review-content-error-metadata-unavailable")
+        }
+        DiffContentError::Gate(DiffGateRefusal::TooLarge { len, max, .. }) => catalog
+            .get_with_args(
+                "change-review-content-error-too-large",
+                &CatalogArgs::new().number("len", *len).number("max", *max),
+            ),
+        DiffContentError::ReadFailed { .. } => {
+            catalog.get("change-review-content-error-read-failed")
+        }
+    }
+}
+
+fn file_access_blocked_reason_symbol(
+    reason: tekstide_core::project::root::FileAccessBlockedReason,
+) -> &'static str {
+    use tekstide_core::project::root::FileAccessBlockedReason;
+    match reason {
+        FileAccessBlockedReason::AbsolutePathNotAllowed => "absolute-path-not-allowed",
+        FileAccessBlockedReason::InvalidRelativePath => "invalid-relative-path",
+        FileAccessBlockedReason::MissingPath => "missing-path",
+        FileAccessBlockedReason::PermissionDenied => "permission-denied",
+        FileAccessBlockedReason::CannotReadPath => "cannot-read-path",
+        FileAccessBlockedReason::RootEscape => "root-escape",
+        FileAccessBlockedReason::SymlinkEscape => "symlink-escape",
+    }
 }
 
 /// PR-020-B: why a real key press reaches transcript content the way

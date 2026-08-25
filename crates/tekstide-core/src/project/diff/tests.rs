@@ -637,6 +637,66 @@ fn content_is_not_pre_escaped_raw_bytes_survive_unaltered() {
     }
 }
 
+/// RFC-041 D3: `DiffContent`'s hand-written `Debug` never prints
+/// content, for either variant that carries any -- one `dbg!`, panic
+/// message, or `tracing` field away from putting a user's source into a
+/// log otherwise. **Checked by size, not by substring**: `Vec<u8>`'s own
+/// derived `Debug` renders as a numeric list (`[84, 69, 75, ...]`), not
+/// readable ASCII, so a secret string would not appear as literal text
+/// even if `bytes` leaked into the output -- a length bound is the
+/// robust check, since a real byte dump of a payload this size would be
+/// many times longer than any reasonable redacted summary, regardless
+/// of whether it renders as text or numbers.
+#[test]
+fn diff_content_debug_never_prints_file_bytes() {
+    let sandbox = Sandbox::new("debug-never-prints-bytes");
+    let secret = "TEKSTIDE-D3-SECRET-MARKER-".repeat(200); // 5,200 bytes
+    sandbox.write_file("added.txt", secret.as_bytes());
+    sandbox.write_file("modified.txt", secret.as_bytes());
+    let changes = detected(&[
+        ("added.txt", ChangePathKind::File, ChangeLifecycle::Added),
+        (
+            "modified.txt",
+            ChangePathKind::File,
+            ChangeLifecycle::Modified,
+        ),
+    ]);
+
+    let added = read_diff_content(
+        &changes,
+        &sandbox.root_handle(),
+        "added.txt",
+        DiffPreviewPolicy::default(),
+    )
+    .expect("added.txt must read successfully");
+    let modified = read_diff_content(
+        &changes,
+        &sandbox.root_handle(),
+        "modified.txt",
+        DiffPreviewPolicy::default(),
+    )
+    .expect("modified.txt must read successfully");
+
+    let added_debug = format!("{added:?}");
+    let modified_debug = format!("{modified:?}");
+
+    assert!(
+        added_debug.len() < 300 && modified_debug.len() < 300,
+        "Debug output must stay small and independent of file size, never scale with content \
+         -- a real dump of {} bytes (as text or as a numeric Vec<u8> list) would be far longer \
+         than this: added len={} modified len={}",
+        secret.len(),
+        added_debug.len(),
+        modified_debug.len()
+    );
+    assert!(
+        added_debug.contains(&secret.len().to_string())
+            && modified_debug.contains(&secret.len().to_string()),
+        "Debug must still print the real length, just not the bytes: added={added_debug:?} \
+         modified={modified_debug:?}"
+    );
+}
+
 /// `read_diff_content` reuses the gate rather than re-deriving its
 /// refusals: a path absent from `detected.changed_paths` refuses via
 /// `DiffContentError::Gate`, carrying the same `DiffGateRefusal` the gate
