@@ -1,8 +1,8 @@
 ---
 title: "RFC-035: QA evidence"
 rfc: "RFC-035"
-rfc_file: "../../accepted/035-change-detection-coverage-and-disclosure.md"
-source_rfc_status: "Implemented 2026-08-25, both slices"
+rfc_file: "../../done/035-change-detection-coverage-and-disclosure.md"
+source_rfc_status: "Implemented and closed 2026-08-25 — RFC-035 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-25"
 ---

@@ -1,8 +1,8 @@
 ---
 title: "RFC-035: Acceptance / QA Checklist"
 rfc: "RFC-035"
-rfc_file: "../../accepted/035-change-detection-coverage-and-disclosure.md"
-source_rfc_status: "Accepted 2026-08-18 — scheduled 2026-08-25"
+rfc_file: "../../done/035-change-detection-coverage-and-disclosure.md"
+source_rfc_status: "Implemented and closed 2026-08-25 — RFC-035 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-25"
 ---
@@ -88,12 +88,47 @@ Every unchecked line at closeout carries a stated reason.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Final Acceptance recorded 2026-08-25 (review requests 326 and 327). Suite re-run by the
+reviewer, three consecutive runs under default parallelism, both rounds: all four targets ok,
+zero failures.
+
+The supervision hole is closed for the two entries that carry executable consequence, and the
+surface now says why they are watched rather than only that .git/ is excluded -- "the two
+places a change could install or redirect code that runs on your machine". That sentence does
+what "excludes .git/" never did: it conveys the consequence.
+
+Reviewer's own ablation went the opposite way from the one the handoff specified -- widening
+GIT_WATCHED_ENTRY_NAMES to include objects/refs/index -- and three tests failed, including
+filesystem_scan_skips_ignored_directories_entirely. The implementer's tests guard narrowness
+in both directions. The handoff asked for one; the other is the half that matters in a year,
+when someone widens this "just a little" to debug something.
+
+Two decisions the implementer made beyond instruction, both right:
+
+  - Partial no longer set for the max_changed_paths case. The scan completed; asserting
+    incompleteness would have been false. The consequence is larger than labelling:
+    add_detected_generated_change_set refuses non-Complete detection, so a run over the limit
+    previously produced no ChangeSet at all. That is the real user-visible win here.
+  - The two omission counts split rather than summed, after review response 326 required a
+    decision on the record. Display-level omission is recoverable -- the paths are in the
+    model past a display limit. Detection-level omission is not -- truncate() dropped them
+    before the ChangeSet existed. The surface renders them as two lines and only the
+    unrecoverable one says so, which is the distinction one level finer than the
+    truncated-scan/truncated-list one this project has now defended four times.
+
+Rewriting projectsession_refuses_changeset_creation_from_non_complete_detection to reach
+Partial via max_entries was necessary and easy to skip. Left alone it would have kept passing
+against a fixture that no longer exercised what its name claimed -- vacuously green, which
+this project has been bitten by twice.
+
+Deferred with reasons, not dropped: core.hooksPath not followed (watching config reports the
+location changed, which is the fact that matters); RFC-035 items 3 and 4 (mid-run triggers,
+baseline surviving the application) untouched and already disclosed.
 ```

@@ -1,8 +1,8 @@
 ---
 title: "RFC-035: task breakdown and PR plan"
 rfc: "RFC-035"
-rfc_file: "../../accepted/035-change-detection-coverage-and-disclosure.md"
-source_rfc_status: "Accepted 2026-08-18 — scheduled 2026-08-25"
+rfc_file: "../../done/035-change-detection-coverage-and-disclosure.md"
+source_rfc_status: "Implemented and closed 2026-08-25 — RFC-035 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-25"
 ---

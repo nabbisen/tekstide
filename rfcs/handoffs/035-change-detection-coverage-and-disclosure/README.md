@@ -1,19 +1,19 @@
 ---
 title: "RFC-035: Change Detection Coverage and Disclosure — implementation handoff"
 rfc: "RFC-035"
-rfc_file: "../../accepted/035-change-detection-coverage-and-disclosure.md"
-source_rfc_status: "Accepted 2026-08-18 — scheduled 2026-08-25, first of three for 0.14.0"
+rfc_file: "../../done/035-change-detection-coverage-and-disclosure.md"
+source_rfc_status: "Implemented and closed 2026-08-25 — RFC-035 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-25"
 ---
 
 # Two holes in what change review can see
 
-Source RFC: [RFC-035](../../accepted/035-change-detection-coverage-and-disclosure.md)
+Source RFC: [RFC-035](../../done/035-change-detection-coverage-and-disclosure.md)
 
 | # | Read | Why |
 | --- | --- | --- |
-| 1 | [RFC-035](../../accepted/035-change-detection-coverage-and-disclosure.md) | Both items, with the `.git/` reasoning that decides the approach |
+| 1 | [RFC-035](../../done/035-change-detection-coverage-and-disclosure.md) | Both items, with the `.git/` reasoning that decides the approach |
 | 2 | [`what-watching-dot-git-must-not-become.md`](./what-watching-dot-git-must-not-become.md) | **Required before any detector change.** Narrowing an exclusion is a security change |
 | 3 | [`task-breakdown-pr-plan.md`](./task-breakdown-pr-plan.md) | Two slices |
 | 4 | [`acceptance-qa-checklist.md`](./acceptance-qa-checklist.md) | What must be true and evidenced |
