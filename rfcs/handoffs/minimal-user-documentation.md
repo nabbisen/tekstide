@@ -1,7 +1,7 @@
 ---
 title: "Minimal user documentation — implementation handoff"
 rfc: "none — pulled forward from RFC-029"
-status: "Scheduled 2026-08-01, unstarted for three weeks; re-scoped and re-scheduled 2026-08-25 as the third of three. Items 1 and 2 were overtaken by RFC-038 and are struck below."
+status: "Scheduled 2026-08-01, unstarted for three weeks; re-scoped 2026-08-25 and **pinned to commit 711be4b** the same day, after the re-scope was itself overtaken within hours. Items 1 and 2 struck as done, pending verification at the pin."
 target_milestone: "M9, alongside RFC-017"
 created: "2026-08-01"
 ---
@@ -48,6 +48,58 @@ looking.
 
 **If this slips again, escalate rather than deferring.** Three weeks of silent slippage is how a
 scheduled item becomes a permanent one.
+
+## Pinned, 2026-08-25 — because re-scoping is what keeps failing
+
+The re-scope above was written this morning and was **already overtaken by the afternoon**:
+RFC-040 shipped visible controls across the application (3 → 11 of 13 actions), and RFC-020
+shipped the change review surface. That is the fourth time this document has been overtaken by
+the product it describes.
+
+Re-scoping a fifth time would fail the same way. So the scope is now **pinned to a commit**:
+
+> **Document the application as it stands at `711be4b`.** Anything landing after that commit is
+> explicitly **out of scope for this document** and belongs to a later one.
+
+Write it against a build of that commit. If something changes underneath you mid-slice, that is
+not a reason to re-scope — finish, note what moved, and let a later document catch up. **A
+document that waits for the product to stop moving is never written.**
+
+### What is at `711be4b`, mechanically rather than by hand
+
+Do not transcribe a list from this document; read it out of the build, the same instruction
+item 2 already carries:
+
+- **14 live keybindings**, derived from `KeybindingPolicy::linux_mvp()`. `--help` and the in-app
+  Help modal (`Ctrl+Alt+K`) both render them from that one source, so they cannot be stale.
+  **Cite them; do not re-list them by hand.**
+- **11 of 13 actions have a visible control**; the remaining two are deliberate keyboard-only
+  conventions with reasons recorded in `keyboard_help::control_coverage`. If the documentation
+  says "keyboard-driven", that is now only half true and the other half is the interesting half.
+- **29 clickable controls** across the shell and its surfaces.
+
+### Subjects at this pin that no user-facing text covers
+
+Superseding the three named above, which stand and are joined by two more:
+
+1. **The project tab strip** — seeing what is open, switching, going home.
+2. **Closing a project**, and what that ends: its terminals and any agent run. The confirmation
+   names the project by canonical path.
+3. **Transcript capture opt-out and purge** — a privacy control a user currently finds only by
+   opening Trust Settings and looking.
+4. **The change review surface** (`Ctrl+Alt+D`) — **and its limits, which matter more than its
+   existence**: metadata only, no diff content, detection is conservative and excludes `.git/`,
+   `target/` and `node_modules/`. The surface states this itself; the documentation must not
+   state it more weakly than the product does.
+5. **The folder browser and the path field** — two routes to opening a project, one of which
+   (`Browse…`) needs no path typed.
+
+### One thing to check rather than assume
+
+Item 1's Quick Start and item 2's keyboard reference are struck as done. **Verify that is still
+true at this pin** — RFC-040 and RFC-020 both touched user-facing text after they were struck.
+Saying "verified still accurate" is a real evidence line; assuming it is how this document got
+stale four times.
 
 ## The five items
 
