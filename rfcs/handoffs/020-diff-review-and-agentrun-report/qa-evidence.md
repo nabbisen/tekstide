@@ -418,3 +418,10 @@ what an agent changed" — no longer true, and both have been corrected rather t
   live real-agent-run walkthrough was judged impractical to orchestrate reliably.
 - **No approve/reject/accept action of any kind on the Change Review surface.** RFC-034's
   own job, deliberately not built here.
+- **`TEKSTIDE_CHANGESET_DEMO` writes a real file into the real, user-owned project root and
+  never removes it — required disclosure, review response 323.** Unlike `TEKSTIDE_LAYER_DEMO`
+  and `TEKSTIDE_TERMINAL_DEMO`, which touch no filesystem at all, this variable drops
+  `tekstide-changeset-demo.txt` into whatever project is open on every launch it is set for.
+  Inherent to what it proves (detection has to see a change *in the project*), not incidental
+  — but do not set it in a shell profile or a CI environment and leave it set. Also stated in
+  `seed_change_review_demo_data`'s own doc comment.

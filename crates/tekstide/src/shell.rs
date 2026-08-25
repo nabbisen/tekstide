@@ -4549,10 +4549,21 @@ fn launch_terminal_demo_panes(
 /// seeds into the real project root, with no `agent_run_id` (`None`):
 /// honest, since no agent run produced this write, not a fabricated
 /// `Strong` association. Gated behind `TEKSTIDE_CHANGESET_DEMO`, the
-/// same env-gated-demo convention as `TEKSTIDE_LAYER_DEMO`/
-/// `TEKSTIDE_TERMINAL_DEMO`; requires an active project; best-effort
-/// (an absent project or a write failure is silently skipped, the same
-/// "diagnostic path, not a user-facing feature" shape those two use).
+/// same env-gated-demo *convention* as `TEKSTIDE_LAYER_DEMO`/
+/// `TEKSTIDE_TERMINAL_DEMO` -- **not the same effect, and that
+/// difference matters** (review response 323 Required): neither of
+/// those two touches the filesystem at all; this one **writes
+/// `tekstide-changeset-demo.txt` into the real, user-owned project root
+/// and never removes it**, on every launch the variable is set for,
+/// against whatever project happens to be open. Detection has to see a
+/// change *in the project* to produce anything real, so writing there
+/// is inherent to what this demo proves, not incidental -- but that is
+/// a reason the write is necessary, not a reason to describe it as
+/// filesystem-inert like its two siblings. Requires an active project;
+/// best-effort (an absent project or a write failure is silently
+/// skipped, the same "diagnostic path, not a user-facing feature" shape
+/// those two use) -- but unlike those two, do not set this in a shell
+/// profile or a CI environment and leave it set.
 fn seed_change_review_demo_data(app_shell: &mut ApplicationShell) {
     if std::env::var("TEKSTIDE_CHANGESET_DEMO").is_err() {
         return;
