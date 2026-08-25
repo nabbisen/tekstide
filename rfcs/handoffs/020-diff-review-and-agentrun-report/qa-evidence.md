@@ -2,7 +2,7 @@
 title: "RFC-020: Diff Review and AgentRun Report Surfaces - QA Evidence"
 rfc: "RFC-020"
 rfc_file: "../../accepted/020-diff-review-and-agentrun-report.md"
-status: "PR-020-B implemented 2026-08-18 (core: responses 198/199, commits b74d8d5/c92d97e; surface: pr-020-b-report-surface.md, 2026-08-18), awaiting review. PR-020-C (change review surface) and PR-020-D (closeout) not started."
+status: "PR-020-B implemented 2026-08-18 (core: responses 198/199, commits b74d8d5/c92d97e; surface: pr-020-b-report-surface.md, 2026-08-18), accepted. PR-020-C (change review surface) implemented 2026-08-25, accepted with one required item (review response 322); closeout item delivered 2026-08-25. Both RFC-020 surfaces now implemented and reachable."
 target_milestone: "M10"
 created: "2026-08-15"
 ---
@@ -296,24 +296,125 @@ everywhere else in this project.
 
 ## PR-020-C — The change review surface
 
-*Not started.*
+Implemented 2026-08-25 per the 2026-08-25 handoff (`change-review-surface.md`). Reviewed and
+accepted, one required item, response to review request 322 —
+`.git-exclude/reviewed/tekstide-review-request-322-change-review-surface-response.md`.
+
+**Scope**: metadata only — file paths, a count, detection status, review state — from
+`ChangeSet::default_summary()`. No diff content (blocked on retaining `DetectedChanges` past
+`add_detected_generated_change_set`, per RFC-020's own scoping addendum — recorded as future
+work, not built). No approve/reject affordance; RFC-034's own job.
+
+**What shipped**:
+
+- `ProjectOpenSurface::DiffReview` gets a real render arm (`change_review_view`), moved from
+  `surface_renders_editor`'s `true` arm to `false` alongside `ApprovalHistory`/`AgentRunDetail`.
+- A real button, "Change Review", on `trust_settings_view`, alongside Launch AI CLI Run /
+  AgentRun Report / Approval History.
+- `Ctrl+Alt+D`, `KeybindingStatus::Candidate`, unclaimed proven mechanically
+  (`open_diff_review_shortcut_is_a_candidate_that_collides_with_no_other_rule`). Both the button
+  and the keystroke converge on one function, `open_diff_review` — the same "one setup, two
+  routes" shape `open_folder_browser` established. RFC-036's dead-action count: three to two
+  (`CycleVisibleTerminalSession`, `OpenSafeCloseDialog` remain).
+- The two required disclosures render **on the surface**: not-all-changes (metadata-only,
+  conservative, excludes `.git/`, `target/`, `node_modules/`) and not-a-review/approval/safety-claim.
+  `ChangeDetectionStatus::Partial{limit}`'s scan-level truncation renders as a line distinct
+  from `omitted_changed_file_count`'s display-level truncation — both, when both are true, not
+  collapsed.
+- File paths escaped via `text_safety::quote_untrusted` before display (the bidi fixture
+  applies, tested).
+
+**Tests** (`crates/tekstide/src/shell/tests.rs`): bidi/escaping for the file-entry line;
+distinct-rendering for all five `ChangeDetectionStatus` variants and all five `ReviewState`
+variants; click-reachability; keyboard-reachability; modal-exclusivity (extends RFC-040's own
+pattern to this surface's new control); and a heavy end-to-end test
+(`change_review_surface_renders_a_real_change_set_from_a_real_agent_run`) reusing the real
+managed-agent-run/real-file-write/real-approval/real-exit pipeline already proven for
+`ChangeSet` creation, extended through a real click on the real button and asserted against the
+real rendered strings.
+
+Plus the five test breakages the handoff predicted (`control_coverage`, the binding-count test
+13→14, the dead-actions list, `click_message_kind`, the keyboard-help catalog key), and two a
+full-suite run found that the handoff did not name:
+`navigation::tests::advertised_bindings_are_exactly_the_live_ones` (a hardcoded ordered binding
+list) and `shell::tests::opening_help_through_a_real_key_event_shows_every_live_binding` (a
+hardcoded count). All fixed. The reviewer's own ablation (collapsing `Partial`'s symbol into
+`complete`) confirmed the truncation-distinction test actually guards the property, not merely
+intends it.
+
+**Gates**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features --
+-D warnings`, full workspace suite (`tekstide` 413 passed, `tekstide-core` 737 passed), run
+three times for stability, `git diff --check`. All clean, both rounds (initial slice and the
+closeout addition below).
+
+**GUI evidence, round 1 (review request 322)**: real release binary, real project directory,
+`niri`/`xdotool`. Cold start with an empty project: "Trust Settings" shows the real "Change
+Review" button as the fourth item. Clicking it reaches the real surface's real empty state, "No
+changes have been detected in this project yet." `Ctrl+Alt+D` from the Project Board reaches the
+identical rendered surface, confirming both routes converge. `Ctrl+Alt+K` lists `Ctrl+Alt+D`
+among all fourteen live bindings. **Did not show a populated surface** — the substitution
+disclosed instead was the heavy end-to-end test above, string-level rather than pixel-level.
+
+**Required by review response 322**: "someone must see the populated surface" — string-level
+proof is not the same claim as a screenshot, and this arc has found three defects by clicking
+that the suite did not catch.
+
+**GUI evidence, round 2 (closeout) — the populated surface**: rather than drive a full live
+agent run through raw `xdotool` automation against a real subprocess's real timing (judged
+fragile in review request 322, and not asked for again by the reviewer, who called the
+end-to-end test "stronger evidence than most live walkthroughs"), a small env-gated seeding
+path, `TEKSTIDE_CHANGESET_DEMO` (`seed_change_review_demo_data` /
+`seed_change_review_demo_change_set` in `shell.rs`), calls the same three real production
+functions `attempt_generated_change_detection` calls at a real agent run's exit —
+`capture_filesystem_baseline`, `detect_filesystem_changes`, `add_detected_generated_change_set`
+— against one real file it seeds into the real project root, with no `agent_run_id` (honest:
+no agent run produced this write). Same env-gated-demo convention as `TEKSTIDE_LAYER_DEMO`/
+`TEKSTIDE_TERMINAL_DEMO`; the env check and the seeding are two functions, not one, so the
+seeding logic is tested directly rather than by setting the env var
+(`seed_change_review_demo_change_set_creates_a_real_unlinked_change_set`,
+`seed_change_review_demo_change_set_is_a_no_op_without_an_active_project`) — process-global env
+vars race against concurrently-running tests, the same reasoning
+`measurement_and_the_demo_modal_are_mutually_exclusive` already documents.
+
+Real release binary launched with `TEKSTIDE_CHANGESET_DEMO=1` against a fresh project directory:
+the real file `tekstide-changeset-demo.txt` appears in the real explorer, and clicking "Change
+Review" renders the real populated surface — heading, disclosure, "Detection: Complete", "1 file
+changed", the real filename, "Review state: Unreviewed". This proves the render arm against real
+content end to end, visually, closing the gap the reviewer named. **Does not** prove the surface
+against a `ChangeSet` genuinely produced by a real agent run being visually observed live — that
+remains string-level only (the end-to-end test above), a disclosed substitution, not a silent
+one.
 
 ## PR-020-D — Closeout
 
-*Not started.*
+Folded into PR-020-C's own evidence above rather than a separate slice — RFC-020's two surfaces
+(AgentRun report, change review) are both now implemented, reviewed, and reachable. See "Known
+limitations, consolidated" below for what remains disclosed rather than fixed, and the README /
+RFC-020's own text for the corrections this work required (both previously said "you cannot see
+what an agent changed" — no longer true, and both have been corrected rather than left stale).
 
 ## Known limitations, consolidated
 
-To be filled at closeout. The ones already known going in, which must survive into the
-closeout rather than being rediscovered:
-
-- **No two-sided diff for a modified file.** The before-bytes were never captured
-  (`ReviewBaselineEntry` is metadata-only by RFC-012 §Design Principles 2) and are gone,
-  not merely unretained, by preview time.
+- **No two-sided diff for a modified file, and no diff content at all.** The before-bytes
+  were never captured (`ReviewBaselineEntry` is metadata-only by RFC-012 §Design Principles
+  2) and are gone, not merely unretained, by preview time. Reading actual diff content
+  (`DetectedChanges`/`read_diff_content`) is additionally blocked on retaining
+  `DetectedChanges` past `add_detected_generated_change_set`, which currently discards it —
+  recorded by RFC-020's own scoping addendum as future work, not built in this slice.
 - **Detection is metadata-only and conservative**; the change set may be incomplete.
+  `.git/`, `target/` and `node_modules/` are excluded by design, so a change an agent makes
+  inside them is never reported. Stated on the Change Review surface itself, not only here.
 - **`DiffContent` blocks two specific storage paths**, not general retention — a consumer
   can destructure it and keep the bytes.
 - **The transcript window is a view, not the whole transcript**, and is distinct from the
   writer's retention truncation.
 - **No Git-backed before-source exists**; it is gated behind RFC-012's unmet safety
   evidence.
+- **The Change Review surface has never been visually observed populated by a `ChangeSet`
+  a real agent run produced.** The real pipeline is proven end to end at string level
+  (`change_review_surface_renders_a_real_change_set_from_a_real_agent_run`); the live
+  screenshot of a populated surface uses `TEKSTIDE_CHANGESET_DEMO`'s seeded, non-agent-run
+  `ChangeSet` instead. Disclosed, not silent — see PR-020-C's own evidence above for why a
+  live real-agent-run walkthrough was judged impractical to orchestrate reliably.
+- **No approve/reject/accept action of any kind on the Change Review surface.** RFC-034's
+  own job, deliberately not built here.

@@ -3,7 +3,10 @@
 Status: **Accepted 2026-08-12** (the status line said "awaiting acceptance" until 2026-08-18,
 stale against `rfcs/README.md` and this RFC's own handoff pack, both of which recorded the
 acceptance at the time). Surface work stopped 2026-08-15 by response 200 for want of a
-producer; **re-scoped 2026-08-18**, see the scoping section at the end.
+producer; **re-scoped 2026-08-18**, see the scoping section at the end. The AgentRun report
+surface shipped in `0.12.0`; the change review surface shipped 2026-08-25, reviewed and
+accepted with one required closeout item, also delivered 2026-08-25 — see the closeout section
+near the end. Both of this RFC's surfaces are now implemented and reachable.
 Target milestone: M10, slipping to M11
 Date: 2026-08-11
 
@@ -208,6 +211,24 @@ must state the metadata-only limitation **on the surface** rather than only in d
 the reader must not become a second retention policy. And, from RFC-039's audit: a visible
 control, not only a keybinding — the third reachability principle applies to this surface as it
 does to every other.
+
+## Closeout, 2026-08-25 — the change review surface shipped; both RFC-020 surfaces are now reachable
+
+`Ctrl+Alt+D` (or the "Change Review" button on `trust_settings_view`) opens the surface this
+addendum unblocked, per `change-review-surface.md`. Reviewed and accepted, one required item
+(review response 322): a live screenshot of the surface populated by a real `ChangeSet`, delivered
+via `TEKSTIDE_CHANGESET_DEMO` rather than a live real-agent-run walkthrough judged too fragile to
+orchestrate reliably through raw GUI automation — disclosed as a substitution, not presented as
+equivalent. Full detail in `qa-evidence.md`'s PR-020-C entry.
+
+**This RFC's own opening claim — "there is no diff review or change-review surface" — is no
+longer true**, and both this document and `README.md` said so in several places; both have been
+corrected rather than left stale. What remains true, and is now the accurate framing: the surface
+renders *metadata* (file paths, a count, detection status, review state) — never diff *content*.
+Reading actual diff content is still blocked, on retaining `DetectedChanges` past
+`add_detected_generated_change_set` (which currently discards it), exactly as this addendum's own
+table implied by never listing "diff content" among what exists. That remains future work, not
+this slice's gap.
 
 ## Risks
 

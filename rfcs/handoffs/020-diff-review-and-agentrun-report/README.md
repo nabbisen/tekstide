@@ -2,7 +2,7 @@
 title: "RFC-020: Diff Review and AgentRun Report Surfaces — handoff pack"
 rfc: "RFC-020"
 rfc_file: "../../accepted/020-diff-review-and-agentrun-report.md"
-status: "Ready for implementation — accepted 2026-08-12, both prerequisites landed"
+status: "Both surfaces implemented — AgentRun report (0.12.0), change review surface (2026-08-25, accepted with one required closeout item, also delivered)"
 target_milestone: "M10"
 created: "2026-08-15"
 ---
@@ -92,8 +92,12 @@ escaping this surface: a reviewer deciding whether to accept AI-generated code m
 to see `U+202E` precisely when it is there, and a surface rendering it faithfully hides
 the most dangerous thing it could contain.
 
-## The change review surface (scheduled 2026-08-25)
+## The change review surface — shipped 2026-08-25
 
-[`change-review-surface.md`](./change-review-surface.md) — the remaining slice, named by surface
-rather than by letter because this RFC's own Slices section has the two letters swapped and that
-has already misled once. Scoped and unblocked; see RFC-020's scoping addendum.
+[`change-review-surface.md`](./change-review-surface.md) — named by surface rather than by
+letter because this RFC's own Slices section has the two letters swapped and that has already
+misled once. Implemented, reviewed, and accepted with one required closeout item (a live
+screenshot of the surface populated by a real `ChangeSet`), also delivered 2026-08-25. See
+`qa-evidence.md`'s PR-020-C entry and the RFC's own closeout section for full detail. **Both of
+RFC-020's surfaces are now implemented and reachable** — the AgentRun report since `0.12.0`, the
+change review surface since this date.

@@ -871,6 +871,7 @@ impl State {
         // This call covers only the CLI-argument projects already live
         // when `State::new` runs.
         verify_restored_trust(&mut app_shell);
+        seed_change_review_demo_data(&mut app_shell);
         let measurement = Measurement::from_env();
         let typing_doc = if matches!(
             measurement.as_ref().map(Measurement::criterion),
@@ -4533,6 +4534,73 @@ fn launch_terminal_demo_panes(
         panes.push(pane);
     }
     panes
+}
+
+/// RFC-020 closeout (review response 322 Required): the change review
+/// surface's own evidence gap was "the populated surface has never
+/// been seen" -- driving a full real agent run (subprocess, socket,
+/// approval dialog) through raw GUI automation to get one screenshot
+/// would be exactly the fragile orchestration review request 322
+/// already disclosed avoiding for the automated test. This calls the
+/// same three real production functions
+/// [`attempt_generated_change_detection`] calls at a real agent run's
+/// exit -- `capture_filesystem_baseline`, `detect_filesystem_changes`,
+/// `add_detected_generated_change_set` -- against one real file this
+/// seeds into the real project root, with no `agent_run_id` (`None`):
+/// honest, since no agent run produced this write, not a fabricated
+/// `Strong` association. Gated behind `TEKSTIDE_CHANGESET_DEMO`, the
+/// same env-gated-demo convention as `TEKSTIDE_LAYER_DEMO`/
+/// `TEKSTIDE_TERMINAL_DEMO`; requires an active project; best-effort
+/// (an absent project or a write failure is silently skipped, the same
+/// "diagnostic path, not a user-facing feature" shape those two use).
+fn seed_change_review_demo_data(app_shell: &mut ApplicationShell) {
+    if std::env::var("TEKSTIDE_CHANGESET_DEMO").is_err() {
+        return;
+    }
+    seed_change_review_demo_change_set(app_shell);
+}
+
+/// The env check and the seeding itself are two functions, not one --
+/// this one takes no env dependency, the same "constructed directly ...
+/// so these tests do not depend on an env var for determinism"
+/// discipline `state_with_two_visible_and_one_hidden_pane` already
+/// established for `TEKSTIDE_TERMINAL_DEMO`'s own shape:
+/// `std::env::var` is process-global and races against
+/// concurrently-running tests that also construct a `State`.
+fn seed_change_review_demo_change_set(app_shell: &mut ApplicationShell) {
+    let detector =
+        tekstide_core::project::GeneratedChangeDetector::new(generated_change_detection_policy());
+    let Some((baseline, demo_file)) = app_shell.state().active_project().map(|project| {
+        (
+            detector.capture_filesystem_baseline(project),
+            project
+                .canonical_root_path()
+                .join("tekstide-changeset-demo.txt"),
+        )
+    }) else {
+        return;
+    };
+    if std::fs::write(
+        &demo_file,
+        b"Seeded by TEKSTIDE_CHANGESET_DEMO for RFC-020 evidence -- not a real agent run.\n",
+    )
+    .is_err()
+    {
+        return;
+    }
+    let Some(detected) = app_shell
+        .state()
+        .active_project()
+        .map(|project| detector.detect_filesystem_changes(project, &baseline))
+    else {
+        return;
+    };
+    let _ = app_shell.state_mut().add_detected_generated_change_set(
+        &baseline,
+        &detected,
+        None,
+        "Seeded by TEKSTIDE_CHANGESET_DEMO (RFC-020 evidence, not a real agent run)",
+    );
 }
 
 /// RFC-017 PR-017-G: the background output flood for the `TerminalFlood`

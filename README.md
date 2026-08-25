@@ -102,11 +102,14 @@ switching. It includes:
   executable, because the live product needs interactive authentication and
   makes real network calls. The launch pathway is proven end to end against
   production code; the specific behaviour of the real binary under it is not.
-  You still cannot **see what a run changed** — there is no diff review or
-  change-review surface (RFC-020's PR-020-C, still blocked) — but as of
-  `0.11.0` the change set itself is real, and you can now read **what the
-  run said**: see the AgentRun report entry below. What it said and what
-  it changed remain two different, separately-reachable things.
+  As of `0.11.0` the change set itself is real, and as of `0.13.0` it is
+  reachable: `Ctrl+Alt+D` (or the "Change Review" button on Workspace Trust)
+  opens the **Change Review** surface, showing the files a run touched, a
+  count, detection status, and review state. It is metadata only — **not a
+  diff**: no before/after content, no per-line comparison. Reading **what the
+  run said** is a separate surface: see the AgentRun report entry below. What
+  it said and what it changed remain two different, separately-reachable
+  things.
 - **The adapter-spawn pathway and the command-approval dialog** (`0.10.0`,
   RFC-022) — built, audited, and proven end to end. Reachable only by this
   project's own reference adapter, for the reason given under *Command
@@ -160,14 +163,16 @@ switching. It includes:
 It is not yet the full AI CLI workbench. The editor has no undo (a mid-buffer
 edit is unrecoverable within the session past what Backspace can still
 reach), no syntax highlighting, language server, multi-cursor, or search,
-and files above 4 MiB are not editable. There is still no diff/review surface
-(RFC-020's PR-020-C, M10's second half), so **you still cannot review what an
-agent run changed**. The **AgentRun report surface** (`Ctrl+Alt+R`) does now
+and files above 4 MiB are not editable. The **Change Review surface**
+(`Ctrl+Alt+D`, `0.13.0`) now shows the files a run changed, but **still no
+diff**: file paths, a count, detection status, and review state only — no
+before/after content, no per-line comparison. Reading actual diff content is
+blocked on retaining `DetectedChanges` past the point it is currently
+discarded (RFC-020's own scoping addendum records this as future work, not
+built). The **AgentRun report surface** (`Ctrl+Alt+R`) does now
 exist — real, escaped transcript content for the most recently launched run,
 what it *said*, not what it *changed*; see the caveat below about what that
-does and does not reach. What `0.11.0`'s change detection changed is the
-reason diff review is now **buildable, not reachable** — the input is there,
-the change-review surface itself is not. There
+does and does not reach. There
 is also no Git-based change detection, file watcher, or overwrite-confirmation
 UI, and no cross-platform evidence beyond Linux. RFC-039 (M12) built a real
 close-confirmation dialog — `×` on a project tab, naming live-work counts and
@@ -294,6 +299,7 @@ The shell is keyboard-navigable by design. These bindings exist today
 | `Ctrl+Alt+U` | Open the Workspace Trust surface for the active project (grant or revoke) |
 | `Ctrl+Alt+H` | Open the Approval History surface for the active project |
 | `Ctrl+Alt+R` | Open the AgentRun Report for the most recently launched run in the active project |
+| `Ctrl+Alt+D` | Open the Change Review surface for the active project's most recent change set (RFC-020) |
 | `Ctrl+Alt+K` | Open this keyboard reference, from anywhere (RFC-038) |
 | `Ctrl+Shift+V` | Paste the clipboard into the focused terminal, subject to RFC-009's policy |
 | `Ctrl+S` | Save the active document in Content mode |

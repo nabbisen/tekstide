@@ -11396,3 +11396,64 @@ fn change_review_surface_renders_a_real_change_set_from_a_real_agent_run() {
         "a normal, unbounded scan must render Complete, got {status_line:?}"
     );
 }
+
+/// RFC-020 closeout (review response 322 Required): the demo-seeding
+/// path used to get a populated surface into a screenshot, exercised
+/// through its own env-independent function -- not by setting
+/// `TEKSTIDE_CHANGESET_DEMO` itself, the same "process-global, races
+/// against concurrently-running tests" reasoning
+/// `measurement_and_the_demo_modal_are_mutually_exclusive` already
+/// documents for `TEKSTIDE_LAYER_DEMO`.
+#[test]
+fn seed_change_review_demo_change_set_creates_a_real_unlinked_change_set() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("change-review-demo-seed");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+
+    super::seed_change_review_demo_change_set(&mut app_shell);
+
+    let (agent_run_id_is_none, changed_file_count, shown_first_file) = {
+        let project = app_shell.state().active_project().unwrap();
+        let change_set = project
+            .change_sets()
+            .last()
+            .expect("seeding must produce a real ChangeSet");
+        let summary = change_set.default_summary();
+        (
+            change_set.agent_run_id.is_none(),
+            summary.changed_file_count,
+            summary.shown_changed_files[0].clone(),
+        )
+    };
+    assert!(
+        agent_run_id_is_none,
+        "no real agent run produced this write -- the association must not claim one"
+    );
+    assert_eq!(changed_file_count, 1);
+    let state = state_with(app_shell);
+    let file_line = super::change_review_file_entry_line(&state.catalog, &shown_first_file);
+    assert!(
+        file_line.contains("tekstide-changeset-demo.txt"),
+        "the real seeded file must be the one real path rendered, got {file_line:?}"
+    );
+    assert!(
+        project_dir.join("tekstide-changeset-demo.txt").exists(),
+        "the seed must actually write the real file it detects, not only claim to"
+    );
+}
+
+/// Without this, seeding with no active project would need its own
+/// panic-vs-no-op decision documented separately from the doc comment
+/// above -- this proves the "best-effort, silently skipped" half of
+/// that claim directly, matching `launch_terminal_demo_panes`'s own
+/// no-active-project early return.
+#[test]
+fn seed_change_review_demo_change_set_is_a_no_op_without_an_active_project() {
+    let mut app_shell = ApplicationShell::new();
+
+    super::seed_change_review_demo_change_set(&mut app_shell);
+
+    assert!(app_shell.state().active_project().is_none());
+}
