@@ -279,6 +279,39 @@ cargo run -p tekstide
 cargo run -p tekstide -- /path/to/project
 ```
 
+## Working With Projects
+
+**The folder browser (`Browse...`, or `Ctrl+Alt+B`).** Opens over your home directory by
+default. Arrow keys move the highlight; `Enter` navigates into the highlighted folder (updating
+the "Current:" line at the top); `Space` — or the **Open this folder** button — chooses whatever
+folder "Current:" now shows as the project to open. `Escape` cancels without opening anything.
+
+**Multiple projects, and switching between them.** Opening more than one project shows a real
+tab strip at the top: one tab per open project — a filled dot marks the active one — plus a
+permanent **Projects** tab that returns to the board. Click a tab to switch to it, or press
+`Ctrl+Alt+N` to cycle to the next one with wraparound. A project you closed earlier is
+remembered on the board too, with its own **Open** button — no retyping its path.
+
+**Closing a project (`×` on its tab).** If nothing is live in it — no terminal, no agent run —
+it closes immediately, no dialog. If something is, a confirmation dialog names exactly what
+will end (for example, "This will end: 1 running process") and shows the project's **canonical**
+path, so you know precisely what you are about to close. Focus defaults to **Cancel**; `Enter`
+activates whichever button is focused, `Escape` always cancels — closing is never one accidental
+keystroke away.
+
+**Reviewing what an AI agent changed (`Ctrl+Alt+D`, or the "Change Review" button on Trust
+Settings).** After an AI CLI run exits, this surface lists the files it touched, a count, a
+detection-status line, and a review state. **Read its limits as closely as its existence**: it
+is metadata only — file paths, not a diff. There is no before/after content and no per-line
+comparison; reading actual diff content is future work, not built here (see *Current Status*
+below). Detection is conservative and excludes `.git/`, `target/`, and `node_modules/` by
+design, so a change made inside those is never reported. The surface states both of these
+itself, in its own disclosure text; nothing here should be read as promising more than that.
+
+**Transcript privacy controls** — declining capture for future runs, and purging what is
+already retained, both per project — live on the same Trust Settings surface (`Ctrl+Alt+U`).
+See *Local Data and Privacy* below for exactly what is recorded and how to remove it.
+
 ## Keyboard Reference
 
 The shell is keyboard-navigable by design. These bindings exist today
@@ -301,8 +334,6 @@ The shell is keyboard-navigable by design. These bindings exist today
 | `Ctrl+Alt+R` | Open the AgentRun Report for the most recently launched run in the active project |
 | `Ctrl+Alt+D` | Open the Change Review surface for the active project's most recent change set (RFC-020) |
 | `Ctrl+Alt+K` | Open this keyboard reference, from anywhere (RFC-038) |
-| `Ctrl+Shift+V` | Paste the clipboard into the focused terminal, subject to RFC-009's policy |
-| `Ctrl+S` | Save the active document in Content mode |
 | `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |
 
 `Ctrl+Shift+P` is reserved for a command palette that does not exist yet — it is
