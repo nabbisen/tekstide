@@ -6838,11 +6838,15 @@ fn paste_confirm_focus(modal: &Option<ModalContent>) -> Option<PasteConfirmButto
 /// **Review gate**: "every dismissal path defaults to not pasting --
 /// Escape, click-away, focus loss, and any other exit that is not an
 /// explicit accept must leave the PTY untouched. Test each exit path,
-/// not one representative." Two real exit paths exist in this shell
-/// (`ModalDismiss`/Escape, and `ModalActivate` while focus is on
-/// `Reject`) -- "click-away" and "focus loss" have no reachable trigger
-/// here at all: this shell has no mouse-click handling anywhere, and
-/// modal focus is structurally isolated from `state.focus` (proven by
+/// not one representative." RFC-040 PR-040-B added a real, clickable
+/// "Reject" button, but it dispatches the literal `Message::ModalDismiss`
+/// `Escape` already sends (`paste_confirmation_modal_view`'s own
+/// `button_line`), so it is the same exit path this test already
+/// covers, not a fourth one. "Click-away" and "focus loss" still have
+/// no reachable trigger: `opaque(center(...))`'s own full-window capture
+/// means there is nothing behind the modal a click could land on (see
+/// `a_control_behind_an_open_modal_cannot_be_clicked`), and modal focus
+/// is structurally isolated from `state.focus` (proven by
 /// `modal_focus_cycling_never_touches_the_shell_focus_cycle`), so there
 /// is no window-blur-equivalent event to test. Both are disclosed
 /// non-goals here, not silently skipped.
@@ -10231,4 +10235,507 @@ fn closing_a_background_project_does_not_disturb_the_active_one() {
         Some(&active_id),
         "closing a background tab must not change which project is active"
     );
+}
+
+// RFC-040 PR-040-B: modals get real, clickable buttons for their own
+// decision -- `what-a-clickable-modal-must-not-become.md`'s required
+// tests, below.
+
+/// `what-a-clickable-modal-must-not-become.md` §1's required proof: "a
+/// control behind an open modal cannot be clicked." A real click's
+/// hit-testing cannot be simulated without a live `iced` runtime -- this
+/// whole suite is headless, by design -- so this proves the property the
+/// same way `modal_open_blocks_pty_write_and_closing_it_resumes_delivery`
+/// already proves keystroke suppression: dispatch the exact `Message` a
+/// real click on a background control sends, while a modal is open, and
+/// show it has no effect; then show the identical message *does* have
+/// its ordinary effect once the modal closes, proving the earlier
+/// silence was the guard, not a fluke. `opaque(center(...))` already
+/// makes the click itself unreachable in the real GUI (`view`'s own
+/// `stack!` puts the scrim on top, full-window); this guard is defense
+/// in depth that does not depend on that layout fact holding -- "a
+/// property that holds by accident of layout is one refactor from not
+/// holding." Two of the crate's ten background controls, on two
+/// different surfaces (Trust Settings, the Project Board) -- not all
+/// ten: every one of them now shares the identical one-line
+/// `if state.modal.is_some() { return; }` guard (see
+/// `reopen_recent_project`'s own doc for the full list), so this is a
+/// proof of the shared mechanism, not ten copies of the same assertion.
+#[test]
+fn a_control_behind_an_open_modal_cannot_be_clicked() {
+    let (mut state, project_id) = state_with_a_real_project("modal-exclusivity-click");
+    state.modal = Some(ModalContent::default());
+
+    let declined_before = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .unwrap()
+        .transcript_capture_declined();
+    let _ = super::update(&mut state, Message::ToggleTranscriptCaptureDeclined);
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .transcript_capture_declined(),
+        declined_before,
+        "a background control's click message must have no effect while a modal is open"
+    );
+
+    let _ = super::update(&mut state, Message::OpenFolderBrowserButtonPressed);
+    assert!(
+        matches!(state.modal, Some(ModalContent::LayerDemo { .. })),
+        "the open modal must not be replaced by a background control's click while it is up"
+    );
+
+    state.modal = None;
+
+    let _ = super::update(&mut state, Message::ToggleTranscriptCaptureDeclined);
+    assert_ne!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .transcript_capture_declined(),
+        declined_before,
+        "the identical message, sent after the modal closes, must reach its ordinary handler -- \
+         proving the earlier silence was the guard, not a fluke"
+    );
+
+    let _ = super::update(&mut state, Message::OpenFolderBrowserButtonPressed);
+    assert!(
+        matches!(state.modal, Some(ModalContent::FolderBrowser(_))),
+        "the same click message must open the folder browser once nothing else is open"
+    );
+}
+
+/// RFC-040 PR-040-B: the real, clickable "Accept" button -- proven
+/// against a real pane, the same way
+/// `activating_accept_writes_the_real_pasted_content_and_closes_the_dialog`
+/// already proves `Enter`-with-focus-on-Accept. Focus starts on
+/// `Reject` (the dialog's own default) and is never moved by hand here
+/// -- the click must reach `Accept` regardless of what focus happens to
+/// be on, since `Message::PasteConfirmAcceptPressed`'s own handler sets
+/// focus before calling `activate_current_modal`, the identical function
+/// `Enter` calls.
+#[test]
+fn clicking_accept_writes_the_real_pasted_content_and_closes_the_dialog() {
+    let (mut state, _target) = state_with_paste_dialog_open(
+        "paste-dialog-accept-click",
+        "echo accepted-paste-content\nsecond-line",
+    );
+    assert_eq!(
+        paste_confirm_focus(&state.modal),
+        Some(PasteConfirmButton::Reject),
+        "test precondition: Reject is still the default focus"
+    );
+
+    let _ = super::update(&mut state, Message::PasteConfirmAcceptPressed);
+    assert!(
+        state.modal.is_none(),
+        "clicking Accept must close the dialog"
+    );
+
+    assert!(
+        poll_demo_pane_until(&mut state, "accepted-paste-content"),
+        "clicking Accept must write the real content the dialog held, through the same \
+         activate_current_modal call Enter-with-focus-on-Accept already uses"
+    );
+}
+
+/// RFC-040 PR-040-B: the real, clickable "Reload" button -- proven
+/// against a real conflicted save, the same way
+/// `saving_over_a_real_external_change_opens_the_conflict_modal_and_reload_takes_the_disk_content`
+/// already proves `Enter`-with-focus-on-Reload. Focus starts on
+/// `Dismiss` and is never moved by hand.
+#[test]
+fn clicking_reload_takes_the_disk_content_and_closes_the_dialog() {
+    let (mut state, dir) =
+        state_with_an_open_document("editor-real-conflict-reload-click", "original");
+    let _ = state.app_shell.replace_active_project_text("tekstide edit");
+    std::fs::write(dir.join("file.txt"), "external edit").unwrap();
+
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("s".into()),
+        modifiers: iced::keyboard::Modifiers::CTRL,
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, press);
+    let _ = super::update(&mut state, Message::Input(routed));
+    assert_eq!(
+        external_change_focus(&state.modal),
+        Some(ExternalChangeButton::Dismiss),
+        "test precondition: Dismiss is still the default focus"
+    );
+
+    let _ = super::update(&mut state, Message::ExternalChangeReloadPressed);
+
+    assert!(
+        state.modal.is_none(),
+        "clicking Reload must close the modal"
+    );
+    assert_eq!(
+        active_document_text(&state),
+        "external edit",
+        "clicking Reload must take disk's real current content, discarding the local edit"
+    );
+}
+
+/// RFC-040 PR-040-B: the real, clickable "Approve once" button --
+/// same real-decide round trip
+/// `deciding_the_promoted_dialog_sends_a_real_decision_and_updates_the_stored_request`
+/// already proves for `Enter`, constructed with focus starting on
+/// `Reject` to prove the click reaches `ApproveOnce` regardless.
+#[test]
+fn clicking_approve_once_sends_a_real_decision_regardless_of_current_focus() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-approve-click");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    let request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    let proposal_id = state.approval_proposal_ids[&request.id].clone();
+
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog::for_test(
+        request.clone(),
+        proposal_id,
+        ApprovalDialogButton::Reject,
+    ))));
+    let _ = super::update(&mut state, Message::ApprovalApproveOncePressed);
+
+    assert!(state.modal.is_none(), "clicking must close the dialog");
+    let stored = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    assert_eq!(
+        stored.decision,
+        tekstide_core::domain::ApprovalDecision::ApprovedOnce,
+        "clicking Approve once must decide ApprovedOnce even though focus started on Reject -- \
+         got {stored:?}"
+    );
+}
+
+/// RFC-040 PR-040-B: the real, clickable "Reject" button -- the other
+/// half of `clicking_approve_once_sends_a_real_decision_regardless_of_current_focus`,
+/// constructed with focus starting on `ApproveOnce` to prove the same
+/// thing in the other direction. Unlike every other modal in this crate,
+/// neither of this dialog's buttons is `ModalDismiss`-equivalent
+/// (RFC-022 PR-022-E), so both needed their own click message.
+#[test]
+fn clicking_reject_sends_a_real_decision_regardless_of_current_focus() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-reject-click");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    launch_real_managed_agent_run(&mut state);
+    poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    let request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    let proposal_id = state.approval_proposal_ids[&request.id].clone();
+
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog::for_test(
+        request.clone(),
+        proposal_id,
+        ApprovalDialogButton::ApproveOnce,
+    ))));
+    let _ = super::update(&mut state, Message::ApprovalRejectPressed);
+
+    assert!(state.modal.is_none(), "clicking must close the dialog");
+    let stored = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    assert_eq!(
+        stored.decision,
+        tekstide_core::domain::ApprovalDecision::Rejected,
+        "clicking Reject must decide Rejected even though focus started on ApproveOnce -- got \
+         {stored:?}"
+    );
+}
+
+/// RFC-040 PR-040-B: the real, clickable "Grant" button -- same
+/// real-audited grant `trust_grant_dialog_requires_moving_focus_and_activating_to_grant`
+/// already proves for `Tab` then `Enter`. Focus starts on `Cancel` (the
+/// dialog's own default, `what-the-trust-dialog-must-say.md` §2) and is
+/// never moved by hand -- the click alone must be enough.
+#[test]
+fn clicking_grant_grants_trust_for_real_regardless_of_current_focus() {
+    let (mut state, project_id) = state_with_a_real_project("trust-dialog-grant-click");
+
+    press_trust_settings_action(&mut state);
+    match state.modal.as_ref() {
+        Some(ModalContent::TrustGrant(modal)) => {
+            assert_eq!(
+                modal.focus,
+                TrustGrantButton::Cancel,
+                "test precondition: Cancel is still the default focus"
+            );
+        }
+        other => panic!("expected an open TrustGrant dialog, got {other:?}"),
+    }
+
+    let _ = super::update(&mut state, Message::TrustGrantGrantPressed);
+
+    assert!(
+        state.modal.is_none(),
+        "clicking Grant must close the dialog"
+    );
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "clicking Grant must grant trust for real even though focus started on Cancel"
+    );
+}
+
+/// RFC-040 PR-040-B: the real, clickable "Purge" button -- same
+/// real-file-removal proof `purging_transcripts_through_a_real_key_sequence_removes_the_real_file`
+/// already establishes for `Tab` then `Enter`. Focus starts on `Cancel`
+/// (`what-purge-must-remove.md`'s own required default) and is never
+/// moved by hand.
+#[test]
+fn clicking_purge_removes_the_real_file_regardless_of_current_focus() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("purge-real-file-click");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let state_root = fresh_state_root_dir();
+
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "transcript-marker-script",
+        "Transcript Marker Script (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: transcript_marker_script_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    attempt_agent_run_launch_with_profile_and_state_root(
+        &mut state,
+        profile,
+        Some(state_root.clone()),
+    )
+    .expect("a resolvable Supervised profile should launch the real marker script");
+
+    let (project_id, agent_run_id, terminal_id) = capture_evidence_run_identifiers(&state);
+    let expected_transcript_file = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(agent_run_id.as_str())
+        .join("transcript.log");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        let marker_written = std::fs::read(&expected_transcript_file)
+            .map(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .contains("TEKSTIDE-TRANSCRIPT-CAPTURE-EVIDENCE-MARKER")
+            })
+            .unwrap_or(false);
+        if marker_written {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "test precondition: the real transcript file never appeared with its marker"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    press_transcript_purge_key(&mut state);
+    match state.modal.as_ref() {
+        Some(ModalContent::TranscriptPurge(modal)) => {
+            assert_eq!(
+                modal.focus,
+                TranscriptPurgeButton::Cancel,
+                "test precondition: Cancel is still the default focus"
+            );
+        }
+        other => panic!("expected an open TranscriptPurge dialog, got {other:?}"),
+    }
+    let _ = super::update(&mut state, Message::TranscriptPurgePressed);
+
+    assert!(
+        state.modal.is_none(),
+        "clicking Purge must close the dialog"
+    );
+    assert!(
+        !expected_transcript_file.exists(),
+        "clicking Purge must remove the real transcript file even though focus started on \
+         Cancel, got one still at {}",
+        expected_transcript_file.display()
+    );
+}
+
+/// RFC-040 PR-040-B: the real, clickable "Close" button -- same
+/// real-termination-and-two-phase-audit proof
+/// `confirming_the_close_terminates_the_real_process_and_removes_the_project`
+/// already establishes for `Tab` then `Enter`. Focus starts on `Cancel`
+/// (RFC-039's own required default, §4a: closing is irreversible) and is
+/// never moved by hand. `Cancel`'s own click is not tested separately
+/// here: `project_close_dialog_view`'s own `button_line` wires it to the
+/// literal `Message::ModalDismiss` `Escape` already sends (see that
+/// function's own doc comment), so
+/// `escaping_the_close_confirmation_also_records_a_cancelled_decision`
+/// already proves it by construction, not merely by coincidence of
+/// behaviour.
+#[test]
+fn clicking_close_terminates_the_real_process_regardless_of_current_focus() {
+    let (mut state, project_id, terminal_id) =
+        state_with_a_real_terminal_on_its_own_project("close-confirm-click");
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+    match &state.modal {
+        Some(ModalContent::ProjectClose(modal)) => {
+            assert_eq!(
+                modal.focus,
+                ProjectCloseButton::Cancel,
+                "test precondition: Cancel is still the default focus"
+            );
+        }
+        other => panic!("expected the confirmation open, got {other:?}"),
+    }
+
+    let _ = super::update(&mut state, Message::ProjectCloseClosePressed);
+
+    assert!(state.modal.is_none());
+    assert!(
+        state.app_shell.state().project(&project_id).is_none(),
+        "clicking Close must actually remove the project even though focus started on Cancel"
+    );
+    assert!(
+        !state
+            .terminal_panes
+            .iter()
+            .any(|pane| pane.terminal_id() == &terminal_id),
+        "the real terminal's pane must be gone, not orphaned"
+    );
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let mut records: Vec<_> = audit_store
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::SafeCloseDecision),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .collect();
+    records.reverse();
+    assert_eq!(
+        records.len(),
+        2,
+        "a confirmed close writes exactly two phases: {records:?}"
+    );
+    assert_eq!(
+        records[0].outcome,
+        tekstide_core::audit::AuditOutcome::Authorized
+    );
+    assert_eq!(
+        records[1].outcome,
+        tekstide_core::audit::AuditOutcome::Applied,
+        "a clean real shell exit must record Applied, not Failed: {records:?}"
+    );
+}
+
+/// RFC-040 PR-040-B: a real, clickable folder-browser row -- the mouse
+/// equivalent of `enter_navigates_into_a_subdirectory_and_back_up_via_the_parent_row`,
+/// constructed with `highlight` left at its default (row 0, the `Parent`
+/// row when one exists) to prove the click reaches the clicked row
+/// regardless of what is currently highlighted.
+#[test]
+fn clicking_a_row_navigates_into_it_regardless_of_current_highlight() {
+    let mut state = state_with(ApplicationShell::new());
+    let base = fresh_project_dir("browse-nav-click-base");
+    let child = base.join("child");
+    std::fs::create_dir(&child).expect("real child directory must be creatable");
+
+    let modal = folder_browser_modal_fixture(&base);
+    assert_eq!(
+        modal.highlight, 0,
+        "test precondition: highlight starts at row 0"
+    );
+    let rows = crate::surface::explorer::visible_browse_rows(&modal.scan);
+    let child_row_index = rows
+        .iter()
+        .position(|row| {
+            matches!(row, crate::surface::explorer::BrowseRow::Node(node) if node.name == "child")
+        })
+        .expect("the freshly created child directory must appear in the scan");
+    assert_ne!(
+        child_row_index, 0,
+        "test precondition: the child row is not already highlighted, so the click must move it"
+    );
+    state.modal = Some(ModalContent::FolderBrowser(modal));
+
+    let _ = super::update(
+        &mut state,
+        Message::FolderBrowserRowPressed(child_row_index),
+    );
+
+    let expected_child = child.canonicalize().expect("child must be canonicalizable");
+    match &state.modal {
+        Some(ModalContent::FolderBrowser(modal)) => {
+            assert_eq!(modal.scan.current_dir, expected_child);
+            assert_eq!(modal.highlight, 0, "highlight must reset after navigating");
+        }
+        other => panic!("clicking a row must navigate into it, keeping the modal open: {other:?}"),
+    }
 }

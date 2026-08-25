@@ -984,6 +984,60 @@ pub enum Message {
     ModalFocusPrevious,
     ModalActivate,
     ModalDismiss,
+    /// RFC-040 PR-040-B: the real, clickable "Accept" button on the
+    /// paste confirmation dialog -- `iced`'s own click dispatch, the
+    /// same mouse-is-outside-the-keyboard-router reasoning
+    /// `OpenFolderBrowserButtonPressed` already established. Its own
+    /// arm in `update` sets `focus` to `Accept` and calls
+    /// [`activate_current_modal`], the exact function `Enter` already
+    /// calls -- not a second, parallel decision path. "Reject" has no
+    /// message of its own: it is button-for-button identical to
+    /// `ModalDismiss` (Escape), so its own button dispatches that
+    /// message directly.
+    PasteConfirmAcceptPressed,
+    /// RFC-040 PR-040-B: the external-change dialog's real "Reload"
+    /// button -- same shape as [`Message::PasteConfirmAcceptPressed`].
+    /// "Dismiss" dispatches `ModalDismiss` directly, for the same
+    /// reason "Reject" above does.
+    ExternalChangeReloadPressed,
+    /// RFC-040 PR-040-B: the approval dialog's real "Approve once"
+    /// button. Unlike every other modal here, *neither* of this
+    /// dialog's buttons is `ModalDismiss`-equivalent (RFC-022 PR-022-E:
+    /// both focus positions are real decisions), so both get their own
+    /// message.
+    ApprovalApproveOncePressed,
+    /// RFC-040 PR-040-B: the approval dialog's real "Reject" button --
+    /// see [`Message::ApprovalApproveOncePressed`]'s doc for why this
+    /// one, alone among the "second button" cases in this enum, is not
+    /// just `ModalDismiss`.
+    ApprovalRejectPressed,
+    /// RFC-040 PR-040-B: the trust-grant dialog's real "Grant" button --
+    /// same shape as [`Message::PasteConfirmAcceptPressed`]. "Cancel"
+    /// dispatches `ModalDismiss` directly.
+    TrustGrantGrantPressed,
+    /// RFC-040 PR-040-B: the transcript-purge dialog's real "Purge"
+    /// button -- same shape as [`Message::PasteConfirmAcceptPressed`].
+    /// "Cancel" dispatches `ModalDismiss` directly.
+    TranscriptPurgePressed,
+    /// RFC-040 PR-040-B: the project-close dialog's real "Close" button
+    /// -- same shape as [`Message::PasteConfirmAcceptPressed`]. "Cancel"
+    /// dispatches `ModalDismiss` directly -- the literal same message
+    /// `Escape` already sends, which is what proves this dialog's own
+    /// `Cancelled` audit record is identical by click or by key: both
+    /// paths are the same `Message` value, not just the same outcome.
+    ProjectCloseClosePressed,
+    /// RFC-040 PR-040-B: a real, clickable folder-browser row --
+    /// `usize` is the row's index into `visible_browse_rows`, the same
+    /// index `highlight` already tracks. Its own arm sets `highlight`
+    /// to this index and calls [`activate_current_modal`], the exact
+    /// function `Enter` already calls for this modal -- a click
+    /// navigates into the row exactly the way pressing `Enter` with it
+    /// highlighted already does, through the same
+    /// [`navigate_folder_browser`] call. The "commit this directory"
+    /// button (`Space`'s own action) reuses
+    /// `Message::FolderBrowserChooseCurrentDirectory` directly rather
+    /// than adding a second message for it.
+    FolderBrowserRowPressed(usize),
     /// RFC-015 PR-015-F: a synthetic measurement keystroke arrived; the
     /// `Instant` is when the measurement subscription first saw it, not
     /// when `update` gets around to handling it -- the gap between the
@@ -1174,6 +1228,110 @@ pub enum Message {
     CloseProjectTabPressed(tekstide_core::project::ProjectId),
 }
 
+/// RFC-040 PR-040-B: the one place a modal's own decision is made,
+/// shared by `Enter` (`Message::ModalActivate`) and every modal's new
+/// click button -- a click sets `focus` to the button that was pressed,
+/// then calls this exact function, so a decision reached by mouse runs
+/// through the identical code a decision reached by keyboard already
+/// did, never a second, parallel copy of the same logic.
+fn activate_current_modal(state: &mut State) {
+    match state.modal.take() {
+        Some(ModalContent::PasteConfirmation(modal)) if modal.focus == PasteConfirmButton::Accept => {
+            write_terminal_input(state, &modal.target, modal.content.as_bytes());
+        }
+        // RFC-019 PR-019-D: Reload re-opens the document fresh --
+        // `open_active_project_text_document` takes disk's current
+        // content and drops local edits, the only way past a
+        // conflict `TextDocument::save()` itself provides. Any other
+        // focus (Dismiss), or `ModalDismiss` (Escape), closes
+        // the modal without touching the file at all -- the same
+        // "every dismissal path defaults to not overwriting" shape
+        // the paste dialog's own Reject/Escape arms already hold.
+        Some(ModalContent::ExternalChange(modal))
+            if modal.focus == ExternalChangeButton::Reload =>
+        {
+            let _ = state
+                .app_shell
+                .open_active_project_text_document(&modal.relative_path);
+        }
+        // RFC-022 PR-022-E: unlike Paste/ExternalChange above, *both*
+        // of this dialog's own focus positions are real decisions --
+        // there is no "closes without consequence" reading for
+        // Approve/Reject the way Dismiss/anything-but-Reload is for
+        // the other two. `decide_approval` records whichever one
+        // focus landed on.
+        Some(ModalContent::Approval(dialog)) => {
+            let decision = match dialog.focus {
+                ApprovalDialogButton::ApproveOnce => {
+                    tekstide_core::approval::SimpleDecision::ApprovedOnce
+                }
+                ApprovalDialogButton::Reject => tekstide_core::approval::SimpleDecision::Rejected,
+            };
+            decide_approval(state, *dialog, decision);
+        }
+        // RFC-032: the paste dialog's shape, not the approval
+        // dialog's -- only `Grant` is a real decision. Any other
+        // focus (`Cancel`), or `ModalDismiss` (Escape), closes
+        // without granting anything.
+        Some(ModalContent::TrustGrant(modal)) if modal.focus == TrustGrantButton::Grant => {
+            apply_workspace_trust_grant(state, &modal);
+        }
+        // RFC-033 PR-033-C: the paste dialog's shape again --
+        // only `Purge` is a real decision. Any other focus
+        // (`Cancel`), or `ModalDismiss` (Escape), closes
+        // without deleting anything.
+        Some(ModalContent::TranscriptPurge(modal))
+            if modal.focus == TranscriptPurgeButton::Purge =>
+        {
+            apply_transcript_purge(state, &modal);
+        }
+        // RFC-039 PR-039-C: unlike every guarded arm above,
+        // `ProjectCloseModal` has no "closes without
+        // consequence" reading at all -- `Cancel` is a real
+        // decision too, `safe_close_decision`'s own `Cancelled`
+        // outcome, not a silent drop. This guarded arm handles
+        // `Close`; the unguarded `ProjectClose` arm a few lines
+        // below catches `Cancel` (the guard having failed falls
+        // through to the next matching pattern, the same
+        // mechanism every other guarded arm here relies on).
+        Some(ModalContent::ProjectClose(modal)) if modal.focus == ProjectCloseButton::Close => {
+            apply_project_close_confirmation(state, &modal);
+        }
+        Some(ModalContent::ProjectClose(modal)) => {
+            record_project_close_cancelled(state, &modal.project_id);
+        }
+        // RFC-038 PR-038-G: unlike every arm above, this one
+        // does not represent a final decision -- `Enter` (or a row
+        // click, RFC-040 PR-040-B) navigates the browser, it does not
+        // close it. `modal` is `state.modal.take()`'s own owned value
+        // (this whole match runs against it, not a
+        // `state.modal.as_mut()` borrow), so it must be explicitly put
+        // back; every other arm's implicit "stays closed" is what this
+        // one deliberately does not do.
+        Some(ModalContent::FolderBrowser(mut modal)) => {
+            navigate_folder_browser(&mut modal);
+            state.modal = Some(ModalContent::FolderBrowser(modal));
+        }
+        Some(ModalContent::LayerDemo { .. })
+        | Some(ModalContent::PasteConfirmation(_))
+        | Some(ModalContent::ExternalChange(_))
+        | Some(ModalContent::TrustGrant(_))
+        | Some(ModalContent::TranscriptPurge(_))
+        // RFC-038 PR-038-C: nothing to activate -- closes the
+        // same way `ModalDismiss` does, the same "no real
+        // decision for this arm" shape every other no-op case
+        // above already has.
+        | Some(ModalContent::Help)
+        | None => {}
+    }
+    // RFC-022 PR-022-E, response 227: re-evaluate after every
+    // activation, not only a real approval decision -- any
+    // `ModalActivate` closes whatever modal was open (its own
+    // action, or a no-op focus), freeing the slot the same way
+    // `ModalDismiss` does below.
+    evaluate_promotion(state);
+}
+
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
     // RFC-022 PR-022-E ("the arrival model"), response 227: a promoted
     // approval dialog briefly ignores modal input after appearing, so a
@@ -1189,6 +1347,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             | Message::ModalFocusPrevious
             | Message::ModalActivate
             | Message::ModalDismiss
+            // RFC-040 PR-040-B: the only two messages a click on *this*
+            // dialog's own buttons can ever produce -- extending the
+            // same brief-ignore-window protection to the mouse the same
+            // way it already covers `Enter`/`Escape`/`Tab`.
+            | Message::ApprovalApproveOncePressed
+            | Message::ApprovalRejectPressed
     ) && let Some(ModalContent::Approval(dialog)) = state.modal.as_ref()
         && dialog
             .ignore_input_until
@@ -1535,108 +1699,54 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         // without writing anything. Escape defaulting to "not pasting"
         // holds structurally: `ModalDismiss`'s arm never touches the
         // write path at all, for either modal kind.
-        Message::ModalActivate => {
-            match state.modal.take() {
-                Some(ModalContent::PasteConfirmation(modal))
-                    if modal.focus == PasteConfirmButton::Accept =>
-                {
-                    write_terminal_input(state, &modal.target, modal.content.as_bytes());
-                }
-                // RFC-019 PR-019-D: Reload re-opens the document fresh --
-                // `open_active_project_text_document` takes disk's current
-                // content and drops local edits, the only way past a
-                // conflict `TextDocument::save()` itself provides. Any other
-                // focus (Dismiss), or `ModalDismiss` (Escape) below, closes
-                // the modal without touching the file at all -- the same
-                // "every dismissal path defaults to not overwriting" shape
-                // the paste dialog's own Reject/Escape arms already hold.
-                Some(ModalContent::ExternalChange(modal))
-                    if modal.focus == ExternalChangeButton::Reload =>
-                {
-                    let _ = state
-                        .app_shell
-                        .open_active_project_text_document(&modal.relative_path);
-                }
-                // RFC-022 PR-022-E: unlike Paste/ExternalChange above, *both*
-                // of this dialog's own focus positions are real decisions --
-                // there is no "closes without consequence" reading for
-                // Approve/Reject the way Dismiss/anything-but-Reload is for
-                // the other two. `decide_approval` records whichever one
-                // focus landed on.
-                Some(ModalContent::Approval(dialog)) => {
-                    let decision = match dialog.focus {
-                        ApprovalDialogButton::ApproveOnce => {
-                            tekstide_core::approval::SimpleDecision::ApprovedOnce
-                        }
-                        ApprovalDialogButton::Reject => {
-                            tekstide_core::approval::SimpleDecision::Rejected
-                        }
-                    };
-                    decide_approval(state, *dialog, decision);
-                }
-                // RFC-032: the paste dialog's shape, not the approval
-                // dialog's -- only `Grant` is a real decision. Any other
-                // focus (`Cancel`), or `ModalDismiss` (Escape) below,
-                // closes without granting anything.
-                Some(ModalContent::TrustGrant(modal)) if modal.focus == TrustGrantButton::Grant => {
-                    apply_workspace_trust_grant(state, &modal);
-                }
-                // RFC-033 PR-033-C: the paste dialog's shape again --
-                // only `Purge` is a real decision. Any other focus
-                // (`Cancel`), or `ModalDismiss` (Escape) below, closes
-                // without deleting anything.
-                Some(ModalContent::TranscriptPurge(modal))
-                    if modal.focus == TranscriptPurgeButton::Purge =>
-                {
-                    apply_transcript_purge(state, &modal);
-                }
-                // RFC-039 PR-039-C: unlike every guarded arm above,
-                // `ProjectCloseModal` has no "closes without
-                // consequence" reading at all -- `Cancel` is a real
-                // decision too, `safe_close_decision`'s own `Cancelled`
-                // outcome, not a silent drop. This guarded arm handles
-                // `Close`; the unguarded `ProjectClose` arm a few lines
-                // below catches `Cancel` (the guard having failed falls
-                // through to the next matching pattern, the same
-                // mechanism every other guarded arm here relies on).
-                Some(ModalContent::ProjectClose(modal))
-                    if modal.focus == ProjectCloseButton::Close =>
-                {
-                    apply_project_close_confirmation(state, &modal);
-                }
-                Some(ModalContent::ProjectClose(modal)) => {
-                    record_project_close_cancelled(state, &modal.project_id);
-                }
-                // RFC-038 PR-038-G: unlike every arm above, this one
-                // does not represent a final decision -- `Enter`
-                // navigates the browser, it does not close it. `modal`
-                // is `state.modal.take()`'s own owned value (this whole
-                // match runs against it, not a `state.modal.as_mut()`
-                // borrow), so it must be explicitly put back; every
-                // other arm's implicit "stays closed" is what this one
-                // deliberately does not do.
-                Some(ModalContent::FolderBrowser(mut modal)) => {
-                    navigate_folder_browser(&mut modal);
-                    state.modal = Some(ModalContent::FolderBrowser(modal));
-                }
-                Some(ModalContent::LayerDemo { .. })
-                | Some(ModalContent::PasteConfirmation(_))
-                | Some(ModalContent::ExternalChange(_))
-                | Some(ModalContent::TrustGrant(_))
-                | Some(ModalContent::TranscriptPurge(_))
-                // RFC-038 PR-038-C: nothing to activate -- closes the
-                // same way `ModalDismiss` does, the same "no real
-                // decision for this arm" shape every other no-op case
-                // above already has.
-                | Some(ModalContent::Help)
-                | None => {}
+        Message::ModalActivate => activate_current_modal(state),
+        Message::PasteConfirmAcceptPressed => {
+            if let Some(ModalContent::PasteConfirmation(modal)) = state.modal.as_mut() {
+                modal.focus = PasteConfirmButton::Accept;
             }
-            // RFC-022 PR-022-E, response 227: re-evaluate after every
-            // activation, not only a real approval decision -- any
-            // `ModalActivate` closes whatever modal was open (its own
-            // action, or a no-op focus), freeing the slot the same way
-            // `ModalDismiss` does below.
-            evaluate_promotion(state);
+            activate_current_modal(state);
+        }
+        Message::ExternalChangeReloadPressed => {
+            if let Some(ModalContent::ExternalChange(modal)) = state.modal.as_mut() {
+                modal.focus = ExternalChangeButton::Reload;
+            }
+            activate_current_modal(state);
+        }
+        Message::ApprovalApproveOncePressed => {
+            if let Some(ModalContent::Approval(dialog)) = state.modal.as_mut() {
+                dialog.focus = ApprovalDialogButton::ApproveOnce;
+            }
+            activate_current_modal(state);
+        }
+        Message::ApprovalRejectPressed => {
+            if let Some(ModalContent::Approval(dialog)) = state.modal.as_mut() {
+                dialog.focus = ApprovalDialogButton::Reject;
+            }
+            activate_current_modal(state);
+        }
+        Message::TrustGrantGrantPressed => {
+            if let Some(ModalContent::TrustGrant(modal)) = state.modal.as_mut() {
+                modal.focus = TrustGrantButton::Grant;
+            }
+            activate_current_modal(state);
+        }
+        Message::TranscriptPurgePressed => {
+            if let Some(ModalContent::TranscriptPurge(modal)) = state.modal.as_mut() {
+                modal.focus = TranscriptPurgeButton::Purge;
+            }
+            activate_current_modal(state);
+        }
+        Message::ProjectCloseClosePressed => {
+            if let Some(ModalContent::ProjectClose(modal)) = state.modal.as_mut() {
+                modal.focus = ProjectCloseButton::Close;
+            }
+            activate_current_modal(state);
+        }
+        Message::FolderBrowserRowPressed(index) => {
+            if let Some(ModalContent::FolderBrowser(modal)) = state.modal.as_mut() {
+                modal.highlight = index;
+            }
+            activate_current_modal(state);
         }
         Message::ModalDismiss => {
             // RFC-039 PR-039-C: Escape on a `ProjectClose` dialog is a
@@ -3043,6 +3153,16 @@ fn handle_project_board_row_key(state: &mut State, key: &input::KeyPress) {
 /// `a_bad_path_renders_a_notice_and_the_application_keeps_running`
 /// already proves for a typed path.
 fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project::ProjectId) {
+    // RFC-040 PR-040-B: `opaque(center(...))` already makes this button
+    // unreachable by a real click while a modal is open (`view`'s own
+    // `stack!` puts the scrim on top, full-window) -- this guard does
+    // not depend on that layout fact holding, the same
+    // defense-in-depth reasoning `attempt_close_project_tab` already
+    // established (RFC-039 PR-039-C) and `SubscriptionMode::for_modal`
+    // plus the terminal-write-site guard already apply to keyboard.
+    if state.modal.is_some() {
+        return;
+    }
     state.project_board_row_highlight = 0;
     let Some(restored) = state
         .app_shell
@@ -3088,6 +3208,15 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
 /// silent no-op -- the same precedent `reopen_recent_project`'s own
 /// `FocusedExisting` arm already sets for an equivalent impossible case.
 fn switch_to_project_tab(state: &mut State, project_id: &tekstide_core::project::ProjectId) {
+    // RFC-040 PR-040-B: see `reopen_recent_project`'s own doc for why
+    // this guard exists alongside `opaque`'s layout capture rather than
+    // relying on it alone. Harmless to the keyboard route this function
+    // also serves: `SubscriptionMode::for_modal` already keeps `Enter`
+    // on the tab strip from reaching here while a modal is open, so
+    // this guard changes nothing about it.
+    if state.modal.is_some() {
+        return;
+    }
     let _ = state.app_shell.switch_active_project(project_id);
     ensure_explorer_scanned(state);
 }
@@ -3099,6 +3228,13 @@ fn switch_to_project_tab(state: &mut State, project_id: &tekstide_core::project:
 /// converge on the same `AppCommand::OpenProjectBoard` dispatch, not
 /// three independent copies of it.
 fn go_to_project_board(state: &mut State) {
+    // RFC-040 PR-040-B: see `reopen_recent_project`'s own doc. Harmless
+    // to the `Ctrl+Alt+P`/`Enter`-on-strip keyboard routes this function
+    // also serves, for the same reason `switch_to_project_tab`'s guard
+    // is.
+    if state.modal.is_some() {
+        return;
+    }
     state.app_shell.dispatch(AppCommand::OpenProjectBoard);
     ensure_explorer_scanned(state);
 }
@@ -3595,6 +3731,12 @@ fn record_new_project_added(state: &State, project_id: tekstide_core::project::P
 /// `attempt_terminal_launch`'s own "no active project" branch already
 /// sets, rather than opening a modal with nothing real to show.
 fn open_folder_browser(state: &mut State) {
+    // RFC-040 PR-040-B: see `reopen_recent_project`'s own doc. Harmless
+    // to the `Ctrl+Alt+B` keyboard route this function also serves, for
+    // the same reason `switch_to_project_tab`'s guard is.
+    if state.modal.is_some() {
+        return;
+    }
     let start = starting_browse_directory();
     if let Ok(scan) = tekstide_core::project::root::browse_directory(
         &start,
@@ -5724,6 +5866,14 @@ fn help_modal_view(state: &State) -> Element<'_, Message> {
         );
     }
 
+    // RFC-040 PR-040-B: this modal's own real, clickable close control
+    // -- no decision to make (unlike every other modal here), so it
+    // dispatches `ModalDismiss` directly, the same message `Escape`
+    // already sends.
+    lines = lines.push(
+        button(text(state.catalog.get("help-dialog-close")).size(state.theme.font_size_body()))
+            .on_press(Message::ModalDismiss),
+    );
     lines = lines
         .push(text(state.catalog.get("help-dialog-hint")).size(state.theme.font_size_status()));
 
@@ -5749,6 +5899,7 @@ fn folder_browser_modal_view<'a>(
         modal.highlight,
         &state.catalog,
         &state.theme,
+        Message::FolderBrowserRowPressed,
     ));
 
     if modal.navigate_failed {
@@ -5769,6 +5920,19 @@ fn folder_browser_modal_view<'a>(
         lines = lines.push(text(notice).size(state.theme.font_size_body()));
     }
 
+    // RFC-040 PR-040-B: `Space`'s own real, clickable equivalent --
+    // dispatches the literal same message `Space` already sends
+    // (`choose_current_browsed_directory`, `Message::
+    // FolderBrowserChooseCurrentDirectory`'s own handler), not a
+    // second, parallel commit path.
+    lines = lines.push(
+        button(
+            text(state.catalog.get("browse-dialog-choose-button"))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(Message::FolderBrowserChooseCurrentDirectory),
+    );
+
     lines = lines
         .push(text(state.catalog.get("browse-dialog-hint")).size(state.theme.font_size_status()));
 
@@ -5776,9 +5940,20 @@ fn folder_browser_modal_view<'a>(
 }
 
 fn layer_composition_demo_modal(state: &State, focus: ModalButton) -> Element<'_, Message> {
+    // RFC-040 PR-040-B: neither button here has ever had a real
+    // decision to record (this modal's own doc: "still scaffolding"),
+    // and `activate_current_modal`'s own catch-all arm treats
+    // `Enter` on either target identically to `Escape` -- so both
+    // buttons dispatch `ModalDismiss` directly, the literal same
+    // message the keyboard path already sends, rather than adding a
+    // click message that would just call the same no-op.
     let button_line = |target: ModalButton, label_key: &str| {
         let marker = if focus == target { "> " } else { "  " };
-        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+        button(
+            text(format!("{marker}{}", state.catalog.get(label_key)))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(Message::ModalDismiss)
     };
 
     modal_dialog_box(
@@ -5824,9 +5999,19 @@ fn paste_confirmation_modal_view<'a>(
     state: &'a State,
     modal: &'a PasteConfirmationModal,
 ) -> Element<'a, Message> {
-    let button_line = |target: PasteConfirmButton, label_key: &str| {
+    // RFC-040 PR-040-B: `Accept` dispatches its own click message
+    // (`activate_current_modal` makes the real decision, same as
+    // `Enter`); `Reject` dispatches `ModalDismiss` directly -- the same
+    // message `Escape` already sends, since this dialog's own
+    // `ModalActivate` arm treats any focus but `Accept` identically to
+    // dismissal.
+    let button_line = |target: PasteConfirmButton, label_key: &str, on_press: Message| {
         let marker = if modal.focus == target { "> " } else { "  " };
-        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+        button(
+            text(format!("{marker}{}", state.catalog.get(label_key)))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(on_press)
     };
 
     let (preview, truncated) = paste_preview(&modal.content);
@@ -5850,8 +6035,22 @@ fn paste_confirmation_modal_view<'a>(
                 .into(),
         );
     }
-    lines.push(button_line(PasteConfirmButton::Accept, "paste-confirm-dialog-accept").into());
-    lines.push(button_line(PasteConfirmButton::Reject, "paste-confirm-dialog-reject").into());
+    lines.push(
+        button_line(
+            PasteConfirmButton::Accept,
+            "paste-confirm-dialog-accept",
+            Message::PasteConfirmAcceptPressed,
+        )
+        .into(),
+    );
+    lines.push(
+        button_line(
+            PasteConfirmButton::Reject,
+            "paste-confirm-dialog-reject",
+            Message::ModalDismiss,
+        )
+        .into(),
+    );
     lines.push(
         text(state.catalog.get("paste-confirm-dialog-hint"))
             .size(state.theme.font_size_status())
@@ -6345,6 +6544,15 @@ fn apply_workspace_trust_grant(state: &mut State, modal: &TrustGrantModal) {
 /// the safe direction). `AuditCoordinator::revoke_project_trust`'s first
 /// production caller.
 fn revoke_workspace_trust(state: &mut State) {
+    // RFC-040 PR-040-B: see `reopen_recent_project`'s own doc. Unlike
+    // `open_trust_grant_dialog`/`open_transcript_purge_dialog` above,
+    // this handler never had a modal guard before -- it does not open a
+    // dialog of its own, so the pre-existing "never replace an open
+    // modal" reasoning never applied to it, even though the same
+    // mouse-exclusivity requirement now does.
+    if state.modal.is_some() {
+        return;
+    }
     let Some(project_id) = state
         .app_shell
         .state()
@@ -6371,6 +6579,12 @@ fn revoke_workspace_trust(state: &mut State) {
 /// this toggle, only for `transcript_purge` (PR-033-D), and this is the
 /// safe direction the same way revocation is.
 fn toggle_transcript_capture_declined(state: &mut State) {
+    // RFC-040 PR-040-B: see `revoke_workspace_trust`'s own doc, right
+    // above -- the same "never had a modal guard because it never
+    // opened a dialog" gap.
+    if state.modal.is_some() {
+        return;
+    }
     let Some(project_id) = state
         .app_shell
         .state()
@@ -6560,9 +6774,17 @@ pub(crate) fn approval_dialog_body(
 /// Called from `view()` as of response 220/227's "the arrival model" --
 /// `ModalContent::Approval`'s own render arm.
 fn approval_dialog_view<'a>(state: &'a State, dialog: &'a ApprovalDialog) -> Element<'a, Message> {
-    let button_line = |target: ApprovalDialogButton, label_key: &str| {
+    // RFC-040 PR-040-B: unlike every other dialog's `button_line`,
+    // neither button here is `ModalDismiss`-equivalent (RFC-022
+    // PR-022-E: both focus positions are real decisions), so both take
+    // their own click message.
+    let button_line = |target: ApprovalDialogButton, label_key: &str, on_press: Message| {
         let marker = if dialog.focus == target { "> " } else { "  " };
-        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+        button(
+            text(format!("{marker}{}", state.catalog.get(label_key)))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(on_press)
     };
 
     let lines: Vec<Element<'_, Message>> = vec![
@@ -6579,8 +6801,18 @@ fn approval_dialog_view<'a>(state: &'a State, dialog: &'a ApprovalDialog) -> Ele
         text(state.catalog.get("approval-dialog-cooperative-notice"))
             .size(state.theme.font_size_body())
             .into(),
-        button_line(ApprovalDialogButton::ApproveOnce, "approval-dialog-approve").into(),
-        button_line(ApprovalDialogButton::Reject, "approval-dialog-reject").into(),
+        button_line(
+            ApprovalDialogButton::ApproveOnce,
+            "approval-dialog-approve",
+            Message::ApprovalApproveOncePressed,
+        )
+        .into(),
+        button_line(
+            ApprovalDialogButton::Reject,
+            "approval-dialog-reject",
+            Message::ApprovalRejectPressed,
+        )
+        .into(),
         text(state.catalog.get("approval-dialog-hint"))
             .size(state.theme.font_size_status())
             .into(),
@@ -7189,9 +7421,16 @@ fn trust_grant_dialog_view<'a>(
     state: &'a State,
     modal: &'a TrustGrantModal,
 ) -> Element<'a, Message> {
-    let button_line = |target: TrustGrantButton, label_key: &str| {
+    // RFC-040 PR-040-B: `Grant` dispatches its own click message;
+    // `Cancel` dispatches `ModalDismiss` directly -- same reasoning as
+    // `paste_confirmation_modal_view`'s own `button_line`.
+    let button_line = |target: TrustGrantButton, label_key: &str, on_press: Message| {
         let marker = if modal.focus == target { "> " } else { "  " };
-        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+        button(
+            text(format!("{marker}{}", state.catalog.get(label_key)))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(on_press)
     };
 
     let lines: Vec<Element<'_, Message>> = vec![
@@ -7201,8 +7440,18 @@ fn trust_grant_dialog_view<'a>(
         text(trust_grant_dialog_body(&state.catalog, modal))
             .size(state.theme.font_size_body())
             .into(),
-        button_line(TrustGrantButton::Grant, "trust-grant-dialog-grant").into(),
-        button_line(TrustGrantButton::Cancel, "trust-grant-dialog-cancel").into(),
+        button_line(
+            TrustGrantButton::Grant,
+            "trust-grant-dialog-grant",
+            Message::TrustGrantGrantPressed,
+        )
+        .into(),
+        button_line(
+            TrustGrantButton::Cancel,
+            "trust-grant-dialog-cancel",
+            Message::ModalDismiss,
+        )
+        .into(),
         text(state.catalog.get("trust-grant-dialog-hint"))
             .size(state.theme.font_size_status())
             .into(),
@@ -7233,9 +7482,16 @@ fn transcript_purge_dialog_view<'a>(
     state: &'a State,
     modal: &'a TranscriptPurgeModal,
 ) -> Element<'a, Message> {
-    let button_line = |target: TranscriptPurgeButton, label_key: &str| {
+    // RFC-040 PR-040-B: `Purge` dispatches its own click message;
+    // `Cancel` dispatches `ModalDismiss` directly -- same reasoning as
+    // `paste_confirmation_modal_view`'s own `button_line`.
+    let button_line = |target: TranscriptPurgeButton, label_key: &str, on_press: Message| {
         let marker = if modal.focus == target { "> " } else { "  " };
-        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+        button(
+            text(format!("{marker}{}", state.catalog.get(label_key)))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(on_press)
     };
 
     let lines: Vec<Element<'_, Message>> = vec![
@@ -7248,11 +7504,13 @@ fn transcript_purge_dialog_view<'a>(
         button_line(
             TranscriptPurgeButton::Purge,
             "transcript-purge-dialog-purge",
+            Message::TranscriptPurgePressed,
         )
         .into(),
         button_line(
             TranscriptPurgeButton::Cancel,
             "transcript-purge-dialog-cancel",
+            Message::ModalDismiss,
         )
         .into(),
         text(state.catalog.get("transcript-purge-dialog-hint"))
@@ -7309,9 +7567,18 @@ fn project_close_dialog_view<'a>(
     state: &'a State,
     modal: &'a ProjectCloseModal,
 ) -> Element<'a, Message> {
-    let button_line = |target: ProjectCloseButton, label_key: &str| {
+    // RFC-040 PR-040-B: `Close` dispatches its own click message;
+    // `Cancel` dispatches `ModalDismiss` directly -- the literal same
+    // message `Escape` already sends, which is what proves this
+    // dialog's own `Cancelled` audit record is identical by click or by
+    // key (see `Message::ProjectCloseClosePressed`'s own doc).
+    let button_line = |target: ProjectCloseButton, label_key: &str, on_press: Message| {
         let marker = if modal.focus == target { "> " } else { "  " };
-        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+        button(
+            text(format!("{marker}{}", state.catalog.get(label_key)))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(on_press)
     };
 
     let lines: Vec<Element<'_, Message>> = vec![
@@ -7324,8 +7591,18 @@ fn project_close_dialog_view<'a>(
         text(project_close_dialog_reasons_line(&state.catalog, modal))
             .size(state.theme.font_size_body())
             .into(),
-        button_line(ProjectCloseButton::Close, "project-close-dialog-close").into(),
-        button_line(ProjectCloseButton::Cancel, "project-close-dialog-cancel").into(),
+        button_line(
+            ProjectCloseButton::Close,
+            "project-close-dialog-close",
+            Message::ProjectCloseClosePressed,
+        )
+        .into(),
+        button_line(
+            ProjectCloseButton::Cancel,
+            "project-close-dialog-cancel",
+            Message::ModalDismiss,
+        )
+        .into(),
         text(state.catalog.get("project-close-dialog-hint"))
             .size(state.theme.font_size_status())
             .into(),
@@ -7338,9 +7615,16 @@ fn external_change_modal_view<'a>(
     state: &'a State,
     modal: &'a ExternalChangeModal,
 ) -> Element<'a, Message> {
-    let button_line = |target: ExternalChangeButton, label_key: &str| {
+    // RFC-040 PR-040-B: `Reload` dispatches its own click message;
+    // `Dismiss` dispatches `ModalDismiss` directly -- same reasoning as
+    // `paste_confirmation_modal_view`'s own `button_line`.
+    let button_line = |target: ExternalChangeButton, label_key: &str, on_press: Message| {
         let marker = if modal.focus == target { "> " } else { "  " };
-        text(format!("{marker}{}", state.catalog.get(label_key))).size(state.theme.font_size_body())
+        button(
+            text(format!("{marker}{}", state.catalog.get(label_key)))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(on_press)
     };
 
     let lines: Vec<Element<'_, Message>> = vec![
@@ -7357,11 +7641,13 @@ fn external_change_modal_view<'a>(
         button_line(
             ExternalChangeButton::Reload,
             "external-change-dialog-reload",
+            Message::ExternalChangeReloadPressed,
         )
         .into(),
         button_line(
             ExternalChangeButton::Dismiss,
             "external-change-dialog-dismiss",
+            Message::ModalDismiss,
         )
         .into(),
         text(state.catalog.get("external-change-dialog-hint"))

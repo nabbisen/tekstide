@@ -314,11 +314,11 @@ transcript-purge, command-approval, and project-close dialogs (RFC-018,
 RFC-019, RFC-032, RFC-033, RFC-022, RFC-039); the developer-only demo modal
 gated behind an environment variable still exists too. Of those six, only the
 approval dialog is unreachable in practice, and because no AI CLI speaks the
-protocol that would raise it — not because it is unbuilt. Every modal here,
-including the project-close dialog, is reachable and completable by keyboard
-only — its own decision buttons are not yet mouse-clickable, a known,
-disclosed limitation (`rfcs/handoffs/039-interaction-model-and-visible-affordances/affordance-audit.md`),
-not particular to any one of them.
+protocol that would raise it — not because it is unbuilt. Every modal's own
+decision is now also reachable and completable by mouse (RFC-040 PR-040-B):
+each has a real, clickable button for every choice it offers, routed through
+the same code its own `Enter`/`Escape` handling already used, not a second,
+parallel path.
 
 ## Local Data and Privacy
 

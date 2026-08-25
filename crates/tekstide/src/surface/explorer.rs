@@ -16,7 +16,7 @@
 //! `tekstide-core`'s, already bounded by `FileExplorerScanPolicy`; this
 //! module only renders what it is given.
 
-use iced::widget::{column, container, text};
+use iced::widget::{button, column, container, text};
 use iced::{Element, Length};
 
 use tekstide_core::project::ProjectExplorerStatus;
@@ -233,52 +233,61 @@ pub(crate) fn browse_row_line(catalog: &Catalog, row: BrowseRow<'_>) -> String {
     }
 }
 
-/// The direct analogue of [`tree_lines`]: the currently-browsed
-/// directory's own path first (untrusted -- a real path on a real
-/// filesystem can contain anything a file name can), then every row
-/// with its focus marker, then a truncation notice if core's scan was
-/// bounded.
-pub(crate) fn browse_tree_lines(
-    catalog: &Catalog,
-    scan: &DirectoryBrowseScan,
-    highlight: usize,
-) -> Vec<String> {
-    let current = text_safety::quote_untrusted(&scan.current_dir.display().to_string());
-    let mut lines = vec![catalog.get_with_args(
-        "browse-dialog-current",
-        &CatalogArgs::new().untrusted("path", &current),
-    )];
-
-    let rows = visible_browse_rows(scan);
-    if rows.is_empty() {
-        lines.push(catalog.get("browse-empty"));
-    }
-    for (index, row) in rows.into_iter().enumerate() {
-        let marker = if index == highlight { "> " } else { "  " };
-        lines.push(format!("{marker}{}", browse_row_line(catalog, row)));
-    }
-    if scan.truncated {
-        lines.push(catalog.get("browse-truncated-notice"));
-    }
-    lines
-}
-
-/// No `Message` interest of its own, matching [`view`]'s own shape --
-/// navigation is driven by the modal keyboard messages `shell.rs`
-/// already routes to every modal (`ModalFocusNext`/`ModalFocusPrevious`/
-/// `ModalActivate`), not by anything this function constructs.
-pub fn browse_view<'a, Message: 'a>(
-    scan: &DirectoryBrowseScan,
+/// RFC-040 PR-040-B: each row is now a real, clickable button --
+/// `on_row_click` is the same "surface renders the data, `shell.rs`
+/// supplies the message" split [`crate::surface::board::row_view`]'s
+/// own `open_message` parameter already established, generalized to a
+/// closure since a row's message carries *which* row (its index),
+/// unlike that single-button case. Navigation itself is still driven
+/// by `Enter`/`ModalActivate` for the keyboard path; this closure's own
+/// message goes through the identical modal-activation call (`shell.rs`'s
+/// own `activate_current_modal`) after setting `highlight` to the
+/// clicked row (see
+/// `Message::FolderBrowserRowPressed`'s own doc in `shell.rs`), not a
+/// second, parallel navigation path.
+pub fn browse_view<'a, Message: 'a + Clone>(
+    scan: &'a DirectoryBrowseScan,
     highlight: usize,
     catalog: &'a Catalog,
     theme: &'a Theme,
+    on_row_click: impl Fn(usize) -> Message + 'a,
 ) -> Element<'a, Message> {
-    let lines = browse_tree_lines(catalog, scan, highlight);
-    let rows: Vec<Element<'a, Message>> = lines
-        .into_iter()
-        .map(|line| text(line).size(theme.font_size_body()).into())
-        .collect();
-    column(rows).spacing(4).into()
+    let current = text_safety::quote_untrusted(&scan.current_dir.display().to_string());
+    let mut lines: Vec<Element<'a, Message>> = vec![
+        text(catalog.get_with_args(
+            "browse-dialog-current",
+            &CatalogArgs::new().untrusted("path", &current),
+        ))
+        .size(theme.font_size_body())
+        .into(),
+    ];
+
+    let rows = visible_browse_rows(scan);
+    if rows.is_empty() {
+        lines.push(
+            text(catalog.get("browse-empty"))
+                .size(theme.font_size_body())
+                .into(),
+        );
+    }
+    for (index, row) in rows.into_iter().enumerate() {
+        let marker = if index == highlight { "> " } else { "  " };
+        let label = format!("{marker}{}", browse_row_line(catalog, row));
+        lines.push(
+            button(text(label).size(theme.font_size_body()))
+                .on_press(on_row_click(index))
+                .into(),
+        );
+    }
+    if scan.truncated {
+        lines.push(
+            text(catalog.get("browse-truncated-notice"))
+                .size(theme.font_size_body())
+                .into(),
+        );
+    }
+
+    column(lines).spacing(4).into()
 }
 
 #[cfg(test)]

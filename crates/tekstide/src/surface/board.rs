@@ -385,11 +385,11 @@ pub(crate) fn row_lines(row: &ProjectBoardRow, catalog: &Catalog) -> Vec<String>
 
 /// [`row_lines`] plus the keyboard cursor's own marker on the name
 /// line, exactly the "> "/"  " convention `surface/explorer.rs`'s own
-/// `tree_lines`/`browse_tree_lines` already use (not `shell::
+/// `tree_lines`/`browse_view` already use (not `shell::
 /// focus_marker`: that helper is private to `shell.rs`, and every
 /// existing render module here keeps its own copy of the same literal
-/// rather than reaching across the surface/shell boundary for it --
-/// see `browse_tree_lines`'s own doc for the precedent). Factored out
+/// rather than reaching across the surface/shell boundary for it).
+/// Factored out
 /// from [`row_view`] for the same testability reason `row_lines` itself
 /// already is: the rendered string, not the `Element` tree.
 pub(crate) fn highlighted_row_lines(

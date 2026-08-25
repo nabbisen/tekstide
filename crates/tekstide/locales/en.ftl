@@ -352,6 +352,10 @@ browse-dialog-title = Choose a project folder
 browse-dialog-current = Current: { $path }
 browse-dialog-hint = Enter opens a folder; Space chooses the folder shown above; Escape cancels.
 browse-navigate-error = Couldn't open that folder.
+# RFC-040 PR-040-B: the real, clickable equivalent of `Space` -- commits
+# `browse-dialog-current`'s own folder, not whichever row is highlighted
+# (that is what a row click does instead, `Enter`'s own mouse equivalent).
+browse-dialog-choose-button = Open this folder
 
 # RFC-019 PR-019-C: the editor's chrome header -- everything here is
 # chrome (RFC-016's editor exception applies only to the text area
@@ -664,6 +668,10 @@ keyboard-help-switch-active-project = Switch to the next open project
 # replaces the Project Board's own former keyboard list.
 help-dialog-title = Keyboard reference
 help-dialog-hint = Escape closes this.
+# RFC-040 PR-040-B: this modal's own real, clickable close control --
+# no decision to make, just a mouse-reachable way out (this dialog had
+# zero buttons of any kind until this slice).
+help-dialog-close = Close
 
 # 0.12.1: rendered beside `status-bar-summary`, on the same line so the
 # status bar's height -- which `content_area_height` subtracts to size

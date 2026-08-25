@@ -37,14 +37,32 @@ Every unchecked line at closeout carries a stated reason.
 
 ## PR-040-B — modals — `what-a-clickable-modal-must-not-become.md`
 
-- [ ] All nine modals can complete and cancel by click.
-- [ ] Keystroke suppression unchanged; no second interaction-capturing layer; no `mouse_area`.
-- [ ] Destructive choice is never default focus; a bare `Enter` does what it did before, ablated.
-- [ ] Click and keystroke share one handler and produce the same audit record —
-      `ProjectCloseModal`'s `Cancelled` proven both ways.
-- [ ] **A control behind an open modal cannot be clicked** — the mouse half of modal exclusivity,
-      never previously tested.
-- [ ] No untrusted value reaches a button label outside the catalog.
+- [x] All nine modals can complete and cancel by click. Seven get a new click message for their
+      destructive/decision-committing half (`activate_current_modal`, shared with `Enter`); the
+      safe half of every two-button modal, plus LayerDemo's two and Help's new "Close", dispatch
+      the literal `Message::ModalDismiss` directly. The folder browser's rows are individually
+      clickable (`Message::FolderBrowserRowPressed`); its commit button reuses the existing
+      `FolderBrowserChooseCurrentDirectory` message. One modal (Help) verified live against a
+      real `iced` click, not only `update()` dispatch — see `qa-evidence.md`.
+- [x] Keystroke suppression unchanged; no second interaction-capturing layer; no `mouse_area` —
+      `no_click_mechanism_other_than_button_on_press_exists_anywhere_in_the_crate` (PR-040-A) still
+      passes unmodified; nothing in this slice introduces a competing capture mechanism, only
+      `button`/`.on_press`, the crate's one recognized click path.
+- [x] Destructive choice is never default focus; a bare `Enter` does what it did before, ablated —
+      no default-focus code changed this slice; every existing default-focus test re-verified
+      green across three runs (`qa-evidence.md`).
+- [x] Click and keystroke share one handler and produce the same audit record —
+      `ProjectCloseModal`'s `Cancelled` proven both ways: `Cancel`'s own button dispatches the
+      literal `Message::ModalDismiss` `Escape` already sends (the same `Message` value, not two
+      paths that happen to agree), so the existing `escaping_the_close_confirmation_also_records_
+      a_cancelled_decision` already proves it by construction.
+- [x] **A control behind an open modal cannot be clicked** — the mouse half of modal exclusivity,
+      never previously tested. `a_control_behind_an_open_modal_cannot_be_clicked`, plus an
+      explicit `state.modal.is_some()` guard now on all ten background click handlers (six newly
+      added this slice), ablated.
+- [x] No untrusted value reaches a button label outside the catalog — every new button's label is
+      `state.catalog.get(...)`/`catalog.get_with_args(...)` text, the same construction every
+      existing modal label already used; nothing routes a raw string into a button label.
 
 ## PR-040-C — controls
 
