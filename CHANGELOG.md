@@ -1,64 +1,103 @@
 # Changelog
 
-## 0.13.0 - There Is Now Something to Do
+## 0.13.0 - Something To Do, And A Way To Do It
 
-Status: released on 2026-08-24.
+Status: unreleased.
 
-**`0.12.1` made the product describe itself; it still could not act.** A user starting
-`tekstide` with no argument saw an honest empty board and a full keyboard reference — and no way
-to actually open a project without leaving the window to retype a path at a shell prompt. This
-release is RFC-038's own fix: a real path field, a real folder browser, a keyboard reference
-reachable from anywhere, and a one-key way back into a project you already had open.
+**`0.12.1` made the product describe itself. It still could not be used.** A user starting
+`tekstide` with no argument saw an honest empty board, a full keyboard reference, and no way to
+open a project without leaving the window. Five keybindings were live and every one of them was
+the *only* route to what it did.
 
-### Added
+This release is three RFCs' worth of answer to that: you can open a project, move between
+projects, close one, see what an agent changed — and do nearly all of it with a mouse, because
+eleven of the thirteen things this application can do now have a control you can see.
 
-- **A path field on the Project Board**, focused by construction the moment the board is empty,
-  and reachable on a populated board too via `Ctrl+Alt+O` for a second project. Every keystroke
-  routes through the same reviewed input path every other key in this application does; a failed
-  path renders a bounded, escaped diagnostic and leaves the field editable, never exits.
-- **A real, clickable "Browse..." button** next to the field — the first genuine
-  `iced::widget::button` in this crate — opening a keyboard- and mouse-operable folder browser
-  (`Ctrl+Alt+B`) that lets a project be chosen by navigating the filesystem, never by typing a
-  path. Directories only; the chosen folder goes through the exact same entry point the field
-  uses, with the same audit record and the same `Restricted`-by-default outcome.
-- **A keyboard reference reachable from anywhere** (`Ctrl+Alt+K`), including from inside a
-  project's own Terminal Immersion mode, where no route back to any help existed before. Derived
-  directly from the same policy the input layer dispatches on, so it cannot drift from what a key
-  actually does.
-- **A previously-opened project can be reopened without retyping its path.** The Project Board
-  already remembered recent projects and rendered them as rows; this release adds the missing
-  action — `Up`/`Down` to highlight a remembered row, `Enter` or a real click on its own "Open"
-  button to reopen it, one key, no typing.
+### Added — opening and moving between projects
+
+- **A path field on the Project Board**, focused the moment the board is empty, and reachable on
+  a populated board via `Ctrl+Alt+O`. A failed path renders a bounded, escaped diagnostic and
+  leaves the field editable; it never exits.
+- **A folder browser** (`Ctrl+Alt+B`, or the **Browse…** button) — choose a project by navigating
+  the filesystem rather than typing a path. `Enter` moves into a folder, `Space` chooses the one
+  shown.
+- **Reopen a remembered project with one key.** The board already listed recent projects; now
+  `Enter` on a highlighted row, or its own **Open** button, reopens it.
+- **A project tab strip** in the top bar: which projects are open, which is active, a permanent
+  **Projects** tab back to the board, and `×` to close one. `Ctrl+Alt+N` cycles.
+- **Closing a project** — the first time this has been possible from the application at all. A
+  project with nothing running closes immediately. One with live terminals or an agent run raises
+  a confirmation naming **what will be lost** by count, and identifying the project by its
+  **canonical path** rather than its display name, so two similarly-named projects cannot be
+  confused at the moment it matters.
+
+### Added — seeing what an agent run changed
+
+- **A change review surface** (`Ctrl+Alt+D`, or **Change Review** in Trust Settings). Since
+  `0.11.0` this product has detected what an agent run changed and been unable to show it.
+
+  **It renders metadata, not a diff**: file paths, counts, detection status, review state. It
+  says so on the surface itself, along with the limits that matter more than the feature —
+  detection is conservative and excludes `.git/`, `target/` and `node_modules/`, so a change an
+  agent makes in a git hook is not reported. A *truncated scan* and *nothing changed* are
+  rendered as different facts, because they are.
+
+### Added — you can use it with a mouse
+
+- **Eleven of thirteen actions now have a visible control**, up from three. Launching a terminal,
+  switching modes, saving a file, starting an AI CLI run, opening Trust Settings, Help, the
+  AgentRun report, Approval History — all had keyboard-only routes and now have buttons where the
+  action applies.
+- **Every dialog can be finished or abandoned with a mouse.** Previously all nine were
+  keyboard-only for their own decision — several of them *opened* by a button, so a user arrived
+  with a mouse and was stranded.
+- **A Help modal** (`Ctrl+Alt+K`) reachable from anywhere, including from inside Terminal
+  Immersion, where no route to any help existed.
+
+The two actions that remain keyboard-only are deliberate and recorded as such, not overlooked.
 
 ### Fixed (security)
 
-- **A project's cached trust label could be restored with no confirmation against the durable
-  audit store**, outside of the one point at startup this was previously checked. Concretely: a
-  user who once granted a project trust, closed it, and later reopened it by any route other than
-  the original command line — retyping its path, browsing to it, or (as of this release) the new
-  one-key reopen — got `Trusted` back on the strength of a user-writable cache file alone, with
-  nothing behind it. Fixed at all three non-command-line routes a project can open through; each
-  now re-confirms against the audit store the same way a command-line-opened project already did.
+- **A project's cached trust label could be restored without confirmation against the audit
+  store.** A user who granted a project trust, closed it, and later reopened it by any route
+  other than the original command line — retyping the path, browsing to it, or the new one-key
+  reopen — got `Trusted` back on the strength of a **user-writable cache file alone**. Fixed at
+  all three routes; each now re-confirms against the audit store the way a command-line-opened
+  project already did.
+
+### Fixed
+
+- **Tekstide could leak shell processes.** A panicking terminal left its shell running with
+  nothing owning it; at scale this exhausted the system's pseudo-terminal pool. Terminals now
+  terminate their process group when dropped. **A related gap remains and is disclosed below.**
+- **`close_project` could never report a project safe to close** — its resource assessment had no
+  way to reach a "known" state, so the capability was unreachable even once wired.
+- Two duplicated rows in the README's keyboard reference.
 
 ### Breaking changes
 
 - **`ProjectBoardEmptyState`'s `primary_action` and `secondary_action` fields are removed** from
   `tekstide-core`'s public API. They held pre-baked English for two actions — "Add Project",
-  "Open from path" — that were never reachable from anywhere; `0.12.1` already stopped rendering
-  them, and this release removes the fields themselves. Any external caller constructing or
-  matching on `ProjectBoardEmptyState` by its full field set will need to drop both.
+  "Open from path" — that were never reachable from anywhere. `0.12.1` stopped rendering them;
+  this release removes the fields. Any external caller constructing or reading them will not
+  compile.
 
 ### Known limitations
 
-- **The remembered-projects cache is only written at startup.** Reopening a project mid-session
-  updates the live session (and its confirmed trust) but not the on-disk cache's own timestamps
-  until the next process start happens to rewrite it.
-- **Adding a second project through `Ctrl+Alt+O` does not switch to it.** It lands on the board;
-  the originally active project stays active. Switching which project is active has no live
-  binding yet.
-- Unchanged from `0.12.1`: the configuration system loads nothing, no screen-reader support, no
-  cross-platform evidence beyond Linux, the real Claude Code CLI still never exercised by the
-  test suite, and `NFR-PERF-004` still unverified.
+- **No diff content.** The change review surface shows which files changed, not what changed in
+  them. Reading diff content is a separate, unbuilt piece of work.
+- **A backgrounded job can outlive the terminal that launched it.** Closing a project terminates
+  each terminal's process group — but a job the user backgrounded inside a shell gets its own
+  group, so it survives, and the close is recorded as confirmed. Bounded and disclosed rather
+  than fixed: what "closing a terminal" *should* mean for a job someone deliberately backgrounded
+  is a product decision, not a mechanical one.
+- **Two actions remain keyboard-only** by deliberate convention: pasting into a terminal, and the
+  path field's own shortcut, whose workflow has a visible route through **Browse…**.
+- **A change set produced by a real agent run has never been observed live** — only proven end to
+  end in test, and seen on screen via a seeded change.
+- Unchanged from `0.12.0`: the configuration system loads nothing, so writing a config file has
+  no effect; no screen-reader support; no cross-platform evidence beyond Linux; the real Claude
+  Code CLI still never exercised by the test suite; `NFR-PERF-004` still unverified.
 
 ## 0.12.1 - You Can See What It Does
 
