@@ -25,6 +25,7 @@ resulting pressure, each disclosed separately and each moved past:
 | `command_approval_family_produces_real_durable_audit_records_through_the_pipeline` | request 276 |
 | `shell::tests::a_real_low_risk_proposal_is_received_mirrored_and_stays_queued_without_promoting` | request 296 (2026-08-24) |
 | `approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` | request 326 (2026-08-25) |
+| `shell::tests::change_review_surface_renders_a_real_change_set_from_a_real_agent_run` | request 329 (2026-08-25) — **candidate, not confirmed** |
 
 **The fourth was added 2026-08-24 and the count above was edited with it**, because "three
 distinct tests" is a count, and `ARCHITECTURE.md` records counts as state-asserting text that a
@@ -289,6 +290,17 @@ means the escalation ran and observation was given up on, which is weaker than `
 `TerminatedBySignal`. Narrowing `confirmed` to exclude it, re-checking group emptiness after the
 kill, or renaming the field to what it can support are three answers with different costs.
 Whoever takes the third cause takes this with it.
+
+**The sixth row is a candidate and is marked as one.** Observed **once in ten** full-workspace
+runs by the reviewer, in the same run as `command_approval_family_...` — the co-occurrence is the
+main evidence that it shares their cause rather than being a regression in the slice that
+surfaced it. Not reproduced in nine further workspace runs, four `-p tekstide` runs, or five runs
+in isolation.
+
+**The reviewer did not capture its assertion message**, so what it actually failed on is unknown.
+That is a weaker record than the other five and is stated as such rather than dressed up: if it
+recurs, capture the message first — that is the difference between a sixth symptom and a sixth
+guess.
 
 ## Why it matters beyond tidiness
 
