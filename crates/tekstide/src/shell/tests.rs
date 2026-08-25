@@ -11064,14 +11064,40 @@ fn change_set_summary_fixture(
     omitted_changed_file_count: usize,
     review_state: tekstide_core::domain::ReviewState,
 ) -> tekstide_core::domain::ChangeSetSummary {
+    change_set_summary_fixture_with_detection_omission(
+        detection_status,
+        shown_changed_files,
+        omitted_changed_file_count,
+        0,
+        review_state,
+    )
+}
+
+/// Review response 326: the display-level omission
+/// (`omitted_changed_file_count`, recoverable) and the detection-level
+/// one (`changed_files_omitted_by_detection`, unrecoverable) are two
+/// separate counts, never summed -- this fixture can set both
+/// independently so a test can prove they render as two distinct facts,
+/// simultaneously, the same way `Partial{limit}` and
+/// `omitted_changed_file_count` already had to.
+fn change_set_summary_fixture_with_detection_omission(
+    detection_status: tekstide_core::domain::ChangeDetectionStatus,
+    shown_changed_files: Vec<std::path::PathBuf>,
+    omitted_changed_file_count: usize,
+    changed_files_omitted_by_detection: usize,
+    review_state: tekstide_core::domain::ReviewState,
+) -> tekstide_core::domain::ChangeSetSummary {
     let now = tekstide_core::domain::DomainTimestamp::now_utc();
     tekstide_core::domain::ChangeSetSummary {
         id: tekstide_core::domain::ChangeSetId::new_uuid(),
         project_id: tekstide_core::project::ProjectId::new_uuid(),
         agent_run_id: None,
-        changed_file_count: shown_changed_files.len() + omitted_changed_file_count,
+        changed_file_count: shown_changed_files.len()
+            + omitted_changed_file_count
+            + changed_files_omitted_by_detection,
         shown_changed_files,
         omitted_changed_file_count,
+        changed_files_omitted_by_detection,
         artifact_ref_count: 0,
         detection_source: tekstide_core::domain::ChangeDetectionSource::FilesystemSnapshot,
         detection_status,
@@ -11168,6 +11194,79 @@ fn change_review_detection_status_line_renders_each_status_distinctly() {
         "the complete status must not read as any of the others, got {:?}",
         lines[0]
     );
+}
+
+/// Review response 326's own required correction: the display-level
+/// omission (`omitted_changed_file_count`, recoverable) and the
+/// detection-level one (`changed_files_omitted_by_detection`,
+/// unrecoverable) must render as two distinct lines, never merged into
+/// one number -- proven here with **both true at once**, the exact
+/// composition an earlier version of this code summed into a single,
+/// less honest count.
+#[test]
+fn change_review_omitted_lines_render_as_two_distinct_facts_when_both_are_true() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    use tekstide_core::domain::{ChangeDetectionStatus, ReviewState};
+
+    let summary = change_set_summary_fixture_with_detection_omission(
+        ChangeDetectionStatus::Complete,
+        vec![std::path::PathBuf::from("shown.rs")],
+        3,
+        7,
+        ReviewState::Unreviewed,
+    );
+
+    let omitted_line = super::change_review_omitted_files_line(&catalog, &summary)
+        .expect("a nonzero display-level omission must render a line");
+    let detection_omitted_line =
+        super::change_review_detection_omitted_files_line(&catalog, &summary)
+            .expect("a nonzero detection-level omission must render a line");
+
+    assert_ne!(
+        omitted_line, detection_omitted_line,
+        "the two omission causes must never render as the same text"
+    );
+    assert!(
+        omitted_line.contains('3') && !omitted_line.contains('7'),
+        "the display-level line must name its own count (3), not the detection one (7), got \
+         {omitted_line:?}"
+    );
+    assert!(
+        detection_omitted_line.contains('7') && !detection_omitted_line.contains('3'),
+        "the detection-level line must name its own count (7), not the display one (3), got \
+         {detection_omitted_line:?}"
+    );
+    assert!(
+        !omitted_line.to_lowercase().contains("cannot be recovered"),
+        "the recoverable, display-level line must not borrow the unrecoverable line's own \
+         wording, got {omitted_line:?}"
+    );
+    assert!(
+        detection_omitted_line
+            .to_lowercase()
+            .contains("cannot be recovered"),
+        "the unrecoverable line must say so, not read like the recoverable one, got \
+         {detection_omitted_line:?}"
+    );
+}
+
+/// The zero-case for both lines: `None`, not an empty or zero-valued
+/// line -- the same "rendered only when real" shape the pre-existing
+/// `omitted_changed_file_count > 0` guard already established.
+#[test]
+fn change_review_omitted_lines_are_absent_when_both_are_zero() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    use tekstide_core::domain::{ChangeDetectionStatus, ReviewState};
+
+    let summary = change_set_summary_fixture(
+        ChangeDetectionStatus::Complete,
+        vec![std::path::PathBuf::from("only.rs")],
+        0,
+        ReviewState::Unreviewed,
+    );
+
+    assert!(super::change_review_omitted_files_line(&catalog, &summary).is_none());
+    assert!(super::change_review_detection_omitted_files_line(&catalog, &summary).is_none());
 }
 
 #[test]

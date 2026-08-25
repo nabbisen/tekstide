@@ -15,7 +15,7 @@ created: "2026-08-19"
 > `Child::drop` does not kill the process, so **any test that panics before reaching its own
 > cleanup leaks a shell process**
 
-Since then, **four distinct tests** have been reported failing intermittently under the
+Since then, **five distinct tests** have been reported failing intermittently under the
 resulting pressure, each disclosed separately and each moved past:
 
 | test | first reported |
@@ -24,6 +24,7 @@ resulting pressure, each disclosed separately and each moved past:
 | `approval::tests::coordinator::agent_run_queue_limit_is_enforced_and_only_counts_live_entries` | request 260 |
 | `command_approval_family_produces_real_durable_audit_records_through_the_pipeline` | request 276 |
 | `shell::tests::a_real_low_risk_proposal_is_received_mirrored_and_stays_queued_without_promoting` | request 296 (2026-08-24) |
+| `approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` | request 326 (2026-08-25) |
 
 **The fourth was added 2026-08-24 and the count above was edited with it**, because "three
 distinct tests" is a count, and `ARCHITECTURE.md` records counts as state-asserting text that a
@@ -37,6 +38,19 @@ change touched only `rfc_docs_invariants.rs`, a separate test binary, so it cann
 source. **Not reproduced by the reviewer**, deliberately: this document's own instruction is not
 to chase the symptoms individually, and a 3-in-150 event is not worth a sampling run to
 re-observe what is already diagnosed.
+
+**The fifth, added 2026-08-25, is a different shape than the first four**: it never calls
+`launch_real_managed_agent_run` at all — `is_still_answerable_reflects_the_real_connection_state`
+uses `ApprovalCoordinator::receive` directly with a real socket peer, `drop`s that peer, and
+checks connection state immediately afterward, with no process spawn anywhere in the test itself.
+Disclosed with the same reasoning applied honestly rather than assumed: the change under review
+touched `change_detection.rs`, `changeset.rs`, `session.rs`, and `shell.rs`'s change-review
+rendering — nothing in the approval/coordinator/socket path — so it cannot be the source. What
+plausibly connects it to the same underlying pressure is the assertion's own shape: it depends on
+the OS delivering a socket-close notification promptly enough for an immediate next check to
+observe it, which is exactly the kind of timing this document's diagnosed process-leak pressure
+(leaked shells, leaked PTYs, orphaned process groups) would perturb. Not confirmed as the same
+root cause, only consistent with it — recorded rather than asserted.
 
 Every one of those disclosures was the right individual call — reported rather than re-run
 past, confirmed non-deterministic in isolation, not attributed to the slice that saw it.

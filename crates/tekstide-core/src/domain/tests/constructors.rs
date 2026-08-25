@@ -108,18 +108,24 @@ fn changeset_bounded_summary_reports_metadata_without_content() {
     assert!(!debug_summary.contains("artifact:secret-reference"));
 }
 
-/// RFC-035 PR-035-B: two independent sources of "not everything that
-/// changed is shown" can now both be non-trivial on the same summary --
-/// display-level (`bounded_summary`'s own `path_limit`) and
-/// detection-level (`max_changed_paths`, carried on `ChangeSet` as
-/// `changed_files_omitted_by_detection`). This is the first slice where
-/// that composition is possible; `omitted_changed_file_count` must sum
-/// both rather than reporting only whichever one a caller thought to
-/// ask about, and `changed_file_count` must report the **true** total
-/// (what detection actually found), never merely what happened to be
-/// stored.
+/// RFC-035 PR-035-B, corrected per review response 326: two independent
+/// sources of "not everything that changed is shown" can now both be
+/// non-trivial on the same summary at once -- display-level
+/// (`bounded_summary`'s own `path_limit`, **recoverable**: the paths
+/// still exist in `changed_files`) and detection-level
+/// (`max_changed_paths`, carried as `changed_files_omitted_by_detection`,
+/// **unrecoverable**: `max_changed_paths` dropped those paths before this
+/// `ChangeSet` ever existed). The first slice where that composition is
+/// possible. They are **not summed into one count** -- an initial
+/// implementation did exactly that, and review response 326 required the
+/// correction: a reader must be able to tell "these are a click away"
+/// apart from "these are gone," which one merged number cannot express.
+/// `changed_file_count` alone stays a sum, because it answers a
+/// different question (the **true total**, regardless of why any of it
+/// is not individually listed) and must never under-report what
+/// detection genuinely found.
 #[test]
-fn changeset_bounded_summary_sums_display_and_detection_level_omission() {
+fn changeset_bounded_summary_keeps_display_and_detection_level_omission_separate() {
     let changeset = ChangeSet::unreviewed(
         ProjectId::for_test(1),
         Some(AgentRunId::for_test(1)),
@@ -136,9 +142,14 @@ fn changeset_bounded_summary_sums_display_and_detection_level_omission() {
     );
     assert_eq!(summary.shown_changed_files.len(), 2);
     assert_eq!(
-        summary.omitted_changed_file_count, 6,
-        "1 held back by the display limit (3 stored - 2 shown) plus the 5 detection already \
-         omitted -- both causes, summed, not either one alone"
+        summary.omitted_changed_file_count, 1,
+        "display-level only: 3 stored - 2 shown, recoverable by a larger path_limit -- must not \
+         include the 5 detection-level ones"
+    );
+    assert_eq!(
+        summary.changed_files_omitted_by_detection, 5,
+        "detection-level only, carried through unchanged from the ChangeSet -- unrecoverable, \
+         must not be diluted into the display-level count"
     );
 }
 

@@ -94,22 +94,50 @@ scan-completeness kind (`Partial`). `max_entries`' own `Partial` behaviour is un
 `Partial` scan (baseline or current) still empties `changed_paths` before this check ever runs,
 and still refuses `ChangeSet` creation, exactly as before.
 
-**Threading the count through, not adding a second shape**: `ChangeSet` gained one new field,
-`changed_files_omitted_by_detection`, carried from `DetectedChanges::changed_paths_omitted_by_limit`
-through `add_detected_generated_change_set`'s three construction arms (Strong/Ambiguous/None
-association). `bounded_summary` sums it with its own pre-existing display-level omission
-(`path_limit`) into one `ChangeSetSummary::omitted_changed_file_count`, and adds it into
-`changed_file_count` so the **true** total is reported, never merely what happened to be stored.
+**Threading the count through, not adding a second shape** (revised — see the decision below):
+`ChangeSet` gained one new field, `changed_files_omitted_by_detection`, carried from
+`DetectedChanges::changed_paths_omitted_by_limit` through
+`add_detected_generated_change_set`'s three construction arms (Strong/Ambiguous/None
+association).
+
+**Required decision (review response 326): keep the two omission counts separate, not summed.**
+The first submission of this evidence summed `changed_files_omitted_by_detection` into the
+pre-existing `ChangeSetSummary::omitted_changed_file_count`. The reviewer's finding: the two
+causes are not the same kind of fact. Display-level omission (`bounded_summary`'s own
+`path_limit`) is **recoverable** — the paths are still in `ChangeSet.changed_files`, just past
+the limit a caller asked for. Detection-level omission (`max_changed_paths`) is
+**unrecoverable** — `truncate(max_changed_paths)` dropped those paths before the `ChangeSet`
+ever existed; no larger `path_limit` will ever produce them, because they are nowhere in the
+model. A user reading one merged number cannot tell which is true, on a surface whose entire
+job is showing what an AI agent changed to a human deciding whether to trust it.
+
+**Decided: split.** `ChangeSetSummary` now carries both counts separately —
+`omitted_changed_file_count` (display-level, recoverable) and
+`changed_files_omitted_by_detection` (detection-level, unrecoverable) — and the Change Review
+surface renders them as two distinct lines, only when each is individually nonzero, with wording
+that states the difference (`change-review-omitted-files` vs. `change-review-detection-omitted-files`,
+the latter saying outright "cannot be recovered by showing more"). `changed_file_count` alone
+stays a sum of both, because it answers a different question — the true total — and must never
+under-report what detection genuinely found regardless of which count explains the gap. This is
+the same shape as the already-defended `Partial{limit}` vs. `omitted_changed_file_count`
+distinction, one level finer, and gets the same treatment: two facts, two lines, never one
+number standing in for both.
 
 **Tests**:
 - `tekstide-core`: `detector_keeps_the_first_n_changed_paths_and_reports_the_omitted_count` — 2
   real changes, `max_changed_paths: 1`: `status` stays `Complete`, exactly 1 path kept,
   `changed_paths_omitted_by_limit == 1`.
-- `tekstide-core`: `changeset_bounded_summary_sums_display_and_detection_level_omission` — **both
-  omission sources non-trivial on the same summary at once**, the first slice where that
-  composition is possible: 3 stored, 5 detection-omitted, display `path_limit: 2` →
-  `changed_file_count == 8` (true total), `omitted_changed_file_count == 6` (1 display + 5
-  detection), not either cause alone.
+- `tekstide-core`: `changeset_bounded_summary_keeps_display_and_detection_level_omission_separate`
+  — **both omission sources non-trivial on the same summary at once**, the first slice where
+  that composition is possible: 3 stored, 5 detection-omitted, display `path_limit: 2` →
+  `changed_file_count == 8` (true total, still summed), `omitted_changed_file_count == 1`
+  (display-only), `changed_files_omitted_by_detection == 5` (detection-only, unchanged from what
+  was set) — proving the two stay apart, not that they combine.
+- `tekstide`: `change_review_omitted_lines_render_as_two_distinct_facts_when_both_are_true` —
+  render-level proof, both lines present, different text, each naming only its own count, only
+  the unrecoverable one saying "cannot be recovered."
+  `change_review_omitted_lines_are_absent_when_both_are_zero` — the zero case renders neither
+  line, not an empty or zero-valued one.
 - `projectsession_refuses_changeset_creation_from_non_complete_detection` — rewritten (its old
   fixture used `max_changed_paths` to reach `Partial`, which is no longer possible) to reach
   `Partial` via `max_entries` instead, proving that path's refusal is genuinely unchanged, not
@@ -121,10 +149,10 @@ association). `bounded_summary` sums it with its own pre-existing display-level 
 `"exactly max_changed_paths (1) of the 2 real changes must be kept, not 0 and not 2 — left: 0,
 right: 1"`. Reverted; full `change_detection` module re-run green.
 
-**`Partial { limit }` still distinct from display truncation**: unaffected by this change —
-`change_review_detection_status_line_renders_each_status_distinctly` (RFC-020's own test) still
-passes unchanged, still rendering `Partial{limit}` and `omitted_changed_file_count` as two
-separate lines, never collapsed.
+**`Partial { limit }` still distinct from both display and detection-level truncation**:
+unaffected by this change — `change_review_detection_status_line_renders_each_status_distinctly`
+(RFC-020's own test) still passes unchanged, still rendering `Partial{limit}` on its own line,
+never collapsed into either omission count.
 
 ## Closeout
 
@@ -147,15 +175,25 @@ unaffected by anything here).
 
 ## Gates
 
-`cargo fmt --all -- --check`: clean (after `cargo fmt --all` reformatted one long line in a new
-test). `cargo clippy --workspace --all-targets --all-features -- -D warnings`: clean. Full
-workspace suite, three consecutive runs under default parallelism: 414 tekstide + 741
+Two rounds — the second after review response 326's required split.
+
+**Round 1** (the original, summed submission): `fmt`/`clippy -D warnings` clean; three
+consecutive full-suite runs, 414 tekstide + 741 tekstide-core, clean on runs 1 and 3;
+`command_approval_family_produces_real_durable_audit_records_through_the_pipeline` failed once
+on run 2 — the already-documented socket flake in `test-process-leak.md`, unrelated to this
+diff.
+
+**Round 2** (the split, per the decision above): `cargo fmt --all -- --check` clean (after
+`cargo fmt --all` reformatted one long line). `cargo clippy --workspace --all-targets
+--all-features -- -D warnings` clean. Three consecutive full-suite runs: 416 tekstide + 741
 tekstide-core, clean on runs 1 and 3.
-`command_approval_family_produces_real_durable_audit_records_through_the_pipeline` failed once on
-run 2 — the already-documented socket flake in `test-process-leak.md`, unrelated to this diff
-(no code this slice touches sits anywhere near the approval-channel pipeline that flake is in).
-`git diff --check`: clean. Live GUI: release binary, `TEKSTIDE_CHANGESET_DEMO=1`, fresh project —
-the corrected `change-review-disclosure` text renders exactly as written, in the real running
+`approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` failed
+once on run 2 — a **new** entry in `test-process-leak.md`'s own flake table (fifth test, added
+2026-08-25), disclosed there with the reasoning for why it plausibly shares the same underlying
+cause despite not sharing the first four's exact shape. Unrelated to this diff either way — no
+code this slice touches sits anywhere near the approval/coordinator/socket path. `git diff
+--check`: clean. Live GUI: release binary, `TEKSTIDE_CHANGESET_DEMO=1`, fresh project — the
+corrected `change-review-disclosure` text renders exactly as written, in the real running
 application, not only in `en.ftl`.
 
 ## Known limitations (RFC-035-wide)

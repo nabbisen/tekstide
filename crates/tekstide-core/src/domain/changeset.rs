@@ -135,12 +135,23 @@ impl ChangeSet {
 
     pub fn bounded_summary(&self, path_limit: usize) -> ChangeSetSummary {
         let path_limit = path_limit.min(self.changed_files.len());
-        // RFC-035 PR-035-B: the true total, and the true omission, both
-        // sum the display-level cap (`path_limit`, applied to what is
-        // actually stored) with the detection-level one
-        // (`changed_files_omitted_by_detection`, already excluded from
-        // `changed_files` before this ever runs) -- a reader must never
-        // see a lower total than what detection genuinely found.
+        // Review response 326's own finding, corrected here: this used to
+        // sum the display-level cap with the detection-level one into one
+        // `omitted_changed_file_count`. The total was right; collapsing
+        // the two *causes* into it was not -- they are not the same kind
+        // of fact. A display-level omission is a path still sitting in
+        // `changed_files`, recoverable by any caller asking for a larger
+        // `path_limit`. A detection-level omission
+        // (`changed_files_omitted_by_detection`) was truncated by
+        // `max_changed_paths` before this `ChangeSet` ever existed -- the
+        // paths are nowhere, unrecoverable, and no larger limit brings
+        // them back. This project has defended exactly this shape of
+        // distinction three times already (truncated scan vs. truncated
+        // list); this is that distinction one level finer, so it gets the
+        // same treatment: two counts, not one sum. `changed_file_count`
+        // still reports the **true** total either way -- a reader must
+        // never see a lower total than what detection genuinely found,
+        // regardless of which count explains the gap.
         ChangeSetSummary {
             id: self.id.clone(),
             project_id: self.project_id.clone(),
@@ -152,8 +163,8 @@ impl ChangeSet {
                 .take(path_limit)
                 .cloned()
                 .collect(),
-            omitted_changed_file_count: (self.changed_files.len() - path_limit)
-                + self.changed_files_omitted_by_detection,
+            omitted_changed_file_count: self.changed_files.len() - path_limit,
+            changed_files_omitted_by_detection: self.changed_files_omitted_by_detection,
             artifact_ref_count: self.artifact_refs.len(),
             detection_source: self.detection_source,
             detection_status: self.detection_status,
@@ -221,7 +232,22 @@ pub struct ChangeSetSummary {
     pub agent_run_id: Option<AgentRunId>,
     pub changed_file_count: usize,
     pub shown_changed_files: Vec<PathBuf>,
+    /// Display-level only: paths present in the underlying `ChangeSet`
+    /// but past this summary's own `path_limit`. **Recoverable** -- a
+    /// larger `path_limit` would show them, since they still exist in
+    /// the model. See `changed_files_omitted_by_detection` for the
+    /// other, unrecoverable kind of omission -- review response 326
+    /// requires the two never be summed into one number again.
     pub omitted_changed_file_count: usize,
+    /// Detection-level: paths `detect_filesystem_changes` found but
+    /// never stored at all, because the true count exceeded
+    /// `GeneratedChangeDetectionPolicy::max_changed_paths`
+    /// (`ChangeSet::changed_files_omitted_by_detection`, carried
+    /// forward unchanged). **Unrecoverable** -- these paths are nowhere
+    /// in the model; no larger `path_limit` on this same `ChangeSet`
+    /// will ever produce them. Zero whenever detection never hit that
+    /// limit.
+    pub changed_files_omitted_by_detection: usize,
     pub artifact_ref_count: usize,
     pub detection_source: ChangeDetectionSource,
     pub detection_status: ChangeDetectionStatus,

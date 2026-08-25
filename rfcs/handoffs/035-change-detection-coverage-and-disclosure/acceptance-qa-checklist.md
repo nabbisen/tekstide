@@ -46,13 +46,20 @@ Every unchecked line at closeout carries a stated reason.
 
 - [x] A completed scan over the limit keeps the first N and reports the omitted count.
 - [x] `ChangeSetSummary`'s existing fields populated rather than a second shape added.
-      `ChangeSet::changed_files_omitted_by_detection` (new) feeds `bounded_summary`'s existing
-      `omitted_changed_file_count`/`changed_file_count`, summed with the pre-existing
-      display-level omission.
+      `ChangeSet::changed_files_omitted_by_detection` (new) feeds `changed_file_count` (summed,
+      the true total) and a **new** `ChangeSetSummary::changed_files_omitted_by_detection` field
+      — **not** summed into the pre-existing `omitted_changed_file_count`, per review response
+      326's required decision below.
 - [x] `Partial { limit }` still distinct from display truncation, **tested with both true at
-      once** — the first slice where that is possible.
-      `changeset_bounded_summary_sums_display_and_detection_level_omission`: 3 stored + 5
-      detection-omitted + display cap 2 → `changed_file_count: 8`, `omitted_changed_file_count: 6`.
+      once** — the first slice where that is possible. **Required correction (review response
+      326)**: display-level and detection-level omission are also two distinct facts and must
+      not be summed into each other either — see "Decided: split" in `qa-evidence.md`.
+      `changeset_bounded_summary_keeps_display_and_detection_level_omission_separate`: 3 stored +
+      5 detection-omitted + display cap 2 → `changed_file_count: 8` (true total),
+      `omitted_changed_file_count: 1` (display-only), `changed_files_omitted_by_detection: 5`
+      (detection-only, kept apart). Render-level:
+      `change_review_omitted_lines_render_as_two_distinct_facts_when_both_are_true`,
+      `change_review_omitted_lines_are_absent_when_both_are_zero`.
 - [x] `max_entries` behaviour unchanged.
       `projectsession_refuses_changeset_creation_from_non_complete_detection` rewritten to reach
       `Partial` via `max_entries` (the only way left) and still refuses `ChangeSet` creation.
@@ -68,13 +75,16 @@ Every unchecked line at closeout carries a stated reason.
 - [x] Deferrals stated: `hooksPath`, mid-run triggers. Both in `README.md`; `hooksPath` also in
       `change_detection.rs`'s own doc comments and `rfcs/future-work.md`.
 - [x] Gates: `fmt`, `clippy -D warnings`, full suite **three runs under default parallelism**,
-      `git diff --check`. Clean: 414 tekstide + 741 tekstide-core (runs 1 and 3); see the flake
-      line for run 2.
-- [x] Flakes disclosed against `test-process-leak.md`'s three causes.
-      `command_approval_family_produces_real_durable_audit_records_through_the_pipeline` failed
-      once on run 2 of 3 — the already-documented socket flake, unrelated to this diff (no code
-      this slice touches is anywhere near that pipeline). Runs 1 and 3 clean; not chased further,
-      matching this project's own established disclosure discipline for this specific flake.
+      `git diff --check`. Clean, both before and after the required split: 416 tekstide + 741
+      tekstide-core (runs 1 and 3 of the final round); see the flake line for run 2 of each round.
+- [x] Flakes disclosed against `test-process-leak.md`'s causes (now five, not three — see
+      below). Round 1: `command_approval_family_produces_real_durable_audit_records_through_the_pipeline`
+      failed once on run 2 — already-documented. Round 2 (after the split):
+      `approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state`
+      failed once on run 2 — a **new** fifth entry, added to `test-process-leak.md`'s own table
+      with the reasoning for why it plausibly shares the same cause. Neither flake is related to
+      this diff; not chased further, matching this project's own established disclosure
+      discipline.
 
 ## Final Acceptance Decision
 

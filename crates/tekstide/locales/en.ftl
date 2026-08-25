@@ -664,6 +664,17 @@ change-review-omitted-files = { $count ->
     [one] 1 more changed file is not shown above
    *[other] { $count } more changed files are not shown above
 }
+# RFC-035 PR-035-B, corrected per review response 326: a *third*
+# truncation fact -- `$count` is `ChangeSetSummary::changed_files_omitted_by_detection`,
+# paths a scan found but never stored at all because the true count
+# exceeded `max_changed_paths`. Distinct from `change-review-omitted-files`
+# above: that one is recoverable (the paths exist in the model, just past
+# a display limit); this one is not (the paths are nowhere), and the
+# wording says so rather than reading the same as the recoverable case.
+change-review-detection-omitted-files = { $count ->
+    [one] 1 further changed file was never recorded at all -- the scan capped how many it would track, and this one cannot be recovered by showing more
+   *[other] { $count } further changed files were never recorded at all -- the scan capped how many it would track, and these cannot be recovered by showing more
+}
 change-review-review-state = Review state: { $state ->
     [accepted] Accepted
     [partially-accepted] Partially accepted

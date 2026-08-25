@@ -7744,14 +7744,32 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
     // own **scan** limit above, per the RFC's own required distinction:
     // "a truncated scan is not 'nothing changed.'" Rendered only when
     // real, not as a permanent zero line.
-    if summary.omitted_changed_file_count > 0 {
+    if let Some(omitted_line) = change_review_omitted_files_line(&state.catalog, &summary) {
         lines.push(
-            text(state.catalog.get_with_args(
-                "change-review-omitted-files",
-                &CatalogArgs::new().number("count", summary.omitted_changed_file_count as u64),
-            ))
-            .size(state.theme.font_size_status())
-            .into(),
+            text(omitted_line)
+                .size(state.theme.font_size_status())
+                .into(),
+        );
+    }
+    // RFC-035 PR-035-B, corrected per review response 326: a *third*
+    // truncation fact, distinct from both the scan-level one above
+    // (`change-review-detection-status`'s own `partial` branch) and the
+    // display-level one immediately above this comment.
+    // `changed_files_omitted_by_detection` paths were never stored at
+    // all -- `max_changed_paths` capped them before this `ChangeSet`
+    // existed. Unlike `omitted_changed_file_count`, no larger display
+    // limit will ever recover them, and the wording says so; collapsing
+    // this into the recoverable count above is exactly the mistake this
+    // project has now corrected in the model twice for this same shape
+    // of distinction (scan vs. list) and once for this specific one
+    // (recoverable vs. not).
+    if let Some(detection_omitted_line) =
+        change_review_detection_omitted_files_line(&state.catalog, &summary)
+    {
+        lines.push(
+            text(detection_omitted_line)
+                .size(state.theme.font_size_status())
+                .into(),
         );
     }
 
@@ -7854,6 +7872,44 @@ fn change_review_file_entry_line(catalog: &Catalog, path: &std::path::Path) -> S
         "change-review-file-entry",
         &CatalogArgs::new().untrusted("path", &escaped),
     )
+}
+
+/// The **display**-level omission -- recoverable, since the paths still
+/// exist in the underlying `ChangeSet`, merely past this summary's own
+/// `path_limit`. `None` when there is nothing to say, the same
+/// "rendered only when real, not as a permanent zero line" shape every
+/// other conditional line on this surface uses.
+fn change_review_omitted_files_line(
+    catalog: &Catalog,
+    summary: &tekstide_core::domain::ChangeSetSummary,
+) -> Option<String> {
+    if summary.omitted_changed_file_count == 0 {
+        return None;
+    }
+    Some(catalog.get_with_args(
+        "change-review-omitted-files",
+        &CatalogArgs::new().number("count", summary.omitted_changed_file_count as u64),
+    ))
+}
+
+/// The **detection**-level omission -- unrecoverable, since
+/// `max_changed_paths` dropped these paths before the `ChangeSet` ever
+/// existed. Review response 326: kept as its own line, its own function,
+/// its own catalog key -- never merged with
+/// [`change_review_omitted_files_line`]'s count, because a reader who
+/// sees one merged number cannot tell which paths are a click away and
+/// which are gone.
+fn change_review_detection_omitted_files_line(
+    catalog: &Catalog,
+    summary: &tekstide_core::domain::ChangeSetSummary,
+) -> Option<String> {
+    if summary.changed_files_omitted_by_detection == 0 {
+        return None;
+    }
+    Some(catalog.get_with_args(
+        "change-review-detection-omitted-files",
+        &CatalogArgs::new().number("count", summary.changed_files_omitted_by_detection as u64),
+    ))
 }
 
 fn change_review_state_line(
