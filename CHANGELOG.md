@@ -1,5 +1,133 @@
 # Changelog
 
+## 0.14.0 - What It Changed, And What This Cannot Tell You
+
+Status: released on 2026-08-26.
+
+**`0.13.0` gave the product a change review surface that could not show you a single line of a
+file.** It listed paths, counts and detection status and said so plainly. This release fills that
+in — and, in doing so, found two places where change review had been quietly telling users less
+than it knew, and one place where the audit trail claimed more than it could see.
+
+### Added — see the content of a changed file
+
+- **A change review file row is now a real button.** Selecting one renders that file's content
+  according to what kind of change it was: the whole content for an added file, the current
+  content for a modified one, and nothing at all for a deleted one.
+
+  This machinery — gated, bounded, size-capped, reviewed — has existed in `tekstide-core` since
+  `0.7.0` and had **zero production callers for six releases**. Nothing needed to be designed
+  here; something needed to call it. What was actually missing was the detection result, which
+  the code path that creates a change set discarded the moment it was done with it.
+
+- **A modified file's content is labelled "not a diff", in the words the limitation deserves.**
+  The surface says: *this is the file's current content, not a diff; it cannot show what changed,
+  only what the file looks like now; whether the agent's own edit is still there, was reverted, or
+  was overwritten by something else since, this screen cannot tell you.*
+
+  There is no before/after comparison because the before-bytes were never captured. That is
+  blocked on Git-backed detection, not cancelled, and the surface says which.
+
+- **A stale baseline refuses, and names why.** If the file has moved on since the change was
+  detected, you get a refusal that explains itself rather than content that silently describes a
+  different moment.
+
+- **Every line break in the previewed content is shown escaped, as `<U+000A>`, so a multi-line
+  file renders as one continuous run of text rather than as lines.** File content is untrusted
+  text drawn in trusted chrome — the same rule that escapes a project name or a path — and
+  escaping control characters is what stops a file from forging the interface around it. The
+  consequence was not designed, though: previewing a 300-line source file gives you a wrapped
+  block with `<U+000A>` between every line, not something you would want to read. **The preview is
+  honest but it is not yet readable for real source files**, and the surface itself does not say
+  so. Found by running the release binary against a four-line file during this release's own
+  gate. Preserving line structure while keeping every other character escaped is the obvious next
+  step and has not been designed yet; it is a security decision, not a formatting one.
+
+### Fixed — change detection was blind to git hooks
+
+- **`.git/hooks/` and `.git/config` are now watched.** Change detection excludes `.git/`,
+  `target/` and `node_modules/` — a deliberate default, and a necessary one: walking this repository in
+  full reaches **64,415** entries and **1,506** after those three exclusions. But it meant an agent that installed a
+  `.git/hooks/pre-commit`, or redirected `core.hooksPath`, changed something that would execute on
+  your next commit and **never appeared in change review at all**. The file explorer collapses
+  `.git/` too, so there was no second route by which you would have noticed.
+
+  Everything else under `.git/` — `refs/`, `objects/`, `index` — is still skipped exactly as
+  before. A `core.hooksPath` redirect is **not** followed to its target; watching `.git/config`
+  reports that the hook location changed, which is the fact that matters, and resolving the
+  redirect is separate work that has not been done.
+
+  **If you used the change review surface on `0.13.0` — the only release where it was visible —
+  and read it as what an agent run touched, that answer excluded git hooks.** Detection itself has
+  had this blind spot since `0.11.0`, when it was first wired. Check `.git/hooks/` and
+  `.git/config` in those projects directly: `ls -la .git/hooks/` and `git config --list --local`.
+  Nothing on your disk was changed by this release; what changed is that these paths are now
+  reported.
+
+- **A large change set no longer reports as no change set at all.** Detection caps the changed-path
+  list at 4,096 entries. Over that cap it used to discard the entire list and mark the scan
+  incomplete — and an incomplete scan produces **no change set**, which on the surface is
+  indistinguishable from "the agent changed nothing." An agent run that touched more than 4,096
+  files therefore showed you nothing, silently. It now keeps the first 4,096 and reports the
+  remainder as a count.
+
+  **If an agent run showed no change review entry on `0.13.0`, that was not proof it changed
+  nothing** — a run over the cap looked identical, and the missing change set was never built at
+  all on any release from `0.11.0` on. There is no record to recover; re-check those projects with
+  `git status` if it matters.
+
+- **Two kinds of "not shown" are now two separate lines, never one number.** Files omitted because
+  the surface showed a shorter list are **recoverable** — they are still in the change set. Files
+  omitted because detection capped its own scan are **not** — they were dropped before the change
+  set existed, and no larger limit brings them back. Summing them into a single count meant a
+  reader could not tell which they were looking at, on a surface whose whole job is deciding
+  whether to trust what an agent did.
+
+### Fixed — an audit record that claimed more than it could see
+
+- **`fully_confirmed` on a safe-close audit decision was renamed to
+  `terminal_process_groups_confirmed_empty`, because that is all it ever knew.** When you close a
+  project with live terminals, Tekstide signals the process group it launched and confirms that
+  group is empty. A job you backgrounded inside that terminal (`sleep 30 &`, a build left running)
+  gets its **own** process group from the shell, which that signal never reaches and that check
+  never looks at. So a durable audit record could say a close was fully confirmed while a process
+  that terminal started was still running.
+
+  **No behaviour changed. The predicate is bit-for-bit identical**, and every `applied`/`failed`
+  outcome this project has ever written is unaffected — the field was never itself persisted. What
+  changed is that the name no longer asserts something the check cannot establish, and the doc
+  comment now states both halves: what `true` means, and what it does not.
+
+  **If you closed a project on `0.13.0` and read an `applied` safe-close outcome as "everything
+  that terminal started is gone", that was more than the record could support.** Check with `ps`
+  or `pgrep` for anything you backgrounded. The audit store is at
+  `$XDG_STATE_HOME/tekstide/audit/audit.sqlite3` (`~/.local/state/tekstide/audit/audit.sqlite3` if
+  unset); no record in it is rewritten or invalidated by this release, and nothing needs removing.
+
+  Killing sibling process groups a terminal spawned is a **product decision that has not been
+  made** — a real terminal emulator often leaves them running on purpose, which is `nohup`'s entire
+  reason to exist. It is recorded as open work, not silently pending.
+
+### Documentation
+
+- `crates/tekstide-core/README.md` claimed safe-close audit producers were "defined in the audit
+  schema but not yet wired." They were wired in `0.13.0`. Corrected, and split from
+  configuration-change producers, which genuinely still have no caller. Found by the release
+  gate's own instruction to check **every** README a published crate names, not only the workspace
+  root — the third time that instruction has caught something on that specific page.
+
+### Known limitations, unchanged by this release
+
+- **Still no two-sided diff.** Blocked on Git-backed detection (RFC-030), which does not exist.
+- **Absence of visible change is not absence of change.** The content preview shows a file as it
+  is now, not as the agent left it.
+- **Previewed content is not laid out as lines** — see the escaping note above.
+- **`core.hooksPath` redirects are reported, not followed.**
+- **A backgrounded job survives closing the terminal that started it**, and Tekstide does not yet
+  say so on the close confirmation.
+- **No screen-reader support.** `iced` has no accessibility bridge; this remains out of scope for
+  that reason and no other.
+
 ## 0.13.0 - Something To Do, And A Way To Do It
 
 Status: released on 2026-08-25.
