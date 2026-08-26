@@ -3,10 +3,17 @@ use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
+use super::launch::{processes_in_session, session_confirmed_empty, session_id_of};
 use super::{
     BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalRuntimeError, TerminalRuntimeEvent,
     TerminalRuntimeHandle, TerminationOutcome, TerminationRequest, TerminationSignal,
 };
+
+/// RFC-043 security document §1: "bound your iterations." A defensive
+/// cap, not a realistic limit -- a terminal's own session realistically
+/// holds a handful of processes -- so a pathological session can never
+/// turn the enumerate-then-signal step below into an unbounded loop.
+const MAX_SESSION_SIGNAL_ITERATIONS: usize = 256;
 
 impl LinuxTerminalRuntime {
     pub fn wait_for_exit(
@@ -17,27 +24,61 @@ impl LinuxTerminalRuntime {
         self.wait_for_child_outcome(handle, timeout)
     }
 
+    /// RFC-043 D1/D2: signals the **session**, and nothing else. Every
+    /// job-control process group inside it (a user's or an agent's own
+    /// `&`) is in scope; anything that left the session entirely
+    /// (`nohup`, `disown`, `setsid`) is out of scope **by design** --
+    /// D2's own opt-out, not a gap this routine tries to close.
+    ///
+    /// The sequence RFC-043's own "Decided on acceptance" section
+    /// requires, in this order, because the order is the fix (a
+    /// SIGKILL-first order destroys the one thing -- the shell itself --
+    /// that would otherwise hang up its own jobs cooperatively):
+    ///
+    /// 1. `SIGHUP` the session leader alone (a single pid, never a
+    ///    `-group` target) and wait `hangup_timeout`. An interactive
+    ///    shell with job control on (every shell this runtime launches
+    ///    has it, `spawn_pty_child`'s own `TIOCSCTTY`) hangs up its own
+    ///    background jobs when it is itself hung up -- most of the work
+    ///    is done here, by the shell that already knows what it started.
+    /// 2. Enumerate whoever is left in the session and `SIGKILL` each
+    ///    survivor -- re-verifying, immediately before every signal,
+    ///    that the pid is still a member of this session (security
+    ///    document §1: a pid can exit and be reused by an unrelated
+    ///    process in the gap between enumeration and signalling; leaving
+    ///    an orphan is a bug, killing a stranger is an incident. If the
+    ///    check fails, the pid is left unsignalled). Wait
+    ///    `sigkill_timeout`.
+    /// 3. Re-enumerate to confirm empty -- this observation, and only
+    ///    this one, is what [`TerminalRuntimeEvent::SessionConfirmedEmpty`]
+    ///    reports (D3): never inferred from which signal was sent or
+    ///    which `TerminationOutcome` the session leader itself produced.
     pub fn request_terminate(
         &mut self,
         handle: &TerminalRuntimeHandle,
         request: TerminationRequest,
-        sigterm_timeout: Duration,
+        hangup_timeout: Duration,
         sigkill_timeout: Duration,
     ) -> Result<Vec<TerminalRuntimeEvent>, TerminalRuntimeError> {
-        self.session(handle)?;
+        let session_id = self.session(handle)?.process_group_id;
         let mut events = vec![TerminalRuntimeEvent::TerminationRequested {
             handle: handle.clone(),
             request,
         }];
 
-        if self.send_signal_to_process_group(handle, TerminationSignal::Sigterm)? {
+        if self.signal_session_leader(handle, TerminationSignal::Sighup)? {
             events.push(TerminalRuntimeEvent::TerminationSignalSent {
                 handle: handle.clone(),
-                signal: TerminationSignal::Sigterm,
+                signal: TerminationSignal::Sighup,
             });
         }
 
-        if let Some(outcome) = self.wait_for_process_group_outcome(handle, sigterm_timeout)? {
+        if let Some(outcome) = self.wait_for_session_outcome(handle, session_id, hangup_timeout)? {
+            self.sessions.remove(&handle.terminal_id);
+            events.push(TerminalRuntimeEvent::SessionConfirmedEmpty {
+                handle: handle.clone(),
+                confirmed: true,
+            });
             events.push(TerminalRuntimeEvent::Terminated {
                 handle: handle.clone(),
                 outcome,
@@ -47,26 +88,31 @@ impl LinuxTerminalRuntime {
 
         events.push(TerminalRuntimeEvent::TerminationTimedOut {
             handle: handle.clone(),
-            after_signal: TerminationSignal::Sigterm,
+            after_signal: TerminationSignal::Sighup,
         });
 
-        let sigkill_sent = self.send_signal_to_process_group(handle, TerminationSignal::Sigkill)?;
-        if sigkill_sent {
+        let signalled = signal_session_survivors(session_id, libc::SIGKILL);
+        if signalled > 0 {
             events.push(TerminalRuntimeEvent::TerminationSignalSent {
                 handle: handle.clone(),
                 signal: TerminationSignal::Sigkill,
             });
         }
 
-        if let Some(outcome) = self.wait_for_process_group_outcome(handle, sigkill_timeout)? {
-            let outcome = if sigkill_sent {
+        if let Some(outcome) = self.wait_for_session_outcome(handle, session_id, sigkill_timeout)? {
+            let outcome = if signalled > 0 {
                 TerminationOutcome::KilledAfterTimeout {
-                    initial_signal: TerminationSignal::Sigterm,
+                    initial_signal: TerminationSignal::Sighup,
                     fallback_signal: TerminationSignal::Sigkill,
                 }
             } else {
                 outcome
             };
+            self.sessions.remove(&handle.terminal_id);
+            events.push(TerminalRuntimeEvent::SessionConfirmedEmpty {
+                handle: handle.clone(),
+                confirmed: true,
+            });
             events.push(TerminalRuntimeEvent::Terminated {
                 handle: handle.clone(),
                 outcome,
@@ -74,20 +120,24 @@ impl LinuxTerminalRuntime {
             return Ok(events);
         }
 
-        let process_group_exists = self.process_group_exists(handle)?;
+        // Step 4, named and re-run explicitly rather than relied on from
+        // the wait loop's own last iteration above: this call, and only
+        // this call, is what `SessionConfirmedEmpty` actually rests on.
+        // A grace period expiring with survivors still present reports
+        // `false` here -- not a hopeful `true` inferred from "SIGKILL was
+        // sent."
+        let confirmed = session_confirmed_empty(session_id);
         self.sessions.remove(&handle.terminal_id);
-        let outcome = if process_group_exists {
-            TerminationOutcome::OrphanedUnknown {
-                summary: BoundedRuntimeSummary::new(
-                    "process group remained observable after SIGKILL timeout",
-                ),
-            }
-        } else {
-            TerminationOutcome::OrphanedUnknown {
-                summary: BoundedRuntimeSummary::new(
-                    "process group disappeared before child exit status was collected",
-                ),
-            }
+        events.push(TerminalRuntimeEvent::SessionConfirmedEmpty {
+            handle: handle.clone(),
+            confirmed,
+        });
+        let outcome = TerminationOutcome::OrphanedUnknown {
+            summary: BoundedRuntimeSummary::new(if confirmed {
+                "session confirmed empty only after the grace period had already expired"
+            } else {
+                "session still has live process(es) after SIGKILL and the grace period"
+            }),
         };
         events.push(TerminalRuntimeEvent::Terminated {
             handle: handle.clone(),
@@ -126,12 +176,21 @@ impl LinuxTerminalRuntime {
         }
     }
 
-    fn wait_for_process_group_outcome(
+    /// The session-scoped replacement for the old `-process_group_id`
+    /// polling: returns `Some(outcome)` only once a real `/proc`
+    /// enumeration observes the *session* empty, not merely the session
+    /// leader's own process group -- a backgrounded job in a sibling
+    /// group inside the same session is exactly what the old check could
+    /// not see. Still collects the leader's own real exit status
+    /// opportunistically (`try_child_outcome`), the same as before, so a
+    /// clean `Exited`/`TerminatedBySignal` outcome is reported when one
+    /// is available rather than always falling back to `OrphanedUnknown`.
+    fn wait_for_session_outcome(
         &mut self,
         handle: &TerminalRuntimeHandle,
+        session_id: libc::pid_t,
         timeout: Duration,
     ) -> Result<Option<TerminationOutcome>, TerminalRuntimeError> {
-        let process_group_id = self.session(handle)?.process_group_id;
         let started = Instant::now();
         let mut child_outcome = None;
 
@@ -140,12 +199,12 @@ impl LinuxTerminalRuntime {
                 child_outcome = self.try_child_outcome(handle)?;
             }
 
-            if !process_group_exists_by_id(process_group_id)? {
-                self.sessions.remove(&handle.terminal_id);
+            if session_confirmed_empty(session_id) {
                 return Ok(Some(child_outcome.unwrap_or_else(|| {
                     TerminationOutcome::OrphanedUnknown {
                         summary: BoundedRuntimeSummary::new(
-                            "process group disappeared before child exit status was collected",
+                            "session became empty before the leader's own exit status was \
+                             collected",
                         ),
                     }
                 })));
@@ -174,21 +233,27 @@ impl LinuxTerminalRuntime {
             })
     }
 
-    fn send_signal_to_process_group(
+    /// Signals the session **leader alone** -- a single, positive pid,
+    /// never a `-group`/`-session` target. `self.process_group_id` is
+    /// also the session id (`spawn_pty_child`'s `pre_exec` calls
+    /// `setsid()` before `exec`, making the freshly forked shell both),
+    /// so this is the same value under a different name depending on
+    /// which fact about it a caller cares about.
+    fn signal_session_leader(
         &self,
         handle: &TerminalRuntimeHandle,
         signal: TerminationSignal,
     ) -> Result<bool, TerminalRuntimeError> {
-        let process_group_id = self.session(handle)?.process_group_id;
-        if process_group_id <= 1 {
+        let session_id = self.session(handle)?.process_group_id;
+        if session_id <= 1 {
             return Err(TerminalRuntimeError::Io {
                 summary: BoundedRuntimeSummary::new(format!(
-                    "refusing to signal unsafe process group id: {process_group_id}"
+                    "refusing to signal unsafe session id: {session_id}"
                 )),
             });
         }
 
-        let result = unsafe { libc::kill(-process_group_id, signal_number(signal)) };
+        let result = unsafe { libc::kill(session_id, signal_number(signal)) };
         if result == 0 {
             return Ok(true);
         }
@@ -199,41 +264,57 @@ impl LinuxTerminalRuntime {
         } else {
             Err(TerminalRuntimeError::Io {
                 summary: BoundedRuntimeSummary::new(format!(
-                    "failed to signal terminal process group: {error}"
+                    "failed to signal terminal session leader: {error}"
                 )),
             })
         }
     }
-
-    fn process_group_exists(
-        &self,
-        handle: &TerminalRuntimeHandle,
-    ) -> Result<bool, TerminalRuntimeError> {
-        let process_group_id = self.session(handle)?.process_group_id;
-        process_group_exists_by_id(process_group_id)
-    }
 }
 
-fn process_group_exists_by_id(process_group_id: libc::pid_t) -> Result<bool, TerminalRuntimeError> {
-    let result = unsafe { libc::kill(-process_group_id, 0) };
-    if result == 0 {
-        return Ok(true);
-    }
+/// Enumerates the session and signals every survivor found. Returns how
+/// many were actually signalled.
+fn signal_session_survivors(session_id: libc::pid_t, signal: libc::c_int) -> usize {
+    signal_candidates(
+        session_id,
+        processes_in_session(session_id).into_iter().flatten(),
+        signal,
+    )
+}
 
-    let error = io::Error::last_os_error();
-    match error.raw_os_error() {
-        Some(libc::ESRCH) => Ok(false),
-        Some(libc::EPERM) => Ok(true),
-        _ => Err(TerminalRuntimeError::Io {
-            summary: BoundedRuntimeSummary::new(format!(
-                "failed to inspect terminal process group: {error}"
-            )),
-        }),
+/// The re-verifying signal loop itself, separated from
+/// [`signal_session_survivors`]'s own enumeration so a test can hand it
+/// a *controlled* candidate list -- including a pid deliberately not a
+/// member of `session_id` -- without needing to win a real, inherently
+/// racy PID-reuse timing window to prove the check matters.
+///
+/// Re-verifies, immediately before each individual `kill`, that the pid
+/// is still a member of `session_id` (security document §1: the pid
+/// could have exited and been reused by an unrelated process in the gap
+/// between an earlier enumeration and this signal; if it is no longer a
+/// member, it is left unsignalled rather than risking a stranger --
+/// leaving an orphan is a bug, killing a stranger is an incident).
+/// Bounded by [`MAX_SESSION_SIGNAL_ITERATIONS`], per the same security
+/// document's "bound your iterations."
+pub(super) fn signal_candidates(
+    session_id: libc::pid_t,
+    candidates: impl IntoIterator<Item = libc::pid_t>,
+    signal: libc::c_int,
+) -> usize {
+    let mut signalled = 0;
+    for pid in candidates.into_iter().take(MAX_SESSION_SIGNAL_ITERATIONS) {
+        if session_id_of(pid) != Some(session_id) {
+            continue;
+        }
+        if unsafe { libc::kill(pid, signal) } == 0 {
+            signalled += 1;
+        }
     }
+    signalled
 }
 
 fn signal_number(signal: TerminationSignal) -> libc::c_int {
     match signal {
+        TerminationSignal::Sighup => libc::SIGHUP,
         TerminationSignal::Sigterm => libc::SIGTERM,
         TerminationSignal::Sigkill => libc::SIGKILL,
     }
@@ -245,6 +326,9 @@ fn outcome_from_exit_status(status: ExitStatus) -> TerminationOutcome {
     }
 
     match status.signal() {
+        Some(libc::SIGHUP) => TerminationOutcome::TerminatedBySignal {
+            signal: TerminationSignal::Sighup,
+        },
         Some(libc::SIGTERM) => TerminationOutcome::TerminatedBySignal {
             signal: TerminationSignal::Sigterm,
         },

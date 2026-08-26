@@ -83,6 +83,115 @@ stable across repeated runs. Per this slice's own gate item: "the suite will not
 end of this slice, by design. Say so plainly; do not skip the guard's rollout to keep a green
 run." Said plainly here.
 
-## PR-043-B, PR-043-C
+## PR-043-B — the sequence
 
-Not started.
+### What changed, and where
+
+`termination.rs`'s `request_terminate`, and `launch.rs`'s `RunningTerminal::drop`, both replaced
+with the same sequence:
+
+1. `SIGHUP` the session leader alone (a single, positive pid -- never `-process_group_id`, never
+   `-session_id`). Wait a bounded grace period.
+2. Enumerate the session; `SIGKILL` every survivor, re-verifying immediately before each signal
+   that the pid is still a member (security document §1).
+3. Re-enumerate to confirm empty -- this observation, and only this one, is what
+   `TerminalRuntimeEvent::SessionConfirmedEmpty` reports.
+
+**Both call sites, not only `request_terminate`.** The task breakdown says so explicitly
+("The containment routine, in `request_terminate` and `RunningTerminal::drop`") and a first pass
+here missed it: `Drop`'s own kill logic was left as the old `SIGKILL`-the-process-group-only call,
+with only PR-043-A's diagnostic guard added *after* it. This shipped a genuine gap, caught by
+running the two `FLOOD_SCRIPT` benchmarks (which rely on `Drop`-based cleanup, never call
+`request_terminate`) and watching PR-043-A's own guard still fire against them. `Drop` now runs the
+identical two-phase sequence with short, fixed grace periods (200ms/200ms -- bounded, since this
+runs synchronously during an unrelated panic's unwind and must not hang) instead of
+`request_terminate`'s caller-supplied ones.
+
+`TerminationSignal` gained `Sighup`; `TerminationOutcome::TerminatedBySignal` and
+`outcome_from_exit_status` handle it. `TerminalRuntimeEvent` gained `SessionConfirmedEmpty { handle,
+confirmed }`, pushed exactly once, immediately before `Terminated`.
+
+### A second real bug found while writing the required "false" test
+
+`what-containment-must-not-become.md` §4 requires `false` for "a `/proc` read that failed," not
+just a grace period expiring with survivors. The first version of `processes_in_session` defaulted
+a failed `read_dir("/proc")` to an empty `Vec`, which downstream code then read as "confirmed
+empty" -- the exact unearned confidence that document forbids. Found writing this slice's own
+required negative test, not by inspection. Fixed: `processes_in_session` now returns
+`Option<Vec<pid_t>>` (`None` only when enumeration itself failed, distinct from `Some(vec![])`),
+and a new `session_confirmed_empty` is the one place that turns it into the honest boolean
+(`false` for both "found survivors" and "could not check").
+
+### Ablated, both required points
+
+- **Remove step 1** (temporarily disabled the `SIGHUP` send): the "clean exit" test
+  (`linux_runtime_terminates_session_leader_with_sighup`) still eventually succeeds via the
+  `SIGKILL` fallback, but took the full grace period doing it (2.02s vs near-instant) -- "a slice
+  that adds session enumeration and keeps the SIGKILL-first order will work, badly," measured, not
+  quoted.
+- **Remove the session re-verification** (temporarily disabled the check in `signal_candidates`):
+  `signal_candidates_never_signals_a_pid_outside_the_target_session` fails -- the deliberately
+  unrelated stranger process gets signalled too (`left: 2, right: 1`). Restored, passes again. Not
+  built by winning a real PID-reuse race (inherently flaky); `signal_candidates` was factored out
+  from its own live-enumeration caller specifically so a test could hand it a controlled candidate
+  list including a pid that is definitely not a session member, without needing to race anything.
+
+### Required tests
+
+| Requirement | Test |
+| --- | --- |
+| A real backgrounded job is gone after a real close, by `kill -0` | `a_real_backgrounded_job_is_dead_after_a_real_close` |
+| A `setsid`-detached process survives, asserted on purpose | `a_job_that_leaves_the_session_via_setsid_survives_a_real_close` |
+| Grace period expiring produces `false`, not a hopeful `true` | `session_confirmed_empty_reports_false_when_its_own_enumeration_fails` (see "a second real bug," above, for why this is built the way it is rather than by racing `SIGKILL` reaping speed) |
+| PR-043-A's guard now passes for the benchmark | Both `FLOOD_SCRIPT` benchmarks, and the sigterm-overclaim test, all pass -- see next section |
+
+### Three tests this slice's own fix made false, corrected rather than left stale
+
+Discovered by running the existing suite after the fix landed, not decided in advance:
+
+- `linux_runtime_does_not_overclaim_when_child_outlives_direct_shell_after_sigterm`
+  (`tekstide-core`): its own `trap '' TERM` descendant does not trap `SIGHUP`, so the shell's own
+  job-control hangup now reaps it before any escalation -- `confirmed: true`,
+  `TerminatedBySignal { signal: Sighup }`, no timeout at all. Renamed to
+  `a_real_backgrounded_job_is_dead_after_a_real_close`, rebuilt around a plain `sleep 300 &`
+  scenario (the required test above), with the old scenario's history kept in its own doc comment
+  rather than deleted.
+- `linux_runtime_uses_sigkill_fallback_for_foreground_child_after_sigterm_timeout`
+  (`tekstide-core`): a bare foreground `sleep 30` also turned out not to survive step 1 -- a session
+  leader blocked in a foreground `wait()` still receives and acts on `SIGHUP` immediately.
+  Rewritten around a job that explicitly traps `SIGHUP` (the same shape the overclaim test used for
+  `SIGTERM`), which is what actually needs the `SIGKILL` escalation now.
+- `closing_a_project_with_a_backgrounded_descendant_still_records_applied_while_it_survives`
+  (`tekstide`): identical shape to the first, at the GUI-close level -- the descendant no longer
+  survives. Renamed to `..._kills_it_through_a_real_close`, assertions inverted (was
+  `still_alive`, now `!still_alive`), the now-unneeded manual cleanup `kill -9` removed since
+  nothing survives to clean up.
+
+None of these are broken tests. Each is the fix working on the exact scenario that used to
+demonstrate the defect it fixes -- a real, measured before/after, not an assumption.
+
+### Gate
+
+`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D
+warnings`, `git diff --check`: all clean. **The suite is green again**: 444/444 (`tekstide`),
+746/746 (`tekstide-core`, four new tests), 2/2 (`rfc_docs_invariants`).
+
+Four full-workspace runs (`--no-fail-fast`), `/dev/pts` flat at 13 across every one: three clean
+outright (runs 1, 2, 4); run 3 hit one pre-existing, already-documented flake
+(`approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state`,
+`test-process-leak.md`'s own row 5/6, a socket-timing test unrelated to any file this slice
+touches) that passed on immediate isolated re-run. Not re-run further, per the standing lesson
+about not hammering a shared machine chasing a lucky streak once the property actually being
+tested (a clean, stable `/dev/pts`) already holds.
+
+## PR-043-C
+
+Not started. Owns: the close-confirmation wording (D1 + RFC-034 D4's rule), the
+`terminal_process_groups_confirmed_empty` → `terminal_session_confirmed_empty` rename and its
+audit-side wiring in `shell.rs` (this slice only produced the real
+`TerminalRuntimeEvent::SessionConfirmedEmpty` signal `terminate_project_live_work` will need to
+read from instead of inferring from the outcome variant, as it still does today), and correcting
+the remaining disclosed-limitation text in `test-process-leak.md` and its own doc comments that
+this slice's fix has made stale (the "not fixed here" framing around the backgrounded-job-survives
+defect itself, as distinct from the pool-exhaustion mechanism the fd-inheritance fix already
+closed).

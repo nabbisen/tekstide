@@ -10114,32 +10114,28 @@ fn confirming_the_close_terminates_the_real_process_and_removes_the_project() {
     );
 }
 
-/// `safe-close-confirmation-honesty.md`'s own required evidence: a real
-/// terminal whose shell backgrounds a SIGTERM-ignoring descendant into
-/// its own, separate process group -- the exact real shape response 319
-/// reproduced, and the same shell one-liner
-/// `linux_runtime_does_not_overclaim_when_child_outlives_direct_shell_after_sigterm`
-/// already proves reaches `KilledAfterTimeout` at the
-/// `LinuxTerminalRuntime` level -- closed through the real production
-/// path (`Message::CloseProjectTabPressed`/`ModalActivate`), not
-/// constructed. Proves both halves of the decision this slice made:
-/// the recorded outcome is still `Applied` (`KilledAfterTimeout` is
-/// confirmation of the shell's own process group, exactly like
-/// `Exited`/`TerminatedBySignal` -- not narrowed out), and the
-/// backgrounded descendant is a real, still-alive orphan afterward, by
-/// a real OS-level check rather than an inference from the outcome --
-/// the gap `terminal_process_groups_confirmed_empty`'s own rename now
-/// discloses in its name and doc comment rather than implying closed.
+/// `safe-close-confirmation-honesty.md`'s own required evidence, and
+/// RFC-043's own before/after: a real terminal whose shell backgrounds a
+/// SIGTERM-ignoring descendant into its own, separate process group --
+/// the exact real shape response 319 reproduced -- closed through the
+/// real production path (`Message::CloseProjectTabPressed`/
+/// `ModalActivate`), not constructed.
 ///
-/// No behavioural ablation applies here (see `qa-evidence.md`): this
-/// slice renames a field and corrects what it claims; the underlying
-/// `confirmed` predicate is unchanged by design, so there is no old
-/// predicate to restore and watch fail. What this test ablates instead
-/// is the *old name's* implicit claim -- if `fully_confirmed: true` had
-/// been read as "every process this terminal launched is gone," this
-/// test is the concrete case that reads false.
+/// **This test used to prove the opposite of what it proves now, and
+/// that history is worth keeping.** Before RFC-043 PR-043-B, this same
+/// scenario (and the identical one-liner
+/// `tekstide-core`'s own `linux_runtime_does_not_overclaim_when_child_outlives_direct_shell_after_sigterm`
+/// used) left the descendant alive, an orphan, because `request_terminate`
+/// only ever signalled the shell's own process group -- the descendant,
+/// in a sibling group, was untouched. Under RFC-043's `SIGHUP`-first,
+/// session-scoped sequence, the exact same script no longer survives: a
+/// `SIGTERM`-trapping job does not trap `SIGHUP`, so the shell's own
+/// job-control hangup reaps it before any escalation is needed --
+/// measured directly here, not assumed, the same finding
+/// `tekstide-core`'s own sibling test already made and was renamed to
+/// reflect (`a_real_backgrounded_job_is_dead_after_a_real_close`).
 #[test]
-fn closing_a_project_with_a_backgrounded_descendant_still_records_applied_while_it_survives() {
+fn closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close() {
     let _audit_state_dir =
         test_audit_state_dir(&temp_audit_state_dir("close-backgrounded-descendant"));
     let (mut state, project_id, terminal_id) =
@@ -10225,8 +10221,7 @@ fn closing_a_project_with_a_backgrounded_descendant_still_records_applied_while_
     assert_eq!(
         records[1].outcome,
         tekstide_core::audit::AuditOutcome::Applied,
-        "KilledAfterTimeout is confirmation of the shell's own process group -- Applied is the \
-         honest outcome for it, exactly as for Exited/TerminatedBySignal: {records:?}"
+        "a real close that actually reaps everything must record Applied: {records:?}"
     );
 
     // The real, decisive check -- not inferred from the outcome above.
@@ -10240,19 +10235,10 @@ fn closing_a_project_with_a_backgrounded_descendant_still_records_applied_while_
         .expect("running `kill -0` as a command must succeed regardless of its exit status")
         .success();
     assert!(
-        still_alive,
-        "the backgrounded descendant (pid {descendant_pid}) must still be alive -- proving \
-         a recorded Applied does not mean every process this terminal launched is gone"
+        !still_alive,
+        "the backgrounded descendant (pid {descendant_pid}) must be gone after a real close -- \
+         an OS-level kill -0 check, not an inference from the recorded outcome above"
     );
-
-    // This test deliberately leaves an orphan behind to prove it exists
-    // -- clean it up rather than leaking it for the rest of the test
-    // process's life. Not this project's own job in production (that is
-    // `test-process-leak.md`'s disclosed, unaddressed third cause); it
-    // is this test's own job.
-    let _ = std::process::Command::new("kill")
-        .args(["-9", &descendant_pid.to_string()])
-        .status();
 }
 
 /// §3, required verbatim: closing a project must not delete its

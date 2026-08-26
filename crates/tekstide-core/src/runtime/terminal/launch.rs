@@ -462,6 +462,33 @@ pub(super) struct RunningTerminal {
     pub(super) transcript_capture_mode: Option<TranscriptCaptureMode>,
 }
 
+/// `RunningTerminal::drop`'s own bounded grace periods -- short and
+/// fixed, unlike `request_terminate`'s caller-supplied ones, because
+/// this runs synchronously during an unrelated panic's unwind and must
+/// not turn into an open-ended hang. `SIGKILL` reaping was measured at
+/// close to instantaneous on an idle machine
+/// (`pty-master-fd-inheritance-qa-evidence.md`'s own measurement), so
+/// both windows are generous relative to that, not tuned to be minimal.
+const DROP_HANGUP_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
+const DROP_SIGKILL_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// The same poll shape `termination::wait_for_session_outcome` uses,
+/// without that function's additional child-outcome bookkeeping --
+/// `Drop` has no `TerminationOutcome` to report, only "is it safe to
+/// stop escalating yet."
+fn wait_briefly_for_session_empty(session_id: libc::pid_t, timeout: std::time::Duration) -> bool {
+    let started = std::time::Instant::now();
+    loop {
+        if session_confirmed_empty(session_id) {
+            return true;
+        }
+        if started.elapsed() > timeout {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 /// `test-process-leak.md`'s second, distinct cause, fixed: until this
 /// impl existed, dropping a `RunningTerminal` did nothing, so any path
 /// that dropped one without going through [`termination::request_terminate`]
@@ -523,25 +550,55 @@ pub(super) struct RunningTerminal {
 /// `HashMap::remove`/a displaced `insert` drop their value unconditionally.
 impl Drop for RunningTerminal {
     fn drop(&mut self) {
+        // RFC-043 D1/D2/PR-043-B: the same `SIGHUP`-first, session-wide
+        // sequence `termination::request_terminate` uses, not the old
+        // "`SIGKILL` the shell's own group and hope" this destructor used
+        // before this RFC -- discovered still necessary the hard way, not
+        // assumed: PR-043-A's guard below still fired against a
+        // panicking/dropped-without-`request_terminate` terminal after
+        // `request_terminate` itself was already fixed, because *this*
+        // function still had the old logic. `request_terminate` is not
+        // the only path that ends a terminal; this one needed the same
+        // fix, not only the same diagnostic.
+        //
+        // Bounded, not open-ended, unlike `request_terminate`'s own
+        // caller-supplied grace periods: this runs synchronously during
+        // an unrelated panic's unwind, so short, fixed grace periods
+        // (`DROP_HANGUP_GRACE`/`DROP_SIGKILL_GRACE`) stand in for the
+        // "give it real time" this is not the place to offer -- RFC-039
+        // PR-039-C's own `request_terminate` is still the normal,
+        // user-facing way a close gets real grace periods; this is the
+        // last-resort net under it, not a replacement for it.
+        let session_id = self.process_group_id;
         // Same `<= 1` refusal `send_signal_to_process_group` already
         // applies before signalling -- group 0 means "this process's own
         // group" (never correct to target here) and group 1 is not a
         // real terminal's group on this platform; a `RunningTerminal`
         // should never be constructed with either, but a destructor is
         // exactly the place to not trust that invariant blindly.
-        if self.process_group_id > 1 {
+        if session_id > 1 {
             unsafe {
-                libc::kill(-self.process_group_id, libc::SIGKILL);
+                libc::kill(session_id, libc::SIGHUP);
             }
         }
-        // Reaps this value's own direct child specifically, so it does
-        // not linger as a zombie -- `SIGKILL` cannot be caught, ignored,
-        // or blocked, so the wait below returns essentially immediately
-        // once the kernel delivers it, not a genuine block. Harmless
-        // (`Err`, discarded) if the child was already reaped by an
-        // earlier `try_wait`/`wait` call before this value ever reached
-        // `Drop`.
-        let _ = self.child.wait();
+
+        if !wait_briefly_for_session_empty(session_id, DROP_HANGUP_GRACE) {
+            super::termination::signal_candidates(
+                session_id,
+                processes_in_session(session_id).into_iter().flatten(),
+                libc::SIGKILL,
+            );
+            let _ = wait_briefly_for_session_empty(session_id, DROP_SIGKILL_GRACE);
+        }
+
+        // Reaps this value's own direct child, non-blocking (`try_wait`,
+        // not `wait`): the escalation above already gave the leader
+        // every bounded chance this destructor is willing to offer, so a
+        // leader that still somehow has not exited must not be allowed
+        // to hang this destructor forever. Harmless (`Ok(None)` or
+        // `Err`, both discarded) if it was already reaped by an earlier
+        // `try_wait`/`wait` call before this value ever reached `Drop`.
+        let _ = self.child.try_wait();
 
         // RFC-043 PR-043-A, D4: this is deliberately here, not wired into
         // any specific test -- "one week ago the audit-store slice wired
@@ -562,10 +619,13 @@ impl Drop for RunningTerminal {
         // exactly why session id, not process group id, is what the kill
         // above (a single `-process_group_id` target) cannot reach.
         //
-        // **No containment yet.** This only observes and reports; PR-B
-        // is what acts on what this finds. Expected, by design, to turn
-        // tests red the moment this lands -- that is the inventory this
-        // slice exists to produce, not a regression in this commit.
+        // RFC-043 PR-043-A shipped before PR-043-B: at that point this
+        // comment said "no containment yet, this only observes and
+        // reports," and the guard turned four tests red on purpose --
+        // that inventory is recorded in this RFC's own `qa-evidence.md`.
+        // PR-043-B, above, is what now acts on what PR-043-A found; this
+        // assertion is what confirms the action actually worked, on
+        // every drop, not only the four tests that first exposed the gap.
         //
         // `#[cfg(any(test, feature = "test-support"))]`, not bare
         // `#[cfg(test)]`: this crate's own `cfg(test)` only activates
@@ -603,15 +663,31 @@ fn assert_session_is_empty(session_id: libc::pid_t) {
     if std::thread::panicking() {
         return;
     }
-    let survivors = processes_in_session(session_id);
     assert!(
-        survivors.is_empty(),
+        session_confirmed_empty(session_id),
         "RunningTerminal::drop killed process group {session_id}, but session {session_id} \
-         still has live process(es) after the kill and wait above: {survivors:?} -- a \
-         backgrounded job inside this terminal escaped, exactly the defect \
-         rfcs/accepted/043-terminal-process-containment.md exists to fix. This is the \
-         reproduction PR-043-A exists to turn red, not a false alarm to silence."
+         still has live process(es), or its own enumeration could not be trusted, after the \
+         kill and wait above: {:?} -- a backgrounded job inside this terminal escaped, exactly \
+         the defect rfcs/accepted/043-terminal-process-containment.md exists to fix. This is \
+         the reproduction PR-043-A exists to turn red, not a false alarm to silence.",
+        processes_in_session(session_id)
     );
+}
+
+/// D3's own honesty rule, in one place rather than re-derived at every
+/// call site: `true` only when a real enumeration positively observed
+/// nobody left in `session_id`. `None` from [`processes_in_session`]
+/// (the enumeration itself could not be trusted -- a `/proc` read that
+/// failed) is `false`, the same as a non-empty survivor list --
+/// `what-containment-must-not-become.md` §4's own text names this exact
+/// case ("a `/proc` read that failed... `false`. Not 'almost certainly
+/// empty.'"). An earlier version of this function let a failed `/proc`
+/// read fall through `Vec::new()` to an empty list, which is precisely
+/// the unearned "almost certainly empty" confidence that document
+/// forbids -- caught while writing this slice's own required "grace
+/// period expiring produces false" test, not by inspection.
+pub(super) fn session_confirmed_empty(session_id: libc::pid_t) -> bool {
+    processes_in_session(session_id).is_some_and(|survivors| survivors.is_empty())
 }
 
 /// Every live pid whose `/proc/<pid>/stat` session field equals
@@ -620,16 +696,95 @@ fn assert_session_is_empty(session_id: libc::pid_t) {
 /// mid-scan (a process exiting during the read) are skipped rather than
 /// erroring, the same tolerance `process_group_exists_by_id` already
 /// gives a process that may no longer exist by the time it's checked.
-#[cfg(any(test, feature = "test-support"))]
-fn processes_in_session(session_id: libc::pid_t) -> Vec<libc::pid_t> {
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter_map(|entry| entry.file_name().to_str()?.parse::<libc::pid_t>().ok())
-        .filter(|&pid| session_id_of(pid) == Some(session_id))
-        .collect()
+///
+/// `None` only when `/proc` itself could not be enumerated at all --
+/// deliberately distinct from `Some(vec![])` ("enumerated successfully,
+/// found nobody"). Conflating the two, by defaulting to an empty `Vec`
+/// on a failed read, is exactly the false confidence
+/// [`session_confirmed_empty`]'s own doc comment describes; callers that
+/// want the honest boolean should use that function, not this one's
+/// `Vec` directly, unless they specifically need the pid list itself
+/// (`termination.rs`'s own re-verify-before-signalling step does).
+///
+/// RFC-043 PR-043-B: not test-only any more -- `termination.rs`'s own
+/// containment sequence now calls this in production, to know what is
+/// left in a session between escalation steps. PR-043-A's own test-only
+/// [`assert_session_is_empty`] is now just one more caller of it.
+///
+/// Reads from [`test_proc_root`]'s override when one is set
+/// (`#[cfg(test)]` only) instead of the real `/proc`, so a test can
+/// deterministically force the "enumeration failed" branch without
+/// racing real process reaping timing to observe it.
+pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::pid_t>> {
+    let entries = std::fs::read_dir(proc_root()).ok()?;
+    Some(
+        entries
+            .flatten()
+            .filter_map(|entry| entry.file_name().to_str()?.parse::<libc::pid_t>().ok())
+            .filter(|&pid| session_id_of(pid) == Some(session_id))
+            .collect(),
+    )
+}
+
+#[cfg(not(test))]
+fn proc_root() -> &'static std::path::Path {
+    std::path::Path::new("/proc")
+}
+
+/// RFC-043 D3's own required negative test ("the grace period expiring
+/// produces `false`, not a hopeful `true`") cannot reliably force a real
+/// process to survive `SIGKILL` long enough to observe -- reaping on a
+/// quiet, idle test machine is close enough to instantaneous that a
+/// zero-length grace period still reports the session correctly empty.
+/// This override lets that one test force the *enumeration itself* to
+/// fail deterministically instead, which `what-containment-must-not-become.md`
+/// §4 requires to also report `false` -- a real, reachable failure mode
+/// (`/proc` unreadable, a sandboxed environment, resource exhaustion),
+/// not a contrived one.
+#[cfg(test)]
+fn proc_root() -> std::path::PathBuf {
+    TEST_PROC_ROOT
+        .with(|cell| cell.borrow().clone())
+        .unwrap_or_else(|| std::path::PathBuf::from("/proc"))
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_PROC_ROOT: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// RAII guard for [`test_proc_root`] -- restores the real `/proc` on
+/// drop.
+#[cfg(test)]
+pub(super) struct TestProcRootGuard {
+    _private: (),
+}
+
+#[cfg(test)]
+impl Drop for TestProcRootGuard {
+    fn drop(&mut self) {
+        TEST_PROC_ROOT.with(|cell| *cell.borrow_mut() = None);
+    }
+}
+
+/// Forces [`processes_in_session`] to read `path` instead of the real
+/// `/proc` for the returned guard's lifetime. Pointed at a path that
+/// cannot be listed (does not exist, or exists with no read permission),
+/// this deterministically forces the "enumeration failed" branch --
+/// see [`proc_root`]'s own doc comment for why a real test needs this
+/// rather than racing `SIGKILL` reaping speed.
+#[cfg(test)]
+pub(super) fn test_proc_root(path: &std::path::Path) -> TestProcRootGuard {
+    TEST_PROC_ROOT.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        assert!(
+            cell.is_none(),
+            "test_proc_root called twice on the same thread without dropping the first guard"
+        );
+        *cell = Some(path.to_path_buf());
+    });
+    TestProcRootGuard { _private: () }
 }
 
 /// `/proc/<pid>/stat`'s own format: `pid (comm) state ppid pgrp session
@@ -638,8 +793,15 @@ fn processes_in_session(session_id: libc::pid_t) -> Vec<libc::pid_t> {
 /// `)` in the line rather than the first space, the standard way to
 /// parse this file safely. `state`, `ppid`, `pgrp`, `session` are then
 /// fields 0-3 of what remains.
-#[cfg(any(test, feature = "test-support"))]
-fn session_id_of(pid: libc::pid_t) -> Option<libc::pid_t> {
+///
+/// RFC-043 PR-043-B: `termination.rs`'s own §1 re-verification ("the
+/// session id is re-verified immediately before every signal") calls
+/// this directly, right before each `kill`, not only through
+/// [`processes_in_session`]'s own bulk enumeration -- a pid found in an
+/// earlier scan may have exited and been replaced by an unrelated
+/// process with the same number by the time a signal is about to be
+/// sent, and that race is exactly what this second call closes.
+pub(super) fn session_id_of(pid: libc::pid_t) -> Option<libc::pid_t> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_comm = stat.rsplit_once(')')?.1;
     after_comm.split_whitespace().nth(3)?.parse().ok()

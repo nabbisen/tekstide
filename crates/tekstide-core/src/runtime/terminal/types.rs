@@ -204,6 +204,21 @@ pub enum TerminalRuntimeEvent {
         handle: TerminalRuntimeHandle,
         after_signal: TerminationSignal,
     },
+    /// RFC-043 D3: `request_terminate`'s step 4, and *only* step 4 --
+    /// pushed once, right before `Terminated`, carrying exactly what the
+    /// real re-enumeration of the session observed. `true` only when
+    /// that `/proc` scan found nothing left; `false` for a grace period
+    /// that expired with survivors, an enumeration that could not run,
+    /// or anything else short of a positive, current observation of
+    /// empty. Never inferred from which `TerminationOutcome` variant the
+    /// session leader itself produced -- that inference is the exact gap
+    /// this event exists to close (a backgrounded job can survive in its
+    /// own process group regardless of how the leader's own termination
+    /// is classified).
+    SessionConfirmedEmpty {
+        handle: TerminalRuntimeHandle,
+        confirmed: bool,
+    },
     Terminated {
         handle: TerminalRuntimeHandle,
         outcome: TerminationOutcome,
@@ -240,6 +255,13 @@ pub enum TerminationRequestSource {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminationSignal {
+    /// RFC-043 D1's own sequence step 1: sent to the session leader
+    /// alone (a single pid, never a `-group`/`-session` target) so an
+    /// interactive shell's own job control does the cooperative half of
+    /// the work -- a shell with job control on hangs up its own
+    /// background jobs when it is itself hung up, which is the whole
+    /// reason those jobs are in separate process groups to begin with.
+    Sighup,
     Sigterm,
     Sigkill,
 }

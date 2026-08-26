@@ -317,8 +317,8 @@ fn linux_runtime_routes_resize_to_project_terminal() {
 }
 
 #[test]
-fn linux_runtime_terminates_process_group_with_sigterm() {
-    let root = test_root("terminate-sigterm");
+fn linux_runtime_terminates_session_leader_with_sighup() {
+    let root = test_root("terminate-sighup");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Cat", &root, "/bin/cat");
     let mut runtime = LinuxTerminalRuntime::new();
@@ -351,15 +351,23 @@ fn linux_runtime_terminates_process_group_with_sigterm() {
     assert!(
         events.contains(&TerminalRuntimeEvent::TerminationSignalSent {
             handle: handle.clone(),
-            signal: TerminationSignal::Sigterm,
+            signal: TerminationSignal::Sighup,
         })
+    );
+    assert!(
+        events.contains(&TerminalRuntimeEvent::SessionConfirmedEmpty {
+            handle: handle.clone(),
+            confirmed: true,
+        }),
+        "the session must be confirmed empty by a real re-enumeration, not merely inferred: \
+         {events:?}"
     );
     assert_eq!(
         events.last(),
         Some(&TerminalRuntimeEvent::Terminated {
             handle: handle.clone(),
             outcome: TerminationOutcome::TerminatedBySignal {
-                signal: TerminationSignal::Sigterm,
+                signal: TerminationSignal::Sighup,
             },
         })
     );
@@ -420,8 +428,18 @@ fn linux_runtime_rejects_cross_project_termination_handle() {
     cleanup_root(root);
 }
 
+/// A plain foreground child (a bare `sleep 30`, no trap) turned out not
+/// to exercise this path at all under the new sequence: a session
+/// leader blocked in a foreground `wait()` still receives and acts on
+/// `SIGHUP` immediately (confirmed directly -- an earlier version of
+/// this test using a bare foreground `sleep` found the whole session
+/// already confirmed empty after step 1 alone, `TerminatedBySignal
+/// { signal: Sighup }`, no timeout, no escalation). A job has to
+/// deliberately ignore `SIGHUP` (`trap '' HUP`) the same way the
+/// overclaim test's own descendant ignores `SIGTERM` -- to survive the
+/// shell's own hangup and force the real escalation to `SIGKILL`.
 #[test]
-fn linux_runtime_uses_sigkill_fallback_for_foreground_child_after_sigterm_timeout() {
+fn linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup() {
     let root = test_root("terminate-sigkill-fallback");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
@@ -433,18 +451,21 @@ fn linux_runtime_uses_sigkill_fallback_for_foreground_child_after_sigterm_timeou
     let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
 
     runtime
-        .write_input(&handle, b"printf 'sleep-started\\n'; sleep 30\n")
-        .expect("foreground child command should write to PTY");
-    let output = read_until_contains(&mut runtime, &handle, b"sleep-started");
+        .write_input(
+            &handle,
+            b"(trap '' HUP; printf 'hup-ignoring-job-started\\n'; sleep 30) &\n",
+        )
+        .expect("hup-ignoring background command should write to PTY");
+    let output = read_until_contains(&mut runtime, &handle, b"hup-ignoring-job-started");
     assert!(
-        contains_subsequence(&output, b"sleep-started"),
-        "PTY output should contain foreground-child marker; captured: {}",
+        contains_subsequence(&output, b"hup-ignoring-job-started"),
+        "PTY output should contain the background-job marker; captured: {}",
         String::from_utf8_lossy(&output)
     );
 
     let request = TerminationRequest {
         source: TerminationRequestSource::TestHarness,
-        reason: BoundedRuntimeSummary::new("force foreground child fallback smoke"),
+        reason: BoundedRuntimeSummary::new("force sigkill fallback against a sighup-ignoring job"),
     };
     let events = runtime
         .request_terminate(
@@ -458,12 +479,12 @@ fn linux_runtime_uses_sigkill_fallback_for_foreground_child_after_sigterm_timeou
     assert!(
         events.contains(&TerminalRuntimeEvent::TerminationSignalSent {
             handle: handle.clone(),
-            signal: TerminationSignal::Sigterm,
+            signal: TerminationSignal::Sighup,
         })
     );
     assert!(events.contains(&TerminalRuntimeEvent::TerminationTimedOut {
         handle: handle.clone(),
-        after_signal: TerminationSignal::Sigterm,
+        after_signal: TerminationSignal::Sighup,
     }));
     assert!(
         events.contains(&TerminalRuntimeEvent::TerminationSignalSent {
@@ -471,12 +492,19 @@ fn linux_runtime_uses_sigkill_fallback_for_foreground_child_after_sigterm_timeou
             signal: TerminationSignal::Sigkill,
         })
     );
+    assert!(
+        events.contains(&TerminalRuntimeEvent::SessionConfirmedEmpty {
+            handle: handle.clone(),
+            confirmed: true,
+        }),
+        "the session must be confirmed empty by a real re-enumeration: {events:?}"
+    );
     assert_eq!(
         events.last(),
         Some(&TerminalRuntimeEvent::Terminated {
             handle,
             outcome: TerminationOutcome::KilledAfterTimeout {
-                initial_signal: TerminationSignal::Sigterm,
+                initial_signal: TerminationSignal::Sighup,
                 fallback_signal: TerminationSignal::Sigkill,
             },
         })
@@ -484,9 +512,30 @@ fn linux_runtime_uses_sigkill_fallback_for_foreground_child_after_sigterm_timeou
     cleanup_root(root);
 }
 
+/// RFC-043's own required claim, checked the way its own README insists
+/// on: "an OS-level check, not an inference from the dialog." Whatever
+/// `request_terminate`'s returned events say, `kill(pid, 0)` on the
+/// backgrounded job's own real pid is the thing this test actually
+/// trusts.
+///
+/// This test's own history is worth keeping: it used to be named
+/// `..._does_not_overclaim_when_child_outlives_direct_shell_after_sigterm`,
+/// with a descendant that trapped `SIGTERM` specifically to survive the
+/// old (process-group-only) termination path and demonstrate that path
+/// lying about success. Under RFC-043's new sequence that exact
+/// scenario no longer survives at all: a `SIGTERM`-trapping job does not
+/// trap `SIGHUP`, so the shell's own job-control hangup (step 1) reaps
+/// it before `SIGKILL` is ever needed -- confirmed directly, not assumed
+/// (`confirmed: true`, `TerminatedBySignal { signal: Sighup }`, no
+/// escalation at all). That is not a broken test; it is the fix working
+/// on the exact case that used to demonstrate the defect. Replaced with
+/// this plainer scenario -- an ordinary backgrounded job, no traps --
+/// since the interesting question after this RFC is no longer "does the
+/// report lie," it's "is the job actually gone," which is what RFC-043's
+/// own acceptance claim asks for directly.
 #[test]
-fn linux_runtime_does_not_overclaim_when_child_outlives_direct_shell_after_sigterm() {
-    let root = test_root("terminate-descendant-outlives-shell");
+fn a_real_backgrounded_job_is_dead_after_a_real_close() {
+    let root = test_root("terminate-real-backgrounded-job");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
     let mut runtime = LinuxTerminalRuntime::new();
@@ -497,52 +546,245 @@ fn linux_runtime_does_not_overclaim_when_child_outlives_direct_shell_after_sigte
     let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
 
     runtime
-        .write_input(
-            &handle,
-            b"(trap '' TERM; printf 'descendant-ready\\n'; while :; do sleep 1; done) & wait\n",
-        )
-        .expect("SIGTERM-ignoring descendant command should write to PTY");
-    let output = read_until_contains(&mut runtime, &handle, b"descendant-ready");
+        .write_input(&handle, b"sleep 300 & echo BGPID=$!\n")
+        .expect("backgrounded sleep command should write to PTY");
+    let output = read_until_contains(&mut runtime, &handle, b"BGPID=");
+    let background_pid = parse_bgpid(&output)
+        .expect("real backgrounded job's own pid should be parseable from PTY output");
     assert!(
-        contains_subsequence(&output, b"descendant-ready"),
-        "PTY output should contain descendant marker; captured: {}",
-        String::from_utf8_lossy(&output)
+        crate::test_support::process_is_alive(background_pid),
+        "test precondition: the real backgrounded job must be alive before the close"
     );
 
     let request = TerminationRequest {
         source: TerminationRequestSource::TestHarness,
-        reason: BoundedRuntimeSummary::new("descendant outlives direct shell smoke"),
+        reason: BoundedRuntimeSummary::new("real backgrounded job smoke"),
     };
     let events = runtime
         .request_terminate(
             &handle,
             request,
-            Duration::from_millis(100),
+            Duration::from_secs(2),
             Duration::from_secs(2),
         )
-        .expect("termination request should continue to SIGKILL fallback");
+        .expect("termination request should complete");
 
-    assert!(events.contains(&TerminalRuntimeEvent::TerminationTimedOut {
-        handle: handle.clone(),
-        after_signal: TerminationSignal::Sigterm,
-    }));
     assert!(
-        events.contains(&TerminalRuntimeEvent::TerminationSignalSent {
+        events.contains(&TerminalRuntimeEvent::SessionConfirmedEmpty {
             handle: handle.clone(),
-            signal: TerminationSignal::Sigkill,
-        })
+            confirmed: true,
+        }),
+        "the session must be confirmed empty by a real re-enumeration: {events:?}"
     );
-    assert_eq!(
-        events.last(),
-        Some(&TerminalRuntimeEvent::Terminated {
-            handle,
-            outcome: TerminationOutcome::KilledAfterTimeout {
-                initial_signal: TerminationSignal::Sigterm,
-                fallback_signal: TerminationSignal::Sigkill,
-            },
-        })
+    assert!(
+        !crate::test_support::process_is_alive(background_pid),
+        "an OS-level kill(pid, 0) on the real backgrounded job's own pid, after a real close, \
+         must find it gone -- not inferred from the returned events"
     );
     cleanup_root(root);
+}
+
+/// RFC-043 D2's own opt-out, asserted on purpose rather than merely
+/// tolerated: `setsid` is the standard, documented way a user (or a
+/// script) says "this should outlive my terminal," by leaving the
+/// session entirely. A containment routine that reached it anyway would
+/// have a blast radius wider than the RFC's own contract describes --
+/// `what-containment-must-not-become.md` §2's own "the opt-out is
+/// load-bearing, not a nicety."
+#[test]
+fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
+    let root = test_root("terminate-setsid-survives");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+
+    // `setsid --fork`, not a bare `setsid sleep 300 &`: this job is
+    // already its own process group leader by the time it runs (bash's
+    // own job-control backgrounding put it there), and `setsid(2)`
+    // itself refuses to run on a process that already leads its own
+    // group -- confirmed directly, not assumed (a first attempt without
+    // `--fork` had the job die immediately with no visible error, since
+    // `setsid`'s own failure message went to a stderr write that raced
+    // past this test's own read). `--fork` is `setsid`'s own answer to
+    // exactly this case. `$!` from the outer `setsid` invocation would
+    // only be *its* pid, which exits the moment it forks -- `sh -c
+    // 'echo ...; exec sleep 300'` inside the forked child reports its
+    // own pid before `exec` replaces it with `sleep`, keeping the same
+    // pid throughout, which is the one this test actually needs.
+    runtime
+        .write_input(
+            &handle,
+            b"setsid --fork sh -c 'echo DETACHEDPID=$$; exec sleep 300' &\n",
+        )
+        .expect("setsid-detached command should write to PTY");
+    let output = read_until_contains(&mut runtime, &handle, b"DETACHEDPID=");
+    let detached_pid = parse_pid_after(&output, "DETACHEDPID=")
+        .expect("real setsid-detached job's own pid should be parseable from PTY output");
+    assert!(
+        crate::test_support::process_is_alive(detached_pid),
+        "test precondition: the real detached job must be alive before the close"
+    );
+
+    let request = TerminationRequest {
+        source: TerminationRequestSource::TestHarness,
+        reason: BoundedRuntimeSummary::new("setsid opt-out smoke"),
+    };
+    let _ = runtime
+        .request_terminate(
+            &handle,
+            request,
+            Duration::from_secs(2),
+            Duration::from_secs(2),
+        )
+        .expect("termination request should complete");
+
+    assert!(
+        crate::test_support::process_is_alive(detached_pid),
+        "a process that left the session via setsid is out of scope by design -- D2's own \
+         opt-out -- and a real close must not have touched it"
+    );
+    // Not this test's own cleanup responsibility to kill -- proving the
+    // survival is the point -- but leaving a real `sleep 300` running
+    // for the rest of the test binary's life is its own kind of leak.
+    unsafe {
+        libc::kill(detached_pid as libc::pid_t, libc::SIGKILL);
+    }
+    cleanup_root(root);
+}
+
+/// RFC-043 security document §1's own required property: "the session
+/// id is re-verified immediately before every signal... if you cannot
+/// establish a pid is still in the target session, do not signal it."
+///
+/// **Not built by winning a real PID-reuse race** -- that race is
+/// inherently timing-dependent and would make this test flaky by
+/// construction. Instead this calls
+/// [`super::termination::signal_candidates`] directly (the re-verifying
+/// signal loop, factored out from its own live-enumeration caller
+/// specifically so this is possible) with a *controlled* candidate list:
+/// a real survivor genuinely in the target session, and a real,
+/// completely unrelated process (spawned by this test, in this test
+/// binary's own session, never the target's) standing in for exactly
+/// the pid a reuse race could hand the enumeration above. The stranger
+/// must survive; only the real survivor may be signalled.
+#[test]
+fn signal_candidates_never_signals_a_pid_outside_the_target_session() {
+    let root = test_root("terminate-race-reverification");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    let session_id = runtime
+        .sessions
+        .get(&terminal.id)
+        .expect("just-launched session must be present")
+        .process_group_id;
+
+    let mut stranger = std::process::Command::new("sleep")
+        .arg("300")
+        .spawn()
+        .expect("a real, unrelated stranger process should spawn");
+    let stranger_pid = stranger.id() as libc::pid_t;
+    assert_ne!(
+        super::launch::session_id_of(stranger_pid),
+        Some(session_id),
+        "test precondition: the stranger must genuinely not belong to the target session"
+    );
+
+    let signalled = super::termination::signal_candidates(
+        session_id,
+        vec![session_id, stranger_pid],
+        libc::SIGKILL,
+    );
+
+    assert_eq!(
+        signalled, 1,
+        "exactly the one real member of the target session must have been signalled"
+    );
+    assert!(
+        crate::test_support::process_is_alive(stranger_pid as u32),
+        "the stranger, though present in the candidate list, must never have been signalled -- \
+         leaving an orphan is a bug, killing a stranger is an incident"
+    );
+
+    let _ = stranger.kill();
+    let _ = stranger.wait();
+    let request = TerminationRequest {
+        source: TerminationRequestSource::TestHarness,
+        reason: BoundedRuntimeSummary::new("re-verification test cleanup"),
+    };
+    let _ = runtime.request_terminate(
+        &handle,
+        request,
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+    );
+    cleanup_root(root);
+}
+
+/// RFC-043 D3, the required negative case: "the grace period expiring
+/// produces `false` from step 4, not a hopeful `true`."
+///
+/// **Not built by racing real `SIGKILL` reaping speed, and not routed
+/// through a real `request_terminate` call.** A first attempt gave a
+/// `SIGHUP`-ignoring job `Duration::ZERO` grace periods, expecting the
+/// enumeration right after `SIGKILL` to still catch it alive -- measured,
+/// not assumed, and it did not work: reaping on this machine is close
+/// enough to instantaneous that even a zero-length window still observed
+/// the session correctly empty. A genuinely unkillable process
+/// (uninterruptible I/O sleep is the only real way `SIGKILL` can fail to
+/// remove something) is not portable or fast to construct either.
+///
+/// A second attempt routed a forced enumeration failure through a real
+/// `request_terminate` call against a real session -- but
+/// `RunningTerminal::drop`'s own PR-043-A guard reads the exact same
+/// `session_confirmed_empty` this test wants to force `false`, and that
+/// `Drop` fires *inside* `request_terminate` itself
+/// (`self.sessions.remove` drops the removed value immediately), before
+/// this test's own assertion on the returned events ever runs. The
+/// override does not stay narrow enough to affect only the return value
+/// and not the guard; it panics before returning.
+///
+/// This instead tests [`session_confirmed_empty`] directly, with no real
+/// session or `request_terminate` call at all: [`test_proc_root`] points
+/// the real enumeration at a directory that cannot be listed, forcing
+/// `processes_in_session` to return `None` deterministically -- the
+/// *other* honest-`false` case `what-containment-must-not-become.md` §4
+/// names explicitly ("a `/proc` read that failed"). Found dishonest
+/// while writing this very test: an earlier version of
+/// `session_confirmed_empty` defaulted a failed read to an empty `Vec`,
+/// which is precisely the unearned "almost certainly empty" confidence
+/// that document forbids.
+#[test]
+fn session_confirmed_empty_reports_false_when_its_own_enumeration_fails() {
+    let unreadable_proc = test_root("session-confirmed-empty-unreadable-proc");
+    std::fs::remove_dir(&unreadable_proc).expect("directory should be removable to force ENOENT");
+    let _proc_root_guard = super::launch::test_proc_root(&unreadable_proc);
+
+    assert!(
+        !super::launch::session_confirmed_empty(1),
+        "a session whose own enumeration could not run at all must report false -- not infer \
+         success just because nothing could be observed"
+    );
+}
+
+fn parse_pid_after(output: &[u8], marker: &str) -> Option<u32> {
+    let text = String::from_utf8_lossy(output);
+    let (_, after_marker) = text.rsplit_once(marker)?;
+    let digits: String = after_marker
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
 }
 
 fn project_session(project_id: ProjectId, root: &Path) -> ProjectSession {
@@ -589,6 +831,18 @@ fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
         && haystack
             .windows(needle.len())
             .any(|window| window == needle)
+}
+
+/// Parses the real pid a shell's own `$!` reported, out of raw PTY
+/// output containing a `BGPID=<digits>` marker -- the shell's own
+/// authority on what pid it just backgrounded, not a guess derived from
+/// this process's own bookkeeping.
+fn parse_bgpid(output: &[u8]) -> Option<u32> {
+    // The *last* occurrence of the marker, not the first: the shell's
+    // own terminal echo of the still-unexpanded command (`echo
+    // BGPID=$!`) contains the literal marker text too, before the real,
+    // digit-bearing one the command's actual output produces.
+    parse_pid_after(output, "BGPID=")
 }
 
 /// `test-process-leak.md`'s second cause, shown fixed: the gate's own
