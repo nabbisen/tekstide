@@ -12231,6 +12231,115 @@ fn change_review_content_view_build_cost_by_line_count_measurement() {
     }
 }
 
+/// RFC-034's own required measurement: the pack README warns that
+/// `pinned_middle` already clips at short window heights before this
+/// slice adds anything, and asks for the added cost to be measured
+/// with the RFC-042 headless harness "rather than reasoning about
+/// pixels." Builds `pinned_middle` with the real, catalog-resolved
+/// decision strings (not synthetic markers, unlike
+/// `change_review_layout_pins_fixed_regions_regardless_of_list_length`'s
+/// own fixtures, since the actual English text length is exactly what
+/// is being measured here) through the real, production
+/// `assemble_change_review_layout`, with and without the decision
+/// controls, at the reviewer's own 380px reproduction height plus two
+/// more representative ones.
+///
+/// Not a pass/fail gate -- a diagnostic report recorded in
+/// `qa-evidence.md`, the same shape
+/// `change_review_content_view_build_cost_by_line_count_measurement`
+/// above already uses.
+#[test]
+fn change_review_decision_controls_measured_layout_cost() {
+    // The null renderer (`()`, used by the D1 structural test above) is
+    // the wrong tool here: its own `text::Paragraph` impl
+    // (`iced_core::renderer::null`) returns `Size::ZERO` from
+    // `bounds()`/`min_bounds()` unconditionally, so a `Text` widget
+    // *always* measures zero height under it, regardless of content --
+    // confirmed directly, before writing this version: an
+    // assemble-and-layout attempt using `()` reported `0px` for
+    // `pinned_middle` containing a single real line of text. That
+    // harness is right for *structural* properties (child count,
+    // ordering, widget kind) and cannot answer a *how many pixels does
+    // this real sentence cost* question at all.
+    //
+    // `crate::surface::terminal::font_metrics` already answers exactly
+    // that question for a different surface, using the real text-shaping
+    // primitive `iced`'s own `Text` widget uses internally
+    // (`iced::advanced::graphics::text::Paragraph`, backed by
+    // `cosmic-text`) -- no window, no GPU, real measured glyphs. Reused
+    // here rather than reinvented.
+    use iced::advanced::graphics::text::Paragraph as GraphicsParagraph;
+    use iced::advanced::text::{Alignment, LineHeight, Paragraph as _, Shaping, Text, Wrapping};
+    use iced::{Font, Pixels, Size};
+
+    let state = state_with(tekstide_core::shell::ApplicationShell::new());
+    // Representative content-area width: the release binary's own
+    // window in this session's live evidence was 1042px wide with a
+    // ~260px sidebar, leaving roughly this much for `pinned_middle`'s
+    // own text to wrap within. Stated here, not hidden in the number,
+    // since the real answer is width-dependent and this is a
+    // measurement, not a universal constant.
+    const REPRESENTATIVE_CONTENT_WIDTH_PX: f32 = 700.0;
+
+    let wrapped_height = |content: &str, font_size: f32| -> f32 {
+        let text = Text {
+            content,
+            bounds: Size::new(REPRESENTATIVE_CONTENT_WIDTH_PX, f32::INFINITY),
+            size: Pixels(font_size),
+            line_height: LineHeight::Relative(1.0),
+            font: Font::DEFAULT,
+            align_x: Alignment::Default,
+            align_y: iced::alignment::Vertical::Top,
+            shaping: Shaping::Basic,
+            wrapping: Wrapping::Word,
+        };
+        GraphicsParagraph::with_text(text).min_bounds().height
+    };
+
+    let status_size = state.theme.font_size_status();
+    let body_size = state.theme.font_size_body();
+
+    let review_state_height = wrapped_height(
+        &state.catalog.get_with_args(
+            "change-review-review-state",
+            &super::CatalogArgs::new().trusted_symbol("state", "unreviewed"),
+        ),
+        status_size,
+    );
+    let notice_height = wrapped_height(
+        &state.catalog.get("change-review-decision-notice"),
+        status_size,
+    );
+    let stale_tree_height = wrapped_height(
+        &state.catalog.get("change-review-decision-stale-tree"),
+        status_size,
+    );
+    // The button row's own text is short and never wraps at this width
+    // -- one line each, at body size -- so its measured height is this
+    // slice's own real per-line cost at that size, not an estimate.
+    let button_row_height =
+        wrapped_height(&state.catalog.get("change-review-accept-button"), body_size);
+
+    assert!(
+        notice_height > 0.0,
+        "sanity: a real, non-trivial sentence must measure a real, non-zero height under this \
+         harness -- got 0px, which would mean this measurement is as broken as the null-renderer \
+         attempt it replaced"
+    );
+
+    let added_without_stale_tree = notice_height + button_row_height;
+    let added_with_stale_tree = added_without_stale_tree + stale_tree_height;
+
+    eprintln!(
+        "change_review_decision_controls_measured_layout_cost \
+         review_state_line={review_state_height}px notice={notice_height}px \
+         stale_tree={stale_tree_height}px button_row={button_row_height}px \
+         added_without_stale_tree={added_without_stale_tree}px \
+         added_with_stale_tree={added_with_stale_tree}px \
+         (at {REPRESENTATIVE_CONTENT_WIDTH_PX}px content width, before per-item `.spacing(8)`)"
+    );
+}
+
 /// The real, clickable control -- proving reachability by row click, not
 /// assumed. Mirrors `clicking_change_review_routes_to_the_real_change_review_surface`'s
 /// own shape for the surface-level button, one layer in for this row's
@@ -12306,6 +12415,236 @@ fn clicking_a_change_review_row_while_a_modal_is_open_has_no_effect() {
     assert!(
         state.change_review_selection.is_none(),
         "a background control's click message must have no effect while a modal is open"
+    );
+}
+
+/// RFC-034: the security document's own required falsifiable form --
+/// *"rejecting a change set does not modify any file"* -- held by a
+/// real test, against real files on disk, real bytes compared before
+/// and after, through the real message path (`update`, not
+/// `record_change_review_decision` called directly).
+#[test]
+fn rejecting_a_change_set_does_not_modify_any_file() {
+    let (mut state, _change_set_id, project_dir) =
+        state_with_a_real_change_set_and_retained_detection("decision-reject-no-file-touch");
+
+    let existing_before =
+        std::fs::read(project_dir.join("existing.txt")).expect("fixture file must exist");
+    let new_before = std::fs::read(project_dir.join("new.txt")).expect("fixture file must exist");
+
+    let _ = super::update(
+        &mut state,
+        Message::ChangeReviewDecisionButtonPressed(super::ChangeReviewDecision::Rejected),
+    );
+
+    let existing_after =
+        std::fs::read(project_dir.join("existing.txt")).expect("fixture file must still exist");
+    let new_after =
+        std::fs::read(project_dir.join("new.txt")).expect("fixture file must still exist");
+
+    assert_eq!(
+        existing_before, existing_after,
+        "rejecting a change set must not modify any file"
+    );
+    assert_eq!(
+        new_before, new_after,
+        "rejecting a change set must not modify any file"
+    );
+
+    // Not a no-op test: the decision must have actually recorded, or the
+    // "no file changed" assertions above would be true for a trivial,
+    // uninteresting reason.
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    assert_eq!(
+        change_set.review_state,
+        tekstide_core::domain::ReviewState::Rejected,
+        "the decision must have actually reached the real transition for this test to mean \
+         anything"
+    );
+}
+
+/// Accept and Reject each reach `transition_change_set_review_state`
+/// for real, through the real message path, and the state line changes
+/// to match.
+#[test]
+fn accepting_a_change_set_reaches_the_real_transition_and_the_state_line_changes() {
+    let (mut state, _change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("decision-accept-real");
+
+    let _ = super::update(
+        &mut state,
+        Message::ChangeReviewDecisionButtonPressed(super::ChangeReviewDecision::Accepted),
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    assert_eq!(
+        change_set.review_state,
+        tekstide_core::domain::ReviewState::Accepted
+    );
+    let state_line = super::change_review_state_line(&state.catalog, &change_set.default_summary());
+    assert!(
+        state_line.to_lowercase().contains("accepted"),
+        "got {state_line:?}"
+    );
+}
+
+#[test]
+fn rejecting_a_change_set_reaches_the_real_transition_and_the_state_line_changes() {
+    let (mut state, _change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("decision-reject-real");
+
+    let _ = super::update(
+        &mut state,
+        Message::ChangeReviewDecisionButtonPressed(super::ChangeReviewDecision::Rejected),
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    assert_eq!(
+        change_set.review_state,
+        tekstide_core::domain::ReviewState::Rejected
+    );
+    let state_line = super::change_review_state_line(&state.catalog, &change_set.default_summary());
+    assert!(
+        state_line.to_lowercase().contains("rejected"),
+        "got {state_line:?}"
+    );
+}
+
+/// D1/D4, all five `ReviewState` variants: the controls are offered
+/// from exactly `Unreviewed` and `PartiallyAccepted`, never the other
+/// three -- covers "after a decision, neither control is offered"
+/// (`Accepted`/`Rejected`, reachable in production) and "never offered
+/// from any reachable state" (`Superseded`) in one enumeration.
+/// `PartiallyAccepted`/`Superseded` being unreachable as *outcomes* of a
+/// click is a separate, stronger, type-level guarantee:
+/// `ChangeReviewDecision` has exactly two variants, so no button this
+/// surface builds can ever produce either -- not evidenced by a test,
+/// evidenced by what the type can represent at all (`what-a-review-decision-must-not-claim.md`'s
+/// D1: "a control may record an opinion; it may not assert a fact").
+///
+/// **Ablated, twice, matching the checklist's own two bullets, each
+/// confirmed failing then reverted:**
+/// 1. Broadened the match to also permit `Superseded` -- this test's own
+///    `Superseded` assertion failed.
+/// 2. Broadened it to always return `true` -- this test's `Accepted`
+///    and `Rejected` assertions (the "withdrawn after a decision" case)
+///    failed.
+#[test]
+fn change_review_decision_controls_offered_exactly_from_unreviewed_and_partially_accepted() {
+    use tekstide_core::domain::ReviewState;
+    assert!(super::change_review_decision_controls_offered(
+        ReviewState::Unreviewed
+    ));
+    assert!(super::change_review_decision_controls_offered(
+        ReviewState::PartiallyAccepted
+    ));
+    assert!(!super::change_review_decision_controls_offered(
+        ReviewState::Accepted
+    ));
+    assert!(!super::change_review_decision_controls_offered(
+        ReviewState::Rejected
+    ));
+    assert!(!super::change_review_decision_controls_offered(
+        ReviewState::Superseded
+    ));
+}
+
+/// A control behind an open modal cannot be clicked -- the same
+/// established pattern `clicking_a_change_review_row_while_a_modal_is_open_has_no_effect`
+/// already proves for the row button, extended to the decision buttons.
+#[test]
+fn change_review_decision_button_is_inert_while_a_modal_is_open() {
+    let (mut state, _change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("decision-modal-exclusivity");
+    state.modal = Some(ModalContent::default());
+
+    let _ = super::update(
+        &mut state,
+        Message::ChangeReviewDecisionButtonPressed(super::ChangeReviewDecision::Accepted),
+    );
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    assert_eq!(
+        change_set.review_state,
+        tekstide_core::domain::ReviewState::Unreviewed,
+        "a background control's click message must have no effect while a modal is open"
+    );
+}
+
+/// D3: a real, later write after a real selection makes the tree
+/// "moved" -- the stale-tree notice renders, distinct wording from
+/// `change-review-content-stale`, and the decision controls remain
+/// offered (the opposite of what content preview does when stale).
+#[test]
+fn change_review_decision_panel_shows_the_stale_tree_notice_and_keeps_controls_live() {
+    let (mut state, _change_set_id, project_dir) =
+        state_with_a_real_change_set_and_retained_detection("decision-stale-tree");
+    super::select_change_review_file(&mut state, std::path::PathBuf::from("existing.txt"));
+
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    std::fs::write(
+        project_dir.join("existing.txt"),
+        b"changed again, after selection\n",
+    )
+    .expect("the later write must succeed");
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    let panel = super::change_review_decision_panel(&state, project, change_set)
+        .expect("a stale tree must not block the decision -- the controls stay offered");
+
+    assert!(
+        panel.lines.iter().any(|line| line
+            .to_lowercase()
+            .contains("changed since this change set was detected")),
+        "got {:?}",
+        panel.lines
+    );
+    assert!(
+        panel
+            .lines
+            .iter()
+            .any(|line| line.to_lowercase().contains("close tekstide")),
+        "the session-scope/finality notice must still render too, got {:?}",
+        panel.lines
+    );
+}
+
+/// The base case: nothing has moved, so only the session-scope/finality
+/// notice renders -- no stale-tree line. `qa-evidence.md`'s own required
+/// D0 ablation lives here: removing `change-review-decision-notice`'s
+/// own `lines.push` in `change_review_decision_panel` made this test's
+/// second assertion fail (empty `lines`, no sentence containing "close
+/// tekstide"). Reverted, not committed.
+#[test]
+fn change_review_decision_panel_has_no_stale_notice_when_nothing_has_moved() {
+    let (state, _change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("decision-not-stale");
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    let panel = super::change_review_decision_panel(&state, project, change_set)
+        .expect("the controls must be offered from a fresh Unreviewed change set");
+
+    assert!(
+        !panel.lines.iter().any(|line| line
+            .to_lowercase()
+            .contains("changed since this change set was detected")),
+        "nothing has moved -- the stale-tree notice must not render, got {:?}",
+        panel.lines
+    );
+    assert!(
+        panel
+            .lines
+            .iter()
+            .any(|line| line.to_lowercase().contains("close tekstide")),
+        "the session-scope/finality notice must always render while the controls are offered, \
+         got {:?}",
+        panel.lines
     );
 }
 

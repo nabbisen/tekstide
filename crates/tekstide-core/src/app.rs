@@ -2,7 +2,7 @@ use crate::agent::AgentRunLaunchPlan;
 use crate::close::{CloseAssessment, assess_close};
 use crate::content::{ExternalChangeDecision, SaveDecision, TextCursor};
 use crate::domain::{
-    AgentRunId, ChangeSetId, OwnershipError, TerminalId, TerminalSession, VisibleSlot,
+    AgentRunId, ChangeSetId, OwnershipError, ReviewState, TerminalId, TerminalSession, VisibleSlot,
 };
 use crate::project::recent::{
     RECENT_PROJECT_STATE_VERSION, RecentProject, RecentProjectAvailability, RecentProjectState,
@@ -434,6 +434,31 @@ impl AppState {
             candidate_agent_run_id,
             summary,
         )
+    }
+
+    /// RFC-034: `transition_change_set_review_state` has existed since
+    /// RFC-012 with zero production callers -- this is the delegate that
+    /// gives it one, the same "wrap `active_project_mut`" shape
+    /// `add_detected_generated_change_set` immediately above already
+    /// uses. Callers offer only `ReviewState::Accepted`/`Rejected` (D1:
+    /// "a control may record an opinion; it may not assert a fact") --
+    /// this function itself does not narrow the type, since
+    /// `ProjectSession::transition_change_set_review_state` already
+    /// exists and is reviewed; the narrowing lives at the GUI layer's own
+    /// `ChangeReviewDecision` type, one level up, per RFC-041/042's own
+    /// precedent of a GUI-scoped type standing between a wire message and
+    /// a wider domain enum.
+    pub fn transition_active_project_change_set_review_state(
+        &mut self,
+        change_set_id: &ChangeSetId,
+        review_state: ReviewState,
+    ) -> Result<(), ProjectChangeSetError> {
+        let project = self
+            .active_project_mut()
+            .ok_or(ProjectChangeSetError::Ownership(
+                OwnershipError::MissingProject,
+            ))?;
+        project.transition_change_set_review_state(change_set_id, review_state)
     }
 
     pub fn open_active_project_text_document(

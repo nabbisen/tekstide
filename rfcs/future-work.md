@@ -757,6 +757,15 @@ Status: active after `0.1.0`.
   reviewer as worth a `min_height` or a one-row floor whenever the next change-review slice is
   scoped.
 
+- **Should the audit store record a user's decision about generated code?** RFC-034's own D0
+  amendment: a review decision (`Accepted`/`Rejected`) is session-scoped and unaudited by design
+  for `0.15.0` — no thirteenth `AuditEventFamily` was invented for it, since that changes what the
+  audit store is *for* (today every family records a security boundary crossed, refused, or
+  authorised; none records a preference), and that argument deserves its own RFC rather than
+  riding in on a button. Restated here as its own entry, not only inside RFC-034's own Amendment
+  text, so whoever next touches change review or the audit schema finds it without having to
+  reread that RFC first.
+
 ## Milestone Roadmap
 
 See [`../ROADMAP.md`](../ROADMAP.md) for the milestone schedule, and [`delivery-plan.md`](./delivery-plan.md) for the ordered RFC queue, requirements gap analysis, and developer pick-up workflow.

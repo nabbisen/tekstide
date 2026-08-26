@@ -52,7 +52,7 @@ from diverging: an adapter that cannot decide anything cannot decide differently
 
 ## The properties that hold the whole thing up
 
-Five invariants recur across RFCs. Breaking one is a security regression, not a
+Six invariants recur across RFCs. Breaking one is a security regression, not a
 refactor.
 
 **Single ingress.** Every byte from a PTY reaches the emulator through exactly one
@@ -84,6 +84,19 @@ scroll region the content it describes lives in, rather than trusting that files
 short enough for both to fit on screen together. This is the same failure this project
 treats most seriously — a claim that says less than the truth by the time a reader
 actually reaches it — one layer removed from wording into layout.
+
+**A control may record an opinion; it may not assert a fact.** RFC-034 offers exactly
+two buttons over a change set's review state — `Accepted` and `Rejected` — and
+deliberately not the other two the state machine permits. `PartiallyAccepted` has no
+way to be true without a per-file review model this product does not have; a whole-set
+button setting it would record a state nothing else in the product can express or act
+on. `Superseded` is not an opinion at all — it is a fact about a *later* change set
+replacing this one, and a user pressing a button is not that fact's source of truth.
+The same shape as a field named `fully_confirmed` that could not confirm
+(`test-process-leak.md`), arriving from the other direction: there, a name promised more
+than a value could back up; here, a control would let a user assert something they have
+no standing to assert. Before adding a button, ask what it would be claiming on the
+user's behalf, and whether the user is actually in a position to know it.
 
 ## Evidence conventions
 

@@ -1142,6 +1142,18 @@ pub enum Message {
     /// row is a specific file, not a position a keyboard cursor happens
     /// to occupy.
     ChangeReviewFileRowPressed(std::path::PathBuf),
+    /// RFC-034: a decision button on the Change Review surface. Carries
+    /// [`ChangeReviewDecision`], not `tekstide_core::domain::ReviewState`
+    /// directly -- D1 offers exactly two opinions
+    /// (`Accepted`/`Rejected`), never `PartiallyAccepted` (has no way to
+    /// be true without per-file review) or `Superseded` (a fact about a
+    /// later change set, not a user's opinion, and a button press is not
+    /// its source of truth). The wider `ReviewState` staying reachable
+    /// from this message would make those two representable here even
+    /// though nothing may ever construct them from a click -- the same
+    /// "narrower than the domain type" idiom `ContentLifecycle` already
+    /// uses ahead of `ChangeLifecycle`.
+    ChangeReviewDecisionButtonPressed(ChangeReviewDecision),
     /// RFC-015 PR-015-F: a synthetic measurement keystroke arrived; the
     /// `Instant` is when the measurement subscription first saw it, not
     /// when `update` gets around to handling it -- the gap between the
@@ -1420,7 +1432,10 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         // keybinding names it, the same shape explorer/approval-history
         // row activation already has), so `control_coverage` has no
         // entry for it; this classification is what governs it instead.
-        | Message::ChangeReviewFileRowPressed(_) => Some(ClickMessageKind::BackgroundControl),
+        | Message::ChangeReviewFileRowPressed(_)
+        // RFC-034: a decision button on the same surface -- not a
+        // `NavigationAction` either, for the identical reason.
+        | Message::ChangeReviewDecisionButtonPressed(_) => Some(ClickMessageKind::BackgroundControl),
 
         // -- modal decisions (RFC-040 PR-040-B): the destructive/
         // decision-committing half of a two-button modal, a folder
@@ -2011,6 +2026,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::OpenHelpButtonPressed => open_help(state),
         Message::OpenDiffReviewButtonPressed => open_diff_review(state),
         Message::ChangeReviewFileRowPressed(path) => select_change_review_file(state, path),
+        Message::ChangeReviewDecisionButtonPressed(decision) => {
+            record_change_review_decision(state, decision)
+        }
         Message::ModalDismiss => {
             // RFC-039 PR-039-C: Escape on a `ProjectClose` dialog is a
             // real decision too (`safe_close_decision`'s `Cancelled`),
@@ -7865,9 +7883,32 @@ struct ChangeReviewSelection {
     baseline: Option<tekstide_core::content::FileSnapshot>,
 }
 
+/// RFC-034 D1: the two opinions a user may record about a change set,
+/// narrower than `tekstide_core::domain::ReviewState` on purpose --
+/// see [`Message::ChangeReviewDecisionButtonPressed`]'s own doc for why
+/// a GUI-layer type stands between the wire message and the wider
+/// domain enum. [`Self::to_review_state`] is the one, explicit,
+/// exhaustive conversion point.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChangeReviewDecision {
+    Accepted,
+    Rejected,
+}
+
+impl ChangeReviewDecision {
+    fn to_review_state(self) -> tekstide_core::domain::ReviewState {
+        match self {
+            Self::Accepted => tekstide_core::domain::ReviewState::Accepted,
+            Self::Rejected => tekstide_core::domain::ReviewState::Rejected,
+        }
+    }
+}
+
 /// RFC-020, the change review surface (`change-review-surface.md`):
-/// `ProjectOpenSurface::DiffReview`'s own real render arm. Read-only --
-/// RFC-034's own job is acting on a `ChangeSet`, not this one. Renders
+/// `ProjectOpenSurface::DiffReview`'s own real render arm. As of
+/// RFC-034 no longer read-only: a change set's `review_state` can be
+/// recorded here, in the same `pinned_middle` region as the state line
+/// it updates. Renders
 /// the most recent change set in the active project, the same
 /// "most-recently-launched, no selector" answer `agent_run_detail_view`
 /// already gives for the analogous question -- a selector is a second
@@ -8006,6 +8047,44 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
             .size(state.theme.font_size_status())
             .into(),
     );
+
+    // RFC-034 D1/D4: the decision controls, offered only from
+    // `Unreviewed`/`PartiallyAccepted` -- withdrawn the moment a
+    // decision is recorded (or a later change set supersedes this one),
+    // so the review-state line above is the only thing left to say what
+    // happened. `change_review_decision_panel` returns the resolved
+    // disclosure text as plain strings -- the same "resolved string, not
+    // the `Element` tree" split `ChangeReviewContentPreview` already
+    // established for testability -- so the checklist's own required
+    // ablation ("remove the sentence, a test fails") has something real
+    // to fail: the loop below is a trivial, unconditional conversion
+    // with nothing left to decide, so testing the panel's own `lines`
+    // directly is testing exactly what reaches the screen.
+    if let Some(panel) = change_review_decision_panel(state, project, change_set) {
+        for line in panel.lines {
+            pinned_middle.push(text(line).size(state.theme.font_size_status()).into());
+        }
+        pinned_middle.push(
+            row![
+                button(
+                    text(state.catalog.get("change-review-accept-button"))
+                        .size(state.theme.font_size_body())
+                )
+                .on_press(Message::ChangeReviewDecisionButtonPressed(
+                    ChangeReviewDecision::Accepted
+                )),
+                button(
+                    text(state.catalog.get("change-review-reject-button"))
+                        .size(state.theme.font_size_body())
+                )
+                .on_press(Message::ChangeReviewDecisionButtonPressed(
+                    ChangeReviewDecision::Rejected
+                )),
+            ]
+            .spacing(8)
+            .into(),
+        );
+    }
 
     // RFC-041 PR-041-B, restructured by RFC-042 PR-042-A/B: the content
     // preview for whichever row is currently selected, if any -- see
@@ -8318,6 +8397,128 @@ fn change_review_diff_content_baseline(
         | DiffContent::NonTextContent { baseline, .. } => Some(baseline),
         DiffContent::Deleted { .. } | DiffContent::NonFile { .. } => None,
     }
+}
+
+/// RFC-034 PR-034-B: `Message::ChangeReviewDecisionButtonPressed`'s
+/// handler. Records the decision on the most recently created change
+/// set -- the same "most-recently-launched, no selector" scoping
+/// `change_review_view` itself already uses to decide which
+/// `ChangeSet` this whole surface is about. D1's own legality table
+/// (`can_transition_review_state`, `tekstide-core`) is the real gate;
+/// this function does not re-decide legality -- it is the domain's own
+/// job, the same "the domain owns legality, the GUI does not
+/// duplicate it" precedent `select_change_review_file` already sets
+/// for staleness. An illegal transition is reached only if this
+/// surface's own D1/D4 rendering guard (`change_review_decision_controls_offered`)
+/// has a bug, since the buttons are never rendered outside
+/// `Unreviewed`/`PartiallyAccepted` -- refused silently by
+/// `transition_change_set_review_state` rather than asserted against
+/// here a second time.
+fn record_change_review_decision(state: &mut State, decision: ChangeReviewDecision) {
+    let Some(change_set_id) = state
+        .app_shell
+        .state()
+        .active_project()
+        .and_then(|project| project.change_sets().last())
+        .map(|change_set| change_set.id.clone())
+    else {
+        return;
+    };
+    let _ = state
+        .app_shell
+        .state_mut()
+        .transition_active_project_change_set_review_state(
+            &change_set_id,
+            decision.to_review_state(),
+        );
+}
+
+/// RFC-034 D1/D4: whether the decision controls (and their own
+/// disclosure sentence) render at all. Exactly `Unreviewed` and
+/// `PartiallyAccepted` -- the two states `can_transition_review_state`
+/// permits `Accepted`/`Rejected` from. Once a decision is recorded
+/// (`Accepted`/`Rejected`) or a later change set supersedes this one
+/// (`Superseded`), the controls are withdrawn and the review-state line
+/// alone carries what happened -- D4's own "say it before the click,
+/// withdraw after."
+fn change_review_decision_controls_offered(
+    review_state: tekstide_core::domain::ReviewState,
+) -> bool {
+    use tekstide_core::domain::ReviewState;
+    matches!(
+        review_state,
+        ReviewState::Unreviewed | ReviewState::PartiallyAccepted
+    )
+}
+
+/// RFC-034 D3: reuses `diff_content_is_stale` (RFC-024/041) against
+/// whatever file is currently selected for this same change set -- the
+/// only per-file baseline this application retains anywhere (a
+/// `ChangeSet` itself carries no per-path snapshot; only
+/// `ChangeReviewSelection::baseline`, captured once at selection time,
+/// does). **Scoping decision, stated plainly rather than left implicit
+/// in the code**: this checks whether the *selected file* has moved
+/// since it was selected, not literally every file in the change set
+/// since detection -- re-scanning the whole tree would be inventing a
+/// second, heavier staleness mechanism, which D3 explicitly says not to
+/// do. `false` (not stale) whenever nothing is selected, or the
+/// selection belongs to a different change set, or the selected path
+/// never resolved a real file to snapshot in the first place
+/// (`Deleted`/`NonFile`, which carry no baseline) -- there is nothing to
+/// have moved in any of those cases.
+fn change_review_decision_tree_has_moved(
+    state: &State,
+    project: &tekstide_core::project::ProjectSession,
+    change_set_id: &tekstide_core::domain::ChangeSetId,
+) -> bool {
+    let Some(selection) = &state.change_review_selection else {
+        return false;
+    };
+    if selection.change_set_id != *change_set_id {
+        return false;
+    }
+    let Some(baseline) = &selection.baseline else {
+        return false;
+    };
+    let root = tekstide_core::project::root::ProjectRootHandle::from_project_session(project);
+    tekstide_core::project::diff_content_is_stale(baseline, &root, &selection.relative_path)
+        .unwrap_or(true)
+}
+
+/// RFC-034 D0/D3/D4: everything Tekstide itself says about the decision
+/// controls, as plain resolved strings -- the same "resolved string,
+/// not the `Element` tree" split every other rendered line on this
+/// surface already uses, and specifically the reason this is
+/// independently testable without reaching into `iced`'s own widget
+/// tree: `change_review_view`'s own conversion of `lines` into
+/// `Element`s is one trivial, unconditional loop with nothing left to
+/// decide, so a test asserting on `lines` directly is asserting on
+/// exactly what reaches the screen. `None` exactly when the controls
+/// themselves are not offered (D4) -- there is nothing left to disclose
+/// about a click that already happened.
+struct ChangeReviewDecisionPanel {
+    /// In render order: the D3 stale-tree notice, if the tree has moved
+    /// since the current selection was made, followed always by the one
+    /// combined D0/D4 notice (session-scoped, final, no file touched --
+    /// `what-a-review-decision-must-not-claim.md` §4's own answer to the
+    /// disclosure-density question).
+    lines: Vec<String>,
+}
+
+fn change_review_decision_panel(
+    state: &State,
+    project: &tekstide_core::project::ProjectSession,
+    change_set: &tekstide_core::domain::ChangeSet,
+) -> Option<ChangeReviewDecisionPanel> {
+    if !change_review_decision_controls_offered(change_set.review_state) {
+        return None;
+    }
+    let mut lines = Vec::new();
+    if change_review_decision_tree_has_moved(state, project, &change_set.id) {
+        lines.push(state.catalog.get("change-review-decision-stale-tree"));
+    }
+    lines.push(state.catalog.get("change-review-decision-notice"));
+    Some(ChangeReviewDecisionPanel { lines })
 }
 
 /// RFC-042 D2, closed per response 332 Required 3: a real module

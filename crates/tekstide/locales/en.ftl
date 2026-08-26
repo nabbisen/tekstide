@@ -684,6 +684,30 @@ change-review-review-state = Review state: { $state ->
 }
 change-review-open-button = Change Review
 
+# RFC-034: a review decision. `what-a-review-decision-must-not-claim.md` §4's own
+# answer to the disclosure-density question -- one combined sentence rather than
+# three separate ones, since finality (§3), session-scope (D0), and "no file is
+# touched" (§1's falsifiable claim) are, from the reader's own perspective, one
+# fact: *this is a note to yourself, for now.* Rendered once, beside the two
+# buttons, only while they are offered (D4) -- never after a decision, when there
+# is nothing left to disclose about a click that already happened.
+change-review-decision-notice = Marking this here only records your own note about it: it changes no file, cannot be undone, and disappears when you close Tekstide.
+# D3: a *different* fact from `change-review-content-stale`'s own wording, on
+# purpose -- that one is about content read at a passed moment; this one is
+# about a decision that is still about what was detected, not what is on disk
+# now. Reuses `diff_content_is_stale`'s own check (RFC-024), not a second
+# staleness notion. Rendered beside the decision controls, which stay live.
+change-review-decision-stale-tree = The files on disk have changed since this change set was detected. You can still record your decision about what was detected.
+# D1: exactly these two, from `Unreviewed`/`PartiallyAccepted` only, offering an
+# opinion, never `PartiallyAccepted` or `Superseded` -- facts a button press is
+# not the source of truth for. "Mark", not "Accept"/"Reject" alone: the label
+# itself reads as recording a note, not performing an action, the same "the
+# words must carry it, at the point of the click" requirement
+# `change-review-decision-notice` above also exists to satisfy, redundantly by
+# design.
+change-review-accept-button = Mark accepted
+change-review-reject-button = Mark rejected
+
 # RFC-041, the change content preview (`what-a-content-preview-must-not-claim.md`).
 # `$path` is untrusted -- filesystem-derived, escaped through
 # `text_safety::quote_untrusted` before it ever reaches this key, the

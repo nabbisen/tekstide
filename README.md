@@ -337,6 +337,14 @@ by design, so a change made inside those is never reported — except `.git/hook
 install or redirect code that runs on this machine. The surface states both of these itself, in
 its own disclosure text; nothing here should be read as promising more than that.
 
+**You can record a decision about a change set** (`0.15.0`) — "Mark accepted" or "Mark rejected",
+offered until you decide. **Read what that is as closely as what it is not**: it changes no file,
+it cannot be taken back once recorded, and it does not survive closing Tekstide — no audit
+record, no persistence, nothing left when you reopen the project. It is a note to yourself for
+the session, not a review workflow. If the files on disk have moved since this change set was
+detected, the surface says so and still lets you decide — a decision is about what was detected,
+which a later, unrelated change does not undo.
+
 **Transcript privacy controls** — declining capture for future runs, and purging what is
 already retained, both per project — live on the same Trust Settings surface (`Ctrl+Alt+U`).
 See *Local Data and Privacy* below for exactly what is recorded and how to remove it.
