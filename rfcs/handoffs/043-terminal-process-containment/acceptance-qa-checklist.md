@@ -44,10 +44,13 @@ created: "2026-08-26"
 
 ## D4 — a leaking test is red
 
-- [ ] The guard is in `RunningTerminal::drop`, not wired per test.
-- [ ] **The inventory is recorded**: which tests failed when the guard first went live. Nobody has
-      that list today.
-- [ ] Ablated: reintroduce a leak, watch the guard fail.
+- [x] The guard is in `RunningTerminal::drop`, not wired per test. `assert_session_is_empty`,
+      called unconditionally at the end of the existing `Drop` impl.
+- [x] **The inventory is recorded**: which tests failed when the guard first went live. Four,
+      stable across three runs on each crate -- full table and per-test reason in `qa-evidence.md`.
+- [x] Ablated: reintroduce a leak, watch the guard fail. Commented out the guard's `#[cfg]` and
+      call, re-ran the sigterm-overclaim test: passed silently despite the real leak. Restored:
+      failed again. `qa-evidence.md`.
 
 ## Wording
 
@@ -72,9 +75,14 @@ created: "2026-08-26"
 
 ## Gates
 
-- [ ] `fmt`, `clippy -D warnings`, `git diff --check`, `rfc_docs_invariants`.
-- [ ] Full workspace suite, **three consecutive runs**, each logged to a file.
-- [ ] **PR-043-A is expected to end red.** Say so; do not delay the guard to keep a green run.
+- [ ] `fmt`, `clippy -D warnings`, `git diff --check`, `rfc_docs_invariants`. Clean as of
+      PR-043-A's own diff (`qa-evidence.md`); re-check after PR-043-B/C land, since this is a
+      whole-RFC gate, not a per-slice one.
+- [ ] Full workspace suite, **three consecutive runs**, each logged to a file. Not applicable to
+      PR-043-A on its own -- it is expected to end red, by design (below). PR-043-B is what makes
+      three-clean-runs a meaningful gate again.
+- [x] **PR-043-A is expected to end red.** Say so; do not delay the guard to keep a green run.
+      Said: 4 tests red, stable across 3 runs on each crate, full inventory in `qa-evidence.md`.
 
 ## Final Acceptance Decision
 

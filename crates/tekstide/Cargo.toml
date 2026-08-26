@@ -25,3 +25,7 @@ vte                         = { workspace = true }
 
 [dev-dependencies]
 iced_futures                = { version = "0.14" }
+# RFC-043 PR-043-A: activates tekstide-core's D4 leak guard for this
+# crate's own tests too -- see that crate's Cargo.toml for why `[features]`
+# rather than `#[cfg(test)]` is what crosses the dependency boundary.
+tekstide-core                = { workspace = true, features = ["test-support"] }

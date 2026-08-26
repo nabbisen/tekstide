@@ -542,7 +542,107 @@ impl Drop for RunningTerminal {
         // earlier `try_wait`/`wait` call before this value ever reached
         // `Drop`.
         let _ = self.child.wait();
+
+        // RFC-043 PR-043-A, D4: this is deliberately here, not wired into
+        // any specific test -- "one week ago the audit-store slice wired
+        // a guard into the 23 sites its handoff named and the suite
+        // failed 58 *other* tests reaching the same path" (this RFC's
+        // own security document, `what-containment-must-not-become.md`
+        // §5). A guard placed at the sites that call it always misses
+        // sites; a guard placed where the process is *created* cannot.
+        //
+        // `self.process_group_id` is also this terminal's session id --
+        // `spawn_pty_child`'s `pre_exec` calls `setsid()` before `exec`,
+        // which makes the freshly `fork`ed child both its own process
+        // group leader and its own session leader, so `child.id()`
+        // (what this field is constructed from) equals both at launch.
+        // A backgrounded job started inside the shell gets its *own*
+        // process group -- that is `test-process-leak.md`'s own
+        // corrected finding -- but stays in this same session, which is
+        // exactly why session id, not process group id, is what the kill
+        // above (a single `-process_group_id` target) cannot reach.
+        //
+        // **No containment yet.** This only observes and reports; PR-B
+        // is what acts on what this finds. Expected, by design, to turn
+        // tests red the moment this lands -- that is the inventory this
+        // slice exists to produce, not a regression in this commit.
+        //
+        // `#[cfg(any(test, feature = "test-support"))]`, not bare
+        // `#[cfg(test)]`: this crate's own `cfg(test)` only activates
+        // when *tekstide-core's* test suite is what's compiling, not
+        // when a consuming crate's tests are -- most real terminal
+        // launches (the flood benchmarks, the close-with-a-backgrounded-
+        // descendant tests) live in the `tekstide` binary crate, which
+        // depends on this one as an ordinary library. Found the hard
+        // way: this guard fired correctly under `cargo test -p
+        // tekstide-core` but was silently absent (not skipped, *absent*
+        // -- the code did not exist in that build) under `cargo test -p
+        // tekstide`, and a benchmark known to leak 28 processes passed
+        // clean. `tekstide-core`'s own `test-support` Cargo feature is
+        // what `tekstide/Cargo.toml`'s `[dev-dependencies]` enables to
+        // close that gap; see that feature's own doc comment.
+        #[cfg(any(test, feature = "test-support"))]
+        assert_session_is_empty(self.process_group_id);
     }
+}
+
+/// The test-and-test-support-only half of RFC-043 D4 -- panics loudly,
+/// naming every survivor, if anything is still alive in the session
+/// this terminal's shell led, immediately after the kill above. Skipped
+/// while the current thread is already unwinding from a different panic
+/// (`std::thread::panicking()`): a `Drop` that panics during an
+/// existing unwind aborts the whole test process instead of failing one
+/// test, which would turn "this test leaked" into "this test run lost
+/// every other test's result," the opposite of what a red test is for.
+/// A test that panics for its own reason and *also* leaks is still
+/// worth knowing about, but not at that cost -- it is not what this
+/// slice's own "make the leak red" goal needs, since that test was
+/// already red.
+#[cfg(any(test, feature = "test-support"))]
+fn assert_session_is_empty(session_id: libc::pid_t) {
+    if std::thread::panicking() {
+        return;
+    }
+    let survivors = processes_in_session(session_id);
+    assert!(
+        survivors.is_empty(),
+        "RunningTerminal::drop killed process group {session_id}, but session {session_id} \
+         still has live process(es) after the kill and wait above: {survivors:?} -- a \
+         backgrounded job inside this terminal escaped, exactly the defect \
+         rfcs/accepted/043-terminal-process-containment.md exists to fix. This is the \
+         reproduction PR-043-A exists to turn red, not a false alarm to silence."
+    );
+}
+
+/// Every live pid whose `/proc/<pid>/stat` session field equals
+/// `session_id` -- read-only, no signal sent, safe to call
+/// unconditionally. `/proc` entries that vanish or become unreadable
+/// mid-scan (a process exiting during the read) are skipped rather than
+/// erroring, the same tolerance `process_group_exists_by_id` already
+/// gives a process that may no longer exist by the time it's checked.
+#[cfg(any(test, feature = "test-support"))]
+fn processes_in_session(session_id: libc::pid_t) -> Vec<libc::pid_t> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<libc::pid_t>().ok())
+        .filter(|&pid| session_id_of(pid) == Some(session_id))
+        .collect()
+}
+
+/// `/proc/<pid>/stat`'s own format: `pid (comm) state ppid pgrp session
+/// ...`, space-separated after the `)` that closes `comm` -- `comm`
+/// itself can contain spaces or even `)`, so this splits on the *last*
+/// `)` in the line rather than the first space, the standard way to
+/// parse this file safely. `state`, `ppid`, `pgrp`, `session` are then
+/// fields 0-3 of what remains.
+#[cfg(any(test, feature = "test-support"))]
+fn session_id_of(pid: libc::pid_t) -> Option<libc::pid_t> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_comm = stat.rsplit_once(')')?.1;
+    after_comm.split_whitespace().nth(3)?.parse().ok()
 }
 
 fn transcript_write_error_summary(error: &TranscriptWriteError) -> BoundedRuntimeSummary {

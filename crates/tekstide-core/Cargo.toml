@@ -20,3 +20,14 @@ serde_json.workspace        = true
 toml.workspace              = true
 uuid.workspace              = true
 rusqlite.workspace          = true
+
+# RFC-043 PR-043-A: `#[cfg(test)]` only activates when this crate's own
+# test suite is what's compiling -- it cannot see a *consuming* crate's
+# test mode across the dependency boundary. `tekstide`'s own tests (where
+# most real terminal launches actually happen) need the D4 leak guard
+# active too, so `tekstide/Cargo.toml`'s `[dev-dependencies]` enables
+# this feature on top of the normal dependency; Cargo unifies the two
+# into one build for `cargo test -p tekstide`. Never enabled by a
+# release build, since only a dev-dependency turns it on.
+[features]
+test-support = []
