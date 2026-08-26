@@ -201,3 +201,29 @@ the tree has moved since detection.
 not readable — a real source file previews as one escaped line. An approval control over a review
 surface a user cannot read is a control implying more than it delivers, and would be the fourth
 of that shape in this project.
+
+### D4 (added 2026-08-26, while writing the handoff pack) — a decision is final. Say so **before** the click.
+
+Found by reading `can_transition_review_state` again with D1's answer in hand. Once a change set
+is `Accepted`, the only legal transition is `Superseded`. Once it is `Rejected`, likewise.
+**`Accepted → Rejected` is not legal, and neither is the reverse.**
+
+So the two controls D1 offers are **one-way**, and nothing in D1 said so.
+
+Three ways that could go, and only one is honest:
+
+- **Offer the buttons anyway and refuse on click.** A control that will always refuse is a control
+  that implies an action it does not have. This project has corrected that shape four times.
+- **Withdraw the buttons after a decision, silently.** The user clicks Accept, the controls
+  vanish, and nothing ever said the click was irreversible. They learn the rule by losing to it.
+- **Say it before the click, and withdraw after.** ← **decided.**
+
+**The surface states that a review decision cannot be changed once recorded, while the controls
+are still live** — not in a confirmation modal after the fact, and not only as an explanation of
+why the buttons are gone. After a decision, the controls are no longer offered and the review
+state line carries what was decided.
+
+**This compounds with D0.** A decision is *final* and *session-scoped*: it cannot be changed, and
+it does not survive closing Tekstide. Both are true, both are surprising, and a user told only one
+of them will infer the other wrongly in whichever direction is worse. **Both sentences ship or
+neither control does.**
