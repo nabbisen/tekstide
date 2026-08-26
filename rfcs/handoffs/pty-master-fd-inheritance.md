@@ -81,3 +81,30 @@ The backgrounded job still escapes termination — it is in its own process grou
 shell's session, and `request_terminate`/`RunningTerminal::drop` signal one group. That is
 RFC-043. This fix stops the leak sustaining itself and closes the descriptor hole; it does not
 change what "close this terminal" means.
+
+
+---
+
+## Accepted 2026-08-26 (review 338, commit `0673d80`)
+
+Verified by the reviewer by breaking it, not by reading it:
+
+- Both layers ablated → the test fails, `found 2 such descriptor(s)`.
+- `set_cloexec` alone → passes. `close_range` alone → passes. **Each layer independently closes
+  the hole**, so neither is decoration and deleting either is a real regression.
+- Benchmark run: `/dev/pts` **3 → 3**, shells 6 → 34. Descriptor hole closed; the
+  job-escapes-termination defect untouched, correctly left to RFC-043.
+- The 28 orphans are `state=R`, `ptmx_fds=0` — no inherited masters, running rather than blocked —
+  and were **back to the pre-run baseline of 6** minutes later. They now hit `EIO`, reach
+  `FLOOD_SCRIPT`'s own 30-second deadline, and exit. **The leak is no longer self-sustaining**,
+  which was what turned a bounded per-run cost into an exhausted machine.
+- The descriptor enumeration re-run independently: `eventfd` has `EFD_CLOEXEC`, the approval
+  channel's `open`/`openat` both pass `O_CLOEXEC`, and `duplicate_slave`'s `dup` correctly has
+  none because those become the child's stdio. The master and slave were the only two.
+
+**Baseline for RFC-043 to improve on:** 28 orphans per benchmark run, PTY occupancy flat, orphans
+self-terminating within 30 seconds.
+
+Gate accepted at 12 full-workspace runs (5 clean) rather than three consecutive: `/dev/pts` held
+at baseline in **all 12**, which is direct evidence about the property this fix changes, where
+three green suites would have been weaker evidence at higher cost.
