@@ -47,6 +47,20 @@ This checklist applies before creating a tag or package for a Tekstide release.
       state-asserting-text failure `ARCHITECTURE.md` records. Tick a copy, or record the run in
       the release's own evidence — never here. (Response 293 promised to tick this one on
       evidence landing; that promise was wrong and is withdrawn.)
+- [ ] **Open the project you launch from a scratch directory, never a real one.**
+      `mktemp -d`, a fixture file or two inside it, and nothing else. The Run It gate captures
+      screenshots, this repository is public, and the close confirmation and Project Board both
+      render a project's **canonical path** on purpose. `0.14.0`'s own gate run pointed the
+      binary at a directory under `$HOME` and committed three screenshots carrying the
+      operator's username and home layout; they were pushed before the owner caught it. Every
+      screenshot committed before that had used a `/tmp` fixture — the practice was real and
+      unwritten, which is exactly why it broke. See `ARCHITECTURE.md`, "A committed screenshot
+      may only ever show throwaway state."
+- [ ] **Release evidence goes in `.git-exclude/release-evidence/<version>/`, not in the
+      repository.** A release's gate record is for the owner and the team, not for
+      publication, and it is the document most likely to carry a real path or a real project
+      name. Only per-RFC evidence that a fixture can produce belongs under
+      `rfcs/handoffs/<rfc>/evidence/`.
 - [ ] **`./target/release/tekstide --help`** prints usage and exits, rather than treating the
       flag as a path.
 

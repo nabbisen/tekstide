@@ -41,8 +41,14 @@ XDG_STATE_HOME=.git-exclude/tmp/manual-state cargo run -p tekstide
 Rendered row:
 
 ```text
-manual-project | .git-exclude/tmp/manual-project -> /home/nabbisen/Desktop/tekstide/tekstide-git/.git-exclude/tmp/manual-project | trust: Restricted | branch/status: not available | terminals: not implemented | agents: not implemented | approvals: not implemented | reviews: not implemented | dirty: not implemented | attention: Calm
+manual-project | .git-exclude/tmp/manual-project -> <REPO>/.git-exclude/tmp/manual-project | trust: Restricted | branch/status: not available | terminals: not implemented | agents: not implemented | approvals: not implemented | reviews: not implemented | dirty: not implemented | attention: Calm
 ```
+
+*(The canonical path in the row above was the operator's real absolute path when this was
+written; replaced with `<REPO>` on 2026-08-26. The substitution changes nothing this evidence
+proves — the point is that the row shows a canonical path at all, not which one. It remains in
+this repository's git history; see `ARCHITECTURE.md` on committed evidence and throwaway
+state.)*
 
 Invalid path evidence from PR-005-C:
 

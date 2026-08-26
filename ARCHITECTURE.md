@@ -91,6 +91,22 @@ that your check reaches real data before asserting what it does not find.
 **Screenshots** state what they prove **and what they do not**, and live under
 `rfcs/handoffs/<rfc>/evidence/`.
 
+**A committed screenshot may only ever show throwaway state.** Capture against a fixture
+project in a scratch directory (`mktemp -d`), with a fixture's own file names and content —
+never a real project, never a path under `$HOME`, never real file content. This repository is
+public: a screenshot is a verbatim publication of whatever was on screen, and the application's
+own surfaces render **canonical project paths** by design (the close confirmation identifies a
+project by its full path precisely so two similar names cannot be confused). Pointing the
+binary at a real directory therefore publishes the operator's username and home layout, without
+any step that looks like publishing.
+
+This rule was practised before it was written — every screenshot committed up to `0.14.0` was
+captured against a `/tmp` fixture — and was broken the first time someone followed the written
+half without knowing the unwritten half. **A convention that survives only because everyone
+happens to share a habit is one newcomer away from failing.** Evidence that cannot be captured
+against a fixture belongs in `.git-exclude/`, which is never committed, and the committed
+document links to nothing it cannot show.
+
 **Claims** are checked against the RFC's own text at closeout, not only against the
 evidence file — an RFC has twice asserted something its own results had falsified.
 
