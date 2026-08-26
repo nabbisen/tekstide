@@ -1,8 +1,8 @@
 ---
 title: "RFC-034 acceptance and QA checklist"
 rfc: "RFC-034"
-rfc_file: "../../accepted/034-change-review-actions-and-review-state.md"
-source_rfc_status: "Accepted 2026-08-18, amended 2026-08-26 — M12, second of three for 0.15.0"
+rfc_file: "../../done/034-change-review-actions-and-review-state.md"
+source_rfc_status: "Implemented and closed 2026-08-26 — RFC-034 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-26"
 ---
@@ -157,12 +157,47 @@ created: "2026-08-26"
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted 2026-08-26 at review 335, after two rounds (requests 334, 335;
+commits 89e7ba1, 6c41aae).
+
+Verified by the reviewer:
+
+- rejecting_a_change_set_does_not_modify_any_file carries its own positive
+  control -- it asserts the transition actually happened, so "no file changed"
+  cannot pass for the trivial reason.
+- D1 by construction: ChangeReviewDecision has two variants, so PartiallyAccepted
+  and Superseded are not representable as button outcomes.
+- Each of the notice's three claims independently ablated by the reviewer. Both
+  deletions that passed with 33/33 green in round 1 now fail, each naming its own
+  claim.
+- Keyboard path: a/r reach the controls. The bare-key claim checked -- no
+  default_binding in the policy lacks Ctrl, so a bare character never matches
+  matching_global_action. Modal exclusivity is structural, not per-handler:
+  RoutedInput::Surface cannot be constructed without a ModalAbsent proof.
+- Three consecutive full-workspace runs by the reviewer: runs 2 and 3 clean at
+  444 + 742 + 2. Run 1 failed 15 tests, none in code this slice touches -- see
+  below.
+
+Round 1 finding worth keeping: consolidating three claims into one sentence
+consolidated their guards into one. The single contains("close tekstide") check
+looked like it guarded all three; deleting "it changes no file" (the oldest risk
+in this RFC) or "cannot be undone" (D4) left the suite green. Section 4's
+consolidation was still the right design call -- what was wrong was testing a
+merged sentence with one substring.
+
+Round 1's other finding: the decision controls were mouse-only. This project has
+now fixed that shape three times (ApprovalHistory, response 234; TrustSettings,
+response 248; here). The missing "after" screenshot was a symptom of it, not an
+evidence gap.
+
+Not this slice's, found while gating it: the suite's audit-store tests share ONE
+store resolved from the real environment, and read it with AuditQuery::latest(50).
+See the reviewer's response 335 and the flake register.
 ```

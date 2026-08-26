@@ -16,7 +16,7 @@ Related RFCs:
   sniff and the staleness check. **None of that changes.** This RFC is about layout only.
 - [RFC-018](../done/018-paste-protection-and-trusted-ui-evidence.md) — owns the trusted-UI
   spoofing boundary, which is the question this RFC actually has to answer.
-- [RFC-034](../accepted/034-change-review-actions-and-review-state.md) — **depends on this.** See
+- [RFC-034](../done/034-change-review-actions-and-review-state.md) — **depends on this.** See
   "Why this is first".
 
 ## Summary

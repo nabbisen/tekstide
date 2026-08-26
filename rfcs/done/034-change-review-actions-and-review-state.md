@@ -1,6 +1,6 @@
 # RFC-034: Change Review Actions and Review State
 
-Status: **Accepted by the human owner 2026-08-18. UNBLOCKED 2026-08-25. AMENDED 2026-08-26** — see the Amendment at the end: one of the two values this RFC was accepted for does not exist, and D1/D2/D3 are decided.
+Status: **Implemented and closed 2026-08-26.** Accepted by the human owner 2026-08-18, unblocked 2026-08-25 by RFC-020, amended and decided 2026-08-26, shipped in `89e7ba1` and accepted at review 335. Original status line and amendment kept below. **AMENDED 2026-08-26** — see the Amendment at the end: one of the two values this RFC was accepted for does not exist, and D1/D2/D3 are decided.
 Original status line: **Accepted by the human owner 2026-08-18. UNBLOCKED 2026-08-25** — RFC-020 shipped the change review surface, so a user can now see a change set. The original blocker read: *"Blocked on RFC-020: a user cannot act on a change set they cannot see."* Note what RFC-020 shipped is **metadata only**: file paths, counts, detection status, review state. Diff *content* is still not rendered, so an action taken here is taken on the same metadata the surface shows, not on inspected content — decide deliberately whether that is sufficient for the actions this RFC defines.
 Target milestone: M12
 Date: 2026-08-18

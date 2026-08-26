@@ -1,8 +1,8 @@
 ---
 title: "RFC-034 task breakdown and PR plan"
 rfc: "RFC-034"
-rfc_file: "../../accepted/034-change-review-actions-and-review-state.md"
-source_rfc_status: "Accepted 2026-08-18, amended 2026-08-26 — M12, second of three for 0.15.0"
+rfc_file: "../../done/034-change-review-actions-and-review-state.md"
+source_rfc_status: "Implemented and closed 2026-08-26 — RFC-034 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-26"
 ---

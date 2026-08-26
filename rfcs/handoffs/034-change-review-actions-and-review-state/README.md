@@ -1,19 +1,19 @@
 ---
 title: "RFC-034: Change Review Actions and Review State — implementation handoff"
 rfc: "RFC-034"
-rfc_file: "../../accepted/034-change-review-actions-and-review-state.md"
-source_rfc_status: "Accepted 2026-08-18, amended 2026-08-26 — M12, second of three for 0.15.0"
+rfc_file: "../../done/034-change-review-actions-and-review-state.md"
+source_rfc_status: "Implemented and closed 2026-08-26 — RFC-034 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-26"
 ---
 
 # Let a user record a decision, and never let the record claim more than it is
 
-Source RFC: [RFC-034](../../accepted/034-change-review-actions-and-review-state.md)
+Source RFC: [RFC-034](../../done/034-change-review-actions-and-review-state.md)
 
 | # | Read | Why |
 | --- | --- | --- |
-| 1 | [RFC-034](../../accepted/034-change-review-actions-and-review-state.md) | **Read the Amendment at the end first.** D0–D4 are decided; do not re-open them |
+| 1 | [RFC-034](../../done/034-change-review-actions-and-review-state.md) | **Read the Amendment at the end first.** D0–D4 are decided; do not re-open them |
 | 2 | [`what-a-review-decision-must-not-claim.md`](./what-a-review-decision-must-not-claim.md) | **Required.** Every risk in this slice is a wording risk |
 | 3 | [RFC-012](../../done/012-generated-change-review-foundations.md) | Froze `ReviewState` and built `transition_change_set_review_state`. You are calling it, not changing it |
 | 4 | [RFC-042](../../done/042-change-content-legibility.md) | Owns the four-region layout your controls land in, and the module boundary around content |
