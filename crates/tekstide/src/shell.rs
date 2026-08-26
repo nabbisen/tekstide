@@ -7989,21 +7989,32 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
             .into(),
     );
 
-    // RFC-041 PR-041-B: the content preview for whichever row is
-    // currently selected, if any -- see `change_review_content_lines`'s
-    // own doc for why this is re-evaluated fresh on every render rather
-    // than read from anything stored.
-    for (index, content_line) in change_review_content_lines(state, project, change_set)
-        .into_iter()
-        .enumerate()
-    {
+    // RFC-041 PR-041-B, restructured by RFC-042 PR-042-A: the content
+    // preview for whichever row is currently selected, if any -- see
+    // `change_review_content_lines`'s own doc for why this is
+    // re-evaluated fresh on every render rather than read from anything
+    // stored. Chrome (`heading`/`chrome`) and untrusted content
+    // (`content`) are told apart by field, not by position -- the
+    // renderer no longer discriminates with `if index == 0`.
+    let preview = change_review_content_lines(state, project, change_set);
+    if let Some(heading) = &preview.heading {
         lines.push(
-            text(content_line)
-                .size(if index == 0 {
-                    state.theme.font_size_heading()
-                } else {
-                    state.theme.font_size_body()
-                })
+            text(heading.clone())
+                .size(state.theme.font_size_heading())
+                .into(),
+        );
+    }
+    for chrome_line in &preview.chrome {
+        lines.push(
+            text(chrome_line.clone())
+                .size(state.theme.font_size_body())
+                .into(),
+        );
+    }
+    for content_line in &preview.content {
+        lines.push(
+            text(content_line.as_str().to_string())
+                .size(state.theme.font_size_body())
                 .into(),
         );
     }
@@ -8234,37 +8245,121 @@ fn change_review_diff_content_baseline(
     }
 }
 
-/// RFC-041 PR-041-B: the content preview's own lines, as plain resolved
-/// text -- `change_review_view` wraps each into a real `text()`
-/// element, the same "resolved string, not the `Element` tree" split
-/// every other rendered line on this surface already uses (and the same
-/// reason those are independently testable). **Re-evaluated fresh on
-/// every call**: this is `what-a-content-preview-must-not-claim.md`'s
-/// own §3 answer -- "if rendering seems to need content in state, that
-/// is the design telling you something: render from a value that lives
-/// for the request." `read_diff_content` runs again here, every single
-/// time this is called while a selection is active; its result is
-/// consumed entirely inside this function and never leaves it, matching
-/// `DiffContent`'s own structural guarantee (derives neither `Clone`
-/// nor `Serialize` -- a field holding one would not compile, the same
-/// argument that already protects `ProjectSession` and every
-/// `AuditCoordinator::record_*` call). Empty when nothing is selected,
-/// or the selection belongs to a change set this call is not rendering
-/// (a newer one superseded it, per `ChangeReviewSelection`'s own
-/// `change_set_id` scoping).
+/// RFC-042 D2: a single line of an **untrusted file's own bytes**,
+/// already escaped by [`tekstide_core::text_safety::quote_untrusted`].
+/// The only way to build one is [`Self::from_escaped`] -- there is no
+/// public constructor accepting an unescaped `&str`, and nothing in this
+/// module renders one through the chrome text path
+/// (`ChangeReviewContentPreview::chrome`/`heading`, plain `String`s
+/// pushed straight into `change_review_view`'s `lines`). This is the
+/// same idiom `DisplayText`'s single `quote_untrusted` constructor and
+/// `DiffContent`'s Added/Modified-carried-by-constructor already use in
+/// this codebase: after this type exists, "a content line rendered
+/// where a chrome line is expected" is something the compiler refuses,
+/// not a convention a future edit could quietly break by, say, pushing
+/// one into `lines` instead of the dedicated content region.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ChangeReviewContentLine(tekstide_core::text_safety::DisplayText);
+
+impl ChangeReviewContentLine {
+    fn from_escaped(text: &str) -> Self {
+        Self(tekstide_core::text_safety::quote_untrusted(text))
+    }
+
+    fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+/// RFC-042 D2's structural half: the content preview's own render
+/// inputs, chrome and untrusted content kept in separate fields rather
+/// than merged into one `Vec<String>` the renderer used to tell apart by
+/// `if index == 0`. `chrome` is every word *Tekstide* wrote about the
+/// selection -- the "Preview: path" heading, the "not a diff" label, or
+/// any refusal/error/stale message -- and is exactly as trusted as every
+/// other line on this surface. `content` is the file's own bytes, one
+/// already-escaped [`ChangeReviewContentLine`] per rendered row (a
+/// single element until RFC-042 PR-042-C splits on `\n`); `heading` and
+/// `chrome` are never derived from it.
+///
+/// **PR-042-A's own required ablation (checklist: "a compile failure is
+/// the ablation here -- record the error, not a test name"):** swapping
+/// this struct's two fields (`chrome: content, content: chrome` in
+/// [`change_review_content_lines`]'s `Ok` arm) fails with
+/// `error[E0308]: mismatched types ... expected Vec<String>, found
+/// Vec<ChangeReviewContentLine>` (and the same in reverse for the other
+/// field). Confirmed, then reverted -- not committed.
+struct ChangeReviewContentPreview {
+    /// `None` exactly when there is no selection for this change set --
+    /// the "nothing to show" case `change_review_view` already renders
+    /// as if this whole preview were absent.
+    heading: Option<String>,
+    chrome: Vec<String>,
+    content: Vec<ChangeReviewContentLine>,
+}
+
+impl ChangeReviewContentPreview {
+    fn empty() -> Self {
+        Self {
+            heading: None,
+            chrome: Vec::new(),
+            content: Vec::new(),
+        }
+    }
+
+    fn chrome_only(heading: String, chrome_line: String) -> Self {
+        Self {
+            heading: Some(heading),
+            chrome: vec![chrome_line],
+            content: Vec::new(),
+        }
+    }
+
+    /// Test-only convenience: every rendered line, chrome and content
+    /// together, in the same order `change_review_view` pushes them --
+    /// for assertions that only care whether some text appears anywhere
+    /// on the surface, not which field it came from. Production code
+    /// never flattens the two back together.
+    #[cfg(test)]
+    fn all_lines(&self) -> Vec<String> {
+        self.heading
+            .iter()
+            .cloned()
+            .chain(self.chrome.iter().cloned())
+            .chain(self.content.iter().map(|line| line.as_str().to_string()))
+            .collect()
+    }
+}
+
+/// RFC-041 PR-041-B, restructured by RFC-042 PR-042-A (D2's structural
+/// half) into [`ChangeReviewContentPreview`] -- see that type's own doc
+/// for why chrome and content are separate fields now, not one `Vec<String>`
+/// discriminated by position. **Re-evaluated fresh on every call**: this
+/// is `what-a-content-preview-must-not-claim.md`'s own §3 answer -- "if
+/// rendering seems to need content in state, that is the design telling
+/// you something: render from a value that lives for the request."
+/// `read_diff_content` runs again here, every single time this is
+/// called while a selection is active; its result is consumed entirely
+/// inside this function and never leaves it, matching `DiffContent`'s
+/// own structural guarantee (derives neither `Clone` nor `Serialize` --
+/// a field holding one would not compile, the same argument that
+/// already protects `ProjectSession` and every `AuditCoordinator::record_*`
+/// call). Empty when nothing is selected, or the selection belongs to a
+/// change set this call is not rendering (a newer one superseded it, per
+/// `ChangeReviewSelection`'s own `change_set_id` scoping).
 fn change_review_content_lines(
     state: &State,
     project: &tekstide_core::project::ProjectSession,
     change_set: &tekstide_core::domain::ChangeSet,
-) -> Vec<String> {
+) -> ChangeReviewContentPreview {
     let Some(selection) = &state.change_review_selection else {
-        return Vec::new();
+        return ChangeReviewContentPreview::empty();
     };
     if selection.change_set_id != change_set.id {
-        return Vec::new();
+        return ChangeReviewContentPreview::empty();
     }
 
-    let mut lines = vec![state.catalog.get_with_args(
+    let heading = state.catalog.get_with_args(
         "change-review-content-heading",
         &CatalogArgs::new().untrusted(
             "path",
@@ -8272,7 +8367,7 @@ fn change_review_content_lines(
                 &selection.relative_path.display().to_string(),
             ),
         ),
-    )];
+    );
 
     let root = tekstide_core::project::root::ProjectRootHandle::from_project_session(project);
 
@@ -8287,17 +8382,19 @@ fn change_review_content_lines(
             &selection.relative_path,
         ) {
             Ok(true) => {
-                lines.push(state.catalog.get("change-review-content-stale"));
-                return lines;
+                return ChangeReviewContentPreview::chrome_only(
+                    heading,
+                    state.catalog.get("change-review-content-stale"),
+                );
             }
             Ok(false) => {}
             Err(_) => {
-                lines.push(
+                return ChangeReviewContentPreview::chrome_only(
+                    heading,
                     state
                         .catalog
                         .get("change-review-content-error-metadata-unavailable"),
                 );
-                return lines;
             }
         }
     }
@@ -8307,8 +8404,10 @@ fn change_review_content_lines(
     // only thing that reads this map) and must render its own honest,
     // distinct refusal rather than silently showing nothing.
     let Some(detected) = state.detected_changes_by_change_set.get(&change_set.id) else {
-        lines.push(state.catalog.get("change-review-content-unavailable"));
-        return lines;
+        return ChangeReviewContentPreview::chrome_only(
+            heading,
+            state.catalog.get("change-review-content-unavailable"),
+        );
     };
 
     match tekstide_core::project::read_diff_content(
@@ -8317,46 +8416,68 @@ fn change_review_content_lines(
         &selection.relative_path,
         tekstide_core::project::DiffPreviewPolicy::default(),
     ) {
-        Ok(content) => lines.extend(change_review_diff_content_lines(&state.catalog, content)),
-        Err(error) => lines.push(change_review_content_error_line(&state.catalog, &error)),
+        Ok(content) => {
+            let (chrome, content) = change_review_diff_content_lines(&state.catalog, content);
+            ChangeReviewContentPreview {
+                heading: Some(heading),
+                chrome,
+                content,
+            }
+        }
+        Err(error) => ChangeReviewContentPreview::chrome_only(
+            heading,
+            change_review_content_error_line(&state.catalog, &error),
+        ),
     }
-
-    lines
 }
 
 /// Per `DiffContent` variant -- reusing exactly what RFC-024 already
 /// classified, never re-deriving Added/Modified/Deleted from
-/// `ChangePathKind` (RFC-024 PR-024-C's own review gate).
+/// `ChangePathKind` (RFC-024 PR-024-C's own review gate). Returns
+/// `(chrome, content)` separately (RFC-042 D2): `chrome` is Tekstide's
+/// own words about this variant (the "not a diff" label, or the fact of
+/// deletion/non-text/non-file -- never the file's own bytes); `content`
+/// is the file's own escaped bytes, empty for every variant that never
+/// had any to show.
 fn change_review_diff_content_lines(
     catalog: &Catalog,
     content: tekstide_core::project::DiffContent,
-) -> Vec<String> {
+) -> (Vec<String>, Vec<ChangeReviewContentLine>) {
     use tekstide_core::project::DiffContent;
     match content {
         // Added: the whole file is the whole change -- no "not a diff"
         // label, since nothing here claims to be a comparison.
-        DiffContent::Added { bytes, .. } => vec![change_review_content_body_text(&bytes)],
+        DiffContent::Added { bytes, .. } => (Vec::new(), change_review_content_body_lines(&bytes)),
         // Modified: RFC-041's own required, non-optional claim --
         // current content, explicitly labelled not a diff, on the
         // screen beside the content itself. Ablated:
         // `change_review_content_modified_content_is_labelled_not_a_diff`
         // removes this line and confirms the test fails.
-        DiffContent::Modified { bytes, .. } => vec![
-            catalog.get("change-review-content-not-a-diff"),
-            change_review_content_body_text(&bytes),
-        ],
-        DiffContent::Deleted { kind } => vec![catalog.get_with_args(
-            "change-review-content-deleted",
-            &CatalogArgs::new().trusted_symbol("kind", change_path_kind_symbol(kind)),
-        )],
-        DiffContent::NonTextContent { len, .. } => vec![catalog.get_with_args(
-            "change-review-content-non-text",
-            &CatalogArgs::new().number("len", len),
-        )],
-        DiffContent::NonFile { kind } => vec![catalog.get_with_args(
-            "change-review-content-non-file",
-            &CatalogArgs::new().trusted_symbol("kind", change_path_kind_symbol(kind)),
-        )],
+        DiffContent::Modified { bytes, .. } => (
+            vec![catalog.get("change-review-content-not-a-diff")],
+            change_review_content_body_lines(&bytes),
+        ),
+        DiffContent::Deleted { kind } => (
+            vec![catalog.get_with_args(
+                "change-review-content-deleted",
+                &CatalogArgs::new().trusted_symbol("kind", change_path_kind_symbol(kind)),
+            )],
+            Vec::new(),
+        ),
+        DiffContent::NonTextContent { len, .. } => (
+            vec![catalog.get_with_args(
+                "change-review-content-non-text",
+                &CatalogArgs::new().number("len", len),
+            )],
+            Vec::new(),
+        ),
+        DiffContent::NonFile { kind } => (
+            vec![catalog.get_with_args(
+                "change-review-content-non-file",
+                &CatalogArgs::new().trusted_symbol("kind", change_path_kind_symbol(kind)),
+            )],
+            Vec::new(),
+        ),
     }
 }
 
@@ -8366,10 +8487,18 @@ fn change_review_diff_content_lines(
 /// valid UTF-8 even after the gate's own NUL-byte sniff passed (RFC-024
 /// Decision 4 deliberately chose that sniff over a strict UTF-8 decode);
 /// `from_utf8_lossy` is the same tolerant conversion this project's
-/// other untrusted-bytes-to-text paths already use rather than a second
-///, stricter one invented here.
-fn change_review_content_body_text(bytes: &[u8]) -> String {
-    tekstide_core::text_safety::quote_untrusted(&String::from_utf8_lossy(bytes)).to_string()
+/// other untrusted-bytes-to-text paths already use rather than a second,
+/// stricter one invented here.
+///
+/// **RFC-042 PR-042-A: still one element, not yet split on `\n`.** This
+/// slice's whole point is the chrome/content type split with no visible
+/// change -- splitting the escaped blob into real lines, and enforcing a
+/// line-count bound, is PR-042-C's job, once D1 (the frame) and D2's
+/// structural half (this type) are both in place.
+fn change_review_content_body_lines(bytes: &[u8]) -> Vec<ChangeReviewContentLine> {
+    vec![ChangeReviewContentLine::from_escaped(
+        &String::from_utf8_lossy(bytes),
+    )]
 }
 
 fn change_path_kind_symbol(kind: tekstide_core::project::ChangePathKind) -> &'static str {

@@ -11478,7 +11478,7 @@ fn change_review_content_modified_content_is_labelled_not_a_diff() {
 
     let project = state.app_shell.state().active_project().unwrap();
     let change_set = project.change_sets().last().unwrap();
-    let lines = super::change_review_content_lines(&state, project, change_set);
+    let lines = super::change_review_content_lines(&state, project, change_set).all_lines();
 
     assert!(
         lines
@@ -11502,7 +11502,7 @@ fn change_review_content_added_content_has_no_not_a_diff_label() {
 
     let project = state.app_shell.state().active_project().unwrap();
     let change_set = project.change_sets().last().unwrap();
-    let lines = super::change_review_content_lines(&state, project, change_set);
+    let lines = super::change_review_content_lines(&state, project, change_set).all_lines();
 
     assert!(
         !lines
@@ -11533,7 +11533,7 @@ fn change_review_content_is_unavailable_when_retention_was_dropped() {
     let project = state.app_shell.state().active_project().unwrap();
     let change_set = project.change_sets().last().unwrap();
     let summary = change_set.default_summary();
-    let content_lines = super::change_review_content_lines(&state, project, change_set);
+    let content_lines = super::change_review_content_lines(&state, project, change_set).all_lines();
 
     assert!(
         content_lines
@@ -11568,7 +11568,7 @@ fn change_review_content_refuses_when_the_file_changes_after_selection() {
 
     let project = state.app_shell.state().active_project().unwrap();
     let change_set = project.change_sets().last().unwrap();
-    let lines = super::change_review_content_lines(&state, project, change_set);
+    let lines = super::change_review_content_lines(&state, project, change_set).all_lines();
 
     assert!(
         lines
@@ -11624,7 +11624,7 @@ fn change_review_content_escapes_a_bidi_override_in_file_content() {
 
     let project = state.app_shell.state().active_project().unwrap();
     let change_set = project.change_sets().last().unwrap();
-    let lines = super::change_review_content_lines(&state, project, change_set);
+    let lines = super::change_review_content_lines(&state, project, change_set).all_lines();
     let rendered = lines.join("\n");
 
     assert!(
@@ -12184,7 +12184,7 @@ fn change_review_surface_shows_real_content_from_a_real_agent_run() {
         .iter()
         .find(|change_set| change_set.agent_run_id.as_ref() == Some(&agent_run_id))
         .unwrap();
-    let lines = super::change_review_content_lines(&state, project, change_set);
+    let lines = super::change_review_content_lines(&state, project, change_set).all_lines();
     let rendered = lines.join("\n");
 
     assert!(
