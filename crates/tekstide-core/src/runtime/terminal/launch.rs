@@ -665,11 +665,14 @@ fn assert_session_is_empty(session_id: libc::pid_t) {
     }
     assert!(
         session_confirmed_empty(session_id),
-        "RunningTerminal::drop killed process group {session_id}, but session {session_id} \
-         still has live process(es), or its own enumeration could not be trusted, after the \
-         kill and wait above: {:?} -- a backgrounded job inside this terminal escaped, exactly \
-         the defect rfcs/accepted/043-terminal-process-containment.md exists to fix. This is \
-         the reproduction PR-043-A exists to turn red, not a false alarm to silence.",
+        "RunningTerminal::drop's own containment sequence for session {session_id} finished, \
+         but a real re-enumeration afterward still found: {:?}. Possible causes, not narrowed to \
+         one: a backgrounded job escaped containment (rfcs/accepted/043-terminal-process-containment.md, \
+         the defect this guard exists to catch); or a `/proc` read failed (session_confirmed_empty \
+         reports false for that too, on purpose); or a real, live survivor this enumeration has \
+         not yet excluded for some other reason. State what was observed here, not which of these \
+         it is -- that determination belongs in whoever reads this failure, with the actual pids \
+         and their own /proc/<pid>/stat in hand, not in this message.",
         processes_in_session(session_id)
     );
 }
@@ -721,9 +724,31 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
         entries
             .flatten()
             .filter_map(|entry| entry.file_name().to_str()?.parse::<libc::pid_t>().ok())
-            .filter(|&pid| session_id_of(pid) == Some(session_id))
+            .filter(|&pid| is_live_member_of_session(pid, session_id))
             .collect(),
     )
+}
+
+/// A pid counts as a live member of `session_id` only if its own
+/// `/proc/<pid>/stat` session field matches **and** its state is not
+/// `Z` (zombie). Response 340's required correction: a `SIGKILL`ed
+/// process becomes a zombie until its parent calls `wait()` on it --
+/// it still has a `/proc/<pid>/stat` entry with its session field
+/// unchanged, but it holds no resources beyond a pid table slot and
+/// cannot execute code. The enumeration was counting exactly this --
+/// most often the terminal's own leader, already killed, not yet
+/// reaped by the very next enumeration a few milliseconds later -- as a
+/// surviving background job, which cost every ordinary close its full
+/// grace period for no reason and made `RunningTerminal::drop`'s own
+/// PR-043-A guard fire on a corpse rather than an actual escape.
+/// Confirmed directly by the reviewer, not inferred: a zombie's own
+/// `state` field really is `Z`, and a plain session-field filter really
+/// does count it.
+fn is_live_member_of_session(pid: libc::pid_t, session_id: libc::pid_t) -> bool {
+    let Some(stat) = process_stat(pid) else {
+        return false;
+    };
+    stat.session_id == session_id && stat.state != 'Z'
 }
 
 #[cfg(not(test))]
@@ -791,9 +816,24 @@ pub(super) fn test_proc_root(path: &std::path::Path) -> TestProcRootGuard {
 /// ...`, space-separated after the `)` that closes `comm` -- `comm`
 /// itself can contain spaces or even `)`, so this splits on the *last*
 /// `)` in the line rather than the first space, the standard way to
-/// parse this file safely. `state`, `ppid`, `pgrp`, `session` are then
-/// fields 0-3 of what remains.
-///
+/// parse this file safely. `state` is field 0 of what remains; `ppid`,
+/// `pgrp`, `session` are 1-3.
+struct ProcessStat {
+    state: char,
+    session_id: libc::pid_t,
+}
+
+fn process_stat(pid: libc::pid_t) -> Option<ProcessStat> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_comm = stat.rsplit_once(')')?.1;
+    let mut fields = after_comm.split_whitespace();
+    let state = fields.next()?.chars().next()?;
+    // `ppid` and `pgrp` are consumed (`nth(2)` skips them) to reach
+    // `session`, the third field after `state`.
+    let session_id = fields.nth(2)?.parse().ok()?;
+    Some(ProcessStat { state, session_id })
+}
+
 /// RFC-043 PR-043-B: `termination.rs`'s own §1 re-verification ("the
 /// session id is re-verified immediately before every signal") calls
 /// this directly, right before each `kill`, not only through
@@ -801,10 +841,15 @@ pub(super) fn test_proc_root(path: &std::path::Path) -> TestProcRootGuard {
 /// earlier scan may have exited and been replaced by an unrelated
 /// process with the same number by the time a signal is about to be
 /// sent, and that race is exactly what this second call closes.
+///
+/// Deliberately not zombie-aware the way [`is_live_member_of_session`]
+/// is -- a zombie's session field is still authoritative (nothing has
+/// reused the pid, it just hasn't been reaped), and `kill(2)` on a
+/// zombie is already a harmless no-op at the kernel level, so there is
+/// no false-positive-survivor risk here the way there was in the
+/// enumeration this function is not part of.
 pub(super) fn session_id_of(pid: libc::pid_t) -> Option<libc::pid_t> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let after_comm = stat.rsplit_once(')')?.1;
-    after_comm.split_whitespace().nth(3)?.parse().ok()
+    process_stat(pid).map(|stat| stat.session_id)
 }
 
 fn transcript_write_error_summary(error: &TranscriptWriteError) -> BoundedRuntimeSummary {

@@ -184,6 +184,58 @@ touches) that passed on immediate isolated re-run. Not re-run further, per the s
 about not hammering a shared machine chasing a lucky streak once the property actually being
 tested (a clean, stable `/dev/pts`) already holds.
 
+## Response 340 — two required fixes, and the timing investigation asked for
+
+### Required 1 — a zombie counted as a survivor
+
+The reviewer's own repro: one run's failures all had `survivors: Some([session_id])` -- the
+survivor pid *was* the session id, i.e. the terminal's own already-`SIGKILL`ed leader, not an
+escaped job. `processes_in_session` read only the session field of `/proc/<pid>/stat`, never the
+state field, so a zombie (killed, not yet reaped by its parent) was counted as a live member.
+Confirmed directly, the same way the reviewer did: a zombie really does keep its own
+`/proc/<pid>/stat` entry, session field unchanged, state `Z`.
+
+Fixed: `is_live_member_of_session` now excludes state `Z`. `session_id_of` (the separate,
+single-pid lookup `termination.rs`'s own re-verification calls) is deliberately left
+non-zombie-aware -- a zombie's session field is still authoritative, and `kill(2)` on a zombie is
+already a harmless no-op, so there was no false-positive-survivor risk on that path to begin with.
+
+**A second, smaller bug the fix itself exposed, found immediately by re-running the suite rather
+than assumed fixed:** excluding zombies makes `session_confirmed_empty` able to report `true` a
+few microseconds before this same process's own `try_wait()`-based reaping call catches up (the OS
+marks a killed child a zombie in its own time, independent of when *we* next call `try_wait()` on
+it) -- `wait_for_session_outcome` could reach "confirmed empty" with `child_outcome` still `None`,
+reporting a vague `OrphanedUnknown` for what was actually a clean `SIGHUP`/`SIGKILL` exit. Since
+only this process can ever reap its own direct child, "confirmed empty and not yet reaped by us"
+can only mean "currently an unreaped zombie" -- so a blocking `wait()` at exactly that point returns
+essentially instantly (it is already dead) and recovers the real exit status.
+`linux_runtime_terminates_session_leader_with_sighup` caught this immediately after the zombie fix
+landed, before it was reported fixed.
+
+### Required 2 — the message asserted a cause it had not established
+
+Reworded `assert_session_is_empty`'s panic: states what was observed (the survivor list) and names
+the possible causes (an actual escape, a failed `/proc` read, something else not yet excluded)
+without picking one. The reviewer's own parallel to the `change_review_content_view_build_cost...`
+finding was the right frame -- a message that answers a question the code cannot actually answer
+tells the next reader to stop looking.
+
+### The timing investigation
+
+Required 1's fix alone took `tekstide`'s own suite from 17.6s back to 11.4s -- most, not all, of
+the 3.4× regression. Investigated the remainder rather than accepting a partial recovery: the
+N-pane `FLOOD_SCRIPT` benchmark's own 28 panes are where essentially all of it lives (10.95s alone,
+vs ~5s before PR-043-B). Traced one directly: 20ms after `SIGHUP`, the session leader is `state=S`,
+`wchan=iterate_tty_write`, blocked in `write(2)` to fd 2. `FLOOD_SCRIPT` produces continuous,
+unread output once the benchmark's own read loop stops (nothing drains the PTY's master side
+during `Drop`); the interactive shell's own job-control status message on receiving `SIGHUP`
+(printed to the same saturated PTY) blocks in exactly the same buffer, and stays blocked until
+`SIGKILL` forces it through. **Not a bug in this sequence** -- `SIGKILL` cannot be blocked, and the
+escalation correctly reaches and clears it every time (confirmed: `kill_worked=true` in ~1.5ms once
+sent) -- it is a real, explained cost specific to a workload that deliberately floods its own PTY
+and stops reading it, not a property of ordinary terminal use. Three consecutive full-workspace
+runs after both fixes: clean, `/dev/pts` flat at 13, `tekstide` at a stable ~11.4s.
+
 ## PR-043-C
 
 Not started. Owns: the close-confirmation wording (D1 + RFC-034 D4's rule), the
