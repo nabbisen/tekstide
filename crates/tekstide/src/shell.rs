@@ -3319,7 +3319,49 @@ fn handle_approval_history_key(state: &mut State, key: &input::KeyPress) {
 /// mode, off the `DiffReview` surface, or with nothing shown to
 /// navigate -- the same guard shape [`handle_explorer_key`]/
 /// [`handle_approval_history_key`] already use for their own zones.
+///
+/// **RFC-034, response 334 Required 1**: the decision controls
+/// (`a`/`r`) are checked *before* the row-navigation guard below returns
+/// early when there are no rows to show. A real `ChangeSet` always has
+/// at least one changed file in production, but a decision is about the
+/// whole change set, not the file list -- it must not become
+/// unreachable in the same hypothetical zero-row case the row list
+/// itself already defends against defensively. Fixed keys, not a shared
+/// highlight cursor: `handle_trust_settings_key`'s own reasoning
+/// (response 248) for Grant/Revoke Trust applies unchanged here --
+/// "Mark accepted"/"Mark rejected" are two independent actions, not
+/// interchangeable list rows, so forcing a cursor to move past one to
+/// reach the other would be the wrong shape. `a`/`r` are unclaimed:
+/// every global keybinding in `KeybindingPolicy::linux_mvp()` requires
+/// at least `Ctrl+`, so a bare, unmodified character key never matches
+/// `matching_global_action` (`input.rs`) and always reaches here.
 fn handle_change_review_key(state: &mut State, key: &input::KeyPress) {
+    if let keyboard::Key::Character(character) = &key.key {
+        let decision = match character.as_str() {
+            "a" => Some(ChangeReviewDecision::Accepted),
+            "r" => Some(ChangeReviewDecision::Rejected),
+            _ => None,
+        };
+        if let Some(decision) = decision {
+            let offered = state
+                .app_shell
+                .state()
+                .active_project()
+                .filter(|project| {
+                    project.mode() == ProjectMode::Content
+                        && project.open_surface() == ProjectOpenSurface::DiffReview
+                })
+                .and_then(|project| project.change_sets().last())
+                .is_some_and(|change_set| {
+                    change_review_decision_controls_offered(change_set.review_state)
+                });
+            if offered {
+                record_change_review_decision(state, decision);
+            }
+            return;
+        }
+    }
+
     let Some(project) = state.app_shell.state().active_project() else {
         return;
     };

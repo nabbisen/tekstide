@@ -12575,6 +12575,86 @@ fn change_review_decision_button_is_inert_while_a_modal_is_open() {
     );
 }
 
+/// RFC-034, response 334 Required 1: the decision controls were
+/// mouse-only -- `handle_change_review_key` handled `ArrowUp`/
+/// `ArrowDown`/`Enter` for file rows only, so a keyboard user could not
+/// record a decision at all, the same reachability defect
+/// `handle_trust_settings_key`'s own doc comment (response 248) already
+/// named for Grant/Revoke Trust. `a`/`r` are fixed keys, not a shared
+/// highlight cursor -- two independent actions, not interchangeable
+/// rows. Dispatched through the real message path
+/// (`send_main_area_key`, `Message::Input(RoutedInput::Surface(...))`
+/// through the real `update`), not `handle_change_review_key` called
+/// directly.
+#[test]
+fn pressing_a_accepts_the_change_set_through_the_real_key_path() {
+    let (mut state, _change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("decision-key-accept");
+
+    state.app_shell.dispatch(
+        tekstide_core::command::AppCommand::OpenActiveProjectSurface(
+            tekstide_core::project::ProjectOpenSurface::DiffReview,
+        ),
+    );
+
+    send_main_area_key(&mut state, iced::keyboard::Key::Character("a".into()));
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    assert_eq!(
+        change_set.review_state,
+        tekstide_core::domain::ReviewState::Accepted
+    );
+}
+
+#[test]
+fn pressing_r_rejects_the_change_set_through_the_real_key_path() {
+    let (mut state, _change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("decision-key-reject");
+
+    state.app_shell.dispatch(
+        tekstide_core::command::AppCommand::OpenActiveProjectSurface(
+            tekstide_core::project::ProjectOpenSurface::DiffReview,
+        ),
+    );
+
+    send_main_area_key(&mut state, iced::keyboard::Key::Character("r".into()));
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    assert_eq!(
+        change_set.review_state,
+        tekstide_core::domain::ReviewState::Rejected
+    );
+}
+
+/// D1/D4 apply to the keyboard route exactly as they do to the button:
+/// once a decision is recorded, the key must not record a second,
+/// different one. Proves the `offered` check inside
+/// `handle_change_review_key` is load-bearing, not merely present.
+#[test]
+fn pressing_a_key_after_a_decision_does_not_change_it_through_the_real_key_path() {
+    let (mut state, _change_set_id, _project_dir) =
+        state_with_a_real_change_set_and_retained_detection("decision-key-after-decided");
+
+    state.app_shell.dispatch(
+        tekstide_core::command::AppCommand::OpenActiveProjectSurface(
+            tekstide_core::project::ProjectOpenSurface::DiffReview,
+        ),
+    );
+
+    send_main_area_key(&mut state, iced::keyboard::Key::Character("a".into()));
+    send_main_area_key(&mut state, iced::keyboard::Key::Character("r".into()));
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    assert_eq!(
+        change_set.review_state,
+        tekstide_core::domain::ReviewState::Accepted,
+        "once accepted, pressing r afterward must not overwrite the recorded decision"
+    );
+}
+
 /// D3: a real, later write after a real selection makes the tree
 /// "moved" -- the stale-tree notice renders, distinct wording from
 /// `change-review-content-stale`, and the decision controls remain
@@ -12604,22 +12684,42 @@ fn change_review_decision_panel_shows_the_stale_tree_notice_and_keeps_controls_l
         "got {:?}",
         panel.lines
     );
+    assert_decision_notice_carries_all_three_claims(&panel.lines);
+}
+
+/// Response 334 Required 2: the combined D0/D4/§1 sentence had only
+/// **one** of its three claims independently guarded --
+/// `panel.lines.iter().any(|line| line.contains("close tekstide"))`
+/// passed even with the finality clause ("cannot be undone") and the
+/// no-file-modification clause ("it changes no file") deleted from the
+/// shipped string, confirmed by the reviewer ablating each in turn (33
+/// of 33 tests still passed for both). One `contains()` on a merged
+/// sentence looks like it guards the whole sentence; it only guards the
+/// one substring it names. **One assertion per claim**, all three,
+/// reused by both tests that check the panel's own content.
+fn assert_decision_notice_carries_all_three_claims(lines: &[String]) {
+    let joined = lines.join(" ").to_lowercase();
     assert!(
-        panel
-            .lines
-            .iter()
-            .any(|line| line.to_lowercase().contains("close tekstide")),
-        "the session-scope/finality notice must still render too, got {:?}",
-        panel.lines
+        joined.contains("it changes no file"),
+        "§1's own falsifiable claim (no file is touched) must render, got {lines:?}"
+    );
+    assert!(
+        joined.contains("cannot be undone"),
+        "D4's finality claim must render, got {lines:?}"
+    );
+    assert!(
+        joined.contains("close tekstide"),
+        "D0's session-scope claim must render, got {lines:?}"
     );
 }
 
 /// The base case: nothing has moved, so only the session-scope/finality
 /// notice renders -- no stale-tree line. `qa-evidence.md`'s own required
-/// D0 ablation lives here: removing `change-review-decision-notice`'s
-/// own `lines.push` in `change_review_decision_panel` made this test's
-/// second assertion fail (empty `lines`, no sentence containing "close
-/// tekstide"). Reverted, not committed.
+/// D0/D4/§1 ablations live here and in the stale-tree test above: each
+/// of the three claims was independently deleted from
+/// `change-review-decision-notice`'s Fluent string in turn, and each
+/// deletion made exactly one of `assert_decision_notice_carries_all_three_claims`'s
+/// three assertions fail. Reverted, not committed.
 #[test]
 fn change_review_decision_panel_has_no_stale_notice_when_nothing_has_moved() {
     let (state, _change_set_id, _project_dir) =
@@ -12637,15 +12737,7 @@ fn change_review_decision_panel_has_no_stale_notice_when_nothing_has_moved() {
         "nothing has moved -- the stale-tree notice must not render, got {:?}",
         panel.lines
     );
-    assert!(
-        panel
-            .lines
-            .iter()
-            .any(|line| line.to_lowercase().contains("close tekstide")),
-        "the session-scope/finality notice must always render while the controls are offered, \
-         got {:?}",
-        panel.lines
-    );
+    assert_decision_notice_carries_all_three_claims(&panel.lines);
 }
 
 #[test]

@@ -32,7 +32,8 @@ created: "2026-08-26"
       true.
 - [x] After a decision the controls are withdrawn and the state line carries what was decided.
       `accepting_a_change_set_reaches_the_real_transition_and_the_state_line_changes` /
-      `rejecting_...`.
+      `rejecting_...`. Also true of the keyboard route (`a`/`r`), added in response 334 —
+      `pressing_a_key_after_a_decision_does_not_change_it_through_the_real_key_path`.
 - [x] Ablated: keep the controls after a decision, the test fails, restored. (Same ablation as
       D1's own "offer `Superseded`" — both broaden the same function.)
 
@@ -41,10 +42,12 @@ created: "2026-08-26"
 - [x] The session-scope claim renders on the surface. Combined into the same
       `change-review-decision-notice` as D4's finality claim, per §4's own suggested
       consolidation.
-- [x] It is held by a test. **Ablated: remove the sentence, a test fails.**
-      `change_review_decision_panel_has_no_stale_notice_when_nothing_has_moved` and
-      `..._shows_the_stale_tree_notice_and_keeps_controls_live` both failed when the `lines.push`
-      for the notice was commented out. Reverted, not committed.
+- [x] It is held by a test. **Response 334 Required 2, corrected**: the original single
+      `contains("close tekstide")` check only guarded the D0 clause — deleting D4's clause, or
+      both D4's and §1's, left it passing. `assert_decision_notice_carries_all_three_claims` now
+      asserts all three substrings independently. **All three ablated separately** (deleted each
+      clause from the real Fluent string in turn), each confirmed to fail exactly the assertion
+      naming that claim; reverted, not committed.
 - [x] The finality and session-scope claims are visible **at the same time** in the live
       screenshot. Trivially true, since they are one sentence.
 
@@ -95,34 +98,40 @@ created: "2026-08-26"
 
 ## Modal exclusivity
 
-- [x] Both new handlers are guarded, in the shape the existing seventeen use. One handler (a pure
-      click message, not `Message::Input(_)`-wrapped): `click_message_kind` classification as
-      `BackgroundControl`, the same one-line shape `ChangeReviewFileRowPressed` already uses.
-- [x] Both are inert while a modal is open, proven by
+- [x] Both routes to the decision are guarded. The click route (a pure click message, not
+      `Message::Input(_)`-wrapped): `click_message_kind` classification as `BackgroundControl`,
+      the same one-line shape `ChangeReviewFileRowPressed` already uses. The keyboard route
+      (`a`/`r`, added in response 334): needs no separate guard — `input.rs`'s own `ModalAbsent`
+      proof-token mechanism makes `Message::Input(RoutedInput::Surface(...))` structurally
+      impossible to construct while a modal is open, confirmed by reading, the same reason no
+      other per-surface keyboard handler on this surface has one either.
+- [x] The click route is inert while a modal is open, proven by
       `change_review_decision_button_is_inert_while_a_modal_is_open`.
-- [x] Ablated: drop the handler's guard (moved its classification to the `None` group), the test
-      fails (`review_state` became `Accepted` with a modal open), restored.
+- [x] Ablated: drop the click handler's guard (moved its classification to the `None` group), the
+      test fails (`review_state` became `Accepted` with a modal open), restored.
 
 ## Live GUI evidence
 
 - [x] Captured against a **`mktemp -d` fixture project** — no path under `$HOME`, no real project
-      name, no real file content. `/tmp/tmp.LTiFha9ds7`.
+      name, no real file content. `/tmp/tmp.7oYJEB3jW7` (response 334's re-capture;
+      `/tmp/tmp.LTiFha9ds7` for the original "before" pass).
 - [x] Whether a real mouse click was sent is **stated either way**. No — no pointer-injection tool
-      available this session (same gap `0.14.0`/RFC-042 already disclosed).
-- [ ] **Partially met, disclosed rather than silently narrowed**: shows the controls live with
-      both claims visible. Does **not** show the surface after a decision — the decision buttons
-      have no keyboard path (unlike the file-row button), and building one solely to enable a
-      screenshot was judged out of this slice's own scope. The "after" state is proven instead by
-      three tests dispatching the real `Message` through the real `update` function — the same
-      substitution this project's own review responses have already accepted for the file-row
-      button's own click path. See `qa-evidence.md`'s own Live GUI Evidence section.
+      available this session (same gap `0.14.0`/RFC-042 already disclosed); keyboard-only
+      throughout, including the new `a`/`r` decision keys.
+- [x] **Response 334 Required 1, fixed — no longer an exception.** The missing "after" screenshot
+      was a symptom of a real reachability defect (the decision controls had no keyboard path at
+      all), not an evidence gap. Fixed by adding fixed keys (`a`/`r`), the same reasoning
+      `handle_trust_settings_key`'s own response-248 fix used for Grant/Revoke Trust.
+      `rfc034-02-before-decision.png` shows the controls live with both claims visible;
+      `rfc034-03-after-decision.png`, taken after `wtype a`, shows `Review state: Accepted` with
+      both buttons and the disclosure sentence withdrawn.
 
 ## Gates
 
 - [x] `cargo fmt --all -- --check`
 - [x] `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- [x] Full workspace suite, **three consecutive runs**, each **logged to a file**. All three
-      clean: 441 tekstide + 742 tekstide-core, no flake.
+- [x] Full workspace suite, **three consecutive runs**, each **logged to a file**. Response 334's
+      own re-gate: all three clean, 444 tekstide + 742 tekstide-core, no flake.
 - [x] `git diff --check`, `rfc_docs_invariants`. Both clean.
 
 ## Closeout

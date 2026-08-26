@@ -221,3 +221,78 @@ state is therefore proven by
 `Message::ChangeReviewDecisionButtonPressed` through the real `update` function, the same
 click-message path a real mouse click would take, exactly the same substitution this project's
 own review responses have already accepted for the file-row button's own click path.
+
+## Response 334 — two required fixes
+
+### Required 1: the decision controls were mouse-only -- a keyboard user could not record a decision at all
+
+Correctly reframed by the reviewer as a **reachability defect**, not an evidence gap: the missing
+"after" screenshot was a symptom, not the finding. `handle_change_review_key` handled
+`ArrowUp`/`ArrowDown`/`Enter` for file rows only; there was no key that reached either decision
+control. This project has fixed this exact shape twice before (`ApprovalHistory`, response 234;
+`TrustSettings`, response 248) — this was the third occurrence, on the surface whose whole reason
+to exist is offering these two controls.
+
+**Fixed, adopting `handle_trust_settings_key`'s own reasoning rather than inventing a new one**:
+`a`/`r` are **fixed keys**, not a shared highlight cursor -- the two decision controls are
+independent actions (like Grant/Revoke Trust), not interchangeable list rows, so forcing a cursor
+to move past one to reach the other would be the wrong shape. Checked before use, per the same
+comment's own instruction: every global keybinding in `KeybindingPolicy::linux_mvp()` requires at
+least `Ctrl+`, so a bare, unmodified character key never matches `matching_global_action`
+(`input.rs`) and always reaches `handle_change_review_key`. Checked *before* the row-navigation
+guard that returns early on zero rows -- a decision is about the whole change set, not the file
+list, and must not become unreachable in that hypothetical case.
+
+**No new modal-exclusivity guard needed, and this is itself worth recording**: `handle_change_review_key`
+is reached via `Message::Input(RoutedInput::Surface(...))`, which `input.rs`'s own `ModalAbsent`
+proof-token mechanism makes *structurally impossible to construct* while a modal is open (the
+non-modal input-routing function requires a `ModalAbsent` token, obtainable only by checking
+`modal.is_none()` immediately beforehand) -- confirmed by reading, not assumed, and consistent
+with every other existing keyboard handler on this surface (`ArrowUp`/`ArrowDown`/`Enter` for file
+rows) having no per-handler modal check either.
+
+**Tests**, all dispatching through the real message path (`send_main_area_key`, the same
+`Message::Input(RoutedInput::Surface(...))` route a real keystroke takes, not
+`handle_change_review_key` called directly):
+
+- `pressing_a_accepts_the_change_set_through_the_real_key_path`
+- `pressing_r_rejects_the_change_set_through_the_real_key_path`
+- `pressing_a_key_after_a_decision_does_not_change_it_through_the_real_key_path` -- proves the
+  `offered` check inside the handler is load-bearing: presses `a` then `r`, asserts the change set
+  stays `Accepted` (the second key must not overwrite the first decision).
+
+**Live GUI evidence, redone**: same release binary, a fresh `mktemp -d` fixture
+(`/tmp/tmp.7oYJEB3jW7`), keyboard-only throughout. `rfc034-02-before-decision.png` shows the
+controls live, `wtype a` records the decision, `rfc034-03-after-decision.png` shows `Review
+state: Accepted`, both buttons and the disclosure sentence withdrawn, exactly as D4 requires. The
+checklist's own "partially met" item is now fully met; no exception remains.
+
+### Required 2: consolidating three claims into one sentence had consolidated their guards into one
+
+The reviewer ablated each of the combined sentence's three claims independently and found only
+the D0 (session-scope) clause was actually guarded -- deleting the D4 (finality) clause, or both
+D4 and §1 (no file is touched), left all 33 `change_review*` tests passing, since the only
+assertion in either test checked for `"close tekstide"` alone.
+
+**Fixed**: `assert_decision_notice_carries_all_three_claims` (new, shared by both tests that
+inspect `panel.lines`) asserts on all three substrings independently -- `"it changes no file"`
+(§1), `"cannot be undone"` (D4), `"close tekstide"` (D0) -- against the lines joined together, so
+it does not matter which of `panel.lines`' entries carries which clause.
+
+**All three ablated independently, each confirmed to fail exactly the assertion naming that
+claim, then reverted**:
+
+1. Deleted "it changes no file, " from `change-review-decision-notice` -- the §1 assertion failed
+   in both tests, D4/D0 assertions still passed.
+2. Deleted "cannot be undone, " -- the D4 assertion failed, §1/D0 still passed.
+3. Deleted ", and disappears when you close Tekstide" -- the D0 assertion failed, §1/D4 still
+   passed.
+
+The sentence itself is unchanged -- §4's own consolidation was correct design; what was wrong was
+testing it with one substring check standing in for three independent claims.
+
+### Gate, re-run
+
+Three consecutive full-workspace runs, all clean: 444 tekstide + 742 tekstide-core + 2
+doc-invariant, no flake. `fmt`, `clippy -D warnings`, `git diff --check`, `rfc_docs_invariants`
+all clean.
