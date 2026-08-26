@@ -55,14 +55,15 @@ Only `content_elements` (the file's own escaped bytes) is wrapped in its own, in
 
 **Tests**:
 
-- `change_review_content_label_survives_content_long_enough_to_scroll` -- a real 93,000-byte
-  modified file (`"line of real modified content\n".repeat(3000)`), real detection, real
-  selection. Asserts `preview.chrome` still contains the "not a diff" label and `preview.content`
-  is a single element over 60,000 characters -- proving the **data-level** guarantee that chrome
-  is structurally independent of content's size. States plainly in its own doc comment what it
-  cannot see: this project's own `frames()`-avoidance convention means no unit test here can
-  observe real interactive scrolling or real pixels (`ARCHITECTURE.md`, "latency criteria stop the
-  clock at state change, not at pixels").
+- `change_review_content_label_survives_content_long_enough_to_scroll` -- a real ~100,000-byte
+  modified file (40 lines of ~2,500 bytes each -- deliberately few lines, so this test's own claim
+  never couples to PR-042-C's separate line-count bound), real detection, real selection. Asserts
+  `preview.chrome` still contains the "not a diff" label and `preview.content`'s combined length
+  exceeds 60,000 characters -- proving the **data-level** guarantee that chrome is structurally
+  independent of content's size. States plainly in its own doc comment what it cannot see: this
+  project's own `frames()`-avoidance convention means no unit test here can observe real
+  interactive scrolling or real pixels (`ARCHITECTURE.md`, "latency criteria stop the clock at
+  state change, not at pixels").
 - `change_review_frame_lines_never_feed_the_scrollable` -- the companion **wiring** proof, in the
   source-scan idiom `modal_layer_always_applies_the_scrim_style` already established for this
   exact class of property (where an `Element` gets placed, not what text it produces). Asserts
@@ -113,3 +114,125 @@ using another window (`wtype` has no window-targeting of its own -- it delivers 
 compositor focus at the instant it runs, unlike `niri msg action screenshot-window --id`, which
 targets by id regardless of focus) -- that attempt was abandoned rather than risking a stray
 keystroke reaching the operator's own session, and redone once the desktop was confirmed free.
+
+## PR-042-C — lines become lines, bounded (D2 visible half, D3)
+
+**1. Line splitting.** `change_review_content_body_lines` splits on the raw byte `b'\n'` --
+never a decoded `char` boundary, so a `\n` can never be bisected out of a multi-byte UTF-8
+sequence -- and escapes each segment independently via `quote_untrusted`. The line break is the
+only character this slice stops escaping; every other control character (`\r`, tab, ANSI escapes,
+bidi overrides) is still escaped, per test below.
+
+**2. The boxed container (D2 visible half).** `content_body` -- built only when
+`content_elements` is non-empty -- wraps the file's own lines in a `container` styled with
+`theme.surface_elevated()` background and a `theme.border_default()` border, the same boxed-card
+style `approval_history_entry_view` already uses for a different untrusted-adjacent payload.
+`Deleted`/`NonFile`/every refusal has no content and gets no box.
+
+**3. The line bound (D3).** `DiffPreviewPolicy.max_lines` (new field, beside `max_input_bytes`,
+in `tekstide-core`), enforced in `read_diff_content` after the bounded byte read (row count is
+only knowable from real content) and before any content is ever returned. Refuses whole via a new
+`DiffContentError::TooManyLines { relative_path, lines, max }` -- never truncates, matching
+RFC-024's own byte-bound shape exactly. `change-review-content-error-too-many-lines` is its own
+Fluent key, worded as a refusal, never as a third omission count next to
+`omitted_changed_file_count`/`changed_files_omitted_by_detection`.
+
+**The bound's value, measured** (`shell::tests::change_review_content_view_build_cost_by_line_count_measurement`,
+`cargo test --release -- change_review_content_view_build_cost_by_line_count_measurement --nocapture`):
+view-build cost -- escaping each line plus building one `text` `Element` per line, the exact
+operation `change_review_view` performs for `content_elements` -- at candidate line counts, both
+profiles:
+
+| lines | release | debug |
+| --- | --- | --- |
+| 100 | 57µs | 155µs |
+| 1,000 | 490µs | 1.41ms |
+| 4,000 | 1.62ms | 5.65ms |
+| 10,000 | 4.00ms | 14.34ms |
+| 50,000 | 16.95ms | 71.75ms |
+| 100,000 | 31.69ms | 140.85ms |
+
+`NFR-PERF-003`'s existing budget (typing latency, p95 ≤ 16ms) is the closest already-established
+latency criterion for a per-keystroke-shaped view rebuild, reused here as the RFC's own
+instruction directs ("measure against this project's existing latency criteria"). At 4,000 lines
+both profiles clear it with large margin (~10x release, ~3x debug); at 10,000 lines debug cost
+alone (14.34ms) already leaves almost none; at 50,000 lines release cost alone (16.95ms) exceeds
+it. **`DEFAULT_MAX_DIFF_LINES = 4000`**, chosen for the margin it leaves in the *slower* profile,
+not only the shipped release one -- confirming, not overriding, RFC-042's own "expect the low
+thousands." Not a tight regression bound in the committed test (machine-dependent) -- a
+diagnostic report, the same shape `real_repository_filesystem_scan_cost_headless_benchmark`
+(`tekstide-core`) already uses; what it cannot measure is real layout/shaping/paint cost inside
+`iced`'s own renderer, which happens after `view` returns and is exactly what this project's
+`frames()`-avoidance convention excludes.
+
+**Tests** (all five fixtures the pack README requires, spoof written to prove the attack per
+`what-a-legible-preview-must-not-become.md` §4's own trap -- "a test that asserts the right thing
+about the wrong property"):
+
+- `change_review_content_renders_real_line_structure_not_one_escaped_blob` -- fixture 1, an
+  ordinary 4-line source file. Asserts 5 real elements (4 lines + one trailing empty line from the
+  file's own final newline), and that no element contains `<U+000A>` any more.
+- `change_review_content_spoof_lines_are_never_rendered_as_chrome` -- fixture 3 (D2), a file whose
+  first three lines read `Detection: Complete`, `Review state: Accepted`, `1 file changed`.
+  Asserts none of them appear in `preview.chrome`, and that the spoof text still renders --
+  **only** inside `preview.content`.
+- `change_review_content_line_split_does_not_weaken_escaping_of_other_control_characters` --
+  fixture 5, "the one most likely to be skipped": tab, carriage return, an ANSI escape sequence,
+  and a bidi override, each alongside real line breaks. Asserts all four still render as
+  `<U+XXXX>` markers, no raw control character reaches the surface, and `<U+000A>` itself never
+  appears any more.
+- `change_review_content_refuses_over_the_line_bound_and_names_it` -- fixture 4, `DEFAULT_MAX_DIFF_LINES
+  + 1` lines. Asserts `preview.content` is empty (refused whole, not truncated) and the refusal
+  names "too many lines" -- distinct wording from RFC-024's own byte-bound refusal.
+- `change_review_content_view_build_cost_by_line_count_measurement` -- the measurement itself,
+  kept as a permanent diagnostic (loose bound, `< 500ms`, so it guards against a real regression
+  without being flaky against machine noise).
+
+Fixture 2 (long enough to test D1) is PR-042-B's own
+`change_review_content_label_survives_content_long_enough_to_scroll`, already covering this slice
+too since it now exercises the real line-splitting path.
+
+**Ablations, all three the checklist requires, confirmed then reverted:**
+
+1. *Escape the line break again* -- reverted `change_review_content_body_lines` to its
+   PR-042-A/B one-blob shape. `change_review_content_renders_real_line_structure_not_one_escaped_blob`
+   failed: `left: 1, right: 5`, and the rendered output showed the pre-slice single escaped blob
+   with `<U+000A>` between every line.
+2. *Relax `quote_untrusted` for a character other than the line break* -- temporarily excluded
+   tab from `text_safety::is_untrusted_display_control`.
+   `change_review_content_line_split_does_not_weaken_escaping_of_other_control_characters` failed
+   on its own first assertion ("tab must still be escaped"), with the raw tab visible in the
+   panic's own rendered output.
+3. *Truncate instead of refusing over the bound* -- replaced the `if line_count > policy.max_lines
+   { return Err(...) }` check with two `let _ =` no-ops. `change_review_content_refuses_over_the_line_bound_and_names_it`
+   failed: `content lines=4002` -- the over-bound content rendered in full instead of being
+   refused.
+
+All three reverted immediately after confirming failure; none committed.
+
+**Live GUI evidence.** Same release binary and `mktemp -d` fixture project as PR-042-B, relaunched
+after a session gap (the desktop was in active use in between -- confirmed free before retrying,
+the same care as PR-042-B's own disclosed interruption). `pr042c-01-boxed.png`
+(`.git-exclude/tmp/rfc042-evidence/`, kept out of the repo for the same reason as PR-042-B's own
+screenshots) shows the new boxed container clearly: a bordered box with a distinct background,
+visibly separate from the surrounding chrome, around the file's content. **What this screenshot
+does not show**: genuine multi-line wrapping -- `TEKSTIDE_CHANGESET_DEMO`'s fixed, single-line
+seed content cannot demonstrate that live without either editing that frozen function or
+orchestrating a full real managed agent run through the GUI purely for evidence, the same
+disproportionate-effort judgement PR-042-B's own live pass already made and disclosed for
+genuine scrolling. The five real-file tests above are the actual proof of line-splitting,
+exercised through the full production read path; this screenshot's own job is narrower --
+confirming the container is visually real, not merely present in the `Element` tree.
+
+## Whether a real mouse click was sent (stated either way, per the checklist)
+
+**No.** Every live interaction across both passes (PR-042-B and PR-042-C) was keyboard-only --
+`niri msg action focus-window --id`, `wtype` for `Ctrl+Alt+D` and `Enter`. No pointer-injection
+tool was available in this session (the same gap `0.14.0`'s own release gate disclosed). This
+slice's own new control (the file row) is unchanged from RFC-041 -- still a real
+`iced::widget::button` -- and RFC-041's own click path is already covered by
+`clicking_a_change_review_row_selects_it_for_preview` and
+`change_review_surface_shows_real_content_from_a_real_agent_run`, which dispatch the real
+`Message::ChangeReviewFileRowPressed` through `update`. Nothing in RFC-042 changes that control or
+its own click handling -- only what renders once a selection already exists -- so no new click-path
+gap is introduced by this slice specifically.

@@ -591,6 +591,11 @@ fn generic_args() -> CatalogArgs<'static> {
         // above already establish for this file's other byte counts.
         .number("len", 1u64)
         .number("max", 1u64)
+        // RFC-042 PR-042-C: `change-review-content-error-too-many-lines`'s
+        // real, measured line count against its own bound -- `max` above
+        // already covers this key's own `$max`, shared with RFC-041's
+        // byte-bound refusal.
+        .number("lines", 1u64)
 }
 
 fn shipped_additional_locales() -> Vec<String> {

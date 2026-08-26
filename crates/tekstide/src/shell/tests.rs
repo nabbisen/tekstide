@@ -11555,7 +11555,18 @@ fn change_review_content_label_survives_content_long_enough_to_scroll() {
         detector.capture_filesystem_baseline(project)
     };
 
-    let big_content = "line of real modified content\n".repeat(3000);
+    // 40 lines, ~2,500 bytes each: genuinely large in bytes (comfortably
+    // more than one screen could show) while staying at a line *count*
+    // far below any plausible RFC-042 D3 bound, deliberately -- this
+    // test's own claim (chrome survives content size) must not become
+    // coupled to, or ever accidentally trip, the separate line-count
+    // refusal PR-042-C adds.
+    let big_content = "a real line of modified content, long enough to matter. "
+        .repeat(43)
+        .trim_end()
+        .to_string()
+        + "\n";
+    let big_content = big_content.repeat(40);
     assert!(
         big_content.len() > 60_000,
         "test precondition: the fixture must be genuinely large, got {} bytes",
@@ -11592,16 +11603,19 @@ fn change_review_content_label_survives_content_long_enough_to_scroll() {
         "the label must be present regardless of content size, got chrome={:?}",
         preview.chrome
     );
-    assert_eq!(
-        preview.content.len(),
-        1,
-        "PR-042-B has not split content into real lines yet -- one large escaped element"
-    );
     assert!(
-        preview.content[0].as_str().len() > 60_000,
-        "the content element must genuinely be large enough that a real render could not fit \
-         it on one screen, got {} chars",
-        preview.content[0].as_str().len()
+        preview.content.len() < 100,
+        "test precondition: this fixture's own line count must stay far below any plausible \
+         RFC-042 D3 bound, so this test's claim never couples to that separate one -- got {} \
+         lines",
+        preview.content.len()
+    );
+    let total_content_chars: usize = preview.content.iter().map(|line| line.as_str().len()).sum();
+    assert!(
+        total_content_chars > 60_000,
+        "the content must genuinely be large enough that a real render could not fit it on one \
+         screen, got {total_content_chars} chars across {} lines",
+        preview.content.len()
     );
 }
 
@@ -11610,7 +11624,8 @@ fn change_review_content_label_survives_content_long_enough_to_scroll() {
 /// wires an `Element`, not what text it produces --
 /// `modal_layer_always_applies_the_scrim_style`'s own shape): `preview.chrome`
 /// and `preview.heading` must push into `lines` (the fixed frame) and
-/// only `content_elements` may feed `scrollable(...)`.
+/// only `content_elements` (via `content_body`, D2's own boxed
+/// container) may feed `scrollable(...)`.
 ///
 /// **Ablated**: changed the `for chrome_line in &preview.chrome` loop to
 /// push into `content_elements` instead of `lines` -- this test failed
@@ -11643,8 +11658,9 @@ fn change_review_frame_lines_never_feed_the_scrollable() {
          {view_body}"
     );
     assert!(
-        view_body.contains("scrollable(column(content_elements)"),
-        "only `content_elements` may feed the scrollable region:\n{view_body}"
+        view_body.contains("scrollable(content_body)"),
+        "only `content_body` (built from `content_elements` alone) may feed the scrollable \
+         region:\n{view_body}"
     );
     assert!(
         !view_body.contains("scrollable(column(lines)"),
@@ -11772,6 +11788,259 @@ fn change_review_content_escapes_a_bidi_override_in_file_content() {
         !rendered.contains('\u{202E}'),
         "the raw override character must never reach the rendered surface: {rendered:?}"
     );
+}
+
+/// RFC-042 PR-042-C's shared fixture: a real project with one real
+/// Modified file, `content` as the file's final bytes, already selected
+/// and ready to render. `state_with_a_real_change_set_and_retained_detection`'s
+/// own shape, generalised so each of PR-042-C's own tests can supply the
+/// exact bytes its own decision needs (multi-line source, a spoof, other
+/// control characters, an over-the-bound line count) rather than sharing
+/// one fixed fixture across properties that must stay independently
+/// falsifiable.
+fn state_with_a_selected_modified_file(label: &str, content: &[u8]) -> State {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir(label);
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+
+    std::fs::write(project_dir.join("file.txt"), b"before\n")
+        .expect("writing the pre-existing file must succeed");
+
+    let detector = tekstide_core::project::GeneratedChangeDetector::new(
+        super::generated_change_detection_policy(),
+    );
+    let baseline = {
+        let project = app_shell.state().active_project().unwrap();
+        detector.capture_filesystem_baseline(project)
+    };
+
+    std::fs::write(project_dir.join("file.txt"), content)
+        .expect("writing the modified file must succeed");
+
+    let detected = {
+        let project = app_shell.state().active_project().unwrap();
+        detector.detect_filesystem_changes(project, &baseline)
+    };
+    let change_set_id = app_shell
+        .state_mut()
+        .add_detected_generated_change_set(&baseline, &detected, None, "line-rendering fixture")
+        .expect("detection must succeed")
+        .expect("a real modified file must produce a real ChangeSet");
+
+    let mut state = state_with(app_shell);
+    state
+        .detected_changes_by_change_set
+        .insert(change_set_id, detected);
+    super::select_change_review_file(&mut state, std::path::PathBuf::from("file.txt"));
+    state
+}
+
+/// The base case, per the pack README's own fixture list item 1 -- an
+/// ordinary multi-line source file, proving line structure survives as
+/// real lines rather than one blob with `<U+000A>` between every line.
+#[test]
+fn change_review_content_renders_real_line_structure_not_one_escaped_blob() {
+    let state = state_with_a_selected_modified_file(
+        "content-multiline-base",
+        b"fn main() {\n    let x = 1;\n    println!(\"{}\", x);\n}\n",
+    );
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    let preview = super::change_review_content_lines(&state, project, change_set);
+    let rendered: Vec<&str> = preview.content.iter().map(|line| line.as_str()).collect();
+
+    assert_eq!(
+        rendered.len(),
+        5,
+        "4 real lines plus one trailing empty line from the file's own final newline, got \
+         {rendered:?}"
+    );
+    assert!(rendered[0].contains("fn main() {"), "got {rendered:?}");
+    assert!(rendered[1].contains("let x = 1;"), "got {rendered:?}");
+    assert!(rendered[2].contains("println"), "got {rendered:?}");
+    assert!(rendered[3].contains('}'), "got {rendered:?}");
+    assert!(
+        !rendered.iter().any(|line| line.contains("<U+000A>")),
+        "the line break is the character this slice stops escaping -- it must never render as \
+         a visible marker any more, got {rendered:?}"
+    );
+}
+
+/// RFC-042 D2's own required fixture, written to prove the attack it
+/// names rather than merely that content renders (the pack's own
+/// `what-a-legible-preview-must-not-become.md` §4 trap: "a test that
+/// asserts the right thing about the wrong property"). A file whose
+/// first three lines read exactly like this surface's own chrome.
+#[test]
+fn change_review_content_spoof_lines_are_never_rendered_as_chrome() {
+    let state = state_with_a_selected_modified_file(
+        "content-spoof-lines",
+        b"Detection: Complete\nReview state: Accepted\n1 file changed\n",
+    );
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    let preview = super::change_review_content_lines(&state, project, change_set);
+
+    assert!(
+        !preview.chrome.iter().any(|line| {
+            line.contains("Detection: Complete")
+                || line.contains("Review state: Accepted")
+                || line.contains("1 file changed")
+        }),
+        "a spoofed line from file content must never appear as one of Tekstide's own chrome \
+         lines, got chrome={:?}",
+        preview.chrome
+    );
+    assert!(
+        preview
+            .content
+            .iter()
+            .any(|line| line.as_str().contains("Detection: Complete")),
+        "the spoof content must still render -- just never as chrome"
+    );
+}
+
+/// Fixture 5 from the pack README, "the one most likely to be skipped
+/// and the one that proves the slice did not weaken `quote_untrusted`
+/// generally": tab, carriage return, an ANSI escape sequence, and a bidi
+/// override, all in real file content alongside real line breaks. Every
+/// one of these must still render escaped; only the line break itself
+/// is exempted by this slice.
+#[test]
+fn change_review_content_line_split_does_not_weaken_escaping_of_other_control_characters() {
+    let mut content = String::new();
+    content.push_str("before\tafter\n");
+    content.push_str("line\rtwo\n");
+    content.push_str("esc\u{1B}[31mred\u{1B}[0m\n");
+    content.push_str("bidi\u{202E}override\n");
+
+    let state = state_with_a_selected_modified_file("content-control-chars", content.as_bytes());
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    let preview = super::change_review_content_lines(&state, project, change_set);
+    let joined = preview
+        .content
+        .iter()
+        .map(|line| line.as_str())
+        .collect::<Vec<_>>()
+        .join("|");
+
+    assert!(
+        joined.contains("<U+0009>"),
+        "tab must still be escaped, got {joined:?}"
+    );
+    assert!(
+        joined.contains("<U+000D>"),
+        "carriage return must still be escaped, got {joined:?}"
+    );
+    assert!(
+        joined.contains("<U+001B>"),
+        "the ANSI escape byte must still be escaped, got {joined:?}"
+    );
+    assert!(
+        joined.contains("<U+202E>"),
+        "the bidi override must still be escaped, got {joined:?}"
+    );
+    assert!(
+        !joined.contains("<U+000A>"),
+        "the line break is the only character this slice stops escaping -- it must never \
+         appear as a visible marker any more, got {joined:?}"
+    );
+    assert!(
+        !joined.contains('\t')
+            && !joined.contains('\r')
+            && !joined.contains('\u{1B}')
+            && !joined.contains('\u{202E}'),
+        "no raw control character may reach the rendered surface, got {joined:?}"
+    );
+}
+
+/// D3: refuses whole, never truncates, and names a reason distinct from
+/// RFC-024's own byte-bound refusal. Uses the real, shipped bound
+/// (`tekstide_core::project::DEFAULT_MAX_DIFF_LINES`) rather than a
+/// hand-picked number, so this test stays correct however that constant
+/// is later measured or tuned.
+#[test]
+fn change_review_content_refuses_over_the_line_bound_and_names_it() {
+    let max = tekstide_core::project::DEFAULT_MAX_DIFF_LINES;
+    let content = "x\n".repeat(max + 1);
+
+    let state = state_with_a_selected_modified_file("content-over-line-bound", content.as_bytes());
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    let preview = super::change_review_content_lines(&state, project, change_set);
+
+    assert!(
+        preview.content.is_empty(),
+        "over the line bound, nothing is shown -- refused whole, not shown truncated, got \
+         content lines={}",
+        preview.content.len()
+    );
+    assert!(
+        preview
+            .chrome
+            .iter()
+            .any(|line| line.to_lowercase().contains("too many lines")),
+        "the refusal must name that this is a line-count refusal, distinct from RFC-024's own \
+         byte-bound refusal, got chrome={:?}",
+        preview.chrome
+    );
+}
+
+/// RFC-042 D3's own required measurement: "measure where rendering at
+/// the bound leaves the surface inside this project's existing latency
+/// criteria... do not ship a bound you chose." Measures the two
+/// per-line operations that actually scale with line count -- escaping
+/// (`quote_untrusted`, which allocates and wraps each line in bidi
+/// isolate marks) and building one `text` `Element` per line -- the
+/// exact construction `change_review_view` performs for
+/// `content_elements`, at candidate line counts up to and beyond the
+/// shipped bound. This is "view-build cost" in this project's own
+/// sense (`ARCHITECTURE.md`: "wall-clock time for `view` to construct
+/// its `Element` tree... Compositor and GPU present time are
+/// excluded") -- what it cannot measure is real layout/shaping/paint
+/// cost inside `iced`'s own renderer, which happens after `view`
+/// returns and is exactly what that convention excludes.
+///
+/// Not a tight regression bound (machine-dependent) -- a diagnostic
+/// report, the same shape
+/// `real_repository_filesystem_scan_cost_headless_benchmark`
+/// (`tekstide-core`) already uses. Prints the real numbers
+/// `DEFAULT_MAX_DIFF_LINES` was set from.
+#[test]
+fn change_review_content_view_build_cost_by_line_count_measurement() {
+    let state = state_with(tekstide_core::shell::ApplicationShell::new());
+    let line_text = "a realistic line of source code, roughly eighty columns wide, for measurement";
+
+    for &line_count in &[100usize, 1_000, 4_000, 10_000, 50_000, 100_000] {
+        let started = std::time::Instant::now();
+        let content_elements: Vec<iced::Element<'_, Message>> = (0..line_count)
+            .map(|_| {
+                let escaped = super::ChangeReviewContentLine::from_escaped(line_text);
+                iced::widget::text(escaped.as_str().to_string())
+                    .size(state.theme.font_size_body())
+                    .into()
+            })
+            .collect();
+        let elapsed = started.elapsed();
+
+        eprintln!(
+            "change_review_content_view_build_cost_by_line_count_measurement lines={line_count} \
+             elapsed_us={} elements_built={}",
+            elapsed.as_micros(),
+            content_elements.len()
+        );
+
+        assert!(
+            elapsed.as_millis() < 500,
+            "view-build cost at {line_count} lines must stay far inside any plausible latency \
+             budget (NFR-PERF-003's own is 16ms p95) -- got {}ms, which would indicate a real \
+             regression, not measurement noise",
+            elapsed.as_millis()
+        );
+    }
 }
 
 /// The real, clickable control -- proving reachability by row click, not

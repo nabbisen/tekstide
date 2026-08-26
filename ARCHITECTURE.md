@@ -52,7 +52,7 @@ from diverging: an adapter that cannot decide anything cannot decide differently
 
 ## The properties that hold the whole thing up
 
-Four invariants recur across RFCs. Breaking one is a security regression, not a
+Five invariants recur across RFCs. Breaking one is a security regression, not a
 refactor.
 
 **Single ingress.** Every byte from a PTY reaches the emulator through exactly one
@@ -74,6 +74,16 @@ chrome around it.
 **The audit store records what happened, not what was convenient.** Producers write
 through `AuditCoordinator`, never to the store directly, and an audit write failing must
 never fail the operation it observes.
+
+**A claim that qualifies content stays visible for as long as that content is
+visible.** RFC-042's own "not a diff" label sat in the same scroll region as the content
+it qualified — a long enough file scrolled the label away while the content it disclaimed
+stayed on screen, so the label's own accuracy was defeated by layout, not by anything
+false in its words. The fix pins the claim (heading, disclosures, the label) outside the
+scroll region the content it describes lives in, rather than trusting that files stay
+short enough for both to fit on screen together. This is the same failure this project
+treats most seriously — a claim that says less than the truth by the time a reader
+actually reaches it — one layer removed from wording into layout.
 
 ## Evidence conventions
 
@@ -106,6 +116,16 @@ half without knowing the unwritten half. **A convention that survives only becau
 happens to share a habit is one newcomer away from failing.** Evidence that cannot be captured
 against a fixture belongs in `.git-exclude/`, which is never committed, and the committed
 document links to nothing it cannot show.
+
+**A fixture that omits the shape under test proves nothing about that shape.** RFC-041's
+own content preview shipped rendering every multi-line file as one continuous escaped
+blob, and survived two rounds of evidence (a unit test suite and a live walkthrough)
+before the `0.14.0` release gate found it — because every fixture either slice used was
+single-line: an 80-byte demo seed, short test strings. A fixture with no newline in it
+cannot show what happens to a newline. The preview's whole job was showing what a file
+looks like, and every fixture proving it did so with a file that had no structure to
+look at. When a decision is about a shape (line count, nesting, ordering, size), the
+fixture must actually have that shape — not merely exist.
 
 **Claims** are checked against the RFC's own text at closeout, not only against the
 evidence file — an RFC has twice asserted something its own results had falsified.

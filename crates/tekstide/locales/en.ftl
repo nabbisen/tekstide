@@ -730,6 +730,11 @@ change-review-content-error-access = This file could not be opened for preview (
 change-review-content-error-metadata-unavailable = This file's metadata could not be read.
 change-review-content-error-too-large = This file is too large to preview: { $len } bytes exceeds the { $max } byte limit. Refused whole, not shown truncated.
 change-review-content-error-read-failed = Reading this file's content failed.
+# RFC-042 D3: a distinct refusal from the byte bound above -- a row
+# count, not a byte count. Refused whole, never truncated, and never
+# worded as a count of omitted *files* (this surface already has two of
+# those, for a different thing).
+change-review-content-error-too-many-lines = This file has too many lines to preview: { $lines } exceeds the { $max } line limit. Refused whole, not shown truncated.
 
 # RFC-032 `what-the-trust-dialog-must-say.md`: `$path` is the project's
 # **canonical** path -- what trust actually binds to

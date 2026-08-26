@@ -8025,16 +8025,42 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
         })
         .collect();
 
+    // RFC-042 D2, visible half: an untrusted file's own content renders
+    // only inside its own visually distinct container -- its own bounds
+    // and background, the same boxed-card style `approval_history_entry_view`
+    // already uses for a different untrusted-adjacent payload (a
+    // proposed command). Only built when there is real content to box --
+    // `Deleted`/`NonFile`/every refusal produces an empty `preview.content`
+    // and has nothing here worth a container around.
+    let content_body: Element<'_, Message> = if content_elements.is_empty() {
+        column![].into()
+    } else {
+        container(column(content_elements).spacing(4))
+            .width(Length::Fill)
+            .padding(8)
+            .style(move |_base_theme: &iced::Theme| container::Style {
+                background: Some(Background::Color(state.theme.surface_elevated())),
+                text_color: Some(state.theme.foreground()),
+                border: Border {
+                    color: state.theme.border_default(),
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..container::Style::default()
+            })
+            .into()
+    };
+
     // RFC-042 D1: before this slice, `lines` (frame) and the content
     // preview shared one `scrollable`, so a long enough file scrolled
     // the "not a diff" label and the detection disclosure off screen
     // while the content they qualify stayed on it -- the label was
     // accurate and its accuracy was defeated by layout. The frame now
-    // renders outside any scroll region; only `content_elements` scrolls,
+    // renders outside any scroll region; only `content_body` scrolls,
     // inside its own, independent `scrollable`.
     column![
         column(lines).spacing(8),
-        scrollable(column(content_elements).spacing(4))
+        scrollable(content_body)
             .width(Length::Fill)
             .height(Length::Fill),
     ]
@@ -8509,15 +8535,27 @@ fn change_review_diff_content_lines(
 /// other untrusted-bytes-to-text paths already use rather than a second,
 /// stricter one invented here.
 ///
-/// **RFC-042 PR-042-A: still one element, not yet split on `\n`.** This
-/// slice's whole point is the chrome/content type split with no visible
-/// change -- splitting the escaped blob into real lines, and enforcing a
-/// line-count bound, is PR-042-C's job, once D1 (the frame) and D2's
-/// structural half (this type) are both in place.
+/// **RFC-042 PR-042-C, D2's visible half**: splits on the raw byte
+/// `b'\n'` -- never on a decoded `char` boundary -- so a `\n` can never
+/// be bisected out of a multi-byte UTF-8 sequence (`0x0A` cannot appear
+/// as a UTF-8 continuation byte, so this split is safe over arbitrary,
+/// possibly-invalid bytes without decoding first). Each segment is
+/// decoded and escaped **independently**: `quote_untrusted` still
+/// escapes every control character it always has (`\r`, `\t`, ANSI
+/// escapes, bidi overrides) -- the line break is the only character this
+/// slice stops escaping, per RFC-042's own Non-goals. `read_diff_content`
+/// (`tekstide-core`) already enforces `policy.max_lines` before this
+/// function ever sees `bytes`, using the identical split
+/// (`bytes.split(|&b| b == b'\n')`) to count -- "line" means the same
+/// thing on both sides, including a trailing newline's own empty final
+/// segment counting as one line.
 fn change_review_content_body_lines(bytes: &[u8]) -> Vec<ChangeReviewContentLine> {
-    vec![ChangeReviewContentLine::from_escaped(
-        &String::from_utf8_lossy(bytes),
-    )]
+    bytes
+        .split(|&byte| byte == b'\n')
+        .map(|line_bytes| {
+            ChangeReviewContentLine::from_escaped(&String::from_utf8_lossy(line_bytes))
+        })
+        .collect()
 }
 
 fn change_path_kind_symbol(kind: tekstide_core::project::ChangePathKind) -> &'static str {
@@ -8564,6 +8602,20 @@ fn change_review_content_error_line(
         DiffContentError::ReadFailed { .. } => {
             catalog.get("change-review-content-error-read-failed")
         }
+        // RFC-042 D3: a distinct refusal and a distinct sentence from
+        // RFC-024's own byte-bound `TooLarge` above -- a row count, not a
+        // byte count, and the two can be hit independently. Not folded
+        // into either existing omission count
+        // (`omitted_changed_file_count`/`changed_files_omitted_by_detection`):
+        // those are about a *list of files*; this is a refusal on *one
+        // file's own content*, the same "a refusal is not a count" rule
+        // `what-a-legible-preview-must-not-become.md` §5 states.
+        DiffContentError::TooManyLines { lines, max, .. } => catalog.get_with_args(
+            "change-review-content-error-too-many-lines",
+            &CatalogArgs::new()
+                .number("lines", *lines as u64)
+                .number("max", *max as u64),
+        ),
     }
 }
 

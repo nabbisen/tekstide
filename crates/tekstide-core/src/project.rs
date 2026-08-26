@@ -21,8 +21,8 @@ pub use content::{
     explorer_node_state_label, explorer_symlink_status_label, text_document_state_label,
 };
 pub use diff::{
-    ContentLifecycle, DEFAULT_MAX_DIFF_INPUT_BYTES, DiffContent, DiffContentError,
-    DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, diff_content_is_stale,
+    ContentLifecycle, DEFAULT_MAX_DIFF_INPUT_BYTES, DEFAULT_MAX_DIFF_LINES, DiffContent,
+    DiffContentError, DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, diff_content_is_stale,
     gate_diff_content_read, read_diff_content,
 };
 pub use identity::ProjectId;

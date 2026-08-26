@@ -49,6 +49,28 @@ use crate::content::FileSnapshot;
 /// time.
 pub const DEFAULT_MAX_DIFF_INPUT_BYTES: u64 = 4 * 1024 * 1024;
 
+/// RFC-042 D3 -- measured, not chosen. The byte bound above does not
+/// bound row count: a 4 MiB file of single-character lines is four
+/// million rows, and rendering cost scales with rows, not bytes. A line
+/// is one element of `bytes.split(|&b| b == b'\n')` -- the exact split
+/// `change_review_content_body_lines` (`tekstide/src/shell.rs`) performs
+/// for rendering, so "line count" means the same thing wherever it is
+/// counted; a trailing newline's own empty final segment counts as one
+/// line, consistently on both sides.
+///
+/// **The measurement** (`shell::tests::change_review_content_view_build_cost_by_line_count_measurement`,
+/// full numbers in `rfcs/handoffs/042-change-content-legibility/qa-evidence.md`):
+/// view-build cost -- escaping each line plus building one `text`
+/// `Element` per line, the operation `change_review_view` actually
+/// performs -- at 4,000 lines is ~1.6ms release / ~5.6ms debug, both
+/// comfortably inside `NFR-PERF-003`'s existing 16ms p95 budget; at
+/// 10,000 lines debug cost (~14.3ms) already erodes nearly all of that
+/// margin, and at 50,000 lines release cost alone (~17ms) exceeds it.
+/// 4,000 is chosen for the margin it leaves in the *slower* (debug)
+/// profile, not only the shipped release one -- RFC-042's own "expect
+/// the low thousands" confirmed, not overridden.
+pub const DEFAULT_MAX_DIFF_LINES: usize = 4000;
+
 /// RFC-024 Decision 4 -- a bounded prefix is enough to answer "is this
 /// binary" without reading, or bounding, the whole file. 8000 bytes
 /// matches the sniff size common tooling (git, ripgrep) already uses for
@@ -63,12 +85,18 @@ const BINARY_SNIFF_BYTES: usize = 8000;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DiffPreviewPolicy {
     pub max_input_bytes: u64,
+    /// RFC-042 D3, added beside `max_input_bytes` -- not a replacement
+    /// for it, and this RFC's own amendment to its Non-goals: "adding a
+    /// bound alongside is in scope; altering or weakening the four that
+    /// exist is not."
+    pub max_lines: usize,
 }
 
 impl DiffPreviewPolicy {
     pub fn linux_mvp() -> Self {
         Self {
             max_input_bytes: DEFAULT_MAX_DIFF_INPUT_BYTES,
+            max_lines: DEFAULT_MAX_DIFF_LINES,
         }
     }
 }
@@ -429,6 +457,19 @@ pub enum DiffContentError {
     /// returning a truncated prefix, matching Decision 2's own "refuse
     /// whole, never truncate" for every other size check in this module.
     ReadFailed { relative_path: PathBuf },
+    /// RFC-042 D3: `policy.max_lines` exceeded. Refused whole, never
+    /// truncated -- the same shape as `DiffGateRefusal::TooLarge`, and
+    /// deliberately a *different* variant/wording from it: this is a row
+    /// count, not a byte count, and the two bounds can be hit
+    /// independently (a small file with only newlines hits this one long
+    /// before the byte bound; a file with very long lines can hit the
+    /// byte bound while having very few rows). `lines` is the real,
+    /// measured count from the content actually read, not an estimate.
+    TooManyLines {
+        relative_path: PathBuf,
+        lines: usize,
+        max: usize,
+    },
 }
 
 /// RFC-024 PR-024-C: the only place in `tekstide-core` that reads a
@@ -495,6 +536,21 @@ pub fn read_diff_content(
                         relative_path: target.selected_relative_path.clone(),
                     }
                 })?;
+
+            // RFC-042 D3: a row-count bound, independent of the byte
+            // bound above -- checked after the read (row count is only
+            // knowable from real content), before this content is ever
+            // handed back to a caller. Refuses whole; never truncates,
+            // matching every other size check in this module.
+            let line_count = bytes.split(|&byte| byte == b'\n').count();
+            if line_count > policy.max_lines {
+                return Err(DiffContentError::TooManyLines {
+                    relative_path: target.selected_relative_path.clone(),
+                    lines: line_count,
+                    max: policy.max_lines,
+                });
+            }
+
             let baseline =
                 capture_baseline_snapshot(&target).map_err(|()| DiffContentError::ReadFailed {
                     relative_path: target.selected_relative_path.clone(),

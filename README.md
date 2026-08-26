@@ -325,11 +325,13 @@ limits as closely as its existence**: whole content for an added file; **current
 explicitly labelled not a diff**, for a modified one — there is still no before/after comparison,
 because the before-bytes for a modified file were never captured and are gone by request time. A
 genuine two-sided diff is future work, blocked on a real before-source (RFC-030); this surface
-will not approximate one. **Previewed content is escaped, line breaks included**, so a multi-line
-file appears as one continuous run of text with `<U+000A>` where each newline was: file content is
-untrusted text drawn in trusted chrome, and escaping it is what stops a file from forging the
-interface around it. Honest, but not yet readable for real source files, and the surface does not
-say so — recorded in `CHANGELOG.md` under `0.14.0` and not yet designed. Detection is conservative and excludes `target/`, `node_modules/`, and most of `.git/`
+will not approximate one. **Previewed content renders with its real line structure** (`0.15.0`) —
+every character other than the line break is still escaped, and file content renders only inside
+its own visually distinct, bordered container, never mistakable for the surface's own chrome (a
+file cannot forge a line reading, say, "Review state: Accepted"). The frame around it — including
+the "not a diff" label — is pinned outside the scroll region, so it cannot be scrolled away by the
+content it qualifies. A file with more than 4,000 lines is refused whole, never truncated, the
+same shape as the byte bound. Detection is conservative and excludes `target/`, `node_modules/`, and most of `.git/`
 by design, so a change made inside those is never reported — except `.git/hooks/` and
 `.git/config` (`0.14.0`), which are watched, since those are the two places a change could
 install or redirect code that runs on this machine. The surface states both of these itself, in
