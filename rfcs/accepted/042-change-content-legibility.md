@@ -1,7 +1,9 @@
 # RFC-042: Change Content Legibility
 
-Status: **Proposed 2026-08-26.** Scoped at the human owner's request as the first theme for
-`0.15.0`, after the `0.14.0` release gate found the defect this RFC exists to answer.
+Status: **Accepted by the human owner 2026-08-26.** Proposed the same day, scoped at his request
+as the first theme for `0.15.0`, after the `0.14.0` release gate found the defect this RFC exists
+to answer. **D1, D2 and D3 were decided by the architect on acceptance** — see "Decided on
+acceptance" at the end. An implementer must not inherit an unresolved architecture decision.
 Target milestone: **M12**
 Date: 2026-08-26
 
@@ -137,3 +139,103 @@ not be confusable with either existing count.
 **D1, D2 and D3 are decided by the architect on acceptance and recorded in this file before any
 implementation begins.** An implementer must not inherit an unresolved architecture decision —
 the same rule RFC-041 was accepted under.
+
+---
+
+## Decided on acceptance, 2026-08-26
+
+Each decision was checked against the code first. Both risks D1 and D2 describe are **present
+today**, not hypothetical.
+
+`render_change_review` ends in `scrollable(column(lines).spacing(8))` — **one scroll region
+holding everything**: heading, disclosure, detection status, both omission counts, review state,
+and the previewed content. `change_review_content_lines` returns `Vec<String>`, and the renderer
+tells chrome from content by **index alone** (`if index == 0` gets heading size, everything else
+body size).
+
+### D1 — content must not be able to scroll the surface's own claims away. **Pin the frame.**
+
+Today it can. Select a long file, scroll down, and the detection disclosure and the "not a diff"
+label both leave the screen while the content they qualify stays on it.
+
+**Decision: the framing text moves outside the scroll region.** Heading, detection disclosure,
+detection status, both omission counts, review state and the **"not a diff" label** render in a
+fixed frame; only the content region scrolls, inside it.
+
+The general rule, which belongs in `ARCHITECTURE.md` at closeout:
+
+> **A claim that qualifies content stays visible for as long as that content is visible.** A
+> disclosure that can be scrolled away from the thing it discloses is a disclosure only for
+> readers who never scroll.
+
+This is the same failure as a control implying more than it does, one layer out: the label is
+accurate, and its accuracy is defeated by layout.
+
+**Not accepted as an answer:** bounding line count so scrolling "cannot get far." That makes the
+label survive by accident, at whichever bound D3 lands on, and stops being true the moment the
+bound changes.
+
+### D2 — a content line must not be able to impersonate a Tekstide line. **Make it unrepresentable.**
+
+Today it can, trivially. A file whose first line reads `Review state: Accepted` renders in the
+same font, the same size, the same column and the same spacing as the real review-state line
+directly above it.
+
+**The root cause is a type, not a style.** `change_review_content_lines` returns one flat
+`Vec<String>` in which a line Tekstide wrote and a line an AI agent's file wrote are the same
+type. Nothing in the signature prevents mixing them, and the renderer's `index == 0` test is a
+positional convention, not a guarantee.
+
+**Decision: chrome and untrusted content become different types**, and untrusted content renders
+only inside its own visually distinct container — its own bounds, its own background, visibly not
+part of the surrounding surface.
+
+This is the project's established idiom, not a new one: `DisplayText` with a single
+`quote_untrusted` constructor, the exhaustive matches over `NavigationAction`, `DiffContent`'s
+Added/Modified distinction carried by the constructor rather than a field. Same move here — after
+this slice, "a content line rendered as chrome" should not be expressible, so it cannot be
+reintroduced by a future edit that forgets the convention.
+
+**A test whose fixture is a real spoof attempt is required**, not a test that content renders.
+A file containing `Detection: Complete`, `Review state: Accepted` and `1 file changed` as its
+first three lines, asserting that none of them can be confused with the real ones. **Do not
+answer this by asserting that a user would notice.**
+
+### D3 — what bounds line count. **Refuse above the bound; do not truncate. No third omission count.**
+
+RFC-024 already decided this shape for the byte bound: content is *"bounded at 4 MiB and refused
+whole above that, never truncated."* A truncated preview is the same trap as absence-of-visible-
+change one level down — the user sees a beginning and has no way to know it is one.
+
+**Decision: one line bound, refusing, with its own wording.** Not a count folded in beside
+`omitted_changed_file_count` and `changed_files_omitted_by_detection`. Those two are about a
+*list of files* and were split in `0.14.0` precisely because one number cannot say which
+happened; content has always been all-or-nothing, and keeping it that way means this surface
+gains a refusal, not a third count to distinguish from the other two.
+
+**The bound's value is measured, not chosen by me.** RFC-024 set its own bound by measuring real
+transient RSS rather than estimating; do the same here. The pathology to stop is rendering cost —
+a 4 MiB file of single-character lines is four million rows — so measure where rendering at the
+bound leaves the surface inside this project's existing latency criteria, and set the constant
+from that number. Record the measurement in `qa-evidence.md`. Expect the answer in the low
+thousands; **if the measurement disagrees, the measurement wins.**
+
+The bound lives in `DiffPreviewPolicy`, beside the byte bound, not in a new home.
+
+### An amendment to this RFC's own Non-goals
+
+This RFC's Non-goals say "Changing RFC-024's gate, bound, sniff or staleness check." D3 adds a
+**new** bound to `DiffPreviewPolicy`, which is RFC-024's type.
+
+**Corrected: adding a bound alongside is in scope; altering or weakening the four that exist is
+not.** Recorded here rather than left as a contradiction for an implementer to resolve alone —
+if a slice makes a statement false, correcting it is part of the slice, and that applies to the
+RFC's own text.
+
+### What is still not in scope
+
+Unchanged: no syntax highlighting, no line numbers as a feature, no editor, no two-sided diff,
+and no weakening of `quote_untrusted` for any character other than the line break. If D2's
+container turns out to require escaping the line break too, closing the defect by disclosure
+instead is a legitimate outcome — but it must be reached by argument, not by finding the layout
+hard.
