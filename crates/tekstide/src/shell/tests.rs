@@ -11619,20 +11619,141 @@ fn change_review_content_label_survives_content_long_enough_to_scroll() {
     );
 }
 
-/// RFC-042 D1's own required ablation target, as a structural source
-/// check (the established technique for a property about *where* code
-/// wires an `Element`, not what text it produces --
-/// `modal_layer_always_applies_the_scrim_style`'s own shape): `preview.chrome`
-/// and `preview.heading` must push into `lines` (the fixed frame) and
-/// only `content_elements` (via `content_body`, D2's own boxed
-/// container) may feed `scrollable(...)`.
+/// RFC-042 D1's own required guard, rebuilt per response 331's Required
+/// 2 after the reviewer defeated the previous version. **What that
+/// version was**: a source-text scan of `change_review_view`'s own body
+/// asserting on exact substrings, including indentation. **How it was
+/// defeated**: wrapping the whole surface back in one outer
+/// `scrollable` -- the pre-RFC-042 defect, restored in full -- spelled
+/// `scrollable(column![column(lines).spacing(8), scrollable(content_body)...])`.
+/// Every assertion still passed, because the negative check looked for
+/// the literal substring `"scrollable(column(lines)"`, and this spelled
+/// it `scrollable(column![`. "A correct test of the shape of the claim,
+/// never its truth" (`what-a-legible-preview-must-not-become.md` §4) --
+/// the reviewer's own words, turned back on the guard meant to prevent
+/// exactly that.
 ///
-/// **Ablated**: changed the `for chrome_line in &preview.chrome` loop to
-/// push into `content_elements` instead of `lines` -- this test failed
-/// on the first assertion, naming `change_review_view`. Reverted, not
-/// committed.
+/// **This version tests the rendered structure, not the source text
+/// that builds it.** It calls the real, production
+/// `assemble_change_review_layout` -- not a copy -- with `()`, iced's
+/// own headless test renderer (`iced_core::renderer::null`), and
+/// computes a real `layout::Node` tree: no GPU, no font backend, no
+/// window. The property that actually matters for D1: **the two pinned
+/// regions' own combined height must not grow when the file-row list or
+/// the file's own content grows** -- if it did, either list could push
+/// the other pinned region (and the "not a diff" label inside it) an
+/// unbounded distance down the page, which is a different-shaped
+/// version of the exact defect D1 exists to prevent. Built once with 1
+/// file row and 1 content line, once with 200 of each; the two pinned
+/// heights must be equal.
+///
+/// **Ablated, twice, matching the reviewer's own two attacks. Both
+/// confirmed failing, then reverted -- neither committed.**
+///
+/// 1. Wrapped `assemble_change_review_layout`'s own `column![...]` in
+///    an extra outer `scrollable(...)` (the reviewer's exact defeat).
+///    The top-level widget is then the outer `Scrollable`, whose own
+///    `layout::Node` has exactly **one** child (its content), not four
+///    -- failed the child-count assertion directly: `left: 1, right: 4`.
+///    This is a *stronger* catch than the height/position checks below
+///    ever needed to run.
+/// 2. Removed the file-row list's own `scrollable(...)` wrapper --
+///    rendering `file_rows` as a plain, unscrolled `column` inline (the
+///    *original* D1 defect this slice amends, reproduced). Growing the
+///    fixture from 1 file row to 200 pushed `pinned_middle`'s own Y
+///    position from 16px to 592px -- the exact "a variable-length list
+///    pushes a pinned region an unbounded distance down the page" shape
+///    this measurement exists to catch, confirmed with real numbers,
+///    not asserted from reasoning about what should happen.
 #[test]
-fn change_review_frame_lines_never_feed_the_scrollable() {
+fn change_review_layout_pins_fixed_regions_regardless_of_list_length() {
+    /// Returns `(pinned_top height + pinned_middle height, pinned_middle's own Y offset from
+    /// the page top)`. The first quantity catches the reviewer's own defeat (wrapping the whole
+    /// page in an outer `scrollable`, which collapses the top-level node to one child and fails
+    /// the child-count assertion below before either quantity is even read). The second quantity
+    /// is what actually catches the *original* D1 defect this slice is amending: a file-row list
+    /// rendered directly, with no scroll region of its own, pushes every pinned region below it
+    /// down by the list's own unclipped height -- `pinned_middle`'s Y offset then grows with
+    /// `file_row_count`, which a height-only comparison would miss (a `Column`'s children size
+    /// themselves independently; `pinned_top`/`pinned_middle`'s own heights don't change just
+    /// because a sibling grew, only their *positions* do).
+    fn pinned_region_measurements(file_row_count: usize, content_line_count: usize) -> (f32, f32) {
+        let pinned_top: Vec<iced::Element<'_, Message, iced::Theme, ()>> =
+            vec![iced::widget::text::<iced::Theme, ()>("PINNED_TOP").into()];
+        let file_rows: Vec<iced::Element<'_, Message, iced::Theme, ()>> = (0..file_row_count)
+            .map(|index| iced::widget::text::<iced::Theme, ()>(format!("ROW_{index}")).into())
+            .collect();
+        let pinned_middle: Vec<iced::Element<'_, Message, iced::Theme, ()>> =
+            vec![iced::widget::text::<iced::Theme, ()>("PINNED_MIDDLE_NOT_A_DIFF").into()];
+        let content_lines: Vec<iced::Element<'_, Message, iced::Theme, ()>> = (0
+            ..content_line_count)
+            .map(|index| iced::widget::text::<iced::Theme, ()>(format!("CONTENT_{index}")).into())
+            .collect();
+        let content: iced::Element<'_, Message, iced::Theme, ()> =
+            iced::widget::column(content_lines).into();
+
+        let mut page =
+            super::assemble_change_review_layout(pinned_top, file_rows, pinned_middle, content);
+
+        let renderer = ();
+        let mut tree = iced::advanced::widget::Tree::new(page.as_widget());
+        let limits = iced::advanced::layout::Limits::new(
+            iced::Size::new(0.0, 0.0),
+            iced::Size::new(400.0, 600.0),
+        );
+        let node = page.as_widget_mut().layout(&mut tree, &renderer, &limits);
+
+        let children = node.children();
+        assert_eq!(
+            children.len(),
+            4,
+            "the page must have exactly 4 top-level regions: pinned_top, the file-row \
+             scrollable, pinned_middle, the content scrollable"
+        );
+        (
+            children[0].bounds().height + children[2].bounds().height,
+            children[2].bounds().y,
+        )
+    }
+
+    let (pinned_height_small, pinned_middle_y_small) = pinned_region_measurements(1, 1);
+    let (pinned_height_large, pinned_middle_y_large) = pinned_region_measurements(200, 200);
+
+    assert!(
+        (pinned_height_small - pinned_height_large).abs() < 0.5,
+        "the pinned regions' own combined height must not depend on how many file rows or \
+         content lines exist -- got {pinned_height_small}px with 1 of each, \
+         {pinned_height_large}px with 200 of each"
+    );
+    assert!(
+        (pinned_middle_y_small - pinned_middle_y_large).abs() < 0.5,
+        "pinned_middle's own Y position must not depend on how many file rows exist -- a file-row \
+         list rendered without its own scroll region pushes every pinned region below it down by \
+         the list's own unclipped height, exactly the original D1 defect this measurement exists \
+         to catch. Got {pinned_middle_y_small}px with 1 file row, {pinned_middle_y_large}px with \
+         200"
+    );
+}
+
+/// RFC-042 D2's own move-out gap, **closed** per response 331 Required
+/// 3 (rather than merely documented, the reviewer's other acceptable
+/// option): `render_change_review_content_body` is now the only
+/// function in this module that calls `.as_str()` on a
+/// `ChangeReviewContentLine` and turns it into an `Element` -- and it
+/// always applies the bordered container in the same step, so there is
+/// no un-boxed intermediate value a caller could misplace. This guard
+/// checks the **absence** of the escape hatch itself, robust to
+/// reformatting in a way the D1 prose-match was not (it does not search
+/// for one specific wiring shape -- it searches for one specific method
+/// call, `.as_str()`, whose presence anywhere in `change_review_view`'s
+/// own body is disqualifying regardless of surrounding whitespace).
+///
+/// **Ablated**: pasted the reviewer's own exploit --
+/// `for content_line in &preview.content { pinned_middle.push(text(content_line.as_str().to_string())...) }`
+/// -- into `change_review_view`. This test failed, naming the reason.
+/// Reverted, not committed.
+#[test]
+fn change_review_view_never_calls_as_str_on_content_directly() {
     let source = std::fs::read_to_string(crate_src_dir().join("shell.rs"))
         .expect("shell.rs must be readable");
 
@@ -11648,24 +11769,12 @@ fn change_review_frame_lines_never_feed_the_scrollable() {
     let view_body = &after_signature[..end];
 
     assert!(
-        view_body.contains("for chrome_line in &preview.chrome {\n        lines.push("),
-        "the preview's chrome lines (including the \"not a diff\" label) must push into \
-         `lines`, the fixed frame outside the scroll region:\n{view_body}"
-    );
-    assert!(
-        view_body.contains("if let Some(heading) = &preview.heading {\n        lines.push("),
-        "the preview's own heading must push into `lines` too, not the scrolling region:\n\
-         {view_body}"
-    );
-    assert!(
-        view_body.contains("scrollable(content_body)"),
-        "only `content_body` (built from `content_elements` alone) may feed the scrollable \
-         region:\n{view_body}"
-    );
-    assert!(
-        !view_body.contains("scrollable(column(lines)"),
-        "the frame (`lines`) must not be wrapped in its own `scrollable` -- that was the \
-         pre-RFC-042 defect D1 exists to fix:\n{view_body}"
+        !view_body.contains(".as_str()"),
+        "change_review_view must never call .as_str() on content itself -- only \
+         render_change_review_content_body may, and it always boxes the result in the same \
+         step. A .as_str() call inside change_review_view's own body is the impersonation \
+         response 331 found: content rendered outside its container, styled identically to \
+         chrome. Found in change_review_view's own body:\n{view_body}"
     );
 }
 
@@ -11868,11 +11977,22 @@ fn change_review_content_renders_real_line_structure_not_one_escaped_blob() {
     );
 }
 
-/// RFC-042 D2's own required fixture, written to prove the attack it
-/// names rather than merely that content renders (the pack's own
-/// `what-a-legible-preview-must-not-become.md` §4 trap: "a test that
-/// asserts the right thing about the wrong property"). A file whose
-/// first three lines read exactly like this surface's own chrome.
+/// RFC-042 D2's own required fixture -- a file whose first three lines
+/// read exactly like this surface's own chrome.
+///
+/// **What this test proves, precisely (response 331 Required 3
+/// corrected this test's own doc comment, which had overclaimed): that
+/// the spoof strings are classified as `content`, never `chrome`, at
+/// the *data* level.** That was never actually in doubt after PR-042-A
+/// -- `chrome` is built from catalog lookups, `content` from file
+/// bytes, and the two cannot cross by construction. The property this
+/// test does **not** reach is *where those values are drawn on
+/// screen*, since `ChangeReviewContentLine::as_str()` returns a plain
+/// `&str` that nothing stops a caller from pushing into the chrome
+/// list anyway -- exactly what response 331 demonstrated live.
+/// `change_review_view_never_calls_as_str_on_content_directly` is the
+/// guard that actually closes that gap, at the render call site rather
+/// than at the data classification this test covers.
 #[test]
 fn change_review_content_spoof_lines_are_never_rendered_as_chrome() {
     let state = state_with_a_selected_modified_file(

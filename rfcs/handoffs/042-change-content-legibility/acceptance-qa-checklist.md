@@ -16,24 +16,47 @@ created: "2026-08-26"
       `E0308`, `qa-evidence.md` PR-042-A.
 - [x] The spoof fixture exists — a file whose first lines are `Detection: Complete`,
       `Review state: Accepted`, `1 file changed` — and a test asserts none of them can be
-      confused with the real lines. `change_review_content_spoof_lines_are_never_rendered_as_chrome`.
+      confused with the real lines. `change_review_content_spoof_lines_are_never_rendered_as_chrome`
+      — response 331 corrected this test's own doc comment: it proves the *data-level*
+      classification, not the *render-level* placement (see below).
 - [x] The renderer no longer discriminates chrome from content by index.
       `ChangeReviewContentPreview`'s three fields (`heading`/`chrome`/`content`) replace the old
       `if index == 0` position check.
+- [x] **Response 331 Required 3, closed**: the move-out gap (`ChangeReviewContentLine::as_str()`
+      returning a plain `&str` nothing stopped a caller from misplacing) is closed --
+      `render_change_review_content_body` is the only function that calls `.as_str()`, and always
+      returns the bordered container in the same step. Guard:
+      `change_review_view_never_calls_as_str_on_content_directly`, asserting the *absence* of the
+      `.as_str()` call syntax in `change_review_view`'s own body. Ablated with the reviewer's own
+      exploit pasted back in; failed; reverted.
 
 ## D1 — the frame does not scroll
 
 - [x] Heading, detection disclosure, detection status, both omission counts, review state and the
-      "not a diff" label are outside the scroll region. `column(lines)`, non-scrolling; only
-      `content_body` (built from `content_elements` alone) feeds `scrollable(...)`.
+      "not a diff" label are outside the scroll region.
+- [x] **Response 331 Required 1, D1 amended**: the file-row list (variable length, up to
+      `DEFAULT_CHANGESET_PATH_SUMMARY_LIMIT`) was still living in the pinned region, making the
+      label *unreachable* (not merely scrollable-past) on a window shorter than the frame's own
+      content-dependent height. `change_review_view` restructured into four independent regions
+      (`assemble_change_review_layout`): `pinned_top`, the file-row list in its own `scrollable`,
+      `pinned_middle` (including the label), the content region. Pinned regions' own height no
+      longer depends on file-row count.
 - [x] A test asserts the label is present with content long enough to scroll.
       `change_review_content_label_survives_content_long_enough_to_scroll` — a real ~100KB file.
-      Live evidence covers reachability and correct layout; genuine interactive scrolling is
-      outside what a `frames()`-avoiding unit test or this session's live pass can observe —
-      disclosed in `qa-evidence.md` rather than claimed.
 - [x] Ablated: label back inside the scroll region, that test fails, restored.
-      `change_review_frame_lines_never_feed_the_scrollable` (structural), confirmed failing then
-      reverted.
+      **Response 331 Required 2**: the previous guard (a source-text scan) was defeated by the
+      reviewer reformatting the same defect (`scrollable(column![...])` instead of
+      `scrollable(column(lines)`) — replaced with
+      `change_review_layout_pins_fixed_regions_regardless_of_list_length`, which computes a real
+      `layout::Node` tree via `()` (iced's headless test renderer) against the real production
+      `assemble_change_review_layout`. Both of the reviewer's own attacks reproduced and confirmed
+      failing against this new test, then reverted.
+- [ ] **Not fully resolved, left for the architect**: at the reviewer's own reproduction height
+      (380px), the pinned regions' fixed content (now independent of list length) still exceeds
+      the available window height and clips below the fold — a different cause than what was
+      fixed (ordinary window-chrome arithmetic, not unbounded growth). See `qa-evidence.md`
+      Required 1 for the numbers and the open question this raises about whether D1 needs a
+      minimum-window-height decision or a scrollable claims region.
 
 ## D3 — bounded, refusing, and distinct
 
@@ -85,11 +108,12 @@ created: "2026-08-26"
 - [x] `cargo fmt --all -- --check`
 - [x] `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - [x] Full workspace suite, **three consecutive runs** under default parallelism, each **logged to
-      a file** rather than filtered live, any flake named against `test-process-leak.md`. Run 2
-      hit the original, already-documented `bind_recovers_from_a_stale_socket_file` flake (row 1)
-      — unrelated to this slice (no approval/socket code touched), assertion message captured
-      this time (`ApprovalChannelError { reason: Io, source: None }`). Runs 1 and 3 clean, 433
-      tekstide + 742 tekstide-core.
+      a file** rather than filtered live, any flake named against `test-process-leak.md`. Response
+      331's own re-gate: the reviewer's own three runs hit disclosed, transient PTY exhaustion
+      (recovered by the time this response ran, unrelated to this slice). Six runs performed here;
+      runs 1–2 hit the already-documented `command_approval_family_produces_real_durable_audit_records_through_the_pipeline`
+      flake (row 3) — unrelated to this slice, assertion message captured for the first time for
+      that row; runs 3–6 clean, 434 tekstide + 742 tekstide-core.
 - [x] `git diff --check`, `rfc_docs_invariants`. Both clean.
 
 ## Closeout

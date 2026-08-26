@@ -7899,7 +7899,22 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
     };
     let summary = change_set.default_summary();
 
-    let mut lines: Vec<Element<'_, Message>> = vec![
+    // RFC-042 D1, **amended** after response 331: the original decision
+    // named "framing text" as what belongs in the fixed region, and
+    // missed that the frame also held a *variable-length list* (the file
+    // rows, up to `DEFAULT_CHANGESET_PATH_SUMMARY_LIMIT`) plus a
+    // disclosure that itself wraps to several lines at a narrow width.
+    // Pinning that whole mixed region made the label *unreachable*, not
+    // merely scrollable-past, on a window shorter than the frame's own
+    // (now content-dependent) height -- reproduced live and is the
+    // opposite of D1's own purpose. **The amended rule: pin the claims,
+    // scroll the lists.** `pinned_top`/`pinned_middle` hold only text
+    // Tekstide wrote *about the whole surface* -- one line each,
+    // independent of how many files changed or how long any one
+    // disclosure wraps to. The file-row list gets its own scroll region,
+    // exactly as content already has; a variable-length list never sits
+    // in a pinned region.
+    let pinned_top: Vec<Element<'_, Message>> = vec![
         text(state.catalog.get("change-review-heading"))
             .size(state.theme.font_size_heading())
             .into(),
@@ -7925,6 +7940,7 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
         .into(),
     ];
 
+    let mut file_row_elements: Vec<Element<'_, Message>> = Vec::new();
     for (index, path) in summary.shown_changed_files.iter().enumerate() {
         // RFC-041 PR-041-B, `what-a-content-preview-must-not-claim.md`
         // ("reaching content needs a visible control, not only a
@@ -7944,18 +7960,20 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
             },
             change_review_file_entry_line(&state.catalog, path)
         );
-        lines.push(
+        file_row_elements.push(
             button(text(label).size(state.theme.font_size_body()))
                 .on_press(Message::ChangeReviewFileRowPressed(path.clone()))
                 .into(),
         );
     }
+
+    let mut pinned_middle: Vec<Element<'_, Message>> = Vec::new();
     // The **display** limit -- distinct from the detection-status line's
     // own **scan** limit above, per the RFC's own required distinction:
     // "a truncated scan is not 'nothing changed.'" Rendered only when
     // real, not as a permanent zero line.
     if let Some(omitted_line) = change_review_omitted_files_line(&state.catalog, &summary) {
-        lines.push(
+        pinned_middle.push(
             text(omitted_line)
                 .size(state.theme.font_size_status())
                 .into(),
@@ -7976,14 +7994,14 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
     if let Some(detection_omitted_line) =
         change_review_detection_omitted_files_line(&state.catalog, &summary)
     {
-        lines.push(
+        pinned_middle.push(
             text(detection_omitted_line)
                 .size(state.theme.font_size_status())
                 .into(),
         );
     }
 
-    lines.push(
+    pinned_middle.push(
         text(change_review_state_line(&state.catalog, &summary))
             .size(state.theme.font_size_status())
             .into(),
@@ -7993,81 +8011,145 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
     // preview for whichever row is currently selected, if any -- see
     // `change_review_content_lines`'s own doc for why this is
     // re-evaluated fresh on every render rather than read from anything
-    // stored. Chrome (`heading`/`chrome`) joins `lines` in the **fixed
-    // frame** below; untrusted `content` renders separately, in its own
-    // independently scrolling region (RFC-042 D1) -- see that decision's
-    // own words in `042-change-content-legibility.md`: "a claim that
-    // qualifies content stays visible for as long as that content is
-    // visible."
+    // stored. Chrome (`heading`/`chrome`) joins `pinned_middle` in the
+    // **fixed frame**; untrusted `content` renders separately, in its
+    // own independently scrolling region (RFC-042 D1, amended) -- see
+    // that decision's own words in `042-change-content-legibility.md`:
+    // "a claim that qualifies content stays visible for as long as that
+    // content is visible."
     let preview = change_review_content_lines(state, project, change_set);
     if let Some(heading) = &preview.heading {
-        lines.push(
+        pinned_middle.push(
             text(heading.clone())
                 .size(state.theme.font_size_heading())
                 .into(),
         );
     }
     for chrome_line in &preview.chrome {
-        lines.push(
+        pinned_middle.push(
             text(chrome_line.clone())
                 .size(state.theme.font_size_body())
                 .into(),
         );
     }
 
-    let content_elements: Vec<Element<'_, Message>> = preview
-        .content
-        .iter()
-        .map(|content_line| {
-            text(content_line.as_str().to_string())
-                .size(state.theme.font_size_body())
-                .into()
-        })
-        .collect();
+    // RFC-042 D2, visible half, **closed per response 331's Required
+    // 3**: the only way to obtain an `Element` for a piece of untrusted
+    // file content is `render_change_review_content_body`, and its
+    // return value is always already inside the bordered container --
+    // there is no intermediate, un-boxed `Vec<Element>` of raw content
+    // lines in this function's own scope that a future edit could push
+    // into `pinned_top`/`pinned_middle`/`file_row_elements` by mistake
+    // (which is exactly the impersonation this review demonstrated:
+    // content styled identically to chrome, outside the container).
+    let content_body = render_change_review_content_body(&preview.content, state.theme);
 
-    // RFC-042 D2, visible half: an untrusted file's own content renders
-    // only inside its own visually distinct container -- its own bounds
-    // and background, the same boxed-card style `approval_history_entry_view`
-    // already uses for a different untrusted-adjacent payload (a
-    // proposed command). Only built when there is real content to box --
-    // `Deleted`/`NonFile`/every refusal produces an empty `preview.content`
-    // and has nothing here worth a container around.
-    let content_body: Element<'_, Message> = if content_elements.is_empty() {
-        column![].into()
-    } else {
-        container(column(content_elements).spacing(4))
-            .width(Length::Fill)
-            .padding(8)
-            .style(move |_base_theme: &iced::Theme| container::Style {
-                background: Some(Background::Color(state.theme.surface_elevated())),
-                text_color: Some(state.theme.foreground()),
-                border: Border {
-                    color: state.theme.border_default(),
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..container::Style::default()
-            })
-            .into()
-    };
+    assemble_change_review_layout(pinned_top, file_row_elements, pinned_middle, content_body)
+}
 
-    // RFC-042 D1: before this slice, `lines` (frame) and the content
-    // preview shared one `scrollable`, so a long enough file scrolled
-    // the "not a diff" label and the detection disclosure off screen
-    // while the content they qualify stayed on it -- the label was
-    // accurate and its accuracy was defeated by layout. The frame now
-    // renders outside any scroll region; only `content_body` scrolls,
-    // inside its own, independent `scrollable`.
-    column![
-        column(lines).spacing(8),
-        scrollable(content_body)
+/// RFC-042 D1, amended after response 331: three independent regions,
+/// not two. `pinned_top`/`pinned_middle` are fixed-count text Tekstide
+/// wrote about the whole surface -- their combined height cannot grow
+/// with how many files changed or how much content was previewed.
+/// `file_rows` (up to `DEFAULT_CHANGESET_PATH_SUMMARY_LIMIT`) and
+/// `content` (whatever the selected file's own line count is) each get
+/// their own, independent scroll region -- neither list can grow the
+/// pinned regions' own height or push the other list's scroll region
+/// off screen.
+///
+/// **Generic over `Renderer`**, deliberately, so
+/// `change_review_layout_pins_fixed_regions_regardless_of_list_length`
+/// (`shell/tests.rs`) can drive this exact function with `()` -- iced's
+/// own headless test renderer (`iced_core::renderer::null`) -- and
+/// compute a real `layout::Node` tree with no GPU or font backend
+/// needed. Response 331 Required 2: "a guard on the property, not the
+/// prose... the test must fail when the frame becomes scrollable, and
+/// must not fail when the code is merely reformatted." A source-text
+/// scan of `change_review_view`'s own body (this function's predecessor)
+/// could not tell `scrollable(column![...])` from `scrollable(column(x))`
+/// apart, and the reviewer defeated it by exactly that reformatting. This
+/// function is called from exactly one production site
+/// (`change_review_view`, with `Renderer = iced::Renderer` inferred from
+/// its own concrete `Element<'_, Message>` context) -- there is nowhere
+/// else a caller could pass `pinned_top`/`pinned_middle` into the wrong
+/// slot, because the slots are separate parameters, not positions in a
+/// shared `Vec` a future edit could reorder.
+fn assemble_change_review_layout<'a, Renderer>(
+    pinned_top: Vec<Element<'a, Message, iced::Theme, Renderer>>,
+    file_rows: Vec<Element<'a, Message, iced::Theme, Renderer>>,
+    pinned_middle: Vec<Element<'a, Message, iced::Theme, Renderer>>,
+    content: Element<'a, Message, iced::Theme, Renderer>,
+) -> Element<'a, Message, iced::Theme, Renderer>
+where
+    Renderer: iced::advanced::text::Renderer + 'a,
+{
+    iced::widget::column![
+        iced::widget::column(pinned_top).spacing(8),
+        iced::widget::scrollable(iced::widget::column(file_rows).spacing(8))
             .width(Length::Fill)
-            .height(Length::Fill),
+            .height(Length::FillPortion(1)),
+        iced::widget::column(pinned_middle).spacing(8),
+        iced::widget::scrollable(content)
+            .width(Length::Fill)
+            .height(Length::FillPortion(3)),
     ]
     .spacing(8)
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
+}
+
+/// RFC-042 D2, visible half: `content`'s own bytes render only inside
+/// this bordered, visually distinct container -- the same boxed-card
+/// style `approval_history_entry_view` already uses for a different
+/// untrusted-adjacent payload (a proposed command). **This is the only
+/// function in this module that turns a `ChangeReviewContentLine` into
+/// an `Element`** (response 331 Required 3: "the render path takes the
+/// typed value, not a `&str`, so only the content region can draw
+/// one") -- `change_review_view` itself never calls `.as_str()` at all;
+/// it only ever receives this function's already-boxed result, and has
+/// no raw, un-boxed `Vec<Element>` of content lines in its own scope
+/// that a future edit could push into the wrong region (which is
+/// exactly the impersonation response 331 demonstrated: content styled
+/// identically to chrome, outside the container).
+/// `change_review_view_never_calls_as_str_on_content_directly` (below)
+/// is the guard: `change_review_view`'s own body must never contain the
+/// call syntax `.as_str()` at all.
+fn render_change_review_content_body(
+    content: &[ChangeReviewContentLine],
+    theme: crate::theme::Theme,
+) -> Element<'static, Message> {
+    if content.is_empty() {
+        // `Deleted`/`NonFile`/every refusal has no bytes to show, and no
+        // container is drawn around nothing.
+        return column![].into();
+    }
+    // `.to_string()` below copies every line's text out -- nothing here
+    // borrows `content`, so this function's own output does not need to
+    // (and per `DiffContent`'s own move-out-gap precedent in RFC-041,
+    // should not) carry a lifetime tied to the caller's local `preview`.
+    let content_elements: Vec<Element<'static, Message>> = content
+        .iter()
+        .map(|content_line| {
+            text(content_line.as_str().to_string())
+                .size(theme.font_size_body())
+                .into()
+        })
+        .collect();
+    container(column(content_elements).spacing(4))
+        .width(Length::Fill)
+        .padding(8)
+        .style(move |_base_theme: &iced::Theme| container::Style {
+            background: Some(Background::Color(theme.surface_elevated())),
+            text_color: Some(theme.foreground()),
+            border: Border {
+                color: theme.border_default(),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..container::Style::default()
+        })
+        .into()
 }
 
 /// A compile-time literal symbol for `ChangeDetectionStatus`, the same

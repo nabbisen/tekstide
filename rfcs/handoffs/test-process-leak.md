@@ -321,7 +321,25 @@ in RFC-041's closeout commit. The reviewer wrote the first wrong date and the de
 it. In a table whose only purpose is correlating an intermittent failure over time, the date is
 the data.)*
 
-## Why it matters beyond tidiness
+## Recurrence, 2026-08-26 — RFC-042 response 331's required re-gate
+
+Response 331 required re-verifying the gate after three required fixes. Redirected every run to a
+file this time, per this document's own standing advice. Runs 1 and 2 (of six total run) both
+failed `command_approval_family_produces_real_durable_audit_records_through_the_pipeline` — row 3,
+its first captured assertion message:
+
+```
+expected a real CommandRequest record for this agent run: [DurableAuditRecordV1 { ...,
+family: CommandApproval, outcome: Applied, ... }, DurableAuditRecordV1 { ..., family:
+CommandApproval, outcome: Authorized, ... }]
+```
+
+Two `CommandApproval` records present (`Authorized` then `Applied`) but the expected
+`CommandRequest` record for the same operation absent — consistent with contention/ordering under
+load, not a logic defect in this row's own already-diagnosed class. Runs 3 through 6, immediately
+after, all clean. Unrelated to RFC-042 (no approval/audit code touched by that slice). Two
+consecutive failures is more than the historically recorded ~2% rate would predict for one pair,
+but not enough of a sample to revise the rate on -- recorded as an observation, not a new finding.
 
 The affected area is **the command-approval and socket path** — the security-critical machinery
 RFC-021 and RFC-022 built. A suite that fails intermittently there trains everyone to re-run

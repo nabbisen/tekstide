@@ -236,3 +236,100 @@ slice's own new control (the file row) is unchanged from RFC-041 -- still a real
 `Message::ChangeReviewFileRowPressed` through `update`. Nothing in RFC-042 changes that control or
 its own click handling -- only what renders once a selection already exists -- so no new click-path
 gap is introduced by this slice specifically.
+
+## Response 331 -- three required fixes
+
+### Required 1: D1 amended -- pin the claims, scroll the lists
+
+The reviewer's own reproduction (release binary, `mktemp -d` fixture, window height 380px) showed
+the file-row button clipped mid-height and the "not a diff" label **unreachable** -- not scrolled
+past, unreachable, because the pinned frame had no scroll region of its own and grew with the
+file-row list's length. `change_review_view` is restructured into four independent regions,
+assembled by a new `assemble_change_review_layout`:
+
+1. `pinned_top` -- heading, disclosure, detection status, file count. Fixed count, four items.
+2. The file-row list, now in **its own** `scrollable`, independent of everything else.
+3. `pinned_middle` -- both omission lines, review state, the preview's own heading and chrome
+   (including the "not a diff" label). Fixed count, unaffected by list length.
+4. The content region, unchanged from PR-042-C -- its own `scrollable`, its own boxed container.
+
+**Verified**: the pinned regions' own combined height is now independent of both list lengths
+(proven by the new test below, real numbers). Re-verified live at several window heights
+(`.git-exclude/tmp/rfc042-evidence/331-reverify-*.png`): at 800px and 450px, the file row, review
+state, preview heading, and boxed content all render correctly, simultaneously, with no scrolling
+needed. **At exactly 380px -- the reviewer's own reproduction height -- the preview heading and
+content still fall below the window's bottom edge**, though the file-row list no longer grows
+unboundedly with row count (this fixture has only one row, so that specific defect was not what
+clipped it here).
+
+**Disclosed, not silently narrowed**: this is a *different* cause than what was fixed. `pinned_top`
+alone (heading plus a disclosure that wraps to three lines at this width, plus two more lines)
+already consumes most of a 380px window once title bar and tab chrome (~140px) are subtracted --
+independent of any list. Making `pinned_middle` reachable at 380px specifically would require
+either shrinking the disclosure text (not in this slice's scope), enforcing a minimum window
+height, or making the pinned regions themselves scrollable (independently of content, which the
+"file-row list" fix would still leave sound) -- but the amendment's own words are "**pin** the
+claims," and a pinned region that must also always fit inside an arbitrarily short window is a
+different, harder requirement than "does not grow with list length," which is what was reproduced
+and is what this fix addresses. Left as an open question for the architect rather than guessed at:
+is a bounded-but-still-clippable-at-380px pinned region acceptable, or does D1 need a fourth
+decision about a minimum window height or a scrollable claims region?
+
+### Required 2: a guard on the property, not the prose
+
+`change_review_frame_lines_never_feed_the_scrollable` (the previous, source-text-scan guard) is
+removed. `change_review_layout_pins_fixed_regions_regardless_of_list_length` replaces it, calling
+the real, production `assemble_change_review_layout` -- not a copy -- with `()`, iced's own
+headless test renderer (`iced_core::renderer::null`, `impl Renderer for ()`), computing a real
+`layout::Node` tree: no GPU, no font backend, no window. It measures, at 1-of-each and 200-of-each
+file rows/content lines: (a) the pinned regions' combined height, and (b) `pinned_middle`'s own Y
+offset from the page top. Both must stay constant.
+
+**Both of the reviewer's own attacks, reproduced against this new test and confirmed failing,
+then reverted -- neither committed:**
+
+1. Wrapped the whole assembled layout in an extra outer `scrollable(...)` (the reviewer's exact
+   defeat). The top-level widget becomes that `Scrollable`, whose own `layout::Node` has exactly
+   **one** child, not four -- failed the child-count assertion directly (`left: 1, right: 4`), a
+   stronger and earlier catch than the height/position checks ever needed to run.
+2. Removed the file-row list's own `scrollable(...)` wrapper (the *original* D1 defect,
+   reproduced). Growing the fixture from 1 file row to 200 pushed `pinned_middle`'s own Y position
+   from 16px to 592px -- measured, not asserted from reasoning about what should happen.
+
+### Required 3: D2's move-out gap, closed
+
+The reviewer's own exploit -- `for content_line in &preview.content { lines.push(text(content_line.as_str().to_string())...) }`
+inside `change_review_view` itself -- rendered content in the chrome frame, unboxed, indistinguishable
+from a real chrome line. **Closed, not merely documented** (the reviewer's own preferred option):
+`render_change_review_content_body` is now the *only* function in this module that calls
+`ChangeReviewContentLine::as_str()`, and it always returns the bordered container in the same
+step -- `change_review_view` itself never touches `.as_str()` and has no intermediate, un-boxed
+`Vec<Element>` of content lines lying in its own scope for a future edit to misplace.
+
+**Guard**: `change_review_view_never_calls_as_str_on_content_directly` asserts the *absence* of
+the call syntax `.as_str()` anywhere in `change_review_view`'s own source body -- robust to
+reformatting in the way the D1 prose-match was not, since it checks for one specific method call,
+not one specific multi-line wiring shape. **Ablated**: pasted the reviewer's own exploit back in;
+failed, naming the reason; reverted, not committed.
+
+`change_review_content_spoof_lines_are_never_rendered_as_chrome`'s own doc comment is corrected --
+it proves the *data-level* classification (chrome from catalog lookups, content from file bytes,
+never crossing by construction, true since PR-042-A) but does not, and never did, reach the
+*render-level* question `change_review_view_never_calls_as_str_on_content_directly` now covers.
+
+### The gate: PTY exhaustion was transient, not this slice's
+
+The reviewer's own three runs each failed ~50 tests in under a second (`PtyUnavailable ... No
+space left on device`), diagnosed as `test-process-leak.md`'s disclosed-but-unscheduled third
+cause (2,060 orphaned `/bin/sh`, `/dev/pts` at its ceiling). By the time this response's own gate
+ran, `/dev/pts` had recovered on its own (5 of 4096 in use, one ordinary shell) -- all three
+previously-PTY-blocked tests (the two real-agent-run `change_review_*` tests and the general
+suite) passed cleanly. Six full-workspace runs performed in total for this response (see
+`test-process-leak.md`'s own new "Recurrence, 2026-08-26" section): runs 1 and 2 both hit the
+already-known, unrelated `command_approval_family_produces_real_durable_audit_records_through_the_pipeline`
+flake (row 3), assertion message captured for the first time for that row; runs 3 through 6 all
+clean, 434 tekstide + 742 tekstide-core.
+
+Not addressed here, and not this response's to fix: the disclosed third-cause PTY leak itself
+(unscheduled, per the reviewer's own note that they raised it to the owner separately) and
+row 6's own still-unconfirmed status.
