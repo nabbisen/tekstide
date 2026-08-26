@@ -341,68 +341,75 @@ after, all clean. Unrelated to RFC-042 (no approval/audit code touched by that s
 consecutive failures is more than the historically recorded ~2% rate would predict for one pair,
 but not enough of a sample to revise the rate on -- recorded as an observation, not a new finding.
 
-## A likely root cause for the audit-store rows, 2026-08-26 — the tests share ONE real store, read with `latest(50)`
+## ROOT CAUSE, CONFIRMED 2026-08-26 — one shared SQLite audit store, accessed in parallel
 
-Found while gating request 335. **Run 1 of three failed fifteen tests at once**, in 9.29 seconds —
-not the sub-second `PtyUnavailable` signature of the causes above. Runs 2 and 3 were clean. Every
-message was captured this time.
+**This section replaces a wrong hypothesis published earlier the same day.** That version blamed
+`AuditQuery::latest(50)` truncation. **It was wrong**, and the experiment that would have
+confirmed it refuted it instead. What is below is measured, not reasoned.
 
-**All fifteen failures are the same shape**: an audit-store query returning nothing for the test's
-own project. `left: 0, right: 1`, `[]`, `must produce a RestrictedModeBlocked record`. The set
-includes `command_approval_family_produces_real_durable_audit_records_through_the_pipeline` —
-**row 3**, on this table since request 276 with no cause ever established.
+### What was measured
 
-### The mechanism
+Every run against a **fresh** `XDG_STATE_HOME`, so nothing depends on accumulated history:
 
-Two facts, both read in the source rather than inferred:
+| Condition | Result |
+| --- | --- |
+| Parallel (default), fresh store | **6 failures** |
+| Parallel, `latest(50)` raised to `latest(100000)` — three runs | **17, 23, 17 failures** |
+| **Serial (`--test-threads=1`), fresh store** | **444 passed, 0 failures** |
 
-1. **`open_real_audit_store` resolves one shared, real path.** It calls
-   `AppStatePathProvider::linux_default()`, which is `$XDG_STATE_HOME`, falling back to
-   `$HOME/.local/state/tekstide`. It is **not** a per-test temp directory — `temp_audit_state_dir`
-   exists and is used by other tests, but not by this path. **23 call sites** in `shell/tests.rs`.
-2. **Those tests read it with `AuditQuery::latest(50)`, then filter to their own project.**
-   **22 call sites.**
+A full suite run appends **111–130 records** to the store — comfortably past the 50-record
+window. **Serial passes anyway.** So a test's own record is found without difficulty when nothing
+else is writing concurrently, and the window size is not the cause.
 
-Tests run in parallel in one process against that one store. A test asserting on its own record
-sees it only if the record is still inside the newest fifty at read time. Under enough concurrent
-writers it is not, the filter yields `[]`, and the assertion fails — intermittently,
-load-dependently, and in clusters when many such tests interleave. That is exactly the observed
-behaviour, and it explains why these rows resisted reproduction in isolation: **running one of
-them alone is the condition under which it passes.**
+Raising the window made things **worse**, not better — consistent with longer-held read locks
+under contention, and flatly inconsistent with truncation.
 
-### This is the `latest(50)` fragility already on the unscheduled list
+### The actual cause
 
-It has been carried as a tidiness item ("seven remaining fragile `latest(50)` test sites"; the
-real count is 22). It is not tidiness. **It is the most likely cause of every audit-store row in
-this table.**
+**Every test that calls `open_real_audit_store` shares one SQLite database, and they run in
+parallel.** `AppStatePathProvider::linux_default()` resolves `$XDG_STATE_HOME`, falling back to
+`$HOME/.local/state/tekstide`. One path, 23 call sites, no per-test isolation —
+`temp_audit_state_dir` exists and is used by other tests, but not on this path.
 
-### A second, separate problem the same finding exposes
+Two distinct failure signatures, both from that one cause:
 
-The suite writes into **the developer's real `$XDG_STATE_HOME`** when that variable is unset,
-which is the ordinary case. `shell/tests.rs`'s own comment on `fresh_state_root_dir` says a test
-state root "must never be the developer's real `$XDG_STATE_HOME`" — that discipline was applied to
-the transcript root and **not** to the audit store's path. Running the suite therefore appends to
-the user's real audit store, and has been doing so for every run this project has ever made.
+1. **`the real audit store must open`** — `open_real_audit_store` returns `None`. The store could
+   not be opened at all under concurrent access.
+2. **`left: 0, right: 1` / `[]`** — the store opened, and the query returned nothing for this
+   test's project.
 
-That is a test-isolation defect on its own terms, independent of the flake, and it is why the
-shared store is large enough for `latest(50)` to overflow in the first place.
+Both are intermittent, both are load-dependent, and both vanish serially.
 
-### Not fixed here, and what fixing it looks like
+### What this explains
 
-- **Isolate the store per test** — give `open_real_audit_store`'s test callers a temp state dir,
-  the way `temp_audit_state_dir` already does for the tests that use it. Removes both problems.
-- **Query by project rather than by recency** — `latest(50)` then filter is the wrong shape for an
-  assertion about one project's records regardless of isolation.
+**Every audit-store row in the table above, including row 3** — on this list since request 276,
+never reproduced in isolation, cause never established. It was never reproducible in isolation
+because **isolation is the condition under which it passes.** Every attempt to chase it,
+reviewer's and implementer's alike, was made under the one condition that hides it.
 
-**Stated as a hypothesis with its evidence, not a confirmed cause.** One observation, fifteen
-failures, messages captured, mechanism read in the source. What would confirm it: set
-`XDG_STATE_HOME` to a fresh directory, run the suite repeatedly, and see whether the audit rows
-stop recurring.
+### The second problem, unchanged and independent
+
+With `XDG_STATE_HOME` unset — the ordinary case — the suite reads and writes **the developer's
+real audit store**. `shell/tests.rs`'s own comment on `fresh_state_root_dir` says a test state
+root "must never be the developer's real `$XDG_STATE_HOME`"; that discipline was applied to the
+transcript root and not to this path. Running the suite has been appending to a real user's audit
+store for the life of this project.
+
+### What a fix must do, and what it must not
+
+**Isolate the store per test.** Not query tuning: the measurements above rule that out directly,
+and a suite whose correctness depends on a query limit is wrong even when it passes.
+
+**Do not "fix" this by serialising the tests.** Serial execution is the diagnostic that found the
+cause, not the remedy — it trades a 5-second parallel suite for a 25-second serial one and leaves
+the shared-real-store problem in place.
+
+See `rfcs/handoffs/audit-store-test-isolation.md`.
 
 ### This document's name no longer matches its contents
 
-It began as a process-leak investigation. It is now the project's flake register, carrying three
-leak causes and six symptom rows, most of which are audit-store rather than process-leak. Worth
+It began as a process-leak investigation. It is now the project's flake register: three leak
+causes, six symptom rows, and this — most of which are audit-store, not process-leak. Worth
 renaming when someone next touches it.
 
 The affected area is **the command-approval and socket path** — the security-critical machinery
