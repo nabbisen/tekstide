@@ -43,6 +43,22 @@ impl OpenPty {
             return Err(BoundedRuntimeSummary::new(error));
         }
 
+        // pty-master-fd-inheritance handoff: glibc's `openpty` does not set
+        // `O_CLOEXEC` on either fd it returns, and nothing downstream of
+        // this call did either -- every child this process ever spawns
+        // (every terminal, every agent run) inherited every PTY master
+        // already open at that moment, crossing RFC-009's terminal
+        // security boundary. Both fds get it, not only the master:
+        // `duplicate_slave` is unaffected (`dup(2)` never copies
+        // `FD_CLOEXEC` onto the new descriptor, by design -- that is what
+        // makes the stdin/stdout/stderr/ctty copies still reach the
+        // child), so this cannot break the slave's own intended use.
+        if let Err(error) = set_cloexec(master).and_then(|()| set_cloexec(slave)) {
+            close_fd(master);
+            close_fd(slave);
+            return Err(BoundedRuntimeSummary::new(error));
+        }
+
         Ok(Self {
             master: Some(unsafe { fs::File::from_raw_fd(master) }),
             slave: Some(slave),
@@ -126,6 +142,32 @@ fn set_nonblocking(fd: RawFd) -> Result<(), String> {
     if result == -1 {
         Err(format!(
             "failed to set PTY master nonblocking: {}",
+            io::Error::last_os_error()
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// `F_SETFD`/`FD_CLOEXEC`, not `F_SETFL`/`O_NONBLOCK` (`set_nonblocking`,
+/// above) -- close-on-exec is a *descriptor* flag, not a file-status
+/// flag, and the two live in disjoint `fcntl` command spaces. Getting
+/// this wrong (e.g. reusing `F_GETFL`/`F_SETFL`) would silently no-op:
+/// `F_SETFL` ignores bits it does not recognise rather than erroring, so
+/// a mixed-up call would report success without setting anything.
+fn set_cloexec(fd: RawFd) -> Result<(), String> {
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if flags == -1 {
+        return Err(format!(
+            "failed to read fd descriptor flags: {}",
+            io::Error::last_os_error()
+        ));
+    }
+
+    let result = unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) };
+    if result == -1 {
+        Err(format!(
+            "failed to set PTY fd close-on-exec: {}",
             io::Error::last_os_error()
         ))
     } else {

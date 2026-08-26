@@ -704,3 +704,86 @@ fn launching_a_second_terminal_does_not_kill_the_first() {
     );
     cleanup_root(root);
 }
+
+/// The symlink target every PTY master shows under `/proc/<pid>/fd`,
+/// regardless of which of possibly many open PTYs it actually is --
+/// `openpty(3)` masters and slaves alike are opened against `/dev/ptmx`/
+/// `/dev/pts/N` but the master's own fd entry resolves to this fixed
+/// target, the same one `pty-master-fd-inheritance.md`'s own measurement
+/// on a live survivor used to identify the leaked descriptors.
+fn open_fd_targets(pid: u32) -> Vec<PathBuf> {
+    std::fs::read_dir(format!("/proc/{pid}/fd"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+        .collect()
+}
+
+/// pty-master-fd-inheritance handoff: the property the fix exists to
+/// hold. `Command::spawn` only returns `Ok` once the child has already
+/// `exec`'d -- libstd's own fork/exec implementation reports a failed
+/// `exec` back through a `CLOEXEC` pipe before returning, so a
+/// successful return is not a race against the child still being a
+/// pre-exec fork of this process; reading `/proc/<pid_b>/fd` immediately
+/// after `launch_project_shell` returns observes the child's real,
+/// post-exec fd table.
+///
+/// **Ablated**: temporarily removed the `set_cloexec` calls `OpenPty::new`
+/// added -- failed, terminal B's own fd table contained a `/dev/ptmx`
+/// entry for terminal A's master, reproducing the exact defect this test
+/// exists to prevent. Restored, re-ran, green.
+#[test]
+fn a_second_terminals_child_inherits_no_descriptor_for_the_first_terminals_pty_master() {
+    let _real_process_slot = crate::test_support::RealProcessLimiter::acquire();
+    let root = test_root("no-cross-terminal-master-inheritance");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let spec_a = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell A", &root, "/bin/sh");
+    let (terminal_a, _events) = runtime
+        .launch_project_shell(&project, spec_a)
+        .expect("first plain shell launch should succeed");
+
+    let spec_b = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell B", &root, "/bin/sh");
+    let (terminal_b, _events) = runtime
+        .launch_project_shell(&project, spec_b)
+        .expect("second plain shell launch should succeed");
+    let pid_b = runtime
+        .sessions
+        .get(&terminal_b.id)
+        .expect("just-launched session must be present")
+        .child
+        .id();
+
+    let inherited_masters: Vec<_> = open_fd_targets(pid_b)
+        .into_iter()
+        .filter(|target| target == Path::new("/dev/ptmx"))
+        .collect();
+    assert!(
+        inherited_masters.is_empty(),
+        "the second terminal's real child must not hold any descriptor for the first \
+         terminal's PTY master -- found {} such descriptor(s) in /proc/{pid_b}/fd",
+        inherited_masters.len()
+    );
+
+    let handle_a = TerminalRuntimeHandle::new(terminal_a.id.clone(), project.id().clone());
+    let handle_b = TerminalRuntimeHandle::new(terminal_b.id.clone(), project.id().clone());
+    let request = TerminationRequest {
+        source: TerminationRequestSource::TestHarness,
+        reason: BoundedRuntimeSummary::new("no-cross-terminal-master-inheritance test cleanup"),
+    };
+    let _ = runtime.request_terminate(
+        &handle_a,
+        request.clone(),
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+    );
+    let _ = runtime.request_terminate(
+        &handle_b,
+        request,
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+    );
+    cleanup_root(root);
+}

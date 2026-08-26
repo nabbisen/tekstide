@@ -730,6 +730,22 @@ fn spawn_pty_child(mut command: Command, pty: &mut OpenPty) -> Result<Child, Ter
                 return Err(io::Error::last_os_error());
             }
             libc::close(ctty_fd);
+            // pty-master-fd-inheritance handoff, item 3: belt and braces,
+            // not a substitute for `OpenPty::new`'s own `O_CLOEXEC` --
+            // this catches any descriptor a future change opens without
+            // that discipline, not only the PTY master this defect was
+            // found through. stdin/stdout/stderr are already at their
+            // final fds 0-2 by this point (`Command` wires them before
+            // running `pre_exec`), so starting at 3 cannot touch them.
+            // Raw `syscall(2)`, not `libc::close_range` directly: the
+            // libc wrapper is a real symbol this binary would fail to
+            // *load* on a glibc older than 2.34 if linked directly, where
+            // going through the stable, decades-old `syscall(2)` entry
+            // point instead fails only this one call, at run time, with
+            // `ENOSYS` -- silently ignored, since this is a bonus layer
+            // over the fix that already closed the known hole, not
+            // something this spawn may fail over.
+            libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 0);
             Ok(())
         });
     }
