@@ -1,8 +1,9 @@
 # RFC-043: Terminal Process Containment
 
-Status: **Proposed 2026-08-26.** Written after a leak investigation found that this project's
-termination path cannot reach processes it is responsible for, and that the recorded explanation
-for why was wrong.
+Status: **Accepted by the human owner 2026-08-26.** Proposed the same day, after a leak
+investigation found that this project's termination path cannot reach processes it is responsible
+for, and that the recorded explanation for why was wrong. **D1–D4 were decided by the architect on
+acceptance** — see "Decided on acceptance" at the end.
 Target milestone: **M12**
 Date: 2026-08-26
 
@@ -133,3 +134,97 @@ process, or the harness globally.
 
 **D1–D4 are decided by the architect on acceptance and recorded in this file before implementation
 begins**, the same rule RFC-041, RFC-042 and RFC-034 were accepted under.
+
+---
+
+## Decided on acceptance, 2026-08-26
+
+D1 and D2 turn out to be one decision. Deciding them separately is what would have produced a
+wrong answer.
+
+### D1 — **kill.** Closing a terminal ends what that terminal started.
+
+The two candidate answers looked evenly matched until the question was asked in this product's
+terms rather than a terminal emulator's.
+
+**Tekstide is not a terminal emulator. It is a supervision surface.** Its reason to exist is
+letting a person see and control what an AI CLI agent did. "Closed, except for the things it
+started that happen to still be running" defeats the property the whole application is built
+around — and the process most likely to have been backgrounded inside an agent's terminal was
+backgrounded *by the agent*, not by the user.
+
+**The close confirmation already promises this.** RFC-039 shipped a dialog that names *what will
+be lost* by count. Making the behaviour match a promise the product already makes is more honest,
+and cheaper, than weakening the promise to match the implementation.
+
+**And the objection is answered by D2 rather than traded away.** "A user who typed `&` may have
+meant it to outlive the window" is a real concern. It is not answered by leaving every job
+running; it is answered by respecting the boundary Unix already provides for exactly this —
+see below.
+
+### D2 — **session-scoped. Not a cgroup.** And this is what makes D1 safe.
+
+A cgroup per terminal is the airtight mechanism, and airtight is the wrong property here.
+
+**A cgroup contains everything, including processes the user deliberately detached.** `nohup`,
+`disown`, `setsid` — the standard, documented ways to say "this should outlive my terminal" — all
+work by leaving the session. A cgroup ignores that and kills them anyway. Choosing cgroups would
+make D1's blast radius genuinely larger than the contract describes, and would remove the user's
+only way to opt out.
+
+**Session scope is not a weaker approximation of containment. It is the correct boundary**, and
+it is the one Unix already uses to mean "belongs to this terminal." A user who wants a process to
+survive has a real, documented, deliberate way to say so, and it works. A user who does nothing
+special gets what closing a terminal appears to mean.
+
+So: signal the **session**, and treat a process that has left the session as out of scope **by
+design**, not by accident.
+
+### The implementation note that changes the sequence
+
+`request_terminate` today sends SIGTERM, then SIGKILL, to the shell's process group.
+
+**SIGKILL on the shell destroys the very mechanism that would have cleaned up its jobs.** A shell
+that receives SIGHUP hups its own jobs — that is what job control is for, and this shell has job
+control on, which is the whole reason the jobs are in separate groups. Killing it first removes
+its ability to do that, then leaves the orphans behind.
+
+The correct sequence, and the one this RFC asks for:
+
+1. **Close the PTY master**, or send `SIGHUP` to the session leader, and give it a bounded grace
+   period. A cooperating shell hups its own jobs here, and most of the work is done by the shell
+   that already knows what it started.
+2. **Enumerate the session** and signal whatever remains.
+3. **Escalate to SIGKILL** for what survives the grace period.
+4. **Re-enumerate to confirm empty**, which is what D3 depends on.
+
+Step 1 is not an optimisation. It is the step whose absence created this defect.
+
+### D3 — the audit record may claim exactly what step 4 observed, and no more.
+
+The field renamed in request 328 (`fully_confirmed` → `terminal_process_groups_confirmed_empty`)
+exists because a record claimed more than its check could see. **Do not repeat that in the
+opposite direction by widening it on the strength of a better mechanism rather than a better
+observation.**
+
+- The field becomes **`terminal_session_confirmed_empty`**, and is `true` **only** when step 4's
+  re-enumeration actually observed zero processes in that session.
+- A grace period that expires, an enumeration that fails, a `/proc` read that races — all produce
+  `false`. Not "probably true."
+- Its doc comment states what it still does not cover: **a process that left the session is
+  outside this claim by design** (D2), and that is the user's opt-out, not a gap.
+
+### D4 — the leak guard lives where the process is created, not in each test.
+
+This defect survived a week and exhausted the machine twice because **a leaking test passes**.
+
+**Do not wire an assertion into each test that launches a process.** The audit-store slice tried
+exactly that shape one week ago: an opt-in guard, wired into the 23 sites the handoff named, and
+the suite immediately failed 58 *other* tests that reached the same path without anyone knowing.
+Per-site wiring is how the twenty-fourth site gets missed.
+
+**`RunningTerminal::drop`, in test builds, verifies its own session is empty and fails loudly if
+it is not.** Automatic, unwired, and it covers every test that launches a terminal — including the
+ones nobody has written yet.
+
+A test that leaks should be red. Today it is green, and that is the reason all of this is here.
