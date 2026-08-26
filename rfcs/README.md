@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 044 | [Surface-Local Keyboard Affordances](./proposed/044-surface-local-keyboard-affordances.md) | **Proposed 2026-08-26.** This application has two keyboard systems and only one is accountable. `advertised_bindings()` covers the 14 global `Ctrl`-prefixed bindings, feeds the Help modal and `--help`, and is guarded by an exhaustive coverage match. The other ~29 keys live in eight surface-local handlers — `Enter`, `Space`, `Delete`, arrows, and RFC-034's `a`/`r` — advertised nowhere and enumerable by nothing. Three surfaces have now needed a mouse-only control fixed (responses 234, 248, review 334), each found by a reviewer noticing rather than by anything mechanical. D1 is the tension: a registry is this project's usual move, but `Enter` means six different things on purpose. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -100,6 +101,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 038 | [First-Run and Project Entry](./handoffs/038-first-run-and-project-entry/README.md) — **M12, first**; the product's missing door |
 | 024 | [Diff Preview Policy](./handoffs/024-diff-preview-policy/README.md) |
 | 043 | [Terminal Process Containment](./handoffs/043-terminal-process-containment/README.md) — **M12**; make closing a terminal mean what the dialog already says |
+| — | [The suite assumes it owns the machine](./handoffs/suite-assumes-it-owns-the-machine.md) — no RFC; two test defects with one cause. `transcripts/`/`approval/` still write to a real `$HOME`, and a wall-clock assertion fails under load while claiming it cannot be load |
 | — | [PTY master fd inheritance](./handoffs/pty-master-fd-inheritance.md) — no RFC; **security fix, start before RFC-043 is accepted**. `openpty` sets no `O_CLOEXEC`, so every spawned shell inherits every other terminal's master — one measured holding 27 |
 | — | [Audit-store test isolation](./handoffs/audit-store-test-isolation.md) — no RFC; **third of three for `0.15.0`**. 23 test sites share one real SQLite audit store and run in parallel; serial passes 444/444, parallel fails 6–23 per run. The cause of every audit-store row in the flake register |
 | — | [Doc invariants completion](./handoffs/doc-invariants-completion.md) — no RFC; third of three for `0.15.0`. Two mechanical checks, five one-line corrections |
