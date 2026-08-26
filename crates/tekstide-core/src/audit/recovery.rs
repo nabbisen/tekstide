@@ -635,13 +635,27 @@ fn sync_directory(_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// audit-store-test-isolation handoff, item 4: judged against the same
+/// "size-based query standing in for an identity-based one" shape flagged in
+/// the 22 test call sites, and fixed the same way -- `family` moved
+/// server-side (`AuditQuery` has no field for recovery ever being
+/// project-scoped, since a store recovery is store-wide, not per-project).
+/// This narrows the window to *recoveries*, so an unrelated event of any
+/// other family newly written after this one can no longer crowd it out of
+/// the top 10 -- the same crowding risk the test sites had, just far less
+/// likely to bite here (recovery runs once, at startup, in one process, per
+/// the handoff's own note).
 fn recovery_event_exists(store: &AuditStore, recovery_id: &AuditReference) -> bool {
-    store.query(&AuditQuery::latest(10)).is_ok_and(|page| {
-        page.records.iter().any(|record| {
-            record.record.family == AuditEventFamily::AuditStoreRecovery
-                && record.record.subject_ref.as_ref() == Some(recovery_id)
+    store
+        .query(&AuditQuery {
+            family: Some(AuditEventFamily::AuditStoreRecovery),
+            ..AuditQuery::latest(10)
         })
-    })
+        .is_ok_and(|page| {
+            page.records
+                .iter()
+                .any(|record| record.record.subject_ref.as_ref() == Some(recovery_id))
+        })
 }
 
 fn recovery_record(recovery_id: &AuditReference) -> DurableAuditRecordV1 {

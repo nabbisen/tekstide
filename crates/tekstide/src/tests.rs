@@ -27,22 +27,43 @@ fn fresh_project_dir(label: &str) -> PathBuf {
     dir
 }
 
+/// audit-store-test-isolation handoff: the same shape
+/// `shell::tests`'s own `temp_audit_state_dir` uses, duplicated here
+/// rather than made `pub(crate)` across a module boundary for two
+/// three-line helpers -- `shell::test_audit_state_dir` (the RAII guard
+/// itself) is the piece that actually has to be shared, since it is
+/// what `open_real_audit_store` reads.
+fn temp_audit_state_dir(label: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "tekstide-main-test-audit-{label}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 fn project_added_record_count(app_shell: &ApplicationShell, project_id: &ProjectId) -> usize {
     let audit_store =
         shell::open_real_audit_store(app_shell).expect("the real audit store must open");
     audit_store
-        .query(&AuditQuery::latest(50))
+        .query(&AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(AuditEventFamily::ProjectAdded),
+            ..AuditQuery::latest(50)
+        })
         .expect("querying the real audit store must succeed")
         .records
-        .into_iter()
-        .map(|sequenced| sequenced.record)
-        .filter(|record| record.project_id.as_ref() == Some(project_id))
-        .filter(|record| record.family == AuditEventFamily::ProjectAdded)
-        .count()
+        .len()
 }
 
 #[test]
 fn opening_a_real_new_project_from_the_cli_path_writes_exactly_one_real_project_added_record() {
+    let _audit_state_dir =
+        shell::test_audit_state_dir(&temp_audit_state_dir("project-added-reachability"));
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir("project-added-reachability");
 
@@ -57,13 +78,15 @@ fn opening_a_real_new_project_from_the_cli_path_writes_exactly_one_real_project_
     let audit_store =
         shell::open_real_audit_store(&app_shell).expect("the real audit store must open");
     let records: Vec<_> = audit_store
-        .query(&AuditQuery::latest(50))
+        .query(&AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(AuditEventFamily::ProjectAdded),
+            ..AuditQuery::latest(50)
+        })
         .expect("querying the real audit store must succeed")
         .records
         .into_iter()
         .map(|sequenced| sequenced.record)
-        .filter(|record| record.project_id.as_ref() == Some(&project_id))
-        .filter(|record| record.family == AuditEventFamily::ProjectAdded)
         .collect();
 
     assert_eq!(
@@ -86,6 +109,8 @@ fn opening_a_real_new_project_from_the_cli_path_writes_exactly_one_real_project_
 
 #[test]
 fn reopening_the_same_project_path_focuses_it_instead_of_writing_a_second_record() {
+    let _audit_state_dir =
+        shell::test_audit_state_dir(&temp_audit_state_dir("project-added-focus-existing"));
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir("project-added-focus-existing");
 
@@ -113,6 +138,8 @@ fn reopening_the_same_project_path_focuses_it_instead_of_writing_a_second_record
 
 #[test]
 fn restoring_recent_projects_on_boot_writes_no_project_added_record() {
+    let _audit_state_dir =
+        shell::test_audit_state_dir(&temp_audit_state_dir("project-added-restore-vs-add"));
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir("project-added-restore-vs-add");
 

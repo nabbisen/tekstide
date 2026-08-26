@@ -13,7 +13,7 @@ use super::{
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
     open_real_audit_store, path_field_error_text, poll_approval_channels,
     project_close_dialog_body, project_close_dialog_path, project_close_dialog_reasons_line,
-    sidebar_label, status_bar_summary, terminal_paste_refusal_text,
+    sidebar_label, status_bar_summary, terminal_paste_refusal_text, test_audit_state_dir,
     transcript_local_data_summary_for, trust_grant_dialog_body, trusted_ui_state,
     verify_restored_trust_against, zone_style,
 };
@@ -2436,6 +2436,9 @@ fn agent_run_launch_shell_input_switches_to_terminal_immersion_and_shows_the_rea
 /// dispatched `AppCommand` or a direct call to the producer.
 #[test]
 fn a_real_workspace_discovery_refusal_writes_a_real_restricted_mode_blocked_record() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir(
+        "restricted-mode-blocked-reachability",
+    ));
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir("restricted-mode-blocked-reachability");
     app_shell
@@ -2472,12 +2475,14 @@ fn a_real_workspace_discovery_refusal_writes_a_real_restricted_mode_blocked_reco
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let records = audit_store
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .expect("querying the real audit store must succeed")
         .records
         .into_iter()
         .map(|sequenced| sequenced.record)
-        .filter(|record| record.project_id.as_ref() == Some(&project_id))
         .collect::<Vec<_>>();
 
     let restricted_records: Vec<_> = records
@@ -2516,6 +2521,8 @@ fn a_real_workspace_discovery_refusal_writes_a_real_restricted_mode_blocked_reco
 /// the narrower discrimination property.
 #[test]
 fn a_restricted_mode_blocked_record_appears_only_for_workspace_discovery_refusals() {
+    let _audit_state_dir =
+        test_audit_state_dir(&temp_audit_state_dir("restricted-mode-discrimination"));
     // WorkspaceDiscoveryBlocked -> a record appears.
     {
         let (mut state, project_id) =
@@ -2547,17 +2554,15 @@ fn a_restricted_mode_blocked_record_appears_only_for_workspace_discovery_refusal
 
         let audit_store =
             open_real_audit_store(&state.app_shell).expect("the real audit store must open");
-        let found = audit_store
-            .query(&tekstide_core::audit::AuditQuery::latest(50))
+        let found = !audit_store
+            .query(&tekstide_core::audit::AuditQuery {
+                project_id: Some(project_id.clone()),
+                family: Some(tekstide_core::audit::AuditEventFamily::RestrictedModeBlocked),
+                ..tekstide_core::audit::AuditQuery::latest(50)
+            })
             .expect("querying the real audit store must succeed")
             .records
-            .into_iter()
-            .map(|sequenced| sequenced.record)
-            .any(|record| {
-                record.project_id.as_ref() == Some(&project_id)
-                    && record.family
-                        == tekstide_core::audit::AuditEventFamily::RestrictedModeBlocked
-            });
+            .is_empty();
         assert!(
             found,
             "WorkspaceDiscoveryBlocked must produce a RestrictedModeBlocked record"
@@ -2607,17 +2612,15 @@ fn a_restricted_mode_blocked_record_appears_only_for_workspace_discovery_refusal
 
         let audit_store =
             open_real_audit_store(&state.app_shell).expect("the real audit store must open");
-        let found = audit_store
-            .query(&tekstide_core::audit::AuditQuery::latest(50))
+        let found = !audit_store
+            .query(&tekstide_core::audit::AuditQuery {
+                project_id: Some(project_id.clone()),
+                family: Some(tekstide_core::audit::AuditEventFamily::RestrictedModeBlocked),
+                ..tekstide_core::audit::AuditQuery::latest(50)
+            })
             .expect("querying the real audit store must succeed")
             .records
-            .into_iter()
-            .map(|sequenced| sequenced.record)
-            .any(|record| {
-                record.project_id.as_ref() == Some(&project_id)
-                    && record.family
-                        == tekstide_core::audit::AuditEventFamily::RestrictedModeBlocked
-            });
+            .is_empty();
         assert!(
             !found,
             "ExecutableUnavailable must not produce a RestrictedModeBlocked record"
@@ -2660,17 +2663,15 @@ fn a_restricted_mode_blocked_record_appears_only_for_workspace_discovery_refusal
 
         let audit_store =
             open_real_audit_store(&state.app_shell).expect("the real audit store must open");
-        let found = audit_store
-            .query(&tekstide_core::audit::AuditQuery::latest(50))
+        let found = !audit_store
+            .query(&tekstide_core::audit::AuditQuery {
+                project_id: Some(project_id.clone()),
+                family: Some(tekstide_core::audit::AuditEventFamily::RestrictedModeBlocked),
+                ..tekstide_core::audit::AuditQuery::latest(50)
+            })
             .expect("querying the real audit store must succeed")
             .records
-            .into_iter()
-            .map(|sequenced| sequenced.record)
-            .any(|record| {
-                record.project_id.as_ref() == Some(&project_id)
-                    && record.family
-                        == tekstide_core::audit::AuditEventFamily::RestrictedModeBlocked
-            });
+            .is_empty();
         assert!(
             !found,
             "RunLimitExceeded must not produce a RestrictedModeBlocked record"
@@ -3065,6 +3066,7 @@ fn open_trust_grant_dialog_does_not_replace_an_already_open_modal() {
 /// `TrustGrant` records, sharing one `operation_id`, in that order.
 #[test]
 fn granting_trust_through_the_real_route_records_both_audit_records() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("trust-grant-audit-records"));
     let (mut state, project_id) = state_with_a_real_project("trust-grant-audit-records");
 
     press_trust_settings_action(&mut state);
@@ -3074,12 +3076,14 @@ fn granting_trust_through_the_real_route_records_both_audit_records() {
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let mut records = audit_store
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .expect("querying the real audit store must succeed")
         .records
         .into_iter()
         .map(|sequenced| sequenced.record)
-        .filter(|record| record.project_id.as_ref() == Some(&project_id))
         .collect::<Vec<_>>();
     // Ascending by the order they were written, since `latest` returns
     // newest-first.
@@ -3123,6 +3127,8 @@ fn granting_trust_through_the_real_route_records_both_audit_records() {
 /// carry no `operation_id`).
 #[test]
 fn revoking_trust_through_the_real_route_records_a_single_applied_record() {
+    let _audit_state_dir =
+        test_audit_state_dir(&temp_audit_state_dir("trust-revoke-audit-records"));
     let (mut state, project_id) = state_with_a_real_project("trust-revoke-audit-records");
     press_trust_settings_action(&mut state);
     let _ = super::update(&mut state, Message::ModalFocusNext);
@@ -3155,15 +3161,15 @@ fn revoking_trust_through_the_real_route_records_a_single_applied_record() {
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let revoke_records = audit_store
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .expect("querying the real audit store must succeed")
         .records
         .into_iter()
         .map(|sequenced| sequenced.record)
-        .filter(|record| {
-            record.project_id.as_ref() == Some(&project_id)
-                && record.action_kind == tekstide_core::audit::AuditActionKind::TrustRevoke
-        })
+        .filter(|record| record.action_kind == tekstide_core::audit::AuditActionKind::TrustRevoke)
         .collect::<Vec<_>>();
 
     assert_eq!(
@@ -4140,6 +4146,8 @@ fn deciding_the_promoted_dialog_sends_a_real_decision_and_updates_the_stored_req
 /// which a record for an unrelated action would also satisfy.
 #[test]
 fn command_approval_family_produces_real_durable_audit_records_through_the_pipeline() {
+    let _audit_state_dir =
+        test_audit_state_dir(&temp_audit_state_dir("command-approval-audit-records"));
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir("approval-audit-records");
     app_shell
@@ -4184,6 +4192,15 @@ fn command_approval_family_produces_real_durable_audit_records_through_the_pipel
          happened -- got {stored:?}"
     );
 
+    // audit-store-test-isolation handoff, item 3: left as `latest(50)` plus a
+    // client-side filter, deliberately -- the identifier that actually
+    // distinguishes this test's own records is `agent_run_id`, and
+    // `AuditQuery` has no `agent_run_id` field to push it server-side into
+    // (only `project_id`/`family`/`outcome`/`operation_id`). This test's own
+    // store already holds only this one test's records (`test_audit_state_dir`
+    // above), which is what made every *other* site's fix a correctness fix,
+    // not merely a style one -- here there is no server-side field to move
+    // this filter into, so it stays client-side.
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let records = audit_store
@@ -4814,6 +4831,7 @@ fn purging_transcripts_through_a_real_key_sequence_removes_the_real_file() {
 /// first GUI caller.
 #[test]
 fn purging_transcripts_through_a_real_key_sequence_records_a_real_audit_record() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("purge-real-audit-record"));
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir("purge-real-audit-record");
     app_shell
@@ -4885,15 +4903,15 @@ fn purging_transcripts_through_a_real_key_sequence_records_a_real_audit_record()
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let records = audit_store
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::TranscriptPurge),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .expect("querying the real audit store must succeed")
         .records
         .into_iter()
         .map(|sequenced| sequenced.record)
-        .filter(|record| {
-            record.project_id.as_ref() == Some(&project_id)
-                && record.family == tekstide_core::audit::AuditEventFamily::TranscriptPurge
-        })
         .collect::<Vec<_>>();
 
     assert_eq!(
@@ -8030,6 +8048,7 @@ fn a_project_opened_through_the_field_refuses_an_agent_run_until_trust_is_grante
 /// reverting before commit.
 #[test]
 fn opening_a_project_through_the_real_field_writes_exactly_one_real_project_added_record() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("path-field-audit-record"));
     let mut state = state_with(ApplicationShell::new());
     let project_dir = fresh_project_dir("path-field-audit-record");
     type_through_the_real_path_field(&mut state, &project_dir.display().to_string());
@@ -8045,13 +8064,15 @@ fn opening_a_project_through_the_real_field_writes_exactly_one_real_project_adde
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let records: Vec<_> = audit_store
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::ProjectAdded),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .expect("querying the real audit store must succeed")
         .records
         .into_iter()
         .map(|sequenced| sequenced.record)
-        .filter(|record| record.project_id.as_ref() == Some(&project_id))
-        .filter(|record| record.family == tekstide_core::audit::AuditEventFamily::ProjectAdded)
         .collect();
 
     assert_eq!(
@@ -8069,6 +8090,7 @@ fn opening_a_project_through_the_real_field_writes_exactly_one_real_project_adde
 /// the CLI path, proven here for the field's own, separate call site.
 #[test]
 fn resubmitting_the_same_path_through_the_field_focuses_it_without_a_second_record() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("path-field-refocus"));
     let mut state = state_with(ApplicationShell::new());
     let project_dir = fresh_project_dir("path-field-refocus");
     type_through_the_real_path_field(&mut state, &project_dir.display().to_string());
@@ -8092,14 +8114,14 @@ fn resubmitting_the_same_path_through_the_field_focuses_it_without_a_second_reco
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let record_count = audit_store
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::ProjectAdded),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .expect("querying the real audit store must succeed")
         .records
-        .into_iter()
-        .map(|sequenced| sequenced.record)
-        .filter(|record| record.project_id.as_ref() == Some(&project_id))
-        .filter(|record| record.family == tekstide_core::audit::AuditEventFamily::ProjectAdded)
-        .count();
+        .len();
     assert_eq!(
         record_count, 1,
         "re-focusing an already-open project through the field must not write a second record"
@@ -8766,6 +8788,8 @@ fn space_commits_the_shown_directory_as_a_new_restricted_project_and_closes_the_
 /// this codebase's convention.
 #[test]
 fn choosing_a_directory_through_the_real_browser_writes_exactly_one_real_project_added_record() {
+    let _audit_state_dir =
+        test_audit_state_dir(&temp_audit_state_dir("browse-commit-audit-record"));
     let mut state = state_with(ApplicationShell::new());
     let project_dir = fresh_project_dir("browse-commit-audit-record");
     state.modal = Some(ModalContent::FolderBrowser(folder_browser_modal_fixture(
@@ -8784,13 +8808,15 @@ fn choosing_a_directory_through_the_real_browser_writes_exactly_one_real_project
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let records: Vec<_> = audit_store
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::ProjectAdded),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .expect("querying the real audit store must succeed")
         .records
         .into_iter()
         .map(|sequenced| sequenced.record)
-        .filter(|record| record.project_id.as_ref() == Some(&project_id))
-        .filter(|record| record.family == tekstide_core::audit::AuditEventFamily::ProjectAdded)
         .collect();
 
     assert_eq!(
@@ -8807,6 +8833,7 @@ fn choosing_a_directory_through_the_real_browser_writes_exactly_one_real_project
 /// record.
 #[test]
 fn committing_an_already_open_project_a_second_time_focuses_it_without_a_second_record() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("browse-commit-refocus"));
     let mut state = state_with(ApplicationShell::new());
     let project_dir = fresh_project_dir("browse-commit-refocus");
     state.modal = Some(ModalContent::FolderBrowser(folder_browser_modal_fixture(
@@ -8838,14 +8865,14 @@ fn committing_an_already_open_project_a_second_time_focuses_it_without_a_second_
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let record_count = audit_store
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::ProjectAdded),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .expect("querying the real audit store must succeed")
         .records
-        .into_iter()
-        .map(|sequenced| sequenced.record)
-        .filter(|record| record.project_id.as_ref() == Some(&project_id))
-        .filter(|record| record.family == tekstide_core::audit::AuditEventFamily::ProjectAdded)
-        .count();
+        .len();
     assert_eq!(
         record_count, 1,
         "re-focusing an already-open project through the browser must not write a second record"
@@ -9057,6 +9084,8 @@ fn the_real_open_button_message_reopens_the_same_project_the_keyboard_does() {
 /// 1); reverted.
 #[test]
 fn reopening_a_recent_project_writes_exactly_one_real_project_added_record() {
+    let _audit_state_dir =
+        test_audit_state_dir(&temp_audit_state_dir("board-row-reopen-audit-record"));
     let (mut state, project_id, _project_dir) =
         state_with_cached_trusted_recent_project("board-row-reopen-audit-record");
 
@@ -9072,13 +9101,15 @@ fn reopening_a_recent_project_writes_exactly_one_real_project_added_record() {
     let audit_store =
         open_real_audit_store(&state.app_shell).expect("the real audit store must open");
     let records: Vec<_> = audit_store
-        .query(&tekstide_core::audit::AuditQuery::latest(50))
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::ProjectAdded),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
         .expect("querying the real audit store must succeed")
         .records
         .into_iter()
         .map(|sequenced| sequenced.record)
-        .filter(|record| record.project_id.as_ref() == Some(&project_id))
-        .filter(|record| record.family == tekstide_core::audit::AuditEventFamily::ProjectAdded)
         .collect();
 
     assert_eq!(
@@ -9912,6 +9943,7 @@ fn closing_a_project_with_a_live_terminal_opens_a_confirmation_defaulted_to_canc
 /// preceding `Authorized` phase: nothing was ever authorized).
 #[test]
 fn cancelling_the_close_confirmation_leaves_everything_running_and_records_it() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("close-cancel"));
     let (mut state, project_id, terminal_id) =
         state_with_a_real_terminal_on_its_own_project("close-cancel");
     let _ = super::update(
@@ -9968,6 +10000,7 @@ fn cancelling_the_close_confirmation_leaves_everything_running_and_records_it() 
 /// Escape closes with nothing recorded.
 #[test]
 fn escaping_the_close_confirmation_also_records_a_cancelled_decision() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("close-escape"));
     let (mut state, project_id, _terminal_id) =
         state_with_a_real_terminal_on_its_own_project("close-escape");
     let _ = super::update(
@@ -10006,6 +10039,7 @@ fn escaping_the_close_confirmation_also_records_a_cancelled_decision() {
 /// `Authorized` phase used.
 #[test]
 fn confirming_the_close_terminates_the_real_process_and_removes_the_project() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("close-confirm"));
     let (mut state, project_id, terminal_id) =
         state_with_a_real_terminal_on_its_own_project("close-confirm");
     let _ = super::update(
@@ -10106,6 +10140,8 @@ fn confirming_the_close_terminates_the_real_process_and_removes_the_project() {
 /// test is the concrete case that reads false.
 #[test]
 fn closing_a_project_with_a_backgrounded_descendant_still_records_applied_while_it_survives() {
+    let _audit_state_dir =
+        test_audit_state_dir(&temp_audit_state_dir("close-backgrounded-descendant"));
     let (mut state, project_id, terminal_id) =
         state_with_a_real_terminal_on_its_own_project("close-backgrounded-descendant");
 
@@ -10227,6 +10263,7 @@ fn closing_a_project_with_a_backgrounded_descendant_still_records_applied_while_
 /// `add_project_from_path` itself) both survive.
 #[test]
 fn closing_a_project_leaves_its_transcripts_and_audit_records_intact() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("close-preserves-history"));
     let (mut state, project_id) = state_with_a_real_project("close-preserves-history");
     let transcript_dir = fresh_state_root_dir();
     let transcript_path = transcript_dir.join("transcript.log");
@@ -10876,6 +10913,7 @@ fn clicking_purge_removes_the_real_file_regardless_of_current_focus() {
 /// behaviour.
 #[test]
 fn clicking_close_terminates_the_real_process_regardless_of_current_focus() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("close-confirm-click"));
     let (mut state, project_id, terminal_id) =
         state_with_a_real_terminal_on_its_own_project("close-confirm-click");
     let _ = super::update(

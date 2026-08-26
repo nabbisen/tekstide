@@ -1,6 +1,6 @@
 ---
 title: "The leaked-child test flake — cause known since 2026-08-16, still unfixed"
-status: "Leak fixed at the two approval call sites 2026-08-20 (request 282). **The second cause — runtime/terminal/launch.rs — FIXED 2026-08-25** (RunningTerminal now has a Drop impl); measured 3,899 leaked shells before, near-zero (the pre-existing baseline) after, across three clean full-suite runs. **A third, distinct, unaddressed cause found while verifying the second fix**: a backgrounded job inside a terminal gets its own process group that neither this Drop nor the production request_terminate path's process-group signal reaches — request_terminate reports Terminated/KilledAfterTimeout while the job survives, orphaned. Confirmed against both paths directly. Not fixed here; RFC-040 PR-040-C's re-gate is unblocked regardless, since it is a small, well-characterised, per-test-launched-count leak (~28/run from one benchmark test), not pool exhaustion. The socket flake is separate and also unfixed"
+status: "Leak fixed at the two approval call sites 2026-08-20 (request 282). **The second cause — runtime/terminal/launch.rs — FIXED 2026-08-25** (RunningTerminal now has a Drop impl); measured 3,899 leaked shells before, near-zero (the pre-existing baseline) after, across three clean full-suite runs. **A third, distinct, unaddressed cause found while verifying the second fix**: a backgrounded job inside a terminal gets its own process group that neither this Drop nor the production request_terminate path's process-group signal reaches — request_terminate reports Terminated/KilledAfterTimeout while the job survives, orphaned. Confirmed against both paths directly. Not fixed here; RFC-040 PR-040-C's re-gate is unblocked regardless, since it is a small, well-characterised, per-test-launched-count leak (~28/run from one benchmark test), not pool exhaustion. The socket flake is separate and also unfixed. **The shared-audit-store cause — FIXED 2026-08-26** (`rfcs/handoffs/audit-store-test-isolation.md`): every test now opens its own store automatically, so the one-shared-SQLite-database contention this document traced row 3 to (and confirmed rows 4 and 6 also transitively reach) can no longer occur in any test in this binary; five consecutive clean full-workspace parallel runs against a fresh `XDG_STATE_HOME`, plus a serial run, confirmed after. A related, separate, and still-open gap found while verifying this: with `XDG_STATE_HOME` unset, the suite's `transcripts/` (and `approval/`) subtrees under the developer's real state root still receive real writes during a run — the audit subtree itself is confirmed untouched, but the same class of defect exists one directory over, out of the audit-store handoff's own scope"
 rfc_file: "none — a test-harness defect, not product behaviour"
 target_milestone: "M12"
 created: "2026-08-19"
@@ -26,6 +26,8 @@ resulting pressure, each disclosed separately and each moved past:
 | `shell::tests::a_real_low_risk_proposal_is_received_mirrored_and_stays_queued_without_promoting` | request 296 (2026-08-24) |
 | `approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` | request 326 (2026-08-25) |
 | `shell::tests::change_review_surface_renders_a_real_change_set_from_a_real_agent_run` | request 329 (2026-08-26) — **candidate, not confirmed** |
+
+**Rows 3, 4, and 6's cause closed 2026-08-26** — `rfcs/handoffs/audit-store-test-isolation.md`'s fix isolates every test's own audit store, removing the one-shared-SQLite-database contention the "ROOT CAUSE, CONFIRMED" section below traced row 3 to. Checked reachability rather than assuming it: rows 1, 2, and 5 live in `tekstide-core`, which has no access to `open_real_audit_store` at all -- that function, and the `update()` write call sites that reach it, are defined entirely in the `tekstide` binary crate, so those three rows are **categorically not** caused by this (row 5's own text above already said as much speculatively; this confirms it structurally, not just as an unconfirmed guess). Rows 3, 4, and 6 all live in `tekstide`'s `shell/tests.rs`, and all three were directly observed transitively reaching `open_real_audit_store` (each panicked against an intermediate, over-strict version of this fix that required every reaching test to opt in -- see that handoff's own write-up for why that version was wrong and was replaced). Row 3 additionally had its pre-fix flake reproduced directly (3 of 4 quick repro runs failed, 2-3 failures each, against a fresh `XDG_STATE_HOME`) immediately before the fix, then 5 consecutive clean full-workspace parallel runs confirmed after. Rows 4 and 6 were not individually reproduced as standalone flakes the way row 3 was, so their closure rests on reachability plus the same structural fix, not on a matching before/after reproduction each.
 
 **The fourth was added 2026-08-24 and the count above was edited with it**, because "three
 distinct tests" is a count, and `ARCHITECTURE.md` records counts as state-asserting text that a
@@ -405,6 +407,19 @@ cause, not the remedy — it trades a 5-second parallel suite for a 25-second se
 the shared-real-store problem in place.
 
 See `rfcs/handoffs/audit-store-test-isolation.md`.
+
+### Fixed 2026-08-26
+
+Isolated per test, automatically, with no per-test opt-in required (see that handoff's own
+closeout for why an opt-in-only first attempt was insufficient: 58 unrelated tests transitively
+reach `open_real_audit_store` through production write call sites inside `update()`, not just the
+23 read call sites the handoff had counted). A belt-and-suspenders runtime assertion also panics
+loudly if a test's resolved directory ever coincides with the real one, ablated and restored
+during that fix's own review. Verified: 5 consecutive clean full-workspace parallel runs plus a
+serial run, all against a fresh `XDG_STATE_HOME`; a real-`$HOME` run before/after diff confirmed
+the audit subtree itself untouched (a separate, still-open gap in the adjacent `transcripts/`
+subtree was found during that same diff -- see the status field above and that handoff's own
+closeout for the reason it is not fixed here).
 
 ### This document's name no longer matches its contents
 

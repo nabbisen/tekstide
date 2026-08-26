@@ -4965,18 +4965,162 @@ fn launch_measurement_terminal_pane(
 /// fail-silent, log-nothing-to-the-user shape appropriate for a
 /// diagnostic/observability path that must never block the app from
 /// starting.
+///
+/// audit-store-test-isolation handoff: the real resolution above is
+/// [`resolve_audit_state_dir`]'s `#[cfg(not(test))]` branch only -- a
+/// `#[cfg(test)]` build never compiles a path to
+/// `AppStatePathProvider::linux_default()` from this function at all,
+/// see that function's own `#[cfg(test)]` branch.
 pub(crate) fn open_real_audit_store(
     app_shell: &ApplicationShell,
 ) -> Option<tekstide_core::audit::AuditStore> {
-    let path_provider =
-        tekstide_core::project::recent::AppStatePathProvider::linux_default().ok()?;
+    let state_dir = resolve_audit_state_dir()?;
     let project_roots = app_shell
         .state()
         .projects()
         .iter()
         .map(|project| project.canonical_root_path().clone())
         .collect();
-    open_audit_store(path_provider.state_dir(), project_roots)
+    open_audit_store(&state_dir, project_roots)
+}
+
+#[cfg(not(test))]
+fn resolve_audit_state_dir() -> Option<std::path::PathBuf> {
+    let path_provider =
+        tekstide_core::project::recent::AppStatePathProvider::linux_default().ok()?;
+    Some(path_provider.state_dir().to_path_buf())
+}
+
+/// The only source of a state directory `open_real_audit_store` can see
+/// in a test build. There is no fallback to
+/// `AppStatePathProvider::linux_default()` compiled into this function
+/// at all, so the real, developer-owned `$XDG_STATE_HOME`/`$HOME` is
+/// structurally unreachable from *any* test in this crate -- not merely
+/// the 23 call sites that read from a store, but every one of the
+/// ~20 production write call sites inside [`update`] too, which turned
+/// out to be reachable from most of this file's ~440 tests, not just
+/// the 23 -- discovered by this handoff's own first full-suite run
+/// against the initial, opt-in-only version of this seam (444 tests, 58
+/// unrelated failures, every one a `resolve_audit_state_dir` panic from
+/// a test that had never called [`test_audit_state_dir`] because it had
+/// no reason to think it needed to).
+///
+/// **Every thread gets its own isolated store automatically** -- lazily
+/// created (`fresh_default_test_audit_state_dir`) the first time this
+/// function runs on a given thread, then memoized in the same
+/// thread-local [`test_audit_state_dir`] can also set explicitly. This
+/// is what actually satisfies "prevent, do not merely redirect" for the
+/// whole suite rather than only the sites someone remembered to name --
+/// the twenty-fourth test, and the four-hundred-and-fortieth, need no
+/// per-test wiring to be safe, because there is no unwired state left to
+/// fall back to the real directory from.
+///
+/// A thread-local, not a process-global (an env var, a `static Mutex`),
+/// because the default `cargo test` harness runs each `#[test]` fn on
+/// its own freshly spawned OS thread: state set or generated inside one
+/// test's body can never be observed by another test running
+/// concurrently, so the whole suite can run with no cross-test
+/// synchronisation and no serialisation.
+///
+/// **Belt and suspenders**: whichever path filled the thread-local --
+/// the lazy default or an explicit [`test_audit_state_dir`] override --
+/// the resolved directory is checked against the real one
+/// (`AppStatePathProvider::linux_default`, when resolvable) and this
+/// panics loudly, naming both paths, if they ever coincide. In ordinary
+/// operation this can never fire (a fresh temp directory or an
+/// explicitly test-supplied one is never the developer's real state
+/// root), which is the acceptance item this exists to satisfy: an
+/// ablation that *forces* the coincidence --
+/// `pointing_a_test_at_the_real_audit_state_dir_panics_loudly` below --
+/// is what proves the check is live, not vacuous.
+#[cfg(test)]
+fn resolve_audit_state_dir() -> Option<std::path::PathBuf> {
+    let dir = TEST_AUDIT_STATE_DIR.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        if let Some(dir) = cell.as_ref() {
+            return dir.clone();
+        }
+        let dir = fresh_default_test_audit_state_dir();
+        std::fs::create_dir_all(&dir)
+            .expect("a fresh temp directory for a test's own audit store must be creatable");
+        *cell = Some(dir.clone());
+        dir
+    });
+    assert_not_the_real_audit_state_dir(&dir);
+    Some(dir)
+}
+
+#[cfg(test)]
+fn fresh_default_test_audit_state_dir() -> std::path::PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "tekstide-audit-test-default-{}-{sequence}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ))
+}
+
+#[cfg(test)]
+fn assert_not_the_real_audit_state_dir(dir: &std::path::Path) {
+    if let Ok(real_provider) = tekstide_core::project::recent::AppStatePathProvider::linux_default()
+    {
+        assert_ne!(
+            dir,
+            real_provider.state_dir(),
+            "open_real_audit_store resolved the real, developer-owned audit state directory \
+             ({dir:?}) inside a test build. See rfcs/handoffs/audit-store-test-isolation.md."
+        );
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_AUDIT_STATE_DIR: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// RAII handle for [`test_audit_state_dir`] -- clears the override on
+/// drop so a panicking test still leaves its thread's thread-local
+/// clean (moot for correctness, since each `#[test]` fn gets a fresh
+/// thread with fresh thread-local storage either way, but cheap and
+/// keeps the guard's own drop from doing nothing surprising).
+#[cfg(test)]
+pub(crate) struct TestAuditStateDirGuard {
+    _private: (),
+}
+
+#[cfg(test)]
+impl Drop for TestAuditStateDirGuard {
+    fn drop(&mut self) {
+        TEST_AUDIT_STATE_DIR.with(|cell| *cell.borrow_mut() = None);
+    }
+}
+
+/// Sets this thread's [`open_real_audit_store`] override to `dir` for
+/// the returned guard's lifetime -- names a specific, inspectable
+/// directory for the 23 call sites that actually read records back out
+/// (`temp_audit_state_dir`'s own shape), rather than relying on the
+/// unnamed default [`resolve_audit_state_dir`] otherwise generates for
+/// every other test. Not what makes those 23 sites *safe* -- the
+/// automatic default already does that for every test in this crate --
+/// only what makes their own store's directory a known, nameable one.
+/// Panics if called twice on the same thread without dropping the first
+/// guard -- nesting is not a shape any test here needs, and silently
+/// letting the second call win would hide a test that forgot to hold
+/// onto its first guard.
+#[cfg(test)]
+pub(crate) fn test_audit_state_dir(dir: &std::path::Path) -> TestAuditStateDirGuard {
+    TEST_AUDIT_STATE_DIR.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        assert!(
+            cell.is_none(),
+            "test_audit_state_dir called twice on the same thread without dropping the first \
+             guard -- nesting is not supported"
+        );
+        *cell = Some(dir.to_path_buf());
+    });
+    TestAuditStateDirGuard { _private: () }
 }
 
 /// RFC-032 PR-032-C, response 245: the audit store, not the
