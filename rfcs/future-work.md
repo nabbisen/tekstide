@@ -747,6 +747,16 @@ Status: active after `0.1.0`.
   Purge and audit-recovery are already disclosed elsewhere as absent (known gaps, not
   surprises), so they can wait behind the three above.
 
+- **Change Review's file-row list can collapse to zero visible height at a short window.**
+  Found live during RFC-042's own re-verification at a 380px window (response 331/332):
+  `assemble_change_review_layout`'s file-row region shares remaining vertical space with the
+  content region via `FillPortion`, and when little space is left, the file-row list gets none —
+  not scrolled, not clipped, simply absent, so a user cannot tell the change set has any files at
+  all. Not a correctness issue (D1's own invariant — content is never shown without the claim
+  that qualifies it — still holds) and not required for RFC-042's own acceptance; flagged by the
+  reviewer as worth a `min_height` or a one-row floor whenever the next change-review slice is
+  scoped.
+
 ## Milestone Roadmap
 
 See [`../ROADMAP.md`](../ROADMAP.md) for the milestone schedule, and [`delivery-plan.md`](./delivery-plan.md) for the ordered RFC queue, requirements gap analysis, and developer pick-up workflow.
