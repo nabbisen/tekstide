@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 043 | [Terminal Process Containment](./proposed/043-terminal-process-containment.md) | **Proposed 2026-08-26.** Closing a terminal signals one process group; the processes that terminal started are not all in it. This project launches `/bin/sh` reading from a PTY, which makes it **interactive**, which enables job control, which puts every `&` job in a group of its own — confirmed on 2,115 live orphans, each `PID == PGID` with the dead shell's `SID`. The previously recorded cause (the controlling terminal, "regardless of interactivity") was **measured and refuted**. Four decisions required, D1 being the product question deferred twice: **should closing a terminal kill a job the user deliberately backgrounded, or leave it?** Today it is neither — whatever the group signal happens to reach. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -98,6 +99,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 039 | [Interaction Model and Visible Affordances](./handoffs/039-interaction-model-and-visible-affordances/README.md) — **M12, after RFC-038**; the workflows the product never had |
 | 038 | [First-Run and Project Entry](./handoffs/038-first-run-and-project-entry/README.md) — **M12, first**; the product's missing door |
 | 024 | [Diff Preview Policy](./handoffs/024-diff-preview-policy/README.md) |
+| — | [PTY master fd inheritance](./handoffs/pty-master-fd-inheritance.md) — no RFC; **security fix, start before RFC-043 is accepted**. `openpty` sets no `O_CLOEXEC`, so every spawned shell inherits every other terminal's master — one measured holding 27 |
 | — | [Audit-store test isolation](./handoffs/audit-store-test-isolation.md) — no RFC; **third of three for `0.15.0`**. 23 test sites share one real SQLite audit store and run in parallel; serial passes 444/444, parallel fails 6–23 per run. The cause of every audit-store row in the flake register |
 | — | [Doc invariants completion](./handoffs/doc-invariants-completion.md) — no RFC; third of three for `0.15.0`. Two mechanical checks, five one-line corrections |
 | — | [Minimal user documentation](./handoffs/minimal-user-documentation.md) — no RFC; pulled forward from RFC-029 to M9 |

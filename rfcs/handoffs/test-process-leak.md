@@ -220,6 +220,18 @@ temporary diagnostic, to have had `Drop for RunningTerminal` actually fire and i
 SIGKILL)` return success. The 28 processes still alive afterward are a **different** set of pids
 from every one that `Drop` signalled.
 
+**CORRECTED 2026-08-26 — the reason below is wrong; the conclusion is right.** A backgrounded job
+does get its own process group, but **not** because the shell has a controlling terminal.
+Measured twice (no tty, and with a controlling tty via `pty.fork`): a *non-interactive* shell
+keeps its `&` job in its own process group, `monitor` off. What actually does it is that this
+application launches `/bin/sh` **with no `-c`**, reading from the PTY — which makes bash
+*interactive*, which enables monitor mode, which is job control. The distinction decides the fix:
+every job group lives **inside the shell's session**, so containment is reachable. See
+`rfcs/proposed/043-terminal-process-containment.md` and, for the descriptor half — the actual root
+cause of the leak's persistence — `rfcs/handoffs/pty-master-fd-inheritance.md`.
+
+**Original text, retained:**
+
 **Root cause: a backgrounded job gets its own process group.** `FLOOD_SCRIPT` (this test's own
 helper, and `TerminalFlood`'s measurement path) ends its loop with `&`, "so the shell stays
 interactive." `/bin/sh` on this machine is `bash`, and bash places a background job into its own
