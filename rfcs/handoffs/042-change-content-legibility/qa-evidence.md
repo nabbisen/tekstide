@@ -333,3 +333,75 @@ clean, 434 tekstide + 742 tekstide-core.
 Not addressed here, and not this response's to fix: the disclosed third-cause PTY leak itself
 (unscheduled, per the reviewer's own note that they raised it to the owner separately) and
 row 6's own still-unconfirmed status.
+
+## Response 332 -- two required fixes
+
+### Required 1: the ordering invariant, stated and tested
+
+The reviewer accepted the four-region split (D1's own growth-independence property holds) but
+found, at 380px, that `pinned_middle` clips too, and so does the content -- the invariant that
+actually matters ("content is never visible without the claim that qualifies it") holds, but "by
+accident of ordering," untested. Added to `change_review_layout_pins_fixed_regions_regardless_of_list_length`:
+for viewport heights `[100, 380, 600, 1200]`, `pinned_middle`'s own bottom edge must stay at or
+above the content region's own top edge.
+
+**A real gap found ablating this addition, not assumed correct.** Read literally (fixed indices
+2 and 3), the check is vacuous: a `Column` always renders its children in **declaration order**,
+so `children[2]` is bottom-bounded above `children[3]` for *whatever* widgets occupy those two
+slots -- confirmed directly by swapping `pinned_middle` and `content`'s declaration order inside
+`assemble_change_review_layout`'s own body: **both the index-based Y check and the growth
+checks stayed green.** The fixed-index comparison alone cannot tell "pinned_middle above
+content" (correct) apart from "content above pinned_middle" (transposed, wrong).
+
+**Strengthened with a type-level check, not another prose match.** `iced::advanced::widget::Tree`
+records each child's `Tag` (`iced_core::widget::tree::Tag`, keyed on `TypeId`) -- stateless
+(`Tag::stateless()`) for a plain `Column`/`Text`, non-stateless for a stateful `Scrollable`
+(which tracks scroll position). Asserting `tree.children[0]`/`[2]` are stateless and
+`tree.children[1]`/`[3]` are not confirms the *structural shape* `[Column, Scrollable, Column,
+Scrollable]` holds -- which the transposition ablation above violates directly (`children[2]`
+becomes the content `Scrollable`, non-stateless, where a stateless `Column` was asserted).
+Reproduced the swap again with this check in place: failed immediately, naming the exact
+transposition. Reverted; nothing committed.
+
+**What this combination proves, precisely**: given the real production `assemble_change_review_layout`
+places a plain `Column` (matching `pinned_middle`'s own shape) at position 2 and a `Scrollable`
+(matching `content`'s own shape) at position 3 -- confirmed by the type check -- `Column`'s own
+declaration-order guarantee then makes the Y-ordering hold, at every tested viewport height.
+Neither check alone was sufficient; both together close the gap the first version left open.
+
+### Required 2: D2's move-out gap, actually closed this time
+
+Response 331's fix (collapsing the un-boxed intermediate value into one render function) left
+`.as_str()` reachable from anywhere in `shell.rs` -- the reviewer defeated it by extracting a
+second helper next to the render function and calling `.as_str()` from there. A source-scan of
+`change_review_view`'s own body cannot see a call made from a *different* function, however the
+scan is written.
+
+**`ChangeReviewContentLine` and the render function now live in their own module**
+(`mod change_review_content`, inline in `shell.rs`). The struct's field and its `as_str` accessor
+are both private to that module (the accessor additionally `#[cfg(test)]`-gated, an explicit,
+named escape hatch for tests that need the raw string rather than an informal one). Nothing
+outside the module -- `change_review_view`, a sibling helper, anything, at any distance -- can
+read a content line's own text. The stale source-scan test
+(`change_review_view_never_calls_as_str_on_content_directly`) is removed: there is nothing left
+to scan for at the render level, since the compiler now enforces the property directly.
+
+**Both of the reviewer's own exact reproductions confirmed as compile errors, then reverted:**
+
+1. Inlined `content_line.0.as_str()` directly in `change_review_view` (reaching the private
+   field from outside its module): `error[E0616]: field \`0\` of struct
+   \`ChangeReviewContentLine\` is private`.
+2. Pasted the reviewer's own `leak_content_into_frame` helper verbatim, extracted next to
+   `assemble_change_review_layout`, calling `line.as_str()` from there: `error[E0599]: no method
+   named \`as_str\` found for reference \`&ChangeReviewContentLine\` in the current scope` -- the
+   method does not exist at all outside `cfg(test)`, regardless of which function tries to call
+   it, so extraction to any distance cannot reach it.
+
+Both confirmed, then reverted -- neither committed.
+
+### Gate
+
+Three consecutive full-workspace runs, each logged to a file: all three clean, 433 tekstide + 742
+tekstide-core + 2 doc-invariant, zero failures. `git diff --check` and `rfc_docs_invariants`
+clean. (Test count is 433, one fewer than response 331's 434, since the stale source-scan test
+was removed and replaced by strengthening an existing test rather than adding a new one.)

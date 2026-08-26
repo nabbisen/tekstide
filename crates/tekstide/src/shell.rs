@@ -8033,16 +8033,17 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
         );
     }
 
-    // RFC-042 D2, visible half, **closed per response 331's Required
-    // 3**: the only way to obtain an `Element` for a piece of untrusted
-    // file content is `render_change_review_content_body`, and its
+    // RFC-042 D2, visible half, closed per response 332 Required 3: the
+    // only way to obtain an `Element` for a piece of untrusted file
+    // content is `change_review_content::render_content_body`, and its
     // return value is always already inside the bordered container --
-    // there is no intermediate, un-boxed `Vec<Element>` of raw content
-    // lines in this function's own scope that a future edit could push
-    // into `pinned_top`/`pinned_middle`/`file_row_elements` by mistake
-    // (which is exactly the impersonation this review demonstrated:
-    // content styled identically to chrome, outside the container).
-    let content_body = render_change_review_content_body(&preview.content, state.theme);
+    // enforced by a real module boundary (`ChangeReviewContentLine`'s
+    // own field and `as_str` are private to that module), not merely by
+    // this function's own restraint. `change_review_view` cannot call
+    // `.as_str()` on a content line under any name, extracted into any
+    // helper, at any distance from this call site -- doing so is a
+    // compile error, not a convention.
+    let content_body = change_review_content::render_content_body(&preview.content, state.theme);
 
     assemble_change_review_layout(pinned_top, file_row_elements, pinned_middle, content_body)
 }
@@ -8097,59 +8098,6 @@ where
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
-}
-
-/// RFC-042 D2, visible half: `content`'s own bytes render only inside
-/// this bordered, visually distinct container -- the same boxed-card
-/// style `approval_history_entry_view` already uses for a different
-/// untrusted-adjacent payload (a proposed command). **This is the only
-/// function in this module that turns a `ChangeReviewContentLine` into
-/// an `Element`** (response 331 Required 3: "the render path takes the
-/// typed value, not a `&str`, so only the content region can draw
-/// one") -- `change_review_view` itself never calls `.as_str()` at all;
-/// it only ever receives this function's already-boxed result, and has
-/// no raw, un-boxed `Vec<Element>` of content lines in its own scope
-/// that a future edit could push into the wrong region (which is
-/// exactly the impersonation response 331 demonstrated: content styled
-/// identically to chrome, outside the container).
-/// `change_review_view_never_calls_as_str_on_content_directly` (below)
-/// is the guard: `change_review_view`'s own body must never contain the
-/// call syntax `.as_str()` at all.
-fn render_change_review_content_body(
-    content: &[ChangeReviewContentLine],
-    theme: crate::theme::Theme,
-) -> Element<'static, Message> {
-    if content.is_empty() {
-        // `Deleted`/`NonFile`/every refusal has no bytes to show, and no
-        // container is drawn around nothing.
-        return column![].into();
-    }
-    // `.to_string()` below copies every line's text out -- nothing here
-    // borrows `content`, so this function's own output does not need to
-    // (and per `DiffContent`'s own move-out-gap precedent in RFC-041,
-    // should not) carry a lifetime tied to the caller's local `preview`.
-    let content_elements: Vec<Element<'static, Message>> = content
-        .iter()
-        .map(|content_line| {
-            text(content_line.as_str().to_string())
-                .size(theme.font_size_body())
-                .into()
-        })
-        .collect();
-    container(column(content_elements).spacing(4))
-        .width(Length::Fill)
-        .padding(8)
-        .style(move |_base_theme: &iced::Theme| container::Style {
-            background: Some(Background::Color(theme.surface_elevated())),
-            text_color: Some(theme.foreground()),
-            border: Border {
-                color: theme.border_default(),
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..container::Style::default()
-        })
-        .into()
 }
 
 /// A compile-time literal symbol for `ChangeDetectionStatus`, the same
@@ -8372,31 +8320,101 @@ fn change_review_diff_content_baseline(
     }
 }
 
-/// RFC-042 D2: a single line of an **untrusted file's own bytes**,
-/// already escaped by [`tekstide_core::text_safety::quote_untrusted`].
-/// The only way to build one is [`Self::from_escaped`] -- there is no
-/// public constructor accepting an unescaped `&str`, and nothing in this
-/// module renders one through the chrome text path
-/// (`ChangeReviewContentPreview::chrome`/`heading`, plain `String`s
-/// pushed straight into `change_review_view`'s `lines`). This is the
-/// same idiom `DisplayText`'s single `quote_untrusted` constructor and
-/// `DiffContent`'s Added/Modified-carried-by-constructor already use in
-/// this codebase: after this type exists, "a content line rendered
-/// where a chrome line is expected" is something the compiler refuses,
-/// not a convention a future edit could quietly break by, say, pushing
-/// one into `lines` instead of the dedicated content region.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ChangeReviewContentLine(tekstide_core::text_safety::DisplayText);
+/// RFC-042 D2, closed per response 332 Required 3: a real module
+/// boundary, not a same-module scan. `ChangeReviewContentLine`'s inner
+/// field and its `as_str` accessor are private to this module -- only
+/// [`render_content_body`] can read a line's own text, and it always
+/// returns the bordered container in the same step. Rendering content
+/// outside its container is now a **privacy error**, not a convention
+/// a source-scan test hopes to catch: `shell`'s own code (including
+/// `change_review_view`) cannot call `.as_str()` on a
+/// `ChangeReviewContentLine` at all, by construction, not by
+/// enumeration. Response 331's fix (collapsing the un-boxed
+/// intermediate `Vec<Element>` into this one function) is still the
+/// right shape; this closes the one gap left in it -- `as_str()` being
+/// reachable from anywhere in `shell.rs`, which a helper extracted one
+/// level away from `change_review_view` (response 332's own
+/// demonstration) could still call.
+mod change_review_content {
+    use super::{Background, Border, Element, Length, Message, column, container, text};
 
-impl ChangeReviewContentLine {
-    fn from_escaped(text: &str) -> Self {
-        Self(tekstide_core::text_safety::quote_untrusted(text))
+    /// A single line of an **untrusted file's own bytes**, already
+    /// escaped by [`tekstide_core::text_safety::quote_untrusted`]. The
+    /// only way to build one is [`Self::from_escaped`] -- there is no
+    /// public constructor accepting an unescaped `&str`. This is the
+    /// same idiom `DisplayText`'s single `quote_untrusted` constructor
+    /// and `DiffContent`'s Added/Modified-carried-by-constructor already
+    /// use in this codebase.
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub(super) struct ChangeReviewContentLine(tekstide_core::text_safety::DisplayText);
+
+    impl ChangeReviewContentLine {
+        pub(super) fn from_escaped(text: &str) -> Self {
+            Self(tekstide_core::text_safety::quote_untrusted(text))
+        }
+
+        /// **Test-only escape hatch, explicit at the boundary.** A test
+        /// that needs a line's raw escaped text (to assert on escaping,
+        /// spoof classification, line-splitting, and so on) says so
+        /// here, rather than reaching past the boundary informally the
+        /// way production code now cannot. Never compiled outside
+        /// `cfg(test)`, so it adds no reachable path in the shipped
+        /// binary.
+        #[cfg(test)]
+        pub(super) fn as_str(&self) -> &str {
+            self.0.as_str()
+        }
     }
 
-    fn as_str(&self) -> &str {
-        self.0.as_str()
+    /// RFC-042 D2, visible half: `content`'s own bytes render only
+    /// inside this bordered, visually distinct container -- the same
+    /// boxed-card style `approval_history_entry_view` already uses for
+    /// a different untrusted-adjacent payload (a proposed command).
+    /// **This is the only function that can read a `ChangeReviewContentLine`'s
+    /// own text at all** -- it reads the private field directly,
+    /// same-module, and returns an already-boxed `Element`; nothing
+    /// outside this module can produce an un-boxed content `Element`
+    /// under any name, extracted into any helper, at any distance from
+    /// `change_review_view`.
+    pub(super) fn render_content_body(
+        content: &[ChangeReviewContentLine],
+        theme: crate::theme::Theme,
+    ) -> Element<'static, Message> {
+        if content.is_empty() {
+            // `Deleted`/`NonFile`/every refusal has no bytes to show,
+            // and no container is drawn around nothing.
+            return column![].into();
+        }
+        // `.to_string()` below copies every line's text out -- nothing
+        // here borrows `content`, so this function's own output does
+        // not need to (and per `DiffContent`'s own move-out-gap
+        // precedent in RFC-041, should not) carry a lifetime tied to
+        // the caller's local `preview`.
+        let content_elements: Vec<Element<'static, Message>> = content
+            .iter()
+            .map(|content_line| {
+                text(content_line.0.as_str().to_string())
+                    .size(theme.font_size_body())
+                    .into()
+            })
+            .collect();
+        container(column(content_elements).spacing(4))
+            .width(Length::Fill)
+            .padding(8)
+            .style(move |_base_theme: &iced::Theme| container::Style {
+                background: Some(Background::Color(theme.surface_elevated())),
+                text_color: Some(theme.foreground()),
+                border: Border {
+                    color: theme.border_default(),
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..container::Style::default()
+            })
+            .into()
     }
 }
+use change_review_content::ChangeReviewContentLine;
 
 /// RFC-042 D2's structural half: the content preview's own render
 /// inputs, chrome and untrusted content kept in separate fields rather

@@ -11677,7 +11677,18 @@ fn change_review_layout_pins_fixed_regions_regardless_of_list_length() {
     /// `file_row_count`, which a height-only comparison would miss (a `Column`'s children size
     /// themselves independently; `pinned_top`/`pinned_middle`'s own heights don't change just
     /// because a sibling grew, only their *positions* do).
-    fn pinned_region_measurements(file_row_count: usize, content_line_count: usize) -> (f32, f32) {
+    struct Measurements {
+        pinned_height: f32,
+        pinned_middle_y: f32,
+        pinned_middle_bottom: f32,
+        content_y: f32,
+    }
+
+    fn measure(
+        file_row_count: usize,
+        content_line_count: usize,
+        viewport_height: f32,
+    ) -> Measurements {
         let pinned_top: Vec<iced::Element<'_, Message, iced::Theme, ()>> =
             vec![iced::widget::text::<iced::Theme, ()>("PINNED_TOP").into()];
         let file_rows: Vec<iced::Element<'_, Message, iced::Theme, ()>> = (0..file_row_count)
@@ -11699,7 +11710,7 @@ fn change_review_layout_pins_fixed_regions_regardless_of_list_length() {
         let mut tree = iced::advanced::widget::Tree::new(page.as_widget());
         let limits = iced::advanced::layout::Limits::new(
             iced::Size::new(0.0, 0.0),
-            iced::Size::new(400.0, 600.0),
+            iced::Size::new(400.0, viewport_height),
         );
         let node = page.as_widget_mut().layout(&mut tree, &renderer, &limits);
 
@@ -11710,73 +11721,130 @@ fn change_review_layout_pins_fixed_regions_regardless_of_list_length() {
             "the page must have exactly 4 top-level regions: pinned_top, the file-row \
              scrollable, pinned_middle, the content scrollable"
         );
-        (
-            children[0].bounds().height + children[2].bounds().height,
-            children[2].bounds().y,
-        )
+
+        // Response 332 Required 1's own gap, found ablating this test's first draft: a
+        // `Column` always preserves its children's *declaration order* -- comparing bounds at
+        // fixed indices 2/3 is trivially true for *whatever* widgets occupy those two slots, so
+        // it cannot by itself tell "pinned_middle above content" (correct) apart from "content
+        // above pinned_middle" (wrong) if the two were transposed inside
+        // `assemble_change_review_layout`'s own body. Confirmed directly: swapping their
+        // declaration order there did not fail either assertion above. A `Tree`'s own `tag`
+        // (`iced_core::widget::tree::Tag`, keyed on `TypeId`) is stateless
+        // (`Tag::stateless()`) for a plain `Column`/`Text` and non-stateless for a `Scrollable`
+        // (which tracks scroll position) -- checking it confirms slots 0/2 are the two
+        // `Column`s and 1/3 are the two `Scrollable`s, which the swap above would have
+        // violated (position 2 would have become the content `Scrollable`, non-stateless).
+        assert_eq!(
+            tree.children[0].tag,
+            iced::advanced::widget::tree::Tag::stateless(),
+            "region 0 (pinned_top) must be a plain, stateless Column"
+        );
+        assert_ne!(
+            tree.children[1].tag,
+            iced::advanced::widget::tree::Tag::stateless(),
+            "region 1 (the file-row list) must be a stateful Scrollable, not a plain Column"
+        );
+        assert_eq!(
+            tree.children[2].tag,
+            iced::advanced::widget::tree::Tag::stateless(),
+            "region 2 (pinned_middle, carrying the \"not a diff\" label) must be a plain, \
+             stateless Column -- if this fails, it has been transposed with the content \
+             Scrollable"
+        );
+        assert_ne!(
+            tree.children[3].tag,
+            iced::advanced::widget::tree::Tag::stateless(),
+            "region 3 (content) must be a stateful Scrollable, not a plain Column -- if this \
+             fails, it has been transposed with pinned_middle"
+        );
+
+        Measurements {
+            pinned_height: children[0].bounds().height + children[2].bounds().height,
+            pinned_middle_y: children[2].bounds().y,
+            pinned_middle_bottom: children[2].bounds().y + children[2].bounds().height,
+            content_y: children[3].bounds().y,
+        }
     }
 
-    let (pinned_height_small, pinned_middle_y_small) = pinned_region_measurements(1, 1);
-    let (pinned_height_large, pinned_middle_y_large) = pinned_region_measurements(200, 200);
+    let small = measure(1, 1, 600.0);
+    let large = measure(200, 200, 600.0);
 
     assert!(
-        (pinned_height_small - pinned_height_large).abs() < 0.5,
+        (small.pinned_height - large.pinned_height).abs() < 0.5,
         "the pinned regions' own combined height must not depend on how many file rows or \
-         content lines exist -- got {pinned_height_small}px with 1 of each, \
-         {pinned_height_large}px with 200 of each"
+         content lines exist -- got {}px with 1 of each, {}px with 200 of each",
+        small.pinned_height,
+        large.pinned_height
     );
     assert!(
-        (pinned_middle_y_small - pinned_middle_y_large).abs() < 0.5,
+        (small.pinned_middle_y - large.pinned_middle_y).abs() < 0.5,
         "pinned_middle's own Y position must not depend on how many file rows exist -- a file-row \
          list rendered without its own scroll region pushes every pinned region below it down by \
          the list's own unclipped height, exactly the original D1 defect this measurement exists \
-         to catch. Got {pinned_middle_y_small}px with 1 file row, {pinned_middle_y_large}px with \
-         200"
+         to catch. Got {}px with 1 file row, {}px with 200",
+        small.pinned_middle_y,
+        large.pinned_middle_y
     );
+
+    // Response 332 Required 1: D1 exists to guarantee that content is
+    // never visible without the claim that qualifies it. That holds
+    // structurally -- not by accident of which region happens to clip
+    // first -- only if the label's own region is laid out strictly
+    // above the content region at *every* viewport height, tiny ones
+    // included: whatever clips the label (a short window) then clips
+    // the content too, since the content sits later in the same
+    // downward stack. Checked at four heights spanning the reviewer's
+    // own 380px reproduction down to an even tighter one.
+    for viewport_height in [100.0f32, 380.0, 600.0, 1200.0] {
+        let measurements = measure(1, 1, viewport_height);
+        assert!(
+            measurements.pinned_middle_bottom <= measurements.content_y + 0.5,
+            "the region holding the \"not a diff\" label must be laid out above the content \
+             region at every viewport height, so any clipping that hides the label also hides \
+             the content -- at {viewport_height}px, pinned_middle's own bottom \
+             ({}px) is below the content region's top ({}px)",
+            measurements.pinned_middle_bottom,
+            measurements.content_y
+        );
+    }
 }
 
-/// RFC-042 D2's own move-out gap, **closed** per response 331 Required
-/// 3 (rather than merely documented, the reviewer's other acceptable
-/// option): `render_change_review_content_body` is now the only
-/// function in this module that calls `.as_str()` on a
-/// `ChangeReviewContentLine` and turns it into an `Element` -- and it
-/// always applies the bordered container in the same step, so there is
-/// no un-boxed intermediate value a caller could misplace. This guard
-/// checks the **absence** of the escape hatch itself, robust to
-/// reformatting in a way the D1 prose-match was not (it does not search
-/// for one specific wiring shape -- it searches for one specific method
-/// call, `.as_str()`, whose presence anywhere in `change_review_view`'s
-/// own body is disqualifying regardless of surrounding whitespace).
-///
-/// **Ablated**: pasted the reviewer's own exploit --
-/// `for content_line in &preview.content { pinned_middle.push(text(content_line.as_str().to_string())...) }`
-/// -- into `change_review_view`. This test failed, naming the reason.
-/// Reverted, not committed.
-#[test]
-fn change_review_view_never_calls_as_str_on_content_directly() {
-    let source = std::fs::read_to_string(crate_src_dir().join("shell.rs"))
-        .expect("shell.rs must be readable");
-
-    let start = source
-        .find("fn change_review_view(state: &State) -> Element<'_, Message> {")
-        .expect("shell.rs must still define `change_review_view` with this exact signature");
-    let after_signature = &source[start..];
-    let end = after_signature
-        .match_indices("\nfn ")
-        .next()
-        .map(|(index, _)| index)
-        .unwrap_or(after_signature.len());
-    let view_body = &after_signature[..end];
-
-    assert!(
-        !view_body.contains(".as_str()"),
-        "change_review_view must never call .as_str() on content itself -- only \
-         render_change_review_content_body may, and it always boxes the result in the same \
-         step. A .as_str() call inside change_review_view's own body is the impersonation \
-         response 331 found: content rendered outside its container, styled identically to \
-         chrome. Found in change_review_view's own body:\n{view_body}"
-    );
-}
+// RFC-042 D2's own move-out gap, closed per response 332 Required 3 --
+// a real module boundary, not a same-module scan. Response 331's own
+// fix (collapsing the un-boxed intermediate Vec<Element> into one
+// function) left .as_str() reachable from anywhere in shell.rs, and
+// the reviewer defeated it with one level of indirection: a helper
+// extracted next to the render function, calling .as_str() from there
+// instead of inline. A source-scan of change_review_view's own body
+// cannot see a call made from a different function, no matter how the
+// scan is written -- so this slice stopped trying to detect the escape
+// hatch and removed it instead. ChangeReviewContentLine and
+// change_review_content::render_content_body now live in their own
+// module; the struct's field and its as_str accessor are private to
+// it. Nothing outside that module can read a content line's own text,
+// extracted into any helper, at any distance, under any name.
+//
+// There is no test for this the way there is for the D1 layout
+// property above, because there is nothing left to test at the render
+// level: the compiler enforces it. What there is instead is two
+// ablations, both reproducing the reviewer's own two exploits exactly,
+// both a compile error, not a runtime failure -- see qa-evidence.md's
+// Required 3 section for the full diffs:
+//
+// 1. Inlined `content_line.0.as_str()` directly in change_review_view
+//    (accessing the private field): error[E0616], field `0` of struct
+//    `ChangeReviewContentLine` is private.
+// 2. Extracted the reviewer's own `leak_content_into_frame` helper,
+//    calling `.as_str()` from a function other than render_content_body:
+//    error[E0599], no method named `as_str` found for
+//    `&ChangeReviewContentLine` -- the method does not exist outside
+//    cfg(test), regardless of which function tries to call it.
+//
+// Both confirmed, then reverted -- neither committed. The one thing
+// tests still need -- reading a line's escaped text to assert on it --
+// goes through ChangeReviewContentLine::as_str's own cfg(test)-gated
+// accessor, an explicit, named escape hatch at the boundary rather
+// than an informal one.
 
 /// RFC-041 D1's own required ablation: retention dropped must not
 /// break metadata rendering, and content preview must say so honestly

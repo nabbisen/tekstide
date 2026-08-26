@@ -22,13 +22,16 @@ created: "2026-08-26"
 - [x] The renderer no longer discriminates chrome from content by index.
       `ChangeReviewContentPreview`'s three fields (`heading`/`chrome`/`content`) replace the old
       `if index == 0` position check.
-- [x] **Response 331 Required 3, closed**: the move-out gap (`ChangeReviewContentLine::as_str()`
-      returning a plain `&str` nothing stopped a caller from misplacing) is closed --
-      `render_change_review_content_body` is the only function that calls `.as_str()`, and always
-      returns the bordered container in the same step. Guard:
-      `change_review_view_never_calls_as_str_on_content_directly`, asserting the *absence* of the
-      `.as_str()` call syntax in `change_review_view`'s own body. Ablated with the reviewer's own
-      exploit pasted back in; failed; reverted.
+- [x] **Response 332 Required 3, actually closed**: response 331's own fix was a source-scan of
+      `change_review_view`'s body, and the reviewer defeated it by extracting a second helper
+      function and calling `.as_str()` from there instead — a scan of one function cannot see a
+      call from another. `ChangeReviewContentLine` and the render function now live in their own
+      module; the struct's field and its `as_str` accessor are both private to it (the accessor
+      additionally `#[cfg(test)]`-gated). Nothing outside the module can read a content line's
+      own text under any name, at any distance. The stale scan test is removed — there is
+      nothing left to test at the render level. Both of the reviewer's own exact exploits
+      confirmed as compile errors (`E0616` private field; `E0599` method does not exist outside
+      `cfg(test)`), then reverted.
 
 ## D1 — the frame does not scroll
 
@@ -51,12 +54,21 @@ created: "2026-08-26"
       `layout::Node` tree via `()` (iced's headless test renderer) against the real production
       `assemble_change_review_layout`. Both of the reviewer's own attacks reproduced and confirmed
       failing against this new test, then reverted.
-- [ ] **Not fully resolved, left for the architect**: at the reviewer's own reproduction height
-      (380px), the pinned regions' fixed content (now independent of list length) still exceeds
-      the available window height and clips below the fold — a different cause than what was
-      fixed (ordinary window-chrome arithmetic, not unbounded growth). See `qa-evidence.md`
-      Required 1 for the numbers and the open question this raises about whether D1 needs a
-      minimum-window-height decision or a scrollable claims region.
+- [x] **Response 332 Required 1: the ordering invariant, stated and tested.** The reviewer
+      accepted the bounded-height fix but found the deeper guarantee ("content is never visible
+      without the claim that qualifies it") held only "by accident of ordering" — nothing tested
+      it. Added: `pinned_middle`'s own bottom must sit at or above the content region's own top,
+      at four viewport heights including tiny ones. **A real gap found ablating this**: read as
+      fixed-index bounds, the check is vacuous (`Column` always preserves declaration order, so
+      it holds for *whatever* occupies the two slots) — confirmed by swapping `pinned_middle` and
+      `content`'s declaration order, which left it green. Strengthened with a `Tree::tag`
+      (`iced_core::widget::tree::Tag`) check confirming positions 0/2 are stateless (`Column`) and
+      1/3 are not (`Scrollable`) — the same swap then fails immediately. Both checks together
+      close the gap the first version left open.
+- [ ] **Left open, at the architect's own request from response 331**: at the 380px reproduction
+      height, the file-row list's own scroll region collapses to zero visible height (not
+      scrolled, not clipped, absent) — flagged by the reviewer as a real but non-blocking
+      readability issue, not required in this slice.
 
 ## D3 — bounded, refusing, and distinct
 
@@ -109,11 +121,11 @@ created: "2026-08-26"
 - [x] `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - [x] Full workspace suite, **three consecutive runs** under default parallelism, each **logged to
       a file** rather than filtered live, any flake named against `test-process-leak.md`. Response
-      331's own re-gate: the reviewer's own three runs hit disclosed, transient PTY exhaustion
-      (recovered by the time this response ran, unrelated to this slice). Six runs performed here;
-      runs 1–2 hit the already-documented `command_approval_family_produces_real_durable_audit_records_through_the_pipeline`
-      flake (row 3) — unrelated to this slice, assertion message captured for the first time for
-      that row; runs 3–6 clean, 434 tekstide + 742 tekstide-core.
+      331's own re-gate hit disclosed, transient PTY exhaustion (the reviewer's) then the
+      already-documented `command_approval_family_...` flake (mine) across six total runs — see
+      `qa-evidence.md`'s own Response 331 section. Response 332's own re-gate: three consecutive
+      runs, all clean, 433 tekstide + 742 tekstide-core (one fewer than response 331's 434 — the
+      stale source-scan test was removed, not replaced with a new one).
 - [x] `git diff --check`, `rfc_docs_invariants`. Both clean.
 
 ## Closeout
