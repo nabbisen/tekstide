@@ -25,9 +25,10 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 042 | [Change Content Legibility](./proposed/042-change-content-legibility.md) | **Proposed 2026-08-26.** First of three scoped for `0.15.0`. RFC-041 made a changed file's content inspectable and it is not **readable**: `quote_untrusted` escapes every line break, so a real source file renders as one line. The escaping is right; whether a newline is a character to neutralise or a layout instruction to honour was never decided. Three decisions required before any code — can content scroll the "not a diff" label out of view, can a line of file content be mistaken for one of Tekstide's own, and what bounds line count separately from RFC-024's byte bound. **RFC-034 depends on this.** |
 
-*(empty — and that is the correct state. An empty `proposed/` means nothing is awaiting review,
-not that a folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
+*(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
+folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
 
 ## Accepted
 
@@ -37,7 +38,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 034 | [Change Review Actions and Review State](./accepted/034-change-review-actions-and-review-state.md) | **Accepted 2026-08-18; UNBLOCKED 2026-08-25** by RFC-020's change review surface. Note it renders **metadata only** — an action defined here is taken on what the surface shows, not on inspected diff content, which is still unrendered. **Accepted 2026-08-18.** Gives `transition_change_set_review_state` a route, and decides the question RFC-020's Q3 deferred: whether a review decision is a record or an operation. Blocked on RFC-020 |
+| 034 | [Change Review Actions and Review State](./accepted/034-change-review-actions-and-review-state.md) | **Accepted 2026-08-18; unblocked 2026-08-25; amended 2026-08-26.** Second of three for `0.15.0`. The amendment records that **neither value this RFC was accepted for exists**: no `AuditEventFamily` variant covers a user's opinion of generated code, and `ChangeSet` derives no `Serialize`, so every change set and every decision about one dies with the process. **D0 decided: session-scoped, said on the surface** — persisting real project paths is a data-policy question and a thirteenth audit family is its own RFC. D1: `Accepted`/`Rejected` only — `PartiallyAccepted` has no way to be true without per-file review, and `Superseded` is a fact, not an opinion. D2: no audit record, stated. D3: stale tree is said, not blocking. Depends on RFC-042. |
 | 036 | [Dormant Capability Closure](./accepted/036-dormant-capability-closure.md) | **Accepted 2026-08-18.** Wire / delete / document, per orphan from the reachability audit. Separates `recover` and `purge_all_records` as worse than dormant — recovery and deletion paths never exercised from the application |
 
 
@@ -97,6 +98,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 039 | [Interaction Model and Visible Affordances](./handoffs/039-interaction-model-and-visible-affordances/README.md) — **M12, after RFC-038**; the workflows the product never had |
 | 038 | [First-Run and Project Entry](./handoffs/038-first-run-and-project-entry/README.md) — **M12, first**; the product's missing door |
 | 024 | [Diff Preview Policy](./handoffs/024-diff-preview-policy/README.md) |
+| — | [Doc invariants completion](./handoffs/doc-invariants-completion.md) — no RFC; third of three for `0.15.0`. Two mechanical checks, five one-line corrections |
 | — | [Minimal user documentation](./handoffs/minimal-user-documentation.md) — no RFC; pulled forward from RFC-029 to M9 |
 | — | [The reachability audit](./handoffs/reachability-audit.md) — no RFC; run 2026-08-17, findings carried into RFC-023, RFC-031 and RFC-036 |
 | — | [The 0.12.1 first-run correction](./handoffs/first-run-correction-0.12.1.md) — no RFC; the release's only evidence record, written after the fact because it shipped without a pack. Carries two corrections: `ca456c7` claims five valid ablations and four were, and `action_catalog_key`'s contract for non-live actions is untested |
