@@ -1,8 +1,8 @@
 ---
 title: "RFC-042 task breakdown and PR plan"
 rfc: "RFC-042"
-rfc_file: "../../accepted/042-change-content-legibility.md"
-source_rfc_status: "Accepted 2026-08-26 — M12, first of three for 0.15.0"
+rfc_file: "../../done/042-change-content-legibility.md"
+source_rfc_status: "Implemented and closed 2026-08-26 — RFC-042 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-26"
 ---

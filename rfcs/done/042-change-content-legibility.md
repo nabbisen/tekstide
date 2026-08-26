@@ -1,6 +1,6 @@
 # RFC-042: Change Content Legibility
 
-Status: **Accepted by the human owner 2026-08-26.** Proposed the same day, scoped at his request
+Status: **Implemented and closed 2026-08-26.** Proposed, accepted and shipped the same day; accepted at review 333 after three rounds (`75a6850`, `f746eb5`, `e475f60`, `c0a035f`, `ee3a94d`). Proposed and accepted at his request
 as the first theme for `0.15.0`, after the `0.14.0` release gate found the defect this RFC exists
 to answer. **D1, D2 and D3 were decided by the architect on acceptance** — see "Decided on
 acceptance" at the end. An implementer must not inherit an unresolved architecture decision.

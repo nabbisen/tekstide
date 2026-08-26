@@ -1,19 +1,19 @@
 ---
 title: "RFC-042: Change Content Legibility — implementation handoff"
 rfc: "RFC-042"
-rfc_file: "../../accepted/042-change-content-legibility.md"
-source_rfc_status: "Accepted 2026-08-26 — M12, first of three for 0.15.0"
+rfc_file: "../../done/042-change-content-legibility.md"
+source_rfc_status: "Implemented and closed 2026-08-26 — RFC-042 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-26"
 ---
 
 # Make the preview readable without making it forgeable
 
-Source RFC: [RFC-042](../../accepted/042-change-content-legibility.md)
+Source RFC: [RFC-042](../../done/042-change-content-legibility.md)
 
 | # | Read | Why |
 | --- | --- | --- |
-| 1 | [RFC-042](../../accepted/042-change-content-legibility.md) | Three decisions already made; do not re-open them |
+| 1 | [RFC-042](../../done/042-change-content-legibility.md) | Three decisions already made; do not re-open them |
 | 2 | [`what-a-legible-preview-must-not-become.md`](./what-a-legible-preview-must-not-become.md) | **Required.** The whole risk of this slice is here |
 | 3 | [RFC-041's security document](../041-change-content-preview/what-a-content-preview-must-not-claim.md) | §5 is the constraint D2 exists to satisfy, not to work around |
 | 4 | [RFC-024](../../done/024-diff-preview-policy.md) | Owns the byte bound, gate, sniff and staleness. D3 adds a bound beside them and changes none of them |

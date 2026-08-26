@@ -1,8 +1,8 @@
 ---
 title: "RFC-042 acceptance and QA checklist"
 rfc: "RFC-042"
-rfc_file: "../../accepted/042-change-content-legibility.md"
-source_rfc_status: "Accepted 2026-08-26 — M12, first of three for 0.15.0"
+rfc_file: "../../done/042-change-content-legibility.md"
+source_rfc_status: "Implemented and closed 2026-08-26 — RFC-042 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-26"
 ---
@@ -140,12 +140,58 @@ created: "2026-08-26"
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted 2026-08-26 at review 333, after three rounds: requests 331, 332, 333
+(commits 75a6850, f746eb5, e475f60, c0a035f, ee3a94d).
+
+Verified by the reviewer, by attack rather than by reading:
+
+Round 1 (response 331) -- two guards passed while the property they named was
+broken:
+  - D1's guard was a source-text scan asserting exact indentation. Wrapping the
+    whole surface back in one scrollable -- the pre-RFC-042 defect in full --
+    left all four assertions green, because the negative one looked for the
+    literal "scrollable(column(lines)" and the defeat spells it
+    "scrollable(column![".
+  - D2's spoof test asserted the data classification, which PR-042-A had already
+    made true by construction. Pushing content into the chrome frame via
+    as_str() left 11 of 11 tests green.
+  - D1's own decision was also wrong, and that was the reviewer's fault: the
+    frame held up to 32 file-row buttons, so at a 380px window height the "not a
+    diff" label became unreachable. Reproduced in the release binary. D1 amended
+    to "pin the claims, scroll the lists."
+
+Round 2 (response 332) -- Required 2 closed properly; Required 3 reported closed
+and was not. An extracted helper one level away from change_review_view defeated
+the .as_str() scan with 29 of 29 tests green.
+
+Round 3 (this request) -- both closed, verified:
+  - Module boundary: the reviewer's two exploits are now compile errors, E0599
+    (no such method outside cfg(test)) and E0616 (private field). The field stays
+    private even in a test build. Both `cargo test --all-targets` and
+    `cargo clippy --all-targets` reject them, so the project's own gate enforces
+    the boundary -- not only a release build.
+  - Layout ordering: transposing pinned_middle and content inside
+    assemble_change_review_layout fails on the Tree::tag assertion, naming the
+    transposition.
+
+The dev team found that the reviewer's own required assertion was VACUOUS before
+reporting it closed. A Column lays children out in declaration order, so
+children[2].bottom <= children[3].top holds for whatever occupies those slots --
+the assertion as specified could never fail. The Tree::tag check is what makes it
+real. That correction is the most valuable thing in this arc: it runs against the
+reviewer, and it was found by ablating a green test rather than trusting it.
+
+Gates verified independently by the reviewer: three consecutive full-workspace
+runs, logged to files, all clean -- 433 tekstide + 742 tekstide-core + 2
+doc-invariant, no flake. fmt clean.
+
+Not done, by the reviewer's own decision: the file-row list region collapses to
+zero height at 380px -- real, not a correctness issue, left for a follow-up.
 ```
