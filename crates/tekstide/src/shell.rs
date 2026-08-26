@@ -2769,15 +2769,26 @@ fn record_restricted_mode_blocked_if_applicable(
     }
 }
 
-/// RFC-022 PR-022-D: the same `AppStatePathProvider::linux_default()`
-/// resolution [`open_real_audit_store`] already uses -- RFC-013's own
-/// "one resolution, N consumers" convention, extended to a third
-/// consumer here rather than inventing new XDG resolution logic in this
-/// crate. `None` degrades to "no transcript capture for this launch,"
-/// not a launch refusal: `TranscriptCaptureMode::LocalBounded` (what
-/// `AgentRunLaunchRequest::new` defaults to) does not reject launch when
-/// unavailable -- only `RequiredLocalBounded` does, and this slice does
-/// not ask for that.
+/// RFC-022 PR-022-D: `AppStatePathProvider::linux_default()` -- RFC-013's
+/// own "one resolution, N consumers" convention, rather than inventing
+/// new XDG resolution logic in this crate. `None` degrades to "no
+/// transcript capture for this launch," not a launch refusal:
+/// `TranscriptCaptureMode::LocalBounded` (what `AgentRunLaunchRequest::new`
+/// defaults to) does not reject launch when unavailable -- only
+/// `RequiredLocalBounded` does, and this slice does not ask for that.
+///
+/// audit-store-test-isolation handoff: this call used to be described as
+/// "the same resolution `open_real_audit_store` already uses." That
+/// stopped being true the moment that function's own `#[cfg(test)]`
+/// branch stopped compiling a path to `linux_default()` at all -- this
+/// function still calls it unconditionally, test builds included, so it
+/// is now the **last** production consumer of the real state root that a
+/// test can still reach. That is why the `transcripts/`/`approval/`
+/// subtrees under a real developer's `$HOME` still receive real writes
+/// during a test run (confirmed by that handoff's own before/after
+/// diff), while `audit/` does not. Deliberately not fixed here -- out of
+/// that handoff's own stated scope -- tracked in
+/// `rfcs/handoffs/test-process-leak.md`'s "Fixed 2026-08-26" section.
 fn open_real_agent_run_state_root() -> Option<std::path::PathBuf> {
     let path_provider =
         tekstide_core::project::recent::AppStatePathProvider::linux_default().ok()?;
@@ -5029,10 +5040,15 @@ fn resolve_audit_state_dir() -> Option<std::path::PathBuf> {
 /// panics loudly, naming both paths, if they ever coincide. In ordinary
 /// operation this can never fire (a fresh temp directory or an
 /// explicitly test-supplied one is never the developer's real state
-/// root), which is the acceptance item this exists to satisfy: an
-/// ablation that *forces* the coincidence --
-/// `pointing_a_test_at_the_real_audit_state_dir_panics_loudly` below --
-/// is what proves the check is live, not vacuous.
+/// root). Confirmed live, not vacuous, by hand while writing this check:
+/// temporarily commented out the `assert_not_the_real_audit_state_dir`
+/// call below, pointed a temporary test at the real, resolved directory
+/// via [`test_audit_state_dir`], and `open_real_audit_store` silently
+/// returned a store opened against it; restored the call, re-ran the
+/// same test, and it panicked naming both paths. Removed before
+/// committing, not left as a standing ablation, matching this file's
+/// own convention (see `opening_a_project_through_the_real_field_...`'s
+/// comment for the same "confirmed by hand, then restored" shape).
 #[cfg(test)]
 fn resolve_audit_state_dir() -> Option<std::path::PathBuf> {
     let dir = TEST_AUDIT_STATE_DIR.with(|cell| {
