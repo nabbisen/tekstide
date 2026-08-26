@@ -11517,6 +11517,142 @@ fn change_review_content_added_content_has_no_not_a_diff_label() {
     );
 }
 
+/// RFC-042 D1: the "not a diff" label (and every other chrome line the
+/// preview produces) must stay present and un-displaced no matter how
+/// large the content it qualifies grows -- the whole reason it moved
+/// out of the scroll region. A 64,000-byte modified file is comfortably
+/// larger than one screen can show at once.
+///
+/// **What this test cannot see** (the same boundary `modal_layer_always_applies_the_scrim_style`
+/// already states for a different property): this project's own
+/// `frames()`-avoidance convention (`ARCHITECTURE.md`, "latency criteria
+/// stop the clock at state change, not at pixels") means no test here
+/// can observe real interactive scrolling or real pixels. This proves
+/// the **data-level** guarantee that makes D1 possible -- `chrome`
+/// (carrying the label) is structurally independent of `content`'s size,
+/// per `ChangeReviewContentPreview`'s own fields -- and
+/// `change_review_frame_lines_never_feed_the_scrollable` (below) proves
+/// the **wiring** that keeps that guarantee visible: `chrome` renders
+/// outside the scroll region, `content` inside it. Together they cover
+/// what a unit test can; the live GUI evidence in `qa-evidence.md`
+/// covers what only a screenshot can.
+#[test]
+fn change_review_content_label_survives_content_long_enough_to_scroll() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("content-label-survives-scroll");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+
+    std::fs::write(project_dir.join("big.txt"), b"before\n")
+        .expect("writing the pre-existing file must succeed");
+
+    let detector = tekstide_core::project::GeneratedChangeDetector::new(
+        super::generated_change_detection_policy(),
+    );
+    let baseline = {
+        let project = app_shell.state().active_project().unwrap();
+        detector.capture_filesystem_baseline(project)
+    };
+
+    let big_content = "line of real modified content\n".repeat(3000);
+    assert!(
+        big_content.len() > 60_000,
+        "test precondition: the fixture must be genuinely large, got {} bytes",
+        big_content.len()
+    );
+    std::fs::write(project_dir.join("big.txt"), &big_content)
+        .expect("writing the large modified file must succeed");
+
+    let detected = {
+        let project = app_shell.state().active_project().unwrap();
+        detector.detect_filesystem_changes(project, &baseline)
+    };
+    let change_set_id = app_shell
+        .state_mut()
+        .add_detected_generated_change_set(&baseline, &detected, None, "large-file fixture")
+        .expect("detection must succeed")
+        .expect("a real modified file must produce a real ChangeSet");
+
+    let mut state = state_with(app_shell);
+    state
+        .detected_changes_by_change_set
+        .insert(change_set_id, detected);
+    super::select_change_review_file(&mut state, std::path::PathBuf::from("big.txt"));
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let change_set = project.change_sets().last().unwrap();
+    let preview = super::change_review_content_lines(&state, project, change_set);
+
+    assert!(
+        preview
+            .chrome
+            .iter()
+            .any(|line| line.to_lowercase().contains("not a diff")),
+        "the label must be present regardless of content size, got chrome={:?}",
+        preview.chrome
+    );
+    assert_eq!(
+        preview.content.len(),
+        1,
+        "PR-042-B has not split content into real lines yet -- one large escaped element"
+    );
+    assert!(
+        preview.content[0].as_str().len() > 60_000,
+        "the content element must genuinely be large enough that a real render could not fit \
+         it on one screen, got {} chars",
+        preview.content[0].as_str().len()
+    );
+}
+
+/// RFC-042 D1's own required ablation target, as a structural source
+/// check (the established technique for a property about *where* code
+/// wires an `Element`, not what text it produces --
+/// `modal_layer_always_applies_the_scrim_style`'s own shape): `preview.chrome`
+/// and `preview.heading` must push into `lines` (the fixed frame) and
+/// only `content_elements` may feed `scrollable(...)`.
+///
+/// **Ablated**: changed the `for chrome_line in &preview.chrome` loop to
+/// push into `content_elements` instead of `lines` -- this test failed
+/// on the first assertion, naming `change_review_view`. Reverted, not
+/// committed.
+#[test]
+fn change_review_frame_lines_never_feed_the_scrollable() {
+    let source = std::fs::read_to_string(crate_src_dir().join("shell.rs"))
+        .expect("shell.rs must be readable");
+
+    let start = source
+        .find("fn change_review_view(state: &State) -> Element<'_, Message> {")
+        .expect("shell.rs must still define `change_review_view` with this exact signature");
+    let after_signature = &source[start..];
+    let end = after_signature
+        .match_indices("\nfn ")
+        .next()
+        .map(|(index, _)| index)
+        .unwrap_or(after_signature.len());
+    let view_body = &after_signature[..end];
+
+    assert!(
+        view_body.contains("for chrome_line in &preview.chrome {\n        lines.push("),
+        "the preview's chrome lines (including the \"not a diff\" label) must push into \
+         `lines`, the fixed frame outside the scroll region:\n{view_body}"
+    );
+    assert!(
+        view_body.contains("if let Some(heading) = &preview.heading {\n        lines.push("),
+        "the preview's own heading must push into `lines` too, not the scrolling region:\n\
+         {view_body}"
+    );
+    assert!(
+        view_body.contains("scrollable(column(content_elements)"),
+        "only `content_elements` may feed the scrollable region:\n{view_body}"
+    );
+    assert!(
+        !view_body.contains("scrollable(column(lines)"),
+        "the frame (`lines`) must not be wrapped in its own `scrollable` -- that was the \
+         pre-RFC-042 defect D1 exists to fix:\n{view_body}"
+    );
+}
+
 /// RFC-041 D1's own required ablation: retention dropped must not
 /// break metadata rendering, and content preview must say so honestly
 /// rather than silently show nothing.

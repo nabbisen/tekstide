@@ -7989,13 +7989,16 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
             .into(),
     );
 
-    // RFC-041 PR-041-B, restructured by RFC-042 PR-042-A: the content
+    // RFC-041 PR-041-B, restructured by RFC-042 PR-042-A/B: the content
     // preview for whichever row is currently selected, if any -- see
     // `change_review_content_lines`'s own doc for why this is
     // re-evaluated fresh on every render rather than read from anything
-    // stored. Chrome (`heading`/`chrome`) and untrusted content
-    // (`content`) are told apart by field, not by position -- the
-    // renderer no longer discriminates with `if index == 0`.
+    // stored. Chrome (`heading`/`chrome`) joins `lines` in the **fixed
+    // frame** below; untrusted `content` renders separately, in its own
+    // independently scrolling region (RFC-042 D1) -- see that decision's
+    // own words in `042-change-content-legibility.md`: "a claim that
+    // qualifies content stays visible for as long as that content is
+    // visible."
     let preview = change_review_content_lines(state, project, change_set);
     if let Some(heading) = &preview.heading {
         lines.push(
@@ -8011,18 +8014,34 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
                 .into(),
         );
     }
-    for content_line in &preview.content {
-        lines.push(
+
+    let content_elements: Vec<Element<'_, Message>> = preview
+        .content
+        .iter()
+        .map(|content_line| {
             text(content_line.as_str().to_string())
                 .size(state.theme.font_size_body())
-                .into(),
-        );
-    }
+                .into()
+        })
+        .collect();
 
-    scrollable(column(lines).spacing(8))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    // RFC-042 D1: before this slice, `lines` (frame) and the content
+    // preview shared one `scrollable`, so a long enough file scrolled
+    // the "not a diff" label and the detection disclosure off screen
+    // while the content they qualify stayed on it -- the label was
+    // accurate and its accuracy was defeated by layout. The frame now
+    // renders outside any scroll region; only `content_elements` scrolls,
+    // inside its own, independent `scrollable`.
+    column![
+        column(lines).spacing(8),
+        scrollable(column(content_elements).spacing(4))
+            .width(Length::Fill)
+            .height(Length::Fill),
+    ]
+    .spacing(8)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 /// A compile-time literal symbol for `ChangeDetectionStatus`, the same
