@@ -102,6 +102,22 @@ pub(crate) enum ControlCoverage {
     /// own evidence cites is this table's composition changing, not this
     /// test going red and green again.
     KeyboardOnly(&'static str),
+    /// RFC-044 D3: the mirror `KeyboardOnly` never had, because
+    /// `control_coverage`'s own domain ([`NavigationAction`]) could not
+    /// represent it -- every entry there is required to carry a live
+    /// `KeybindingPolicy` rule, so "no keyboard route" was not merely
+    /// unnoticed, it was inexpressible. Reachable now that
+    /// [`SurfaceAction`]'s own coverage function
+    /// ([`surface_keyboard_coverage`]) asks the opposite question
+    /// (`control_coverage` still only asks "does a mouse reach this,"
+    /// unchanged). Requires a reason exactly as `KeyboardOnly` already
+    /// does, and the same `TrackedGap`/`Permanent` vocabulary applies:
+    /// a `TrackedGap` names the slice that closes it (this RFC's own
+    /// PR-044-B); a `Permanent` one is a real, considered decision that
+    /// a key would cost more than it is worth (§6 of
+    /// `what-advertising-keys-must-not-become.md`), not a place to park
+    /// a gap nobody had to justify.
+    MouseOnly { reason: &'static str },
 }
 
 /// Exhaustive by design, the same discipline [`action_catalog_key`]
@@ -185,6 +201,151 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
         NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenSafeCloseDialog
         | NavigationAction::OpenCommandPalette => None,
+    }
+}
+
+/// RFC-044 D1: a **surface-local** action -- something a user can do
+/// on one specific surface, deliberately keyed by (surface, action) so
+/// `Enter` meaning six different things on six surfaces is six
+/// variants, not one collision (the surface is encoded in the variant
+/// name/grouping below, mirroring how [`NavigationAction`] itself has
+/// no separate "surface" field either -- its own domain is implicitly
+/// "global").
+///
+/// **Wider than [`NavigationAction`] on purpose, and that widening is
+/// D1's whole substance.** Every `NavigationAction` is required to
+/// carry a live [`KeybindingPolicy`] rule to exist in that enum's
+/// domain at all -- so `control_coverage`'s own exhaustive match could
+/// never represent an action with *no* keyboard route: the action
+/// would simply not be a `NavigationAction` yet. Closing a project is
+/// the proof -- it has no `NavigationAction` variant and no
+/// `KeybindingPolicy` rule, which is exactly why `0.15.0`'s release
+/// gate found the gap by accident rather than by anything mechanical.
+/// `SurfaceAction` carries no such guarantee, so it can name an action
+/// that has no keyboard route today.
+///
+/// **Scope, stated rather than left implicit**: covers the seven of
+/// eight surface-local handlers whose keys perform a *discrete action*
+/// (open, activate, mark, close, submit, dismiss) -- not
+/// `handle_editor_key`, whose own keys are continuous text-editing
+/// input, not a fixed, nameable set of actions the way a button press
+/// is. Arrow-key row highlighting is also excluded from every handler
+/// that has it: it is a keyboard-native concept with no mouse
+/// equivalent to lack (there is nothing for `MouseOnly` to say about
+/// "move the highlight without selecting"), so it is not the kind of
+/// gap this RFC exists to close. Both exclusions are a scoping
+/// decision, recorded here rather than silently omitted -- if either
+/// stops being true (the editor gains a discrete, non-typing action;
+/// a highlight gains its own mouse-only meaning), it belongs in this
+/// enum.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SurfaceAction {
+    TabStripCloseProject,
+    TabStripGoToProjectBoard,
+    TabStripSwitchToProject,
+    ExplorerActivateHighlightedRow,
+    ApprovalHistoryOpenHighlightedEntry,
+    ChangeReviewMarkAccepted,
+    ChangeReviewMarkRejected,
+    ChangeReviewSelectHighlightedFile,
+    TrustSettingsActivateTrustControl,
+    TrustSettingsToggleTranscriptCaptureDeclined,
+    TrustSettingsOpenTranscriptPurgeDialog,
+    ProjectBoardRowReopenHighlightedProject,
+    ProjectBoardPathFieldSubmit,
+    ProjectBoardPathFieldDismiss,
+}
+
+/// RFC-044 D3: the required mirror of `control_coverage` -- not "how
+/// does a *mouse* reach this" (that question, and `control_coverage`
+/// itself, are unchanged, and still only asked of [`NavigationAction`])
+/// but **"how does the *keyboard* reach this"**, exhaustive over the
+/// widened [`SurfaceAction`] domain D1 defines. Adding a `SurfaceAction`
+/// variant without extending this match fails to compile -- the same
+/// discipline [`action_catalog_key`]/`control_coverage` already use,
+/// aimed at the axis neither of them asked about.
+///
+/// **Why `ControlCoverage::MouseOnly` is reachable here and never was
+/// from `control_coverage`**: every arm below that answers "yes, a key
+/// reaches this" reuses `ControlCoverage::VisibleControl`'s own shape
+/// (`description` plus a literal, grep-checked source snippet) --
+/// repurposed for *this* function to mean "a real key binding exists
+/// and here is the literal match proving it," the keyboard analogue of
+/// what that field already meant for a mouse press. `KeyboardOnly` is
+/// not reused here at all, deliberately: reusing it for "the keyboard
+/// *does* reach this" would silently invert its own established
+/// meaning ("only the keyboard reaches this, no mouse control exists")
+/// into its opposite, which is exactly the confusion a shared type
+/// must not create. `MouseOnly { reason }` is the one genuinely new
+/// arm this function needs, and it requires a reason exactly as
+/// `KeyboardOnly` already does -- `TrackedGap` entries name the slice
+/// that closes them (PR-044-B), `Permanent` entries are a real,
+/// considered decision that a key would cost more than it is worth,
+/// per §6 of `what-advertising-keys-must-not-become.md`.
+#[cfg(test)]
+pub(crate) fn surface_keyboard_coverage(action: SurfaceAction) -> ControlCoverage {
+    match action {
+        SurfaceAction::TabStripCloseProject => ControlCoverage::MouseOnly {
+            reason: "TrackedGap, PR-044-B: the access defect that widened this RFC's scope. \
+                     `handle_tab_strip_key` has no arm for it; `attempt_close_project_tab` is \
+                     otherwise a plain, callable function with no structural obstacle.",
+        },
+        SurfaceAction::TabStripGoToProjectBoard => ControlCoverage::VisibleControl {
+            description: "Enter, with the tab strip's own first (\"Projects\") entry highlighted",
+            on_press_snippet: "keyboard::key::Named::Enter",
+        },
+        SurfaceAction::TabStripSwitchToProject => ControlCoverage::VisibleControl {
+            description: "Enter, with a project's own tab highlighted",
+            on_press_snippet: "keyboard::key::Named::Enter",
+        },
+        SurfaceAction::ExplorerActivateHighlightedRow => ControlCoverage::VisibleControl {
+            description: "Enter, opening the highlighted file or navigating into the \
+                          highlighted directory",
+            on_press_snippet: "keyboard::key::Named::Enter",
+        },
+        SurfaceAction::ApprovalHistoryOpenHighlightedEntry => ControlCoverage::VisibleControl {
+            description: "Enter, with an approval history row highlighted",
+            on_press_snippet: "keyboard::key::Named::Enter",
+        },
+        SurfaceAction::ChangeReviewMarkAccepted => ControlCoverage::VisibleControl {
+            description: "the bare `a` key, response 334 Required 1",
+            on_press_snippet: "\"a\" => Some(ChangeReviewDecision::Accepted)",
+        },
+        SurfaceAction::ChangeReviewMarkRejected => ControlCoverage::VisibleControl {
+            description: "the bare `r` key, response 334 Required 1",
+            on_press_snippet: "\"r\" => Some(ChangeReviewDecision::Rejected)",
+        },
+        SurfaceAction::ChangeReviewSelectHighlightedFile => ControlCoverage::VisibleControl {
+            description: "Enter, with a changed-file row highlighted",
+            on_press_snippet: "keyboard::key::Named::Enter",
+        },
+        SurfaceAction::TrustSettingsActivateTrustControl => ControlCoverage::VisibleControl {
+            description: "Enter, activating whichever of Grant/Revoke Trust is currently shown",
+            on_press_snippet: "keyboard::key::Named::Enter",
+        },
+        SurfaceAction::TrustSettingsToggleTranscriptCaptureDeclined => {
+            ControlCoverage::VisibleControl {
+                description: "the Space key, response 248 PR-033-B",
+                on_press_snippet: "keyboard::key::Named::Space",
+            }
+        }
+        SurfaceAction::TrustSettingsOpenTranscriptPurgeDialog => ControlCoverage::VisibleControl {
+            description: "the Delete key, response 248 PR-033-C",
+            on_press_snippet: "keyboard::key::Named::Delete",
+        },
+        SurfaceAction::ProjectBoardRowReopenHighlightedProject => ControlCoverage::VisibleControl {
+            description: "Enter, with a recent-project row highlighted",
+            on_press_snippet: "keyboard::key::Named::Enter",
+        },
+        SurfaceAction::ProjectBoardPathFieldSubmit => ControlCoverage::VisibleControl {
+            description: "Enter, while the path field is showing",
+            on_press_snippet: "keyboard::key::Named::Enter",
+        },
+        SurfaceAction::ProjectBoardPathFieldDismiss => ControlCoverage::VisibleControl {
+            description: "Escape, only when the field was explicitly requested (Ctrl+Alt+O)",
+            on_press_snippet: "keyboard::key::Named::Escape",
+        },
     }
 }
 

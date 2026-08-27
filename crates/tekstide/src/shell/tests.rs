@@ -831,6 +831,14 @@ fn every_live_action_has_a_visible_control_or_a_reasoned_allow_list_entry() {
                     rule.action
                 );
             }
+            Some(super::super::keyboard_help::ControlCoverage::MouseOnly { .. }) => panic!(
+                "{:?} is live (Candidate, with a binding) yet its own control_coverage entry \
+                 claims MouseOnly -- contradictory: a NavigationAction with a real \
+                 KeybindingPolicy rule has a keyboard route by construction, so it cannot also \
+                 be keyboard-unreachable. MouseOnly is RFC-044's own addition for the wider \
+                 SurfaceAction domain (surface_keyboard_coverage), not this one",
+                rule.action
+            ),
             None => panic!(
                 "{:?} is live (Candidate, with a binding) but has no control_coverage entry at \
                  all -- a new live action must be triaged into a visible control or a reasoned \
@@ -839,6 +847,196 @@ fn every_live_action_has_a_visible_control_or_a_reasoned_allow_list_entry() {
             ),
         }
     }
+}
+
+/// RFC-044 D3: which handler function's own body a `SurfaceAction`'s
+/// keyboard route must be found inside. Needed because several
+/// `surface_keyboard_coverage` entries deliberately share the same
+/// literal snippet (`"keyboard::key::Named::Enter"` names six different
+/// actions across six different handlers) -- unlike
+/// `control_coverage`'s own snippets, which are each unique enough that
+/// a whole-crate `.contains()` proves the claim, a shared snippet must
+/// be checked *within the specific function it is claimed for*, or the
+/// check would trivially pass regardless of whether that particular
+/// handler was ever wired the way its entry claims.
+fn surface_action_handler_name(action: super::super::keyboard_help::SurfaceAction) -> &'static str {
+    use super::super::keyboard_help::SurfaceAction;
+    match action {
+        SurfaceAction::TabStripCloseProject
+        | SurfaceAction::TabStripGoToProjectBoard
+        | SurfaceAction::TabStripSwitchToProject => "handle_tab_strip_key",
+        SurfaceAction::ExplorerActivateHighlightedRow => "handle_explorer_key",
+        SurfaceAction::ApprovalHistoryOpenHighlightedEntry => "handle_approval_history_key",
+        SurfaceAction::ChangeReviewMarkAccepted
+        | SurfaceAction::ChangeReviewMarkRejected
+        | SurfaceAction::ChangeReviewSelectHighlightedFile => "handle_change_review_key",
+        SurfaceAction::TrustSettingsActivateTrustControl
+        | SurfaceAction::TrustSettingsToggleTranscriptCaptureDeclined
+        | SurfaceAction::TrustSettingsOpenTranscriptPurgeDialog => "handle_trust_settings_key",
+        SurfaceAction::ProjectBoardRowReopenHighlightedProject => "handle_project_board_row_key",
+        SurfaceAction::ProjectBoardPathFieldSubmit
+        | SurfaceAction::ProjectBoardPathFieldDismiss => "handle_project_board_path_field_key",
+    }
+}
+
+/// Extracts `fn <name>`'s own body from `source` by brace-counting from
+/// its first `{` -- robust to another function later in the file also
+/// containing `fn ` in a doc comment or string, unlike a naive "up to
+/// the next `fn`" search, and simple enough to trust for this crate's
+/// own consistently-`rustfmt`ed source.
+fn function_body<'a>(source: &'a str, name: &str) -> Option<&'a str> {
+    let signature = format!("fn {name}(");
+    let start = source.find(&signature)?;
+    let brace_start = start + source[start..].find('{')?;
+    let mut depth = 0usize;
+    for (offset, ch) in source[brace_start..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&source[brace_start..brace_start + offset + 1]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// RFC-044 D3's own required cross-check, the direct analogue of
+/// `every_live_action_has_a_visible_control_or_a_reasoned_allow_list_entry`
+/// above for the widened `SurfaceAction` domain: every entry's own
+/// claim is checked against real, current source, not merely typed
+/// into a table and trusted. `VisibleControl` entries must have their
+/// literal key-match snippet found *inside the specific handler
+/// function* `surface_action_handler_name` names (see that function's
+/// own doc for why "inside that function," not "anywhere in the
+/// crate," is required here). `MouseOnly` entries must carry a
+/// non-empty reason, the same requirement `KeyboardOnly` already has.
+///
+/// **Exhaustive over `SurfaceAction` by construction**: this iterates
+/// every variant via `SURFACE_ACTION_INVENTORY` below rather than a
+/// hand-written subset, so a new `SurfaceAction` variant is checked
+/// automatically the moment it exists -- the same guarantee
+/// `surface_keyboard_coverage`'s own exhaustive match already gives at
+/// compile time, checked again here against real source at test time.
+#[test]
+fn every_surface_action_has_a_checked_keyboard_route_or_a_reasoned_mouse_only_entry() {
+    use super::super::keyboard_help::ControlCoverage;
+
+    let shell_source = std::fs::read_to_string(crate_src_dir().join("shell.rs"))
+        .expect("shell.rs must be readable");
+
+    for &action in SURFACE_ACTION_INVENTORY {
+        let handler_name = surface_action_handler_name(action);
+        let handler_body = function_body(&shell_source, handler_name).unwrap_or_else(|| {
+            panic!("{handler_name} not found in shell.rs -- has it been renamed or removed?")
+        });
+
+        match super::super::keyboard_help::surface_keyboard_coverage(action) {
+            ControlCoverage::VisibleControl {
+                description,
+                on_press_snippet,
+            } => {
+                assert!(
+                    handler_body.contains(on_press_snippet),
+                    "{action:?} claims a keyboard route ({description:?}, snippet \
+                     {on_press_snippet:?}) inside {handler_name}, but that snippet does not \
+                     appear in that function's own body -- the route this entry names has been \
+                     removed, renamed, or was never real",
+                );
+            }
+            ControlCoverage::MouseOnly { reason } => {
+                assert!(
+                    !reason.is_empty(),
+                    "{action:?} is a MouseOnly entry with an empty reason -- D3 requires a \
+                     reason per entry, the same bar KeyboardOnly already has",
+                );
+            }
+            ControlCoverage::KeyboardOnly(_) => panic!(
+                "{action:?}'s own surface_keyboard_coverage returned KeyboardOnly -- that \
+                 variant is deliberately unused by surface_keyboard_coverage (see its own doc \
+                 comment for why reusing it here would invert its established meaning); use \
+                 VisibleControl for a real route or MouseOnly for its absence",
+            ),
+        }
+    }
+}
+
+/// RFC-044 PR-044-A's own required evidence: the inventory itself, and
+/// the count of `MouseOnly` entries -- "nobody has this number today."
+/// Every `SurfaceAction` variant, listed once, so both tests above and
+/// this one iterate the same set without a second, hand-maintained copy
+/// drifting from the enum.
+const SURFACE_ACTION_INVENTORY: &[super::super::keyboard_help::SurfaceAction] = {
+    use super::super::keyboard_help::SurfaceAction;
+    &[
+        SurfaceAction::TabStripCloseProject,
+        SurfaceAction::TabStripGoToProjectBoard,
+        SurfaceAction::TabStripSwitchToProject,
+        SurfaceAction::ExplorerActivateHighlightedRow,
+        SurfaceAction::ApprovalHistoryOpenHighlightedEntry,
+        SurfaceAction::ChangeReviewMarkAccepted,
+        SurfaceAction::ChangeReviewMarkRejected,
+        SurfaceAction::ChangeReviewSelectHighlightedFile,
+        SurfaceAction::TrustSettingsActivateTrustControl,
+        SurfaceAction::TrustSettingsToggleTranscriptCaptureDeclined,
+        SurfaceAction::TrustSettingsOpenTranscriptPurgeDialog,
+        SurfaceAction::ProjectBoardRowReopenHighlightedProject,
+        SurfaceAction::ProjectBoardPathFieldSubmit,
+        SurfaceAction::ProjectBoardPathFieldDismiss,
+    ]
+};
+
+/// PR-044-A's own required gate, chosen deliberately red rather than
+/// green: `task-breakdown-pr-plan.md` explicitly permits either and
+/// asks which, with a reason, rather than silently choosing the
+/// comfortable one. This project chose red, mirroring PR-043-A's own
+/// `RunningTerminal::drop` guard -- a slice whose whole point is making
+/// a gap countable should not also hide the count behind a passing
+/// test. This test fails until PR-044-B closes every `MouseOnly` entry
+/// (or turns it into a `Permanent`, reasoned exception, matching
+/// `KeyboardOnly`'s own convention) -- **`TrackedGap` reasons only**;
+/// `Permanent` ones are excluded from the count deliberately, since
+/// they are not gaps, they are decisions.
+#[test]
+fn surface_action_inventory_has_no_unclosed_tracked_gaps() {
+    use super::super::keyboard_help::ControlCoverage;
+
+    let tracked_gaps: Vec<_> = SURFACE_ACTION_INVENTORY
+        .iter()
+        .filter_map(|&action| {
+            match super::super::keyboard_help::surface_keyboard_coverage(action) {
+                ControlCoverage::MouseOnly { reason } if reason.starts_with("TrackedGap") => {
+                    Some(format!("  {action:?}: {reason}"))
+                }
+                _ => None,
+            }
+        })
+        .collect();
+
+    eprintln!(
+        "surface_action_inventory: {} actions, {} MouseOnly (TrackedGap or Permanent)",
+        SURFACE_ACTION_INVENTORY.len(),
+        SURFACE_ACTION_INVENTORY
+            .iter()
+            .filter(|&&action| matches!(
+                super::super::keyboard_help::surface_keyboard_coverage(action),
+                ControlCoverage::MouseOnly { .. }
+            ))
+            .count()
+    );
+
+    assert!(
+        tracked_gaps.is_empty(),
+        "PR-044-A's own inventory found {} unclosed TrackedGap entr{}, which PR-044-B must \
+         close (with a real keyboard route) or reclassify as Permanent (with a decision, not a \
+         gap):\n{}",
+        tracked_gaps.len(),
+        if tracked_gaps.len() == 1 { "y" } else { "ies" },
+        tracked_gaps.join("\n")
+    );
 }
 
 /// RFC-018 PR-018-G's own review gate: "a test that the scrim is present
