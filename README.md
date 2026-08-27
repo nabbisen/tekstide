@@ -1,4 +1,4 @@
-![Tekst IDE](https://raw.githubusercontent.com/nabbisen/tekstide/main/assets/tekstide-logo.png)
+<img src="https://raw.githubusercontent.com/nabbisen/tekstide/main/assets/tekstide-logo.png" alt="Tekst IDE" width="160">
 
 # Tekst IDE
 
