@@ -86,9 +86,14 @@ Ninety seconds. Run it.
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings`
 - [ ] `cargo build --release --locked`
 - [ ] `cargo package -p tekstide-core --locked`
-- [ ] `cargo package -p tekstide --locked --no-verify` — **since `0.15.0` this step cannot run
-      at all until `tekstide-core`'s new version is published**, and that is expected, not a
-      failure to fix. `tekstide`'s `[dev-dependencies]` enables `tekstide-core`'s `test-support`
+- [ ] `cargo package -p tekstide --locked --no-verify` — **this step breaks for exactly one
+      release whenever `tekstide`'s `[dev-dependencies]` starts using a `tekstide-core`
+      feature that the *previously published* core does not have**, and it heals itself the
+      release after. Corrected 2026-08-28: the `0.15.0` note below said it "cannot run at
+      all until `tekstide-core`'s new version is published", which read as permanent. It is
+      not — `0.16.0` packaged fine, because `tekstide-core 0.15.0` was by then on crates.io
+      carrying the `test-support` feature that broke `0.15.0`'s own attempt. Expect it, do
+      not fix it, and use the workspace dry-run's unpacked package directory that release. `tekstide`'s `[dev-dependencies]` enables `tekstide-core`'s `test-support`
       feature (RFC-043 PR-043-A). Packaging `tekstide` alone resolves core from crates.io — the
       *previous* release — which does not have that feature, so resolution fails before any
       compile: *"package `tekstide` depends on `tekstide-core` with feature `test-support` but
