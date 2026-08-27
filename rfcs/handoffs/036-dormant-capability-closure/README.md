@@ -1,19 +1,19 @@
 ---
 title: "RFC-036: Dormant Capability Closure — implementation handoff"
 rfc: "RFC-036"
-rfc_file: "../../accepted/036-dormant-capability-closure.md"
-source_rfc_status: "Accepted 2026-08-18, D0–D4 decided 2026-08-27 — M12"
+rfc_file: "../../done/036-dormant-capability-closure.md"
+source_rfc_status: "Implemented and closed 2026-08-28 — RFC-036 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-27"
 ---
 
 # Decide each orphan once, with evidence
 
-Source RFC: [RFC-036](../../accepted/036-dormant-capability-closure.md)
+Source RFC: [RFC-036](../../done/036-dormant-capability-closure.md)
 
 | # | Read | Why |
 | --- | --- | --- |
-| 1 | [RFC-036](../../accepted/036-dormant-capability-closure.md) | **Read "Decided 2026-08-27" first.** D0–D4 are settled; the RFC body above them still lists rows that have since changed |
+| 1 | [RFC-036](../../done/036-dormant-capability-closure.md) | **Read "Decided 2026-08-27" first.** D0–D4 are settled; the RFC body above them still lists rows that have since changed |
 | 2 | [`what-a-triage-must-not-become.md`](./what-a-triage-must-not-become.md) | **Required.** This slice deletes published API and can quietly launder gaps |
 | 3 | [`reachability-audit.md`](../reachability-audit.md) | The 2026-08-17 audit that produced the list. **Its counts are stale** — see D0 |
 | 4 | [`task-breakdown-pr-plan.md`](./task-breakdown-pr-plan.md) | Three slices |

@@ -13,7 +13,7 @@ Related RFCs:
 
 - [RFC-039](../done/039-interaction-model-and-visible-affordances.md) — established the
   principles and built three affordances. Its PR-039-D audit is this RFC's entire input.
-- [RFC-036](../accepted/036-dormant-capability-closure.md) — `OpenSafeCloseDialog` and
+- [RFC-036](../done/036-dormant-capability-closure.md) — `OpenSafeCloseDialog` and
   `CycleVisibleTerminalSession` remain on its list; `OpenDiffReview` belongs to RFC-020.
 
 ## Summary

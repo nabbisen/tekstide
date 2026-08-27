@@ -1,8 +1,8 @@
 ---
 title: "RFC-036 PR-036-A: the orphan triage table"
 rfc: "RFC-036"
-rfc_file: "../../accepted/036-dormant-capability-closure.md"
-source_rfc_status: "Accepted 2026-08-18, D0–D4 decided 2026-08-27 — M12"
+rfc_file: "../../done/036-dormant-capability-closure.md"
+source_rfc_status: "Implemented and closed 2026-08-28 — RFC-036 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-27"
 ---

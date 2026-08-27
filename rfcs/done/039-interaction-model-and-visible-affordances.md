@@ -19,7 +19,7 @@ Related RFCs:
   rows are, today, inert text.
 - [RFC-038](../done/038-first-run-and-project-entry.md) — project entry. Overlaps
   deliberately and is bounded in §Relationship below.
-- [RFC-036](../accepted/036-dormant-capability-closure.md) — `close_project` joins its list.
+- [RFC-036](../done/036-dormant-capability-closure.md) — `close_project` joins its list.
 
 ## Summary
 

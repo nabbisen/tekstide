@@ -1,6 +1,6 @@
 # RFC-036: Dormant Capability Closure
 
-Status: **Accepted by the human owner 2026-08-18. D1-D4 decided by the architect 2026-08-27**, when the pack was written — this RFC predates the decide-on-acceptance convention RFC-041 onward were accepted under, so its decisions were still open. See "Decided 2026-08-27" at the end. Deletion of published API is on the table deliberately, batched into one release.
+Status: **Implemented and closed 2026-08-28.** Accepted by the human owner 2026-08-18, D0–D4 decided by the architect 2026-08-27, all three slices accepted at review 356. Original: **Accepted by the human owner 2026-08-18. D1-D4 decided by the architect 2026-08-27**, when the pack was written — this RFC predates the decide-on-acceptance convention RFC-041 onward were accepted under, so its decisions were still open. See "Decided 2026-08-27" at the end. Deletion of published API is on the table deliberately, batched into one release.
 Target milestone: M12
 Date: 2026-08-18
 

@@ -1,8 +1,8 @@
 ---
 title: "RFC-036 acceptance and QA checklist"
 rfc: "RFC-036"
-rfc_file: "../../accepted/036-dormant-capability-closure.md"
-source_rfc_status: "Accepted 2026-08-18, D0–D4 decided 2026-08-27 — M12"
+rfc_file: "../../done/036-dormant-capability-closure.md"
+source_rfc_status: "Implemented and closed 2026-08-28 — RFC-036 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-27"
 ---
@@ -85,12 +85,42 @@ created: "2026-08-27"
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted 2026-08-28 at review 356, across three requests (354, 355, 356).
+
+Verified by the reviewer:
+
+- The nine removals: checked the six "outright" ones are gone and that the one
+  remaining add_approval hit is add_approval_request, the real production path.
+  Checked the three narrowed to cfg(test) are absent from the release rlib, so a
+  consumer loses the symbol exactly as the changelog says.
+- The changelog distinguishes "narrowed to cfg(test)" from "removed outright",
+  with reasons, at the point a consumer reads it -- the deviation is disclosed,
+  not hidden.
+- Status line reads "not yet released", so no premature claim.
+- Both corruption screenshots read: /tmp fixtures, no $HOME, one project. They
+  are visually identical, which is the finding: two corruption shapes, one silent
+  result, and the interface reports "Calm".
+- Three consecutive full-workspace runs: 456 + 4 + 738, green. 746 -> 738 is the
+  eight deleted tests.
+
+The implementer's method beat the one this pack specified. It measured caller
+counts with #[deprecated] plus a build, letting the compiler enumerate call
+sites, and that corrected the reviewer's own D0: request_terminate has one
+production caller, not three -- the reviewer's grep had counted a wrapper's
+definition and its internal delegation.
+
+Two shipped defects found, both of the shape this RFC's opening argument
+predicted (the two capabilities anyone had previously looked at were both
+defects): an agent-run launch writes no durable audit record, and a corrupted
+audit store fails completely silently. Reserved as RFC-046 and RFC-047.
+
+Zero wire verdicts, stated as a finding rather than manufactured, is the right
+outcome and the right way to report it.
 ```

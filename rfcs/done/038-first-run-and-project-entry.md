@@ -23,7 +23,7 @@ Related RFCs:
   `ProjectBoardEmptyState`, whose `primary_action` / `secondary_action` fields this RFC removes.
 - [RFC-015](../done/015-application-shell-and-rendered-surface-model.md) — PR-015-D built the
   empty state that rendered those two fields' names as inert text.
-- [RFC-036](../accepted/036-dormant-capability-closure.md) — the wire/delete/document pass over
+- [RFC-036](../done/036-dormant-capability-closure.md) — the wire/delete/document pass over
   capabilities with no production caller. This RFC is the same defect one layer up: a
   *product* with no user-reachable entry point.
 
