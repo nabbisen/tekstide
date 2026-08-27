@@ -516,13 +516,59 @@ dialog wording, doc/test corrections): 447-449 + 746 + 2 each time (count rises 
 added), clean, no flakes. `/dev/pts` flat at 14-15. `fmt`, `clippy -D warnings`,
 `git diff --check`: clean throughout.
 
-### Live GUI evidence -- not yet captured
+### Live GUI evidence -- captured
 
-RFC-043's own README requires this against a `mktemp -d` fixture: a real backgrounded process, the
-close confirmation showing its new wording, and a real `kill -0` failing afterward, with whether a
-real mouse click was sent stated either way. Not done in this pass -- raised to the owner directly
-(launching a real window and sending synthetic input is a more invasive action than the rest of
-this slice), who asked that this be raised to the reviewer rather than proceeding unilaterally. See
-review request's own text for the question. Response 341's own separate, optional note (making the
-evidence process a foreground child rather than backgrounded, since that is closer to the real
-"agent mid-write" scenario) applies here once this is captured, if still wanted at that point.
+Release binary, a fresh `mktemp -d` fixture project (`/tmp/tmp.TByIEqHazo`) **and** a fresh
+`mktemp -d` `XDG_STATE_HOME` (response 345's own required addition -- without it the Project
+Board would render the real recent-projects list, the exact leak review 336 caught). Launched as
+`env -u WAYLAND_DISPLAY XDG_STATE_HOME=<mktemp -d> ./target/release/tekstide <mktemp -d fixture>`
+to force the X11/XWayland `winit` backend, per this repo's own established convention (niri does
+not forward `XTest` synthetic input to a native Wayland client). `xdotool windowfocus` plus
+`xdotool mousemove ... click 1` for navigation and the close confirmation's own buttons; `niri msg
+action screenshot-window --id <id> --path <file>`, targeted by window id, so the owner's own
+desktop focus was never touched.
+
+**A real mouse click was sent for the confirming `Close` press.** Stated plainly, per the RFC's
+own requirement either way.
+
+**A genuine input-delivery finding along the way, not part of what this evidence is for:** every
+attempt to type a Shift-modified character into this app through this session's `xdotool`
+(`ampersand`/`dollar`/`exclam` keysyms, explicit `keydown shift`/`key 7`/`keyup shift`, even plain
+`shift+a`) was delivered with Shift silently dropped -- `sleep 300 &` arrived as `sleep 300 7`,
+`$!` as `41`. Worked around by writing the one line needing `&`/`$`/`!` to a small helper script
+(`sh -c 'sleep 300 & echo REALPID=$!'`, saved to `/tmp/bg.sh`) and typing only the plain,
+unshifted `sh /tmp/bg.sh` into the terminal -- every character on screen after that point is real,
+synthetic keyboard input; only the one line containing special characters was written to disk
+first rather than typed. This is an environment/toolkit quirk in how this session's `xdotool`
+signals modifier state under this X11/XWayland setup, not a Tekstide defect -- plain, unshifted
+keys and mouse clicks were delivered correctly throughout, which is what the rest of this capture
+relies on.
+
+**What the capture shows**, three screenshots
+(`rfcs/handoffs/043-terminal-process-containment/evidence/`):
+
+1. `EVIDENCE-1-backgrounded-process-visible.png` -- the terminal after running the helper script:
+   `REALPID=2194464` printed to a real, running shell. Cross-checked directly:
+   `ps -p 2194464` showed a genuine `sleep 300` process, `kill -0 2194464` succeeded.
+2. `EVIDENCE-2-close-confirmation-new-wording.png` -- the close confirmation, on screen, **before
+   the click**: "This will end: 1 running process" / **"Anything started from these terminals ends
+   too, including a backgrounded job."** -- PR-043-C's own new line, visible and live. `kill -0
+   2194464` re-checked immediately before sending the click: still succeeded (process still
+   alive at the moment of confirmation).
+3. `EVIDENCE-3-after-close-project-board.png` -- after the real click on `Close` and a ~3s wait
+   (this backgrounded job is exactly the RFC-043 D2 case that legitimately needs step 2's
+   `SIGKILL`, the same reason `FOREGROUND_FLOOD_SCRIPT` exists for the *other* test -- a
+   `sleep 300 &` is POSIX-exempt from `SIGHUP` and needed the full sequence, not an instant hangup):
+   the project tab is gone, back at the Project Board. `kill -0 2194464` **failed**,
+   `no such process` -- an OS-level check, not an inference from the dialog or from an event, the
+   same shape request 328's own evidence used to prove the opposite property when it was still
+   true.
+
+Response 344's own correction (use the backgrounded fixture, not a foreground child) followed
+exactly -- `sleep 300 &`, matching the dialog's own wording and the checklist. No foreground-child
+second capture was added; response 344 named it a bonus, not a requirement, and this pass judged
+the backgrounded case sufficient on its own.
+
+Cleaned up after: the app process and its own child killed by the close sequence itself
+(confirmed via `kill -0`); the two `mktemp -d` scratch directories left in place under `/tmp`
+(harmless, empty or near-empty, on this machine's tmpfs) rather than force-removed.

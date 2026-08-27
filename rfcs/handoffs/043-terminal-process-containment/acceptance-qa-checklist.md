@@ -98,15 +98,16 @@ created: "2026-08-26"
 
 ## Live GUI evidence
 
-**Not yet captured.** Everything else in PR-043-C's own scope is done; this item alone remains.
-Raised to the owner before attempting it (launching a real window and sending synthetic input is
-more invasive than the rest of this slice) -- see this review's own text for the question.
-
-- [ ] Against a **`mktemp -d` fixture project**. No path under `$HOME`, no real project name, no
+- [x] Against a **`mktemp -d` fixture project**, and a fresh `mktemp -d` `XDG_STATE_HOME`
+      (response 345's own required addition). No path under `$HOME`, no real project name, no
       real file content.
-- [ ] Shows: a real backgrounded process, the close confirmation with its new wording, and the
-      `kill -0` failing afterwards.
-- [ ] Whether a real mouse click was sent is stated either way.
+- [x] Shows: a real backgrounded process (`REALPID=2194464`, a genuine `sleep 300`), the close
+      confirmation with its new wording ("Anything started from these terminals ends too,
+      including a backgrounded job."), and the `kill -0` failing afterwards -- an OS-level check,
+      confirmed both immediately before the click (still alive) and after (`no such process`).
+      Three screenshots, `evidence/EVIDENCE-{1,2,3}-*.png`.
+- [x] Whether a real mouse click was sent is stated either way. **Yes** -- the confirming `Close`
+      press was a real `xdotool` mouse click, targeted by window id.
 
 ## Gates
 
