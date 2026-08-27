@@ -11,37 +11,48 @@ created: "2026-08-27"
 
 ## D0 — the table is of the tree, not the document
 
-- [ ] Every row re-verified against the current tree.
-- [ ] `request_terminate` (3 production callers) and `shutdown` (1) are **not** listed as orphans.
-- [ ] The measurement method is stated once and used for every row.
-- [ ] Each row's count is split: production in `tekstide`, `tekstide-core`-internal, test-only.
+- [x] Every row re-verified against the current tree (compiler-based method, 35 candidates,
+      one `cargo build -p tekstide`).
+- [x] `request_terminate` and `shutdown` (`TerminalReader`'s) are **not** listed as orphans.
+      **Correction found**: the RFC's own D0 claimed `request_terminate` had 3 production callers;
+      re-measured today, it has **1**. Recorded in `orphan-triage-table.md`'s own D0 section, not
+      silently fixed without comment.
+- [x] The measurement method is stated once (`orphan-triage-table.md`'s own opening section) and
+      used for every row.
+- [x] Each row's count is split: production in `tekstide`, `tekstide-core`-internal, test-only.
 
 ## The table itself (PR-036-A)
 
-- [ ] One row per orphan, with verdict, reason, counts, and **what the capability was for**.
-- [ ] **Per D4, each row names the search shape that would have found it.**
-- [ ] Reviewed **before** any deletion happens.
+- [x] One row per orphan, with verdict, reason, counts, and **what the capability was for**.
+- [x] **Per D4, each row names the search shape that would have found it.**
+- [ ] Reviewed **before** any deletion happens. *(Filed for review; PR-036-B has not started.)*
 
 ## D1 — deletion
 
-- [ ] Deletions batched into one release (`0.16.0`), not trickled.
-- [ ] Each "delete" row cites what was searched, rather than asserting dormancy.
+- [ ] Deletions batched into one release (`0.16.0`), not trickled. *(PR-036-B, not started —
+      table names 7 delete-verdict functions, none removed yet.)*
+- [x] Each "delete" row cites what was searched, rather than asserting dormancy — and, per §2 of
+      the risk document, what the real path is instead, so the *why* is not lost when the row's
+      own function is removed.
 - [ ] `CHANGELOG.md` names every removed public item individually — **written in `0.16.0`'s own
-      entry at release time**, never by editing a released entry.
+      entry at release time**, never by editing a released entry. *(PR-036-B, not started.)*
 
 ## D2 — "keep, documented" is earned
 
-- [ ] Every "keep" row cites an **RFC number** as its named consumer.
-- [ ] The four configuration-conditioned rows cite **RFC-045**.
-- [ ] No row uses this verdict without a number. If one wants to, it is an "own RFC" row instead.
+- [x] Every "keep" row cites an **RFC number** as its named consumer.
+- [x] The four configuration-conditioned rows cite **RFC-045**.
+- [x] No row uses this verdict without a number. Nine rows this triage found undesigned are
+      "own RFC" rows instead, none forced into "keep, documented."
 
 ## D3 — the two that left
 
-- [ ] `recover` and `purge_all_records` are **not** triage rows.
+- [x] `recover` and `purge_all_records` are **not** triage rows. **`purge_project_records` folded
+      into the same defect slice**, recorded and reasoned rather than silently added or omitted.
 - [ ] What a user experiences with a corrupt store today is **reproduced**, not reasoned about —
-      a corrupted store in a scratch `XDG_STATE_HOME`, against the release binary.
+      a corrupted store in a scratch `XDG_STATE_HOME`, against the release binary. *(PR-036-C, not
+      started.)*
 - [ ] The outcome is either a fix or a written RFC recommendation. Both are acceptable; silence
-      is not.
+      is not. *(PR-036-C, not started.)*
 
 ## Wiring (PR-036-B)
 
@@ -57,8 +68,9 @@ created: "2026-08-27"
 
 ## The outcome this slice is allowed to reach
 
-- [ ] A row saying "own RFC" is a **finished** row, not an unfinished one. A table whose hard
-      cases all read "keep, documented" has hidden them.
+- [x] A row saying "own RFC" is a **finished** row, not an unfinished one. A table whose hard
+      cases all read "keep, documented" has hidden them. Nine rows in this table say "own RFC";
+      none say "keep, documented" without the RFC-045 number D2 requires.
 
 ## Final Acceptance Decision
 
