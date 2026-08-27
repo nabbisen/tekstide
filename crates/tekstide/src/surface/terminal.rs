@@ -206,8 +206,6 @@ fn pane_config() -> Config {
 /// `TerminalSession` this pane's [`Self::terminal_id`] names, asked of
 /// `tekstide-core` fresh each time (`shell.rs`), not cached here.
 pub struct TerminalPane {
-    runtime: LinuxTerminalRuntime,
-    handle: TerminalRuntimeHandle,
     /// RFC-017 Amendment 1, PR-A1-B: this pane's single source of PTY
     /// output, replacing `runtime.read_available_bounded_for` as
     /// `poll()`'s data source. `TerminalReader` is not `Clone` and this
@@ -215,7 +213,20 @@ pub struct TerminalPane {
     /// P2's "exactly one consumer" -- see
     /// `only_this_field_drains_a_terminalreader_in_the_crate` for the
     /// enumeration proof.
+    ///
+    /// RFC-043 D1's own disjunction, response 341's required half:
+    /// declared *before* `runtime`, deliberately -- Rust drops struct
+    /// fields in declaration order, and `TerminalReader::drop` shuts its
+    /// thread down and joins it (closing that thread's own
+    /// `try_clone()`d duplicate of the PTY master) before returning.
+    /// `runtime` (via `RunningTerminal::drop`, nested inside dropping
+    /// this field) needs that duplicate already gone before it closes
+    /// its own copy of the same master, or its close is not the last
+    /// reference and the pty does not actually hang up. See
+    /// `RunningTerminal::drop`'s own comment for the other half of this.
     reader: TerminalReader,
+    runtime: LinuxTerminalRuntime,
+    handle: TerminalRuntimeHandle,
     processor: Processor<StdSyncHandler>,
     term: Term<VoidListener>,
     /// RFC-017 PR-017-G (response 156): cumulative bytes actually read

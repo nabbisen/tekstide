@@ -79,7 +79,7 @@ impl LinuxTerminalRuntime {
                 project_id: spec.project_id,
                 process_group_id: child.id() as libc::pid_t,
                 child,
-                master: pty.into_master(),
+                master: Some(pty.into_master()),
                 transcript_writer,
                 transcript_capture_mode,
             },
@@ -163,7 +163,7 @@ impl LinuxTerminalRuntime {
                 project_id: spec.project_id,
                 process_group_id: child.id() as libc::pid_t,
                 child,
-                master: pty.into_master(),
+                master: Some(pty.into_master()),
                 transcript_writer,
                 transcript_capture_mode,
             },
@@ -187,13 +187,13 @@ impl LinuxTerminalRuntime {
     ) -> Result<TerminalRuntimeEvent, TerminalRuntimeError> {
         let session = self.session_mut(handle)?;
         session
-            .master
+            .master()
             .write_all(input)
             .map_err(|error| TerminalRuntimeError::Io {
                 summary: BoundedRuntimeSummary::new(format!("failed to write PTY input: {error}")),
             })?;
         session
-            .master
+            .master()
             .flush()
             .map_err(|error| TerminalRuntimeError::Io {
                 summary: BoundedRuntimeSummary::new(format!("failed to flush PTY input: {error}")),
@@ -218,7 +218,7 @@ impl LinuxTerminalRuntime {
         let mut buffer = [0_u8; 4096];
 
         while started.elapsed() < duration {
-            match session.master.read(&mut buffer) {
+            match session.master().read(&mut buffer) {
                 Ok(0) => break,
                 Ok(bytes_read) => {
                     if let Some(writer) = session.transcript_writer.as_mut() {
@@ -299,7 +299,7 @@ impl LinuxTerminalRuntime {
         let session = self.session_mut(handle)?;
         let master_for_reader =
             session
-                .master
+                .master()
                 .try_clone()
                 .map_err(|error| TerminalRuntimeError::Io {
                     summary: BoundedRuntimeSummary::new(format!(
@@ -327,11 +327,13 @@ impl LinuxTerminalRuntime {
         dimensions: TerminalDimensions,
     ) -> Result<TerminalRuntimeEvent, TerminalRuntimeError> {
         let session = self.session_mut(handle)?;
-        resize_master(&session.master, dimensions).map_err(|summary| TerminalRuntimeError::Io {
-            summary: BoundedRuntimeSummary::new(format!(
-                "failed to route PTY resize: {}",
-                summary.as_str()
-            )),
+        resize_master(session.master(), dimensions).map_err(|summary| {
+            TerminalRuntimeError::Io {
+                summary: BoundedRuntimeSummary::new(format!(
+                    "failed to route PTY resize: {}",
+                    summary.as_str()
+                )),
+            }
         })?;
 
         Ok(TerminalRuntimeEvent::Resized {
@@ -452,7 +454,12 @@ pub(super) struct RunningTerminal {
     pub(super) project_id: ProjectId,
     pub(super) process_group_id: libc::pid_t,
     pub(super) child: Child,
-    pub(super) master: fs::File,
+    /// `Some` for this value's entire life except during `Drop::drop`,
+    /// which takes it early -- see that impl's own comment for why.
+    /// Every other call site runs on a still-live session, where this
+    /// is always `Some`; use the [`RunningTerminal::master`] accessor
+    /// rather than matching on this directly.
+    master: Option<fs::File>,
     pub(super) transcript_writer: Option<BoundedTranscriptWriter>,
     /// RFC-011 Amendment 2, D1: carried alongside `transcript_writer` so
     /// `spawn_output_reader` has the capture mode available at the
@@ -460,6 +467,22 @@ pub(super) struct RunningTerminal {
     /// `transcript_writer` is `Some`, checked by construction in
     /// `launch_project_shell` (both are set from the same `match` arm).
     pub(super) transcript_capture_mode: Option<TranscriptCaptureMode>,
+}
+
+impl RunningTerminal {
+    /// Panics if called after `Drop::drop` has already taken `master` --
+    /// every real call site (`write_input`, `read_available_bounded_for`,
+    /// `spawn_output_reader`, `resize`) runs through `self.session_mut`/
+    /// `self.session` on a session that is still in `self.sessions`, and
+    /// nothing removes an entry from that map without the value being
+    /// dropped in the same motion (`termination.rs`'s own `.remove`
+    /// calls immediately drop what they return), so a live caller can
+    /// never observe `None` here.
+    fn master(&self) -> &fs::File {
+        self.master
+            .as_ref()
+            .expect("RunningTerminal.master is only taken during Drop::drop")
+    }
 }
 
 /// `RunningTerminal::drop`'s own bounded grace periods -- short and
@@ -569,6 +592,36 @@ impl Drop for RunningTerminal {
         // PR-039-C's own `request_terminate` is still the normal,
         // user-facing way a close gets real grace periods; this is the
         // last-resort net under it, not a replacement for it.
+        //
+        // RFC-043 D1's own disjunction, response 341's required half:
+        // "close the PTY master." Taken (dropped) here, first -- a
+        // custom `Drop::drop` body runs to completion before any of its
+        // own fields auto-drop, so leaving this to Rust's own field-drop
+        // at the end of this function would close it only *after* the
+        // SIGHUP/enumerate/SIGKILL sequence below already ran, too late
+        // to unblock anything during it (response 341's own measured
+        // finding: a session leader blocked in `write(2)` to a
+        // saturated pty never processes the pending `SIGHUP` until
+        // something unblocks that write). Closing this reference alone
+        // is always safe regardless of who else holds a duplicate --
+        // `dup`/`try_clone`'d descriptors are independent numbers over
+        // the same open file description, so closing one never disturbs
+        // another live user of a different one. It only closes the
+        // *last* reference, and so only actually triggers the pty's
+        // hangup (`EIO` on the slave side), specifically because
+        // `TerminalPane` (`crates/tekstide`) declares its own
+        // `reader: TerminalReader` field before `runtime:
+        // LinuxTerminalRuntime` -- by the time this drop runs as part of
+        // that struct's own teardown, `TerminalReader::drop` has already
+        // shut its thread down and joined it, closing that thread's own
+        // `try_clone()`d duplicate of this same master first. **This is
+        // not true of `termination::request_terminate`'s own explicit
+        // close path** -- see that function's own doc comment for the
+        // gap that leaves open there.
+        if let Some(master) = self.master.take() {
+            drop(master);
+        }
+
         let session_id = self.process_group_id;
         // Same `<= 1` refusal `send_signal_to_process_group` already
         // applies before signalling -- group 0 means "this process's own

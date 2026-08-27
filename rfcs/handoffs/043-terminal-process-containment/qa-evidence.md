@@ -236,6 +236,84 @@ sent) -- it is a real, explained cost specific to a workload that deliberately f
 and stops reading it, not a property of ordinary terminal use. Three consecutive full-workspace
 runs after both fixes: clean, `/dev/pts` flat at 13, `tekstide` at a stable ~11.4s.
 
+## Response 341 — closing the master, for real
+
+Required: "close the master before or with the `SIGHUP`, so step 1 does its job on a busy terminal
+rather than only an idle one" -- RFC-043's own step 1 disjunction, the half left unimplemented
+after PR-043-B.
+
+### `TIOCVHANGUP` tried first, and ruled out
+
+Reasoned that `ioctl(fd, TIOCVHANGUP)` would force the pty's hangup regardless of how many other
+fds referenced the same master, sidestepping the need to coordinate with the reader thread's own
+duplicate. Wired it into both `RunningTerminal::drop` and `request_terminate`, all 70
+`runtime::terminal::` tests still passed, and the `FLOOD_SCRIPT` benchmark showed **zero**
+improvement (10.98s vs 10.95s). Added `eprintln!` diagnostics around the call and found why:
+`hangup_master_ok=false errno=Os { code: 1, kind: PermissionDenied, message: "Operation not
+permitted" }`. `TIOCVHANGUP` requires `CAP_SYS_ADMIN` unconditionally on Linux, including for a
+process that created the pty itself. Reverted both call sites and the function entirely rather than
+leave a primitive that always fails silently in the tree.
+
+### The real mechanism, and the actual fix
+
+Went back to the literal suggestion: a plain `close(2)` on the master. The reason PR-043-B's own
+measurement showed this mattering is real -- a pty only hangs up once its *last* referencing fd
+closes, and `spawn_output_reader` (`launch.rs`) hands the reader thread (`TerminalReader`, owned by
+`TerminalPane` in `crates/tekstide`) its own `try_clone()`d duplicate of the same master. Closing
+`RunningTerminal.master` alone was never going to be the last reference on its own.
+
+The fix did not need new coordination machinery, because `TerminalReader` already has it:
+`Drop for TerminalReader` signals its shutdown `eventfd`, drops its `receiver` (unblocking a thread
+parked in a full-channel `send`), and **joins the thread** before returning -- by the time that
+`drop` call returns, the reader thread's own duplicate of the master (a local, owned `fs::File`
+inside the thread's closure) is provably closed. The only problem was ordering: `TerminalPane`
+declared `runtime` (containing `RunningTerminal`) *before* `reader`, and Rust drops struct fields in
+declaration order, so `RunningTerminal::drop`'s whole `SIGHUP`/enumerate/`SIGKILL` sequence ran
+*before* `reader`'s graceful shutdown ever closed its own duplicate.
+
+Two changes, both required together:
+
+1. `crates/tekstide/src/surface/terminal.rs`: reordered `TerminalPane`'s fields so `reader` is
+   declared (and therefore dropped) before `runtime`.
+2. `crates/tekstide-core/src/runtime/terminal/launch.rs`: `RunningTerminal.master` became
+   `Option<fs::File>` (a `master()` accessor panics if read after it is taken, which only `Drop`
+   does), and `Drop for RunningTerminal` now does `self.master.take()` first, before the `SIGHUP`.
+   Taking this reference is always safe regardless of who else holds a duplicate (closing one
+   `dup`/`try_clone`'d fd number never disturbs another live one over the same open file
+   description) -- it is only *effective* here because, by the time this runs as part of
+   `TerminalPane`'s own teardown, the reordering above already guarantees the reader's own
+   duplicate is gone, making this close the last reference.
+
+### Measured
+
+`tekstide`'s own 444-test suite: **5.59-5.61s** across three consecutive runs, `/dev/pts` flat at
+13 -- not just a recovery from the 11.4s post-Required-1 baseline, but back at (marginally better
+than) the original ~5.2s pre-PR-043-B baseline. Full workspace, three consecutive runs: 444 + 746 +
+2, clean, no flakes, 8.3-12.3s wall time. `fmt`, `clippy -D warnings`, `git diff --check`: clean.
+
+### The gap this does not close: `request_terminate`
+
+The fix above only helps the **`Drop`** path -- a `TerminalPane` (reader and all) being torn down
+together. `termination::request_terminate`'s own real caller
+(`crates/tekstide/src/shell.rs`'s project-close flow, `terminal_process_groups_confirmed_empty`)
+does something different: it removes the `TerminalPane` from its tracked list first, then calls
+`pane.request_terminate(...)` directly on the now-isolated value, and nothing drains
+`TerminalPane`'s `reader` for the entire span of that blocking call. The reader thread stays alive
+and holds its own duplicate of the master throughout -- so even if `request_terminate` closed
+`RunningTerminal`'s own copy at the same point `Drop` now does, it would not be the last reference,
+would not trigger a real hangup, and would not unblock a session leader stuck writing into a
+saturated pty. Closing it there was never unsafe (the same "closing one fd number never disturbs
+another" property applies); it would simply do nothing.
+
+This is the same busy-terminal scenario response 341 raised (an agent mid-write, project closed),
+reached through the code path Tekstide's own UI actually uses for closing a project, not only
+through the synthetic `Drop`-only path the benchmark exercises. Making it effective there needs
+`TerminalPane` itself to shut down or drain its reader as part of requesting termination, before
+`request_terminate`'s own `SIGHUP`, not only afterward when the pane is finally dropped -- a change
+to what `crates/tekstide` and `crates/tekstide-core` agree the termination sequence's shape is, not
+a narrow fix inside either crate alone. Recorded in `termination.rs`'s own doc comment on
+`request_terminate` rather than left implied. Not fixed in this slice; see review request 342.
+
 ## PR-043-C
 
 Not started. Owns: the close-confirmation wording (D1 + RFC-034 D4's rule), the
