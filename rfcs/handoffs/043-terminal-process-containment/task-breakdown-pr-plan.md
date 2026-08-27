@@ -1,8 +1,8 @@
 ---
 title: "RFC-043 task breakdown and PR plan"
 rfc: "RFC-043"
-rfc_file: "../../accepted/043-terminal-process-containment.md"
-source_rfc_status: "Accepted 2026-08-26 — M12"
+rfc_file: "../../done/043-terminal-process-containment.md"
+source_rfc_status: "Implemented and closed 2026-08-27 — RFC-043 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-26"
 ---

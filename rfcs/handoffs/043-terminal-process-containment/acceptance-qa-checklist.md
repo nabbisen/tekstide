@@ -1,8 +1,8 @@
 ---
 title: "RFC-043 acceptance and QA checklist"
 rfc: "RFC-043"
-rfc_file: "../../accepted/043-terminal-process-containment.md"
-source_rfc_status: "Accepted 2026-08-26 — M12"
+rfc_file: "../../done/043-terminal-process-containment.md"
+source_rfc_status: "Implemented and closed 2026-08-27 — RFC-043 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-26"
 ---
@@ -124,12 +124,52 @@ created: "2026-08-26"
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted 2026-08-27 at review 346, after eight rounds (requests 339-346).
+
+Verified by the reviewer at each stage, by attack rather than by reading:
+
+PR-043-A: guard ablated with an always-false cfg -> 444/444 and 743/743 fully
+green while the leak still happened. The inventory reproduced exactly: four
+tests, no unknown leakers, which bounded B's scope.
+
+PR-043-B: the reviewer's own three gate runs found a defect the implementer's
+four had not -- survivors whose pid equalled the session id, i.e. the terminal's
+own zombie counted as an escaped job. Confirmed empirically (state=Z with a
+readable session field). The same bug was also the 3.4x suite slowdown.
+
+Then: the master-close half of step 1 was missing, so on a busy terminal the
+shell never processed SIGHUP and every job was SIGKILLed -- the clean-shutdown
+property the RFC claimed was undelivered on the path that mattered. Closed on
+the Drop path, then on request_terminate. Ablation reproduces the original
+failure trace both times.
+
+The remaining flake was diagnosed rather than tuned away: the implementer forced
+it at load average 130, sampled every session member's /proc every 500ms, and
+found the leader already gone in the first sample. The cause was a fourth
+candidate the reviewer had not listed -- the test's own fixture backgrounded its
+loop, so it asserted a property that fixture could not have.
+
+PR-043-C: the audit field is read from SessionConfirmedEmpty's own field rather
+than inferred from a termination outcome. Reviewer checked both layers: defaults
+false when the event is absent, and aggregates across terminals with &= rather
+than last-wins.
+
+Live evidence: all three screenshots read by the reviewer. /tmp fixture and a
+fresh XDG_STATE_HOME, no $HOME path, no other project on screen. The close
+confirmation carries the new line before the click; kill -0 fails after.
+
+The implementer's disclosed xdotool Shift-drop was checked rather than accepted:
+typing $&!ABC through wtype arrives intact, so it is the X11/XWayland input
+path, not Tekstide.
+
+Measured: benchmark orphans 28 -> 0. PTY occupancy flat. Suite time recovered to
+the pre-slice baseline. Reviewer's final gate: three consecutive runs,
+449 + 746 + 2, clean.
 ```

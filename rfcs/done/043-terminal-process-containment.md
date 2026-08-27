@@ -1,9 +1,9 @@
 # RFC-043: Terminal Process Containment
 
-Status: **Accepted by the human owner 2026-08-26.** Proposed the same day, after a leak
+Status: **Implemented and closed 2026-08-27.** Proposed and accepted 2026-08-26, after a leak
 investigation found that this project's termination path cannot reach processes it is responsible
 for, and that the recorded explanation for why was wrong. **D1–D4 were decided by the architect on
-acceptance** — see "Decided on acceptance" at the end.
+acceptance** — see "Decided on acceptance" at the end. Shipped across PR-043-A/B/C in eight review rounds (requests 339-346); accepted at review 346.
 Target milestone: **M12**
 Date: 2026-08-26
 

@@ -1,19 +1,19 @@
 ---
 title: "RFC-043: Terminal Process Containment — implementation handoff"
 rfc: "RFC-043"
-rfc_file: "../../accepted/043-terminal-process-containment.md"
-source_rfc_status: "Accepted 2026-08-26 — M12"
+rfc_file: "../../done/043-terminal-process-containment.md"
+source_rfc_status: "Implemented and closed 2026-08-27 — RFC-043 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-26"
 ---
 
 # Make closing a terminal mean what the dialog already says
 
-Source RFC: [RFC-043](../../accepted/043-terminal-process-containment.md)
+Source RFC: [RFC-043](../../done/043-terminal-process-containment.md)
 
 | # | Read | Why |
 | --- | --- | --- |
-| 1 | [RFC-043](../../accepted/043-terminal-process-containment.md) | **Read "Decided on acceptance" first.** D1–D4 are settled |
+| 1 | [RFC-043](../../done/043-terminal-process-containment.md) | **Read "Decided on acceptance" first.** D1–D4 are settled |
 | 2 | [`what-containment-must-not-become.md`](./what-containment-must-not-become.md) | **Required.** This slice kills processes; the risks are all blast radius |
 | 3 | [`pty-master-fd-inheritance.md`](../pty-master-fd-inheritance.md) | Lands first. Changes the leak's behaviour, so measure after it, not before |
 | 4 | [RFC-009](../../done/009-terminal-security-boundary.md) | Owns the boundary |
