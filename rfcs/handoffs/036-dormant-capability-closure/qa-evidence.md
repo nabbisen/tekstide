@@ -30,10 +30,17 @@ correct rather than repeat stale numbers:**
 3. `shutdown` (ambiguous in the RFC's D0 table — two functions share the name):
    `TerminalReader::shutdown` has 1 production caller (very plausibly what the RFC's "1" meant);
    `approval::channel::shutdown` (the one the *original* audit actually named) has **0**.
-4. `transition_change_set_review_state`: still 0 production callers despite being assigned to
-   RFC-034 — RFC-034 solved the same user-facing need through a separate, ephemeral mechanism, not
-   by wiring this function. Not re-decided (the RFC forbids re-litigating an assigned row), but the
-   discrepancy is real and recorded.
+4. `transition_change_set_review_state` — **this entry was wrong in the first pass, and review 354
+   caught it.** The first pass found one internal caller (`app.rs:464`) and stopped without
+   checking whether *that* caller itself had a production caller, concluding "0 production, still
+   unwired." It has one: `AppState::transition_active_project_change_set_review_state`
+   (`app.rs:452`), a wrapper RFC-034 added under a name that does not match the core function's
+   own, called for real from `record_change_review_decision` (`shell.rs:8783`). **The count was
+   right; the conclusion drawn from a count with a nonzero internal caller and no wrapper-name
+   follow-up grep was not.** Corrected in `orphan-triage-table.md`; every other row with an
+   internal-only caller in the first pass had its own wrapper independently marked
+   `#[deprecated]` too (so its production reachability was checked directly, not assumed) —
+   re-checked after this was found, and this was the only row with the gap.
 
 `request_terminate` and `shutdown` (`TerminalReader`'s) are confirmed **not** orphans either way —
 neither appears in the table as a triage row, matching the RFC's own trap warning.
@@ -53,15 +60,26 @@ number reserved — nine rows, none absorbed into a wire verdict. **Zero wire ve
 pass; nothing found had both a real gap *and* a small enough fix to belong in PR-036-B's own
 "real caller and a test" bar without also being new design.
 
-**The finding this triage rates as its own most important result**: `launch_managed_agent_run` and
-its three siblings (`apply_managed_agent_terminal_outcome`, `open_project_text_document`,
-`save_project_text_document`) are fully-built, tested audit-writing paths that production never
-calls — a Managed-compatibility agent-run launch produces no durable audit record today. Checked
-directly (read the function body, confirmed it calls `append_required`/`append_observation`
-against the real `AuditStore` and does the real launch) rather than inferred from the name. Recorded
-as the "third category" D4 asks the triage to name if found, since it is neither "no route to a
-user" (RFC-040/044's shape) nor "an error path that never runs" (D3's shape) — it is a capability a
-user reaches constantly, whose audit trail nothing writes.
+**The finding this triage rates as its own most important result, confirmed a defect at review
+354**: `launch_managed_agent_run` and its three siblings (`apply_managed_agent_terminal_outcome`,
+`open_project_text_document`, `save_project_text_document`) are fully-built, tested audit-writing
+paths that production never calls — a Managed-compatibility agent-run launch produces no durable
+audit record today. Checked directly (read the function body, confirmed it calls
+`append_required`/`append_observation` against the real `AuditStore` and does the real launch)
+rather than inferred from the name. The first pass here handed "is this a defect or an unwritten
+scope choice" to whoever authors the recommended RFC; the reviewer answered it directly instead, on
+three independent grounds (the asymmetry against plain-terminal auditing cannot be a choice, a real
+scope choice would be written down somewhere and isn't, and `tekstide-core/README.md` asserted the
+opposite on a published crate). Recorded as the "third category" D4 asks the triage to name if
+found, since it is neither "no route to a user" (RFC-040/044's shape) nor "an error path that never
+runs" (D3's shape) — it is a capability a user reaches constantly, whose audit trail nothing
+writes.
+
+**Required, done immediately rather than deferred to whenever the recommended RFC lands**:
+`crates/tekstide-core/README.md`'s claim that durable audit "currently records … managed AgentRun
+lifecycle" was false in the shipped product (recorded in tests only) — corrected, with the finding
+and its date noted in place of the false claim, per this project's own convention that a false
+statement about a published crate gets fixed the moment it is found.
 
 ### Gate
 

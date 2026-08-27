@@ -67,19 +67,23 @@ table was built) had its own count already drift:
   `crates/tekstide/src/shell.rs:3740`, wired by **RFC-039 PR-039-B** ("real project tabs — switch
   by click or keyboard"), confirmed via `git log -S`. Not an orphan; an omission in the RFC's own
   bookkeeping, corrected here rather than re-triaged.
-- **`transition_change_set_review_state`: still 0/0/0 in production, despite "→ RFC-034."** The
-  RFC assigns this row to RFC-034 and says not to re-decide it. Re-verifying anyway, per D0's own
-  instruction to check every row against the tree: `AppState::transition_change_set_review_state`
-  (the wrapper) has exactly one caller — its own definition delegating to
-  `ProjectSession::transition_change_set_review_state` — and **zero** callers of the wrapper
-  itself anywhere in `crates/tekstide/src`. RFC-034's real, shipped "Mark accepted / Mark
-  rejected" feature (`0.15.0`'s own changelog: *"a note... changes no file, cannot be undone,
-  disappears when you close Tekstide... no audit record is written"*) satisfies the same
-  user-facing need through a **separate, ephemeral, in-memory mechanism**, not by wiring this
-  function. The durable review-state transition this function represents is still exactly as
-  dormant as the day the audit found it. Not re-decided (the RFC is explicit that this is not
-  re-litigated here), but the discrepancy between "assigned" and "wired" is real and worth whoever
-  owns RFC-034's own follow-up seeing.
+- **`transition_change_set_review_state`: wired. This entry was wrong, corrected at review 354.**
+  The original text here concluded "0 production callers" from finding only one internal caller
+  named `app.rs:464`, and stopped without checking whether *that* caller itself had a production
+  caller. It does: the internal caller is `AppState::transition_active_project_change_set_review_state`
+  (`app.rs:452`) — a wrapper RFC-034 added under a **different name** than the core function it
+  calls, not a reuse of the core function's own name — and it is called for real from
+  `record_change_review_decision` (`crates/tekstide/src/shell.rs:8783`), the actual "Mark
+  accepted / Mark rejected" handler. **The count (0 production callers *of the exact core
+  symbol*) was correct; the conclusion drawn from it — "therefore unreached" — was not**, because
+  a differently-named intermediate wrapper is exactly what a bare compiler-warning count cannot
+  see past on its own; it takes one more grep, of the wrapper's own name, which this row skipped.
+  Every other row with an internal-only caller in this table's first pass had that same wrapper
+  independently marked `#[deprecated]` too (`switch_active_project`, `purge_project_transcripts`),
+  so its own production reachability was checked directly rather than assumed — re-verified after
+  this correction was found, and confirmed this was the only row with the gap. RFC-034's assignment
+  stands, now correctly: it *did* wire this function, through a wrapper it built for the purpose,
+  not through a separate ephemeral mechanism as first (wrongly) concluded here.
 
 ## The two that already left the triage (D3) — reconfirmed, not re-decided
 
@@ -166,6 +170,24 @@ the number left blank because none is reserved (unlike the RFC-045 cluster above
 
 ## The finding worth more than any single row: agent-run launches are not durably audited
 
+**Confirmed a defect at review 354, not left as an open question.** The first pass here handed the
+"is this a defect or a written-nowhere scope choice" question to whoever authors the recommended
+RFC. The reviewer answered it directly and the answer is defect, on three independent grounds, none
+of which needed new measurement beyond what this row already found:
+
+1. **The asymmetry cannot be a choice.** This product audits a plain terminal start
+   (`record_plain_terminal_started`). It does not audit launching an AI CLI agent — the action
+   Restricted Mode, workspace trust, and the entire command-approval machinery exist to control.
+2. **A scope choice would be written down.** This project records its deferrals compulsively
+   (this document is itself an instance of that habit). No note anywhere says agent launches are
+   deliberately unaudited.
+3. **The documentation asserted the opposite, on a published crate.** `crates/tekstide-core/README.md`
+   said durable audit "currently records … managed AgentRun lifecycle." False in the shipped
+   product — recorded in tests only. **Corrected as of this response**, not deferred to whenever
+   the recommended RFC below lands, since a false claim about an audit trail on a published crate
+   is exactly the kind of statement this project's own convention says gets fixed the moment it is
+   found, not the moment it is scheduled.
+
 **This is the third category D4 asks to be named if found, and it is more consequential than
 either of the first two.** RFC-040/044 built mechanical answers for "actions a user cannot take."
 Nothing exists yet for "a fully-built, tested audit-writing path that production never calls" —
@@ -188,14 +210,12 @@ that writes no audit record for the launch at all.
 | `save_project_text_document` | 0 / 0 / 1 test-only | `grep -rn '\.save_project_text_document('` |
 
 All four share the same shape: a fully-audited entry point exists, is tested, and is not the one
-production calls. **Verdict: own RFC, strongly recommended, no number reserved.** Not wired here —
-whether a Managed agent run's launch, terminal outcome, and any text document it opens or saves
-*should* be durably audited is a real product/compliance question this triage should surface, not
-answer by quietly wiring four functions into a slice whose own stated risk is "triage becomes a
-rewrite." **The open question to hand to that RFC**: is the missing audit trail for these four
-operations a defect (matching this RFC's own opening argument — two of two dormant capabilities
-anyone looked at turned out to be shipped defects) or a deliberate scope choice nobody wrote down.
-Silence is not currently distinguishable from either.
+production calls. **Verdict: own RFC, no number reserved. Confirmed a defect, not an open
+question** — see the three grounds above. Not wired here regardless: what to record and when
+(`Authorized`, then `Started`/`Failed`, then terminated) is real design, and RFC-013's own
+frozen-family discipline over the audit schema applies to it, so this triage surfaces the defect
+and corrects the one false public claim it made (`tekstide-core/README.md`) rather than quietly
+wiring four functions into a slice whose own stated risk is "triage becomes a rewrite."
 
 **Search shape for the category itself, per D4**: nothing that searches for "does this function
 have a caller" finds this, because the *feature* has a caller (agent runs launch constantly) — it
@@ -210,22 +230,24 @@ built check.
 - **4** rows leave the triage as D3's own defect slice (`recover`, `resume`, `purge_all_records`,
   `purge_project_records`), unchanged from the RFC's own decision.
 - **4** rows are RFC-045-conditioned `keep, documented`, unchanged from the RFC's own D2 decision.
-- **6** rows are **delete**: `add_agent_run`, `add_transcript`, `add_audit_event`, `add_approval`,
-  `shutdown` (approval channel), and the `record_terminal_transcript_write_summary` /
-  `record_transcript_write_summary` pair counted as one row — **7 functions total**, all confirmed
-  superseded by a real, different, already-wired production path, none deleting a capability
-  nothing else provides.
+- **7** rows are **delete**: `add_agent_run`, `add_transcript`, `add_audit_event`, `add_approval`,
+  `shutdown` (approval channel), `accept_proposal`, and the
+  `record_terminal_transcript_write_summary` / `record_transcript_write_summary` pair counted as
+  one row — **9 functions total**, all confirmed superseded by a real, different, already-wired
+  production path, none deleting a capability nothing else provides. Two of the nine
+  (`shutdown`, `accept_proposal`) are not new findings — the original audit already called both
+  "not a capability gap," and re-verification found nothing to overturn that; the other seven are.
 - **9** rows are **own RFC**: `purge_agent_run_transcripts`, `set_viewport`, `set_git_summary`,
   `set_warning_state`, `decide_with_edited_argv`, and the four-function managed-agent audit-trail
   cluster (`launch_managed_agent_run`, `apply_managed_agent_terminal_outcome`,
   `open_project_text_document`, `save_project_text_document`) — the last four sharing one
-  recommended RFC, not four separate ones.
-- **`accept_proposal`** and **`shutdown`** (approval channel) are reconfirmed **not capability
-  gaps** at all, matching the original audit.
+  recommended RFC, not four separate ones, and confirmed a defect rather than left as an open
+  question (see above).
 - **`set_runtime_summary`** is reconfirmed **not a real finding** — test-only by construction.
-- Four D0 corrections recorded above (`request_terminate`'s true count, `switch_active_project`'s
-  missing assignment, `shutdown`'s ambiguous count, `transition_change_set_review_state`'s real
-  status despite its RFC-034 assignment).
+- **Four D0 corrections**, one of them wrong in its first draft and fixed at review 354:
+  `request_terminate`'s true count (1, not 3), `switch_active_project`'s missing assignment,
+  `shutdown`'s ambiguous count, and `transition_change_set_review_state` — **wired**, not
+  unwired as first concluded; see the corrected entry above for what the mistake actually was.
 
 No wire verdicts. Every candidate this triage found undesigned went to "own RFC" rather than being
 wired here, matching the RFC's own stated risk (triage becomes a rewrite) and this slice's own
