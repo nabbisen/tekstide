@@ -88,44 +88,47 @@ pub struct AuditActionResult<T> {
 /// unrepresentable. `Cancelled` never has a phase-one call at all -- no
 /// operation began, so there is nothing to authorize.
 ///
-/// **`Closed::terminal_process_groups_confirmed_empty`, renamed from
-/// `fully_confirmed` (`safe-close-confirmation-honesty.md`): the old
-/// name claimed more than any of its possible values can support.** It
-/// is `false` when any terminated terminal's own outcome was
-/// `OrphanedUnknown`/`Failed` (see `record_plain_terminal_terminated`'s
-/// own `NotRequired` branch for that same ambiguity), or when a
-/// project-tracked terminal had no live pane, or `request_terminate`
-/// itself errored or produced no `Terminated` event.
+/// **`Closed::terminal_session_confirmed_empty`, renamed again from
+/// `terminal_process_groups_confirmed_empty`** (itself renamed from
+/// `fully_confirmed`, `safe-close-confirmation-honesty.md`) **by RFC-043
+/// PR-043-C, and not only renamed this time -- rewired to a different,
+/// more honest source of truth.** The old field was *computed*, in
+/// `shell.rs`, by matching `Terminated`'s own outcome variant
+/// (`Exited`/`TerminatedBySignal`/`KilledAfterTimeout` counted as
+/// confirmed, `OrphanedUnknown`/`Failed` did not) -- an inference from a
+/// *different* fact than the one this field claims. This value now
+/// comes directly from [`crate::runtime::terminal::TerminalRuntimeEvent::SessionConfirmedEmpty`]'s
+/// own `confirmed` field instead: RFC-043 D3's real, independent
+/// re-enumeration of the *whole session*, taken immediately before
+/// `request_terminate` returns, not derived from which signal ended up
+/// terminating the leader.
 ///
-/// **It is `true` for `Exited`/`TerminatedBySignal`/`KilledAfterTimeout`
-/// alike -- deliberately not narrowed to exclude `KilledAfterTimeout`.**
-/// All three outcomes come from the identical observation:
-/// `request_terminate`'s own polling confirmed the *one process group it
-/// directly signaled* had become empty. `KilledAfterTimeout` is not a
-/// weaker, give-up kind of confirmation -- `request_terminate` only ever
-/// produces it when that polling loop *did* observe the group empty
-/// (the genuinely-gave-up case is `OrphanedUnknown`, already excluded
-/// above); narrowing to exclude it would have fixed nothing but the one
-/// scenario response 319 happened to reproduce, while leaving the
-/// identical gap live under `Exited`/`TerminatedBySignal` -- which is
-/// the more common case, not a rarer one.
+/// **This is a strictly stronger claim than the old field made, not
+/// merely a renamed version of the same one.** The old inference could
+/// not see a backgrounded job (`cmd &`) that survived in its own
+/// process group *inside* the same session -- `request_terminate` used
+/// to signal only the leader's own group, so `Exited`/`TerminatedBySignal`/
+/// `KilledAfterTimeout` on the leader said nothing about a sibling job.
+/// RFC-043 D1/D2 changed what gets signaled and enumerated to the whole
+/// **session**, and D3's `SessionConfirmedEmpty` is a real re-scan of
+/// that same session -- a surviving backgrounded job is a session member
+/// step 4 would find, making `confirmed` correctly `false` in exactly
+/// the case the old field's name (and every rename before this one)
+/// warned readers not to assume it covered.
 ///
-/// **What `true` does not mean, for any of the three:** that every
-/// process this terminal ever launched is gone. A shell with job
-/// control puts a backgrounded job (`cmd &`) in its *own* process
-/// group, separate from the shell's -- `request_terminate` signals and
-/// polls only the shell's own group, so a backgrounded descendant can
-/// (and, per response 319's real reproduction, does) outlive a
-/// termination this field reports as confirmed. Watching sibling
-/// process groups a terminal may have spawned is real, separate scope
-/// (`test-process-leak.md`'s own third, disclosed, unaddressed cause)
-/// -- this rename does not close that gap, it stops the field's own
-/// name from implying it is already closed.
+/// **What remains outside the claim, by design, is now only D2's own
+/// opt-out:** a process that left the session entirely (`nohup`,
+/// `disown`, `setsid`) is invisible to this session's own enumeration on
+/// purpose -- that is the user's deliberate detachment, not a gap this
+/// field's honesty is compromised by. `false` also still covers the
+/// mundane cases the old field did: a project-tracked terminal with no
+/// live pane, or `request_terminate` erroring before emitting any
+/// events at all.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SafeCloseDecision {
     Closed {
         operation_id: AuditOperationId,
-        terminal_process_groups_confirmed_empty: bool,
+        terminal_session_confirmed_empty: bool,
     },
     Cancelled,
 }
@@ -909,9 +912,9 @@ fn safe_close_decision_record(
     let (outcome, operation_id) = match decision {
         SafeCloseDecision::Closed {
             operation_id,
-            terminal_process_groups_confirmed_empty,
+            terminal_session_confirmed_empty,
         } => (
-            if terminal_process_groups_confirmed_empty {
+            if terminal_session_confirmed_empty {
                 AuditOutcome::Applied
             } else {
                 AuditOutcome::Failed

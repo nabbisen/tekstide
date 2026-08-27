@@ -3892,7 +3892,7 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
             .record_safe_close_authorized(project_id.clone(), operation_id.clone());
     }
 
-    let terminal_process_groups_confirmed_empty =
+    let terminal_session_confirmed_empty =
         terminate_project_live_work(state, &project_id, &mut audit_store, &mut audit_health);
 
     let assessment = state.app_shell.state_mut().close_project(&project_id);
@@ -3907,8 +3907,7 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
                 project_id.clone(),
                 tekstide_core::audit::SafeCloseDecision::Closed {
                     operation_id,
-                    terminal_process_groups_confirmed_empty: terminal_process_groups_confirmed_empty
-                        && closed,
+                    terminal_session_confirmed_empty: terminal_session_confirmed_empty && closed,
                 },
             );
     }
@@ -3925,6 +3924,34 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
     // of the assessment, which §6 explicitly forbids.
 }
 
+/// RFC-043 PR-043-C: the one place `terminate_project_live_work` reads
+/// a `request_terminate` call's own events, factored out so it is
+/// checkable directly against a synthetic `Vec<TerminalRuntimeEvent>`
+/// rather than only through a real, spawned process. Returns `outcome`
+/// (`None` if `request_terminate` produced no `Terminated` event at
+/// all) and `confirmed`, read from `SessionConfirmedEmpty`'s own field
+/// -- **not** derived from `outcome`'s variant, which is exactly the
+/// bug this factoring exists to make impossible to reintroduce by
+/// accident. `confirmed` defaults to `false`, never a hopeful `true`,
+/// if `SessionConfirmedEmpty` is somehow absent (D3's own honesty rule,
+/// applied at this layer too); in practice `request_terminate` always
+/// pushes it immediately before `Terminated` on every return path, so
+/// this default is a floor, not a case this crate expects to hit.
+fn terminated_outcome_and_session_confirmation(
+    events: Vec<TerminalRuntimeEvent>,
+) -> (Option<TerminationOutcome>, bool) {
+    let mut outcome = None;
+    let mut confirmed = false;
+    for event in events {
+        match event {
+            TerminalRuntimeEvent::Terminated { outcome: o, .. } => outcome = Some(o),
+            TerminalRuntimeEvent::SessionConfirmedEmpty { confirmed: c, .. } => confirmed = c,
+            _ => {}
+        }
+    }
+    (outcome, confirmed)
+}
+
 /// §6's own step 2, generalized to every terminal `assess_project_close`
 /// already counts as live -- both a plain terminal
 /// (`terminal_status_is_active` directly) and one an agent run owns (an
@@ -3933,17 +3960,25 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
 /// `live_terminal_ids` is a snapshot taken once, before any mutation --
 /// the same reason every other multi-step orchestration in this module
 /// reads its work list up front rather than re-deriving it mid-loop.
-/// Returns whether every terminated terminal's own **directly signaled
-/// process group** was confirmed empty, not `OrphanedUnknown`/`Failed`
-/// -- the same ambiguity `record_plain_terminal_terminated`'s own
-/// `NotRequired` branch already refuses to guess a reason code for,
-/// threaded up so the caller can record an honest `Applied` vs.
-/// `Failed`. See `SafeCloseDecision::Closed`'s own doc for what this
-/// return value does **not** claim: a backgrounded job the shell
-/// launched sits in its own, separate process group, so this can be
-/// `true` while such a job is still alive -- not a gap this function
-/// closes, a gap its own name (and its caller's field name) must not
-/// hide.
+///
+/// **RFC-043 PR-043-C: returns the real, session-wide observation now,
+/// not an inference from the leader's own outcome.** Before this slice,
+/// this returned whether every terminated terminal's own outcome variant
+/// (`Exited`/`TerminatedBySignal`/`KilledAfterTimeout`, not
+/// `OrphanedUnknown`/`Failed`) looked like confirmation -- a fact about
+/// the *leader's own process group*, which said nothing about a
+/// backgrounded job (`cmd &`) surviving in a sibling group inside the
+/// same session. `request_terminate` now signals and re-enumerates the
+/// whole *session* (RFC-043 D1/D2), and
+/// [`TerminalRuntimeEvent::SessionConfirmedEmpty`]'s own `confirmed`
+/// field is D3's real, independent re-scan of it, taken immediately
+/// before `request_terminate` returns -- this function reads that field
+/// directly (`terminated_outcome_and_session_confirmation`) instead of
+/// re-deriving an approximation of it from `outcome`. See
+/// `SafeCloseDecision::Closed`'s own doc for what still sits outside the
+/// claim: only D2's own opt-out now (`nohup`/`disown`/`setsid` leaving
+/// the session entirely), not a surviving in-session backgrounded job
+/// any more.
 fn terminate_project_live_work(
     state: &mut State,
     project_id: &tekstide_core::project::ProjectId,
@@ -3960,7 +3995,7 @@ fn terminate_project_live_work(
         .map(|terminal| terminal.id.clone())
         .collect();
 
-    let mut terminal_process_groups_confirmed_empty = true;
+    let mut terminal_session_confirmed_empty = true;
     for terminal_id in live_terminal_ids {
         let Some(pane_index) = state
             .terminal_panes
@@ -3971,7 +4006,7 @@ fn terminate_project_live_work(
             // active -- cannot terminate a process this crate holds no
             // handle to; not confirmed, but not fatal to the rest of the
             // close either.
-            terminal_process_groups_confirmed_empty = false;
+            terminal_session_confirmed_empty = false;
             continue;
         };
         let mut pane = state.terminal_panes.remove(pane_index);
@@ -3980,43 +4015,19 @@ fn terminate_project_live_work(
             source: TerminationRequestSource::ProjectClose,
             reason: BoundedRuntimeSummary::new("project closed with live work"),
         };
-        let outcome = match pane.request_terminate(
+        let (outcome, session_confirmed) = match pane.request_terminate(
             request,
             PROJECT_CLOSE_SIGTERM_TIMEOUT,
             PROJECT_CLOSE_SIGKILL_TIMEOUT,
         ) {
-            Ok(events) => events.into_iter().rev().find_map(|event| match event {
-                TerminalRuntimeEvent::Terminated { outcome, .. } => Some(outcome),
-                _ => None,
-            }),
-            Err(_) => None,
+            Ok(events) => terminated_outcome_and_session_confirmation(events),
+            Err(_) => (None, false),
         };
         let Some(outcome) = outcome else {
-            terminal_process_groups_confirmed_empty = false;
+            terminal_session_confirmed_empty = false;
             continue;
         };
-
-        // `safe-close-confirmation-honesty.md`'s own question, answered:
-        // `KilledAfterTimeout` is confirmation of the same kind and
-        // strength as `Exited`/`TerminatedBySignal`, not a weaker one --
-        // `request_terminate` only ever produces it when its own polling
-        // *observed* the signaled process group become empty (the
-        // genuinely-gave-up case is `OrphanedUnknown`, excluded below).
-        // Narrowing this match to drop `KilledAfterTimeout` would not
-        // have closed the real gap (a backgrounded job survives in a
-        // *different* process group regardless of which of these three
-        // outcomes the shell's own group produced) -- it would only have
-        // made the one scenario response 319 happened to reproduce look
-        // fixed while leaving the identical, more common case
-        // (`Exited`/`TerminatedBySignal`) exactly as it was. The fix
-        // here is the caller's field name, not this predicate.
-        let confirmed = matches!(
-            outcome,
-            TerminationOutcome::Exited { .. }
-                | TerminationOutcome::TerminatedBySignal { .. }
-                | TerminationOutcome::KilledAfterTimeout { .. }
-        );
-        terminal_process_groups_confirmed_empty &= confirmed;
+        terminal_session_confirmed_empty &= session_confirmed;
 
         let owning_agent_run_id = state
             .app_shell
@@ -4058,7 +4069,7 @@ fn terminate_project_live_work(
         }
     }
 
-    terminal_process_groups_confirmed_empty
+    terminal_session_confirmed_empty
 }
 
 /// After a close actually removed the project: if no project is active

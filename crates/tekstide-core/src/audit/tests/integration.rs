@@ -1269,7 +1269,7 @@ fn purge_write_failure_degrades_health_but_the_deletion_already_happened() {
 /// `safe_close_decision`'s first producer pair, the confirmed-and-closed
 /// path -- `record_safe_close_authorized` (phase one) then
 /// `record_safe_close_decision` (phase two,
-/// `terminal_process_groups_confirmed_empty: true` since every
+/// `terminal_session_confirmed_empty: true` since every
 /// terminated terminal reported a real exit, not an orphan)
 /// maps to `Applied`, carrying the same `operation_id` phase one
 /// authorized. `AuditStore`'s own schema enforces this pairing: a phase
@@ -1294,7 +1294,7 @@ fn safe_close_decision_persists_an_applied_record_with_its_operation_id() {
         project_id.clone(),
         SafeCloseDecision::Closed {
             operation_id: operation_id.clone(),
-            terminal_process_groups_confirmed_empty: true,
+            terminal_session_confirmed_empty: true,
         },
     );
 
@@ -1343,7 +1343,7 @@ fn safe_close_decision_persists_a_failed_record_when_termination_was_not_confirm
         project_id,
         SafeCloseDecision::Closed {
             operation_id,
-            terminal_process_groups_confirmed_empty: false,
+            terminal_session_confirmed_empty: false,
         },
     );
 
@@ -1376,7 +1376,7 @@ fn missing_authorization_rejects_a_bare_closed_record() {
         project_id,
         SafeCloseDecision::Closed {
             operation_id,
-            terminal_process_groups_confirmed_empty: true,
+            terminal_session_confirmed_empty: true,
         },
     );
 

@@ -13,7 +13,8 @@ use super::{
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
     open_real_audit_store, path_field_error_text, poll_approval_channels,
     project_close_dialog_body, project_close_dialog_path, project_close_dialog_reasons_line,
-    sidebar_label, status_bar_summary, terminal_paste_refusal_text, test_audit_state_dir,
+    sidebar_label, status_bar_summary, terminal_paste_refusal_text,
+    terminated_outcome_and_session_confirmation, test_audit_state_dir,
     transcript_local_data_summary_for, trust_grant_dialog_body, trusted_ui_state,
     verify_restored_trust_against, zone_style,
 };
@@ -9940,6 +9941,81 @@ fn project_close_dialog_reasons_line_states_the_real_counts() {
     assert!(
         !line.contains("unsaved work"),
         "must never fall back to vague warning text: {line:?}"
+    );
+}
+
+fn terminated_and_confirmed_events(
+    outcome: tekstide_core::runtime::terminal::TerminationOutcome,
+    confirmed: bool,
+) -> Vec<tekstide_core::runtime::terminal::TerminalRuntimeEvent> {
+    let handle = tekstide_core::runtime::terminal::TerminalRuntimeHandle::new(
+        tekstide_core::domain::TerminalId::new_uuid(),
+        tekstide_core::project::ProjectId::new_uuid(),
+    );
+    vec![
+        tekstide_core::runtime::terminal::TerminalRuntimeEvent::SessionConfirmedEmpty {
+            handle: handle.clone(),
+            confirmed,
+        },
+        tekstide_core::runtime::terminal::TerminalRuntimeEvent::Terminated { handle, outcome },
+    ]
+}
+
+/// RFC-043 PR-043-C's own required test: "the audit field is `false`
+/// when step 4 could not confirm. A test that only proves the `true`
+/// case proves the easy half." The half that was previously impossible
+/// to observe: before this slice, `confirmed` was *inferred* from
+/// `outcome`'s own variant, so a clean `Exited` outcome always read as
+/// confirmed regardless of what step 4 actually observed. This
+/// constructs exactly that combination -- a clean exit, paired with a
+/// real `SessionConfirmedEmpty { confirmed: false }` -- and proves the
+/// rewired extraction reports `false`, not the `true` the old,
+/// outcome-based inference would have.
+#[test]
+fn terminated_outcome_and_session_confirmation_does_not_infer_true_from_a_clean_exit() {
+    let events = terminated_and_confirmed_events(
+        tekstide_core::runtime::terminal::TerminationOutcome::Exited { exit_status: 0 },
+        false,
+    );
+
+    let (outcome, confirmed) = terminated_outcome_and_session_confirmation(events);
+
+    assert_eq!(
+        outcome,
+        Some(tekstide_core::runtime::terminal::TerminationOutcome::Exited { exit_status: 0 })
+    );
+    assert!(
+        !confirmed,
+        "a clean Exited outcome must not make this true when SessionConfirmedEmpty itself said \
+         false -- that is exactly the outcome-variant inference this rewiring replaces"
+    );
+}
+
+/// The other, previously-impossible-to-observe half: before this slice,
+/// `OrphanedUnknown` always read as *not* confirmed, regardless of
+/// whether step 4's own re-enumeration genuinely found the session
+/// empty. Proves the rewired extraction reports the real, independent
+/// `true` step 4 observed, rather than the `false` the old inference
+/// would always have produced for this outcome.
+#[test]
+fn terminated_outcome_and_session_confirmation_does_not_infer_false_from_an_orphaned_outcome() {
+    let events = terminated_and_confirmed_events(
+        tekstide_core::runtime::terminal::TerminationOutcome::OrphanedUnknown {
+            summary: tekstide_core::runtime::terminal::BoundedRuntimeSummary::new("test fixture"),
+        },
+        true,
+    );
+
+    let (outcome, confirmed) = terminated_outcome_and_session_confirmation(events);
+
+    assert!(matches!(
+        outcome,
+        Some(tekstide_core::runtime::terminal::TerminationOutcome::OrphanedUnknown { .. })
+    ));
+    assert!(
+        confirmed,
+        "an OrphanedUnknown outcome must not make this false when SessionConfirmedEmpty itself \
+         said true -- the old outcome-variant inference always reported false here"
     );
 }
 
