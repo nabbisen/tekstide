@@ -1,7 +1,10 @@
 # RFC-044: Surface-Local Keyboard Affordances
 
-Status: **Proposed 2026-08-26.** Written after RFC-034 shipped a control reachable by `a`/`r` that
-nothing on screen names, and the reviewer found the same gap on two other surfaces.
+Status: **Accepted by the human owner 2026-08-27.** Proposed 2026-08-26 after RFC-034 shipped a
+control reachable by `a`/`r` that nothing on screen names, and the reviewer found the same gap on
+two other surfaces. **D1–D4 were decided by the architect on acceptance** — see "Decided on
+acceptance" at the end, which also records what `0.15.0`'s release gate found the day after this
+RFC was written, and how it changed the scope.
 Target milestone: **M12**
 Date: 2026-08-26
 
@@ -112,3 +115,99 @@ first and describe it as the second.
 
 **D1–D4 are decided by the architect on acceptance and recorded in this file before implementation
 begins** — the rule RFC-041, RFC-042, RFC-034 and RFC-043 were all accepted under.
+
+---
+
+## Decided on acceptance, 2026-08-27
+
+### What changed between proposal and acceptance
+
+`0.15.0`'s release gate, trying to exercise the close path by keyboard, found that
+**`CloseProjectTabPressed` has exactly one emitter** — the `×` button's `.on_press` at
+`shell.rs:6084`. The tab strip's `Enter` switches projects or returns to the board. `FocusZone`
+has three variants (`MainArea`/`Sidebar`/`TabStrip`), so `Tab` cycles *zones*, not widgets, and
+cannot land on a button. **A keyboard-only user cannot close a project at all.**
+
+That is a different defect from the one this RFC was written about, and a worse one:
+
+- **Discoverability** — a key exists, nothing names it. The user can act if they guess.
+- **Access** — no key exists. The user cannot act.
+
+Both are in scope, and the second goes first.
+
+### The structural finding, which decides D1 and D3 together
+
+`keyboard_help.rs` already has the shape this RFC needs, pointed one way only.
+`control_coverage(action: NavigationAction) -> Option<ControlCoverage>` is an exhaustive match
+asking **"how does a *mouse* reach this?"** — RFC-040's direction. Its `ControlCoverage` enum can
+say `VisibleControl` or `KeyboardOnly { reason }`.
+
+**It cannot express `MouseOnly`.** The mirror does not exist, so the gap was not merely unnoticed —
+it was *inexpressible*.
+
+And its domain is `NavigationAction`: the fourteen global, `Ctrl`-prefixed navigations. **Closing a
+project is not a `NavigationAction`**, so the exhaustive match that was supposed to guarantee
+affordance coverage could not see the control in either direction. Neither could anything else.
+
+### D1 — a registry, keyed by surface, over a **wider domain than `NavigationAction`**
+
+Yes to a registry. The objection I raised — `Enter` means six different things on purpose —
+dissolves once entries are keyed by **(surface, key)** rather than key alone. Six different
+meanings become six different entries, which is correct; they *are* different actions.
+
+**Do not put surface-local keys into `KeybindingPolicy`.** `matching_global_action` compares a
+rendered binding string against `default_binding`, so a bare `Enter` there would become a global
+action and shadow every surface. Separate registry, deliberately, and the reason recorded at the
+type.
+
+**The domain is a surface action** — something a user can do on a surface — **not a
+`NavigationAction`.** That widening is the substance of D1. A registry over the old domain would
+have been unable to represent the very control that prompted this decision.
+
+### D2 — the Help modal, grouped by surface. **Not a key hint on every label.**
+
+A keyboard user's need on first contact is to learn that keys exist and where to find them, not to
+read a key on every button.
+
+- **Help gains a surface-grouped section**, and `--help` gains the same grouping. `Ctrl+Alt+K` and
+  the `?` button are already advertised, so that entry point is discoverable today.
+- **Contextual filtering to the active surface is optional**, not required. Findable beats clever.
+
+**Explicitly rejected: a key hint on every control label.** RFC-034's own security document had to
+confront that `en.ftl` already carries 28 `change-review-*` strings and that a surface where every
+line is a caveat is one where none is read. Turning "Mark accepted" into "Mark accepted (a)" across
+every surface is that same failure wearing a different coat.
+
+### D3 — add the mirror of `control_coverage`, exhaustive over the widened domain
+
+`control_coverage` asks how a mouse reaches an action. Add the question nobody was asking:
+**how does the keyboard reach it?** — exhaustive, so a surface action added without deciding its
+keyboard route **fails to compile**.
+
+- `ControlCoverage` gains its missing `MouseOnly { reason }` arm, so the state that was
+  inexpressible becomes statable — and therefore countable.
+- A `MouseOnly` entry must carry a reason, exactly as `KeyboardOnly` already does. `PasteIntoTerminal`
+  is `KeyboardOnly` with a real justification; the mirror deserves the same bar rather than
+  becoming a place to park gaps.
+
+**A source scan is not acceptable as the enforcement.** RFC-042's first guard was one, and I
+defeated it by respelling `scrollable(column(lines)` as `scrollable(column![`. If dispatching
+handlers through the registry turns out to be impractical, **report why in writing** rather than
+falling back to a scan without saying so.
+
+### D4 — three slices, inventory first
+
+Ordered as RFC-043 was, for the reason that worked there: make the problem enumerable before
+fixing it, and let the enumeration be red.
+
+1. **Widen the domain and produce the inventory.** Every surface action, with its keyboard route
+   or its absence. Expect `MouseOnly` entries; expect the slice to end with a list nobody has
+   today. PR-043-A's guard found four leaking tests and bounded everything after it — the same
+   move.
+2. **Close the access gaps.** Mouse-only controls get keys, closing a project first, since that
+   one is proven.
+3. **Advertise**, per D2.
+
+**Scope is every surface, not only those where a key is the sole route.** I offered that narrowing
+in the proposal and am withdrawing it: the release gate found the close control by accident, and a
+scope that depends on someone noticing is the thing this RFC exists to replace.
