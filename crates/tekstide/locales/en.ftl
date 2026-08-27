@@ -819,6 +819,11 @@ project-close-dialog-body = { $path }
 # catalog-driven text, the same disclosed limitation
 # `surface::board`'s own `trust_label`/`availability_label` already have.
 project-close-dialog-live-work-prefix = This will end:
+# RFC-043 D1 + RFC-034 D4's rule: said before the click, while the
+# controls are still live, not only after as a changed status line --
+# see `project_close_dialog_names_running_processes`'s own doc for when
+# this line shows at all.
+project-close-dialog-running-process-detail = Anything started from these terminals ends too, including a backgrounded job.
 project-close-dialog-close = Close
 project-close-dialog-cancel = Cancel
 project-close-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.

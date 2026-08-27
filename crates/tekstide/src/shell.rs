@@ -9593,6 +9593,20 @@ fn project_close_dialog_reasons_line(catalog: &Catalog, modal: &ProjectCloseModa
     )
 }
 
+/// RFC-043 D1 + RFC-034 D4's rule ("say it before the click, while the
+/// control is live," not only after in a confirmation modal or as an
+/// explanation for withdrawn controls): whether this close names at
+/// least one live process as a reason to confirm -- the condition for
+/// showing [`project_close_dialog_view`]'s extra disclosure line, since
+/// a close with only, say, a dirty file has nothing this line would be
+/// true about.
+fn project_close_dialog_names_running_processes(modal: &ProjectCloseModal) -> bool {
+    modal
+        .reasons
+        .iter()
+        .any(|reason| reason.code == tekstide_core::close::CloseReasonCode::RunningProcess)
+}
+
 fn project_close_dialog_view<'a>(
     state: &'a State,
     modal: &'a ProjectCloseModal,
@@ -9611,7 +9625,7 @@ fn project_close_dialog_view<'a>(
         .on_press(on_press)
     };
 
-    let lines: Vec<Element<'_, Message>> = vec![
+    let mut lines: Vec<Element<'_, Message>> = vec![
         text(state.catalog.get("project-close-dialog-title"))
             .size(state.theme.font_size_heading())
             .into(),
@@ -9621,6 +9635,23 @@ fn project_close_dialog_view<'a>(
         text(project_close_dialog_reasons_line(&state.catalog, modal))
             .size(state.theme.font_size_body())
             .into(),
+    ];
+    // RFC-043 D1 + RFC-034 D4: named here, before the `Close` button
+    // below is ever pressed, not only after in a toast or a changed
+    // status line -- see `project_close_dialog_names_running_processes`'s
+    // own doc for why this is conditional rather than always shown.
+    if project_close_dialog_names_running_processes(modal) {
+        lines.push(
+            text(
+                state
+                    .catalog
+                    .get("project-close-dialog-running-process-detail"),
+            )
+            .size(state.theme.font_size_body())
+            .into(),
+        );
+    }
+    lines.extend([
         button_line(
             ProjectCloseButton::Close,
             "project-close-dialog-close",
@@ -9636,7 +9667,7 @@ fn project_close_dialog_view<'a>(
         text(state.catalog.get("project-close-dialog-hint"))
             .size(state.theme.font_size_status())
             .into(),
-    ];
+    ]);
 
     modal_dialog_box(state, column(lines).spacing(10).into())
 }

@@ -12,11 +12,11 @@ use super::{
     attempt_agent_run_launch_with_profile_state_root_and_capture, content_within_bound,
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
     open_real_audit_store, path_field_error_text, poll_approval_channels,
-    project_close_dialog_body, project_close_dialog_path, project_close_dialog_reasons_line,
-    sidebar_label, status_bar_summary, terminal_paste_refusal_text,
-    terminated_outcome_and_session_confirmation, test_audit_state_dir,
-    transcript_local_data_summary_for, trust_grant_dialog_body, trusted_ui_state,
-    verify_restored_trust_against, zone_style,
+    project_close_dialog_body, project_close_dialog_names_running_processes,
+    project_close_dialog_path, project_close_dialog_reasons_line, sidebar_label,
+    status_bar_summary, terminal_paste_refusal_text, terminated_outcome_and_session_confirmation,
+    test_audit_state_dir, transcript_local_data_summary_for, trust_grant_dialog_body,
+    trusted_ui_state, verify_restored_trust_against, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -9942,6 +9942,39 @@ fn project_close_dialog_reasons_line_states_the_real_counts() {
         !line.contains("unsaved work"),
         "must never fall back to vague warning text: {line:?}"
     );
+}
+
+/// RFC-043 D1 + RFC-034 D4's rule: a close that names a running process
+/// as a reason to confirm must also say, before the click, that
+/// anything that process started ends too.
+#[test]
+fn project_close_dialog_names_running_processes_is_true_when_a_process_reason_is_present() {
+    let modal = project_close_modal_fixture(
+        vec![tekstide_core::close::CloseReason {
+            code: tekstide_core::close::CloseReasonCode::RunningProcess,
+            message: "1 running process".to_owned(),
+        }],
+        "/home/user/work/project",
+    );
+
+    assert!(project_close_dialog_names_running_processes(&modal));
+}
+
+/// The negative control: a close whose only reason is a dirty file has
+/// no running process to disclose anything about, so this must stay
+/// `false` -- not shown unconditionally regardless of what the real
+/// reasons are.
+#[test]
+fn project_close_dialog_names_running_processes_is_false_without_a_process_reason() {
+    let modal = project_close_modal_fixture(
+        vec![tekstide_core::close::CloseReason {
+            code: tekstide_core::close::CloseReasonCode::DirtyFile,
+            message: "1 dirty file".to_owned(),
+        }],
+        "/home/user/work/project",
+    );
+
+    assert!(!project_close_dialog_names_running_processes(&modal));
 }
 
 fn terminated_and_confirmed_events(
