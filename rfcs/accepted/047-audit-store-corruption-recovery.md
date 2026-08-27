@@ -1,6 +1,6 @@
 # RFC-047: Audit Store Corruption Recovery
 
-Status: **Proposed 2026-08-28.** Reserved by RFC-036's own triage (PR-036-C), which reproduced the
+Status: **Accepted by the human owner 2026-08-28.** **D1–D4 decided by the architect on acceptance** — see "Decided on acceptance" at the end, which also records a fourth built-and-unconnected layer found while deciding. Proposed the same day; reserved by RFC-036's own triage (PR-036-C), which reproduced the
 defect against the release binary rather than reasoning about it, and recommended an RFC rather
 than a fix.
 Target milestone: **M12**
@@ -116,3 +116,88 @@ refusal a user cannot understand or clear is its own defect.
 
 **D1–D4 are decided by the architect on acceptance and recorded in this file before implementation
 begins**, the rule RFC-041 onward have been accepted under.
+
+---
+
+## Decided on acceptance, 2026-08-28
+
+Two facts checked while deciding changed two of the four answers.
+
+### A fourth layer, found while deciding D2
+
+`AuditEventFamily::AuditStoreRecovery` exists, and `recovery_record()` builds a `Completed`
+outcome for it. **The way to tell a user that recovery happened is already written**, and — like
+`recover`, like `resume`, like `AuditHealth` — nothing calls it.
+
+So the honest version of this feature is not mostly new code. It is four existing pieces, none
+connected to anything.
+
+### D1 — resume the safe case, and say so in the record that already exists for it
+
+`AuditStoreErrorReason::RecoveryIncomplete` means the application was already inside a known, safe
+recovery when it stopped. **Call `resume()` once per session at that branch.** Its precondition (no
+live connection) is satisfied there by construction.
+
+**Not silently.** Write the `AuditStoreRecovery` record into the store that resume just made
+usable. The family is frozen and already designed for it; this is the one case in this RFC where
+disclosure costs nothing, because the mechanism and the storage are both already there.
+
+### D2 — auto-recover, because `recover()` quarantines rather than deletes
+
+The proposal called this *"discarding a user's audit history"* and treated it as the hard decision.
+**Checked: `recover()` is `fs::rename`.** It moves the unreadable database aside and starts a fresh
+one. Nothing is destroyed.
+
+That changes the answer. "Discard the user's history without asking" would be indefensible;
+**"set the unreadable file aside, start a working store, and say where the old one went" is not the
+same act** and does not need a modal to justify it.
+
+So: **recover automatically, and tell the user the path of the quarantined file.** A dialog on
+startup, before any project is open, asking a question whose only sensible answer is "yes, keep
+working" would be ceremony — and this project has a standing objection to controls that imply a
+choice they do not really offer.
+
+**The disclosure is the condition, not the courtesy.** If the quarantined path is not surfaced,
+this decision reverts to being indefensible, because a user then has a working store and no way to
+know their previous records exist on disk under a name they were never told.
+
+### D3 — `AuditHealth` gets its first reader, and it shows only when degraded
+
+Fourteen constructions, no readers, not stored on `State`. **Store one on `State`** so failures
+accumulate across a session, and read it.
+
+- **On screen when, and only when, degraded.** The project board already carries a runtime summary
+  ("Calm", "9 blocked automations"); a degraded-audit line belongs there. **Absent when healthy** —
+  RFC-034's §4 disclosure-density problem is real, and a permanent "audit: fine" line is how a
+  surface becomes unreadable.
+- **Plus something a technical user can find** — the durable record from D1/D2 covers the recovery
+  cases; a failure that recovery cannot fix must still leave a trace that is not the screen alone.
+
+### D4 — do **not** refuse. Disclose at the point of the action.
+
+The proposal asked whether a working audit store should be a precondition for the actions it
+audits, and pointed at RFC-004's Restricted Mode as precedent for refusing.
+
+**The precedent does not transfer, and the distinction is the decision:**
+
+> **Restricted Mode refuses actions whose *danger* it cannot bound. A broken audit store does not
+> make an agent run more dangerous — it makes it unrecorded.**
+
+Refusing would trade a real capability for no reduction in risk. Worse, a user cannot repair a
+corrupt store from inside the application, so a refusal would be one they could not clear — the
+risk this RFC's own text names.
+
+**Instead: the actions that would have been recorded say so at the point of the click.** Launching
+an agent run and granting workspace trust name, in their own confirmation, that this action will
+not be recorded while the audit store is degraded.
+
+That is this project's consistent answer whenever it cannot guarantee something: the content
+preview says "not a diff"; the close confirmation names what ends; a review decision says it does
+not survive the session. **Say it before the click, and let the person decide** — the rule RFC-034
+D4 established for one-way controls, applied to an unrecorded one.
+
+### What this RFC must not become
+
+Connecting `resume()` and stopping. D1 and D3's cheap half are close to free and will feel like
+completion. **D4 is the reason this is an RFC**, and it is the part with no code in `tekstide-core`
+waiting to be called.
