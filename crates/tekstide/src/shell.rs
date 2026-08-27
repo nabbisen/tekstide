@@ -2777,24 +2777,122 @@ fn record_restricted_mode_blocked_if_applicable(
 /// defaults to) does not reject launch when unavailable -- only
 /// `RequiredLocalBounded` does, and this slice does not ask for that.
 ///
-/// audit-store-test-isolation handoff: this call used to be described as
-/// "the same resolution `open_real_audit_store` already uses." That
-/// stopped being true the moment that function's own `#[cfg(test)]`
-/// branch stopped compiling a path to `linux_default()` at all -- this
-/// function still calls it unconditionally, test builds included, so it
-/// is now the **last** production consumer of the real state root that a
-/// test can still reach. That is why the `transcripts/`/`approval/`
-/// subtrees under a real developer's `$HOME` still receive real writes
-/// during a test run (confirmed by that handoff's own before/after
-/// diff), while `audit/` does not. Deliberately not fixed here -- out of
-/// that handoff's own stated scope -- tracked in
-/// `rfcs/handoffs/test-process-leak.md`'s "Fixed 2026-08-26" section.
+/// `suite-assumes-it-owns-the-machine.md`, item 1: this was the **last**
+/// production consumer of the real state root a test could still reach
+/// after `resolve_audit_state_dir`'s own split closed the `audit/`
+/// version of the same gap -- confirmed by that handoff's own
+/// before/after diff, `transcripts/`/`approval/` moved, `audit/` did
+/// not. `resolve_agent_run_state_dir`, below, gets the identical split
+/// `resolve_audit_state_dir` already has -- this function's own body is
+/// otherwise unchanged, since isolation belongs in the one place the
+/// root is resolved, not here where it is merely used.
 fn open_real_agent_run_state_root() -> Option<std::path::PathBuf> {
-    let path_provider =
-        tekstide_core::project::recent::AppStatePathProvider::linux_default().ok()?;
-    let state_dir = path_provider.state_dir().to_path_buf();
+    let state_dir = resolve_agent_run_state_dir()?;
     std::fs::create_dir_all(&state_dir).ok()?;
     Some(state_dir)
+}
+
+#[cfg(not(test))]
+fn resolve_agent_run_state_dir() -> Option<std::path::PathBuf> {
+    let path_provider =
+        tekstide_core::project::recent::AppStatePathProvider::linux_default().ok()?;
+    Some(path_provider.state_dir().to_path_buf())
+}
+
+/// The only source of a state directory [`open_real_agent_run_state_root`]
+/// can see in a test build -- the same shape `resolve_audit_state_dir`
+/// already has, reused rather than reinvented per that handoff's own
+/// instruction. No fallback to `AppStatePathProvider::linux_default()`
+/// compiles into this function at all, so the real, developer-owned
+/// `$XDG_STATE_HOME`/`$HOME` is structurally unreachable from any test in
+/// this crate through this path -- not only the ~9 tests that reach it
+/// via [`attempt_agent_run_launch_with_profile`] today, the same class of
+/// site the audit fix's own postmortem warns against enumerating by
+/// hand.
+///
+/// Lazily created the first time this function runs on a given thread,
+/// then memoized in the same thread-local for the rest of that test --
+/// no per-test wiring required, the property that actually satisfies
+/// "prevent, do not merely redirect" for every test in this crate,
+/// including ones written after this comment. A thread-local, not a
+/// process-global, for the identical reason `resolve_audit_state_dir`'s
+/// own comment gives: `cargo test` runs each `#[test]` fn on its own
+/// freshly spawned OS thread, so no cross-test synchronisation is
+/// needed.
+///
+/// **No named-override hook, unlike `resolve_audit_state_dir`'s own
+/// [`test_audit_state_dir`].** That hook exists because 23 audit-store
+/// tests read records back out of a store they need to name; nothing
+/// reaching this function inspects `transcripts/`/`approval/` contents
+/// through it -- `agent_run_transcript_window_with_state_root` already
+/// gives transcript-path tests an explicit `state_root` parameter that
+/// bypasses this function entirely, and every test reaching
+/// [`attempt_agent_run_launch_with_profile`]'s plain two-argument form
+/// only needs the directory to exist and be isolated, never to be a
+/// specific, known path. Add one if that stops being true; do not add it
+/// speculatively.
+///
+/// **Belt and suspenders**: the resolved directory is checked against
+/// the real one (`AppStatePathProvider::linux_default`, when resolvable)
+/// and this panics loudly, naming both paths, if they ever coincide.
+#[cfg(test)]
+fn resolve_agent_run_state_dir() -> Option<std::path::PathBuf> {
+    let dir = TEST_AGENT_RUN_STATE_DIR.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        if let Some(dir) = cell.as_ref() {
+            return dir.clone();
+        }
+        let dir = fresh_default_test_agent_run_state_dir();
+        std::fs::create_dir_all(&dir).expect(
+            "a fresh temp directory for a test's own agent-run state root must be creatable",
+        );
+        *cell = Some(dir.clone());
+        dir
+    });
+    assert_not_the_real_agent_run_state_dir(&dir);
+    Some(dir)
+}
+
+/// Deliberately **not** `fresh_default_test_audit_state_dir`'s own,
+/// longer naming scheme (`tekstide-audit-test-default-<pid>-<sequence>-
+/// <ThreadId debug repr>`) -- an approval socket gets bound *under* this
+/// directory (`ApprovalChannelDirectory::socket_path`,
+/// `<state_root>/approval/<agent run id>.sock`), and `sockaddr_un`'s
+/// `sun_path` has real, small capacity (`max_socket_path_len`, ~107
+/// bytes). Found the hard way, not reasoned out in advance: the longer
+/// scheme, tried first, produced `SocketPathTooLong` in every test
+/// reaching a real `Managed` launch the moment this seam went live.
+/// `std::thread::ThreadId`'s own `Debug` (`ThreadId(23)`) costs more
+/// bytes than it buys here -- the global, monotonic `COUNTER` already
+/// guarantees a distinct directory per call regardless of which thread
+/// makes it, so the thread id adds no uniqueness this scheme does not
+/// already have. The pid stays, short-form, so two concurrent
+/// invocations of this same test binary (two `cargo test -p tekstide`
+/// runs, or a sharded CI) still cannot collide.
+#[cfg(test)]
+fn fresh_default_test_agent_run_state_dir() -> std::path::PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!("tekstide-run-{}-{sequence}", std::process::id()))
+}
+
+#[cfg(test)]
+fn assert_not_the_real_agent_run_state_dir(dir: &std::path::Path) {
+    if let Ok(real_provider) = tekstide_core::project::recent::AppStatePathProvider::linux_default()
+    {
+        assert_ne!(
+            dir,
+            real_provider.state_dir(),
+            "open_real_agent_run_state_root resolved the real, developer-owned state directory \
+             ({dir:?}) inside a test build. See rfcs/handoffs/suite-assumes-it-owns-the-machine.md."
+        );
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_AGENT_RUN_STATE_DIR: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// RFC-022 PR-022-D: the real `Ctrl+Alt+A` path, and `launch_agent_run_with_runtime`'s

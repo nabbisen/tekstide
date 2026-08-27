@@ -12425,6 +12425,25 @@ fn change_review_content_refuses_over_the_line_bound_and_names_it() {
 /// `real_repository_filesystem_scan_cost_headless_benchmark`
 /// (`tekstide-core`) already uses. Prints the real numbers
 /// `DEFAULT_MAX_DIFF_LINES` was set from.
+///
+/// `suite-assumes-it-owns-the-machine.md`, item 2: this budget failed 6
+/// of 7 red runs in review 338's own gate, at a load average of 59.7 on
+/// a 32-core box -- load this project's own repeated full-suite runs
+/// produce. Every one of those failures was noise, not a regression, and
+/// the assertion's own message used to claim otherwise ("would indicate
+/// a real regression, not measurement noise") -- a claim this single
+/// number cannot support, since it cannot distinguish "the view-build
+/// path got slower" from "the scheduler gave this thread less time."
+/// Fixed by no longer claiming either: the message below states what
+/// budget was crossed and reports the load average alongside it, so the
+/// next reader can tell the two apart instead of being told which one it
+/// is. **Not `#[ignore]`**: this project's own precedent for a
+/// load-sensitive-but-real assertion is the flake register
+/// (`test-process-leak.md`), not silencing the test -- an ignored test
+/// stops being run at all, where a recorded, honestly-worded flake still
+/// runs, still reports, and still catches an actual regression the day
+/// one lands; only the interpretation of an occasional red run changes.
+/// Recorded there as a new row alongside this fix.
 #[test]
 fn change_review_content_view_build_cost_by_line_count_measurement() {
     let state = state_with(tekstide_core::shell::ApplicationShell::new());
@@ -12451,12 +12470,31 @@ fn change_review_content_view_build_cost_by_line_count_measurement() {
 
         assert!(
             elapsed.as_millis() < 500,
-            "view-build cost at {line_count} lines must stay far inside any plausible latency \
-             budget (NFR-PERF-003's own is 16ms p95) -- got {}ms, which would indicate a real \
-             regression, not measurement noise",
-            elapsed.as_millis()
+            "view-build cost at {line_count} lines exceeded the 500ms budget (NFR-PERF-003's own \
+             is 16ms p95) -- got {}ms. This is either a real regression or this machine was \
+             under load when it ran; load average (1min, from /proc/loadavg): {}. A number well \
+             above the core count points at load, not a regression -- rerun on an idle machine \
+             before treating this as one.",
+            elapsed.as_millis(),
+            one_minute_load_average()
+                .map_or_else(|| "unavailable".to_owned(), |load| load.to_string())
         );
     }
+}
+
+/// The 1-minute load average from `/proc/loadavg`'s own first field --
+/// Linux-only, matching every other `/proc`-reading diagnostic this test
+/// suite already has. `None` only if the file cannot be read or parsed
+/// (a non-Linux host, or a sandboxed environment without `/proc`); never
+/// asserted on, only reported alongside a failure so a reader can judge
+/// whether load explains it.
+fn one_minute_load_average() -> Option<f64> {
+    std::fs::read_to_string("/proc/loadavg")
+        .ok()?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
 }
 
 /// RFC-034's own required measurement: the pack README warns that

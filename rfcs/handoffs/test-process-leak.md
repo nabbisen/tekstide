@@ -26,6 +26,20 @@ resulting pressure, each disclosed separately and each moved past:
 | `shell::tests::a_real_low_risk_proposal_is_received_mirrored_and_stays_queued_without_promoting` | request 296 (2026-08-24) |
 | `approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` | request 326 (2026-08-25) |
 | `shell::tests::change_review_surface_renders_a_real_change_set_from_a_real_agent_run` | request 329 (2026-08-26) — **candidate, not confirmed** |
+| `shell::tests::change_review_content_view_build_cost_by_line_count_measurement` | review 338 (2026-08-26) — **not this document's own cause; see below** |
+
+**Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
+the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
+a wall-clock view-build measurement (`suite-assumes-it-owns-the-machine.md`, item 2) asserting a
+500ms budget, and it failed 6 of 7 red runs in review 338's own gate at a load average of 59.7 on
+a 32-core box, produced by this project's own repeated full-suite runs, not by anything leaked. Its
+own message used to claim a failure "would indicate a real regression, not measurement noise" --
+every observed failure was noise, and the message could not tell the two apart. Fixed to report
+what was crossed and the load average alongside it, rather than claim which cause it hit; kept in
+the default suite rather than `#[ignore]`d, matching this table's own precedent -- a recorded,
+honestly-worded flake still runs and still catches a real regression the day one lands, where an
+ignored test stops running at all. Recorded here for the same reason the other six are: so the
+next person who meets it under load spends a lookup, not a day.
 
 **Rows 3, 4, and 6's cause closed 2026-08-26** — `rfcs/handoffs/audit-store-test-isolation.md`'s fix isolates every test's own audit store, removing the one-shared-SQLite-database contention the "ROOT CAUSE, CONFIRMED" section below traced row 3 to. Checked reachability rather than assuming it: rows 1, 2, and 5 live in `tekstide-core`, which has no access to `open_real_audit_store` at all -- that function, and the `update()` write call sites that reach it, are defined entirely in the `tekstide` binary crate, so those three rows are **categorically not** caused by this (row 5's own text above already said as much speculatively; this confirms it structurally, not just as an unconfirmed guess). Rows 3, 4, and 6 all live in `tekstide`'s `shell/tests.rs`, and all three were directly observed transitively reaching `open_real_audit_store` (each panicked against an intermediate, over-strict version of this fix that required every reaching test to opt in -- see that handoff's own write-up for why that version was wrong and was replaced). Row 3 additionally had its pre-fix flake reproduced directly (3 of 4 quick repro runs failed, 2-3 failures each, against a fresh `XDG_STATE_HOME`) immediately before the fix, then 5 consecutive clean full-workspace parallel runs confirmed after. Rows 4 and 6 were not individually reproduced as standalone flakes the way row 3 was, so their closure rests on reachability plus the same structural fix, not on a matching before/after reproduction each.
 
