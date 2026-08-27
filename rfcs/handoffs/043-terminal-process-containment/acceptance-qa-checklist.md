@@ -56,10 +56,11 @@ created: "2026-08-26"
       observed a real survivor as gone; see `qa-evidence.md` for why the enumeration-failure path
       is the one this test forces instead, and the real, second bug in `processes_in_session`
       found while trying.
-- [ ] Its doc states what remains outside the claim, and that this is by design. Present on
-      `SessionConfirmedEmpty`'s own doc comment (`types.rs`); the *audit-facing* doc (the renamed
-      field in `shell.rs`/`audit/integration.rs`) is PR-043-C's own scope, left unchecked here
-      rather than claimed early.
+- [x] Its doc states what remains outside the claim, and that this is by design. Present on
+      `SessionConfirmedEmpty`'s own doc comment (`types.rs`); the *audit-facing* doc -- the renamed
+      `SafeCloseDecision::Closed::terminal_session_confirmed_empty` (`audit/integration.rs`) --
+      states it too, and `terminate_project_live_work` (`shell.rs`) now reads this field's own
+      value directly instead of inferring it, PR-043-C's own scope, done.
 
 ## D4 — a leaking test is red
 
@@ -73,14 +74,14 @@ created: "2026-08-26"
 
 ## Wording
 
-- [ ] The close confirmation says things started from these terminals end too, **before the
-      click**, while the controls are live (RFC-034 D4's rule). PR-043-C's own scope -- not
-      touched by this slice.
-- [ ] Every statement this slice makes false is corrected — `test-process-leak.md`'s third cause,
-      the README, and anywhere else the surviving-job limitation is recorded. PR-043-C's own
-      scope; PR-043-B's own three now-stale test scenarios were corrected as part of *this* slice
-      (`qa-evidence.md`), since a red or lying test suite is not something to leave for later, but
-      the prose documents named here are not.
+- [x] The close confirmation says things started from these terminals end too, **before the
+      click**, while the controls are live (RFC-034 D4's rule). `project-close-dialog-running-process-detail`,
+      shown only when the close names a running process as a reason -- proven present and absent
+      by test, not only present.
+- [x] Every statement this slice makes false is corrected — `test-process-leak.md`'s third cause,
+      the README, and anywhere else the surviving-job limitation is recorded. `test-process-leak.md`'s
+      own three "still open, PR-043-C" notes (frontmatter, the job-escapes-termination section, the
+      `KilledAfterTimeout` question) updated to state what this slice did.
 
 ## Measurement
 
@@ -97,9 +98,12 @@ created: "2026-08-26"
 
 ## Live GUI evidence
 
+**Not yet captured.** Everything else in PR-043-C's own scope is done; this item alone remains.
+Raised to the owner before attempting it (launching a real window and sending synthetic input is
+more invasive than the rest of this slice) -- see this review's own text for the question.
+
 - [ ] Against a **`mktemp -d` fixture project**. No path under `$HOME`, no real project name, no
-      real file content. PR-043-C's own scope (the close-confirmation dialog's new wording is
-      part of what this evidence needs to show) -- not captured by this slice.
+      real file content.
 - [ ] Shows: a real backgrounded process, the close confirmation with its new wording, and the
       `kill -0` failing afterwards.
 - [ ] Whether a real mouse click was sent is stated either way.

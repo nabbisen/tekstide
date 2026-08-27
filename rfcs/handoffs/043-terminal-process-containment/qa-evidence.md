@@ -449,12 +449,80 @@ anything a normal CI run produces -- not this slice's regression to fix. `/dev/p
 
 ## PR-043-C
 
-Not started. Owns: the close-confirmation wording (D1 + RFC-034 D4's rule), the
-`terminal_process_groups_confirmed_empty` → `terminal_session_confirmed_empty` rename and its
-audit-side wiring in `shell.rs` (this slice only produced the real
-`TerminalRuntimeEvent::SessionConfirmedEmpty` signal `terminate_project_live_work` will need to
-read from instead of inferring from the outcome variant, as it still does today), and correcting
-the remaining disclosed-limitation text in `test-process-leak.md` and its own doc comments that
-this slice's fix has made stale (the "not fixed here" framing around the backgrounded-job-survives
-defect itself, as distinct from the pool-exhaustion mechanism the fd-inheritance fix already
-closed).
+### The close confirmation names the consequence, before the click
+
+RFC-034 D4's rule ("say it before the click, while the control is live") applied to RFC-043 D1's
+own requirement. Added `project_close_dialog_names_running_processes` (true iff `modal.reasons`
+includes `CloseReasonCode::RunningProcess`) and a new, conditional dialog line --
+`project-close-dialog-running-process-detail`, "Anything started from these terminals ends too,
+including a backgrounded job." -- shown only when the close actually names a running process as a
+reason, not unconditionally. Two tests: present when a `RunningProcess` reason exists, absent
+when the only reason is (for example) a dirty file -- the negative control, not just the easy
+positive case. `i18n::enforcement`'s own catalog-completeness/unused-key scans both pass with the
+new key (no Fluent variables, so `pl.ftl`'s own deliberate incompleteness does not affect it --
+resolves through the source-locale fallback like every key `pl.ftl` does not define).
+
+### The rename, and what actually changed underneath it
+
+`terminal_process_groups_confirmed_empty` → `terminal_session_confirmed_empty`
+(`SafeCloseDecision::Closed`, `tekstide-core/src/audit/integration.rs`) -- not only a rename this
+time, a rewiring to a different, more honest source of truth. Before this slice,
+`terminate_project_live_work` (`shell.rs`) computed this value by matching `Terminated`'s own
+outcome variant (`Exited`/`TerminatedBySignal`/`KilledAfterTimeout` counted, `OrphanedUnknown`/
+`Failed` did not) -- an inference from a *different* fact than the one the field claims. It now
+reads `TerminalRuntimeEvent::SessionConfirmedEmpty`'s own `confirmed` field directly
+(`terminated_outcome_and_session_confirmation`, factored out specifically so it is checkable
+against a synthetic `Vec<TerminalRuntimeEvent>` rather than only through a real process).
+
+**This is a real behavioral improvement, not a cosmetic rename.** The old inference could not see
+a backgrounded job surviving in a sibling process group *inside* the same session -- RFC-043
+D1/D2 already made `request_terminate` signal and re-enumerate the whole session, and D3's
+`SessionConfirmedEmpty` is a real re-scan of exactly that; reading it directly means a surviving
+backgrounded job (a session member) now correctly makes `confirmed: false`, where the old
+outcome-variant inference had no way to know. **What remains outside the claim, by design, is now
+only D2's own opt-out**: a process that left the session entirely (`nohup`/`disown`/`setsid`).
+
+**Required test, both directions** (`shell/tests.rs`):
+`terminated_outcome_and_session_confirmation_does_not_infer_true_from_a_clean_exit` (a clean
+`Exited` outcome paired with a real `SessionConfirmedEmpty { confirmed: false }` must report
+`false`, not the `true` the old inference would have) and
+`..._does_not_infer_false_from_an_orphaned_outcome` (the mirror: `OrphanedUnknown` paired with a
+real `confirmed: true` must report `true`, not the `false` the old inference always produced for
+that outcome). Ablated: reverted the extraction to the old outcome-variant `matches!`, reran --
+both failed exactly as predicted; restored, both pass.
+
+**The setsid test's own discard, resolved** (per response 341's own note: "D3's own audit-field
+rewiring is what gives that discard somewhere real to go"). `a_job_that_leaves_the_session_via_setsid_survives_a_real_close`
+now asserts `SessionConfirmedEmpty { confirmed: true }` is present in `request_terminate`'s own
+returned events at the same time the detached pid is still alive -- proving `confirmed: true`
+means exactly "the session was re-scanned and found empty," never "every process this terminal
+ever launched is gone."
+
+### `test-process-leak.md`, corrected
+
+The document's own "Still open, PR-043-C's own scope" notes (frontmatter `status`, the "job-
+escapes-termination" section, the `KilledAfterTimeout` "question to answer, not decided here")
+are updated to state what this slice actually did, not deleted -- this project's own convention
+for a doc a later slice makes stale. The `KilledAfterTimeout` question specifically: answered by
+removing the outcome-variant computation entirely, not by picking one of the three costed answers
+that question posed (narrow the match, re-check after the kill, or rename alone) -- reading
+`SessionConfirmedEmpty` directly *is* the "re-check group emptiness after the kill" answer, done
+via the re-check RFC-043 D3 already performs rather than approximating it from a different signal.
+
+### Gate
+
+Full workspace, three consecutive runs after each of the sub-slices above (rename/rewiring,
+dialog wording, doc/test corrections): 447-449 + 746 + 2 each time (count rises as tests are
+added), clean, no flakes. `/dev/pts` flat at 14-15. `fmt`, `clippy -D warnings`,
+`git diff --check`: clean throughout.
+
+### Live GUI evidence -- not yet captured
+
+RFC-043's own README requires this against a `mktemp -d` fixture: a real backgrounded process, the
+close confirmation showing its new wording, and a real `kill -0` failing afterward, with whether a
+real mouse click was sent stated either way. Not done in this pass -- raised to the owner directly
+(launching a real window and sending synthetic input is a more invasive action than the rest of
+this slice), who asked that this be raised to the reviewer rather than proceeding unilaterally. See
+review request's own text for the question. Response 341's own separate, optional note (making the
+evidence process a foreground child rather than backgrounded, since that is closer to the real
+"agent mid-write" scenario) applies here once this is captured, if still wanted at that point.
