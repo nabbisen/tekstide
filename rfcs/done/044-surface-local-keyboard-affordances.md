@@ -1,6 +1,6 @@
 # RFC-044: Surface-Local Keyboard Affordances
 
-Status: **Accepted by the human owner 2026-08-27.** Proposed 2026-08-26 after RFC-034 shipped a
+Status: **Implemented and closed 2026-08-27.** Accepted by the human owner the same day, shipped across PR-044-A/B/C and accepted at review 353. Proposed 2026-08-26 after RFC-034 shipped a
 control reachable by `a`/`r` that nothing on screen names, and the reviewer found the same gap on
 two other surfaces. **D1–D4 were decided by the architect on acceptance** — see "Decided on
 acceptance" at the end, which also records what `0.15.0`'s release gate found the day after this

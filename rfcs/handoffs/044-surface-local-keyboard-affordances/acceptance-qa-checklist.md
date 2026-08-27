@@ -1,8 +1,8 @@
 ---
 title: "RFC-044 acceptance and QA checklist"
 rfc: "RFC-044"
-rfc_file: "../../accepted/044-surface-local-keyboard-affordances.md"
-source_rfc_status: "Accepted 2026-08-27 — M12"
+rfc_file: "../../done/044-surface-local-keyboard-affordances.md"
+source_rfc_status: "Implemented and closed 2026-08-27 — RFC-044 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-27"
 ---
@@ -111,12 +111,39 @@ created: "2026-08-27"
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted 2026-08-27 at review 353, across five requests (349-353).
+
+Verified by the reviewer:
+
+- PR-044-A's domain tested directly rather than read: enumerated every
+  .on_press(Message::..) in the crate and cross-referenced against SurfaceAction
+  and NavigationAction. One control fell outside both --
+  FolderBrowserChooseCurrentDirectory -- and turned out to be keyboard-reachable
+  via the modal path, which exposed an unrecorded third exclusion. Required and
+  recorded in 350.
+- The shadowing reason was corrected by the implementer: format_binding returns
+  None unless the key is a Character, so bare Named keys are structurally immune.
+  Better than the reason the RFC gave.
+- PR-044-B: both routes converge on attempt_close_project_tab, so the keyboard
+  route inherits the confirmation dialog rather than getting a weaker path to the
+  same destruction. Screenshots read: /tmp fixture, one project, no $HOME. Zero
+  mouse clicks in the walkthrough -- the first such evidence in this project.
+- PR-044-C verified in the shipping artifact: --help shows the surface-grouped
+  list, including "Delete  Close the highlighted project's tab".
+- Three consecutive full-workspace runs at each stage. Final: 456 + 4 + 746.
+
+One required item, in 352: PR-044-C had rewritten 0.15.0's released changelog
+entry, removing two limitations that were true of that release. Reverted; verified
+byte-identical to the tag. The convention was the implementer's own, from request
+334, and they cited it back correctly.
+
+Result: one MouseOnly entry counted, one closed, zero remaining -- and an action
+added without a decided keyboard route now fails to compile.
 ```

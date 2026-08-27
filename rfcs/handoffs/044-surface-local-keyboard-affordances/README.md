@@ -1,19 +1,19 @@
 ---
 title: "RFC-044: Surface-Local Keyboard Affordances — implementation handoff"
 rfc: "RFC-044"
-rfc_file: "../../accepted/044-surface-local-keyboard-affordances.md"
-source_rfc_status: "Accepted 2026-08-27 — M12"
+rfc_file: "../../done/044-surface-local-keyboard-affordances.md"
+source_rfc_status: "Implemented and closed 2026-08-27 — RFC-044 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-27"
 ---
 
 # Two keyboard systems, one accountable
 
-Source RFC: [RFC-044](../../accepted/044-surface-local-keyboard-affordances.md)
+Source RFC: [RFC-044](../../done/044-surface-local-keyboard-affordances.md)
 
 | # | Read | Why |
 | --- | --- | --- |
-| 1 | [RFC-044](../../accepted/044-surface-local-keyboard-affordances.md) | **Read "Decided on acceptance" first.** D1–D4 are settled, and the scope widened after it was proposed |
+| 1 | [RFC-044](../../done/044-surface-local-keyboard-affordances.md) | **Read "Decided on acceptance" first.** D1–D4 are settled, and the scope widened after it was proposed |
 | 2 | [`what-advertising-keys-must-not-become.md`](./what-advertising-keys-must-not-become.md) | **Required.** The failure mode here is making surfaces worse while technically fixing them |
 | 3 | `crates/tekstide/src/keyboard_help.rs` | `control_coverage` is the shape you are mirroring. Read it before designing a new one |
 | 4 | [RFC-040](../../done/040-affordance-completion.md) | Did this in the other direction, for global actions |

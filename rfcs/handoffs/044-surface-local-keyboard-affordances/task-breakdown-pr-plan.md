@@ -1,8 +1,8 @@
 ---
 title: "RFC-044 task breakdown and PR plan"
 rfc: "RFC-044"
-rfc_file: "../../accepted/044-surface-local-keyboard-affordances.md"
-source_rfc_status: "Accepted 2026-08-27 — M12"
+rfc_file: "../../done/044-surface-local-keyboard-affordances.md"
+source_rfc_status: "Implemented and closed 2026-08-27 — RFC-044 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-27"
 ---
