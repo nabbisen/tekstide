@@ -24,6 +24,19 @@ nothing for `MouseOnly` to say about it.
 **Closing a project is in the domain.** `SurfaceAction::TabStripCloseProject` — the specific
 finding that widened this RFC's own scope.
 
+**Response 349's required addition: a third exclusion, larger than the first two, was missing
+from the record.** Modal buttons -- seven `ModalContent` variants carry real buttons with real
+`on_press` handlers, `FolderBrowserChooseCurrentDirectory` among them -- are not `SurfaceAction`
+entries either, and the reviewer went looking expecting a second mouse-only gap there. Verified
+directly rather than taken on trust: `ModalFocusNext` (nine call sites) cycles focus generically
+across whichever buttons the active modal has, and six catalog entries carry the exact on-screen
+hint ("Tab/Shift+Tab moves focus; Enter activates"). Every modal button is keyboard-reachable **by
+construction** -- unlike a surface, where `FocusZone`'s three variants
+(`Sidebar`/`TabStrip`/`MainArea`) cycle zones, not widgets, which is the actual reason a
+surface-local button can go keyboard-unreachable at all and a modal button structurally cannot.
+That asymmetry is this RFC's own justification for existing, and it is now recorded at
+`SurfaceAction`'s own doc comment, not only reasoned about once and left unwritten.
+
 Surface-local keys are **not** in `KeybindingPolicy` — this slice adds nothing there at all; the
 reason (a bare key would shadow every surface via `matching_global_action`) was already recorded
 at that type before this RFC, and traced directly this pass: `format_binding` (`input.rs`)

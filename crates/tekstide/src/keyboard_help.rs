@@ -233,11 +233,35 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
 /// that has it: it is a keyboard-native concept with no mouse
 /// equivalent to lack (there is nothing for `MouseOnly` to say about
 /// "move the highlight without selecting"), so it is not the kind of
-/// gap this RFC exists to close. Both exclusions are a scoping
-/// decision, recorded here rather than silently omitted -- if either
-/// stops being true (the editor gains a discrete, non-typing action;
-/// a highlight gains its own mouse-only meaning), it belongs in this
-/// enum.
+/// gap this RFC exists to close.
+///
+/// **A third exclusion, the largest of the three, response 349's own
+/// required addition: modal buttons.** Seven `ModalContent` variants
+/// carry real buttons with real `on_press` handlers --
+/// `FolderBrowserChooseCurrentDirectory` is one -- and none of them are
+/// `SurfaceAction` entries either. **Verified as a real asymmetry, not
+/// assumed the way this RFC's own risk document warns against**: modal
+/// buttons are keyboard-reachable by construction, not by individual
+/// handler wiring. `ModalFocusNext` (nine call sites) cycles focus
+/// generically across whichever buttons the current modal has, and the
+/// dialogs say so on screen ("Tab/Shift+Tab moves focus; Enter
+/// activates," six catalog entries carrying that exact hint). A
+/// surface has nothing equivalent: `FocusZone` is three variants
+/// (`Sidebar`/`TabStrip`/`MainArea`) that cycle *zones*, not widgets,
+/// which is the entire reason a surface-local button can go
+/// keyboard-unreachable in the first place and a modal button
+/// structurally cannot. **This asymmetry is this RFC's own
+/// justification for existing at all** -- the risk document's §4 warns
+/// that an exhaustive match is only as good as the set it is exhaustive
+/// over, and an inventory whose own largest exclusion goes unstated
+/// invites the exact "we already enumerated that" misreading that let
+/// a mouse-only close button survive four prior reviews.
+///
+/// All three exclusions are a scoping decision, recorded here rather
+/// than silently omitted -- if any of them stops being true (the
+/// editor gains a discrete, non-typing action; a highlight gains its
+/// own mouse-only meaning; a modal ever grows a button `ModalFocusNext`
+/// does not reach), it belongs in this enum.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SurfaceAction {
