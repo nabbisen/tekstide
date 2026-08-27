@@ -312,12 +312,15 @@ permanent **Projects** tab that returns to the board. Click a tab to switch to i
 `Ctrl+Alt+N` to cycle to the next one with wraparound. A project you closed earlier is
 remembered on the board too, with its own **Open** button — no retyping its path.
 
-**Closing a project (`×` on its tab).** If nothing is live in it — no terminal, no agent run —
+**Closing a project (`×` on its tab, or `Delete` with the tab highlighted — `0.16.0`).** If nothing is live in it — no terminal, no agent run —
 it closes immediately, no dialog. If something is, a confirmation dialog names exactly what
 will end (for example, "This will end: 1 running process") and shows the project's **canonical**
 path, so you know precisely what you are about to close. Focus defaults to **Cancel**; `Enter`
 activates whichever button is focused, `Escape` always cancels — closing is never one accidental
 keystroke away.
+
+Every surface-local key like that one is listed in the Help modal (`Ctrl+Alt+K`, or the `?`
+button) and in `--help`, grouped by the surface it belongs to (`0.16.0`).
 
 **Closing ends what those terminals started (`0.15.0`)**, including a job you backgrounded with
 `&` — the dialog says so before you click. A process you deliberately detached with `nohup`,

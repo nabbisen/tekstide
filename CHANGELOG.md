@@ -2,7 +2,7 @@
 
 ## 0.16.0 - What The Reachability Audit Found, Two Sessions Later
 
-Status: not yet released.
+Status: released on 2026-08-28.
 
 ### Fixed — a keyboard-only user can close a project, and every surface-local key is advertised
 
@@ -67,6 +67,26 @@ is a minor version bump rather than a patch.
   through a different route that writes nothing to the audit trail. This crate's own `README.md`
   said otherwise until this release corrected it. A fix is recommended as its own RFC, not built
   here, since what to record and when is real design, not a wiring gap.
+
+  **What to check:** if you have been treating the audit store as the record of which AI CLI runs
+  were launched on your machine, **it does not contain them and never did.** Trust decisions,
+  command approvals, restricted-mode refusals, paste refusals, plain-terminal starts and
+  safe-close outcomes are all really there; agent-run launches are not. Nothing on your disk is
+  wrong — the records were never written, so there is nothing to remove or repair.
+
+- **A corrupted audit store fails completely silently.** Also found by this release's audit, and
+  reproduced against the release binary rather than reasoned about: with a genuinely corrupted
+  `audit.sqlite3`, or with an interrupted-migration marker present, Tekstide starts normally, the
+  project board reports **"Calm"**, and nothing anywhere indicates the audit trail is broken. The
+  recovery machinery this project built and tested (`recover`, `resume`) exists and nothing calls
+  it.
+
+  **What to check:** the store lives at `$XDG_STATE_HOME/tekstide/audit/audit.sqlite3`
+  (`~/.local/state/tekstide/audit/audit.sqlite3` if unset). If you want to know whether yours is
+  readable today, `sqlite3 <that path> 'pragma integrity_check;'` answers it — the application
+  will not. A fix is recommended as its own RFC: resuming a safe, interrupted migration is small,
+  but discarding a user's audit history to recover from real corruption is a decision that should
+  be made deliberately rather than by default.
 - **Still no two-sided diff.** The before-bytes were never captured; blocked on Git-backed
   detection.
 - **A review decision does not survive closing Tekstide.**

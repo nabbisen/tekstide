@@ -27,6 +27,7 @@ resulting pressure, each disclosed separately and each moved past:
 | `approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` | request 326 (2026-08-25) |
 | `shell::tests::change_review_surface_renders_a_real_change_set_from_a_real_agent_run` | request 329 (2026-08-26) — **candidate, not confirmed** |
 | `shell::tests::change_review_content_view_build_cost_by_line_count_measurement` | review 338 (2026-08-26) — **not this document's own cause; see below** |
+| `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` | `0.16.0` release gate (2026-08-28) — **PTY read timing, not process leak or audit store.** Once in three runs. The assertion message was captured: *"the marker must be followed by a real, parseable PID"*, with the read having returned only the shell's **echo of the command line** and not yet the `descendant-pid:` line it prints. A read that outran the shell's own output, not a failure of the termination behaviour the test covers. Distinct from every row above: no socket, no audit store, no PTY exhaustion — `/dev/pts` was well below its limit throughout. |
 
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
