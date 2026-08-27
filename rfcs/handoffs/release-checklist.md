@@ -86,7 +86,20 @@ Ninety seconds. Run it.
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings`
 - [ ] `cargo build --release --locked`
 - [ ] `cargo package -p tekstide-core --locked`
-- [ ] `cargo package -p tekstide --locked --no-verify` — **`--no-verify` is required, not
+- [ ] `cargo package -p tekstide --locked --no-verify` — **since `0.15.0` this step cannot run
+      at all until `tekstide-core`'s new version is published**, and that is expected, not a
+      failure to fix. `tekstide`'s `[dev-dependencies]` enables `tekstide-core`'s `test-support`
+      feature (RFC-043 PR-043-A). Packaging `tekstide` alone resolves core from crates.io — the
+      *previous* release — which does not have that feature, so resolution fails before any
+      compile: *"package `tekstide` depends on `tekstide-core` with feature `test-support` but
+      `tekstide-core` does not have that feature."* **Do not "fix" this by removing the feature
+      from the dev-dependency** — that would silently disable the leak guard for the whole
+      `tekstide` crate's tests, which is the exact defect PR-043-A's own postmortem records.
+      Verify package contents from `cargo publish --workspace --dry-run`'s own unpacked
+      `target/package/tekstide-<version>/` instead; it builds the same contents that will be
+      uploaded. Amended 2026-08-27, when this step stopped being able to pass. The original note
+      follows and still applies to the *API* half of the same version-range arrangement:
+      **`--no-verify` is required, not
       optional.** Without it this gate **cannot pass** for any release that adds
       `tekstide-core` API. The dependency is declared `version = "0"` (deliberately, for
       development cost), so packaging `tekstide` alone resolves core from crates.io — the
