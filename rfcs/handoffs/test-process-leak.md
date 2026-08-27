@@ -634,3 +634,31 @@ increase from the last-recorded 695; PR-023-E's own fourteen account for the res
 not gated in isolation from each other, only combined, since both landed the same session before
 either was reviewed), `reference_adapter` 0 tests. `git diff --check` clean. Committed as
 `f0c5055`, staged by explicit path, separately from the unrelated RFC-023 work (`855d063`).
+
+## Recurrence, 2026-08-27 — RFC-044 PR-044-C's required re-gate
+
+RFC-044 PR-044-C required three consecutive full-workspace runs. Run 2 of the first pass failed
+one test in the `tekstide-core` binary (**745 passed, 1 failed**, `tekstide`'s own 456 and
+`rfc_docs_invariants`'s 4 both clean the same run). Runs 1 and 3 of that pass were clean.
+
+**The assertion message was not captured** — the same mistake this document already names as the
+difference between a sixth symptom and a sixth guess (see the row 6 section above): the run was
+piped through `grep "test result:"` rather than redirected to a file, so the panic detail scrolled
+past before the omission was noticed.
+
+Failing in `tekstide-core` rules out rows 3, 4, and 6 categorically, the same reachability
+argument this document already makes for rows 1, 2, and 5: `tekstide-core` has no access to
+`open_real_audit_store`, so this is not that fix's own already-closed cause recurring. Consistent
+with row 1, 2, or 5 instead, but not identifiable further than that without the message.
+
+Twelve further runs immediately after, this time redirected to a file per this document's own
+standing advice, were all clean (four `cargo test --workspace`, eight more of the same). One
+failure in thirteen total runs (~7.7%) is within the range this document already records for this
+class of flake and is not itself new information — recorded so a future recurrence in
+`tekstide-core` with a captured message can be checked against this one by binary and count alone.
+**Whoever next hits this in `tekstide-core`: redirect to a file first, and check whether it names
+one of the three tests already tied to rows 1, 2, or 5** — that comparison is what turns this row
+from a guess into a match.
+
+Unrelated to RFC-044 (no `tekstide-core` code touched by that slice — the whole slice is
+`tekstide`-crate-local: `keyboard_help.rs`, `en.ftl`, `shell.rs`, and their own tests).

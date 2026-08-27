@@ -262,25 +262,62 @@ reviewer finds the full list too long in practice.
 
 ### Closeout
 
-`CHANGELOG.md`'s `0.15.0` entry carried two now-false "Known limitations": "some controls are
-mouse-only, and closing a project is one of them" (PR-044-B closed this) and "surface-local keys
-are not advertised" (this slice closes it). Both moved out of "Known limitations, unchanged" into a
-new "Fixed" section, referencing RFC-044, mirroring the phrasing convention the existing
-"Fixed -- closing a terminal..." section above them already uses ("That is no longer true, and this
-is the correction to it").
+**Response 352's required correction: `CHANGELOG.md`'s `0.15.0` entry is not rewritten.** The
+first pass here edited it directly -- removed two "Known limitations" and added a "Fixed" section
+for work done after `0.15.0` shipped. Wrong, and the reviewer cited the project's own established
+precedent back correctly: `0.15.0` is tagged and released, and crates.io links `CHANGELOG.md` on
+`main`, so a reader of the released version would see a claim ("Fixed -- a keyboard-only user can
+close a project") that is false for the version they are running. Request 334's own words apply
+unchanged: *"`CHANGELOG.md` -- deliberately not touched, per established precedent... it was true
+when written."* **Reverted** (`git checkout 4558fd0~1 -- CHANGELOG.md`) to restore `0.15.0`'s entry
+exactly as it shipped. The "Fixed" text is kept here, in this evidence file, ready for whoever cuts
+`0.16.0` -- not written into the changelog by this slice.
 
 The README's own keyboard table is explicitly out of this RFC's own scope, per its README: making
 it generated (rather than merely checked) needs a separate decision this RFC does not make.
 
+**Response 352's non-required note, addressed anyway: the Tab strip's two `Enter` rows didn't
+disambiguate.** Rendered as written, both read as an outcome ("Go to the Project Board, with
+'Projects' highlighted" / "Switch to the highlighted project") rather than naming which condition
+applies first, so a reader scanning two `Enter` rows under the same heading could not tell which
+was which. Reworded both to lead with the condition: `keyboard-help-surface-tab-strip-*` in
+`en.ftl` now reads "With \"Projects\" highlighted, go to the Project Board" and "With a project's
+own tab highlighted, switch to it." Catalog *keys* unchanged, so
+`surface_action_help_lines_is_derived_from_the_registry`'s own expectation table (keyed by catalog
+key, not by English text) needed no change; reran to confirm, still green.
+
+### The `0.15.0` changelog's own Fixed-section text, held here for `0.16.0`
+
+> **Fixed -- a keyboard-only user can close a project, and every surface-local key is advertised**
+>
+> - This release's own gate found that a keyboard-only user could not close a project -- the `×`
+>   on a project tab was the only thing that emitted a close, and no key reached it, so a
+>   keyboard-only user could not reach the termination behaviour this release is largely about.
+>   That is no longer true. `Delete`, with a project's own tab highlighted, closes it -- the same
+>   `attempt_close_project_tab` the `×` button already reached, so both routes converge on the
+>   same confirmation dialog for a project with live work. RFC-044.
+>
+> - `a`/`r` here, and `Enter`/`Space`/`Delete`/arrows elsewhere, appeared in neither the Help modal
+>   nor `--help`. They do now: a surface-grouped section, generated from the same registry that
+>   drives the fix above, lists every surface-local key by the surface it belongs to. RFC-044.
+
 ### Gate
 
 `fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
-(4 tests): clean. Three consecutive full-workspace runs: **456 + 4 + 746, fully green** every
-time -- three new tests (`surface_action_help_lines_is_derived_from_the_registry`,
+(4 tests): clean. Three consecutive full-workspace runs after response 352's corrections:
+**456 + 4 + 746, fully green** every time -- three new tests
+(`surface_action_help_lines_is_derived_from_the_registry`,
 `every_surface_action_help_line_is_described_to_the_user`,
 `usage_text_lists_every_surface_binding_the_gui_lists`) account for 453 to 456; the pre-existing
 `help_modal_view_reuses_the_shared_keyboard_help_derivation_not_a_second_list` gained a second
 assertion rather than a new test, so it does not add to the count.
+
+**One flake, unrelated, disclosed and logged**: the first pass at these three runs hit one
+`tekstide-core` test failure whose assertion message was not captured (piped through `grep`
+instead of redirected to a file). Not `tekstide`-crate code, so not this slice's own regression.
+Recorded as a dated recurrence in `rfcs/handoffs/test-process-leak.md` ("Recurrence, 2026-08-27 --
+RFC-044 PR-044-C's required re-gate"), including the twelve further clean runs (this time
+redirected to a file) that followed and did not reproduce it.
 
 No new live GUI evidence required for this slice -- per the RFC's own README, live evidence was
 required only for the access slice (PR-044-B), already captured.

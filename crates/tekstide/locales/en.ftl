@@ -872,8 +872,8 @@ keyboard-help-surface-project-board = Project Board
 keyboard-help-surface-project-board-path-field = Project Board: path field
 
 keyboard-help-surface-tab-strip-close-project = Close the highlighted project's tab
-keyboard-help-surface-tab-strip-go-to-project-board = Go to the Project Board, with "Projects" highlighted
-keyboard-help-surface-tab-strip-switch-to-project = Switch to the highlighted project
+keyboard-help-surface-tab-strip-go-to-project-board = With "Projects" highlighted, go to the Project Board
+keyboard-help-surface-tab-strip-switch-to-project = With a project's own tab highlighted, switch to it
 keyboard-help-surface-explorer-activate-row = Open the highlighted file, or step into the highlighted directory
 keyboard-help-surface-approval-history-open-entry = Open the highlighted approval history entry
 keyboard-help-surface-change-review-mark-accepted = Mark the highlighted change accepted

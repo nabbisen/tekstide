@@ -104,9 +104,10 @@ created: "2026-08-27"
       RFC's own README, making the table generated (rather than merely checked) is out of scope —
       it needs a separate decision about whether the README is generated or merely checked, which
       this RFC does not make.
-- [x] Any statement this slice makes false is corrected — `0.15.0`'s changelog no longer lists
-      "closing a project is mouse-only" or "surface-local keys are not advertised" as known
-      limitations; both moved to a new "Fixed" section referencing RFC-044.
+- [x] Any statement this slice makes false is corrected. **Not** in `0.15.0`'s own changelog
+      entry, per response 352's required correction and this project's own established precedent
+      (request 334, RFC-042's checklist): a released entry is not rewritten after the fact. The
+      correction text is held in `qa-evidence.md`, ready for whoever cuts `0.16.0`.
 
 ## Final Acceptance Decision
 
