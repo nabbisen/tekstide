@@ -3883,6 +3883,26 @@ fn handle_tab_strip_key(state: &mut State, key: &input::KeyPress) {
                 }
             }
         }
+        // RFC-044 PR-044-B: `SurfaceAction::TabStripCloseProject`, the
+        // one `MouseOnly` entry PR-044-A's own inventory found -- the
+        // access defect that widened this RFC's scope, closed first per
+        // the handoff's own required ordering, since RFC-043's whole
+        // termination behaviour was otherwise unreachable by keyboard.
+        // `Delete` confirmed unclaimed in this zone before use, the same
+        // check `handle_trust_settings_key`'s own doc records making --
+        // this handler's own match above uses only `ArrowRight`/
+        // `ArrowLeft`/`Enter`. Only meaningful with a real project
+        // highlighted (index 0 is the "Projects" board entry, which
+        // `×` itself has no button for either); a no-op on the board
+        // entry, the same "guard, then act" shape every sibling
+        // MainArea handler already uses rather than a special case here.
+        keyboard::Key::Named(keyboard::key::Named::Delete) if state.tab_strip_highlight > 0 => {
+            let index = state.tab_strip_highlight - 1;
+            if let Some(project) = state.app_shell.state().projects().get(index) {
+                let project_id = project.id().clone();
+                attempt_close_project_tab(state, project_id);
+            }
+        }
         _ => {}
     }
 }

@@ -11,8 +11,9 @@ created: "2026-08-27"
 
 ## The claim this RFC exists to be able to make
 
-- [ ] **A keyboard-only user can close a project**, proven live, not inferred — the defect that
-      widened this RFC's scope.
+- [x] **A keyboard-only user can close a project**, proven live, not inferred — the defect that
+      widened this RFC's scope. `EVIDENCE-1`/`EVIDENCE-2`, zero mouse clicks, `Tab`×3/`Right`×1/
+      `Delete`×1.
 
 ## D1 — the registry, over the right domain
 
@@ -58,10 +59,16 @@ created: "2026-08-27"
 
 ## PR-044-B — access
 
-- [ ] Every `MouseOnly` entry is closed or is a stated, permanent exception.
-- [ ] Keys were confirmed unclaimed on their surface **before use**.
-- [ ] Independent actions use fixed keys, not a shared cursor.
-- [ ] Each closed gap has a test through the real message path.
+- [x] Every `MouseOnly` entry is closed or is a stated, permanent exception. One entry existed
+      (`TabStripCloseProject`); closed.
+- [x] `Delete` confirmed unclaimed on `TabStrip` before use — `handle_tab_strip_key`'s own match
+      previously had only `ArrowRight`/`ArrowLeft`/`Enter`.
+- [x] Independent actions use fixed keys, not a shared cursor. (Only one action closed this pass;
+      the fixed-key convention it follows is `handle_trust_settings_key`'s own, unchanged.)
+- [x] The closed gap has a test through the real message path:
+      `delete_on_a_highlighted_project_tab_closes_that_project` dispatches
+      `Message::Input(RoutedInput::Surface(...))` through `super::update()`, not a direct call to
+      `attempt_close_project_tab`. Ablated (removed the new key arm): failed. Restored: passes.
 
 ## D2 / PR-044-C — advertising
 
@@ -72,10 +79,10 @@ created: "2026-08-27"
 
 ## Live GUI evidence
 
-- [ ] Against a **`mktemp -d` fixture project with a fresh `XDG_STATE_HOME`**. No path under
+- [x] Against a **`mktemp -d` fixture project with a fresh `XDG_STATE_HOME`**. No path under
       `$HOME`, no real project name, no other project on screen.
-- [ ] Shows a project being **closed entirely by keyboard**.
-- [ ] Whether a real mouse click was sent is stated either way.
+- [x] Shows a project being **closed entirely by keyboard**.
+- [x] Whether a real mouse click was sent is stated either way. **No mouse click was sent.**
 
 ## Gates
 

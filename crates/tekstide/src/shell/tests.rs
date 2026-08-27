@@ -9942,6 +9942,83 @@ fn enter_on_a_highlighted_project_tab_switches_to_that_project() {
     assert_ne!(state.app_shell.state().active_project_id(), Some(&first_id));
 }
 
+/// RFC-044 PR-044-B's own required test: `SurfaceAction::TabStripCloseProject`
+/// reachable by keyboard, through the real message path -- not a call
+/// to `attempt_close_project_tab` in isolation, but `Message::Input`
+/// dispatched through `update()`, the same shape
+/// `enter_on_a_highlighted_project_tab_switches_to_that_project` above
+/// already uses for its own sibling action. An idle project (no live
+/// terminals, no dirty files) is `SafeToClose`, so this proves the
+/// keyboard route reaches all the way through to a real
+/// `close_project` call, not merely that a confirmation modal opened --
+/// the modal path is proven separately by the live GUI evidence, which
+/// is the shape a project with live work actually takes.
+#[test]
+fn delete_on_a_highlighted_project_tab_closes_that_project() {
+    let mut app_shell = ApplicationShell::new();
+    let first_id = app_shell
+        .add_project_from_path(fresh_project_dir("tab-strip-delete-first"))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    let second_id = app_shell
+        .add_project_from_path(fresh_project_dir("tab-strip-delete-second"))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    let mut state = state_with(app_shell);
+    state.focus = FocusZone::TabStrip;
+    // Index 0 is the home tab; index 2 is the second project.
+    state.tab_strip_highlight = 2;
+
+    let routed = crate::input::RoutedInput::Surface(crate::input::surface_input_for_test(
+        FocusZone::TabStrip,
+        press(iced::keyboard::Key::Named(
+            iced::keyboard::key::Named::Delete,
+        )),
+    ));
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert!(
+        state.app_shell.state().project(&second_id).is_none(),
+        "the highlighted project must be closed for real, not merely have a modal opened over it"
+    );
+    assert!(
+        state.app_shell.state().project(&first_id).is_some(),
+        "only the highlighted project must close -- the other must be untouched"
+    );
+    assert!(
+        state.modal.is_none(),
+        "an idle project is SafeToClose and must close directly, with no confirmation modal"
+    );
+}
+
+/// The home tab (index 0) has no project behind it -- `Delete` there
+/// must be a no-op, the same "guard, then act" shape every sibling
+/// handler already uses rather than a special case.
+#[test]
+fn delete_on_the_highlighted_home_tab_is_a_no_op() {
+    let (mut state, project_id) = state_with_a_real_project("tab-strip-delete-home-noop");
+    state
+        .app_shell
+        .dispatch(tekstide_core::command::AppCommand::OpenActiveProjectWorkspace);
+    state.focus = FocusZone::TabStrip;
+    state.tab_strip_highlight = 0;
+
+    let routed = crate::input::RoutedInput::Surface(crate::input::surface_input_for_test(
+        FocusZone::TabStrip,
+        press(iced::keyboard::Key::Named(
+            iced::keyboard::key::Named::Delete,
+        )),
+    ));
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert!(
+        state.app_shell.state().project(&project_id).is_some(),
+        "Delete on the home tab must not close the only real project on the strip"
+    );
+}
+
 // RFC-039 PR-039-B: `SwitchActiveProject` (`Ctrl+Alt+N`) -- the global
 // accelerator, RFC-036's dead-action count now four to three.
 

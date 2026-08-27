@@ -117,6 +117,16 @@ pub(crate) enum ControlCoverage {
     /// a key would cost more than it is worth (§6 of
     /// `what-advertising-keys-must-not-become.md`), not a place to park
     /// a gap nobody had to justify.
+    ///
+    /// `#[allow(dead_code)]`: PR-044-B closed the one entry that used to
+    /// construct this (`TabStripCloseProject`), so nothing currently
+    /// does. Left in the type rather than removed -- §6 of
+    /// `what-advertising-keys-must-not-become.md` explicitly anticipates
+    /// a future, legitimate mouse-only control needing exactly this
+    /// arm, and removing a vocabulary word the moment its one current
+    /// user goes away would make the *next* gap someone's job to
+    /// reinvent rather than reach for.
+    #[allow(dead_code)]
     MouseOnly { reason: &'static str },
 }
 
@@ -310,10 +320,10 @@ pub(crate) enum SurfaceAction {
 #[cfg(test)]
 pub(crate) fn surface_keyboard_coverage(action: SurfaceAction) -> ControlCoverage {
     match action {
-        SurfaceAction::TabStripCloseProject => ControlCoverage::MouseOnly {
-            reason: "TrackedGap, PR-044-B: the access defect that widened this RFC's scope. \
-                     `handle_tab_strip_key` has no arm for it; `attempt_close_project_tab` is \
-                     otherwise a plain, callable function with no structural obstacle.",
+        SurfaceAction::TabStripCloseProject => ControlCoverage::VisibleControl {
+            description: "Delete, with a project's own tab highlighted -- PR-044-B, closing the \
+                          access defect that widened this RFC's scope",
+            on_press_snippet: "keyboard::key::Named::Delete",
         },
         SurfaceAction::TabStripGoToProjectBoard => ControlCoverage::VisibleControl {
             description: "Enter, with the tab strip's own first (\"Projects\") entry highlighted",

@@ -122,6 +122,73 @@ matching it as if it were expected.
 `fmt`, `clippy -D warnings`, `git diff --check`: clean. Three consecutive full-workspace runs:
 450 passed + 1 failed (the deliberate one) every time, stable. `rfc_docs_invariants`: clean.
 
-## PR-044-B, PR-044-C
+## PR-044-B — close the access gap
+
+**`TabStripCloseProject` closed, the only entry the inventory found, first per the handoff's own
+required ordering.** `handle_tab_strip_key` gains one arm: `Delete`, guarded on
+`state.tab_strip_highlight > 0` (a real project tab highlighted, not the "Projects" board entry at
+index 0, which `×` itself has no button for either), calling the same `attempt_close_project_tab`
+the `×` button already reaches.
+
+**`Delete` confirmed unclaimed before use**, the same check `handle_trust_settings_key`'s own doc
+comment records making: `handle_tab_strip_key`'s own match, before this change, used only
+`ArrowRight`/`ArrowLeft`/`Enter`. Reused across surfaces safely regardless (`handle_trust_settings_key`
+already uses `Delete` too, for a different, mutually-exclusive surface) — `FocusZone`/`open_surface`
+guard the two apart structurally.
+
+`SurfaceAction::TabStripCloseProject`'s own coverage entry moved from `MouseOnly` to
+`VisibleControl`. `ControlCoverage::MouseOnly` itself now has zero live constructors —
+`#[allow(dead_code)]`'d rather than removed, since §6 of `what-advertising-keys-must-not-become.md`
+explicitly anticipates a future, legitimate mouse-only control needing it again; the reason is
+recorded at the variant.
+
+### Required test, through the real message path
+
+`delete_on_a_highlighted_project_tab_closes_that_project`: two real projects, `Delete` dispatched
+through `Message::Input(RoutedInput::Surface(...))` and `super::update()` — the same shape
+`enter_on_a_highlighted_project_tab_switches_to_that_project` already uses for its own sibling
+action, not a direct call to `attempt_close_project_tab` in isolation. Asserts the highlighted
+project is genuinely gone (`state.app_shell.state().project(&id).is_none()`), the other project is
+untouched, and no confirmation modal opened (an idle project is `SafeToClose`). A second test,
+`delete_on_the_highlighted_home_tab_is_a_no_op`, proves `Delete` on the board entry (index 0) does
+nothing, the same "guard, then act" shape every sibling handler already uses.
+
+**Ablated**: removed the new `Delete` arm, reran — `delete_on_a_highlighted_project_tab_closes_that_project`
+failed, naming the exact assertion ("the highlighted project must be closed for real, not merely
+have a modal opened over it"). Restored: passes.
+
+### Live GUI evidence
+
+Release binary, a fresh `mktemp -d` fixture project (`/tmp/tmp.1pqCFhr1A1`) and a fresh
+`mktemp -d` `XDG_STATE_HOME`, launched with `WAYLAND_DISPLAY` unset to force the X11/XWayland
+backend (this repo's own established convention). `xdotool key --clearmodifiers` for every input
+below; `niri msg action screenshot-window --id <id>`, targeted by window id, so the owner's own
+desktop focus was never touched.
+
+**Zero mouse clicks, start to finish.** `Tab` ×3 (cycling `FocusZone` from wherever the app booted
+into around to `TabStrip`, visible as a blue border around `[Projects]`), `Right` ×1 (moves the
+highlight onto the real project tab, `EVIDENCE-1-project-tab-highlighted-by-keyboard.png`),
+`Delete` ×1. **No real mouse click was sent** — stated plainly, per the RFC's own requirement
+either way.
+
+Result (`EVIDENCE-2-project-closed-tab-gone.png`): the project's own tab is gone from the strip
+entirely; its Project Board row now shows an "Open" button instead of `×`, the same transition a
+real close via the mouse button produces. Closed directly, no confirmation modal, matching the
+idle/`SafeToClose` case the required test above also covers -- the live-work/confirmation-modal
+case is the same path RFC-043's own evidence already exercised (that dialog is already
+keyboard-reachable, Tab/Shift+Tab/Enter, from that RFC's own work), so this evidence deliberately
+covers the *other* half: the case that previously had no keyboard route into the close sequence at
+all.
+
+Two screenshots, `rfcs/handoffs/044-surface-local-keyboard-affordances/evidence/`. Neither shows a
+path under `$HOME`, a real project name, or another project on screen.
+
+### Gate
+
+`fmt`, `clippy -D warnings`, `git diff --check`, `rfc_docs_invariants`: clean. Three consecutive
+full-workspace runs: **453 + 4 + 746, fully green** -- the deliberate PR-044-A failure is gone,
+closed by this slice, not merely raised.
+
+## PR-044-C
 
 Not started.
