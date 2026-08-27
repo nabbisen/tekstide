@@ -3005,7 +3005,7 @@ dependencies = [
 
 [[package]]
 name = "tekstide"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "alacritty_terminal",
  "fluent-bundle",
@@ -3019,7 +3019,7 @@ dependencies = [
 
 [[package]]
 name = "tekstide-core"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "libc",
  "rusqlite",

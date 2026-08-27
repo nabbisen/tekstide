@@ -317,6 +317,12 @@ path, so you know precisely what you are about to close. Focus defaults to **Can
 activates whichever button is focused, `Escape` always cancels — closing is never one accidental
 keystroke away.
 
+**Closing ends what those terminals started (`0.15.0`)**, including a job you backgrounded with
+`&` — the dialog says so before you click. A process you deliberately detached with `nohup`,
+`disown` or `setsid` survives, because those work by leaving the terminal's session and the
+session is the boundary this respects. That is the opt-out; use it if you want something to
+outlive the project you are closing.
+
 **Reviewing what an AI agent changed (`Ctrl+Alt+D`, or the "Change Review" button on Trust
 Settings).** After an AI CLI run exits, this surface lists the files it touched, a count, a
 detection-status line, and a review state — click a file (or highlight it and press `Enter`) to

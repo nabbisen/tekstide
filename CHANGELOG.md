@@ -1,5 +1,117 @@
 # Changelog
 
+## 0.15.0 - What The Terminal Started, And Who Could See It
+
+Status: released on 2026-08-27.
+
+**Security release.** Every shell this application launched inherited the PTY master file
+descriptor of every other terminal open at that moment. A PTY master is read/write access to that
+terminal, so code running in one project's terminal — including an AI CLI agent, which is what
+this application exists to run — could read what another project's terminal displayed and inject
+input into it. Fixed. Details and what to check are under **Security** below.
+
+Also: closing a terminal now actually ends what that terminal started, a previewed file is
+readable rather than one escaped line, and you can record a decision about a change set.
+
+### Security — cross-terminal descriptor access (all releases through `0.14.0`)
+
+- **What was wrong.** `openpty()` does not set close-on-exec, and nothing added it. At `exec`,
+  every child inherited **every PTY master descriptor open in the parent** — not only its own. A
+  live process was measured holding **27** of them.
+
+- **What that allowed.** Anything running inside a Tekstide terminal could read the output of, and
+  write input to, every other Tekstide terminal open when it started. No capability check, no
+  audit record, nothing on screen. This crosses the terminal security boundary RFC-009 defines.
+
+- **What it did not allow.** Nothing outside Tekstide's own terminals, and nothing across user
+  accounts — the descriptors were only ever those of terminals this application itself opened in
+  the same session.
+
+- **The fix.** `FD_CLOEXEC` on the PTY master and slave at creation, plus a `close_range` sweep of
+  everything above the child's own stdio before `exec`. **Either alone closes the hole** — proven
+  by ablating each independently — so the second is a real net, not decoration.
+
+- **What to check.** There is nothing to clean up on disk and no record to inspect; the exposure
+  was between live processes. **If you ran code you would not fully trust — an AI CLI agent, a
+  build script from an unfamiliar project — in a Tekstide terminal while another terminal was
+  open, treat what was on those other terminals as potentially read.** In practice that means
+  anything typed into them, secrets included. If you only ever ran your own commands, the exposure
+  is theoretical. If you are unsure, `0.15.0` removes the possibility going forward.
+
+### Fixed — closing a terminal now ends what that terminal started
+
+- **`0.14.0` shipped this as a known limitation** — *"a backgrounded job survives closing the
+  terminal that started it."* **That is no longer true**, and this is the correction to it.
+
+  Closing signalled one process group. An interactive shell puts every `&` job in a process group
+  of its own, so those jobs were never in the group being signalled. Termination now hangs up and
+  re-scans the whole **session**: close the PTY master, `SIGHUP` the session leader so the shell
+  hangs up its own jobs, escalate to `SIGKILL` for anything left, then re-enumerate to confirm.
+
+  **The close confirmation says so before you click**: *"Anything started from these terminals ends
+  too, including a backgrounded job."*
+
+- **A process you deliberately detached still survives, by design.** `nohup`, `disown` and `setsid`
+  work by leaving the session, and the session is exactly the boundary this fix respects. That is
+  your opt-out and it is deliberate, not an oversight — it is also why this kills by session rather
+  than by container.
+
+  **If you relied on the old behaviour** — backgrounding a long build with `&` and closing the
+  project expecting it to continue — **that no longer works, and `nohup` or `disown` is how to ask
+  for it now.**
+
+- **The safe-close audit record can now support a stronger claim, and does.**
+  `terminal_process_groups_confirmed_empty` is renamed `terminal_session_confirmed_empty`, and it
+  is no longer inferred from the termination outcome — it is read from a real, session-wide re-scan
+  performed after the kill. `0.14.0`'s entry told you an `applied` outcome meant less than it
+  looked like; it now means what it says, for everything inside the session. A process that left
+  the session remains outside the claim, deliberately, and the field's own documentation says so.
+
+### Fixed — a previewed file is readable
+
+- **`0.14.0` shipped the content preview escaping every line break**, so a real source file
+  rendered as one continuous run of text with `<U+000A>` between every line. Lines are lines now.
+
+  Every other control character is still escaped — tab, carriage return, ANSI sequences, bidi
+  overrides — and file content renders inside its own bordered container, kept in a type the rest
+  of the surface cannot draw. A file whose first line reads `Review state: Accepted` cannot
+  impersonate the interface around it.
+
+- **The "not a diff" label can no longer be scrolled away from what it labels.** The framing text
+  and the file list sit outside the content's own scroll region.
+
+- **Content over 4,000 lines is refused whole rather than truncated**, matching the existing byte
+  bound. A partial preview you cannot tell is partial is the trap this surface exists to avoid.
+
+### Added — record a decision about a change set
+
+- **Mark accepted / Mark rejected**, reachable by mouse or by `a` / `r`. The first time anything in
+  this application could change a change set's review state.
+
+- **It is a note, and it says so**: *"Marking this here only records your own note about it: it
+  changes no file, cannot be undone, and disappears when you close Tekstide."* All three are true
+  and all three would otherwise surprise you. Nothing is reverted, staged, or applied — there is no
+  before-side to revert to.
+
+- **No audit record is written for a review decision.** Said plainly so the audit store's silence
+  is never read as evidence that no decision was made.
+
+### Known limitations, unchanged
+
+- **No screen-reader support.** `iced` has no accessibility bridge; out of scope for that reason
+  and no other.
+- **Some controls are mouse-only, and closing a project is one of them.** Found by this release's
+  own gate, trying to exercise the close path by keyboard: the `×` on a project tab is the only
+  thing that emits a close, and no key reaches it. **A keyboard-only user cannot close a project**,
+  and therefore cannot reach the termination behaviour this release is largely about. Pre-existing
+  since `0.13.0`, not introduced here, and not a reason to hold a security fix — but it is the
+  fourth control of this shape this project has had to find, and the next release is scoped to it.
+- **Surface-local keys are not advertised.** `a`/`r` here, and `Enter`/`Space`/`Delete`/arrows
+  elsewhere, appear in neither the Help modal nor `--help`. Same work.
+- **Still no two-sided diff.** The before-bytes were never captured; blocked on Git-backed
+  detection.
+- **A review decision does not survive closing Tekstide.**
+
 ## 0.14.0 - What It Changed, And What This Cannot Tell You
 
 Status: released on 2026-08-26.
