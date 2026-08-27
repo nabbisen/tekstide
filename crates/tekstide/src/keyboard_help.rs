@@ -272,7 +272,21 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
 /// editor gains a discrete, non-typing action; a highlight gains its
 /// own mouse-only meaning; a modal ever grows a button `ModalFocusNext`
 /// does not reach), it belongs in this enum.
-#[cfg(test)]
+///
+/// **Not `#[cfg(test)]`, unlike `control_coverage`'s own domain:**
+/// response 349/351's own flag, decided at PR-044-C's start rather than
+/// on contact. D2 requires the surface-grouped Help section and
+/// `--help` to be *generated from the registry*, and both are real
+/// production code -- a `#[cfg(test)]` enum cannot be their data
+/// source. `surface_keyboard_coverage`/`ControlCoverage`, directly
+/// below, stay test-only: that pairing is still the audit layer,
+/// mirroring `control_coverage`'s own role for `NavigationAction`
+/// exactly, unchanged by this. What is new is [`surface_action_entry`],
+/// further below, the production sibling `action_catalog_key` already
+/// has for the global registry -- real data, a real caller
+/// (`keyboard_help_lines`/`usage_text`'s own surface-grouped
+/// additions), checked at test time against the same [`SurfaceAction`]
+/// set rather than duplicated by hand.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SurfaceAction {
     TabStripCloseProject,
@@ -383,6 +397,164 @@ pub(crate) fn surface_keyboard_coverage(action: SurfaceAction) -> ControlCoverag
     }
 }
 
+/// Every [`SurfaceAction`], in registry order -- grouped by surface,
+/// the order [`surface_action_help_lines`] renders them in and the
+/// order PR-044-A's own inventory test already walks. **The one list
+/// every production and test caller shares** -- a second,
+/// differently-ordered copy would be exactly the "hand-written list"
+/// D2 requires this RFC not to become.
+pub(crate) const SURFACE_ACTION_ORDER: &[SurfaceAction] = &[
+    SurfaceAction::TabStripCloseProject,
+    SurfaceAction::TabStripGoToProjectBoard,
+    SurfaceAction::TabStripSwitchToProject,
+    SurfaceAction::ExplorerActivateHighlightedRow,
+    SurfaceAction::ApprovalHistoryOpenHighlightedEntry,
+    SurfaceAction::ChangeReviewMarkAccepted,
+    SurfaceAction::ChangeReviewMarkRejected,
+    SurfaceAction::ChangeReviewSelectHighlightedFile,
+    SurfaceAction::TrustSettingsActivateTrustControl,
+    SurfaceAction::TrustSettingsToggleTranscriptCaptureDeclined,
+    SurfaceAction::TrustSettingsOpenTranscriptPurgeDialog,
+    SurfaceAction::ProjectBoardRowReopenHighlightedProject,
+    SurfaceAction::ProjectBoardPathFieldSubmit,
+    SurfaceAction::ProjectBoardPathFieldDismiss,
+];
+
+/// One row of surface-grouped help: which surface it belongs to (a
+/// catalog key naming a Help section heading, not a per-line label),
+/// the real live key, and its own description's catalog key.
+pub(crate) struct SurfaceActionEntry {
+    pub(crate) group_key: &'static str,
+    /// A `&'static str` straight from this function -- trusted,
+    /// fixed-set text, the same shape [`KeyboardHelpLine::binding`]
+    /// already has, never routed through `text_safety::quote_untrusted`.
+    pub(crate) binding: &'static str,
+    pub(crate) description_key: &'static str,
+}
+
+/// Production: one [`SurfaceAction`]'s own real binding and catalog
+/// keys -- the data source [`surface_action_help_lines`] renders,
+/// mirroring [`action_catalog_key`]'s own role for [`NavigationAction`].
+/// `Option`, matching that function's own shape exactly, for the same
+/// reason: today every arm is `Some` (there are no `MouseOnly` entries
+/// left after PR-044-B), but a future action added to [`SurfaceAction`]
+/// without a real keyboard route -- `surface_keyboard_coverage` would
+/// call it `MouseOnly` -- has nothing to advertise here, and `None`
+/// is how that stays representable rather than becoming a made-up
+/// binding.
+pub(crate) fn surface_action_entry(action: SurfaceAction) -> Option<SurfaceActionEntry> {
+    match action {
+        SurfaceAction::TabStripCloseProject => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-tab-strip",
+            binding: "Delete",
+            description_key: "keyboard-help-surface-tab-strip-close-project",
+        }),
+        SurfaceAction::TabStripGoToProjectBoard => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-tab-strip",
+            binding: "Enter",
+            description_key: "keyboard-help-surface-tab-strip-go-to-project-board",
+        }),
+        SurfaceAction::TabStripSwitchToProject => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-tab-strip",
+            binding: "Enter",
+            description_key: "keyboard-help-surface-tab-strip-switch-to-project",
+        }),
+        SurfaceAction::ExplorerActivateHighlightedRow => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-explorer",
+            binding: "Enter",
+            description_key: "keyboard-help-surface-explorer-activate-row",
+        }),
+        SurfaceAction::ApprovalHistoryOpenHighlightedEntry => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-approval-history",
+            binding: "Enter",
+            description_key: "keyboard-help-surface-approval-history-open-entry",
+        }),
+        SurfaceAction::ChangeReviewMarkAccepted => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-change-review",
+            binding: "a",
+            description_key: "keyboard-help-surface-change-review-mark-accepted",
+        }),
+        SurfaceAction::ChangeReviewMarkRejected => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-change-review",
+            binding: "r",
+            description_key: "keyboard-help-surface-change-review-mark-rejected",
+        }),
+        SurfaceAction::ChangeReviewSelectHighlightedFile => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-change-review",
+            binding: "Enter",
+            description_key: "keyboard-help-surface-change-review-select-file",
+        }),
+        SurfaceAction::TrustSettingsActivateTrustControl => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-trust-settings",
+            binding: "Enter",
+            description_key: "keyboard-help-surface-trust-settings-activate-trust-control",
+        }),
+        SurfaceAction::TrustSettingsToggleTranscriptCaptureDeclined => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-trust-settings",
+            binding: "Space",
+            description_key: "keyboard-help-surface-trust-settings-toggle-transcript-capture",
+        }),
+        SurfaceAction::TrustSettingsOpenTranscriptPurgeDialog => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-trust-settings",
+            binding: "Delete",
+            description_key: "keyboard-help-surface-trust-settings-open-transcript-purge",
+        }),
+        SurfaceAction::ProjectBoardRowReopenHighlightedProject => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-project-board",
+            binding: "Enter",
+            description_key: "keyboard-help-surface-project-board-reopen-project",
+        }),
+        SurfaceAction::ProjectBoardPathFieldSubmit => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-project-board-path-field",
+            binding: "Enter",
+            description_key: "keyboard-help-surface-project-board-path-field-submit",
+        }),
+        SurfaceAction::ProjectBoardPathFieldDismiss => Some(SurfaceActionEntry {
+            group_key: "keyboard-help-surface-project-board-path-field",
+            binding: "Escape",
+            description_key: "keyboard-help-surface-project-board-path-field-dismiss",
+        }),
+    }
+}
+
+/// One surface's own group of help lines -- the heading (already
+/// catalog-resolved) plus every live binding on that surface, in
+/// [`SURFACE_ACTION_ORDER`]'s own order.
+pub struct SurfaceHelpGroup {
+    pub heading: String,
+    pub lines: Vec<KeyboardHelpLine>,
+}
+
+/// D2/PR-044-C: the surface-grouped section, generated from
+/// [`SURFACE_ACTION_ORDER`]/[`surface_action_entry`] -- not a second,
+/// hand-written list. Groups are emitted in the order their first
+/// member appears in [`SURFACE_ACTION_ORDER`], and lines within a group
+/// keep that same relative order. An action with no real keyboard route
+/// (`surface_action_entry` returning `None`) contributes no line and no
+/// empty group -- nothing to advertise, per D2's own "findable, not
+/// exhaustive" principle.
+pub fn surface_action_help_lines(catalog: &Catalog) -> Vec<SurfaceHelpGroup> {
+    let mut groups: Vec<SurfaceHelpGroup> = Vec::new();
+    for &action in SURFACE_ACTION_ORDER {
+        let Some(entry) = surface_action_entry(action) else {
+            continue;
+        };
+        let heading = catalog.get(entry.group_key);
+        let line = KeyboardHelpLine {
+            binding: entry.binding,
+            description: catalog.get(entry.description_key),
+        };
+        match groups.iter_mut().find(|group| group.heading == heading) {
+            Some(group) => group.lines.push(line),
+            None => groups.push(SurfaceHelpGroup {
+                heading,
+                lines: vec![line],
+            }),
+        }
+    }
+    groups
+}
+
 /// Every live binding, described. Order follows the policy's own rule
 /// order rather than being re-sorted here, so the help reads in the
 /// order the policy declares.
@@ -421,6 +593,16 @@ pub fn usage_text(catalog: &Catalog, executable: &str) -> String {
     out.push_str("KEYBOARD:\n");
     for line in keyboard_help_lines(catalog) {
         out.push_str(&format!("    {:<14} {}\n", line.binding, line.description));
+    }
+    // RFC-044 D2/PR-044-C: the same surface-grouped section
+    // `help_modal_view` renders, generated from the same registry --
+    // `--help` and the GUI must not be able to disagree about what a
+    // surface's own keys do.
+    for group in surface_action_help_lines(catalog) {
+        out.push_str(&format!("\n{}:\n", group.heading));
+        for line in group.lines {
+            out.push_str(&format!("    {:<14} {}\n", line.binding, line.description));
+        }
     }
     out
 }

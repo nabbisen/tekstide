@@ -8772,6 +8772,14 @@ fn help_modal_view_reuses_the_shared_keyboard_help_derivation_not_a_second_list(
         "help_modal_view must call the shared keyboard_help_lines derivation, not a \
          hand-written list"
     );
+    // RFC-044 D2/PR-044-C: the surface-grouped section must be the same
+    // shared derivation too, not a second, hand-written list sitting
+    // next to the first.
+    assert!(
+        source.contains("crate::keyboard_help::surface_action_help_lines(&state.catalog)"),
+        "help_modal_view must call the shared surface_action_help_lines derivation, not a \
+         hand-written list"
+    );
 }
 
 // RFC-038 PR-038-G: the folder browser -- overturns D1 (a typed path is

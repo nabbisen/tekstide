@@ -189,6 +189,98 @@ path under `$HOME`, a real project name, or another project on screen.
 full-workspace runs: **453 + 4 + 746, fully green** -- the deliberate PR-044-A failure is gone,
 closed by this slice, not merely raised.
 
-## PR-044-C
+## PR-044-C — advertise
 
-Not started.
+### The `#[cfg(test)]` question, decided first (response 351's own flag)
+
+`SurfaceAction` moved out of `#[cfg(test)]` -- now an always-compiled production type, because D2
+requires the surface-grouped Help section and `--help` to be generated from the registry, and both
+are real production code that a `#[cfg(test)]` enum cannot be the data source for.
+`surface_keyboard_coverage`/`ControlCoverage` stay test-only, unchanged role: that pairing is still
+the audit layer (D3's own question, "how does the keyboard reach this"), not the production data
+source. The split is recorded at `SurfaceAction`'s own doc comment.
+
+### The production registry (D2)
+
+`SURFACE_ACTION_ORDER` (`keyboard_help.rs`): the fourteen `SurfaceAction` variants in the order
+Help/`--help` render them, grouped by surface -- **the one list every production and test caller
+shares**, deliberately, so a second differently-ordered copy cannot exist to disagree with it.
+
+`SurfaceActionEntry { group_key, binding, description_key }` +
+`surface_action_entry(SurfaceAction) -> Option<SurfaceActionEntry>`: the production sibling
+`action_catalog_key` already has for the global registry. `Option`, matching that function's own
+shape, for the same reason -- today every arm is `Some` (zero `MouseOnly` entries left after
+PR-044-B), but a future action with no real keyboard route has nothing to advertise here, and
+`None` is how that stays representable instead of becoming a made-up binding.
+
+`surface_action_help_lines(&Catalog) -> Vec<SurfaceHelpGroup>`: walks `SURFACE_ACTION_ORDER`,
+resolves each `Some` entry's own catalog keys, and groups consecutive-by-heading lines together --
+an action with no route (`None`) contributes no line and no empty group. Both `help_modal_view`
+(`shell.rs`) and `usage_text` (`keyboard_help.rs`, `--help`) call this directly, the same "one
+derivation, two renderers" shape `keyboard_help_lines` already established for the global list.
+
+**No key hints added to any control's own label** -- D2's own explicit prohibition, the risk
+document's §1, flagged by the reviewer as "the real work of C" given `en.ftl`'s own 28
+`change-review-*`-string history. Checked directly: the diff touches only `keyboard_help.rs`
+(the registry + two new rendering loops), `en.ftl` (new `keyboard-help-surface-*` keys, none of
+which touch an existing button/control label key), `shell.rs`'s `help_modal_view` (the Help modal
+itself, which is the one place bindings and controls are named together, by design), and this
+slice's own tests. No button, tab, or row label anywhere else gained a key suffix.
+
+### The required test: generation is real, not a second hand-written list
+
+`surface_action_help_lines_is_derived_from_the_registry`: an expectation table independent of
+`surface_action_entry` (keyed by catalog key alone, resolved through `Catalog::get` directly, never
+through the function under test) asserts every one of the fourteen live entries appears as the
+right (binding, description) pair under the right heading, and that the total line count is exactly
+fourteen -- a dropped or fabricated line fails either the count or the per-entry lookup.
+**Deliberately does not call `surface_action_entry` for its own expected values**: doing so would
+only prove `surface_action_help_lines` agrees with itself, which passes even if both functions were
+wrong together -- the exact tautology this module's own doc comment (`ARCHITECTURE.md`'s
+"state-asserting text") warns a second list creates.
+
+**Ablated for real**, per this RFC's own established convention (PR-044-A/B): changed
+`surface_action_entry`'s `TabStripCloseProject` arm from `Some(..)` to `None`, reran --
+`surface_action_help_lines_is_derived_from_the_registry` failed, naming the count mismatch (13 vs
+14 expected). Restored: passes, all nine `keyboard_help`-module tests green.
+
+Two further tests mirror the global list's own existing pair exactly:
+`every_surface_action_help_line_is_described_to_the_user` (no rendered heading or description ever
+echoes its own catalog key back, which is how a missing `en.ftl` entry would otherwise hide) and
+`usage_text_lists_every_surface_binding_the_gui_lists` (the Help modal and `--help` cannot disagree
+about a surface's own keys). `help_modal_view_reuses_the_shared_keyboard_help_derivation_not_a_second_list`
+(pre-existing, `shell/tests.rs`) gained a second assertion: `shell.rs` must call
+`surface_action_help_lines`, not a hand-written duplicate, the same source-scan shape it already
+used for the global list.
+
+### Contextual filtering
+
+Not built. D2 states it is optional; the surface-grouped Help section already answers "what can I
+do here" more directly than a flat list did, and scoping further to only the currently active
+surface was judged more change than this slice's own claim requires. Left for a future slice if a
+reviewer finds the full list too long in practice.
+
+### Closeout
+
+`CHANGELOG.md`'s `0.15.0` entry carried two now-false "Known limitations": "some controls are
+mouse-only, and closing a project is one of them" (PR-044-B closed this) and "surface-local keys
+are not advertised" (this slice closes it). Both moved out of "Known limitations, unchanged" into a
+new "Fixed" section, referencing RFC-044, mirroring the phrasing convention the existing
+"Fixed -- closing a terminal..." section above them already uses ("That is no longer true, and this
+is the correction to it").
+
+The README's own keyboard table is explicitly out of this RFC's own scope, per its README: making
+it generated (rather than merely checked) needs a separate decision this RFC does not make.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
+(4 tests): clean. Three consecutive full-workspace runs: **456 + 4 + 746, fully green** every
+time -- three new tests (`surface_action_help_lines_is_derived_from_the_registry`,
+`every_surface_action_help_line_is_described_to_the_user`,
+`usage_text_lists_every_surface_binding_the_gui_lists`) account for 453 to 456; the pre-existing
+`help_modal_view_reuses_the_shared_keyboard_help_derivation_not_a_second_list` gained a second
+assertion rather than a new test, so it does not add to the count.
+
+No new live GUI evidence required for this slice -- per the RFC's own README, live evidence was
+required only for the access slice (PR-044-B), already captured.

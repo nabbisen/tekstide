@@ -72,10 +72,17 @@ created: "2026-08-27"
 
 ## D2 / PR-044-C — advertising
 
-- [ ] Help gains a surface-grouped section; `--help` gains the same grouping.
-- [ ] Both are **generated from the registry**, not hand-written.
-- [ ] Ablated: remove a registry entry, watch it disappear from the generated help.
-- [ ] **No key hints added to control labels.**
+- [x] Help gains a surface-grouped section; `--help` gains the same grouping.
+- [x] Both are **generated from the registry** (`SURFACE_ACTION_ORDER`/`surface_action_entry`/
+      `surface_action_help_lines`), not hand-written — `help_modal_view` and `usage_text` both call
+      the same function.
+- [x] Ablated: `surface_action_entry`'s `TabStripCloseProject` arm changed to `None`, reran --
+      `surface_action_help_lines_is_derived_from_the_registry` failed (13 vs 14 expected lines).
+      Restored: passes.
+- [x] **No key hints added to control labels.** Verified directly: the diff touches only
+      `keyboard_help.rs`, `en.ftl` (new keys, none aliasing an existing button/label key),
+      `help_modal_view` (the Help modal itself — the one place bindings and controls are named
+      together, by design), and this slice's own tests.
 
 ## Live GUI evidence
 
@@ -86,16 +93,20 @@ created: "2026-08-27"
 
 ## Gates
 
-- [ ] `fmt`, `clippy -D warnings`, `git diff --check`, `rfc_docs_invariants`.
-- [ ] Full workspace suite, **three consecutive runs**, each logged to a file; any flake named
-      against the register **with a row**, not only mentioned.
+- [x] `fmt`, `clippy -D warnings`, `git diff --check`, `rfc_docs_invariants`. All clean.
+- [x] Full workspace suite, **three consecutive runs**, each logged to a file; any flake named
+      against the register **with a row**, not only mentioned. **456 + 4 + 746, fully green**
+      every time — no flake.
 
 ## Closeout
 
-- [ ] `README`'s keyboard table reflects whatever D2 produced.
-- [ ] Any statement this slice makes false is corrected — `0.15.0`'s changelog lists both
-      "closing a project is mouse-only" and "surface-local keys are not advertised" as known
-      limitations.
+- [ ] `README`'s keyboard table reflects whatever D2 produced. **Deliberately not done**: per this
+      RFC's own README, making the table generated (rather than merely checked) is out of scope —
+      it needs a separate decision about whether the README is generated or merely checked, which
+      this RFC does not make.
+- [x] Any statement this slice makes false is corrected — `0.15.0`'s changelog no longer lists
+      "closing a project is mouse-only" or "surface-local keys are not advertised" as known
+      limitations; both moved to a new "Fixed" section referencing RFC-044.
 
 ## Final Acceptance Decision
 

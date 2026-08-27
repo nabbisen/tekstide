@@ -6903,6 +6903,28 @@ fn help_modal_view(state: &State) -> Element<'_, Message> {
         );
     }
 
+    // RFC-044 D2/PR-044-C: the surface-grouped section, generated from
+    // `SURFACE_ACTION_ORDER`/`surface_action_entry` -- the same loop
+    // shape as the global list above, one heading row per surface
+    // rather than a per-line column. No key hint is added to any
+    // control's own label anywhere else in this crate; this list is
+    // the one place bindings and controls are named together, per D2's
+    // own explicit requirement.
+    for group in crate::keyboard_help::surface_action_help_lines(&state.catalog) {
+        lines = lines.push(text(group.heading).size(state.theme.font_size_body()));
+        for line in group.lines {
+            lines = lines.push(
+                row![
+                    text(line.binding)
+                        .size(state.theme.font_size_body())
+                        .width(Length::Fixed(HELP_MODAL_BINDING_COLUMN_PX)),
+                    text(line.description).size(state.theme.font_size_body()),
+                ]
+                .spacing(8),
+            );
+        }
+    }
+
     // RFC-040 PR-040-B: this modal's own real, clickable close control
     // -- no decision to make (unlike every other modal here), so it
     // dispatches `ModalDismiss` directly, the same message `Escape`

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use tekstide_core::navigation::{KeybindingPolicy, KeybindingStatus, NavigationAction};
 
-use super::{action_catalog_key, keyboard_help_lines, usage_text};
+use super::{action_catalog_key, keyboard_help_lines, surface_action_help_lines, usage_text};
 use crate::i18n::{Catalog, LocalePreference};
 
 fn real_locales_dir() -> PathBuf {
@@ -156,6 +156,198 @@ fn usage_text_lists_every_binding_the_gui_lists() {
             "--help omitted the description of {}",
             line.binding
         );
+    }
+}
+
+/// D2/PR-044-C's required test, in substance: the generated help is
+/// actually *derived* from the registry (`SURFACE_ACTION_ORDER`/
+/// `surface_action_entry`), not a second, hand-written list that
+/// happens to agree with it today. **Deliberately does not call
+/// `surface_action_entry` for its own expectations** -- doing so would
+/// only prove `surface_action_help_lines` agrees with itself, which
+/// passes even if both were wrong together, exactly the tautology this
+/// module's own doc comment (`ARCHITECTURE.md`'s "state-asserting text")
+/// warns a second list creates. This table is independent, keyed by
+/// catalog key alone; `catalog.get` reads en.ftl directly, not through
+/// `surface_action_entry`.
+///
+/// Ablated for real, per this RFC's own established convention
+/// (PR-044-A/B): changed `surface_action_entry`'s `TabStripCloseProject`
+/// arm to return `None`, reran -- this test failed, naming the missing
+/// `("Delete", ..close-project)` line under "Tab strip". Restored:
+/// passes.
+#[test]
+fn surface_action_help_lines_is_derived_from_the_registry() {
+    let catalog = real_catalog();
+    let groups = surface_action_help_lines(&catalog);
+
+    // (heading key, binding, description key) -- independent of
+    // `surface_action_entry`, maintained here on purpose the same way
+    // `no_action_without_a_working_binding_is_advertised` maintains its
+    // own independent dead-action list above.
+    let expected: &[(&str, &str, &str)] = &[
+        (
+            "keyboard-help-surface-tab-strip",
+            "Delete",
+            "keyboard-help-surface-tab-strip-close-project",
+        ),
+        (
+            "keyboard-help-surface-tab-strip",
+            "Enter",
+            "keyboard-help-surface-tab-strip-go-to-project-board",
+        ),
+        (
+            "keyboard-help-surface-tab-strip",
+            "Enter",
+            "keyboard-help-surface-tab-strip-switch-to-project",
+        ),
+        (
+            "keyboard-help-surface-explorer",
+            "Enter",
+            "keyboard-help-surface-explorer-activate-row",
+        ),
+        (
+            "keyboard-help-surface-approval-history",
+            "Enter",
+            "keyboard-help-surface-approval-history-open-entry",
+        ),
+        (
+            "keyboard-help-surface-change-review",
+            "a",
+            "keyboard-help-surface-change-review-mark-accepted",
+        ),
+        (
+            "keyboard-help-surface-change-review",
+            "r",
+            "keyboard-help-surface-change-review-mark-rejected",
+        ),
+        (
+            "keyboard-help-surface-change-review",
+            "Enter",
+            "keyboard-help-surface-change-review-select-file",
+        ),
+        (
+            "keyboard-help-surface-trust-settings",
+            "Enter",
+            "keyboard-help-surface-trust-settings-activate-trust-control",
+        ),
+        (
+            "keyboard-help-surface-trust-settings",
+            "Space",
+            "keyboard-help-surface-trust-settings-toggle-transcript-capture",
+        ),
+        (
+            "keyboard-help-surface-trust-settings",
+            "Delete",
+            "keyboard-help-surface-trust-settings-open-transcript-purge",
+        ),
+        (
+            "keyboard-help-surface-project-board",
+            "Enter",
+            "keyboard-help-surface-project-board-reopen-project",
+        ),
+        (
+            "keyboard-help-surface-project-board-path-field",
+            "Enter",
+            "keyboard-help-surface-project-board-path-field-submit",
+        ),
+        (
+            "keyboard-help-surface-project-board-path-field",
+            "Escape",
+            "keyboard-help-surface-project-board-path-field-dismiss",
+        ),
+    ];
+
+    let actual_total: usize = groups.iter().map(|group| group.lines.len()).sum();
+    assert_eq!(
+        actual_total,
+        expected.len(),
+        "surface_action_help_lines produced {actual_total} lines, expected {} -- a registry \
+         entry was dropped, or an extra one appeared, either way it no longer reflects the \
+         registry exactly",
+        expected.len()
+    );
+
+    for &(group_key, binding, description_key) in expected {
+        let heading = catalog.get(group_key);
+        let description = catalog.get(description_key);
+
+        let group = groups
+            .iter()
+            .find(|group| group.heading == heading)
+            .unwrap_or_else(|| panic!("no rendered group for heading {heading:?} ({group_key})"));
+        assert!(
+            group
+                .lines
+                .iter()
+                .any(|line| line.binding == binding && line.description == description),
+            "expected a line ({binding}, {description:?}) under {heading:?}, found {:?}",
+            group
+                .lines
+                .iter()
+                .map(|l| (l.binding, &l.description))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+/// Mirrors `every_live_binding_is_described_to_the_user`, for the
+/// surface-grouped section: every rendered heading and description must
+/// be real catalog text, not the key itself echoed back because en.ftl
+/// is missing an entry `Catalog::get`'s fallback would otherwise hide.
+#[test]
+fn every_surface_action_help_line_is_described_to_the_user() {
+    let catalog = real_catalog();
+    let groups = surface_action_help_lines(&catalog);
+
+    assert!(!groups.is_empty(), "expected at least one surface group");
+
+    for group in &groups {
+        assert!(
+            !group.heading.starts_with("keyboard-help-surface-"),
+            "group heading rendered its own catalog key ({:?}), so the key is missing from \
+             en.ftl",
+            group.heading
+        );
+        for line in &group.lines {
+            assert!(
+                !line.description.is_empty(),
+                "{} has an empty description",
+                line.binding
+            );
+            assert!(
+                !line.description.starts_with("keyboard-help-surface-"),
+                "{} rendered the catalog key itself ({}), which means the key is missing \
+                 from en.ftl",
+                line.binding,
+                line.description
+            );
+        }
+    }
+}
+
+/// Mirrors `usage_text_lists_every_binding_the_gui_lists`, for the
+/// surface-grouped section: `--help` and the Help modal must not be
+/// able to disagree about what a surface's own keys do.
+#[test]
+fn usage_text_lists_every_surface_binding_the_gui_lists() {
+    let catalog = real_catalog();
+    let usage = usage_text(&catalog, "tekstide");
+
+    for group in surface_action_help_lines(&catalog) {
+        assert!(
+            usage.contains(&group.heading),
+            "--help omitted the surface heading {:?}",
+            group.heading
+        );
+        for line in group.lines {
+            assert!(
+                usage.contains(line.binding) && usage.contains(&line.description),
+                "--help omitted the surface line ({}, {:?})",
+                line.binding,
+                line.description
+            );
+        }
     }
 }
 

@@ -857,6 +857,35 @@ keyboard-help-open-help = This list
 keyboard-help-open-folder-browser = Browse for a project folder
 keyboard-help-switch-active-project = Switch to the next open project
 
+# RFC-044 D2/PR-044-C: the surface-grouped section, generated from
+# `SURFACE_ACTION_ORDER`/`surface_action_entry` in `keyboard_help.rs`, not
+# hand-written -- a missing key here is caught the same way the global list
+# above already is (`Catalog::get` falls back to echoing the key). Group
+# headings first, then each surface's own descriptions, in the same order
+# `SURFACE_ACTION_ORDER` declares.
+keyboard-help-surface-tab-strip = Tab strip
+keyboard-help-surface-explorer = Explorer
+keyboard-help-surface-approval-history = Approval History
+keyboard-help-surface-change-review = Change Review
+keyboard-help-surface-trust-settings = Trust Settings
+keyboard-help-surface-project-board = Project Board
+keyboard-help-surface-project-board-path-field = Project Board: path field
+
+keyboard-help-surface-tab-strip-close-project = Close the highlighted project's tab
+keyboard-help-surface-tab-strip-go-to-project-board = Go to the Project Board, with "Projects" highlighted
+keyboard-help-surface-tab-strip-switch-to-project = Switch to the highlighted project
+keyboard-help-surface-explorer-activate-row = Open the highlighted file, or step into the highlighted directory
+keyboard-help-surface-approval-history-open-entry = Open the highlighted approval history entry
+keyboard-help-surface-change-review-mark-accepted = Mark the highlighted change accepted
+keyboard-help-surface-change-review-mark-rejected = Mark the highlighted change rejected
+keyboard-help-surface-change-review-select-file = Open the highlighted changed file
+keyboard-help-surface-trust-settings-activate-trust-control = Grant or revoke trust, whichever is currently shown
+keyboard-help-surface-trust-settings-toggle-transcript-capture = Toggle declining transcript capture
+keyboard-help-surface-trust-settings-open-transcript-purge = Open the transcript purge dialog
+keyboard-help-surface-project-board-reopen-project = Reopen the highlighted recent project
+keyboard-help-surface-project-board-path-field-submit = Open the typed or pasted project path
+keyboard-help-surface-project-board-path-field-dismiss = Dismiss the path field
+
 # RFC-038 PR-038-C: the Help modal itself. Reachable from anywhere;
 # replaces the Project Board's own former keyboard list.
 help-dialog-title = Keyboard reference

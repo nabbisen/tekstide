@@ -96,18 +96,23 @@ readable rather than one escaped line, and you can record a decision about a cha
 - **No audit record is written for a review decision.** Said plainly so the audit store's silence
   is never read as evidence that no decision was made.
 
+### Fixed — a keyboard-only user can close a project, and every surface-local key is advertised
+
+- **This release's own gate found that a keyboard-only user could not close a project** — the `×`
+  on a project tab was the only thing that emitted a close, and no key reached it, so a
+  keyboard-only user could not reach the termination behaviour this release is largely about.
+  **That is no longer true.** `Delete`, with a project's own tab highlighted, closes it — the same
+  `attempt_close_project_tab` the `×` button already reached, so both routes converge on the same
+  confirmation dialog for a project with live work. RFC-044.
+
+- **`a`/`r` here, and `Enter`/`Space`/`Delete`/arrows elsewhere, appeared in neither the Help modal
+  nor `--help`.** They do now: a surface-grouped section, generated from the same registry that
+  drives the fix above, lists every surface-local key by the surface it belongs to. RFC-044.
+
 ### Known limitations, unchanged
 
 - **No screen-reader support.** `iced` has no accessibility bridge; out of scope for that reason
   and no other.
-- **Some controls are mouse-only, and closing a project is one of them.** Found by this release's
-  own gate, trying to exercise the close path by keyboard: the `×` on a project tab is the only
-  thing that emits a close, and no key reaches it. **A keyboard-only user cannot close a project**,
-  and therefore cannot reach the termination behaviour this release is largely about. Pre-existing
-  since `0.13.0`, not introduced here, and not a reason to hold a security fix — but it is the
-  fourth control of this shape this project has had to find, and the next release is scoped to it.
-- **Surface-local keys are not advertised.** `a`/`r` here, and `Enter`/`Space`/`Delete`/arrows
-  elsewhere, appear in neither the Help modal nor `--help`. Same work.
 - **Still no two-sided diff.** The before-bytes were never captured; blocked on Git-backed
   detection.
 - **A review decision does not survive closing Tekstide.**
