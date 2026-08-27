@@ -634,7 +634,7 @@ fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
         source: TerminationRequestSource::TestHarness,
         reason: BoundedRuntimeSummary::new("setsid opt-out smoke"),
     };
-    let _ = runtime
+    let events = runtime
         .request_terminate(
             &handle,
             request,
@@ -647,6 +647,23 @@ fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
         crate::test_support::process_is_alive(detached_pid),
         "a process that left the session via setsid is out of scope by design -- D2's own \
          opt-out -- and a real close must not have touched it"
+    );
+    // RFC-043 PR-043-C: this is `SessionConfirmedEmpty`'s own claim made
+    // precise, not merely an unused return value -- the *session* really
+    // is empty once the shell itself is gone (the setsid'd job left it),
+    // so `confirmed: true` here is correct and honest at the same time
+    // `detached_pid` is still alive above. `confirmed` claims the
+    // session was re-scanned and found empty; it has never claimed
+    // "every process this terminal ever launched is gone" -- D2's own
+    // opt-out is exactly the gap between those two readings, and this is
+    // the test that proves the field does not quietly close it.
+    assert!(
+        events.contains(&TerminalRuntimeEvent::SessionConfirmedEmpty {
+            handle: handle.clone(),
+            confirmed: true,
+        }),
+        "the session itself (minus the process that left it) should be confirmed empty: \
+         {events:?}"
     );
     // Not this test's own cleanup responsibility to kill -- proving the
     // survival is the point -- but leaving a real `sleep 300` running
