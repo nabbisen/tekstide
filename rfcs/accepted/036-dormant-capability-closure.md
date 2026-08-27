@@ -1,6 +1,6 @@
 # RFC-036: Dormant Capability Closure
 
-Status: **Accepted by the human owner 2026-08-18.** Deletion of published API is on the table deliberately, batched into one release.
+Status: **Accepted by the human owner 2026-08-18. D1-D4 decided by the architect 2026-08-27**, when the pack was written — this RFC predates the decide-on-acceptance convention RFC-041 onward were accepted under, so its decisions were still open. See "Decided 2026-08-27" at the end. Deletion of published API is on the table deliberately, batched into one release.
 Target milestone: M12
 Date: 2026-08-18
 
@@ -143,3 +143,91 @@ are separated from the triage and treated as their own finding.
   requiring real design gets its own RFC rather than being absorbed.
 - **Deleting something a future RFC needed.** Mitigated by D2's named-consumer rule, and by
   the git history — deletion is recoverable, whereas a wrong "keep" is invisible forever.
+
+---
+
+## Decided 2026-08-27
+
+Written with the pack. Four decisions: the three this RFC asked for, and one it did not.
+
+### D0 (added) — re-verify the list before triaging it
+
+**The list in this RFC is ten days old and at least two rows have changed.** Checked before
+deciding anything:
+
+| Named orphan | Production callers in `tekstide` today |
+| --- | --- |
+| `request_terminate` | **3** — wired by RFC-039/043 |
+| `shutdown` | **1** |
+| `purge_all_records`, `recover`, `set_viewport`, `set_git_summary`, `set_warning_state`, `decide_with_edited_argv`, `add_agent_run`, `save_project_text_document` | 0 |
+
+Triaging from the written list would have produced decisions about capabilities that are no
+longer dormant. **Re-verify every row against the tree before deciding it**, and record the count
+per row rather than inheriting the audit's.
+
+### D1 — yes, deletion is on the table. Batched into `0.16.0`.
+
+`tekstide-core 0.15.0` is on crates.io, so removals are breaking and force a minor bump. **That
+bump is free here**: `0.16.0` is already owed for RFC-044, so batching removals into it costs
+nothing beyond what is already scheduled.
+
+The argument that settles it is this RFC's own: **deletion is recoverable from git history; a
+wrong "keep" is invisible forever.** The error directions are not symmetric, so the cheaper error
+is the reversible one.
+
+**But deletion carries the same evidence bar as any claim in this project.** A row decided
+"delete" must show what was searched — production callers, test callers, and what *would* have
+called it — not assert dormancy. "No callers" is a measurement, and measurements get cited.
+
+### D2 — "core-only" requires a **named consumer that exists as a file**
+
+Taking this RFC's own recommendation, sharpened: an RFC in `rfcs/`, cited by number in the row.
+Not an intention, not "a future GUI might."
+
+**That rule has a problem this RFC created and did not resolve**, and resolving it is part of
+deciding D2. Four rows — `set_resource_limits`, `ConfigStore`, `to_ai_cli_profile`, and the
+`sensitive_config_changed` producer — are *conditioned*: their owner is the configuration-
+reachability slice RFC-023's closure implies. This RFC says of it: *"It has no number.
+Recommending one is a scheduling decision for the human owner."*
+
+Under a strict named-consumer rule, a consumer with no number is not named, and those four rows
+would fall to "delete" — which this RFC explicitly forbids for them. The rule and the exception
+cannot both stand.
+
+**Decided: reserve RFC-045, Configuration Reachability**, as the named consumer for all four. That
+converts a standing exception into an ordinary row and keeps D2 enforceable without a carve-out.
+RFC-045 is a **reservation**, not an authored RFC — recorded in `rfcs/README.md`'s reserved-numbers
+table, which exists for exactly this.
+
+### D3 — `recover` and `purge_all_records` leave the triage entirely
+
+They are not dormant features. They are **a recovery path and a data-deletion path that have never
+run from the application.** If the audit store is corrupted on a user's machine today, nothing
+calls the recovery this project built, reviewed and tested.
+
+That is the same class as `close_project`: reviewed, tested core API that no GUI code ever called,
+so a user could not do the thing at all. It was found by the owner asking why there was no button
+— not by any sweep.
+
+**They get their own slice, as a defect, not a triage row.** A triage row asks "wire, delete, or
+document"; the answer here is already known and it is "this should have been reachable."
+
+### D4 (added) — the triage records what search would have caught each miss
+
+This RFC's own risk is *"triage becomes a rewrite,"* and D4 must not cause that. So this is not a
+requirement to build checks.
+
+**The audit found what it searched for and missed two categories that its shape could not see:**
+
+- **Actions a user cannot take** — `close_project`. The audit searched for functions with no
+  callers; nothing searched for capabilities with no route to a user.
+- **Paths that never run** — `recover`, `purge_all_records`. Not absent callers; absent
+  *executions* of an error path.
+
+RFC-040 and RFC-044 have since built mechanical answers for the first category
+(`control_coverage`, `surface_keyboard_coverage` — exhaustive matches nobody can extend without
+deciding). Nothing exists for the second.
+
+**Required of the triage: each row states the search that would have found it**, in one line. Not
+the check, the shape. The output is then a specification for whoever builds the next mechanical
+sweep, rather than a list that has to be rediscovered when the third category appears.

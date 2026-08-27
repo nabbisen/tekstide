@@ -37,7 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 036 | [Dormant Capability Closure](./accepted/036-dormant-capability-closure.md) | **Accepted 2026-08-18.** Wire / delete / document, per orphan from the reachability audit. Separates `recover` and `purge_all_records` as worse than dormant — recovery and deletion paths never exercised from the application |
+| 036 | [Dormant Capability Closure](./accepted/036-dormant-capability-closure.md) | **Accepted 2026-08-18.** Wire / delete / document, per orphan from the reachability audit. Separates `recover` and `purge_all_records` as worse than dormant — recovery and deletion paths never exercised from the application **D0–D4 decided 2026-08-27** with the pack, since this RFC predates the decide-on-acceptance convention: re-verify before triaging (the list is ten days old and `request_terminate` now has three callers); deletion batched into `0.16.0`, because deletion is recoverable from git and a wrong "keep" is invisible forever; "core-only" requires a named consumer that exists as a file, which required **reserving RFC-045** for the four configuration-conditioned rows; `recover`/`purge_all_records` leave the triage as a defect; and each row names the search that would have found it. [Handoff pack](./handoffs/036-dormant-capability-closure/README.md) |
 
 
 ### Reserved numbers — check this before authoring
@@ -54,6 +54,7 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 028 | Cross-Platform Support | M14 |
 | 029 | Documentation, CI, and Release Automation | M14 |
 | 030 | Git Integration | M12 |
+| 045 | Configuration Reachability | M12 |
 
 Added 2026-08-12 after a real collision: RFC-024 was authored just-in-time as
 *Diff Preview Policy* and took a number the delivery plan had already reserved for Git
@@ -99,6 +100,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 038 | [First-Run and Project Entry](./handoffs/038-first-run-and-project-entry/README.md) — **M12, first**; the product's missing door |
 | 024 | [Diff Preview Policy](./handoffs/024-diff-preview-policy/README.md) |
 | 043 | [Terminal Process Containment](./handoffs/043-terminal-process-containment/README.md) — **M12**; make closing a terminal mean what the dialog already says |
+| 036 | [Dormant Capability Closure](./handoffs/036-dormant-capability-closure/README.md) — **M12**; decide each orphan once, with evidence |
 | 044 | [Surface-Local Keyboard Affordances](./handoffs/044-surface-local-keyboard-affordances/README.md) — **M12**; two keyboard systems, one accountable |
 | — | [The suite assumes it owns the machine](./handoffs/suite-assumes-it-owns-the-machine.md) — no RFC; two test defects with one cause. `transcripts/`/`approval/` still write to a real `$HOME`, and a wall-clock assertion fails under load while claiming it cannot be load |
 | — | [PTY master fd inheritance](./handoffs/pty-master-fd-inheritance.md) — no RFC; **security fix, start before RFC-043 is accepted**. `openpty` sets no `O_CLOEXEC`, so every spawned shell inherits every other terminal's master — one measured holding 27 |
