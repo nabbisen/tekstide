@@ -1,6 +1,6 @@
 # RFC-020: Diff Review and AgentRun Report Surfaces
 
-Status: **Accepted 2026-08-12** (the status line said "awaiting acceptance" until 2026-08-18,
+Status: **Implemented and closed 2026-08-25.** Accepted 2026-08-12 (the status line said "awaiting acceptance" until 2026-08-18,
 stale against `rfcs/README.md` and this RFC's own handoff pack, both of which recorded the
 acceptance at the time). Surface work stopped 2026-08-15 by response 200 for want of a
 producer; **re-scoped 2026-08-18**, see the scoping section at the end. The AgentRun report

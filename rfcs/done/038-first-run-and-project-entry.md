@@ -1,6 +1,6 @@
 # RFC-038: First-Run and Project Entry
 
-Status: **Accepted by the human owner 2026-08-24.** Written the day the owner ran the `0.12.0`
+Status: **Implemented and closed 2026-08-24.** Accepted by the human owner 2026-08-24. Written the day the owner ran the `0.12.0`
 executable and reported it "wholly useless. No help for me to operate. No action available."
 Target milestone: **M12, first** — ahead of RFC-020 PR-020-C, which adds a surface to a product
 a new user still cannot get into.

@@ -1,6 +1,6 @@
 # RFC-035: Change Detection Coverage and Disclosure
 
-Status: **Accepted by the human owner 2026-08-18.** Scoped to the `.git/hooks/` supervision hole and `max_changed_paths`; the other two limitations stay recorded and deferred.
+Status: **Implemented and closed 2026-08-25.** Accepted by the human owner 2026-08-18. Scoped to the `.git/hooks/` supervision hole and `max_changed_paths`; the other two limitations stay recorded and deferred.
 Target milestone: M12
 Date: 2026-08-18
 

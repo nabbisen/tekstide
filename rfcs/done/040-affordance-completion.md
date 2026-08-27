@@ -1,6 +1,6 @@
 # RFC-040: Affordance Completion
 
-Status: **Proposed 2026-08-25**, filed in the same commit that closed RFC-039, so that RFC's
+Status: **Implemented and closed 2026-08-25.** Proposed 2026-08-25, filed in the same commit that closed RFC-039, so that RFC's
 audit findings are carried rather than left in a review thread.
 Target milestone: **M12** — accepted by the human owner 2026-08-25, scheduled first of three,
 ahead of RFC-020's remaining surface and the minimal user documentation.

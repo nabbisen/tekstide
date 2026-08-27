@@ -1,6 +1,6 @@
 # RFC-039: Interaction Model and Visible Affordances
 
-Status: **Proposed 2026-08-24.** Written after the human owner reviewed `0.12.1` and RFC-038's
+Status: **Implemented and closed 2026-08-25.** Proposed 2026-08-24. Written after the human owner reviewed `0.12.1` and RFC-038's
 first two slices and said: *"What is the most important is to design user workflow(s) and make
 UI/UX to help them. Currently, no button or link to open project tab, close it, return to the
 entrance etc."*

@@ -78,6 +78,16 @@ fn front_matter_value<'a>(source: &'a str, field: &str) -> Option<&'a str> {
     })
 }
 
+/// Shared by every check below that reads a status claim, wherever it
+/// appears -- a handoff pack's own `source_rfc_status` front-matter
+/// field, or an RFC file's own `Status:` line. One predicate, not a
+/// second, differently-worded one for each site: `doc-invariants-completion.md`'s
+/// own instruction for gap 1, and the reason a fix to what "stale"
+/// means only has to happen once.
+fn claims_unfinished(status: &str) -> bool {
+    status.contains("Proposed") || status.starts_with("Accepted")
+}
+
 /// The folder is the source of truth for an RFC's state (RFC-000). A
 /// handoff pack's `source_rfc_status` is text asserting that same state,
 /// so the two cannot be allowed to disagree.
@@ -123,9 +133,8 @@ fn every_pack_status_field_agrees_with_its_rfc_folder() {
             continue;
         };
 
-        let claims_unfinished = status.contains("Proposed") || status.starts_with("Accepted");
         let stale = match folder.as_str() {
-            "done" => claims_unfinished,
+            "done" => claims_unfinished(status),
             "accepted" => status.contains("Proposed"),
             _ => false,
         };
@@ -144,6 +153,186 @@ fn every_pack_status_field_agrees_with_its_rfc_folder() {
          RFC-037 migration left behind. A sweep for paths cannot find these -- they do not \
          contain a path.",
         disagreements.join("\n")
+    );
+}
+
+/// `doc-invariants-completion.md` gap 1: the check above reads a
+/// handoff pack's own `source_rfc_status` front-matter field. It never
+/// reads the RFC file's own `Status:` line -- prose near the top of the
+/// file (`# RFC-NNN: Title`, a blank line, then `Status: **...**...`),
+/// not front matter, and the first thing a human reads. Five RFCs sat
+/// in `rfcs/done/` with this line still saying `Proposed` or a bare
+/// `Accepted` (039, 040 said `Proposed`; 020, 035, 038 said `Accepted`
+/// with no closing update) until this slice corrected them in the same
+/// commit as this check, per that handoff's own required shape. Same
+/// [`claims_unfinished`] predicate as the sibling check above, not a
+/// second, differently-worded one -- this one reads a different field
+/// of a different file for the same disagreement.
+#[test]
+fn every_rfc_own_status_line_agrees_with_its_folder() {
+    let Some(rfcs) = rfcs_dir() else {
+        eprintln!("skipped: rfcs/ is not packaged with the published crate");
+        return;
+    };
+
+    let mut disagreements = Vec::new();
+    for folder in ["accepted", "done"] {
+        let Ok(entries) = std::fs::read_dir(rfcs.join(folder)) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.extension().is_some_and(|ext| ext == "md") {
+                continue;
+            }
+            let Ok(source) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Some(status_line) = source.lines().find(|line| line.starts_with("Status:")) else {
+                continue;
+            };
+            // The RFC's own `Status:` line is prose, not a single short
+            // claim the way a handoff pack's `source_rfc_status` field
+            // is -- it leads with the current state, bolded, then often
+            // narrates history afterward ("**Implemented and closed
+            // 2026-08-26.** Proposed and accepted 2026-08-25 …", the
+            // exact shape this slice's own instruction holds up as
+            // correct). Applying `claims_unfinished` to the *whole*
+            // line would flag that history narration for containing
+            // the word "Proposed" -- reading only the bolded lead
+            // claim is what makes this the same predicate as the
+            // sibling check's, not a laxer one wearing the same name.
+            let rest = status_line.trim_start_matches("Status:").trim();
+            let lead_claim = rest
+                .strip_prefix("**")
+                .and_then(|after| after.split_once("**"))
+                .map_or(rest, |(claim, _)| claim);
+
+            let stale = match folder {
+                "done" => claims_unfinished(lead_claim),
+                "accepted" => lead_claim.contains("Proposed"),
+                _ => false,
+            };
+            if stale {
+                disagreements.push(format!(
+                    "  {}\n    says {status_line:?} but sits in rfcs/{folder}/",
+                    path.strip_prefix(repo_root()).unwrap_or(&path).display(),
+                ));
+            }
+        }
+    }
+
+    assert!(
+        disagreements.is_empty(),
+        "an RFC's own Status: line asserts a state its folder contradicts, and the folder wins \
+         (RFC-000):\n{}\nRFC-037's own argument was that this divergence misleads a reader in \
+         the direction of \"this still needs deciding\" -- and this is the line a reader sees \
+         first, before the handoff pack the sibling check above reads.",
+        disagreements.join("\n")
+    );
+}
+
+/// `doc-invariants-completion.md` gap 2: RFC-034, RFC-035 and RFC-036
+/// were accepted 2026-08-18 and none appeared in `rfcs/delivery-plan.md`
+/// until 2026-08-25, added retroactively when a reviewer noticed while
+/// scoping something else -- the third occurrence of this exact gap,
+/// not the first. `delivery-plan.md` is the file that answers "what is
+/// startable work"; an accepted RFC missing from it is invisible to
+/// whoever is looking for one. `proposed/` is deliberately exempt -- an
+/// RFC under review has not been scheduled and should not be in the
+/// queue yet.
+///
+/// **Matches on the RFC number in the table's first column and nothing
+/// else**, per this slice's own instruction: `delivery-plan.md`'s rows
+/// are prose, not a schema, and anything stricter breaks the next time
+/// a row is reworded. A pipe-table row whose first cell, trimmed, is
+/// not exactly three ASCII digits (a header row, a separator row, or an
+/// unrelated table's own first column, e.g. `RFC-021 command approval`)
+/// is not a match and is silently skipped, matching every other row
+/// that is not this table at all.
+///
+/// **Only checks RFC-014 and above** -- the document's own header says
+/// "Covers: M8 through M14," and RFC-014 is that coverage's own named
+/// start ("RFC-014's substrate outcome constrains every GUI RFC after
+/// it"). Confirmed empirically before adding the cutoff, not assumed:
+/// every RFC 014 and above already has a row; every one of RFC-000
+/// through RFC-013 (the pre-GUI, pre-M8 foundation) has none and was
+/// never meant to. Checking those thirteen would not catch a real gap
+/// -- it would invent one this document never claimed to close.
+#[test]
+fn every_accepted_or_done_rfc_has_a_delivery_plan_row() {
+    let Some(rfcs) = rfcs_dir() else {
+        eprintln!("skipped: rfcs/ is not packaged with the published crate");
+        return;
+    };
+
+    let plan_path = rfcs.join("delivery-plan.md");
+    let Ok(plan) = std::fs::read_to_string(&plan_path) else {
+        eprintln!("skipped: rfcs/delivery-plan.md is not packaged with the published crate");
+        return;
+    };
+
+    let scheduled: std::collections::HashSet<String> = plan
+        .lines()
+        .filter_map(|line| {
+            let number = line.trim().strip_prefix('|')?.split('|').next()?.trim();
+            (number.len() == 3 && number.chars().all(|c| c.is_ascii_digit()))
+                .then(|| number.to_owned())
+        })
+        .collect();
+
+    // `delivery-plan.md`'s own header: "Covers: M8 through M14
+    // (`0.4.x` -> `1.0.0`)". RFC-014 is that coverage's own named start
+    // ("RFC-014's substrate outcome constrains every GUI RFC after
+    // it") -- confirmed empirically, not assumed: every RFC 014 and
+    // above already has a row; every RFC below it (000-013, the
+    // pre-GUI, pre-M8 foundation) has none and was never meant to.
+    // Flagging those thirteen would not be this check catching a real
+    // gap -- it would be this check inventing one the document itself
+    // never claimed to close, exactly the "stricter than the document
+    // actually is" failure this slice's own instruction warns against.
+    const DELIVERY_PLAN_COVERAGE_STARTS_AT_RFC: u32 = 14;
+
+    let mut missing = Vec::new();
+    for folder in ["accepted", "done"] {
+        let Ok(entries) = std::fs::read_dir(rfcs.join(folder)) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.len() < 3 || !name[..3].chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let number = name[..3].to_owned();
+            if number.parse::<u32>().unwrap_or(0) < DELIVERY_PLAN_COVERAGE_STARTS_AT_RFC {
+                continue;
+            }
+            // RFC-037 is a process RFC (the five-folder lifecycle
+            // policy itself, `rfcs/000-rfc-lifecycle-policy.md`'s own
+            // successor), not "startable work" `delivery-plan.md`
+            // tracks -- the document's own prose names it directly
+            // ("look in rfcs/accepted/, which holds exactly those
+            // (RFC-037, 2026-08-19)") without giving it a queue row,
+            // the same narrow, named exception the sibling link-check
+            // above gives RFC-000. Not a wildcard: a second, genuinely
+            // process-only RFC would need its own explicit line here,
+            // not a pattern match on "no row exists."
+            if number == "037" {
+                continue;
+            }
+            if !scheduled.contains(&number) {
+                missing.push(format!("  RFC-{number} (rfcs/{folder}/{name})"));
+            }
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "an RFC in accepted/ or done/ has no row in rfcs/delivery-plan.md, so it is invisible \
+         to whoever is looking for startable work:\n{}\nThis is the gap RFC-034/035/036 fell \
+         into for a week -- found by a reviewer scoping something else, the third occurrence, \
+         not the first.",
+        missing.join("\n")
     );
 }
 
