@@ -483,6 +483,19 @@ impl RunningTerminal {
             .as_ref()
             .expect("RunningTerminal.master is only taken during Drop::drop")
     }
+
+    /// RFC-043 D1's own disjunction, response 342's required close of
+    /// the gap response 341 left open: `termination::request_terminate`'s
+    /// own use of the same early-close `Drop::drop` already applies --
+    /// see that impl's comment for why taking this reference is always
+    /// safe regardless of who else holds a duplicate, and effective only
+    /// once every other duplicate is already gone. `pub(super)` for
+    /// `termination.rs`, a sibling module, to call; not `master()`'s own
+    /// caller's job, since only these two termination paths ever need to
+    /// take this early rather than let it fall out naturally.
+    pub(super) fn close_master(&mut self) {
+        self.master.take();
+    }
 }
 
 /// `RunningTerminal::drop`'s own bounded grace periods -- short and

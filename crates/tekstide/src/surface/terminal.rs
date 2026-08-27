@@ -484,6 +484,17 @@ impl TerminalPane {
         sigterm_timeout: Duration,
         sigkill_timeout: Duration,
     ) -> Result<Vec<TerminalRuntimeEvent>, TerminalRuntimeError> {
+        // RFC-043 D1's own disjunction, response 342's required close of
+        // the gap response 341 left open: shutting `reader` down here,
+        // before delegating below, is what lets `RunningTerminal`'s own
+        // subsequent close of its copy of the master be the *last*
+        // reference -- mirroring, for this explicit-terminate path, what
+        // this pane's own field order (`reader` before `runtime`) already
+        // does for the `Drop` path. See `request_terminate`'s own doc
+        // comment (`tekstide-core`) for the deliberate cost this accepts:
+        // output the shell produces after this point, including a final
+        // line of transcript capture, is not read.
+        self.reader.shutdown();
         self.runtime
             .request_terminate(&self.handle, request, sigterm_timeout, sigkill_timeout)
     }

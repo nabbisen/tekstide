@@ -314,6 +314,70 @@ to what `crates/tekstide` and `crates/tekstide-core` agree the termination seque
 a narrow fix inside either crate alone. Recorded in `termination.rs`'s own doc comment on
 `request_terminate` rather than left implied. Not fixed in this slice; see review request 342.
 
+## Response 342 — the `request_terminate` gap, closed
+
+The reviewer's answer to the open question: not "accept it" -- `request_terminate` is the path a
+user actually reaches by closing a project, and the `Drop` path just fixed is the synthetic one the
+benchmark exercises. Also corrected my own scoping: the reviewer expected the reader-draining
+reasoning to be wrong (draining should keep the pty from saturating during the call) and checked it
+rather than trusting it -- it held, because `reader.rs` uses a *bounded*, *blocking*
+`mpsc::sync_channel(8)`: with nothing polling the receiver during `request_terminate`'s blocking
+call, the channel fills in milliseconds regardless, the reader parks in `send`, and the pty
+saturates exactly as in the `Drop` case. And the fix turned out smaller than the "redesign spanning
+both crates" framing in the request: the machinery this needed already existed.
+
+### What changed
+
+1. `crates/tekstide-core/src/runtime/terminal/reader.rs`: extracted `Drop for TerminalReader`'s
+   body into a new `pub fn shutdown(&mut self)` -- signals the shutdown `eventfd`, drops the
+   receiver, joins the thread, synchronously. `Drop::drop` now just calls it. Idempotent (every
+   step is: `Option::take` on an already-taken field is a no-op, a second `eventfd` write is
+   harmless), so a caller invoking this explicitly and then letting the value drop anyway performs
+   no second shutdown.
+2. `crates/tekstide-core/src/runtime/terminal/launch.rs`: added `RunningTerminal::close_master`
+   (`pub(super)`, for `termination.rs`), doing exactly what `Drop::drop`'s own early `master.take()`
+   does, so both termination paths share the same primitive.
+3. `crates/tekstide-core/src/runtime/terminal/termination.rs`: `request_terminate` now calls
+   `close_master()` first, before the `SIGHUP` -- the same disjunction half `Drop` already applies.
+4. `crates/tekstide/src/surface/terminal.rs`: `TerminalPane::request_terminate` now calls
+   `self.reader.shutdown()` *before* delegating to `self.runtime.request_terminate(...)`. This is
+   what makes step 3's close the pty's last reference at the moment it happens, exactly mirroring
+   what `TerminalPane`'s own field order already does for the `Drop` path -- no new contract between
+   the two crates, an ordering change at the one real call site plus an accessor, as the reviewer
+   predicted.
+
+### The recorded cost
+
+Shutting the reader down before requesting termination means output the shell produces from that
+point until it actually exits -- including a final line of transcript capture, if configured for
+this terminal -- is not read. Written down in both `request_terminate`'s own doc comment
+(`tekstide-core`) and `TerminalPane::request_terminate`'s (`crates/tekstide`), not left as a silent
+side effect of the ordering change: a requested close accepting a truncated transcript tail is
+preferable to the failure mode this fixes, a busy terminal's `SIGHUP` being a silent no-op with
+every job in it reaching `SIGKILL` instead.
+
+### Ablated
+
+Added `request_terminate_on_a_busy_terminal_succeeds_without_falling_back_to_sigkill`
+(`crates/tekstide/src/shell/tests.rs`): launches a real `/bin/sh`, writes `FLOOD_SCRIPT`, calls
+`TerminalPane::request_terminate`, and asserts no `TerminationSignalSent { signal: Sigkill, .. }`
+event appears. Stashed the fix (keeping the test) and re-ran: failed exactly as predicted --
+`TerminationTimedOut` after `SIGHUP`, then `Sigkill`, `KilledAfterTimeout` -- confirming the test
+catches the real regression rather than passing vacuously. Restored the fix; passes.
+
+The first version of this test used a 2s hangup timeout (matching
+`linux_runtime_terminates_session_leader_with_sighup`'s own) and flaked once under
+`cargo test --workspace`'s full concurrent load -- a real `/bin/sh` running a live flood is
+heavier than that test's `/bin/cat`, and scheduling contention from hundreds of other real-process
+tests running alongside it, not this fix's own correctness, was the cause. Raised to 5s (this test
+asserts correctness, not a tight timing bound) and reran `cargo test --workspace` five consecutive
+times: clean every time.
+
+### Gate
+
+Full workspace, five consecutive runs: 445 + 746 + 2, clean, no flakes. `tekstide` stable at
+5.59-6.22s. `/dev/pts` flat at 12. `fmt`, `clippy -D warnings`, `git diff --check`: clean.
+
 ## PR-043-C
 
 Not started. Owns: the close-confirmation wording (D1 + RFC-034 D4's rule), the

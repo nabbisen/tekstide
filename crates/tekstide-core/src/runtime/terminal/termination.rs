@@ -54,30 +54,28 @@ impl LinuxTerminalRuntime {
     ///    reports (D3): never inferred from which signal was sent or
     ///    which `TerminationOutcome` the session leader itself produced.
     ///
-    /// RFC-043 D1's own disjunction, response 341's required follow-up:
-    /// **this function does not close the PTY master before its own
-    /// `SIGHUP`**, unlike [`super::launch::RunningTerminal::drop`],
-    /// which now does -- see that impl's own comment for the mechanism.
-    /// The reason is not that closing here would be unsafe (closing
-    /// this crate's own reference is always safe, regardless of who
-    /// else holds a duplicate); it is that closing it here would not be
-    /// *effective*: this function's real caller
-    /// (`crates/tekstide/src/shell.rs`'s project-close path) removes the
-    /// owning `TerminalPane` from its tracked list and calls this method
-    /// directly on the removed value, with nothing draining
-    /// `TerminalPane`'s own `reader` thread for the entire span of this
-    /// call -- so that thread's independent duplicate of this same
-    /// master is still open throughout the SIGHUP/wait/SIGKILL sequence
-    /// below, and closing this crate's own copy first would not be the
-    /// last reference, would not trigger a real hangup, and would not
-    /// unblock a session leader stuck writing into a saturated pty. That
-    /// is a real, unclosed gap in this specific call path -- making it
-    /// effective here would mean `TerminalPane` shutting its reader down
-    /// (or at least draining it) as part of requesting termination,
-    /// before this function's own `SIGHUP`, not only as part of
-    /// eventually dropping the pane afterward. Recorded rather than
-    /// silently left implied: on a busy terminal, `request_terminate`
-    /// still relies on `SIGHUP`-then-`SIGKILL` alone.
+    /// RFC-043 D1's own disjunction, response 342: closes the PTY master
+    /// (`RunningTerminal::close_master`) before the `SIGHUP` below, the
+    /// same half of the disjunction [`super::launch::RunningTerminal::drop`]
+    /// already applies. Response 341 found this alone would not have
+    /// been *effective* here: this function's real caller
+    /// (`crates/tekstide/src/shell.rs`'s project-close path,
+    /// `TerminalPane::request_terminate`) used to leave `TerminalPane`'s
+    /// own `reader` thread running and undrained for the entire span of
+    /// this call, keeping that thread's own independent duplicate of
+    /// this same master open throughout -- so this crate's own close
+    /// would not have been the last reference, and would not have
+    /// triggered a real hangup. `TerminalPane::request_terminate` now
+    /// shuts its reader down (`TerminalReader::shutdown`) *before*
+    /// calling this function, which is what makes the close below the
+    /// last reference. This is a deliberate, recorded cost, not a silent
+    /// one: any output the shell produces between that reader shutdown
+    /// and its own eventual exit -- including a final line of transcript
+    /// capture, if configured for this terminal -- is not read. A
+    /// requested close accepting a truncated transcript tail is
+    /// preferable to the failure mode this fixes: a busy terminal's
+    /// `SIGHUP` being a silent no-op and every job in it reaching
+    /// `SIGKILL` instead.
     pub fn request_terminate(
         &mut self,
         handle: &TerminalRuntimeHandle,
@@ -85,6 +83,7 @@ impl LinuxTerminalRuntime {
         hangup_timeout: Duration,
         sigkill_timeout: Duration,
     ) -> Result<Vec<TerminalRuntimeEvent>, TerminalRuntimeError> {
+        self.session_mut(handle)?.close_master();
         let session_id = self.session(handle)?.process_group_id;
         let mut events = vec![TerminalRuntimeEvent::TerminationRequested {
             handle: handle.clone(),

@@ -2022,6 +2022,70 @@ fn terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark(
     );
 }
 
+/// RFC-043 D1's own disjunction, response 342's required close of the
+/// `request_terminate` gap response 341 found: proves closing the
+/// master (via `TerminalPane::request_terminate` shutting its own
+/// `reader` down first, before `tekstide-core`'s `request_terminate`
+/// closes its copy and sends `SIGHUP`) actually lets a busy terminal's
+/// `SIGHUP` do real work, instead of silently no-op-ing until
+/// `SIGKILL` fires. Before this slice's fix to this specific path, a
+/// terminal running [`super::FLOOD_SCRIPT`] reliably needed `SIGKILL`
+/// here even under a generous hangup timeout: nothing drained
+/// `TerminalReader`'s channel during the blocking call, so it filled,
+/// the reader thread parked in `send`, stopped reading the master, and
+/// the leader's own job-control status message (printed to the same
+/// saturated pty on receiving `SIGHUP`) blocked right along with it --
+/// the exact mechanism `qa-evidence.md`'s "Response 341"/"Response
+/// 342" sections measured on the `Drop` path this test's own call path
+/// does not use at all.
+#[test]
+fn request_terminate_on_a_busy_terminal_succeeds_without_falling_back_to_sigkill() {
+    let project_id = tekstide_core::project::ProjectId::new_uuid();
+    let (mut pane, _session) = crate::surface::terminal::TerminalPane::launch(
+        project_id,
+        "busy-terminal request_terminate regression",
+        fresh_project_dir("request-terminate-busy-terminal"),
+        PathBuf::from("/bin/sh"),
+    )
+    .expect("launch a real shell for the busy-terminal regression");
+
+    pane.write_input(super::FLOOD_SCRIPT.as_bytes());
+    // Give the flood a moment to actually saturate the pty and the
+    // reader's own channel before requesting termination -- the same
+    // real backpressure the benchmark above relies on, not a race
+    // against a cold start.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    let events = pane
+        .request_terminate(
+            tekstide_core::runtime::terminal::TerminationRequest::user_requested(
+                "busy-terminal request_terminate regression",
+            ),
+            // Generous relative to `linux_runtime_terminates_session_leader_with_sighup`'s
+            // 2s (a `/bin/cat` shell that dies on `SIGHUP` immediately) --
+            // this terminal is a real `/bin/sh` running a live flood, and
+            // this suite runs alongside hundreds of other real-process
+            // tests under `cargo test --workspace`, so scheduling delay
+            // under contention, not this fix's own correctness, is what a
+            // tight bound here would risk flaking on.
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_secs(1),
+        )
+        .expect("request_terminate on a real, busy shell must not itself error");
+
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            tekstide_core::runtime::terminal::TerminalRuntimeEvent::TerminationSignalSent {
+                signal: tekstide_core::runtime::terminal::TerminationSignal::Sigkill,
+                ..
+            }
+        )),
+        "SIGKILL fired for a busy terminal's request_terminate -- step 1 (SIGHUP, now paired \
+         with closing the master before it) silently no-op'd again: {events:?}"
+    );
+}
+
 /// RFC-017 Amendment 1, PR-A1-D, response 209: `terminal_session_limit`'s
 /// re-derivation, headless -- "the limit is a throughput/keep-up
 /// question, not a paint question," so this deliberately does not touch

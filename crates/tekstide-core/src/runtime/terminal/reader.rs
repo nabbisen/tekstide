@@ -425,43 +425,58 @@ impl TerminalReader {
     }
 }
 
-impl Drop for TerminalReader {
-    fn drop(&mut self) {
-        // Response 201: the previous version of this `drop` only had the
-        // `receiver`-drop path below and could still hang forever --
-        // that path unblocks a thread parked in `sender.send` on a full
-        // channel, but does nothing for a thread parked in `poll(2)` on
-        // a live, silent child (no data, PTY not hung up), which is the
-        // common case once a real caller drops a reader for a terminal
-        // that is simply not producing output right now. Writing to the
-        // shutdown `eventfd` wakes `poll(2)` regardless of PTY state --
-        // the fd shows readable, `reader_thread_loop` sees it ahead of
-        // the PTY fd and returns immediately. A write failure here is
-        // not actionable (`join` below is the only thing that must still
-        // complete), so it is not propagated.
+impl TerminalReader {
+    /// Signals shutdown and joins the reader thread synchronously,
+    /// closing this reader's own `try_clone()`d duplicate of the PTY
+    /// master in the process (that duplicate lives only in the thread
+    /// closure's local `master: fs::File`, so it drops when the thread
+    /// function returns). `Drop::drop` calls this; it is exposed here
+    /// too, `pub`, so a caller (`TerminalPane::request_terminate`, RFC-043
+    /// D1's own disjunction, response 342) can force this reader's
+    /// duplicate closed *before* this value would otherwise drop --
+    /// needed because `RunningTerminal`'s own close of its copy of the
+    /// same master is only the pty's *last* reference, and so only
+    /// actually triggers a hangup, once this one is already gone too.
+    ///
+    /// Idempotent: every step is itself idempotent (`Option::take` on an
+    /// already-`None` field is a no-op; a second `eventfd` write is
+    /// harmless), so calling this explicitly and then letting `Drop` run
+    /// anyway -- which every caller's own drop still does -- performs no
+    /// second shutdown, just two calls that agree the first one already
+    /// finished. **After this returns, [`Self::drain_available`] panics**
+    /// -- there is no more reader thread left to have buffered anything,
+    /// and this reader will never receive real PTY output again.
+    ///
+    /// Response 201: the shutdown `eventfd` write and the `receiver`
+    /// drop are two independent unblock paths, both needed. Writing to
+    /// `shutdown` wakes a thread parked in `poll(2)` on a live, silent
+    /// child (no data, pty not hung up) -- the fd shows readable,
+    /// `reader_thread_loop` sees it ahead of the pty fd and returns
+    /// immediately; a write failure here is not actionable (the join
+    /// below is the only thing that must still complete), so it is not
+    /// propagated. Dropping `receiver` is what unblocks a thread already
+    /// past `poll(2)` and parked in `sender.send` on a full channel
+    /// instead, which is not reading `shutdown` at that moment: it makes
+    /// that blocked (or any future) `send` return an error, which is
+    /// `reader_thread_loop`'s own signal to stop. With both unblock
+    /// paths in place, the join below can no longer depend on the
+    /// child's own behaviour --
+    /// `dropping_a_reader_over_a_live_silent_child_completes_promptly`
+    /// proves it under a real timeout, so a regression here fails that
+    /// test rather than hanging the suite.
+    pub fn shutdown(&mut self) {
         let wakeup: u64 = 1;
         let _ = self.shutdown.write(&wakeup.to_ne_bytes());
-
-        // Drop `receiver` next -- a custom `Drop::drop` body runs
-        // *before* Rust's automatic field drops, not after, so this must
-        // be explicit rather than relying on struct field order (an
-        // earlier version of this comment claimed the latter and was
-        // wrong). This is the second, independent unblock path: a thread
-        // already past `poll(2)` and blocked inside `sender.send` on a
-        // full channel is not reading `shutdown` at that moment, so the
-        // write above does not reach it -- dropping `receiver` makes
-        // that blocked (or any future) `send` return an error instead,
-        // which is `reader_thread_loop`'s own signal to stop.
         self.receiver.take();
-
-        // With both unblock paths in place, this join can no longer
-        // depend on the child's own behaviour --
-        // `dropping_a_reader_over_a_live_silent_child_completes_promptly`
-        // proves it under a real timeout, so a regression here fails
-        // that test rather than hanging the suite.
         if let Some(join_handle) = self.join_handle.take() {
             let _ = join_handle.join();
         }
+    }
+}
+
+impl Drop for TerminalReader {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
