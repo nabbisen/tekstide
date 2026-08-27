@@ -1,3 +1,5 @@
+![Tekst IDE](https://raw.githubusercontent.com/nabbisen/tekstide/main/assets/tekstide-logo.png)
+
 # Tekst IDE
 
 ![Status](https://img.shields.io/badge/status-early--implementation-orange)
