@@ -2022,22 +2022,55 @@ fn terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark(
     );
 }
 
+/// The busy-write case [`super::FLOOD_SCRIPT`] does *not* actually
+/// exercise for a single terminal: it ends `done &`, backgrounding the
+/// flood loop into its own process group. Diagnosing this test's own
+/// flake (below) found that subshell is the thing that survives
+/// `request_terminate`'s hangup window every time -- `wchan="0"`,
+/// climbing CPU ticks, never blocked -- because a background job is a
+/// separate shell job POSIX exempts from `SIGHUP` by default, and
+/// `FLOOD_SCRIPT`'s own loop never checks whether its `printf` succeeds,
+/// so it keeps spinning through the `EIO`s a closed master gives it
+/// until either its own ~30s bound or a real `SIGKILL`. That is not a
+/// gap in this fix -- it is `terminate_project_live_work`'s own
+/// documented limitation ("a backgrounded job... sits in its own,
+/// separate process group... not a gap this function closes"), and step
+/// 2 existing to `SIGKILL` exactly that survivor is by design, not a
+/// fallback this fix is supposed to make unnecessary. This script has no
+/// `&`: the flood runs as the leader's own foreground command, so the
+/// session holds exactly one process throughout, and the leader itself
+/// is what has to write into its own saturated pty.
+const FOREGROUND_FLOOD_SCRIPT: &str = "i=0; end=$(( $(date +%s) + 30 )); \
+    while :; do \
+    printf 'tekstide-flood-%08d-filler-filler-filler-filler-filler\\n' \"$i\"; \
+    i=$((i+1)); \
+    [ $((i % 2000)) -eq 0 ] && [ \"$(date +%s)\" -ge \"$end\" ] && break; \
+    done\n";
+
 /// RFC-043 D1's own disjunction, response 342's required close of the
 /// `request_terminate` gap response 341 found: proves closing the
 /// master (via `TerminalPane::request_terminate` shutting its own
 /// `reader` down first, before `tekstide-core`'s `request_terminate`
 /// closes its copy and sends `SIGHUP`) actually lets a busy terminal's
-/// `SIGHUP` do real work, instead of silently no-op-ing until
-/// `SIGKILL` fires. Before this slice's fix to this specific path, a
-/// terminal running [`super::FLOOD_SCRIPT`] reliably needed `SIGKILL`
-/// here even under a generous hangup timeout: nothing drained
-/// `TerminalReader`'s channel during the blocking call, so it filled,
-/// the reader thread parked in `send`, stopped reading the master, and
-/// the leader's own job-control status message (printed to the same
-/// saturated pty on receiving `SIGHUP`) blocked right along with it --
-/// the exact mechanism `qa-evidence.md`'s "Response 341"/"Response
-/// 342" sections measured on the `Drop` path this test's own call path
-/// does not use at all.
+/// own leader unblock and process `SIGHUP`, instead of staying stuck in
+/// `write(2)` to a saturated pty until `SIGKILL` fires. Uses
+/// [`FOREGROUND_FLOOD_SCRIPT`], not [`super::FLOOD_SCRIPT`] -- see that
+/// constant's own doc for why the backgrounded original cannot prove
+/// this property at all, single terminal or not.
+///
+/// Response 343's required diagnosis, once this test's *first* version
+/// (against the backgrounded `FLOOD_SCRIPT`) flaked under
+/// `cargo test --workspace`: sampled the surviving session member's own
+/// `/proc/<pid>/stat`/`wchan` every 500ms across the hangup wait,
+/// reproduced reliably (5-8 failures per 8 runs) under ~130 load average
+/// synthetic CPU contention (64 `yes` loops on a 32-core machine), and
+/// found the survivor was never blocked (`wchan="0"`, `state` cycling
+/// `R`/`S`, `utime` climbing every sample) -- ruling out "stuck in
+/// `iterate_tty_write`" (a real ordering bug) and "leader slow under
+/// contention" (a timeout question) alike. It was
+/// `FOREGROUND_FLOOD_SCRIPT`'s predecessor's own backgrounded loop,
+/// alive and spinning through failed writes, exactly as that constant's
+/// doc describes. Not this fix's defect; this test's wrong premise.
 #[test]
 fn request_terminate_on_a_busy_terminal_succeeds_without_falling_back_to_sigkill() {
     let project_id = tekstide_core::project::ProjectId::new_uuid();
@@ -2049,7 +2082,7 @@ fn request_terminate_on_a_busy_terminal_succeeds_without_falling_back_to_sigkill
     )
     .expect("launch a real shell for the busy-terminal regression");
 
-    pane.write_input(super::FLOOD_SCRIPT.as_bytes());
+    pane.write_input(FOREGROUND_FLOOD_SCRIPT.as_bytes());
     // Give the flood a moment to actually saturate the pty and the
     // reader's own channel before requesting termination -- the same
     // real backpressure the benchmark above relies on, not a race
@@ -2061,14 +2094,12 @@ fn request_terminate_on_a_busy_terminal_succeeds_without_falling_back_to_sigkill
             tekstide_core::runtime::terminal::TerminationRequest::user_requested(
                 "busy-terminal request_terminate regression",
             ),
-            // Generous relative to `linux_runtime_terminates_session_leader_with_sighup`'s
-            // 2s (a `/bin/cat` shell that dies on `SIGHUP` immediately) --
-            // this terminal is a real `/bin/sh` running a live flood, and
-            // this suite runs alongside hundreds of other real-process
-            // tests under `cargo test --workspace`, so scheduling delay
-            // under contention, not this fix's own correctness, is what a
-            // tight bound here would risk flaking on.
-            std::time::Duration::from_secs(5),
+            // Matches `linux_runtime_terminates_session_leader_with_sighup`'s
+            // own 2s -- unlike the backgrounded-script version of this
+            // test, there is no second, POSIX-SIGHUP-exempt process here
+            // that can legitimately need the full window, so this does
+            // not need to be raised to tolerate one.
+            std::time::Duration::from_secs(2),
             std::time::Duration::from_secs(1),
         )
         .expect("request_terminate on a real, busy shell must not itself error");

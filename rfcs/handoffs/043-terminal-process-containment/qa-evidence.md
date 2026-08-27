@@ -378,6 +378,75 @@ times: clean every time.
 Full workspace, five consecutive runs: 445 + 746 + 2, clean, no flakes. `tekstide` stable at
 5.59-6.22s. `/dev/pts` flat at 12. `fmt`, `clippy -D warnings`, `git diff --check`: clean.
 
+## Response 343 — the flake, diagnosed rather than retimed
+
+The required diagnosis, using the same technique response 341's own `wchan` finding used: my
+timing-test finding two days ago overclaimed a failure "would indicate a real regression" when
+every failure was noise, and raising this test's timeout once already, unmeasured, risked the same
+mistake in mirror image. This time it was measured.
+
+### Reproducing it
+
+Not reproducible on this machine's own 32 cores at rest. Forced contention synthetically: 64
+`nohup yes > /dev/null &` loops, pushing load average past 130. Under that, the busy-terminal test
+(still against the backgrounded `FLOOD_SCRIPT`, still at the 5s timeout) failed 5 of 8 runs --
+consistent with, not just "matching," what the reviewer saw once in three at normal load.
+
+### What the diagnosis found
+
+Instrumented `wait_for_session_outcome` to sample the leader's own `/proc/<pid>/stat`/`wchan`
+*and* every session member's, every 500ms, for the duration of the hangup wait (temporary,
+removed once diagnosed). Every failing run showed the same shape: the leader's own `/proc` entry
+gone within the first 500ms sample (dead already, every time) with one survivor left in the
+session -- `cmdline="/bin/sh "`, `wchan="0"`, state cycling `R`/`S`, `utime` climbing every single
+sample. Never blocked. Ruled out both candidates the review named:
+
+- **Not** "the shell unblocked but needed longer under contention" -- the leader was already gone
+  in the very first sample; nothing was still resolving.
+- **Not** "the reader's `join` had not completed, so the master was not yet the last reference" --
+  structurally ruled out regardless of measurement: `TerminalPane::request_terminate` calls
+  `self.reader.shutdown()`, a *blocking* call, before `tekstide-core`'s `request_terminate` ever
+  runs, so the ordering cannot race.
+- **The actual cause**: [`super::FLOOD_SCRIPT`] ends `done &` -- it backgrounds its own loop into a
+  separate process group. A background job is exempt from `SIGHUP` by POSIX/shell convention (a
+  separate mechanism from anything this fix touches), and that loop never checks whether its own
+  `printf` succeeds, so it keeps spinning through the `EIO`s a closed master gives it regardless,
+  until either its own ~30s bound or a real `SIGKILL`. This is not a gap in the master-close fix --
+  it is `terminate_project_live_work`'s own already-documented limitation ("a backgrounded job...
+  sits in its own, separate process group... not a gap this function closes"), and step 2 existing
+  to `SIGKILL` exactly that survivor is the design working as intended, not a fallback this fix was
+  ever supposed to make unnecessary.
+
+### The fix: not the timeout, the test's premise
+
+The test's claim ("no `SIGKILL` for a busy terminal") was too strong for a script that backgrounds
+part of its own work -- that scenario legitimately needs step 2, with or without this fix.
+Replaced [`super::FLOOD_SCRIPT`] in this one test with `FOREGROUND_FLOOD_SCRIPT`, identical minus
+the trailing `&`: the flood runs as the leader's own foreground command, so the session holds
+exactly one process throughout, and the leader itself is what has to write into its own saturated
+pty -- the actual property this fix addresses. Lowered the timeout back to 2s (matching
+`linux_runtime_terminates_session_leader_with_sighup`) since there is no second process that can
+legitimately need the extra margin anymore.
+
+Removed the diagnostic instrumentation once the cause was confirmed.
+
+### Verified
+
+The corrected test: 12/12 passes under the same ~130 load-average synthetic contention that made
+the old (backgrounded) version fail 5/8. Ablated (commented out `reader.shutdown()` and
+`close_master()`, reran): fails exactly as before --
+`Sighup → TerminationTimedOut → Sigkill → KilledAfterTimeout`. Restored: passes.
+
+### Gate
+
+Five consecutive full-workspace runs at rest: 445 + 746 + 2, clean. Three more under the same
+~130 load-average contention: the busy-terminal test itself never failed; two *unrelated*,
+pre-existing, load-sensitive tests
+(`change_review_content_view_build_cost_by_line_count_measurement`,
+`resize_makes_the_pty_the_emulator_and_the_render_path_agree`) did, under contention well beyond
+anything a normal CI run produces -- not this slice's regression to fix. `/dev/pts` flat at 14.
+`fmt`, `clippy -D warnings`, `git diff --check`: clean.
+
 ## PR-043-C
 
 Not started. Owns: the close-confirmation wording (D1 + RFC-034 D4's rule), the
