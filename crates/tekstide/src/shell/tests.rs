@@ -11,12 +11,13 @@ use super::{
     attempt_agent_run_launch_with_profile, attempt_agent_run_launch_with_profile_and_state_root,
     attempt_agent_run_launch_with_profile_state_root_and_capture, content_within_bound,
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
-    open_real_audit_store, path_field_error_text, poll_approval_channels,
-    project_close_dialog_body, project_close_dialog_names_running_processes,
-    project_close_dialog_path, project_close_dialog_reasons_line, sidebar_label,
-    status_bar_summary, terminal_paste_refusal_text, terminated_outcome_and_session_confirmation,
-    test_audit_state_dir, transcript_local_data_summary_for, trust_grant_dialog_body,
-    trusted_ui_state, verify_restored_trust_against, zone_style,
+    open_audit_store_recording_failure, open_real_audit_store, path_field_error_text,
+    poll_approval_channels, project_close_dialog_body,
+    project_close_dialog_names_running_processes, project_close_dialog_path,
+    project_close_dialog_reasons_line, sidebar_label, status_bar_summary,
+    terminal_paste_refusal_text, terminated_outcome_and_session_confirmation, test_audit_state_dir,
+    transcript_local_data_summary_for, trust_grant_dialog_body, trusted_ui_state,
+    verify_restored_trust_against, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -27,7 +28,11 @@ fn real_locales_dir() -> PathBuf {
 
 fn state_with(app_shell: ApplicationShell) -> State {
     let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
-    State::new(app_shell, catalog)
+    State::new(
+        app_shell,
+        catalog,
+        tekstide_core::audit::AuditHealth::default(),
+    )
 }
 
 fn fresh_project_dir(label: &str) -> PathBuf {
@@ -1800,6 +1805,124 @@ fn record_plain_terminal_started_persists_against_a_real_store() {
     assert_eq!(records[0].record.terminal_id, Some(terminal_id));
 }
 
+// --- RFC-047 PR-047-A: distinguishing why the audit store did not open -
+
+/// D0/D1's own reason this row exists at all: `RecoveryIncomplete` means
+/// the application was already inside a known, safe recovery when it
+/// stopped, and must not be collapsed with a genuinely corrupted file --
+/// the two need different remedies (D1's `resume()` vs D2's `recover()`).
+/// The marker alone is sufficient to trigger this, matching
+/// `AuditStoragePath::recovery_is_active`'s own check (existence, not
+/// content), so no real store needs to exist first.
+#[test]
+fn open_audit_store_recording_failure_distinguishes_recovery_incomplete() {
+    let state_dir = temp_audit_state_dir("recovery-incomplete-distinguished");
+    let recovery_dir = state_dir.join("audit").join("recovery");
+    std::fs::create_dir_all(&recovery_dir).unwrap();
+    std::fs::write(recovery_dir.join("active-recovery.json"), b"{}").unwrap();
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    let store = open_audit_store_recording_failure(&app_shell, &mut health);
+
+    assert!(store.is_none());
+    assert_eq!(
+        health.last_failure(),
+        Some(tekstide_core::audit::AuditStoreErrorReason::RecoveryIncomplete),
+        "an interrupted-migration marker must be reported as RecoveryIncomplete specifically, \
+         not collapsed with any other open failure"
+    );
+}
+
+/// The other half of the distinction above: the exact RFC-036 PR-036-C
+/// corruption method (a real store, then its database file overwritten
+/// with non-SQLite bytes) must **not** produce `RecoveryIncomplete` --
+/// there is no marker, so nothing here is a safe, resumable recovery.
+#[test]
+fn open_audit_store_recording_failure_reports_a_different_reason_for_a_corrupted_file() {
+    let state_dir = temp_audit_state_dir("corrupted-file-reason");
+    {
+        let store = super::open_audit_store(&state_dir, Vec::new())
+            .expect("a fresh directory must produce a real store");
+        drop(store);
+    }
+    let db_path = state_dir.join("audit").join("audit.sqlite3");
+    std::fs::write(&db_path, [0xffu8; 4096]).unwrap();
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    let store = open_audit_store_recording_failure(&app_shell, &mut health);
+
+    assert!(store.is_none());
+    assert_ne!(
+        health.last_failure(),
+        Some(tekstide_core::audit::AuditStoreErrorReason::RecoveryIncomplete),
+        "a genuinely corrupted file must not be reported the same way as an interrupted \
+         migration -- the two need different remedies (D1 vs D2)"
+    );
+}
+
+/// RFC-047's own opening finding: fourteen call sites used to construct
+/// a fresh `AuditHealth` and drop it, so a session's second failure
+/// never accumulated onto its first. Proves the fix directly: the same
+/// `AuditHealth` value, reused across two calls, must show two
+/// failures, not one.
+#[test]
+fn open_audit_store_recording_failure_accumulates_onto_the_same_health() {
+    let state_dir = temp_audit_state_dir("health-accumulates");
+    let recovery_dir = state_dir.join("audit").join("recovery");
+    std::fs::create_dir_all(&recovery_dir).unwrap();
+    std::fs::write(recovery_dir.join("active-recovery.json"), b"{}").unwrap();
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    assert_eq!(
+        health.status(),
+        tekstide_core::audit::AuditHealthStatus::Healthy
+    );
+    assert_eq!(health.failure_count(), 0);
+
+    let _ = open_audit_store_recording_failure(&app_shell, &mut health);
+    assert_eq!(
+        health.status(),
+        tekstide_core::audit::AuditHealthStatus::Degraded
+    );
+    assert_eq!(health.failure_count(), 1);
+
+    let _ = open_audit_store_recording_failure(&app_shell, &mut health);
+    assert_eq!(
+        health.failure_count(),
+        2,
+        "a second failure this session must accumulate onto the same health, not reset it"
+    );
+}
+
+/// D3's own "absent when healthy" principle, one layer down: a store
+/// that opens cleanly must leave `AuditHealth` exactly as it started,
+/// not merely "not worse."
+#[test]
+fn open_audit_store_recording_failure_leaves_health_healthy_on_success() {
+    let state_dir = temp_audit_state_dir("health-stays-healthy");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+
+    let store = open_audit_store_recording_failure(&app_shell, &mut health);
+
+    assert!(
+        store.is_some(),
+        "a fresh, empty directory must produce a real, opened store"
+    );
+    assert_eq!(
+        health.status(),
+        tekstide_core::audit::AuditHealthStatus::Healthy
+    );
+    assert_eq!(health.failure_count(), 0);
+}
+
 // --- RFC-032 PR-032-C, response 245: the audit store is authoritative -
 //
 // PR-032-B restores a `Trusted` project from the user-writable
@@ -1866,7 +1989,7 @@ fn verify_restored_trust_keeps_trust_when_a_real_grant_is_recorded() {
     drop(store);
 
     verify_restored_trust_against(&mut app_shell, |_shell| {
-        super::open_audit_store(&audit_state_dir, Vec::new())
+        super::open_audit_store(&audit_state_dir, Vec::new()).ok()
     });
 
     assert_eq!(
@@ -1916,7 +2039,7 @@ fn verify_restored_trust_demotes_when_the_store_has_no_matching_grant() {
         .expect("open a real, temp-dir-backed audit store");
 
     verify_restored_trust_against(&mut app_shell, |_shell| {
-        super::open_audit_store(&audit_state_dir, Vec::new())
+        super::open_audit_store(&audit_state_dir, Vec::new()).ok()
     });
 
     assert_eq!(

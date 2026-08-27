@@ -893,10 +893,33 @@ pub struct State {
     /// same "stale but re-clamped on next use" shape every sibling
     /// highlight field already has.
     tab_strip_highlight: usize,
+    /// RFC-047 PR-047-A: one instance, accumulating across the whole
+    /// session, replacing the fresh `AuditHealth::default()` every one
+    /// of the fourteen production audit-writing call sites used to
+    /// construct and immediately drop. `Healthy` until the first
+    /// `open_audit_store_recording_failure` failure or the first failed
+    /// `AuditCoordinator` write; stays `Degraded` for the rest of the
+    /// session even if a later write succeeds -- there is no code yet
+    /// that clears it (PR-047-B's own recovery-and-record path is the
+    /// first thing with a real reason to reset it, since only a real
+    /// recovery, not a merely-lucky write, should turn this back to
+    /// healthy).
+    audit_health: tekstide_core::audit::AuditHealth,
 }
 
 impl State {
-    pub fn new(mut app_shell: ApplicationShell, catalog: Catalog) -> Self {
+    /// `audit_health` is threaded in rather than started fresh here:
+    /// `boot()` (`main.rs`) may already have recorded a failure opening
+    /// the store for the CLI-argument project-added producer, before
+    /// `State` exists to hold anything -- passing that value in, rather
+    /// than discarding it and starting over, is what makes `State`'s
+    /// own copy the true accumulation for the whole session rather than
+    /// missing whatever happened before it existed.
+    pub fn new(
+        mut app_shell: ApplicationShell,
+        catalog: Catalog,
+        mut audit_health: tekstide_core::audit::AuditHealth,
+    ) -> Self {
         // RFC-032 PR-032-C, response 245: the audit store, not the
         // user-writable recent-projects cache, is authoritative for
         // whether a boot-time (CLI-argument) project is really trusted.
@@ -917,7 +940,7 @@ impl State {
         // itself, right after its own `add_project_from_path` succeeds.
         // This call covers only the CLI-argument projects already live
         // when `State::new` runs.
-        verify_restored_trust(&mut app_shell);
+        verify_restored_trust(&mut app_shell, &mut audit_health);
         let seeded_change_review_demo = seed_change_review_demo_data(&mut app_shell);
         let measurement = Measurement::from_env();
         let typing_doc = if matches!(
@@ -940,9 +963,7 @@ impl State {
         // `$XDG_STATE_HOME/tekstide/audit/audit.sqlite3` (empty, but
         // with the full schema) on every ordinary launch, which made
         // the README's "ordinary use still does not create this file"
-        // false. Not stored on `State` either way -- see that
-        // function's doc comment for why a persistent field isn't
-        // justified yet.
+        // false.
         // RFC-017 PR-017-G: `TerminalFlood` gets its own, separate
         // launch path -- not `launch_terminal_demo_panes` -- because
         // that function also opens the real, durable audit store
@@ -957,7 +978,11 @@ impl State {
         // rather than comparing against a genuinely idle baseline that
         // cannot separate the two. Same disclosed, checked-but-usually-
         // absent shape every other demo/measurement env var here uses.
-        let mut audit_health = tekstide_core::audit::AuditHealth::default();
+        //
+        // RFC-047 PR-047-A: `audit_health` is no longer a fresh,
+        // dropped-here instance -- it is the parameter threaded in from
+        // `boot()`, continued through this demo/measurement path, and
+        // stored on `Self` below, so a failure here is not lost either.
         let terminal_panes = if measurement.as_ref().map(Measurement::criterion)
             == Some(measurement::Criterion::TerminalFlood)
             || std::env::var("TEKSTIDE_TERMINAL_FLOOD_DEMO").is_ok()
@@ -995,6 +1020,7 @@ impl State {
             path_field_requested: false,
             project_board_row_highlight: 0,
             tab_strip_highlight: 0,
+            audit_health,
         }
     }
 
@@ -1875,12 +1901,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     // all, so it has no `TerminalInputDecisionReason` to
                     // report) is one. Auditing either would misrepresent
                     // *why* nothing was written.
-                    let mut audit_store = open_real_audit_store(&state.app_shell);
-                    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+                    let mut audit_store = open_audit_store_recording_failure(
+                        &state.app_shell,
+                        &mut state.audit_health,
+                    );
                     if let Some(store) = audit_store.as_mut() {
-                        let _ =
-                            tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
-                                .record_paste_blocked(project_id, target.clone());
+                        let _ = tekstide_core::audit::AuditCoordinator::new(
+                            store,
+                            &mut state.audit_health,
+                        )
+                        .record_paste_blocked(project_id, target.clone());
                     }
                     state.terminal_paste_notice = Some(TerminalPasteRefusal::Blocked(reason));
                 }
@@ -2368,8 +2398,8 @@ fn record_terminal_exit(
     let Some(project_id) = state.app_shell.state().active_project_id().cloned() else {
         return;
     };
-    let mut audit_store = open_real_audit_store(&state.app_shell);
-    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    let mut audit_store =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health);
 
     // change-detection-wiring handoff, Slice C (D3): exit is the
     // completion trigger, but only for a terminal an `AgentRun` actually
@@ -2426,7 +2456,7 @@ fn record_terminal_exit(
         .state_mut()
         .assign_terminal_visible_slot(&terminal_id, tekstide_core::domain::VisibleSlot::Hidden);
     if let Some(store) = audit_store.as_mut() {
-        let _ = tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
+        let _ = tekstide_core::audit::AuditCoordinator::new(store, &mut state.audit_health)
             .record_plain_terminal_terminated(project_id, terminal_id, &outcome);
     }
 }
@@ -2761,10 +2791,10 @@ fn record_restricted_mode_blocked_if_applicable(
     let Some(project_id) = state.app_shell.state().active_project_id().cloned() else {
         return;
     };
-    let mut audit_store = open_real_audit_store(&state.app_shell);
-    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    let mut audit_store =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health);
     if let Some(store) = audit_store.as_mut() {
-        let _ = tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
+        let _ = tekstide_core::audit::AuditCoordinator::new(store, &mut state.audit_health)
             .record_restricted_mode_blocked(project_id);
     }
 }
@@ -3698,7 +3728,7 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
     match state.app_shell.add_project_from_path(&root_path) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
             record_new_project_added(state, project_id);
-            verify_restored_trust(&mut state.app_shell);
+            verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
         }
         // Should not normally happen -- a `Recent*`-kind row is, by
         // construction, not currently open -- but if the board's rows
@@ -3974,9 +4004,10 @@ fn record_project_close_cancelled(
     state: &mut State,
     project_id: &tekstide_core::project::ProjectId,
 ) {
-    if let Some(mut audit_store) = open_real_audit_store(&state.app_shell) {
-        let mut audit_health = tekstide_core::audit::AuditHealth::default();
-        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health)
+    if let Some(mut audit_store) =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+    {
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut state.audit_health)
             .record_safe_close_decision(
                 project_id.clone(),
                 tekstide_core::audit::SafeCloseDecision::Cancelled,
@@ -4002,16 +4033,16 @@ fn record_project_close_cancelled(
 fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal) {
     let project_id = modal.project_id.clone();
     let operation_id = tekstide_core::domain::AuditOperationId::new_uuid();
-    let mut audit_store = open_real_audit_store(&state.app_shell);
-    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    let mut audit_store =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health);
 
     if let Some(store) = audit_store.as_mut() {
-        tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
+        tekstide_core::audit::AuditCoordinator::new(store, &mut state.audit_health)
             .record_safe_close_authorized(project_id.clone(), operation_id.clone());
     }
 
     let terminal_session_confirmed_empty =
-        terminate_project_live_work(state, &project_id, &mut audit_store, &mut audit_health);
+        terminate_project_live_work(state, &project_id, &mut audit_store);
 
     let assessment = state.app_shell.state_mut().close_project(&project_id);
     let closed = matches!(
@@ -4020,7 +4051,7 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
     );
 
     if let Some(store) = audit_store.as_mut() {
-        tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
+        tekstide_core::audit::AuditCoordinator::new(store, &mut state.audit_health)
             .record_safe_close_decision(
                 project_id.clone(),
                 tekstide_core::audit::SafeCloseDecision::Closed {
@@ -4101,7 +4132,6 @@ fn terminate_project_live_work(
     state: &mut State,
     project_id: &tekstide_core::project::ProjectId,
     audit_store: &mut Option<tekstide_core::audit::AuditStore>,
-    audit_health: &mut tekstide_core::audit::AuditHealth,
 ) -> bool {
     let Some(project) = state.app_shell.state().project(project_id) else {
         return true;
@@ -4182,7 +4212,7 @@ fn terminate_project_live_work(
         }
 
         if let Some(store) = audit_store.as_mut() {
-            tekstide_core::audit::AuditCoordinator::new(store, audit_health)
+            tekstide_core::audit::AuditCoordinator::new(store, &mut state.audit_health)
                 .record_plain_terminal_terminated(project_id.clone(), terminal_id, &outcome);
         }
     }
@@ -4301,7 +4331,7 @@ fn attempt_open_project_from_path_field(state: &mut State) {
     match state.app_shell.add_project_from_path(&path) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
             record_new_project_added(state, project_id);
-            verify_restored_trust(&mut state.app_shell);
+            verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
             state.path_field.clear();
             state.path_field_requested = false;
         }
@@ -4339,12 +4369,13 @@ fn attempt_open_project_from_path_field(state: &mut State) {
 /// `open_real_audit_store` + `AuditCoordinator::new` shape for every
 /// other GUI-triggered producer (`apply_workspace_trust_grant`,
 /// `revoke_workspace_trust`).
-fn record_new_project_added(state: &State, project_id: tekstide_core::project::ProjectId) {
-    let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
+fn record_new_project_added(state: &mut State, project_id: tekstide_core::project::ProjectId) {
+    let Some(mut audit_store) =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+    else {
         return;
     };
-    let mut audit_health = tekstide_core::audit::AuditHealth::default();
-    let _ = tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health)
+    let _ = tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut state.audit_health)
         .record_project_added(project_id);
 }
 
@@ -4433,7 +4464,7 @@ fn choose_current_browsed_directory(state: &mut State) {
     match state.app_shell.add_project_from_path(&path) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
             record_new_project_added(state, project_id);
-            verify_restored_trust(&mut state.app_shell);
+            verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
             state.modal = None;
         }
         Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
@@ -4574,8 +4605,8 @@ fn attempt_terminal_launch(state: &mut State) -> Result<(), TerminalLaunchRefusa
     let project_id = project.id().clone();
     let root = project.canonical_root_path().clone();
 
-    let mut audit_store = open_real_audit_store(&state.app_shell);
-    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    let mut audit_store =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health);
     let pane = launch_terminal(
         &mut state.app_shell,
         project_id,
@@ -4583,7 +4614,7 @@ fn attempt_terminal_launch(state: &mut State) -> Result<(), TerminalLaunchRefusa
         root,
         tekstide_core::domain::VisibleSlot::Primary,
         audit_store.as_mut(),
-        &mut audit_health,
+        &mut state.audit_health,
     )?;
     state.terminal_panes.push(pane);
     // Response 243's required fix: size the freshly launched pane
@@ -4862,7 +4893,7 @@ fn launch_terminal_demo_panes(
         return Vec::new();
     };
 
-    let mut audit_store = open_real_audit_store(app_shell);
+    let mut audit_store = open_audit_store_recording_failure(app_shell, audit_health);
     let mut panes = Vec::new();
     for (index, slot) in [
         tekstide_core::domain::VisibleSlot::Primary,
@@ -5094,17 +5125,52 @@ fn launch_measurement_terminal_pane(
     vec![pane]
 }
 
-/// RFC-017 PR-017-F: resolves and opens the real, durable audit store
-/// at `<tekstide-state-root>/audit/` -- `<tekstide-state-root>` is the
+/// RFC-047 PR-047-A: why the store did not open, preserved rather than
+/// collapsed into the same `None` every other reason produces. This is
+/// the seam D1-D4 need: `AuditStoreErrorReason::RecoveryIncomplete`
+/// means the application was already inside a known, safe recovery when
+/// it stopped (D1's branch), and every other reason is a candidate for
+/// `recover()`'s own quarantine-and-restart (D2's branch) -- a caller
+/// that only sees `None` cannot tell those apart.
+///
+/// `Environment` is not itself an `AuditStoreErrorReason` -- no
+/// `HOME`/`XDG_STATE_HOME`, or the directory could not be created, both
+/// fail before `AuditStore::open` is ever reached, so there is no real
+/// reason from that enum to report. Mapped to
+/// [`tekstide_core::audit::AuditStoreErrorReason::Path`] wherever
+/// `AuditHealth` needs one (its own `last_failure` field is typed to
+/// that enum specifically) -- the closest existing meaning, not a new
+/// one invented for this.
+#[derive(Debug)]
+pub(crate) enum AuditStoreOpenFailure {
+    Environment,
+    Store(tekstide_core::audit::AuditStoreErrorReason),
+}
+
+impl AuditStoreOpenFailure {
+    fn as_audit_store_error_reason(&self) -> tekstide_core::audit::AuditStoreErrorReason {
+        match self {
+            Self::Environment => tekstide_core::audit::AuditStoreErrorReason::Path,
+            Self::Store(reason) => *reason,
+        }
+    }
+}
+
+/// RFC-017 PR-017-F, return type widened by RFC-047 PR-047-A: resolves
+/// and opens the real, durable audit store at
+/// `<tekstide-state-root>/audit/` -- `<tekstide-state-root>` is the
 /// exact same directory `main.rs`'s `RecentProjectStore` already
 /// resolves (`AppStatePathProvider::linux_default`), reused rather than
 /// independently re-derived, per RFC-013's own diagram ("one resolution,
 /// two consumers," `AppStatePathProvider::state_dir`'s own doc comment).
-/// `None` on any failure (no `HOME`/`XDG_STATE_HOME`, the directory
-/// cannot be created, or the store fails to open) -- the same
-/// fail-silent, log-nothing-to-the-user shape appropriate for a
-/// diagnostic/observability path that must never block the app from
-/// starting.
+///
+/// **This function itself stays fail-silent** -- callers decide what to
+/// do with an [`AuditStoreOpenFailure`]; nothing here blocks the app
+/// from starting, and nothing here is noisy. See
+/// [`open_audit_store_recording_failure`] for the seam that records and
+/// diagnoses a failure -- every production call site should go through
+/// that one, not this one directly, so a failure is never silently
+/// dropped again.
 ///
 /// audit-store-test-isolation handoff: the real resolution above is
 /// [`resolve_audit_state_dir`]'s `#[cfg(not(test))]` branch only -- a
@@ -5113,8 +5179,8 @@ fn launch_measurement_terminal_pane(
 /// see that function's own `#[cfg(test)]` branch.
 pub(crate) fn open_real_audit_store(
     app_shell: &ApplicationShell,
-) -> Option<tekstide_core::audit::AuditStore> {
-    let state_dir = resolve_audit_state_dir()?;
+) -> Result<tekstide_core::audit::AuditStore, AuditStoreOpenFailure> {
+    let state_dir = resolve_audit_state_dir().ok_or(AuditStoreOpenFailure::Environment)?;
     let project_roots = app_shell
         .state()
         .projects()
@@ -5122,6 +5188,39 @@ pub(crate) fn open_real_audit_store(
         .map(|project| project.canonical_root_path().clone())
         .collect();
     open_audit_store(&state_dir, project_roots)
+}
+
+/// RFC-047 PR-047-A: the seam every production call site now goes
+/// through. Records the failure onto the `AuditHealth` this session has
+/// been accumulating (not a fresh instance dropped immediately after,
+/// which is what all fourteen call sites did before this slice), and
+/// writes the one diagnostic line D3 requires: "something a technical
+/// user can find" -- unconditional, not gated behind
+/// `cfg!(debug_assertions)` the way `i18n`'s own `log_missing_key` gates
+/// its own, since a release build is exactly where a real user hits
+/// this.
+///
+/// Returns `Option`, matching every call site's own existing
+/// control-flow shape (`let Some(mut store) = ... else { return }` and
+/// `if let Some(store) = ...` both still compile unchanged), so this
+/// slice touches what each site records, not how each site is
+/// structured.
+pub(crate) fn open_audit_store_recording_failure(
+    app_shell: &ApplicationShell,
+    health: &mut tekstide_core::audit::AuditHealth,
+) -> Option<tekstide_core::audit::AuditStore> {
+    match open_real_audit_store(app_shell) {
+        Ok(store) => Some(store),
+        Err(failure) => {
+            let reason = failure.as_audit_store_error_reason();
+            health.record_failure(reason);
+            eprintln!(
+                "[audit] the audit store did not open ({reason:?}) -- this session's \
+                 actions will not be recorded until it recovers"
+            );
+            None
+        }
+    }
 }
 
 #[cfg(not(test))]
@@ -5293,8 +5392,19 @@ pub(crate) fn test_audit_state_dir(dir: &std::path::Path) -> TestAuditStateDirGu
 /// store must not be treated as silent confirmation; every currently-
 /// `Trusted` project is demoted in that case, the same as one the store
 /// opens but genuinely has no record for.
-fn verify_restored_trust(app_shell: &mut ApplicationShell) {
-    verify_restored_trust_against(app_shell, open_real_audit_store);
+/// RFC-047 PR-047-A: `audit_health` records why, if the "fails closed"
+/// branch below fires -- routed through
+/// [`open_audit_store_recording_failure`] via a closure rather than
+/// changing [`verify_restored_trust_against`]'s own signature, so that
+/// function's existing test-injection contract (a bare
+/// `FnOnce(&ApplicationShell) -> Option<AuditStore>`) is untouched.
+fn verify_restored_trust(
+    app_shell: &mut ApplicationShell,
+    audit_health: &mut tekstide_core::audit::AuditHealth,
+) {
+    verify_restored_trust_against(app_shell, |app_shell| {
+        open_audit_store_recording_failure(app_shell, audit_health)
+    });
 }
 
 /// Factored out from [`verify_restored_trust`], the same reason
@@ -5343,13 +5453,14 @@ fn verify_restored_trust_against(
 fn open_audit_store(
     state_dir: &std::path::Path,
     project_roots: Vec<std::path::PathBuf>,
-) -> Option<tekstide_core::audit::AuditStore> {
-    std::fs::create_dir_all(state_dir).ok()?;
+) -> Result<tekstide_core::audit::AuditStore, AuditStoreOpenFailure> {
+    std::fs::create_dir_all(state_dir).map_err(|_| AuditStoreOpenFailure::Environment)?;
     let request = tekstide_core::audit::AuditPathRequest::new(state_dir, project_roots);
     let storage_path = tekstide_core::audit::AuditPathResolver
         .resolve(request)
-        .ok()?;
-    tekstide_core::audit::AuditStore::open(storage_path).ok()
+        .map_err(|_| AuditStoreOpenFailure::Environment)?;
+    tekstide_core::audit::AuditStore::open(storage_path)
+        .map_err(|error| AuditStoreOpenFailure::Store(error.reason))
 }
 
 /// RFC-017 Amendment 1, PR-A1-C: one [`Subscription`] per pane currently
@@ -7277,7 +7388,9 @@ fn receive_approval_proposal(
         per_agent_run: project.resource_limits().agent_run_approval_limit,
         per_project: project.resource_limits().approval_request_limit,
     };
-    let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
+    let Some(mut audit_store) =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+    else {
         // RFC-022 PR-022-E: `receive_proposal` requires a real
         // `AuditCoordinator` to call at all -- the same "no store, no
         // action" degraded mode `decide_approval` also accepts, for the
@@ -7288,9 +7401,8 @@ fn receive_approval_proposal(
         // solved further in this slice.
         return;
     };
-    let mut audit_health = tekstide_core::audit::AuditHealth::default();
     let mut audit =
-        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health);
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut state.audit_health);
     let proposal_id = accepted.proposal.proposal_id().clone();
     let outcome = state.approval_coordinator.receive_proposal(
         serving.project_id.clone(),
@@ -7512,7 +7624,9 @@ fn decide_approval(
     let Some(agent_run_id) = dialog.request.agent_run_id.clone() else {
         return;
     };
-    let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
+    let Some(mut audit_store) =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+    else {
         // RFC-022 PR-022-E: `decide` requires a real `AuditCoordinator`
         // to call at all -- `ApprovedOnce`'s own fail-closed authorization
         // needs one to fail closed *against*. Without a real store, this
@@ -7521,9 +7635,8 @@ fn decide_approval(
         // an accepted degraded mode elsewhere in this crate.
         return;
     };
-    let mut audit_health = tekstide_core::audit::AuditHealth::default();
     let mut audit =
-        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health);
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut state.audit_health);
     let outcome =
         state
             .approval_coordinator
@@ -7584,12 +7697,13 @@ fn open_trust_grant_dialog(state: &mut State) {
 /// nothing left to grant trust *to*, matching `decide_approval`'s own
 /// "cannot record either way, leave state as it was" precedent.
 fn apply_workspace_trust_grant(state: &mut State, modal: &TrustGrantModal) {
-    let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
+    let Some(mut audit_store) =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+    else {
         return;
     };
-    let mut audit_health = tekstide_core::audit::AuditHealth::default();
     let mut audit =
-        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health);
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut state.audit_health);
     if let Some(project) = state.app_shell.state_mut().project_mut(&modal.project_id) {
         let _ = audit.grant_project_trust(project);
     }
@@ -7620,12 +7734,13 @@ fn revoke_workspace_trust(state: &mut State) {
     else {
         return;
     };
-    let Some(mut audit_store) = open_real_audit_store(&state.app_shell) else {
+    let Some(mut audit_store) =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+    else {
         return;
     };
-    let mut audit_health = tekstide_core::audit::AuditHealth::default();
     let mut audit =
-        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health);
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut state.audit_health);
     if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
         let _ = audit.revoke_project_trust(project);
     }
@@ -7759,11 +7874,12 @@ fn open_transcript_purge_dialog(state: &mut State) {
 /// the same case from the deletion's point of view -- delete regardless,
 /// record only if and however well the store currently allows.
 fn apply_transcript_purge(state: &mut State, modal: &TranscriptPurgeModal) {
-    match open_real_audit_store(&state.app_shell) {
+    match open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health) {
         Some(mut audit_store) => {
-            let mut audit_health = tekstide_core::audit::AuditHealth::default();
-            let mut audit =
-                tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut audit_health);
+            let mut audit = tekstide_core::audit::AuditCoordinator::new(
+                &mut audit_store,
+                &mut state.audit_health,
+            );
             if let Some(project) = state.app_shell.state_mut().project_mut(&modal.project_id) {
                 let _ = audit.purge_project_transcripts(project);
             }

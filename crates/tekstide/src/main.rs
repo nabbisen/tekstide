@@ -88,6 +88,12 @@ fn handle_informational_flags() {
 /// `main` and moving it in.
 fn boot() -> shell::State {
     let mut app_shell = ApplicationShell::new();
+    // RFC-047 PR-047-A: threaded through `open_cli_project_path_and_record`
+    // and into `State::new` below, rather than started fresh at each --
+    // `State` does not exist yet at this point in boot, but a failure
+    // recorded here is still real and must not be discarded the moment
+    // `State` starts existing to hold it.
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
 
     let store = match AppStatePathProvider::linux_default() {
         Ok(path_provider) => Some(RecentProjectStore::new(path_provider)),
@@ -110,7 +116,9 @@ fn boot() -> shell::State {
     // without needing `iced::Result`/`iced::Error` to express a custom
     // exit code.
     for selected_path in std::env::args_os().skip(1) {
-        if let Err(error) = open_cli_project_path_and_record(&mut app_shell, selected_path) {
+        if let Err(error) =
+            open_cli_project_path_and_record(&mut app_shell, selected_path, &mut audit_health)
+        {
             eprintln!("{error}");
             std::process::exit(1);
         }
@@ -124,7 +132,7 @@ fn boot() -> shell::State {
     }
 
     let catalog = i18n::Catalog::resolve(i18n::LocalePreference::default(), Some(&locales_dir()));
-    shell::State::new(app_shell, catalog)
+    shell::State::new(app_shell, catalog, audit_health)
 }
 
 /// RFC-031 PR-031-B: the real, testable open-a-project-from-the-CLI
@@ -148,10 +156,11 @@ fn boot() -> shell::State {
 fn open_cli_project_path_and_record(
     app_shell: &mut ApplicationShell,
     selected_path: impl AsRef<std::path::Path>,
+    audit_health: &mut tekstide_core::audit::AuditHealth,
 ) -> Result<(), tekstide_core::project::root::ProjectRootValidationError> {
     match app_shell.add_project_from_path(selected_path)? {
         tekstide_core::app::AddProjectOutcome::Added(project_id) => {
-            record_project_added_if_possible(app_shell, project_id);
+            record_project_added_if_possible(app_shell, project_id, audit_health);
         }
         tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => {}
     }
@@ -170,11 +179,11 @@ fn open_cli_project_path_and_record(
 fn record_project_added_if_possible(
     app_shell: &ApplicationShell,
     project_id: tekstide_core::project::ProjectId,
+    audit_health: &mut tekstide_core::audit::AuditHealth,
 ) {
-    let mut audit_store = shell::open_real_audit_store(app_shell);
-    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    let mut audit_store = shell::open_audit_store_recording_failure(app_shell, audit_health);
     if let Some(store) = audit_store.as_mut() {
-        let _ = tekstide_core::audit::AuditCoordinator::new(store, &mut audit_health)
+        let _ = tekstide_core::audit::AuditCoordinator::new(store, audit_health)
             .record_project_added(project_id);
     }
 }

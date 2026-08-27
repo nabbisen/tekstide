@@ -67,7 +67,8 @@ fn opening_a_real_new_project_from_the_cli_path_writes_exactly_one_real_project_
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir("project-added-reachability");
 
-    open_cli_project_path_and_record(&mut app_shell, &project_dir)
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    open_cli_project_path_and_record(&mut app_shell, &project_dir, &mut audit_health)
         .expect("a freshly created directory is a valid project root");
     let project_id = app_shell
         .state()
@@ -114,7 +115,8 @@ fn reopening_the_same_project_path_focuses_it_instead_of_writing_a_second_record
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir("project-added-focus-existing");
 
-    open_cli_project_path_and_record(&mut app_shell, &project_dir)
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    open_cli_project_path_and_record(&mut app_shell, &project_dir, &mut audit_health)
         .expect("a freshly created directory is a valid project root");
     let project_id = app_shell
         .state()
@@ -126,7 +128,8 @@ fn reopening_the_same_project_path_focuses_it_instead_of_writing_a_second_record
     // Re-opening the exact same path a second time is what
     // `AddProjectOutcome::FocusedExisting` reflects -- nothing new
     // happened, so no second record may appear.
-    open_cli_project_path_and_record(&mut app_shell, &project_dir)
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    open_cli_project_path_and_record(&mut app_shell, &project_dir, &mut audit_health)
         .expect("re-selecting an already-open project root must still succeed");
 
     assert_eq!(
@@ -143,7 +146,8 @@ fn restoring_recent_projects_on_boot_writes_no_project_added_record() {
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir("project-added-restore-vs-add");
 
-    open_cli_project_path_and_record(&mut app_shell, &project_dir)
+    let mut audit_health = tekstide_core::audit::AuditHealth::default();
+    open_cli_project_path_and_record(&mut app_shell, &project_dir, &mut audit_health)
         .expect("a freshly created directory is a valid project root");
     let project_id = app_shell
         .state()

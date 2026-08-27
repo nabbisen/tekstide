@@ -17,10 +17,19 @@ created: "2026-08-28"
 
 ## PR-047-A — the seam
 
-- [ ] `open_audit_store` distinguishes its failure reasons; `RecoveryIncomplete` is separable.
-- [ ] `AuditHealth` is stored on `State` and **read**. All fourteen former construction sites
-      accounted for, each checked rather than assumed.
-- [ ] A failure to open leaves a trace a technical user can find.
+- [x] `open_audit_store` distinguishes its failure reasons; `RecoveryIncomplete` is separable.
+      `AuditStoreOpenFailure::Store(AuditStoreErrorReason)` carries the real reason;
+      `AuditStoreOpenFailure::Environment` for the two failures that happen before
+      `AuditStore::open` is ever reached.
+- [x] `AuditHealth` is stored on `State` and **read**. All fourteen former construction sites
+      accounted for, each checked rather than assumed — twelve already had `&mut State`, one
+      (`record_new_project_added`) widened from `&State` after checking its three callers, two
+      (`main.rs`'s `boot()`, `State::new`'s own demo-panes launch) thread a real value through
+      from before `State` exists rather than starting fresh. First reader: the diagnostic line
+      itself, plus the four tests reading `status()`/`failure_count()`/`last_failure()` directly.
+- [x] A failure to open leaves a trace a technical user can find. One `eprintln!` line,
+      unconditional (not gated behind `cfg!(debug_assertions)`), confirmed live against both
+      corruption shapes with the release binary.
 
 ## D1 / D2 — recovery
 

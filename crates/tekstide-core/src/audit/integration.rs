@@ -56,7 +56,14 @@ impl AuditHealth {
         self.last_failure
     }
 
-    fn record_failure(&mut self, reason: AuditStoreErrorReason) {
+    /// RFC-047 PR-047-A: `pub`, not `pub(crate)` -- until now the only
+    /// callers were `AuditCoordinator`'s own write-failure paths, inside
+    /// this module. The seam `open_audit_store` (`tekstide` crate) now
+    /// needs is the same fact recorded the same way when the store does
+    /// not *open* at all, onto the one `AuditHealth` a session
+    /// accumulates rather than the fresh, immediately-dropped instance
+    /// every one of its fourteen call sites used to construct.
+    pub fn record_failure(&mut self, reason: AuditStoreErrorReason) {
         self.status = AuditHealthStatus::Degraded;
         self.failure_count = self.failure_count.saturating_add(1);
         self.last_failure = Some(reason);

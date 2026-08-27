@@ -663,3 +663,38 @@ from a guess into a match.
 
 Unrelated to RFC-044 (no `tekstide-core` code touched by that slice — the whole slice is
 `tekstide`-crate-local: `keyboard_help.rs`, `en.ftl`, `shell.rs`, and their own tests).
+
+## Recurrence, 2026-08-28 — RFC-047 PR-047-A's own gate
+
+`bind_recovers_from_a_stale_socket_file` failed once in three full-workspace runs during PR-047-A's
+gate (run 1 of 3; runs 2 and 3 clean, 460 + 4 + 738 both times). Assertion message captured this
+time: `second bind must clear the stale file and succeed: ApprovalChannelError { reason: Io,
+source: None }` — the same test and shape this document's own historical ~2% baseline already
+covers, not a new cause. Unrelated to RFC-047 (no `approval::channel` code touched by that slice —
+the whole slice so far is `shell.rs`, `main.rs`, `tests.rs`, and `AuditHealth::record_failure`'s
+own visibility in `tekstide-core/src/audit/integration.rs`).
+
+## Recurrence, 2026-08-28 — RFC-047 PR-047-A, again, third run of the same three-run gate
+
+`shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`
+failed once, in the third and final of three full-workspace runs (the first two clean; the first
+of the three, separately, hit the unrelated stale-socket recurrence logged just above). Same row
+this document already carries (`0.16.0`'s own release gate, table row 8) — same assertion message,
+captured again: *"the marker must be followed by a real, parseable PID"*, the read returning only
+the shell's echo of the command line, not yet the `descendant-pid:` line. Not a new cause; recorded
+so the row's own "once in three runs" rate has a second data point rather than resting on one.
+Unrelated to RFC-047 — no terminal-termination code touched by this slice.
+
+## Recurrence, 2026-08-28 — RFC-047 PR-047-A, third gate attempt
+
+`approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` failed once
+(row 5's own test, first reported request 326), the only failure in that run's 737/738. Assertion
+message: *"once the peer closes its end, the same request must no longer be answerable"* — the same
+shape row 5 already names. Two further full-workspace runs immediately after, clean (460 + 4 + 738
+both times). Three known, already-disclosed flakes recurring across this slice's own gate attempts
+in one session (this row, the stale-socket row, and the backgrounded-descendant row above) is more
+than usual, plausibly load from this same session's own repeated `cargo build`/`cargo test`
+invocations rather than a new cause — consistent with this document's own prior observation that
+its recorded rates were measured "incidentally, across ordinary development activity." Not treated
+as a new finding; each recurrence is dated and message-captured per this document's own standing
+rule, and none touches code this slice changed.
