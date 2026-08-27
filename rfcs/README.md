@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 047 | [Audit Store Corruption Recovery](./proposed/047-audit-store-corruption-recovery.md) | **Proposed 2026-08-28**, from RFC-036's own reproduction. When the audit store cannot open, Tekstide starts normally, the board reports **"Calm"**, and every audit-writing action silently does nothing for the rest of the session. Three layers, each built correctly and none connected: `recover`/`resume` have **zero** production callers; `AuditHealth` models `Degraded`/`failure_count`/`last_failure` and is constructed **fourteen times** in production with **no reader**, never stored, so it cannot even accumulate; and `open_audit_store` collapses every distinct reason to the same `None`. The question is not "call `recover()`" — it is **whether a working audit store is a precondition for the actions it audits**, given RFC-004 already refuses dangerous actions whose preconditions are absent. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -55,7 +56,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 030 | Git Integration | M12 |
 | 045 | Configuration Reachability | M12 |
 | 046 | Managed AgentRun Audit Trail | M12 |
-| 047 | Audit Store Corruption Recovery | M12 |
 
 Added 2026-08-12 after a real collision: RFC-024 was authored just-in-time as
 *Diff Preview Policy* and took a number the delivery plan had already reserved for Git
