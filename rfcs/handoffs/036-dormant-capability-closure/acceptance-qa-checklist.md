@@ -25,17 +25,23 @@ created: "2026-08-27"
 
 - [x] One row per orphan, with verdict, reason, counts, and **what the capability was for**.
 - [x] **Per D4, each row names the search shape that would have found it.**
-- [ ] Reviewed **before** any deletion happens. *(Filed for review; PR-036-B has not started.)*
+- [x] Reviewed **before** any deletion happens. Accepted at review 355; PR-036-B built on the
+      reviewed table, not an unreviewed one.
 
 ## D1 — deletion
 
-- [ ] Deletions batched into one release (`0.16.0`), not trickled. *(PR-036-B, not started —
-      table names 7 delete-verdict functions, none removed yet.)*
+- [x] Deletions batched into one release (`0.16.0`), not trickled. All 9 functions / 7 rows landed
+      in one commit; version bumped `0.15.0` → `0.16.0`.
 - [x] Each "delete" row cites what was searched, rather than asserting dormancy — and, per §2 of
       the risk document, what the real path is instead, so the *why* is not lost when the row's
       own function is removed.
-- [ ] `CHANGELOG.md` names every removed public item individually — **written in `0.16.0`'s own
-      entry at release time**, never by editing a released entry. *(PR-036-B, not started.)*
+- [x] `CHANGELOG.md` names every removed public item individually — written in the new `0.16.0`
+      entry now, since `0.16.0` has not shipped (not editing a released entry — response 352's own
+      precedent). Four of the nine narrowed to `#[cfg(test)]`/`test-support` rather than deleted
+      outright, found and reasoned through while executing the literal verdict — see
+      `qa-evidence.md`'s own "A deviation from the literal verdict" section — but named
+      individually in the changelog exactly as if deleted, since a consumer loses the symbol either
+      way.
 
 ## D2 — "keep, documented" is earned
 
@@ -56,15 +62,17 @@ created: "2026-08-27"
 
 ## Wiring (PR-036-B)
 
-- [ ] Each wired item has a real production caller and a test that the caller reaches it.
-- [ ] Ablated: remove the call site, watch that test fail.
+- [x] Each wired item has a real production caller and a test that the caller reaches it. **N/A —
+      zero wire verdicts** in the reviewed table; nothing to wire.
+- [x] Ablated: remove the call site, watch that test fail. **N/A**, same reason.
 
 ## Gates
 
-- [ ] `fmt`, `clippy -D warnings`, `git diff --check`, `rfc_docs_invariants`.
-- [ ] Full workspace suite, **three consecutive runs**, each logged to a file; any flake named
-      against the register **with a row**.
-- [ ] For deletions: `cargo publish --workspace --dry-run --locked` still passes.
+- [x] `fmt`, `clippy -D warnings`, `git diff --check`, `rfc_docs_invariants`. All clean.
+- [x] Full workspace suite, **three consecutive runs**, each logged to a file; any flake named
+      against the register **with a row**. **456 + 4 + 738, fully green** every time — no flake.
+- [x] For deletions: `cargo publish --workspace --dry-run --locked` still passes (`--allow-dirty`
+      pre-commit; packages, verifies, and would upload both crates at `0.16.0` cleanly).
 
 ## The outcome this slice is allowed to reach
 

@@ -1,9 +1,9 @@
 use super::project_session;
 use crate::close::CloseResourceProviderState;
 use crate::domain::{
-    AgentCompatibilityLevel, AgentRun, AgentRunStatus, ApprovalRequest, AuditEvent,
-    AuditEventClass, ChangeSet, OwnershipError, ReviewState, RiskLevel, TerminalKind,
-    TerminalSession, TerminalStatus, TerminalTransitionError, Transcript, VisibleSlot,
+    AgentCompatibilityLevel, AgentRun, AgentRunStatus, ApprovalRequest, ChangeSet, OwnershipError,
+    ReviewState, RiskLevel, TerminalKind, TerminalSession, TerminalStatus, TerminalTransitionError,
+    Transcript, VisibleSlot,
 };
 use crate::project::{ProjectId, ProjectMode, ProjectTerminalError};
 
@@ -647,39 +647,5 @@ fn terminal_session_limit_is_enforced_with_a_typed_refusal() {
         project.terminal_sessions().len(),
         2,
         "a refused session must not be added"
-    );
-}
-
-#[test]
-fn project_audit_collection_requires_project_owned_events() {
-    let mut project = project_session(1);
-    let terminal = TerminalSession::new(
-        project.id().clone(),
-        TerminalKind::Plain,
-        "Shell",
-        "/workspace/project-1",
-        "bash",
-    );
-    let event = AuditEvent::new(None, AuditEventClass::TerminalStarted, "terminal started")
-        .for_terminal(&terminal)
-        .unwrap();
-    let global_event = AuditEvent::new(None, AuditEventClass::ConfigChanged, "config changed");
-    let cross_project_event = AuditEvent::new(
-        Some(ProjectId::for_test(2)),
-        AuditEventClass::ConfigChanged,
-        "other project",
-    );
-
-    project.add_terminal_session(terminal).unwrap();
-    project.add_audit_event(event.clone()).unwrap();
-
-    assert_eq!(project.audit_events(), &[event]);
-    assert_eq!(
-        project.add_audit_event(global_event),
-        Err(OwnershipError::MissingProject)
-    );
-    assert_eq!(
-        project.add_audit_event(cross_project_event),
-        Err(OwnershipError::CrossProject)
     );
 }

@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.16.0 - What The Reachability Audit Found, Two Sessions Later
+
+Status: not yet released.
+
+### Fixed — a keyboard-only user can close a project, and every surface-local key is advertised
+
+- This release's own gate found that a keyboard-only user could not close a project — the `×`
+  on a project tab was the only thing that emitted a close, and no key reached it, so a
+  keyboard-only user could not reach the termination behaviour the previous release was largely
+  about. That is no longer true. `Delete`, with a project's own tab highlighted, closes it — the
+  same `attempt_close_project_tab` the `×` button already reached, so both routes converge on the
+  same confirmation dialog for a project with live work. RFC-044.
+
+- `a`/`r` here, and `Enter`/`Space`/`Delete`/arrows elsewhere, appeared in neither the Help modal
+  nor `--help`. They do now: a surface-grouped section, generated from the same registry that
+  drives the fix above, lists every surface-local key by the surface it belongs to. RFC-044.
+
+### Removed — dormant, dead public API from `tekstide-core`
+
+RFC-036's reachability audit found capabilities with no production caller anywhere and no named
+future consumer (its own D2 rule: an RFC number, not an intention). Batched into one release
+rather than trickled, per that RFC's own D1 decision. Each removal, individually, because a
+consumer's build breaking is the loudest thing this project can do to someone:
+
+- **`ProjectSession::add_agent_run`** — superseded by `attach_agent_launch_plan`, the real
+  production attachment path (which also enforces `agent_run_limit`, which this never did).
+  Narrowed to `#[cfg(test)]` rather than deleted outright: a dozen `tekstide-core` tests use it as
+  fixture setup unrelated to the function's own behavior, and rewriting each onto
+  `attach_agent_launch_plan`'s heavier `AgentRunLaunchPlan`/`TerminalSession` ceremony would have
+  coupled every one of them to launch internals for no reason relevant to what they check.
+- **`ProjectSession::add_transcript`** — superseded by the private `attach_agent_run_transcript`,
+  the real production attachment path. Narrowed to `#[cfg(any(test, feature = "test-support"))]`
+  for the same fixture-reuse reason as `add_agent_run`, including one `tekstide`-crate test.
+- **`ProjectSession::add_audit_event`** — superseded by `grant_trust`/`revoke_trust`
+  (`pub(crate)`), the real writers of the same collection. Removed outright; its own six tests
+  were entirely about its own rejection behavior, not fixtures for anything else.
+- **`AgentRun::add_approval`** — superseded by `ProjectSession::add_approval_request`, the real
+  approval-attachment path. Removed outright. Checked, not assumed: the field it wrote
+  (`approval_ids`) is read nowhere either, so nothing was silently relying on stale data.
+- **`ServeShutdown::shutdown`** (`approval::channel`) — calls the identical private helper
+  `Drop` already calls; kept no determinism production ever needed. Removed outright; the one test
+  that depended on the explicit method specifically was already redundant with a stronger sibling
+  test proving the same cleanup via `Drop` alone.
+- **`ApprovalChannelEndpoint::accept_proposal`** — superseded by `serve_concurrently`'s own
+  internal accept loop, the real production path. Narrowed to `#[cfg(test)]`: roughly a dozen
+  tests use this single-connection, single-thread shape as their primary vehicle for testing
+  authentication and frame parsing directly, without `serve_concurrently`'s multi-threaded
+  machinery in the way.
+- **`ProjectSession::record_terminal_transcript_write_summary`** and
+  **`ProjectSession::record_transcript_write_summary`** — RFC-033 PR-033-C deliberately built a
+  different mechanism instead (reading real bytes from disk, correct retrospectively, rather than
+  a counter that is only ever correct prospectively), so there is no future version of "wire this"
+  that would not repeat the mistake RFC-033 already avoided. Removed outright.
+
+`tekstide-core` is on crates.io; this is a breaking change to a published crate, which is why it
+is a minor version bump rather than a patch.
+
+### Known limitations, unchanged or newly found
+
+- **No screen-reader support.** `iced` has no accessibility bridge; out of scope for that reason
+  and no other.
+- **A Managed-compatibility agent-run launch produces no durable audit record.** Found by this
+  release's own reachability audit (RFC-036 PR-036-A): a fully-built, tested audit-writing path
+  (`launch_managed_agent_run` and three siblings) exists and is never called — production launches
+  through a different route that writes nothing to the audit trail. This crate's own `README.md`
+  said otherwise until this release corrected it. A fix is recommended as its own RFC, not built
+  here, since what to record and when is real design, not a wiring gap.
+- **Still no two-sided diff.** The before-bytes were never captured; blocked on Git-backed
+  detection.
+- **A review decision does not survive closing Tekstide.**
+
 ## 0.15.0 - What The Terminal Started, And Who Could See It
 
 Status: released on 2026-08-27.

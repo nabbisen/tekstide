@@ -646,9 +646,18 @@ impl ApprovalChannelEndpoint {
     /// nothing here constructs anything a dialog could render, per the
     /// fail-closed-without-a-dialog requirement.
     ///
-    /// This accepts and authenticates strictly one connection at a time --
-    /// see `serve_concurrently` for why that is no longer this endpoint's
-    /// only mode of operation, and when to use which.
+    /// RFC-036 PR-036-B: not `pub` in production any more -- superseded
+    /// there by `serve_concurrently`'s own internal accept loop, which is
+    /// what every real adapter connection goes through. `#[cfg(test)]`
+    /// because this single-connection, single-thread shape is this
+    /// module's own primary vehicle for testing authentication and frame
+    /// parsing directly, without `serve_concurrently`'s multi-threaded
+    /// machinery in the way -- roughly a dozen tests drive it, and
+    /// rewriting each onto `serve_concurrently` to delete one dormant
+    /// production entry point would be a materially larger, riskier
+    /// change to this module's own security-relevant test coverage than
+    /// this triage slice's own scope.
+    #[cfg(test)]
     pub fn accept_proposal(&self) -> Result<AcceptedProposal, ApprovalChannelError> {
         let (stream, _addr) = self.listener.accept().map_err(ApprovalChannelError::io)?;
         self.authenticate_and_read(stream)
@@ -837,16 +846,6 @@ pub struct ServeShutdown {
 }
 
 impl ServeShutdown {
-    /// Signals the accept loop to stop, wakes a blocked `accept()` via a
-    /// throw-away self-connect to the endpoint's own real socket path, and
-    /// blocks until the loop's thread has fully exited. Equivalent to
-    /// simply dropping this value; kept as an explicit method for callers
-    /// that want to wait for shutdown to complete at a specific point
-    /// rather than whenever this value happens to go out of scope.
-    pub fn shutdown(mut self) {
-        self.shutdown_and_join();
-    }
-
     fn shutdown_and_join(&mut self) {
         self.shutting_down.store(true, Ordering::SeqCst);
         let _ = UnixStream::connect(&self.socket_path);

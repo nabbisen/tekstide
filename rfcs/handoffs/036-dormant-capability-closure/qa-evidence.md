@@ -89,7 +89,109 @@ resolve. `fmt`/`clippy` not run against a code change, since PR-036-A makes none
 `#[deprecated]` markers used for measurement were reverted before any gate ran, confirmed via
 `git status`/`git diff --stat` both empty for every source file touched.
 
-## PR-036-B, PR-036-C
+## PR-036-B — wire and delete
 
-Not started. Per the task breakdown's own gate: **the table is reviewed before PR-036-B starts.**
-Nothing in this table has been acted on.
+**Only what the reviewed table says.** Zero wire verdicts existed, so this slice is deletion only:
+the 9 functions across 7 delete-verdict rows.
+
+### A deviation from the literal verdict, found while executing it, and why
+
+The table said "delete," verified against production reachability. What it did not check — because
+checking it wasn't part of measuring reachability — was whether each function also served as
+**test fixture infrastructure for unrelated tests**, not just its own dedicated tests. Attempting
+the literal deletion surfaced this for four of the nine:
+
+- `add_agent_run`: a dozen tests across `change_detection`, `collections`, `transcripts` use it as
+  cheap setup ("a project with an agent run attached") for tests not about launch mechanics.
+  `attach_agent_launch_plan`, the real production path, needs a full `AgentRunLaunchPlan` +
+  `TerminalSession` — rewriting a dozen unrelated tests onto that ceremony is a materially larger
+  change than this triage's own scope.
+- `add_transcript`: same shape, including **one caller in `tekstide`'s own crate**
+  (`shell/tests.rs:10781`) — the real private path (`attach_agent_run_transcript`) is not even
+  visible across the crate boundary.
+- `accept_proposal`: roughly a dozen tests in `approval::tests::channel` and
+  `approval::tests::reference_adapter` use its single-connection, single-thread shape as their
+  primary vehicle for testing authentication and frame parsing directly — `serve_concurrently`'s
+  multi-threaded accept loop would be a materially larger, security-test-relevant rewrite to remove
+  one dormant production entry point.
+- `record_transcript_write_summary`: one remaining test (`local_data_summary_counts_retained_...`)
+  used it as fixture setup — resolved differently, see below, since a smaller fix existed.
+
+**Resolution: narrowed to `#[cfg(test)]` (or `#[cfg(any(test, feature = "test-support"))]` for the
+one with a cross-crate caller — the same gate `runtime/terminal/launch.rs`'s own leak guard
+already uses to cross that exact boundary) rather than deleted outright**, for `add_agent_run`,
+`add_transcript`, and `accept_proposal`. This satisfies D1's actual goal — removed from the
+*published, production-reachable* API, which is what "dead code in a published crate" means — without
+forcing an unrelated, much larger rewrite of security- and behavior-relevant test coverage that PR-036-B's
+own scope ("only what the table says") does not cover. Every reader of the deleted symbol from
+outside this crate loses it exactly as if it had been deleted outright; only this crate's own test
+suite (and, for `add_transcript`, `tekstide`'s test suite via the `test-support` feature) still
+sees it. Documented at each function's own definition, not silently done.
+
+**`record_transcript_write_summary`'s one remaining test call site needed no such gate.** Read
+closely: `local_data_summary_counts_retained_bytes_without_transcript_content`'s own fixture helper
+(`attach_agent_run_transcript`, this test file's own, distinct from the private core method of the
+same name) already calls the public `Transcript::record_active_write` directly on the value before
+attaching it — setting the exact `byte_count`/state the test's own subsequent
+`record_transcript_write_summary` call redundantly re-set to the identical value. Removed the
+redundant call; the test's own real assertions (`transcript_local_data_summary`'s retained-bytes
+and budget-pressure accounting) are unaffected, verified by the still-passing test.
+
+**The other five (`add_audit_event`, `add_approval`, `shutdown` [approval channel],
+`record_terminal_transcript_write_summary`, `record_transcript_write_summary`) had no such
+fixture-reuse pattern** — checked directly per function, not assumed: every one of their own test
+call sites asserted something about *that function's own* behavior (a specific `OwnershipError`
+variant, a duplicate-attachment rejection, socket cleanup timing), so deleting the function and its
+own dedicated tests together lost no coverage of anything else. One exception handled individually:
+`shutdown`'s own dedicated test
+(`serve_concurrently_endpoint_is_dropped_and_socket_removed_after_shutdown`) became fully redundant
+with a *stronger* sibling test already in the same file
+(`dropping_serve_shutdown_while_the_loop_is_blocked_in_accept_still_cleans_up`, which proves the
+same socket-cleanup invariant via `Drop` alone, in the harder case of a blocked `accept()`) —
+deleted rather than adapted, since adapting it would have only reproduced a weaker version of a
+test that already exists.
+
+### A side effect, disclosed rather than chased
+
+Deleting `record_transcript_write_summary` leaves `Transcript::record_active_write`,
+`record_truncated_write`, and `record_lifecycle_state` with **zero remaining production or
+`tekstide-core`-internal callers** (only test callers, via the fixture helpers above) — a new
+orphan created by this removal, the same way RFC-023's own closure created three. **Not chased
+further, deliberately**: these three methods were not part of PR-036-A's own reviewed table, and
+deciding their own fate is a new measurement this slice's scope does not cover. Named here so it
+does not go unnoticed the way RFC-023's own new orphans would have without RFC-036's own
+"What is already assigned" section recording them.
+
+### What was actually removed, and how it's verified
+
+Nine functions, seven table rows — full detail and reasoning per item in `CHANGELOG.md`'s new
+`0.16.0` entry, written now (not deferred) since `0.16.0` has not shipped, matching response 352's
+own established precedent: a released entry is not rewritten, an unreleased one is exactly where
+new work's own record belongs.
+
+Verification, not assertion: `cargo build --workspace --all-targets` clean (catches every stray
+reference the deletions missed, including two private helpers that became newly dead —
+`ProjectSession::ensure_approval_exists` and `::transcript_mut` — removed alongside their own
+callers). `cargo clippy --workspace --all-targets -- -D warnings` clean (catches unused imports the
+build alone would only warn on). Full workspace suite: `tekstide-core` 746 → 738 (8 tests removed,
+each verified above as testing only the deleted function's own behavior), `tekstide` unchanged at
+456 (the `#[cfg(any(test, feature = "test-support"))]` gate keeps its one `add_transcript` caller
+compiling).
+
+### Version and publish gate
+
+Workspace version bumped `0.15.0` → `0.16.0` (`Cargo.toml`), per D1: `tekstide-core` is on
+crates.io, deletion is breaking, and the bump was already owed for RFC-044's own unreleased work
+sitting in the same tree — this batches both into one release rather than two. `Cargo.lock`
+auto-updated by the build. `cargo publish --workspace --dry-run --locked --allow-dirty` (dirty only
+because this is pre-commit): packages, verifies, and would upload both crates at `0.16.0` cleanly.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
+(4 tests): clean. Three consecutive full-workspace runs: **456 + 4 + 738, fully green** every
+time — no flake.
+
+## PR-036-C
+
+Not started.

@@ -718,45 +718,7 @@ fn serve_concurrently_accepts_a_second_connection_while_the_first_stalls() {
         "the well-behaved connection must be served quickly, not wait behind the \
          stalling one -- took {elapsed:?}"
     );
-    shutdown.shutdown();
-}
-
-/// Response 114 Required 3: the accept loop's earlier version captured a
-/// strong `Arc`, so the endpoint's strong count could never reach zero
-/// from outside no matter what the caller did -- `Drop` never ran, and
-/// the socket file was never removed. `shutdown()` must make the endpoint
-/// droppable again: after it returns and the caller's own `Arc` is
-/// dropped, the socket file must actually be gone and the path must no
-/// longer be connectable.
-#[test]
-fn serve_concurrently_endpoint_is_dropped_and_socket_removed_after_shutdown() {
-    let state_root = temp_state_root("shutdown");
-    let directory = resolve_directory(&state_root);
-    let agent_run_id = AgentRunId::for_test(rand_seed());
-
-    let (endpoint, _token) =
-        ApprovalChannelEndpoint::bind(&directory, &agent_run_id).expect("bind must succeed");
-    let socket_path = directory.socket_path(&agent_run_id);
-    assert!(socket_path.exists(), "precondition: socket file exists");
-
-    let endpoint = std::sync::Arc::new(endpoint);
-    let (_receiver, shutdown) = std::sync::Arc::clone(&endpoint).serve_concurrently();
-
-    shutdown.shutdown();
-    // The caller's own `Arc` is the only strong reference left once
-    // `shutdown()` has returned (it waits for the accept loop's thread,
-    // which held only a `Weak`, to fully exit) -- dropping it here must
-    // be what finally runs `Drop`.
-    drop(endpoint);
-
-    assert!(
-        !socket_path.exists(),
-        "the socket file must be removed once the endpoint is actually dropped after shutdown"
-    );
-    assert!(
-        UnixStream::connect(&socket_path).is_err(),
-        "the socket path must no longer be connectable after shutdown"
-    );
+    drop(shutdown);
 }
 
 /// Response 115 Required B: the previous fix relied on the caller
@@ -867,7 +829,7 @@ fn serve_concurrently_refuses_connections_beyond_the_concurrency_cap() {
          is exceeded"
     );
 
-    shutdown.shutdown();
+    drop(shutdown);
 }
 
 /// Response 113 Q3 item 1: the capability token must reach a spawned

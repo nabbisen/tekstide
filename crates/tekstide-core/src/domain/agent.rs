@@ -1,6 +1,6 @@
 use super::{
-    AgentRunId, ApprovalId, ApprovalRequest, AuditEventId, ChangeSet, ChangeSetId, DomainTimestamp,
-    OwnershipError, TerminalId, TerminalSession, TranscriptId,
+    AgentRunId, ApprovalId, AuditEventId, ChangeSet, ChangeSetId, DomainTimestamp, OwnershipError,
+    TerminalId, TerminalSession, TranscriptId,
 };
 use crate::domain::ownership::ensure_same_project;
 use crate::project::ProjectId;
@@ -95,18 +95,6 @@ impl AgentRun {
             return Err(OwnershipError::DuplicateAttachment);
         }
         self.terminal_id = Some(terminal.id.clone());
-        Ok(())
-    }
-
-    pub fn add_approval(&mut self, approval: &ApprovalRequest) -> Result<(), OwnershipError> {
-        ensure_same_project(&self.project_id, &approval.project_id)?;
-        if approval.agent_run_id.as_ref() != Some(&self.id) {
-            return Err(OwnershipError::WrongAgentRun);
-        }
-        if self.approval_ids.contains(&approval.id) {
-            return Err(OwnershipError::DuplicateAttachment);
-        }
-        self.approval_ids.push(approval.id.clone());
         Ok(())
     }
 

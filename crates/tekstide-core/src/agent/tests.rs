@@ -6,7 +6,7 @@ use crate::approval::{ApprovalCoordinator, DecideOutcome, ReceiveOutcome, Simple
 use crate::content::{SaveDecision, TextDocumentState};
 use crate::domain::{
     AgentCompatibilityLevel, AgentRunId, AgentRunStatus, OwnershipError, TerminalId, TerminalKind,
-    TerminalSession, TerminalStatus, TruncationState,
+    TerminalSession, TerminalStatus,
 };
 use crate::project::{
     ProjectActiveFileLaunchBlockReason, ProjectAgentActiveFileLaunchError, ProjectAgentLaunchError,
@@ -638,21 +638,6 @@ fn local_bounded_agent_run_transcript_capture_attaches_metadata_and_writes_outpu
         &transcript_bytes,
         b"tekstide-transcript-ok"
     ));
-    let write_summary = runtime
-        .transcript_write_summary(&handle)
-        .unwrap()
-        .expect("transcript-enabled runtime should expose writer summary");
-    project
-        .record_terminal_transcript_write_summary(&terminal_id, write_summary)
-        .expect("ProjectSession should reconcile transcript metadata");
-    let transcript = project
-        .transcripts()
-        .iter()
-        .find(|transcript| transcript.id == transcript_id)
-        .expect("transcript metadata should still be recorded");
-    assert_eq!(transcript.byte_count, transcript_bytes.len() as u64);
-    assert_eq!(transcript.truncation_state, TruncationState::Complete);
-    assert!(transcript.last_write_at.is_some());
 
     let outcome = runtime
         .wait_for_exit(&handle, Duration::from_secs(5))

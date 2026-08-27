@@ -6,10 +6,7 @@ use crate::runtime::terminal::{
     LinuxTerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntimeEvent,
     TerminationOutcome,
 };
-use crate::transcript::{
-    TranscriptLocalDataSummary, TranscriptRetentionLimits, TranscriptRetentionState,
-    TranscriptWriteSummary,
-};
+use crate::transcript::{TranscriptLocalDataSummary, TranscriptRetentionLimits};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -20,7 +17,7 @@ use crate::domain::{
     ApprovalDecision, ApprovalId, ApprovalRequest, AuditEvent, ChangeAssociationConfidence,
     ChangeDetectionStatus, ChangeSet, ChangeSetId, DomainTimestamp, OwnershipError, ReviewState,
     TerminalId, TerminalKind, TerminalSession, TerminalStatus, TerminalTransitionError, Transcript,
-    TranscriptId, TranscriptLifecycleState, VisibleSlot,
+    TranscriptId, VisibleSlot,
 };
 
 use super::change_detection::{
@@ -492,6 +489,20 @@ impl ProjectSession {
         Ok(())
     }
 
+    /// RFC-036 PR-036-B: not `pub` in production any more -- the real
+    /// production launch path is [`Self::attach_agent_launch_plan`],
+    /// which does everything this does plus ownership checks on the
+    /// terminal/launch-spec and the `agent_run_limit` enforcement this
+    /// never had. `#[cfg(test)]` because a dozen tests across
+    /// `change_detection`, `collections`, and `transcripts` use this as
+    /// cheap fixture setup ("a project with one agent run attached") for
+    /// tests that are not about launch mechanics at all --
+    /// `attach_agent_launch_plan`'s own heavier `AgentRunLaunchPlan` +
+    /// `TerminalSession` ceremony would couple every one of those
+    /// unrelated tests to launch internals for no reason relevant to what
+    /// they check, a materially larger rewrite than this triage slice's
+    /// own scope.
+    #[cfg(test)]
     pub fn add_agent_run(&mut self, run: AgentRun) -> Result<(), OwnershipError> {
         self.ensure_project_member(&run.project_id)?;
         if self.agent_runs.iter().any(|existing| existing.id == run.id) {
@@ -813,6 +824,20 @@ impl ProjectSession {
         Some(self.approval_requests.remove(index).id)
     }
 
+    /// RFC-036 PR-036-B: not `pub` in production any more -- the real
+    /// production attachment path is the private
+    /// `attach_agent_run_transcript`, reached only from the real launch/
+    /// write flow, which this crate's own test modules cannot call
+    /// (private, not `pub(crate)`). `#[cfg(test)]` because this is those
+    /// modules' own fixture for "a project with a transcript already
+    /// attached" across tests that are not about attachment itself
+    /// (`references`, `collections`, `transcripts`, plus one in
+    /// `tekstide`'s own `shell/tests.rs`) -- the same shape as
+    /// `add_agent_run`, above. `feature = "test-support"` too, not bare
+    /// `#[cfg(test)]`, because that one `tekstide`-crate caller needs it
+    /// visible across the dependency boundary -- the same reason
+    /// `runtime/terminal/launch.rs`'s own leak guard uses this gate.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn add_transcript(&mut self, transcript: Transcript) -> Result<(), OwnershipError> {
         self.ensure_project_member(&transcript.project_id)?;
         self.ensure_terminal_exists(&transcript.terminal_id)?;
@@ -829,51 +854,6 @@ impl ProjectSession {
         self.transcripts.push(transcript);
         self.record_activity();
         self.refresh_runtime_summary_from_collections();
-        Ok(())
-    }
-
-    pub fn record_terminal_transcript_write_summary(
-        &mut self,
-        terminal_id: &TerminalId,
-        summary: TranscriptWriteSummary,
-    ) -> Result<(), ProjectTranscriptError> {
-        let transcript_id = self
-            .terminal_sessions
-            .iter()
-            .find(|terminal| terminal.id == *terminal_id)
-            .ok_or(ProjectTranscriptError::Ownership(
-                OwnershipError::MissingReference,
-            ))?
-            .transcript_ref
-            .clone()
-            .ok_or(ProjectTranscriptError::MissingTerminalTranscript)?;
-
-        self.record_transcript_write_summary(&transcript_id, summary)
-    }
-
-    pub fn record_transcript_write_summary(
-        &mut self,
-        transcript_id: &TranscriptId,
-        summary: TranscriptWriteSummary,
-    ) -> Result<(), ProjectTranscriptError> {
-        let transcript = self.transcript_mut(transcript_id)?;
-        match summary.retention_state {
-            TranscriptRetentionState::Active => transcript.record_active_write(summary.byte_count),
-            TranscriptRetentionState::Truncated { .. } => {
-                transcript.record_truncated_write(summary.byte_count)
-            }
-            TranscriptRetentionState::Expired => {
-                transcript.record_lifecycle_state(TranscriptLifecycleState::Expired)
-            }
-            TranscriptRetentionState::DisabledByOptOut => {
-                transcript.record_lifecycle_state(TranscriptLifecycleState::DisabledByOptOut)
-            }
-            TranscriptRetentionState::CaptureFailed => {
-                transcript.record_lifecycle_state(TranscriptLifecycleState::CaptureFailed)
-            }
-            TranscriptRetentionState::Purged => transcript.mark_purged(),
-        }
-        self.record_activity();
         Ok(())
     }
 
@@ -1049,34 +1029,6 @@ impl ProjectSession {
 
         self.add_change_set(change_set)?;
         Ok(Some(change_set_id))
-    }
-
-    pub fn add_audit_event(&mut self, event: AuditEvent) -> Result<(), OwnershipError> {
-        let project_id = event
-            .project_id
-            .as_ref()
-            .ok_or(OwnershipError::MissingProject)?;
-        self.ensure_project_member(project_id)?;
-        if let Some(terminal_id) = &event.terminal_id {
-            self.ensure_terminal_exists(terminal_id)?;
-        }
-        if let Some(agent_run_id) = &event.agent_run_id {
-            self.ensure_agent_run_exists(agent_run_id)?;
-        }
-        if let Some(approval_id) = &event.approval_id {
-            self.ensure_approval_exists(approval_id)?;
-        }
-        if self
-            .audit_events
-            .iter()
-            .any(|existing| existing.id == event.id)
-        {
-            return Err(OwnershipError::DuplicateAttachment);
-        }
-        self.audit_events.push(event);
-        self.record_activity();
-        self.refresh_runtime_summary_from_collections();
-        Ok(())
     }
 
     pub fn mark_opened(&mut self) {
@@ -1309,16 +1261,6 @@ impl ProjectSession {
             .ok_or(OwnershipError::MissingReference)
     }
 
-    fn transcript_mut(
-        &mut self,
-        transcript_id: &TranscriptId,
-    ) -> Result<&mut Transcript, ProjectTranscriptError> {
-        self.transcripts
-            .iter_mut()
-            .find(|transcript| transcript.id == *transcript_id)
-            .ok_or(ProjectTranscriptError::MissingTranscript)
-    }
-
     fn purge_transcripts_by_id(
         &mut self,
         transcript_ids: Vec<TranscriptId>,
@@ -1495,14 +1437,6 @@ impl ProjectSession {
         }
 
         Ok(DetectedChangeAssociation::Strong(agent_run_id.clone()))
-    }
-
-    fn ensure_approval_exists(&self, approval_id: &ApprovalId) -> Result<(), OwnershipError> {
-        self.approval_requests
-            .iter()
-            .any(|approval| approval.id == *approval_id)
-            .then_some(())
-            .ok_or(OwnershipError::MissingReference)
     }
 
     fn refresh_runtime_summary_from_collections(&mut self) {

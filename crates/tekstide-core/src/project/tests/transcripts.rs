@@ -2,51 +2,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::domain::{
-    AgentCompatibilityLevel, AgentRun, TerminalKind, TerminalSession, Transcript,
-    TranscriptLifecycleState, TruncationState,
-};
+use crate::domain::{AgentCompatibilityLevel, AgentRun, TerminalKind, TerminalSession, Transcript};
 use crate::project::{
     ProjectId, ProjectSession, ProjectTranscriptError, ProjectTranscriptPurgeSummary,
 };
-use crate::transcript::{
-    TranscriptBudgetScope, TranscriptRetentionLimits, TranscriptRetentionState,
-    TranscriptWriteSummary,
-};
-
-#[test]
-fn terminal_writer_summary_updates_transcript_metadata_without_content() {
-    let temp = TestDirs::new("metadata-summary");
-    let mut project = real_project_session(1, &temp);
-    let (terminal_id, _agent_run_id, transcript_id, _path) =
-        attach_agent_run_transcript(&mut project, &temp, "summary.log", b"secret bytes");
-
-    project
-        .record_terminal_transcript_write_summary(
-            &terminal_id,
-            TranscriptWriteSummary {
-                byte_count: 42,
-                retention_state: TranscriptRetentionState::Truncated {
-                    scope: TranscriptBudgetScope::Transcript,
-                },
-            },
-        )
-        .unwrap();
-
-    let transcript = project
-        .transcripts()
-        .iter()
-        .find(|transcript| transcript.id == transcript_id)
-        .unwrap();
-    assert_eq!(transcript.byte_count, 42);
-    assert_eq!(transcript.truncation_state, TruncationState::Truncated);
-    assert_eq!(
-        transcript.lifecycle_state,
-        TranscriptLifecycleState::Truncated
-    );
-    assert!(transcript.last_write_at.is_some());
-    assert!(!format!("{transcript:?}").contains("secret bytes"));
-}
+use crate::transcript::{TranscriptBudgetScope, TranscriptRetentionLimits};
 
 #[test]
 fn transcript_purge_removes_bytes_and_preserves_path_free_tombstone_references() {
@@ -216,15 +176,6 @@ fn local_data_summary_counts_retained_bytes_without_transcript_content() {
         attach_agent_run_transcript(&mut project, &temp, "first.log", b"secret-a");
     let (_terminal_id, _agent_run_id, _second_id, _second_path) =
         attach_agent_run_transcript(&mut project, &temp, "second.log", b"secret-bb");
-    project
-        .record_transcript_write_summary(
-            &first_id,
-            TranscriptWriteSummary {
-                byte_count: 8,
-                retention_state: TranscriptRetentionState::Active,
-            },
-        )
-        .unwrap();
     project.purge_transcript(&first_id).unwrap();
 
     let summary =
