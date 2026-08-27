@@ -54,11 +54,14 @@ created: "2026-08-27"
 
 - [x] `recover` and `purge_all_records` are **not** triage rows. **`purge_project_records` folded
       into the same defect slice**, recorded and reasoned rather than silently added or omitted.
-- [ ] What a user experiences with a corrupt store today is **reproduced**, not reasoned about —
-      a corrupted store in a scratch `XDG_STATE_HOME`, against the release binary. *(PR-036-C, not
-      started.)*
-- [ ] The outcome is either a fix or a written RFC recommendation. Both are acceptable; silence
-      is not. *(PR-036-C, not started.)*
+- [x] What a user experiences with a corrupt store today is **reproduced**, not reasoned about —
+      two corruption shapes (a genuinely corrupted file; an interrupted-migration marker,
+      instrumentation-confirmed rather than assumed), both against the release binary in a scratch
+      `XDG_STATE_HOME`, both screenshotted. `corrupted-audit-store-defect.md`.
+- [x] The outcome is either a fix or a written RFC recommendation. Both are acceptable; silence
+      is not. **RFC recommendation**, with the reasoning for why a fix was not built here and a
+      concrete head-start for whoever authors it — see `corrupted-audit-store-defect.md`'s own
+      "Decided" section.
 
 ## Wiring (PR-036-B)
 

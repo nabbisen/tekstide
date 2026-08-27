@@ -192,6 +192,36 @@ because this is pre-commit): packages, verifies, and would upload both crates at
 (4 tests): clean. Three consecutive full-workspace runs: **456 + 4 + 738, fully green** every
 time — no flake.
 
-## PR-036-C
+## PR-036-C — the two that left the triage, reproduced
 
-Not started.
+Full write-up: `corrupted-audit-store-defect.md`. Summary here.
+
+**Reproduced, not reasoned about**, per the task breakdown's own explicit requirement: release
+binary, fresh `mktemp -d` fixture, fresh `mktemp -d` `XDG_STATE_HOME`. Two corruption shapes —
+a genuinely corrupted `audit.sqlite3` (overwritten with random bytes), and an interrupted-migration
+recovery marker present (`recovery_is_active()`'s own condition) — both produce the **identical,
+silent result**: the application launches and runs completely normally, and nothing anywhere
+indicates the audit trail is broken. Screenshotted both (`evidence/EVIDENCE-1`,
+`evidence/EVIDENCE-2`).
+
+**The recovery-marker shape's reproduction was verified, not assumed**: an initial manual attempt
+produced a confusing result (the store appeared to keep working), traced to a contaminated
+scratch directory from an incompletely-cleaned-up earlier process, not a real product behavior.
+Re-ran with temporary `eprintln!` instrumentation in `open_audit_store` (`shell.rs`) against a
+freshly created scratch directory — confirmed `AuditStore::open(...).is_ok() == false`, matching
+the code's own intended logic, then reverted the instrumentation (`git diff --stat` confirmed
+empty before this document was written).
+
+**Decided: an RFC recommendation, not a fix.** The two corruption shapes need genuinely different
+remedies — resuming an interrupted-but-safe migration is mechanically small; silently discarding a
+user's audit history to recover from real corruption is a product decision about user notification
+that this triage should not make by default. Full reasoning and a concrete recommended shape for
+whoever authors the RFC (split the two cases; auto-`resume()` the safe one; decide the corrupted
+one explicitly rather than by which error variant happens to fire; log *something* findable in
+both cases, since today there is not even that) are in `corrupted-audit-store-defect.md`. No
+number reserved, per D2/§6's own precedent (RFC-045).
+
+### Gate
+
+`git diff --check`, `rfc_docs_invariants` (4 tests): clean. No code change survives in the tree —
+the instrumentation used to verify the reproduction was reverted before this evidence was written.
