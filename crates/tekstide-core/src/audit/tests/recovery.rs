@@ -10,7 +10,8 @@ use crate::audit::{
     AuditRecovery, AuditRecoveryErrorReason, AuditStore, AuditStoreErrorReason,
 };
 
-use super::support::TestAuditDirs;
+use super::support::{TestAuditDirs, project_added};
+use crate::project::ProjectId;
 
 #[test]
 fn recovery_quarantines_complete_artifact_set_and_records_fresh_event() {
@@ -279,6 +280,127 @@ fn recovery_refuses_healthy_foreign_future_and_missing_stores() {
         assert_eq!(AuditDiagnostics.run(&dirs.storage_path).status, expected);
         assert_not_recoverable(&dirs);
         assert_eq!(fs::read(dirs.storage_path.database_file()).unwrap(), before);
+    }
+}
+
+// --- RFC-047 PR-047-B: recover_and_reopen / resume_and_reopen -----------
+
+/// D2's own condition for auto-recovering without asking: a real,
+/// working store back **and** the exact path the old, unreadable one
+/// went to. Reconstructed from public data only
+/// (`recovery_dir().join(recovery_id)`) -- confirmed against the same
+/// bundle path `recovery_quarantines_complete_artifact_set_and_records_
+/// fresh_event` above already proves is where `recover()` itself puts
+/// things, not asserted independently.
+#[test]
+fn recover_and_reopen_returns_a_real_open_store_and_the_quarantine_path() {
+    let dirs = TestAuditDirs::new("recover-and-reopen");
+    create_corrupt_artifacts(&dirs, true);
+
+    let outcome =
+        AuditRecovery.recover_and_reopen(dirs.storage_path.clone(), AuditStoreErrorReason::Corrupt);
+
+    let crate::audit::recovery::AuditRecoveryOutcome::Recovered {
+        mut store,
+        quarantine_dir,
+        recovery_event_recorded,
+    } = outcome
+    else {
+        panic!("recovering a genuinely corrupt store must produce Recovered");
+    };
+    assert!(recovery_event_recorded);
+    assert!(
+        quarantine_dir.join("audit.sqlite3").is_file(),
+        "the quarantined database must really be at the reported path: {quarantine_dir:?}"
+    );
+
+    // The reopened store is not merely `Ok` -- it accepts a real write,
+    // proving it is a genuinely usable connection, not a handle to
+    // something still broken.
+    let outcome = store
+        .append(&project_added(ProjectId::new_uuid()))
+        .expect("the reopened store must accept a real write");
+    assert!(matches!(
+        outcome,
+        crate::audit::AuditAppendOutcome::Appended { .. }
+    ));
+}
+
+/// The `resume()` half. Gets into a genuine `RecoveryIncomplete` state
+/// the same way `manifest_write_failure_keeps_restart_guard_and_can_resume`
+/// above already does (an injected mid-recovery failure), then resumes
+/// through the new seam instead of calling `resume()` directly.
+#[test]
+fn resume_and_reopen_returns_a_real_open_store() {
+    let dirs = TestAuditDirs::new("resume-and-reopen");
+    create_corrupt_artifacts(&dirs, true);
+    let database_file = dirs.storage_path.database_file().to_path_buf();
+
+    recover_with_move(dirs.storage_path.clone(), |source, destination| {
+        fs::rename(source, destination)?;
+        if source == database_file {
+            fs::create_dir(destination.parent().unwrap().join(".manifest.json.tmp"))?;
+        }
+        Ok(())
+    })
+    .unwrap_err();
+    assert_open_blocked(&dirs);
+    let bundle_children: Vec<_> = fs::read_dir(dirs.storage_path.recovery_dir())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .collect();
+    let bundle = bundle_children
+        .iter()
+        .find(|path| path.is_dir())
+        .expect("a bundle directory must exist from the interrupted recovery above");
+    fs::remove_dir(bundle.join(".manifest.json.tmp")).unwrap();
+
+    let outcome = AuditRecovery.resume_and_reopen(dirs.storage_path.clone());
+
+    let crate::audit::recovery::AuditRecoveryOutcome::Resumed {
+        mut store,
+        recovery_event_recorded,
+    } = outcome
+    else {
+        panic!("resuming a recovery that can now complete must produce Resumed");
+    };
+    assert!(recovery_event_recorded);
+    let outcome = store
+        .append(&project_added(ProjectId::new_uuid()))
+        .expect("the reopened store must accept a real write");
+    assert!(matches!(
+        outcome,
+        crate::audit::AuditAppendOutcome::Appended { .. }
+    ));
+}
+
+/// D2's own guard, exercised through the new seam rather than assumed:
+/// `recover()` itself refuses a store that is not actually diagnosed
+/// corrupt, and `recover_and_reopen` must report the *original* open
+/// failure back, not manufacture a new one, when that guard fires.
+#[test]
+fn recover_and_reopen_reports_the_original_reason_when_recovery_refuses() {
+    let dirs = TestAuditDirs::new("recover-and-reopen-refused");
+    {
+        let store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+        drop(store);
+    }
+
+    let outcome = AuditRecovery.recover_and_reopen(
+        dirs.storage_path.clone(),
+        AuditStoreErrorReason::DecodeFailed,
+    );
+
+    match outcome {
+        crate::audit::recovery::AuditRecoveryOutcome::Failed(reason) => {
+            assert_eq!(
+                reason,
+                AuditStoreErrorReason::DecodeFailed,
+                "a refused recovery must report the original problem, not invent a new reason"
+            );
+        }
+        _ => panic!("recovering an already-healthy store must not report success"),
     }
 }
 

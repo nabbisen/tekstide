@@ -12,7 +12,7 @@ use super::{
     attempt_agent_run_launch_with_profile_state_root_and_capture, content_within_bound,
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
     open_audit_store_recording_failure, open_real_audit_store, path_field_error_text,
-    poll_approval_channels, project_close_dialog_body,
+    poll_approval_channels, project_board_audit_lines, project_close_dialog_body,
     project_close_dialog_names_running_processes, project_close_dialog_path,
     project_close_dialog_reasons_line, sidebar_label, status_bar_summary,
     terminal_paste_refusal_text, terminated_outcome_and_session_confirmation, test_audit_state_dir,
@@ -1855,12 +1855,57 @@ fn open_audit_store_recording_failure_reports_a_different_reason_for_a_corrupted
     let mut health = tekstide_core::audit::AuditHealth::default();
     let store = open_audit_store_recording_failure(&app_shell, &mut health);
 
-    assert!(store.is_none());
-    assert_ne!(
-        health.last_failure(),
-        Some(tekstide_core::audit::AuditStoreErrorReason::RecoveryIncomplete),
-        "a genuinely corrupted file must not be reported the same way as an interrupted \
-         migration -- the two need different remedies (D1 vs D2)"
+    // RFC-047 PR-047-B, response 357's own required strengthening:
+    // asserts the *identity* of the outcome, not merely that it
+    // differs from another value that could collapse to the same wrong
+    // one alongside it. A genuinely corrupted file must recover
+    // (`Recovered`, D2's branch) -- distinct from an interrupted
+    // migration, proven separately below, which resumes (`Resumed`,
+    // D1's branch) instead. Full detail on each path (the quarantine
+    // path, the durable record read back) lives in its own dedicated
+    // test; this one's own job is the contrast between the two.
+    assert!(
+        store.is_some(),
+        "a corrupt store must recover into a usable one"
+    );
+    assert!(
+        matches!(
+            health.last_recovery(),
+            Some(tekstide_core::audit::AuditRecoveryDisclosure::Recovered { .. })
+        ),
+        "a genuinely corrupted file must be disclosed as Recovered, not Resumed -- the two need \
+         different remedies (D1 vs D2), and reporting the wrong one here would say a database \
+         was quarantined when nothing was, or that nothing happened when it was"
+    );
+}
+
+/// The other half of the contrast above, proven independently rather
+/// than only by omission: the exact same seam, against an interrupted
+/// migration instead of a corrupted file, discloses `Resumed`.
+#[test]
+fn open_audit_store_recording_failure_discloses_resumed_not_recovered_for_an_interrupted_migration()
+{
+    let state_dir = temp_audit_state_dir("interrupted-migration-discloses-resumed");
+    let request = tekstide_core::audit::AuditPathRequest::new(&state_dir, Vec::new());
+    let storage_path = tekstide_core::audit::AuditPathResolver
+        .resolve(request)
+        .unwrap();
+    tekstide_core::audit::corrupt_and_interrupt_recovery_for_test(&storage_path);
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    let store = open_audit_store_recording_failure(&app_shell, &mut health);
+
+    assert!(store.is_some());
+    assert!(
+        matches!(
+            health.last_recovery(),
+            Some(tekstide_core::audit::AuditRecoveryDisclosure::Resumed)
+        ),
+        "an interrupted migration must be disclosed as Resumed, not Recovered -- nothing was \
+         quarantined, and claiming a quarantine path that does not exist would be its own false \
+         statement"
     );
 }
 
@@ -1921,6 +1966,227 @@ fn open_audit_store_recording_failure_leaves_health_healthy_on_success() {
         tekstide_core::audit::AuditHealthStatus::Healthy
     );
     assert_eq!(health.failure_count(), 0);
+}
+
+// --- RFC-047 PR-047-B: recover, and say what happened ------------------
+
+/// D1's own required test: a store with a recovery marker resumes, and
+/// the `AuditStoreRecovery` record is **read back out of the reopened
+/// store**, not inferred from `AuditHealth` or a bare return value.
+/// `corrupt_and_interrupt_recovery_for_test` (`test-support`) is the
+/// only way to reach a genuinely resumable state from outside
+/// `tekstide-core` -- a hand-rolled marker/bundle pair would not match
+/// `resume()`'s own internal format.
+#[test]
+fn open_audit_store_recording_failure_resumes_and_records_the_recovery() {
+    let state_dir = temp_audit_state_dir("resume-records-recovery");
+    let request = tekstide_core::audit::AuditPathRequest::new(&state_dir, Vec::new());
+    let storage_path = tekstide_core::audit::AuditPathResolver
+        .resolve(request)
+        .unwrap();
+    tekstide_core::audit::corrupt_and_interrupt_recovery_for_test(&storage_path);
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    let store = open_audit_store_recording_failure(&app_shell, &mut health);
+
+    let store = store.expect("a resumable recovery must produce a real, usable store");
+    assert_eq!(
+        health.status(),
+        tekstide_core::audit::AuditHealthStatus::Healthy,
+        "a fully successful recovery must not leave the session reporting degraded"
+    );
+    assert!(matches!(
+        health.last_recovery(),
+        Some(tekstide_core::audit::AuditRecoveryDisclosure::Resumed)
+    ));
+
+    let page = store
+        .query(&tekstide_core::audit::AuditQuery::latest(10))
+        .expect("querying the real, reopened store must succeed");
+    assert!(
+        page.records.iter().any(|record| record.record.family
+            == tekstide_core::audit::AuditEventFamily::AuditStoreRecovery),
+        "the AuditStoreRecovery record must really be in the store, not merely claimed: {:?}",
+        page.records
+            .iter()
+            .map(|r| r.record.family)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// D2's own required test: a corrupt store recovers, the old file
+/// **still exists at the quarantined path**, and that path is what
+/// `AuditHealth` reports -- the condition D2's own auto-recover-without-
+/// asking decision rests on.
+#[test]
+fn open_audit_store_recording_failure_recovers_a_corrupt_store_and_reports_the_quarantine_path() {
+    let state_dir = temp_audit_state_dir("recover-reports-quarantine-path");
+    {
+        let store = super::open_audit_store(&state_dir, Vec::new())
+            .expect("a fresh directory must produce a real store");
+        drop(store);
+    }
+    let db_path = state_dir.join("audit").join("audit.sqlite3");
+    std::fs::write(&db_path, [0xffu8; 4096]).unwrap();
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    let store = open_audit_store_recording_failure(&app_shell, &mut health);
+
+    let store = store.expect("a corrupt store must recover into a real, usable one");
+    assert_eq!(
+        health.status(),
+        tekstide_core::audit::AuditHealthStatus::Healthy
+    );
+    let Some(tekstide_core::audit::AuditRecoveryDisclosure::Recovered { quarantine_dir }) =
+        health.last_recovery()
+    else {
+        panic!("recovering a corrupt store must disclose Recovered with a quarantine path");
+    };
+    assert!(
+        quarantine_dir.join("audit.sqlite3").is_file(),
+        "the old, unreadable database must really exist at the reported path, not just be \
+         claimed: {quarantine_dir:?}"
+    );
+    // Not deleted -- D2's whole justification for auto-recovering
+    // without asking is that `recover()` renames, it does not destroy.
+    assert!(
+        !db_path.exists() || db_path != quarantine_dir.join("audit.sqlite3"),
+        "the original path must no longer hold the corrupt bytes"
+    );
+
+    let page = store
+        .query(&tekstide_core::audit::AuditQuery::latest(10))
+        .expect("querying the real, reopened store must succeed");
+    assert!(
+        page.records.iter().any(|record| record.record.family
+            == tekstide_core::audit::AuditEventFamily::AuditStoreRecovery)
+    );
+}
+
+/// A healthy store: no failure, no recovery, nothing to disclose --
+/// `AuditHealth` stays exactly as it started. The on-screen indicator's
+/// own "absent when healthy" test lives with the indicator itself; this
+/// is the same principle one layer down, at the data this session's
+/// health tracking produces.
+#[test]
+fn open_audit_store_recording_failure_produces_no_recovery_disclosure_for_a_healthy_store() {
+    let state_dir = temp_audit_state_dir("healthy-store-no-disclosure");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+
+    let store = open_audit_store_recording_failure(&app_shell, &mut health);
+
+    assert!(store.is_some());
+    assert_eq!(
+        health.status(),
+        tekstide_core::audit::AuditHealthStatus::Healthy
+    );
+    assert!(health.last_recovery().is_none());
+}
+
+/// D2's own required test, the failure direction: recovery that itself
+/// fails leaves `AuditHealth` **degraded**, not reporting success --
+/// checked against a real refusal (`recovery_dir` replaced with a
+/// symlink, which `AuditRecovery::recover`'s own `validate_for_recovery`
+/// guard rejects the same way `AuditStore::open` itself does), not
+/// simulated.
+#[test]
+fn open_audit_store_recording_failure_leaves_health_degraded_when_recovery_itself_fails() {
+    let state_dir = temp_audit_state_dir("recovery-itself-fails");
+    let audit_dir = state_dir.join("audit");
+    std::fs::create_dir_all(&audit_dir).unwrap();
+    std::fs::write(audit_dir.join("audit.sqlite3"), [0xffu8; 4096]).unwrap();
+    let elsewhere = temp_audit_state_dir("recovery-itself-fails-target");
+    std::os::unix::fs::symlink(&elsewhere, audit_dir.join("recovery")).unwrap();
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    let store = open_audit_store_recording_failure(&app_shell, &mut health);
+
+    assert!(
+        store.is_none(),
+        "a recovery this project's own path validation refuses must not report a usable store"
+    );
+    assert_eq!(
+        health.status(),
+        tekstide_core::audit::AuditHealthStatus::Degraded,
+        "recovery that itself fails must leave health degraded, not silently healthy"
+    );
+    assert!(
+        health.last_recovery().is_none(),
+        "a failed recovery must not claim the one-time disclosure a successful one earns"
+    );
+}
+
+/// D3's own required "absent when healthy" test, deliberately its own
+/// function rather than one assertion inside a larger test -- deleting
+/// this whole test must be the only way to lose the property, per the
+/// checklist's own "ablated separately" requirement.
+#[test]
+fn project_board_audit_lines_is_empty_when_healthy_and_never_recovered() {
+    let state = state_with(ApplicationShell::new());
+
+    assert!(
+        project_board_audit_lines(&state).is_empty(),
+        "a healthy session that never recovered must show nothing -- a permanent line is how a \
+         surface stops being read"
+    );
+}
+
+/// D3's own required "present when degraded" test.
+#[test]
+fn project_board_audit_lines_shows_the_degraded_line_when_degraded() {
+    let mut state = state_with(ApplicationShell::new());
+    state
+        .audit_health
+        .record_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
+
+    let lines = project_board_audit_lines(&state);
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line == &state.catalog.get("project-board-audit-degraded")),
+        "a degraded session must show the degraded line: {lines:?}"
+    );
+}
+
+/// D2's own disclosure, checked at the line this project's own text
+/// safety discipline requires: the quarantine path must actually appear
+/// (through `text_safety::quote_untrusted`, not silently dropped),
+/// since §3 of the risk document is explicit that the path is the
+/// condition D2 rests on, not a nicety.
+#[test]
+fn project_board_audit_lines_shows_the_quarantine_path_when_recovered() {
+    let mut state = state_with(ApplicationShell::new());
+    state
+        .audit_health
+        .record_recovery(tekstide_core::audit::AuditRecoveryDisclosure::Recovered {
+            quarantine_dir: std::path::PathBuf::from("/tmp/example-quarantine-dir"),
+        });
+
+    let lines = project_board_audit_lines(&state);
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("example-quarantine-dir")),
+        "the quarantine path must really appear in the rendered line, not just be held in \
+         AuditHealth: {lines:?}"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line == &state.catalog.get("project-board-audit-degraded")),
+        "a successfully recovered, currently-healthy session must not also show the degraded \
+         line: {lines:?}"
+    );
 }
 
 // --- RFC-032 PR-032-C, response 245: the audit store is authoritative -

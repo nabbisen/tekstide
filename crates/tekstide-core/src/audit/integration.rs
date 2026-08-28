@@ -36,11 +36,32 @@ pub enum AuditHealthStatus {
     Degraded,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+/// RFC-047 PR-047-B: what happened the one time this session a broken
+/// store got fixed -- distinct from [`AuditHealth`]'s own
+/// status/failure_count/last_failure, which track whether the store
+/// works *right now*. This is the one-time disclosure D2 requires
+/// ("tell the user the path of the quarantined file"): once a recovery
+/// completes, the *current* state can go back to healthy, but a user
+/// who had audit history moved aside still needs to be told where,
+/// which is a fact about what happened, not about what is true now.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AuditRecoveryDisclosure {
+    /// An interrupted-but-safe migration was retried to completion.
+    /// Nothing was quarantined -- there is no path to report.
+    Resumed,
+    /// The store was unreadable; the old database was moved aside and a
+    /// fresh one started. `quarantine_dir` is where the old one is --
+    /// §3 of the risk document: without this, auto-recovering without
+    /// asking first would not be defensible.
+    Recovered { quarantine_dir: std::path::PathBuf },
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AuditHealth {
     status: AuditHealthStatus,
     failure_count: u32,
     last_failure: Option<AuditStoreErrorReason>,
+    last_recovery: Option<AuditRecoveryDisclosure>,
 }
 
 impl AuditHealth {
@@ -56,6 +77,15 @@ impl AuditHealth {
         self.last_failure
     }
 
+    /// RFC-047 PR-047-B. `None` until a recovery has actually happened
+    /// this session; never cleared afterward by anything in this crate
+    /// -- a durably-visible fact for the rest of the session, not a
+    /// toast, matching §3's "the path is the condition, not the
+    /// courtesy" (a disclosure a user could miss is not much of one).
+    pub fn last_recovery(&self) -> Option<&AuditRecoveryDisclosure> {
+        self.last_recovery.as_ref()
+    }
+
     /// RFC-047 PR-047-A: `pub`, not `pub(crate)` -- until now the only
     /// callers were `AuditCoordinator`'s own write-failure paths, inside
     /// this module. The seam `open_audit_store` (`tekstide` crate) now
@@ -67,6 +97,25 @@ impl AuditHealth {
         self.status = AuditHealthStatus::Degraded;
         self.failure_count = self.failure_count.saturating_add(1);
         self.last_failure = Some(reason);
+    }
+
+    /// RFC-047 PR-047-B: called only after a recovery is confirmed
+    /// complete *and* its own `AuditStoreRecovery` durable record is
+    /// confirmed written -- the store now genuinely works, so leaving
+    /// `status` at `Degraded` would misreport the current state the
+    /// same direction §2 of the risk document warns against for a
+    /// permanently-healthy line, just inverted: **the indicator must
+    /// track what is true now, not what was true a moment ago in
+    /// either direction.** `last_recovery` is untouched by future
+    /// failures -- it is history, not a live gauge, and does not get
+    /// cleared by this call either (a second recovery this session
+    /// replaces it with the newer fact, which is correct: "here's what
+    /// most recently happened," not a log of every event).
+    pub fn record_recovery(&mut self, disclosure: AuditRecoveryDisclosure) {
+        self.status = AuditHealthStatus::Healthy;
+        self.failure_count = 0;
+        self.last_failure = None;
+        self.last_recovery = Some(disclosure);
     }
 }
 

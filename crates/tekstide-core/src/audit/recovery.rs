@@ -10,7 +10,7 @@ use super::record::{
     AuditActionKind, AuditActionSource, AuditActorKind, AuditEventFamily, AuditOutcome,
     AuditReasonCode, AuditReference, AuditSubjectKind, DurableAuditRecordV1,
 };
-use super::store::{AuditQuery, AuditStore};
+use super::store::{AuditQuery, AuditStore, AuditStoreErrorReason};
 use crate::domain::AuditEventId;
 
 const RECOVERY_STATE_VERSION: u32 = 1;
@@ -114,6 +114,116 @@ impl AuditRecovery {
             fs::rename(source, destination)
         })
     }
+
+    /// RFC-047 PR-047-B, D2: [`Self::recover`] plus the two things a
+    /// caller actually needs afterward -- a real, opened `AuditStore`
+    /// (recovery itself leaves the store closed; `finish_recovery`'s own
+    /// internal open, inside [`initialize_fresh_database`], is for the
+    /// atomic-install step only and does not outlive it) and the
+    /// directory the unreadable original was quarantined into, since
+    /// D2's whole justification for auto-recovering without asking is
+    /// that the old data is moved aside, not destroyed -- a caller that
+    /// cannot report *where* has nothing to justify the decision with.
+    ///
+    /// The quarantine directory is reconstructed from public data only
+    /// (`storage_path.recovery_dir()`, `receipt.recovery_id.as_str()`),
+    /// the same path [`quarantine_artifacts`] itself writes to -- no
+    /// schema change, nothing added to [`AuditRecoveryReceipt`] itself.
+    ///
+    /// `original_reason` is what `AuditStore::open` reported before this
+    /// was called -- used only if recovery itself fails, since
+    /// `AuditRecoveryError` has no `AuditStoreErrorReason` of its own and
+    /// the original problem is still the truest thing to report.
+    pub fn recover_and_reopen(
+        self,
+        storage_path: AuditStoragePath,
+        original_reason: AuditStoreErrorReason,
+    ) -> AuditRecoveryOutcome {
+        let reopen_path = storage_path.clone();
+        match self.recover(storage_path) {
+            Ok(receipt) => reopen_after_recovery(
+                reopen_path,
+                receipt,
+                |quarantine_dir, store, recovery_event_recorded| AuditRecoveryOutcome::Recovered {
+                    store,
+                    quarantine_dir,
+                    recovery_event_recorded,
+                },
+            ),
+            Err(_recovery_error) => AuditRecoveryOutcome::Failed(original_reason),
+        }
+    }
+
+    /// The `resume()` half of [`Self::recover_and_reopen`]. No
+    /// `original_reason` parameter -- the one failure this is ever
+    /// called for is `AuditStoreErrorReason::RecoveryIncomplete`, so a
+    /// failed resume reports that back unambiguously rather than asking
+    /// the caller to repeat it.
+    pub fn resume_and_reopen(self, storage_path: AuditStoragePath) -> AuditRecoveryOutcome {
+        let reopen_path = storage_path.clone();
+        match self.resume(storage_path) {
+            Ok(receipt) => reopen_after_recovery(
+                reopen_path,
+                receipt,
+                |_quarantine_dir, store, recovery_event_recorded| AuditRecoveryOutcome::Resumed {
+                    store,
+                    recovery_event_recorded,
+                },
+            ),
+            Err(_recovery_error) => {
+                AuditRecoveryOutcome::Failed(AuditStoreErrorReason::RecoveryIncomplete)
+            }
+        }
+    }
+}
+
+/// RFC-047 PR-047-B: what a caller needs to know after asking
+/// [`AuditRecovery`] to fix a store that would not open on its own.
+/// Not `Debug` -- `AuditStore` itself is not (it holds a live SQLite
+/// connection), so a caller that wants to inspect this in a test
+/// matches its fields directly rather than formatting the whole value.
+pub enum AuditRecoveryOutcome {
+    Resumed {
+        store: AuditStore,
+        /// Whether `AuditStoreRecovery`'s own durable record made it into
+        /// the store. `false` means the store works but the *disclosure*
+        /// of what happened did not survive -- still a real, reportable
+        /// health problem (§4 of the risk document: "do not claim more
+        /// than the record supports").
+        recovery_event_recorded: bool,
+    },
+    Recovered {
+        store: AuditStore,
+        /// Where the unreadable original went -- D2's own condition for
+        /// auto-recovering without asking first.
+        quarantine_dir: PathBuf,
+        recovery_event_recorded: bool,
+    },
+    /// Recovery was attempted and did not produce a usable store --
+    /// either `recover()`/`resume()` itself failed, or it succeeded but
+    /// the store still would not reopen afterward.
+    Failed(AuditStoreErrorReason),
+}
+
+/// Shared by both [`AuditRecovery::recover_and_reopen`] and
+/// [`AuditRecovery::resume_and_reopen`]: reopen the now-recovered store
+/// with the ordinary, public [`AuditStore::open`] -- safe here
+/// specifically because [`finish_recovery`] already removed the active
+/// recovery marker before returning, so `recovery_is_active()` reads
+/// `false` by the time this runs, unlike the internal atomic-install
+/// step's own use of `open_after_complete_recovery`.
+fn reopen_after_recovery(
+    storage_path: AuditStoragePath,
+    receipt: AuditRecoveryReceipt,
+    into_outcome: impl FnOnce(PathBuf, AuditStore, bool) -> AuditRecoveryOutcome,
+) -> AuditRecoveryOutcome {
+    let quarantine_dir = storage_path
+        .recovery_dir()
+        .join(receipt.recovery_id.as_str());
+    match AuditStore::open(storage_path) {
+        Ok(store) => into_outcome(quarantine_dir, store, receipt.recovery_event_recorded),
+        Err(reopen_error) => AuditRecoveryOutcome::Failed(reopen_error.reason),
+    }
 }
 
 pub(crate) fn recover_with_move(
@@ -121,6 +231,47 @@ pub(crate) fn recover_with_move(
     move_artifact: impl FnMut(&Path, &Path) -> io::Result<()>,
 ) -> Result<AuditRecoveryReceipt, AuditRecoveryError> {
     recover_with_move_and_initializer(storage_path, move_artifact, initialize_fresh_database)
+}
+
+/// RFC-047 PR-047-B: the one way another crate's own tests can reach a
+/// genuinely resumable (not merely a bare, unstartable marker file) --
+/// mirrors this module's own
+/// `manifest_write_failure_keeps_restart_guard_and_can_resume` test
+/// exactly (inject a failure after the database artifact has already
+/// moved, leaving the active-recovery marker in place), since that
+/// private technique is the only way to reach this state at all; a
+/// hand-rolled marker/bundle pair would not match the internal format
+/// `resume()` itself expects and would fail for the wrong reason.
+///
+/// `#[cfg(any(test, feature = "test-support"))]`, the same gate
+/// `runtime::terminal::launch`'s own leak guard and RFC-036's
+/// `ProjectSession::add_transcript` already use to cross this exact
+/// crate boundary -- `tekstide`'s own `Cargo.toml` already enables
+/// `test-support` for its `[dev-dependencies]`.
+#[cfg(any(test, feature = "test-support"))]
+pub fn corrupt_and_interrupt_recovery_for_test(storage_path: &AuditStoragePath) {
+    use std::fs;
+
+    fs::create_dir_all(storage_path.audit_dir()).expect("create audit dir for test corruption");
+    fs::write(
+        storage_path.database_file(),
+        b"not sqlite -- test-support corruption fixture",
+    )
+    .expect("write corrupt database for test");
+    let database_file = storage_path.database_file().to_path_buf();
+    let error = recover_with_move(storage_path.clone(), move |source, destination| {
+        fs::rename(source, destination)?;
+        if source == database_file {
+            fs::create_dir(destination.parent().unwrap().join(".manifest.json.tmp"))?;
+        }
+        Ok(())
+    })
+    .expect_err("the injected manifest-write failure must interrupt recovery");
+    let bundle = storage_path
+        .recovery_dir()
+        .join(error.recovery_id.expect("a bundle must exist").as_str());
+    fs::remove_dir(bundle.join(".manifest.json.tmp"))
+        .expect("clear the injected obstruction so resume() can complete");
 }
 
 pub(crate) fn recover_with_move_and_initializer(

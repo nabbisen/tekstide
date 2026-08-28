@@ -235,6 +235,28 @@ project-board-attention = { $attention ->
    *[calm] Calm
 }
 
+# RFC-047 PR-047-B, D3: appears only while `AuditHealth::status()` is
+# `Degraded` -- absent the rest of the time, per §2 of the risk document
+# ("do not tell the user something is fine" applies the same direction
+# in reverse: a permanent line is how a surface stops being read, so a
+# line that is not permanent is what a real signal looks like). Does not
+# name the technical `AuditStoreErrorReason` -- that detail is the
+# `[audit]`-prefixed stderr line PR-047-A already writes; this line is
+# for someone who is not reading a terminal.
+project-board-audit-degraded = Audit: not recording. Recent actions may be missing from the record.
+
+# D2's own required disclosure, the safe half: nothing was quarantined,
+# recording works again.
+project-board-audit-recovered-resumed = Audit: an interrupted recovery finished. Recording is working again.
+
+# D2's own required disclosure, the condition its auto-recover-without-
+# asking decision rests on (§3 of the risk document): not "your audit
+# store was recovered" alone -- the path. `$path` is filesystem-derived
+# and routed through `text_safety::quote_untrusted` before this key is
+# ever reached, the same discipline every other filesystem-derived
+# string on this surface already follows.
+project-board-audit-recovered-quarantined = Audit: the previous audit file could not be read. It was moved to { $path } and a new one was started.
+
 # RFC-017 PR-017-E: response 150 Required -- `session_bar.rs`'s entries
 # were hardcoded English (`slot_label`/`status_label`), the same shape
 # `CountDisplay::label()`/`AttentionState::label()` are banned from this

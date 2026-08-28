@@ -11,9 +11,12 @@ created: "2026-08-28"
 
 ## The claim this RFC exists to be able to make
 
-- [ ] **A user can find out that the audit store is broken.** Proven against a real corrupted
+- [x] **A user can find out that the audit store is broken.** Proven against a real corrupted
       store in a scratch state root — the same reproduction RFC-036 PR-036-C used, which produced
-      a screen indistinguishable from a healthy one.
+      a screen indistinguishable from a healthy one. Now: *"Audit: the previous audit file could
+      not be read. It was moved to `<path>` and a new one was started."* (`EVIDENCE-1`). D4's own
+      per-action confirmations are a further, separate claim (PR-047-C, not yet built) — this box
+      is about the claim in its own right, which stands on D1–D3 alone.
 
 ## PR-047-A — the seam
 
@@ -40,20 +43,33 @@ created: "2026-08-28"
 
 ## D1 / D2 — recovery
 
-- [ ] `RecoveryIncomplete` resumes once per session.
-- [ ] Any other open failure recovers.
-- [ ] **In both cases the `AuditStoreRecovery` record is read back out of the store**, not inferred
-      from a return value.
-- [ ] **The quarantined file still exists**, and its **path is what the product reports**. This is
+- [x] `RecoveryIncomplete` resumes once per session. `resume_and_reopen`; "once per session" falls
+      out for free from a successful recovery leaving a genuinely working store on disk.
+- [x] Any other open failure recovers. `recover_and_reopen`; `recover()`'s own diagnostic guard
+      safely refuses anything not actually diagnosed corrupt.
+- [x] **In both cases the `AuditStoreRecovery` record is read back out of the store**, not inferred
+      from a return value. `open_audit_store_recording_failure_resumes_and_records_the_recovery`
+      queries the reopened store directly.
+- [x] **The quarantined file still exists**, and its **path is what the product reports**. This is
       the condition D2 rests on — without it the decision was wrong.
-- [ ] Recovery that itself fails leaves `AuditHealth` degraded, not reporting success.
-- [ ] Nothing in this slice calls `fs::remove_*` on a user's audit data.
+      `open_audit_store_recording_failure_recovers_a_corrupt_store_and_reports_the_quarantine_path`,
+      ablated (a fake reported path made the file-existence check fail correctly).
+- [x] Recovery that itself fails leaves `AuditHealth` degraded, not reporting success.
+      `..._leaves_health_degraded_when_recovery_itself_fails`, against a real refusal (a symlinked
+      `recovery` directory), not simulated.
+- [x] Nothing in this slice calls `fs::remove_*` on a user's audit data. `recover()`/`resume()`
+      themselves are `fs::rename`, unmodified by this slice; the new code in `tekstide` only reads
+      `AuditRecoveryOutcome` and never touches the filesystem directly.
 
 ## D3 — the indicator
 
-- [ ] Present when degraded.
-- [ ] **Absent when healthy**, with its own test, ablated separately — deleting that assertion must
-      fail on its own.
+- [x] Present when degraded. `project_board_audit_lines_shows_the_degraded_line_when_degraded`;
+      confirmed live (`EVIDENCE-2`).
+- [x] **Absent when healthy**, with its own test, ablated separately — deleting that assertion must
+      fail on its own. `project_board_audit_lines_is_empty_when_healthy_and_never_recovered` and
+      `..._shows_the_quarantine_path_when_recovered` (confirms the degraded line is specifically
+      *absent* once a recovery succeeds) — both ablated together (forced the degraded line
+      unconditionally) and both failed independently, not only in combination.
 
 ## D4 — say it before the click
 
@@ -65,16 +81,20 @@ created: "2026-08-28"
 
 ## Live GUI evidence
 
-- [ ] Against a **`mktemp -d` fixture with a fresh `XDG_STATE_HOME`**, using RFC-036 PR-036-C's own
+- [x] Against a **`mktemp -d` fixture with a fresh `XDG_STATE_HOME`**, using RFC-036 PR-036-C's own
       corruption method.
-- [ ] Shows the degraded indicator and a launch confirmation naming the unrecorded state.
-- [ ] Whether a real mouse click was sent is stated either way.
+- [ ] Shows the degraded indicator (`EVIDENCE-2`, done) **and a launch confirmation naming the
+      unrecorded state** (PR-047-C, not built yet — the full combined evidence this box asks for
+      is not claimed complete until both exist).
+- [x] Whether a real mouse click was sent is stated either way. Zero mouse clicks — both launches
+      were `env`/CLI-driven, no interaction with the running window at all.
 
 ## Gates
 
-- [ ] `fmt`, `clippy -D warnings`, `git diff --check`, `rfc_docs_invariants`.
-- [ ] Full workspace suite, **three consecutive runs**, each logged to a file; any flake given a
-      **row** in the register, not a mention.
+- [x] `fmt`, `clippy -D warnings`, `git diff --check`, `rfc_docs_invariants`. All clean.
+- [x] Full workspace suite, **three consecutive runs**, each logged to a file; any flake given a
+      **row** in the register, not a mention. **468 + 4 + 741, fully green** every time — no flake
+      this pass.
 
 ## The outcome this slice must not reach
 

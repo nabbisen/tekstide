@@ -5141,19 +5141,20 @@ fn launch_measurement_terminal_pane(
 /// `AuditHealth` needs one (its own `last_failure` field is typed to
 /// that enum specifically) -- the closest existing meaning, not a new
 /// one invented for this.
+///
+/// `Store` carries its own `AuditStoragePath`, added in RFC-047
+/// PR-047-B -- `AuditStoreOpenFailure` was PR-047-A's own seam and
+/// carried only the reason, which was enough to *report* a failure but
+/// not enough to *act* on one: D1/D2 need the exact same path
+/// `AuditStore::open` just failed against to retry with `resume()`/
+/// `recover()`.
 #[derive(Debug)]
 pub(crate) enum AuditStoreOpenFailure {
     Environment,
-    Store(tekstide_core::audit::AuditStoreErrorReason),
-}
-
-impl AuditStoreOpenFailure {
-    fn as_audit_store_error_reason(&self) -> tekstide_core::audit::AuditStoreErrorReason {
-        match self {
-            Self::Environment => tekstide_core::audit::AuditStoreErrorReason::Path,
-            Self::Store(reason) => *reason,
-        }
-    }
+    Store {
+        storage_path: tekstide_core::audit::AuditStoragePath,
+        reason: tekstide_core::audit::AuditStoreErrorReason,
+    },
 }
 
 /// RFC-017 PR-017-F, return type widened by RFC-047 PR-047-A: resolves
@@ -5190,35 +5191,124 @@ pub(crate) fn open_real_audit_store(
     open_audit_store(&state_dir, project_roots)
 }
 
-/// RFC-047 PR-047-A: the seam every production call site now goes
-/// through. Records the failure onto the `AuditHealth` this session has
-/// been accumulating (not a fresh instance dropped immediately after,
-/// which is what all fourteen call sites did before this slice), and
-/// writes the one diagnostic line D3 requires: "something a technical
-/// user can find" -- unconditional, not gated behind
-/// `cfg!(debug_assertions)` the way `i18n`'s own `log_missing_key` gates
-/// its own, since a release build is exactly where a real user hits
-/// this.
+/// RFC-047 PR-047-A/B: the seam every production call site goes
+/// through -- unchanged signature since PR-047-A, per that slice's own
+/// design, so this upgrade needed no call-site changes at all. Records
+/// onto the `AuditHealth` this session has been accumulating (not a
+/// fresh instance dropped immediately after, which is what all fourteen
+/// call sites did before PR-047-A), and writes one diagnostic line,
+/// unconditional, not gated behind `cfg!(debug_assertions)` the way
+/// `i18n`'s own `log_missing_key` gates its own, since a release build
+/// is exactly where a real user hits this.
+///
+/// **PR-047-B: a failure is no longer just recorded, it is acted on.**
+/// `AuditStoreErrorReason::RecoveryIncomplete` retries with `resume()`
+/// (D1); every other reason tries `recover()` (D2) -- `recover()`'s own
+/// diagnostic guard refuses anything not actually diagnosed corrupt, so
+/// attempting it for a merely transient failure (a lock contention, a
+/// momentary I/O error) costs an extra, safely-refused call rather than
+/// doing anything wrong. A fully successful recovery (store reopened
+/// *and* its own `AuditStoreRecovery` durable record confirmed written)
+/// resets `health` to `Healthy` and records the one-time disclosure
+/// (`AuditHealth::last_recovery`) D2 requires; a recovery that leaves
+/// the record unwritten, or fails outright, leaves `health` `Degraded`
+/// rather than reporting success (per the required test of that exact
+/// name).
+///
+/// **"Once per session" (D1's own phrasing) falls out for free**: a
+/// successful recovery leaves a genuinely working store on disk, so the
+/// very next call's own first `AuditStore::open` attempt just succeeds
+/// -- there is no separate "already tried this session" flag to
+/// maintain or get stale.
 ///
 /// Returns `Option`, matching every call site's own existing
 /// control-flow shape (`let Some(mut store) = ... else { return }` and
-/// `if let Some(store) = ...` both still compile unchanged), so this
-/// slice touches what each site records, not how each site is
-/// structured.
+/// `if let Some(store) = ...` both still compile unchanged) -- true
+/// again this slice, now covering the recovered case too: a caller
+/// that only wants "do I have a store" needs no changes to keep working
+/// with a resumed or recovered one.
 pub(crate) fn open_audit_store_recording_failure(
     app_shell: &ApplicationShell,
     health: &mut tekstide_core::audit::AuditHealth,
 ) -> Option<tekstide_core::audit::AuditStore> {
     match open_real_audit_store(app_shell) {
         Ok(store) => Some(store),
-        Err(failure) => {
-            let reason = failure.as_audit_store_error_reason();
+        Err(AuditStoreOpenFailure::Environment) => {
+            let reason = tekstide_core::audit::AuditStoreErrorReason::Path;
             health.record_failure(reason);
             eprintln!(
                 "[audit] the audit store did not open ({reason:?}) -- this session's \
                  actions will not be recorded until it recovers"
             );
             None
+        }
+        Err(AuditStoreOpenFailure::Store {
+            storage_path,
+            reason,
+        }) => {
+            let recovery = tekstide_core::audit::AuditRecovery;
+            let outcome =
+                if reason == tekstide_core::audit::AuditStoreErrorReason::RecoveryIncomplete {
+                    recovery.resume_and_reopen(storage_path)
+                } else {
+                    recovery.recover_and_reopen(storage_path, reason)
+                };
+            match outcome {
+                tekstide_core::audit::AuditRecoveryOutcome::Resumed {
+                    store,
+                    recovery_event_recorded,
+                } => {
+                    if recovery_event_recorded {
+                        health.record_recovery(
+                            tekstide_core::audit::AuditRecoveryDisclosure::Resumed,
+                        );
+                        eprintln!(
+                            "[audit] an interrupted migration was resumed; the audit store is \
+                             usable again"
+                        );
+                    } else {
+                        health.record_failure(reason);
+                        eprintln!(
+                            "[audit] the interrupted migration was resumed, but recording that \
+                             it happened failed -- still degraded"
+                        );
+                    }
+                    Some(store)
+                }
+                tekstide_core::audit::AuditRecoveryOutcome::Recovered {
+                    store,
+                    quarantine_dir,
+                    recovery_event_recorded,
+                } => {
+                    if recovery_event_recorded {
+                        health.record_recovery(
+                            tekstide_core::audit::AuditRecoveryDisclosure::Recovered {
+                                quarantine_dir: quarantine_dir.clone(),
+                            },
+                        );
+                        eprintln!(
+                            "[audit] the audit store was unreadable; the old one was moved to \
+                             {quarantine_dir:?} and a fresh one started"
+                        );
+                    } else {
+                        health.record_failure(reason);
+                        eprintln!(
+                            "[audit] the audit store was unreadable and a fresh one was started \
+                             at {quarantine_dir:?}, but recording that it happened failed -- \
+                             still degraded"
+                        );
+                    }
+                    Some(store)
+                }
+                tekstide_core::audit::AuditRecoveryOutcome::Failed(failed_reason) => {
+                    health.record_failure(failed_reason);
+                    eprintln!(
+                        "[audit] the audit store did not open ({failed_reason:?}) and could not \
+                         be recovered -- this session's actions will not be recorded"
+                    );
+                    None
+                }
+            }
         }
     }
 }
@@ -5459,8 +5549,12 @@ fn open_audit_store(
     let storage_path = tekstide_core::audit::AuditPathResolver
         .resolve(request)
         .map_err(|_| AuditStoreOpenFailure::Environment)?;
-    tekstide_core::audit::AuditStore::open(storage_path)
-        .map_err(|error| AuditStoreOpenFailure::Store(error.reason))
+    tekstide_core::audit::AuditStore::open(storage_path.clone()).map_err(|error| {
+        AuditStoreOpenFailure::Store {
+            storage_path,
+            reason: error.reason,
+        }
+    })
 }
 
 /// RFC-017 Amendment 1, PR-A1-C: one [`Subscription`] per pane currently
@@ -6412,6 +6506,41 @@ fn status_bar(state: &State) -> Element<'_, Message> {
     .into()
 }
 
+/// RFC-047 PR-047-B, D3: the project board's own extra line(s), on top
+/// of the per-project runtime summary `surface::board::row_lines`
+/// already renders -- kept out of that function deliberately (its own
+/// module doc: it renders only what `ProjectBoardViewModel` hands it,
+/// a `tekstide-core` type change away from carrying a session-wide
+/// concept like audit health at all) and composed here instead, the
+/// same "shell.rs supplies data, the surface renders" split this crate
+/// already uses for `terminal_launch_notice` and its own text helpers.
+///
+/// **Empty when healthy and nothing has ever been recovered this
+/// session** -- §2 of the risk document's own rule, checked by
+/// `project_board_audit_lines_is_empty_when_healthy_and_never_recovered`
+/// with its own ablation, not merely intended.
+fn project_board_audit_lines(state: &State) -> Vec<String> {
+    let mut lines = Vec::new();
+    if state.audit_health.status() == tekstide_core::audit::AuditHealthStatus::Degraded {
+        lines.push(state.catalog.get("project-board-audit-degraded"));
+    }
+    match state.audit_health.last_recovery() {
+        Some(tekstide_core::audit::AuditRecoveryDisclosure::Resumed) => {
+            lines.push(state.catalog.get("project-board-audit-recovered-resumed"));
+        }
+        Some(tekstide_core::audit::AuditRecoveryDisclosure::Recovered { quarantine_dir }) => {
+            let path =
+                tekstide_core::text_safety::quote_untrusted(&quarantine_dir.display().to_string());
+            lines.push(state.catalog.get_with_args(
+                "project-board-audit-recovered-quarantined",
+                &CatalogArgs::new().untrusted("path", &path),
+            ));
+        }
+        None => {}
+    }
+    lines
+}
+
 fn content_area(state: &State) -> Element<'_, Message> {
     let content: Element<'_, Message> = if state.is_measuring_typing() {
         typing_measurement_view(state)
@@ -6427,7 +6556,7 @@ fn content_area(state: &State) -> Element<'_, Message> {
                 let path_field_notice_text: Option<String> = state
                     .path_field_notice
                     .map(|error| path_field_error_text(&state.catalog, &state.path_field, error));
-                crate::surface::board::view(
+                let board = crate::surface::board::view(
                     &state.app_shell.project_board(),
                     &state.catalog,
                     &state.theme,
@@ -6437,7 +6566,17 @@ fn content_area(state: &State) -> Element<'_, Message> {
                     Message::OpenFolderBrowserButtonPressed,
                     state.project_board_row_highlight,
                     Message::ReopenRecentProjectRowPressed,
-                )
+                );
+                let audit_lines = project_board_audit_lines(state);
+                if audit_lines.is_empty() {
+                    board
+                } else {
+                    let mut items = column![board].spacing(4);
+                    for line in audit_lines {
+                        items = items.push(text(line).size(state.theme.font_size_status()));
+                    }
+                    items.into()
+                }
             }
             AppRoute::ActiveProjectWorkspace => active_project_workspace_view(state),
         }
