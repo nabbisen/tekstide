@@ -48,6 +48,23 @@ still exist on disk under a name nobody mentioned.
 
 Surface the path. Not "your audit store was recovered" — *the path*.
 
+### §3.1 Degraded and disclosed are independent (added 2026-08-28, response 358)
+
+§3 and §4 collide in one state, and the original text did not say which wins: a recovery that
+**succeeds** — the rename happened, a usable store is returned — whose own `AuditStoreRecovery`
+record could not be written. §4 says that is degraded. §3 says the path must be surfaced. Both are
+right. PR-047-B resolved it by silently keeping only §4, so the board named no path at all: a
+working store, a moved history, and no way to find it — the exact state §3 exists to forbid.
+
+**They govern different fields.** §4 governs `status`. §3 governs `last_recovery`. Recording a
+failure must never clear or suppress the disclosure: **failing to attest a rename does not
+un-rename it.** A recovery whose own record did not survive is degraded *and* still names where the
+old file went.
+
+One consequence for the wording: a line shown alongside a returned, working store must not claim
+"not recording". Overstating the damage is the same class of false statement as understating it —
+the indicator tracks what is true now, in either direction.
+
 ## §4 A record about recovery is still a record, and it is written to a store that just failed
 
 D1 and D2 both write an `AuditStoreRecovery` record into a store that was, moments earlier,
