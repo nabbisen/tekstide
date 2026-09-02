@@ -7,8 +7,9 @@ use super::{
     AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ExternalChangeButton,
     FolderBrowserModal, MAX_PATH_FIELD_CHARS, Message, ModalButton, ModalContent,
     PasteConfirmButton, PathFieldError, ProjectCloseButton, State, TerminalPasteRefusal,
-    TranscriptPurgeButton, TrustGrantButton, agent_run_launch_refusal_text, apply_recovery_outcome,
-    attempt_agent_run_launch_with_profile, attempt_agent_run_launch_with_profile_and_state_root,
+    TranscriptPurgeButton, TrustGrantButton, agent_run_launch_audit_notice,
+    agent_run_launch_refusal_text, apply_recovery_outcome, attempt_agent_run_launch_with_profile,
+    attempt_agent_run_launch_with_profile_and_state_root,
     attempt_agent_run_launch_with_profile_state_root_and_capture, content_within_bound,
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
     open_audit_store_recording_failure, open_real_audit_store, path_field_error_text,
@@ -4126,7 +4127,7 @@ fn trust_grant_dialog_body_does_not_double_escape_literal_marker_text() {
         "/home/user/<U+202E>-literally-not-an-override",
     );
 
-    let body = trust_grant_dialog_body(&catalog, &modal);
+    let body = trust_grant_dialog_body(&catalog, &modal, false);
 
     assert!(
         body.contains("<U+202E>-literally-not-an-override"),
@@ -4173,7 +4174,7 @@ fn trust_grant_dialog_body_contains_the_canonical_sentence_verbatim() {
     let catalog = state_with(ApplicationShell::new()).catalog;
     let modal = trust_grant_modal_fixture("/home/user/project", "/home/user/project");
 
-    let body = trust_grant_dialog_body(&catalog, &modal);
+    let body = trust_grant_dialog_body(&catalog, &modal, false);
 
     assert!(
         body.contains(
@@ -4192,7 +4193,7 @@ fn trust_grant_dialog_body_states_the_present_and_future_consequence() {
     let catalog = state_with(ApplicationShell::new()).catalog;
     let modal = trust_grant_modal_fixture("/home/user/project", "/home/user/project");
 
-    let body = trust_grant_dialog_body(&catalog, &modal);
+    let body = trust_grant_dialog_body(&catalog, &modal, false);
 
     assert!(
         body.to_lowercase().contains("future")
@@ -4212,7 +4213,7 @@ fn trust_grant_dialog_body_does_not_enumerate_the_nine_restricted_features() {
     let catalog = state_with(ApplicationShell::new()).catalog;
     let modal = trust_grant_modal_fixture("/home/user/project", "/home/user/project");
 
-    let body = trust_grant_dialog_body(&catalog, &modal).to_lowercase();
+    let body = trust_grant_dialog_body(&catalog, &modal, false).to_lowercase();
 
     for feature in tekstide_core::security::RestrictedModeFeature::ALL {
         assert!(
@@ -4232,7 +4233,7 @@ fn trust_grant_dialog_body_makes_none_of_the_three_forbidden_claims() {
     let catalog = state_with(ApplicationShell::new()).catalog;
     let modal = trust_grant_modal_fixture("/home/user/project", "/home/user/project");
 
-    let body = trust_grant_dialog_body(&catalog, &modal).to_lowercase();
+    let body = trust_grant_dialog_body(&catalog, &modal, false).to_lowercase();
 
     assert!(
         !body.contains("is safe") && !body.contains("safely"),
@@ -4247,6 +4248,134 @@ fn trust_grant_dialog_body_makes_none_of_the_three_forbidden_claims() {
     assert!(
         body.contains("does not undo"),
         "must state plainly that revoking does not undo what already ran, got {body:?}"
+    );
+}
+
+// --- RFC-047 PR-047-C: D4, say it before the click --------------------
+
+/// D4's own required "present when degraded" test, for the trust-grant
+/// half. Deliberately its own function per the task breakdown's
+/// "ablated separately" requirement -- deleting this whole test must be
+/// the only way to lose the property.
+#[test]
+fn trust_grant_dialog_body_shows_the_degraded_notice_when_degraded() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let modal = trust_grant_modal_fixture("/home/user/project", "/home/user/project");
+
+    let body = trust_grant_dialog_body(&catalog, &modal, true);
+
+    assert!(
+        body.contains(&catalog.get("trust-grant-dialog-degraded-notice")),
+        "a degraded audit store must be disclosed in the still-live confirmation body, not only \
+         on the project board: {body:?}"
+    );
+}
+
+/// D4's own required "absent when healthy" test, its own function for
+/// the same ablation reason as above.
+#[test]
+fn trust_grant_dialog_body_omits_the_degraded_notice_when_healthy() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let modal = trust_grant_modal_fixture("/home/user/project", "/home/user/project");
+
+    let body = trust_grant_dialog_body(&catalog, &modal, false);
+
+    assert!(
+        !body.contains(&catalog.get("trust-grant-dialog-degraded-notice")),
+        "a healthy session must not carry a degraded-audit notice into a confirmation about \
+         something else entirely: {body:?}"
+    );
+}
+
+/// §5 of the risk document, checked against the actual catalog string
+/// rather than trusted by inspection: must not read as a safety warning
+/// (the store being degraded does not make the grant more dangerous)
+/// and must not suggest the user can fix it from this dialog.
+#[test]
+fn trust_grant_dialog_degraded_notice_does_not_imply_unsafe_or_fixable() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+
+    let notice = catalog
+        .get("trust-grant-dialog-degraded-notice")
+        .to_lowercase();
+
+    assert!(
+        !notice.contains("unsafe")
+            && !notice.contains("danger")
+            && !notice.contains("warning")
+            && !notice.contains("risk"),
+        "must not read as a safety warning -- a broken audit store does not make granting trust \
+         more dangerous, only unrecorded: {notice:?}"
+    );
+    assert!(
+        !notice.contains("fix")
+            && !notice.contains("repair")
+            && !notice.contains("resolve")
+            && !notice.contains("try again"),
+        "must not imply the user can act on this from here -- they cannot: {notice:?}"
+    );
+}
+
+/// D4's own required "present when degraded" test, for the agent-launch
+/// half -- its own function, matching the trust-grant pair above.
+#[test]
+fn agent_run_launch_audit_notice_present_when_degraded() {
+    let mut state = state_with(ApplicationShell::new());
+    state
+        .audit_health
+        .record_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
+
+    let notice = agent_run_launch_audit_notice(&state);
+
+    assert_eq!(
+        notice,
+        Some(
+            state
+                .catalog
+                .get("trust-settings-launch-agent-run-degraded-notice")
+        ),
+        "a degraded audit store must be named next to the still-live launch button, before the \
+         click"
+    );
+}
+
+/// D4's own required "absent when healthy" test, its own function.
+#[test]
+fn agent_run_launch_audit_notice_absent_when_healthy() {
+    let state = state_with(ApplicationShell::new());
+
+    assert_eq!(
+        agent_run_launch_audit_notice(&state),
+        None,
+        "a healthy session must show no notice next to a control that has nothing to disclose"
+    );
+}
+
+/// §5 of the risk document, for the agent-launch wording -- same
+/// requirement as the trust-grant notice above, checked independently
+/// since the two are separate catalog strings that could drift apart.
+#[test]
+fn agent_run_launch_audit_notice_does_not_imply_unsafe_or_fixable() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+
+    let notice = catalog
+        .get("trust-settings-launch-agent-run-degraded-notice")
+        .to_lowercase();
+
+    assert!(
+        !notice.contains("unsafe")
+            && !notice.contains("danger")
+            && !notice.contains("warning")
+            && !notice.contains("risk"),
+        "must not read as a safety warning -- a broken audit store does not make a run more \
+         dangerous, only unrecorded: {notice:?}"
+    );
+    assert!(
+        !notice.contains("fix")
+            && !notice.contains("repair")
+            && !notice.contains("resolve")
+            && !notice.contains("try again"),
+        "must not imply the user can act on this from here -- they cannot: {notice:?}"
     );
 }
 

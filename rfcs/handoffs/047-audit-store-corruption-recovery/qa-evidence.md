@@ -355,9 +355,87 @@ organic live-evidence capture.
 (4 tests): clean. Three consecutive full-workspace runs: **470 + 4 + 741, fully green** every
 time -- no flake this pass.
 
-## PR-047-C
+## PR-047-C — say it before the click (D4)
 
-Not started. D4 -- the agent-launch and trust-grant confirmations naming the unrecorded state
-before the click -- is the reason this RFC exists and is not optional; landing A and B and calling
-it done is the exact outcome the task breakdown's own "what this RFC must not become" section
-warns against.
+D4: the agent-launch and trust-grant confirmations state, while the control is still live, that the
+action will not be recorded. Two separate controls, two separate mechanisms.
+
+### Trust grant: appended to the still-live confirmation body
+
+`trust_grant_dialog_body` (`shell.rs`) gains a `degraded: bool` parameter. When true, appends
+`trust-grant-dialog-degraded-notice` (*"This grant will not be recorded while the audit store is
+degraded."*) as a final paragraph, after the canonical sentence and future-consequence text
+`what-the-trust-dialog-must-say.md` already required -- this adds one more fact, not a replacement
+for any of them. `trust_grant_dialog_view` passes `state.audit_health.status() ==
+AuditHealthStatus::Degraded`. The whole body, notice included, renders above the still-live Grant
+button -- read before the click, not after.
+
+### Agent-run launch: an inline notice above the button, since no modal exists
+
+Unlike trust grant, launching an agent run has no confirmation modal -- `LaunchAgentRunButtonPressed`
+commits directly. A new `agent_run_launch_audit_notice(state) -> Option<String>` (`shell.rs`,
+factored the same way D3's `project_board_audit_lines` is -- returns text, not an `Element`, so
+presence/absence and wording are asserted directly rather than walked out of a widget tree) is
+rendered in `trust_settings_view` immediately above the "Launch AI CLI Run" button, only while
+`AuditHealth::status()` is `Degraded`. Catalog key: `trust-settings-launch-agent-run-degraded-notice`
+(*"This run will not be recorded while the audit store is degraded."*).
+
+### Wording, checked against the actual catalog strings
+
+§5 of the risk document: must not imply the action is unsafe, must not imply the user can fix it
+from here, must not appear when healthy. Both notices echo the RFC's own D4 text almost verbatim
+("this action will not be recorded while the audit store is degraded") rather than inventing new
+language, and state only that recording will not happen -- no "unsafe"/"danger"/"warning"/"risk",
+no "fix"/"repair"/"resolve"/"try again". Checked directly against the catalog strings by
+`trust_grant_dialog_degraded_notice_does_not_imply_unsafe_or_fixable` and
+`agent_run_launch_audit_notice_does_not_imply_unsafe_or_fixable`, not by inspection alone.
+
+### Required tests, present/absent ablated separately per surface
+
+- `trust_grant_dialog_body_shows_the_degraded_notice_when_degraded` /
+  `..._omits_the_degraded_notice_when_healthy` -- **ablated in both directions, run by me**:
+  reverting the append (always omit) fails only the "shows" test; forcing an unconditional append
+  fails only the "omits" test -- confirmed independently, not only in combination. Each is its own
+  function per the task breakdown's explicit "ablated separately" requirement.
+- `agent_run_launch_audit_notice_present_when_degraded` / `..._absent_when_healthy` -- same pair,
+  same ablation discipline, for the agent-launch half. **Ablated both directions, run by me**:
+  hard-coding `None` fails only "present when degraded"; hard-coding `Some(...)` fails only "absent
+  when healthy" -- confirmed independently, not only in combination.
+
+### Live GUI evidence: blocked by the synthetic-input environment, not by the feature
+
+EVIDENCE-1/EVIDENCE-2 (PR-047-A/B) needed only a screenshot of whatever the app was already
+rendering at boot. D4's evidence needs the app to actually *navigate* -- into `TrustSettings`, and
+into the `TrustGrant` modal -- which needs synthetic keyboard input.
+
+Built the fixture the same way as EVIDENCE-1/2 (`mktemp -d` project, `mktemp -d` `XDG_STATE_HOME`,
+the EVIDENCE-2 "unrecoverable failure" method -- corrupt `audit.sqlite3`, `recovery` replaced with a
+symlink -- so the session stays `Degraded` for the life of the process, not self-heal via automatic
+recovery the way a plain corrupted file would). Launched the release binary against it, confirmed
+via `niri msg windows`/`screenshot-window` that it is a real, live window rendering real state (the
+D3 board line, *"Audit: not recording..."*, appears against the real corrupted fixture -- proving
+the fixture and the running binary are both genuine).
+
+**Could not drive it further.** `wtype` (this project's own documented synthetic-input tool,
+`ARCHITECTURE.md`) delivers correctly to a native Wayland client in this same session -- confirmed
+independently against a freshly spawned `alacritty`, typed text appeared -- but every keybinding
+sent to the Tekstide window (`Ctrl+Alt+U` for Trust Settings, `Ctrl+Alt+P`, `Ctrl+Alt+O`, `Ctrl+Alt+T`,
+even a bare unmodified key) produced no visible change across repeated attempts, including after
+`niri msg action focus-window` and after relaunching the binary through `niri msg action spawn-sh`
+(ruling out "launched via a background shell job never got an activation token" as the cause, since
+Alacritty launched the identical way received input fine). No mouse-input tool (`ydotool`, `wlrctl`,
+`dotool`) is available in this environment to try the alternative the task breakdown's own README
+explicitly allows ("state whether a real mouse click was sent either way").
+
+**Not claiming this as done.** The D3 board line's own correctness under this exact fixture is real,
+live evidence that the degraded state is genuine; the D4 confirmations themselves are proven only
+by the unit tests above, ablated in both directions. Flagged to the reviewer rather than presented
+as captured -- consistent with this project's own rule that a screenshot states what it proves and
+what it does not, and a convention nobody can execute in a given environment is worse than admitting
+it plainly.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
+(4 tests): clean. Three consecutive full-workspace runs: **476 + 4 + 741, fully green** every
+time -- no flake this pass.

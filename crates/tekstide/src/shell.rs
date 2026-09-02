@@ -6586,6 +6586,24 @@ fn project_board_audit_lines(state: &State) -> Vec<String> {
     lines
 }
 
+/// RFC-047 PR-047-C, D4: the agent-launch half of "say it before the
+/// click" -- `trust_grant_dialog_body`'s `degraded` parameter is the
+/// trust-grant half. Unlike D3's board line, this is scoped to one
+/// specific action's own control rather than a session-wide summary,
+/// so it lives next to [`trust_settings_view`]'s launch button, not on
+/// the project board.
+///
+/// `None` whenever `AuditHealth::status()` is not `Degraded` -- §2/§5 of
+/// the risk document: absent when healthy, and it must not appear to
+/// warn about anything other than the one fact it states.
+fn agent_run_launch_audit_notice(state: &State) -> Option<String> {
+    (state.audit_health.status() == tekstide_core::audit::AuditHealthStatus::Degraded).then(|| {
+        state
+            .catalog
+            .get("trust-settings-launch-agent-run-degraded-notice")
+    })
+}
+
 fn content_area(state: &State) -> Element<'_, Message> {
     let content: Element<'_, Message> = if state.is_measuring_typing() {
         typing_measurement_view(state)
@@ -8305,6 +8323,17 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
         .into(),
     );
 
+    // RFC-047 PR-047-C, D4: rendered immediately above the still-live
+    // launch button below -- before the click, not after -- and only
+    // while `AuditHealth::status()` is `Degraded`. `agent_run_launch_
+    // audit_notice` returns `Option<String>` rather than an `Element`
+    // so presence/absence and wording are asserted directly in tests,
+    // the same reason `project_board_audit_lines` (D3) returns
+    // `Vec<String>` instead of rendering itself.
+    if let Some(notice) = agent_run_launch_audit_notice(state) {
+        lines.push(text(notice).size(state.theme.font_size_body()).into());
+    }
+
     // RFC-040 PR-040-C, D2: "agent run where a trusted project's
     // actions live" -- three more real buttons, always rendered
     // regardless of trust state. `LaunchAgentRunButtonPressed` reuses
@@ -9863,7 +9892,13 @@ fn trust_grant_dialog_paths(
     (canonical, secondary)
 }
 
-fn trust_grant_dialog_body(catalog: &Catalog, modal: &TrustGrantModal) -> String {
+/// `degraded` is RFC-047 PR-047-C, D4: whether `AuditHealth::status()`
+/// is `Degraded` at the moment this body is composed. Appended last, so
+/// the canonical sentence and future-consequence text this dialog
+/// already required (§3/§4 of `what-the-trust-dialog-must-say.md`) are
+/// unaffected -- this adds one more fact, not a replacement for any of
+/// them.
+fn trust_grant_dialog_body(catalog: &Catalog, modal: &TrustGrantModal, degraded: bool) -> String {
     let (canonical, secondary) = trust_grant_dialog_paths(modal);
     let mut body = catalog.get_with_args(
         "trust-grant-dialog-body",
@@ -9875,6 +9910,10 @@ fn trust_grant_dialog_body(catalog: &Catalog, modal: &TrustGrantModal) -> String
             "trust-grant-dialog-symlink-notice",
             &CatalogArgs::new().untrusted("root_path", &root),
         ));
+    }
+    if degraded {
+        body.push('\n');
+        body.push_str(&catalog.get("trust-grant-dialog-degraded-notice"));
     }
     body
 }
@@ -9907,9 +9946,13 @@ fn trust_grant_dialog_view<'a>(
         text(state.catalog.get("trust-grant-dialog-title"))
             .size(state.theme.font_size_heading())
             .into(),
-        text(trust_grant_dialog_body(&state.catalog, modal))
-            .size(state.theme.font_size_body())
-            .into(),
+        text(trust_grant_dialog_body(
+            &state.catalog,
+            modal,
+            state.audit_health.status() == tekstide_core::audit::AuditHealthStatus::Degraded,
+        ))
+        .size(state.theme.font_size_body())
+        .into(),
         button_line(
             TrustGrantButton::Grant,
             "trust-grant-dialog-grant",

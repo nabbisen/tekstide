@@ -89,21 +89,33 @@ created: "2026-08-28"
 
 ## D4 — say it before the click
 
-- [ ] The agent-launch and trust-grant confirmations state the action will not be recorded, **while
-      the control is live**.
-- [ ] The wording does not imply the action is unsafe, does not imply the user can fix it from
-      there, and does not appear when healthy.
-- [ ] Present-when-degraded and absent-when-healthy are **separately** ablated.
+- [x] The agent-launch and trust-grant confirmations state the action will not be recorded, **while
+      the control is live**. Trust grant: appended to `trust_grant_dialog_body`, rendered above the
+      still-live Grant button. Agent-run launch: `agent_run_launch_audit_notice`, rendered above the
+      still-live "Launch AI CLI Run" button in `trust_settings_view` (no confirmation modal exists
+      for this control, unlike trust grant).
+- [x] The wording does not imply the action is unsafe, does not imply the user can fix it from
+      there, and does not appear when healthy. `trust_grant_dialog_degraded_notice_does_not_imply_
+      unsafe_or_fixable` / `agent_run_launch_audit_notice_does_not_imply_unsafe_or_fixable`, checked
+      against the real catalog strings.
+- [x] Present-when-degraded and absent-when-healthy are **separately** ablated. Four tests (one pair
+      per surface), each direction ablated independently and run by me — see `qa-evidence.md`.
 
 ## Live GUI evidence
 
 - [x] Against a **`mktemp -d` fixture with a fresh `XDG_STATE_HOME`**, using RFC-036 PR-036-C's own
       corruption method.
-- [ ] Shows the degraded indicator (`EVIDENCE-2`, done) **and a launch confirmation naming the
-      unrecorded state** (PR-047-C, not built yet — the full combined evidence this box asks for
-      is not claimed complete until both exist).
-- [x] Whether a real mouse click was sent is stated either way. Zero mouse clicks — both launches
-      were `env`/CLI-driven, no interaction with the running window at all.
+- [ ] **Not captured.** Blocked by the synthetic-input environment, not by the feature: `wtype`
+      (this project's own documented tool) delivers correctly to a freshly spawned native Wayland
+      client in this session (confirmed against `alacritty`) but no keybinding reached the Tekstide
+      window across repeated attempts, including after explicit refocus and after relaunching
+      through `niri msg action spawn-sh`; no mouse-input tool is available either. Full account in
+      `qa-evidence.md`'s PR-047-C section. The degraded state itself is confirmed live and genuine
+      (the D3 board line renders correctly against the real corrupted fixture); the D4 confirmations
+      are proven only by the ablated unit tests.
+- [x] Whether a real mouse click was sent is stated either way. Zero mouse clicks for EVIDENCE-1/2;
+      the D4 capture attempt used zero mouse clicks too (none available) and produced no usable
+      screenshot, as stated above.
 
 ## Gates
 
@@ -111,7 +123,8 @@ created: "2026-08-28"
 - [x] Full workspace suite, **three consecutive runs**, each logged to a file; any flake given a
       **row** in the register, not a mention. **468 + 4 + 741, fully green** every time — no flake
       this pass. *(Re-run 2026-09-02 after response 358's R1/R2 fix, two new tests added:
-      **470 + 4 + 741, fully green** every time — no flake this pass either.)*
+      **470 + 4 + 741, fully green** every time — no flake this pass either. Re-run again same day
+      after PR-047-C, six more new tests: **476 + 4 + 741, fully green** every time — no flake.)*
 
 ## The outcome this slice must not reach
 
@@ -122,9 +135,8 @@ created: "2026-08-28"
       open must leave the board showing no present-tense "not recording" line, and must still show
       the history line — both directions checked separately, not only in combination.
 
-- [ ] **PR-047-C is done.** D1–D3 are calls to functions that already exist and will feel like
-      completion. A slice that lands them and leaves the confirmations unchanged has fixed the
-      plumbing and left the promise.
+- [x] **PR-047-C is done.** D1–D3 connected in A/B; D4's own confirmations built and tested here,
+      not left as the promise D1–D3 alone would have felt like keeping.
 
 ## Final Acceptance Decision
 

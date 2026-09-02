@@ -598,6 +598,15 @@ trust-settings-retained-transcripts = Retained locally: { $count ->
 } ({ $bytes } bytes)
 trust-settings-purge-button = Purge Project Transcripts…
 
+# RFC-047 PR-047-C, D4: rendered only while `AuditHealth::status()` is
+# `Degraded` -- absent the rest of the time, per §2/§5 of the risk
+# document. Sits above the launch button below, so it is visible while
+# the control is still live, not after the click. States only that
+# recording will not happen -- not that the run itself is unsafe (§5:
+# a broken audit store does not make a run more dangerous, only
+# unrecorded) and not that anything here can fix it.
+trust-settings-launch-agent-run-degraded-notice = This run will not be recorded while the audit store is degraded.
+
 # RFC-040 PR-040-C, D2: "agent run where a trusted project's actions
 # live" -- always shown, not hidden while Restricted: `Ctrl+Alt+A`
 # already allows the attempt and shows the real refusal notice when
@@ -817,6 +826,15 @@ trust-grant-dialog-body = { $path }
 # path (as opened) differs from its canonical path -- `$root_path` is
 # escaped the same way `$path` above is.
 trust-grant-dialog-symlink-notice = You opened this project at { $root_path }, which resolves to the folder above.
+# RFC-047 PR-047-C, D4: appended to `trust-grant-dialog-body` only
+# while `AuditHealth::status()` is `Degraded` -- absent the rest of
+# the time, per §2/§5 of the risk document. Still part of the body
+# shown above the still-live Grant button, so it is read before the
+# click, not after. States only that recording will not happen -- not
+# that granting trust is unsafe (§5: a broken audit store does not
+# make trust more dangerous, only unrecorded) and not that anything
+# here can fix it.
+trust-grant-dialog-degraded-notice = This grant will not be recorded while the audit store is degraded.
 trust-grant-dialog-grant = Grant Trust
 trust-grant-dialog-cancel = Cancel
 trust-grant-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.
