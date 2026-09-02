@@ -245,6 +245,17 @@ project-board-attention = { $attention ->
 # for someone who is not reading a terminal.
 project-board-audit-degraded = Audit: not recording. Recent actions may be missing from the record.
 
+# RFC-047 PR-047-B response 358 R1, §3.1 of the risk document: the
+# collision case, and its own line, not the generic degraded line
+# above. Reached when a resume/recover already returned a working
+# store (recording *is* working) but writing the recovery's own record
+# of that event could not be confirmed -- "not recording" would be
+# false there, since the store works; the honest claim is narrower
+# than that. Shown together with `project-board-audit-recovered-resumed`
+# or `project-board-audit-recovered-quarantined`, never with
+# `project-board-audit-degraded`.
+project-board-audit-recovery-not-confirmed = Audit: recording again, but this recovery could not confirm its own record was written.
+
 # D2's own required disclosure, the safe half: nothing was quarantined,
 # recording works again.
 project-board-audit-recovered-resumed = Audit: an interrupted recovery finished. Recording is working again.

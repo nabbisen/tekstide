@@ -57,6 +57,17 @@ created: "2026-08-28"
 - [x] Recovery that itself fails leaves `AuditHealth` degraded, not reporting success.
       `..._leaves_health_degraded_when_recovery_itself_fails`, against a real refusal (a symlinked
       `recovery` directory), not simulated.
+- [x] **A recovery that succeeds but cannot confirm its own record write still discloses the
+      quarantine path, and the board does not say "not recording".** *(Added 2026-09-02, response
+      358 required R1/R2 -- the original box above tested a different arm, `Failed`, not
+      `recovery_event_recorded: false` on a successful recovery, which is where R1's defect
+      actually lived.)* `AuditHealth::record_recovery` is now disclosure-only; a new
+      `clear_degraded()` carries the status reset separately (§3.1 of the risk document).
+      `apply_recovery_outcome_stays_degraded_and_still_discloses_when_the_record_is_unconfirmed`,
+      against a real recovery driven through the `test-support` seam
+      `recover_and_reopen_forcing_unrecorded_event_for_test` (the one input a black-box test
+      cannot trigger organically, documented there as simulated). Ablated twice, independently:
+      reverting either half of the fix fails a distinct assertion.
 - [x] Nothing in this slice calls `fs::remove_*` on a user's audit data. `recover()`/`resume()`
       themselves are `fs::rename`, unmodified by this slice; the new code in `tekstide` only reads
       `AuditRecoveryOutcome` and never touches the filesystem directly.
@@ -70,6 +81,11 @@ created: "2026-08-28"
       `..._shows_the_quarantine_path_when_recovered` (confirms the degraded line is specifically
       *absent* once a recovery succeeds) — both ablated together (forced the degraded line
       unconditionally) and both failed independently, not only in combination.
+- [x] **The generic degraded line must not appear when a recovery has already been disclosed this
+      session** (§3.1, added 2026-09-02, response 358 required R1) — that combination is false: a
+      returned, working store is not "not recording". `project_board_audit_lines_shows_the_
+      collision_line_not_the_generic_degraded_line`, ablated: reverting the wording fix fails both
+      "must show the new line" and "must not show the generic line" independently.
 
 ## D4 — say it before the click
 
@@ -94,7 +110,8 @@ created: "2026-08-28"
 - [x] `fmt`, `clippy -D warnings`, `git diff --check`, `rfc_docs_invariants`. All clean.
 - [x] Full workspace suite, **three consecutive runs**, each logged to a file; any flake given a
       **row** in the register, not a mention. **468 + 4 + 741, fully green** every time — no flake
-      this pass.
+      this pass. *(Re-run 2026-09-02 after response 358's R1/R2 fix, two new tests added:
+      **470 + 4 + 741, fully green** every time — no flake this pass either.)*
 
 ## The outcome this slice must not reach
 

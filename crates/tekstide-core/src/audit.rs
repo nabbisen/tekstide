@@ -36,6 +36,8 @@ pub use recovery::{
 // the identical cfg, or a build compiling neither fails to find it.
 #[cfg(any(test, feature = "test-support"))]
 pub use recovery::corrupt_and_interrupt_recovery_for_test;
+#[cfg(any(test, feature = "test-support"))]
+pub use recovery::recover_and_reopen_forcing_unrecorded_event_for_test;
 pub use store::{
     AuditAppendOutcome, AuditQuery, AuditRecordPage, AuditStore, AuditStoreError,
     AuditStoreErrorReason, MAX_AUDIT_QUERY_LIMIT, SequencedAuditRecord,

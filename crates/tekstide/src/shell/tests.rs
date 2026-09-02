@@ -7,7 +7,7 @@ use super::{
     AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ExternalChangeButton,
     FolderBrowserModal, MAX_PATH_FIELD_CHARS, Message, ModalButton, ModalContent,
     PasteConfirmButton, PathFieldError, ProjectCloseButton, State, TerminalPasteRefusal,
-    TranscriptPurgeButton, TrustGrantButton, agent_run_launch_refusal_text,
+    TranscriptPurgeButton, TrustGrantButton, agent_run_launch_refusal_text, apply_recovery_outcome,
     attempt_agent_run_launch_with_profile, attempt_agent_run_launch_with_profile_and_state_root,
     attempt_agent_run_launch_with_profile_state_root_and_capture, content_within_bound,
     evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
@@ -2186,6 +2186,149 @@ fn project_board_audit_lines_shows_the_quarantine_path_when_recovered() {
             .any(|line| line == &state.catalog.get("project-board-audit-degraded")),
         "a successfully recovered, currently-healthy session must not also show the degraded \
          line: {lines:?}"
+    );
+}
+
+/// RFC-047 PR-047-B response 358 R1, §3.1: the collision case, at the
+/// rendering layer -- `status()` and `last_recovery()` are independent
+/// fields, and both can be set at once (a recovery happened, but its
+/// own record write could not be confirmed). The generic degraded line
+/// says "not recording", which is false whenever a recovery already
+/// returned a working store; this case needs its own, accurate line
+/// instead, shown *alongside* the quarantine disclosure rather than
+/// replacing it -- §3's requirement to name the path does not go away
+/// just because §4 also applies.
+#[test]
+fn project_board_audit_lines_shows_the_collision_line_not_the_generic_degraded_line() {
+    let mut state = state_with(ApplicationShell::new());
+    state
+        .audit_health
+        .record_recovery(tekstide_core::audit::AuditRecoveryDisclosure::Recovered {
+            quarantine_dir: std::path::PathBuf::from("/tmp/example-quarantine-dir"),
+        });
+    state
+        .audit_health
+        .record_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
+
+    let lines = project_board_audit_lines(&state);
+
+    assert!(
+        lines.iter().any(|line| line
+            == &state
+                .catalog
+                .get("project-board-audit-recovery-not-confirmed")),
+        "the collision must render its own, accurate line: {lines:?}"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line == &state.catalog.get("project-board-audit-degraded")),
+        "\"Audit: not recording\" is false here -- the store works and is recording; what \
+         failed is the recovery's own record of itself: {lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("example-quarantine-dir")),
+        "the quarantine path must still reach the screen -- §3 does not stop applying just \
+         because §4 also does: {lines:?}"
+    );
+}
+
+/// RFC-047 PR-047-B response 358, R2: the one branch no test reached --
+/// a recovery that *succeeds* (a real store comes back) but whose own
+/// `AuditStoreRecovery` record write could not be confirmed
+/// (`recovery_event_recorded: false`). This is exactly where R1's
+/// defect lived: nothing in the suite constructed this state, so the
+/// branch that dropped the quarantine disclosure went untested. Built
+/// via the `test-support` seam
+/// (`recover_and_reopen_forcing_unrecorded_event_for_test`), documented
+/// there as simulating the one input a black-box test cannot trigger
+/// organically -- the corruption, the move, and the reopened store are
+/// all real; only the recorded-event boolean is forced.
+#[test]
+fn apply_recovery_outcome_stays_degraded_and_still_discloses_when_the_record_is_unconfirmed() {
+    let state_dir = temp_audit_state_dir("recovered-but-unrecorded");
+    {
+        let store = super::open_audit_store(&state_dir, Vec::new())
+            .expect("a fresh directory must produce a real store");
+        drop(store);
+    }
+    let db_path = state_dir.join("audit").join("audit.sqlite3");
+    std::fs::write(&db_path, [0xffu8; 4096]).unwrap();
+    let request = tekstide_core::audit::AuditPathRequest::new(&state_dir, Vec::new());
+    let storage_path = tekstide_core::audit::AuditPathResolver
+        .resolve(request)
+        .unwrap();
+
+    let outcome =
+        tekstide_core::audit::recover_and_reopen_forcing_unrecorded_event_for_test(storage_path);
+    assert!(
+        matches!(
+            outcome,
+            tekstide_core::audit::AuditRecoveryOutcome::Recovered {
+                recovery_event_recorded: false,
+                ..
+            }
+        ),
+        "the test-support seam must really force the unrecorded branch, not silently fall back \
+         to Failed or a recorded recovery"
+    );
+
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    let store = apply_recovery_outcome(
+        outcome,
+        tekstide_core::audit::AuditStoreErrorReason::Corrupt,
+        &mut health,
+    );
+
+    assert!(
+        store.is_some(),
+        "a recovery whose own record write failed must still hand back the real, usable store \
+         it produced -- that store is not itself broken"
+    );
+    assert_eq!(
+        health.status(),
+        tekstide_core::audit::AuditHealthStatus::Degraded,
+        "§4 of the risk document: a recovery-record write that could not be confirmed is itself \
+         a degraded state"
+    );
+    let Some(tekstide_core::audit::AuditRecoveryDisclosure::Recovered { quarantine_dir }) =
+        health.last_recovery().cloned()
+    else {
+        panic!(
+            "§3.1: failing to attest the rename must not suppress disclosing it -- the \
+             quarantine still happened and must still be named, degraded or not"
+        );
+    };
+    assert!(
+        quarantine_dir.join("audit.sqlite3").is_file(),
+        "the quarantined file must really exist at the reported path, not just be claimed: \
+         {quarantine_dir:?}"
+    );
+
+    let mut state = state_with(ApplicationShell::new());
+    state.audit_health = health;
+    let lines = project_board_audit_lines(&state);
+    assert!(
+        lines.iter().any(|line| line
+            == &state
+                .catalog
+                .get("project-board-audit-recovery-not-confirmed")),
+        "the collision case needs its own, accurate line: {lines:?}"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line == &state.catalog.get("project-board-audit-degraded")),
+        "\"Audit: not recording\" is false here -- the store works and is recording; what \
+         failed is the recovery's own record of itself: {lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains(&quarantine_dir.display().to_string())),
+        "the quarantine path must still reach the board, end-to-end: {lines:?}"
     );
 }
 

@@ -99,23 +99,37 @@ impl AuditHealth {
         self.last_failure = Some(reason);
     }
 
-    /// RFC-047 PR-047-B: called only after a recovery is confirmed
-    /// complete *and* its own `AuditStoreRecovery` durable record is
-    /// confirmed written -- the store now genuinely works, so leaving
-    /// `status` at `Degraded` would misreport the current state the
-    /// same direction §2 of the risk document warns against for a
-    /// permanently-healthy line, just inverted: **the indicator must
-    /// track what is true now, not what was true a moment ago in
-    /// either direction.** `last_recovery` is untouched by future
-    /// failures -- it is history, not a live gauge, and does not get
-    /// cleared by this call either (a second recovery this session
-    /// replaces it with the newer fact, which is correct: "here's what
-    /// most recently happened," not a log of every event).
+    /// RFC-047 PR-047-B, §3.1 of the risk document (added response 358,
+    /// required R1): the disclosure alone. Call this whenever a
+    /// resume/recover **mechanically happened** -- the rename or the
+    /// resume really occurred and a usable store came back -- regardless
+    /// of whether recording that fact into the durable store also
+    /// succeeded. §4 governs `status` separately (see
+    /// [`Self::record_failure`]/[`Self::clear_degraded`]); this method
+    /// never touches it. **Failing to attest a rename does not un-rename
+    /// it** -- the collision §3.1 exists to resolve is exactly a caller
+    /// that let a failed record-write suppress this call too, leaving a
+    /// working store with a moved history and no way to find it.
+    ///
+    /// `last_recovery` is untouched by later failures -- it is history,
+    /// not a live gauge. A second recovery this session replaces it with
+    /// the newer fact, which is correct: "here's what most recently
+    /// happened," not a log of every event.
     pub fn record_recovery(&mut self, disclosure: AuditRecoveryDisclosure) {
+        self.last_recovery = Some(disclosure);
+    }
+
+    /// RFC-047 PR-047-B, §3.1: the other half of [`Self::record_recovery`]
+    /// -- call this only once a recovery's own `AuditStoreRecovery`
+    /// durable record is *confirmed written*, not merely once the store
+    /// reopens. The store reopening proves it is usable; it does not
+    /// prove the disclosure that just happened is itself durable, and
+    /// §4 is explicit that the latter is what `status` tracks. Does not
+    /// touch `last_recovery` -- the two facts are independent by design.
+    pub fn clear_degraded(&mut self) {
         self.status = AuditHealthStatus::Healthy;
         self.failure_count = 0;
         self.last_failure = None;
-        self.last_recovery = Some(disclosure);
     }
 }
 

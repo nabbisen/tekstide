@@ -256,6 +256,105 @@ Neither shows a path under `$HOME`, a real project name, or another project on s
 (4 tests): clean. Three consecutive full-workspace runs: **468 + 4 + 741, fully green** every
 time -- no flake this pass.
 
+## PR-047-B — response 358 required follow-up (R1, R2)
+
+Response 358 accepted PR-047-B with two required changes. Both addressed here, before PR-047-C.
+
+### R1: the recovered-but-unrecorded branch dropped the quarantine path
+
+`open_audit_store_recording_failure`'s `Recovered`/`Resumed` arms called `health.record_failure`
+only when `recovery_event_recorded` was `false`, never `health.record_recovery` -- so a real
+quarantine that happened on disk was never disclosed, and the board showed only the generic
+`project-board-audit-degraded` line (*"Audit: not recording..."*), which is false there: the store
+works and is recording, what failed is the recovery's own record of itself.
+
+Fixed at the root cause the reviewer named: §3 (surface the path) and §4 (a failed record-write is
+degraded) govern different fields, not one. `AuditHealth::record_recovery` (`integration.rs`) is
+now disclosure-only -- sets `last_recovery`, nothing else -- and a new `AuditHealth::clear_degraded`
+carries the `status`/`failure_count`/`last_failure` reset that used to be bundled into it.
+`open_audit_store_recording_failure`'s `Resumed`/`Recovered` arms now call `record_recovery`
+**unconditionally** (the resume/recovery really happened, regardless of whether recording that it
+happened also succeeded), then branch only on `clear_degraded()` vs `record_failure(reason)`.
+
+The wording half of R1: `project_board_audit_lines` (`shell.rs`) previously showed the generic
+degraded line whenever `status() == Degraded`, without checking whether a recovery had also been
+disclosed this session -- exactly the collision §3.1 (now in the risk document, added by the
+reviewer at `f59b5c5`) describes. Now checks both facts and picks the accurate line: the collision
+(`status() == Degraded` **and** `last_recovery().is_some()`) renders a new catalog key,
+`project-board-audit-recovery-not-confirmed` (*"Audit: recording again, but this recovery could
+not confirm its own record was written."*), instead of the generic degraded line -- shown
+*alongside* the existing `Resumed`/`Recovered` disclosure line, not replacing it, since §3's
+requirement to name the path does not go away just because §4 also applies.
+
+**New tests, each ablated separately:**
+
+- `project_board_audit_lines_shows_the_collision_line_not_the_generic_degraded_line` -- `AuditHealth`
+  driven directly (`record_recovery` then `record_failure`) to the collision state; asserts the new
+  line appears, the generic degraded line does not, and the quarantine path still reaches the
+  screen. **Ablated**: reverted the rendering fix to always show the generic degraded line whenever
+  degraded -- failed, both the "must not show degraded" and "must show the new line" assertions
+  caught it independently.
+- `apply_recovery_outcome_stays_degraded_and_still_discloses_when_the_record_is_unconfirmed` -- see
+  R2 below; also exercises the collision rendering end-to-end.
+
+### R2: no test constructed `recovery_event_recorded: false` on a successful recovery
+
+The cited test (`..._leaves_health_degraded_when_recovery_itself_fails`) proves the `Failed` arm (a
+real refusal via a symlinked `recovery` directory), not the arm R1's defect actually lived in: a
+recovery that **succeeds** (a real store comes back) but whose own `AuditStoreRecovery` record
+write could not be confirmed. Grep confirmed no test in the suite constructed that case at all.
+
+**Why it can't be triggered organically**: `initialize_fresh_database`'s `store.append(...)` writes
+a record to a database this same call just created, schema'd, and validated -- there is no
+reliable, portable filesystem trick to make that one write fail (SQLite runs in WAL mode there)
+without also risking `prepare_for_atomic_install` or the post-write diagnostics check right after
+it, which would take down the whole recovery instead of leaving it successful-but-unrecorded.
+
+**Fix**: `open_audit_store_recording_failure`'s outcome-handling half was split into a new function,
+`apply_recovery_outcome(outcome, reason, health) -> Option<AuditStore>` (`shell.rs`) -- the exact
+same match arms, just callable with an outcome built anywhere, not only from the real
+`AuditRecovery::recover_and_reopen`. A new `test-support` function,
+`recover_and_reopen_forcing_unrecorded_event_for_test` (`tekstide-core/src/audit/recovery.rs`, same
+`#[cfg(any(test, feature = "test-support"))]` gate as `corrupt_and_interrupt_recovery_for_test`),
+runs the real quarantine/move/reopen path (`recover_with_move_and_initializer`, the same seam
+`initialize_fresh_database` is itself plugged into) with a substitute initializer that does
+everything the real one does -- real store, real schema, real `prepare_for_atomic_install` -- except
+it discards the append's own result and always reports `Ok(false)`. Documented there as simulated,
+not organic, the same honesty `corrupt_and_interrupt_recovery_for_test` already holds itself to.
+
+`apply_recovery_outcome_stays_degraded_and_still_discloses_when_the_record_is_unconfirmed`
+(`shell/tests.rs`): a real corrupted store, recovered via the forcing seam, fed into the real
+`apply_recovery_outcome`. Asserts: a real, usable store comes back; `health.status()` is `Degraded`;
+`health.last_recovery()` is `Some(Recovered { quarantine_dir })` with the file really present at
+that path (`quarantine_dir.join("audit.sqlite3").is_file()`); and `project_board_audit_lines`
+renders the new collision line, not the generic one, with the real quarantine path still present.
+
+**Ablated twice, independently:**
+
+- Reverted R1's `AuditHealth`-side fix (moved `record_recovery` inside the `if recovery_event_
+  recorded` branch, reproducing the original bug) -- failed at the `last_recovery` assertion:
+  *"§3.1: failing to attest the rename must not suppress disclosing it..."*.
+- Reverted R1's wording fix only (`project_board_audit_lines` back to unconditional-on-degraded) --
+  failed at the "collision case needs its own, accurate line" assertion, alongside the new
+  `project_board_audit_lines_*` test above -- both caught it, not only in combination.
+
+Restored: both ablations pass.
+
+### No live screenshot of the collision state itself
+
+EVIDENCE-1/EVIDENCE-2 above are real, organically-triggered corruptions. The R1/R2 collision
+(`recovery_event_recorded: false` on a *successful* recovery) is, per R2's own finding, not
+reliably constructible outside the `test-support` seam described there -- a live human run cannot
+currently produce it. The rendering is proven by the ablated unit tests above instead of a
+screenshot; noting this explicitly rather than presenting a test-support-forced state as an
+organic live-evidence capture.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
+(4 tests): clean. Three consecutive full-workspace runs: **470 + 4 + 741, fully green** every
+time -- no flake this pass.
+
 ## PR-047-C
 
 Not started. D4 -- the agent-launch and trust-grant confirmations naming the unrecorded state

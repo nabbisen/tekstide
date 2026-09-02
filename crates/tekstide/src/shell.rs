@@ -5253,62 +5253,88 @@ pub(crate) fn open_audit_store_recording_failure(
                 } else {
                     recovery.recover_and_reopen(storage_path, reason)
                 };
-            match outcome {
-                tekstide_core::audit::AuditRecoveryOutcome::Resumed {
-                    store,
-                    recovery_event_recorded,
-                } => {
-                    if recovery_event_recorded {
-                        health.record_recovery(
-                            tekstide_core::audit::AuditRecoveryDisclosure::Resumed,
-                        );
-                        eprintln!(
-                            "[audit] an interrupted migration was resumed; the audit store is \
-                             usable again"
-                        );
-                    } else {
-                        health.record_failure(reason);
-                        eprintln!(
-                            "[audit] the interrupted migration was resumed, but recording that \
-                             it happened failed -- still degraded"
-                        );
-                    }
-                    Some(store)
-                }
-                tekstide_core::audit::AuditRecoveryOutcome::Recovered {
-                    store,
-                    quarantine_dir,
-                    recovery_event_recorded,
-                } => {
-                    if recovery_event_recorded {
-                        health.record_recovery(
-                            tekstide_core::audit::AuditRecoveryDisclosure::Recovered {
-                                quarantine_dir: quarantine_dir.clone(),
-                            },
-                        );
-                        eprintln!(
-                            "[audit] the audit store was unreadable; the old one was moved to \
-                             {quarantine_dir:?} and a fresh one started"
-                        );
-                    } else {
-                        health.record_failure(reason);
-                        eprintln!(
-                            "[audit] the audit store was unreadable and a fresh one was started \
-                             at {quarantine_dir:?}, but recording that it happened failed -- \
-                             still degraded"
-                        );
-                    }
-                    Some(store)
-                }
-                tekstide_core::audit::AuditRecoveryOutcome::Failed(failed_reason) => {
-                    health.record_failure(failed_reason);
-                    eprintln!(
-                        "[audit] the audit store did not open ({failed_reason:?}) and could not \
-                         be recovered -- this session's actions will not be recorded"
-                    );
-                    None
-                }
+            apply_recovery_outcome(outcome, reason, health)
+        }
+    }
+}
+
+/// RFC-047 PR-047-B response 358 R2: split out of
+/// [`open_audit_store_recording_failure`] so a test can drive this half
+/// -- the part that decides what an [`AuditRecoveryOutcome`] means for
+/// [`AuditHealth`] and the board -- against an outcome built by the
+/// `test-support` seam
+/// ([`tekstide_core::audit::AuditRecovery::recover_and_reopen_forcing_unrecorded_event_for_test`]),
+/// which is the only way to reach `recovery_event_recorded: false` on a
+/// *successful* recovery from outside `tekstide-core` (see that
+/// function's own doc comment for why). Production calls this with a
+/// real [`tekstide_core::audit::AuditRecoveryOutcome`]; the R2 test calls
+/// it with the same real match arms fed a forced value.
+fn apply_recovery_outcome(
+    outcome: tekstide_core::audit::AuditRecoveryOutcome,
+    reason: tekstide_core::audit::AuditStoreErrorReason,
+    health: &mut tekstide_core::audit::AuditHealth,
+) -> Option<tekstide_core::audit::AuditStore> {
+    match outcome {
+        tekstide_core::audit::AuditRecoveryOutcome::Resumed {
+            store,
+            recovery_event_recorded,
+        } => {
+            // RFC-047 PR-047-B response 358 R1, §3.1: the
+            // disclosure is unconditional -- the resume really
+            // happened regardless of whether recording that it
+            // happened also succeeded. Only `status` depends on
+            // `recovery_event_recorded`.
+            health.record_recovery(tekstide_core::audit::AuditRecoveryDisclosure::Resumed);
+            if recovery_event_recorded {
+                health.clear_degraded();
+                eprintln!(
+                    "[audit] an interrupted migration was resumed; the audit store is \
+                     usable again"
+                );
+            } else {
+                health.record_failure(reason);
+                eprintln!(
+                    "[audit] the interrupted migration was resumed, but recording that \
+                     it happened failed -- still degraded"
+                );
             }
+            Some(store)
+        }
+        tekstide_core::audit::AuditRecoveryOutcome::Recovered {
+            store,
+            quarantine_dir,
+            recovery_event_recorded,
+        } => {
+            // Same unconditional-disclosure shape as `Resumed`
+            // above: the quarantine already happened on disk:
+            // failing to attest it here would not undo it, only
+            // hide it (§3.1).
+            health.record_recovery(tekstide_core::audit::AuditRecoveryDisclosure::Recovered {
+                quarantine_dir: quarantine_dir.clone(),
+            });
+            if recovery_event_recorded {
+                health.clear_degraded();
+                eprintln!(
+                    "[audit] the audit store was unreadable; the old one was moved to \
+                     {quarantine_dir:?} and a fresh one started"
+                );
+            } else {
+                health.record_failure(reason);
+                eprintln!(
+                    "[audit] the audit store was unreadable and a fresh one was started \
+                     at {quarantine_dir:?}, but recording that it happened failed -- \
+                     still degraded"
+                );
+            }
+            Some(store)
+        }
+        tekstide_core::audit::AuditRecoveryOutcome::Failed(failed_reason) => {
+            health.record_failure(failed_reason);
+            eprintln!(
+                "[audit] the audit store did not open ({failed_reason:?}) and could not \
+                 be recovered -- this session's actions will not be recorded"
+            );
+            None
         }
     }
 }
@@ -6521,8 +6547,27 @@ fn status_bar(state: &State) -> Element<'_, Message> {
 /// with its own ablation, not merely intended.
 fn project_board_audit_lines(state: &State) -> Vec<String> {
     let mut lines = Vec::new();
-    if state.audit_health.status() == tekstide_core::audit::AuditHealthStatus::Degraded {
-        lines.push(state.catalog.get("project-board-audit-degraded"));
+    let degraded = state.audit_health.status() == tekstide_core::audit::AuditHealthStatus::Degraded;
+    let recovered_this_session = state.audit_health.last_recovery().is_some();
+
+    // RFC-047 PR-047-B response 358 R1, §3.1: "not recording" is false
+    // whenever a recovery already returned a working store -- what
+    // failed there is recording the recovery *itself*, not the store's
+    // own ability to record from here on. Degraded and disclosed are
+    // independent facts, but the *wording* still has to pick the
+    // accurate line for whichever combination is true, not concatenate
+    // both and let the reader reconcile "not recording" against a
+    // "recovered" line sitting right next to it.
+    if degraded {
+        if recovered_this_session {
+            lines.push(
+                state
+                    .catalog
+                    .get("project-board-audit-recovery-not-confirmed"),
+            );
+        } else {
+            lines.push(state.catalog.get("project-board-audit-degraded"));
+        }
     }
     match state.audit_health.last_recovery() {
         Some(tekstide_core::audit::AuditRecoveryDisclosure::Resumed) => {

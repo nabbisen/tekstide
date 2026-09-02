@@ -274,6 +274,67 @@ pub fn corrupt_and_interrupt_recovery_for_test(storage_path: &AuditStoragePath) 
         .expect("clear the injected obstruction so resume() can complete");
 }
 
+/// RFC-047 PR-047-B response 358, R2: the one way another crate's own
+/// tests can reach `recovery_event_recorded: false` on a *successful*
+/// recovery. Organically failing [`initialize_fresh_database`]'s own
+/// `store.append(...)` on a database this same call just created and
+/// validated has no reliable, portable filesystem trick behind it --
+/// WAL-mode SQLite gives a black-box test nothing to pull on that would
+/// not also risk `prepare_for_atomic_install` or the diagnostics check
+/// right after it, taking down the whole recovery instead of leaving it
+/// successful-but-unrecorded.
+///
+/// So this runs the real quarantine/move/reopen path
+/// (`recover_with_move_and_initializer`, the same seam
+/// [`initialize_fresh_database`] is itself plugged into -- not a
+/// separate mock) with a substitute initializer that does everything
+/// [`initialize_fresh_database`] does -- real store, real schema, real
+/// `prepare_for_atomic_install` -- except it discards the append's own
+/// result and always reports `Ok(false)`. The record write is still
+/// attempted for real; only the boolean a caller reads back is forced,
+/// simulating the one input this module's own callers cannot be handed
+/// any other way. Documented as simulated rather than passed off as
+/// organic, the same honesty
+/// [`corrupt_and_interrupt_recovery_for_test`] already holds itself to.
+///
+/// `#[cfg(any(test, feature = "test-support"))]`, same gate as
+/// [`corrupt_and_interrupt_recovery_for_test`] -- `tekstide`'s own
+/// `Cargo.toml` already enables `test-support` for its
+/// `[dev-dependencies]`.
+#[cfg(any(test, feature = "test-support"))]
+pub fn recover_and_reopen_forcing_unrecorded_event_for_test(
+    storage_path: AuditStoragePath,
+) -> AuditRecoveryOutcome {
+    let reopen_path = storage_path.clone();
+    let outcome = recover_with_move_and_initializer(
+        storage_path,
+        |source, destination| fs::rename(source, destination),
+        |initialization_path, recovery_id| {
+            let mut store =
+                AuditStore::open_after_complete_recovery(initialization_path.clone())
+                    .map_err(|_| io::Error::other("fresh audit store initialization failed"))?;
+            let _ = store.append(&recovery_record(recovery_id));
+            store
+                .prepare_for_atomic_install()
+                .map_err(|_| io::Error::other("fresh audit store finalization failed"))?;
+            drop(store);
+            Ok(false)
+        },
+    );
+    match outcome {
+        Ok(receipt) => reopen_after_recovery(
+            reopen_path,
+            receipt,
+            |quarantine_dir, store, recovery_event_recorded| AuditRecoveryOutcome::Recovered {
+                store,
+                quarantine_dir,
+                recovery_event_recorded,
+            },
+        ),
+        Err(_recovery_error) => AuditRecoveryOutcome::Failed(AuditStoreErrorReason::Corrupt),
+    }
+}
+
 pub(crate) fn recover_with_move_and_initializer(
     storage_path: AuditStoragePath,
     move_artifact: impl FnMut(&Path, &Path) -> io::Result<()>,
