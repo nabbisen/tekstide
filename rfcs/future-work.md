@@ -689,6 +689,33 @@ Status: active after `0.1.0`.
 - Decide whether future releases need scripts, `xtask`, or CI gates.
 - Keep the changelog aligned with implemented and deferred scope.
 - **`NOTICE` and third-party dependency trees (`iced` and similar): not owed today, becomes owed at RFC-029.** A `cargo publish` tarball redistributes only this project's own sources — confirmed for `0.4.0` by inspecting `cargo package --list`, which shows no third-party files in either crate. The Apache-2.0 §4(d) notice-propagation obligation attaches to redistributing a work, and `cargo publish` does not redistribute `iced`'s sources, only a dependency reference resolved separately by Cargo. This becomes live the day a prebuilt binary ships (RFC-029: documentation, CI, release automation, M14) — audit `iced`'s dependency tree for upstream `NOTICE` obligations then, not at every source-only release before it.
+- **Dependency currency — measured 2026-09-02, scheduled as one slice after RFC-047 closes.**
+  Prompted by the owner asking whether updating to a dependency's latest is easy. Measured with
+  `cargo update --dry-run`, not estimated.
+
+  **63 in-semver updates available** (patch/minor across the transitive tree — `uuid` 1.23.4→1.26.0,
+  `thiserror` 2.0.19→2.0.20, `zvariant_utils` 3.5.0→4.2.0 internally, and 60 more). These need no
+  manifest change; `cargo update` plus the three-run gate is the whole job. Low risk, and the
+  release checklist's existing gate is exactly the right instrument.
+
+  **One dependency is held back by a breaking bump: `rusqlite` 0.39.0 → 0.40.2.** It is the only
+  `Unchanged ... (available: ...)` line in the whole tree, and it needs a `Cargo.toml` edit plus
+  whatever API changes 0.40 brings.
+
+  **Do it after RFC-047, not during — the timing is the decision.** `rusqlite` is the audit store's
+  engine, and RFC-047 is at this moment rewriting how that store detects corruption, quarantines an
+  unreadable database, and recovers. Bumping the engine underneath an in-flight corruption-recovery
+  RFC would mean any behaviour change arrives entangled with our own, and the tests that would tell
+  them apart are the ones still being written. Afterwards those same tests become the gate that
+  makes the bump cheap to verify — `recover()`/`resume()`, the quarantine-path assertions, and the
+  corruption fixtures are a better `rusqlite` acceptance suite than anything we would write for the
+  bump itself.
+
+  **`iced` needs nothing.** 0.14 is current; no newer major exists. We declare
+  `features = ["tokio", "advanced"]` at the workspace root and use neither `canvas` nor `svg`, so
+  the transitive-feature breakage in snora's 0.42.0 letter has no analogue here — and we do not
+  depend on snora at all.
+
 - **The reachability audit: results.** Scheduled 2026-08-17 (`rfcs/handoffs/reachability-audit.md`) after RFC-022 found two real shipped defects the moment `open_surface` got its first reader — dormant state is not merely untested, it is actively corrupting, because nothing audits its writers until something finally reads it.
 
   **Methodology, per the handoff's own instruction, not a grep.** `#[deprecated(note = "reachability-audit")]` on 132 candidate state-changing `pub fn`s across `tekstide-core` (accessors and constructors excluded — "not every `pub fn`, only operations that create, mutate, decide, grant, launch, or persist"), then `cargo build -p tekstide` (library + binary only, test code never compiles, so a test caller can never count). Every deprecation warning names a real call site; markers reverted afterward, `git diff --stat` confirmed empty. **Caught two bugs in this method while running it** (worth recording so a repeat does not relearn them): a leading-whitespace bug in an early name-extraction pass produced false zero-caller results across the board, and a glob-exclusion bug (`*/tests/*` does not match multi-level paths like `audit/tests/integration.rs` — needs `**/tests/**`) inflated a secondary heuristic check with test-file matches before being caught and corrected.
