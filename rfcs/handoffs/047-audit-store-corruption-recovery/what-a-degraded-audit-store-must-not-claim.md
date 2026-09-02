@@ -65,6 +65,41 @@ One consequence for the wording: a line shown alongside a returned, working stor
 "not recording". Overstating the damage is the same class of false statement as understating it —
 the indicator tracks what is true now, in either direction.
 
+### §3.2 Current capability and session history are different facts (added 2026-09-02, response 359)
+
+§3.1 split *degraded* from *disclosed*. The same split is unmade one layer down, and it produces
+the mirror image of the bug §3.1 fixed.
+
+`AuditHealth::status` is a **latch**: nothing clears it except a successful recovery. A successful
+*open* does not. So a transient open failure — a `Busy` lock, a state directory momentarily
+unavailable — degrades the session permanently, and the board goes on rendering **"Audit: not
+recording. Recent actions may be missing from the record."** for the rest of the session while every
+action is, in fact, being recorded. Measured 2026-09-02: `record_failure(Busy)` followed by an
+ordinary successful open leaves `status=Degraded, failure_count=1` and that exact line on the board.
+
+The naive fix — clear on a successful open — is wrong, and the reason is the second conflation:
+**`status` is written by two different kinds of failure.** The shell seam records *open* failures;
+`AuditCoordinator::append_required`/`append_observation` record *write* failures into the same
+`state.audit_health`. A successful open does not cure a failed write. Clearing on open would erase
+a real one.
+
+**The decision, extending §3.1:**
+
+1. **`status` answers one question: can this session record *right now?*** It is not a latch. Each
+   kind of failure is cleared by the success that actually cures it — a successful open clears an
+   open failure, a successful write clears a write failure. That requires the two to be
+   distinguishable inside `AuditHealth`; today they are not.
+2. **`failure_count` and `last_failure` are session history and are never cleared within a
+   session** — not by a successful open, and not by `clear_degraded()`, which currently zeroes them
+   and silently discards the same history on the recovery path.
+3. **The board renders them as two independent lines**: a present-tense line only while `status` is
+   `Degraded`, and a history line whenever `failure_count > 0` **even after capability returns**,
+   naming that actions this session went unrecorded.
+
+Rule 3 is what makes rule 1 safe. Without it, clearing `status` on success would hide exactly the
+fact this RFC exists to surface — an action that was never recorded. **Capability returning is not
+the record healing.**
+
 ## §4 A record about recovery is still a record, and it is written to a store that just failed
 
 D1 and D2 both write an `AuditStoreRecovery` record into a store that was, moments earlier,
