@@ -194,23 +194,34 @@ Everything above is **SC 1.4.3 (Contrast Minimum)** — a ratio between two colo
 of information?* A pair can pass 1.4.3 at 7:1 and still fail 1.4.1, because a perfectly legible
 amber tells a person who cannot distinguish it from green nothing at all.
 
-**Checked 2026-09-02: tekstide passes 1.4.1 by construction, and the reason is worth keeping.**
-`Theme` exposes no semantic colour roles — no `warning()`, `danger()`, `success()`, no per-intent
-family. Only structural ones (`background`, `foreground`, `accent`, `border_default`,
-`border_focused`, `surface_elevated`, `scrim`). With no intent colour to vary, no state can be
-encoded in colour alone. Every state this product shows is literal text: `Restricted`, `Calm`,
-`9 blocked automations`, `Audit: not recording. Recent actions may be missing from the record.`
+**This project already forbids it, and has since RFC-015.** `NFR-UX-002` — "status must never rely
+on colour alone" — is standing constraint 4 of the delivery plan, binding on every surface, with
+`[focused]`'s text prefix alongside a border as the reference pattern. It is cited in RFC-014, -015,
+-017, -018 and -019. Recorded here only because a reader arriving at *this* document is thinking
+about colour measurement, and 1.4.3 is the criterion this gate enforces while 1.4.1 is the one it
+does not.
 
-**So this is a constraint, not just an observation.** The day someone adds `Theme::warning()` — a
-plausible RFC-023 alternate-palette move — 1.4.1 becomes reachable, and the derived-pair gate above
-will not catch it, because the new pair will measure fine. **A semantic colour role must arrive
-with a non-colour channel in the same change** (text, prefix, icon, or shape), or it must not
-arrive.
+**What the derived-pair gate does and does not do for it.** The gate proves every pair is
+*legible*. It cannot prove any pair is *not the only channel* — that is a claim about what else is
+rendered, which a colour-pair enumeration cannot see. `NFR-UX-002` is instead held by per-surface
+tests where a surface encodes status: `session_bar.rs` asserts every slot and every status resolves
+to its own distinct text, and the explorer asserts symlink and access states render on distinct
+lines. Those are real gates, but they are local — a *new* surface inherits the rule by review, not
+by a test that fails.
 
-This came from the snora team's 0.41.1 letter withdrawing their own 1.4.1 conformance claim: their
+**The structural reason the exposure is currently small**, worth keeping deliberately: `Theme`
+exposes no semantic colour roles at all — no `warning()`, `danger()`, `success()`, no per-intent
+family. Only `background`, `foreground`, `accent`, `border_default`, `border_focused`,
+`surface_elevated`, `scrim`. With no intent colour to vary, a surface has nothing to encode status
+in *except* text. The day someone adds `Theme::warning()` — a plausible RFC-023 alternate-palette
+move — that protection is gone, and neither the derived-pair gate nor the local surface tests will
+notice, because the new pair will measure fine and the existing surfaces will not have changed.
+**A semantic colour role must arrive with a non-colour channel in the same change.**
+
+Prompted by the snora team's 0.41.1 letter withdrawing their own 1.4.1 conformance claim: their
 `toast_style` and `design::notice` varied only background and accent by tone — identical text, no
-icon, no prefix. We do not depend on snora and were not affected, and no reply was sent. The
-*finding* is worth more than the compatibility question, which is why it is recorded here.
+icon, no prefix. We do not depend on snora and were unaffected; no reply was sent. The finding was
+worth more than the compatibility question, which is why it is recorded here.
 
 ## Not in scope
 
