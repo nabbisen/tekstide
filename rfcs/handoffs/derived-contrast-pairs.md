@@ -187,6 +187,31 @@ from outside snora.
 of the same crate. The destructure will work as described. Recorded so that if `E0638` ever
 does appear, it reads as a boundary rather than a mistake.
 
+## The sibling criterion this gate does not cover: SC 1.4.1, Use of Colour
+
+Everything above is **SC 1.4.3 (Contrast Minimum)** — a ratio between two colours. Its sibling,
+**SC 1.4.1 (Use of Colour)**, is a different question: *is colour the only channel carrying a piece
+of information?* A pair can pass 1.4.3 at 7:1 and still fail 1.4.1, because a perfectly legible
+amber tells a person who cannot distinguish it from green nothing at all.
+
+**Checked 2026-09-02: tekstide passes 1.4.1 by construction, and the reason is worth keeping.**
+`Theme` exposes no semantic colour roles — no `warning()`, `danger()`, `success()`, no per-intent
+family. Only structural ones (`background`, `foreground`, `accent`, `border_default`,
+`border_focused`, `surface_elevated`, `scrim`). With no intent colour to vary, no state can be
+encoded in colour alone. Every state this product shows is literal text: `Restricted`, `Calm`,
+`9 blocked automations`, `Audit: not recording. Recent actions may be missing from the record.`
+
+**So this is a constraint, not just an observation.** The day someone adds `Theme::warning()` — a
+plausible RFC-023 alternate-palette move — 1.4.1 becomes reachable, and the derived-pair gate above
+will not catch it, because the new pair will measure fine. **A semantic colour role must arrive
+with a non-colour channel in the same change** (text, prefix, icon, or shape), or it must not
+arrive.
+
+This came from the snora team's 0.41.1 letter withdrawing their own 1.4.1 conformance claim: their
+`toast_style` and `design::notice` varied only background and accent by tone — identical text, no
+icon, no prefix. We do not depend on snora and were not affected, and no reply was sent. The
+*finding* is worth more than the compatibility question, which is why it is recorded here.
+
 ## Not in scope
 
 - Any dependency on `snora`. Evaluated and declined twice; see `future-work.md`.
