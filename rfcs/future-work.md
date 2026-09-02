@@ -243,6 +243,33 @@ Text contrast is excellent — comfortably past AAA. **`border_default` fails WC
 
 **What would reopen the dependency question**: snora reaching 1.0 (churn stops, and cargo compatibility stops breaking every minor), or this project genuinely needing a full design system — light/dark/high-contrast across many surfaces, with spacing and radius scales — rather than the ideas above.
 
+### Sent to snora 2026-09-02, replying to their 0.41.0 → 0.42.0 letter to all app teams
+
+Their letter withdrew a WCAG **1.4.1** conformance claim (their prefab toasts and notices varied
+only background and accent by tone — identical text, no icon, no prefix), announced overlay
+pointer-containment and toast-contrast changes, and dropped `iced`'s `canvas`/`svg` from their
+transitive features.
+
+**We were unaffected on every item** — no snora dependency, no prefab overlays or toasts, no visual
+baselines, and we declare `iced`'s features ourselves (`tokio`, `advanced`; neither `canvas` nor
+`svg`). Their two questions were answered: we do not cite the withdrawn 1.4.1 claim anywhere, and we
+hold no toast baselines. We do reference their focus-ring documentation, which the withdrawal does
+not touch.
+
+**We told them they can drop us from compatibility letters.** They wrote to "every team using
+snora" and stated they do not track versions; we are on that list by accident. If their
+compatibility letters stop arriving, that is the expected result and not a gap. The design
+correspondence is explicitly *not* closed by this — the asymmetric arrangement of 2026-08-21 stands.
+
+**What we sent back, and why it was worth a relay.** Checking their finding against our own surfaces
+found us clean, but not for the reason first assumed. Our derived-pair gate enumerates every theme
+colour pair from an exhaustive destructure so no role can be added unmeasured — and it measures
+**1.4.3** only. Whether a pair is the *only* channel is a claim about what else is rendered, which no
+colour-pair enumeration can reach: **our gate would have passed their toasts at every intent.** What
+actually protected us is that `Theme` exposes no semantic colour roles for a surface to misuse — a
+protection their intent palette never afforded them, which is plausibly why the claim survived as
+long as it did. Recorded in full at `handoffs/derived-contrast-pairs.md`.
+
 ### snora replied 2026-08-18 (their 0.34.0/0.35.0). Two corrections to the record above, both mine.
 
 **Correction 1 — the stability statement I asked for already existed, and I missed it.** I wrote that a statement scoped to `snora-design` *"would change our calculus more than any feature would"*, having been asked to examine the repository entirely. It was there: `docs/src/contributing/api-governance.md`'s **additive-only covenant** (RFC-036, closed at v0.25 — six minors before the version I reviewed) freezes the whole `snora-design` token surface against removal, rename or retype, and names `relative_luminance`, `contrast_ratio` and `composite_over` individually. Verified against the 0.33.1 tree, not their reply. `contributing/` holds 17 files; I read four and grepped others, and the answer was in one I never opened.
