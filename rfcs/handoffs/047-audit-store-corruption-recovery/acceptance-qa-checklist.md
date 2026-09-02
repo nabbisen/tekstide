@@ -115,6 +115,13 @@ created: "2026-08-28"
 
 ## The outcome this slice must not reach
 
+- [ ] **PR-047-D is done.** `AuditHealth::status` is not a latch: each kind of failure is cleared
+      by the success that cures it, open and write failures are distinguishable, `failure_count`/
+      `last_failure` survive as session history, and the board renders present-tense and history as
+      independent lines (§3.2). **Ablation:** a transient `record_failure` followed by a successful
+      open must leave the board showing no present-tense "not recording" line, and must still show
+      the history line — both directions checked separately, not only in combination.
+
 - [ ] **PR-047-C is done.** D1–D3 are calls to functions that already exist and will feel like
       completion. A slice that lands them and leaves the confirmations unchanged has fixed the
       plumbing and left the promise.
