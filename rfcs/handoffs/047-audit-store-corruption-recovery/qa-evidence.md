@@ -536,3 +536,33 @@ shown; deleted after inspection per this project's own screenshot-retention disc
 inconclusive captures).
 
 Gate unchanged -- no code or test changed by this attempt.
+
+## PR-047-C — response 362 required follow-up (R1, attempt 5)
+
+Response 362 identified `123456789` as informative rather than noise: a fixed nine-digit string
+appearing identically across independent fresh launches fits a client decoding raw keycodes under
+the wrong keymap before `wtype`'s own temporary keymap is adopted (consecutive slots landing on the
+number row, `1 2 3 4 5 6 7 8 9 0`), though the exact string doesn't fully match that theory's own
+prediction for `PROBE-PLAIN`'s length. The reviewer's own control on the same commit showed
+`wtype "ZZZ"` landing as `ZZZ`. Prescribed one discriminating command -- `wtype "ZZZ"` -- with three
+named outcomes (lands correctly; a single repeated digit, confirming keymap-slot substitution;
+`123456789` again, falsifying both hypotheses).
+
+**Attempt 5, run exactly as prescribed.** Fresh `mktemp -d` `XDG_STATE_HOME`, spawned via
+`niri msg action spawn-sh`, empty board, focus confirmed on the new window beforehand:
+
+```
+wtype "ZZZ"   -> path field: empty. Not "ZZZ", not a repeated digit, not "123456789".
+```
+
+**A fourth outcome, not one of the three named.** Tried the reviewer's own suggested mitigation for
+the keymap-timing case next, in case the field being empty was the same underlying problem in a more
+severe form (events dropped entirely rather than merely misdecoded): `wtype -s 200 "ZZZ"` against
+the same window. Also empty -- no visible change at all.
+
+Not guessing further at what a fourth, unpredicted outcome means. Reporting the literal result
+rather than fitting it to either standing hypothesis; see review request 363.
+
+No screenshots committed or retained (empty-board fixture only; deleted after inspection).
+
+Gate unchanged -- no code or test changed by this attempt.

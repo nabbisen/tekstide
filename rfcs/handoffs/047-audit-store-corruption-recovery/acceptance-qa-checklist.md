@@ -108,18 +108,16 @@ created: "2026-08-28"
 
 - [x] Against a **`mktemp -d` fixture with a fresh `XDG_STATE_HOME`**, using RFC-036 PR-036-C's own
       corruption method.
-- [ ] **Still not captured, after four separate attempts** (2026-09-05, response 361 required
-      attempt 4). The reviewer reproduced `Ctrl+Alt+B` working on this exact commit and diagnosed
-      attempts 2/3's own gap: focus verification is not a positive control. Attempt 4 sent plain
-      text and the chord in the same run, exactly as prescribed — **neither landed**, which the
-      reviewer's own framework calls "your input path, not the app": `wtype "PROBE-PLAIN"` produced
-      an unrelated `123456789` in the path field instead, and the following chord changed nothing.
-      That same exact string appeared, independently, in an earlier attempt against a different
-      fresh window — recorded in `qa-evidence.md` as an unexplained but reproducible fact, not yet
-      investigated further. The degraded state itself is confirmed live and genuine (the D3 board
-      line renders correctly against the real corrupted fixture); the D4 confirmations are proven
-      only by the ablated unit tests. Escalated again rather than retried a fifth time with no new
-      variable — see review request 362.
+- [ ] **Still not captured, after five separate attempts** (2026-09-05, response 362 required
+      attempt 5). Reviewer's discriminating test, `wtype "ZZZ"`, was meant to settle between "landing
+      correctly", "keymap-slot substitution" (a repeated digit), and "not from input at all"
+      (`123456789` again). The actual result was a **fourth outcome matching none of the three**: an
+      empty field. The reviewer's own timing mitigation (`wtype -s 200`) produced the same empty
+      result. Not one of the three predicted cases, and not resolved by the suggested fix — reported
+      literally rather than forced into either standing hypothesis. The degraded state itself is
+      confirmed live and genuine (the D3 board line renders correctly against the real corrupted
+      fixture); the D4 confirmations are proven only by the ablated unit tests. Escalated again — see
+      review request 363.
 - [x] Whether a real mouse click was sent is stated either way. Zero mouse clicks for EVIDENCE-1/2;
       the D4 capture attempt used zero mouse clicks too (none available) and produced no usable
       screenshot, as stated above.
