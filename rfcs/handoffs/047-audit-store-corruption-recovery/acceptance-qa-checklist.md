@@ -108,16 +108,18 @@ created: "2026-08-28"
 
 - [x] Against a **`mktemp -d` fixture with a fresh `XDG_STATE_HOME`**, using RFC-036 PR-036-C's own
       corruption method.
-- [ ] **Still not captured, after three separate attempts** (2026-09-05, response 360 required R1).
-      The reviewer's own positive-control fix (`ARCHITECTURE.md`, `09d5cff`) does resolve the
-      original ambiguity — the last attempt confirmed via `niri msg focused-window` both immediately
-      before and immediately after sending `Ctrl+Alt+B` that the Tekstide window genuinely held
-      focus throughout, ruling out focus contention specifically for that attempt — and the chord
-      still produced no visible effect. Full account, all three attempts, in `qa-evidence.md`'s
-      response-360 section. The degraded state itself is confirmed live and genuine (the D3 board
+- [ ] **Still not captured, after four separate attempts** (2026-09-05, response 361 required
+      attempt 4). The reviewer reproduced `Ctrl+Alt+B` working on this exact commit and diagnosed
+      attempts 2/3's own gap: focus verification is not a positive control. Attempt 4 sent plain
+      text and the chord in the same run, exactly as prescribed — **neither landed**, which the
+      reviewer's own framework calls "your input path, not the app": `wtype "PROBE-PLAIN"` produced
+      an unrelated `123456789` in the path field instead, and the following chord changed nothing.
+      That same exact string appeared, independently, in an earlier attempt against a different
+      fresh window — recorded in `qa-evidence.md` as an unexplained but reproducible fact, not yet
+      investigated further. The degraded state itself is confirmed live and genuine (the D3 board
       line renders correctly against the real corrupted fixture); the D4 confirmations are proven
-      only by the ablated unit tests. Escalated to the reviewer rather than retried a fourth time —
-      see review request 361.
+      only by the ablated unit tests. Escalated again rather than retried a fifth time with no new
+      variable — see review request 362.
 - [x] Whether a real mouse click was sent is stated either way. Zero mouse clicks for EVIDENCE-1/2;
       the D4 capture attempt used zero mouse clicks too (none available) and produced no usable
       screenshot, as stated above.

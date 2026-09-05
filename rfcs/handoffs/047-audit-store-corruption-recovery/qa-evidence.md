@@ -492,3 +492,47 @@ as an open item rather than a fourth blind retry; see review request 361.
 (4 tests): clean. Three consecutive full-workspace runs: **476 + 4 + 741, fully green** every
 time -- no flake this pass (test count unchanged; R2 strengthened two existing tests rather than
 adding new ones).
+
+## PR-047-C — response 361 required follow-up (R1, attempt 4)
+
+Response 361 reproduced `Ctrl+Alt+B` working against this exact commit, and diagnosed what attempts
+2/3 got wrong: focus verification is not a positive control, since it confirms which window the
+compositor considers active, not that a given `wtype` invocation actually reached it. Prescribed
+sending plain text and the chord **in the same attempt** and reporting both outcomes, since only
+that combination can distinguish "the chord doesn't work" from "no input reached the app at all."
+
+**Attempt 4, run exactly as prescribed.** Fresh `mktemp -d` `XDG_STATE_HOME`, spawned via
+`niri msg action spawn-sh`, empty board:
+
+```
+niri msg focused-window          -> Window ID 119, "Tekstide"
+wtype "PROBE-PLAIN"
+niri msg focused-window          -> Window ID 119, still
+                                  -> path field shows "123456789" -- not what was typed
+wtype -M ctrl -M alt b -m alt -m ctrl
+niri msg focused-window          -> Window ID 119, still
+                                  -> field unchanged ("123456789"); folder browser did not open
+```
+
+**Neither input landed.** Per response 361's own framework, this is case 2 -- "your input path, not
+the app." Something in how this session's `wtype` reaches the compositor is the variable now, not
+Tekstide's own keybinding handling.
+
+**One further, unexplained detail worth recording rather than omitting**: the string `123456789`
+that appeared in the path field instead of `PROBE-PLAIN` is not new to this attempt -- the exact
+same nine-digit string appeared, verbatim, in an earlier attempt this same day against a completely
+independent fresh window, fresh `mktemp -d` state directory, and different window ID. Two
+independent fresh launches producing the identical, specific, non-random string in the same field
+is not consistent with ordinary focus contention (a person retyping the same nine digits twice, at
+exactly the moments this session happened to probe, on both occasions) -- it looks like a fixed
+value from some other, unidentified source landing in this field, or a client-side artifact this
+session cannot explain from the outside. Not investigated further per this project's own "avoid
+rabbit holes" discipline and the explicit request to report rather than retry a fourth time without
+a new variable; recorded here as a fact for whoever investigates the "which seat/session" question
+response 361 named as the next real variable.
+
+No screenshots committed or retained from this attempt (empty-board fixture only, no real paths
+shown; deleted after inspection per this project's own screenshot-retention discipline for
+inconclusive captures).
+
+Gate unchanged -- no code or test changed by this attempt.
