@@ -95,9 +95,12 @@ created: "2026-08-28"
       still-live "Launch AI CLI Run" button in `trust_settings_view` (no confirmation modal exists
       for this control, unlike trust grant).
 - [x] The wording does not imply the action is unsafe, does not imply the user can fix it from
-      there, and does not appear when healthy. `trust_grant_dialog_degraded_notice_does_not_imply_
-      unsafe_or_fixable` / `agent_run_launch_audit_notice_does_not_imply_unsafe_or_fixable`, checked
-      against the real catalog strings.
+      there, and does not appear when healthy, **and states the one fact D4 requires** (added
+      2026-09-05, response 360 required R2 -- the original assertions were negative-only and let
+      `"Audit note."` pass all six PR-047-C tests, confirmed by reproducing exactly that before
+      fixing it). `trust_grant_dialog_degraded_notice_does_not_imply_unsafe_or_fixable` /
+      `agent_run_launch_audit_notice_does_not_imply_unsafe_or_fixable`, checked against the real
+      catalog strings, now asserting both the required content and the absence of the wrong content.
 - [x] Present-when-degraded and absent-when-healthy are **separately** ablated. Four tests (one pair
       per surface), each direction ablated independently and run by me — see `qa-evidence.md`.
 
@@ -105,14 +108,16 @@ created: "2026-08-28"
 
 - [x] Against a **`mktemp -d` fixture with a fresh `XDG_STATE_HOME`**, using RFC-036 PR-036-C's own
       corruption method.
-- [ ] **Not captured.** Blocked by the synthetic-input environment, not by the feature: `wtype`
-      (this project's own documented tool) delivers correctly to a freshly spawned native Wayland
-      client in this session (confirmed against `alacritty`) but no keybinding reached the Tekstide
-      window across repeated attempts, including after explicit refocus and after relaunching
-      through `niri msg action spawn-sh`; no mouse-input tool is available either. Full account in
-      `qa-evidence.md`'s PR-047-C section. The degraded state itself is confirmed live and genuine
-      (the D3 board line renders correctly against the real corrupted fixture); the D4 confirmations
-      are proven only by the ablated unit tests.
+- [ ] **Still not captured, after three separate attempts** (2026-09-05, response 360 required R1).
+      The reviewer's own positive-control fix (`ARCHITECTURE.md`, `09d5cff`) does resolve the
+      original ambiguity — the last attempt confirmed via `niri msg focused-window` both immediately
+      before and immediately after sending `Ctrl+Alt+B` that the Tekstide window genuinely held
+      focus throughout, ruling out focus contention specifically for that attempt — and the chord
+      still produced no visible effect. Full account, all three attempts, in `qa-evidence.md`'s
+      response-360 section. The degraded state itself is confirmed live and genuine (the D3 board
+      line renders correctly against the real corrupted fixture); the D4 confirmations are proven
+      only by the ablated unit tests. Escalated to the reviewer rather than retried a fourth time —
+      see review request 361.
 - [x] Whether a real mouse click was sent is stated either way. Zero mouse clicks for EVIDENCE-1/2;
       the D4 capture attempt used zero mouse clicks too (none available) and produced no usable
       screenshot, as stated above.

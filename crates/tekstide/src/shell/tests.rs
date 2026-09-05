@@ -4290,7 +4290,11 @@ fn trust_grant_dialog_body_omits_the_degraded_notice_when_healthy() {
 /// §5 of the risk document, checked against the actual catalog string
 /// rather than trusted by inspection: must not read as a safety warning
 /// (the store being degraded does not make the grant more dangerous)
-/// and must not suggest the user can fix it from this dialog.
+/// and must not suggest the user can fix it from this dialog. **Response
+/// 360 required R2**: negative assertions alone let `"Audit note."` pass
+/// every check here while saying nothing D4 requires -- this is the
+/// sentence shown before an irreversible, unrecorded click, so the test
+/// must also assert what it *does* say, not only what it avoids saying.
 #[test]
 fn trust_grant_dialog_degraded_notice_does_not_imply_unsafe_or_fixable() {
     let catalog = state_with(ApplicationShell::new()).catalog;
@@ -4299,6 +4303,11 @@ fn trust_grant_dialog_degraded_notice_does_not_imply_unsafe_or_fixable() {
         .get("trust-grant-dialog-degraded-notice")
         .to_lowercase();
 
+    assert!(
+        notice.contains("will not be recorded") && notice.contains("degraded"),
+        "must actually state the one fact D4 requires -- that this action will not be recorded \
+         while the audit store is degraded -- not merely avoid the wrong words: {notice:?}"
+    );
     assert!(
         !notice.contains("unsafe")
             && !notice.contains("danger")
@@ -4354,6 +4363,9 @@ fn agent_run_launch_audit_notice_absent_when_healthy() {
 /// §5 of the risk document, for the agent-launch wording -- same
 /// requirement as the trust-grant notice above, checked independently
 /// since the two are separate catalog strings that could drift apart.
+/// **Response 360 required R2**: same positive-content requirement as
+/// the trust-grant test above -- negative assertions alone would let
+/// `"Audit note."` pass here too.
 #[test]
 fn agent_run_launch_audit_notice_does_not_imply_unsafe_or_fixable() {
     let catalog = state_with(ApplicationShell::new()).catalog;
@@ -4362,6 +4374,11 @@ fn agent_run_launch_audit_notice_does_not_imply_unsafe_or_fixable() {
         .get("trust-settings-launch-agent-run-degraded-notice")
         .to_lowercase();
 
+    assert!(
+        notice.contains("will not be recorded") && notice.contains("degraded"),
+        "must actually state the one fact D4 requires -- that this action will not be recorded \
+         while the audit store is degraded -- not merely avoid the wrong words: {notice:?}"
+    );
     assert!(
         !notice.contains("unsafe")
             && !notice.contains("danger")

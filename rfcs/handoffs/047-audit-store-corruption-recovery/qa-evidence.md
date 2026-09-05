@@ -439,3 +439,56 @@ it plainly.
 `fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
 (4 tests): clean. Three consecutive full-workspace runs: **476 + 4 + 741, fully green** every
 time -- no flake this pass.
+
+## PR-047-C — response 360 required follow-up (R1, R2)
+
+### R2: the wording tests forbid the wrong words but did not require the right meaning, fixed
+
+`..._does_not_imply_unsafe_or_fixable` was negative-only -- the shows/omits pair is not vacuous (a
+degenerate string breaks "omits"), but nothing asserted the notice actually **says** the action will
+not be recorded. Confirmed exactly as described: swapped `trust-grant-dialog-degraded-notice` to
+`"Audit note."` and all six PR-047-C tests stayed green.
+
+Fixed by adding a positive assertion to both wording tests --
+`notice.contains("will not be recorded") && notice.contains("degraded")` -- before the existing
+negative checks. Re-ran the same ablation: `"Audit note."` now fails
+`trust_grant_dialog_degraded_notice_does_not_imply_unsafe_or_fixable` at the new assertion, with the
+two presence/absence tests (which only check whether the string appears at all, not its content)
+unaffected, as expected. Restored the real string; all tests pass.
+
+### R1: three attempts at the live capture, all with the same negative result
+
+Re-verified against the release binary before attempting anything, per `ARCHITECTURE.md`'s updated
+guidance (`09d5cff`): confirmed `wtype "PROBE-PLAIN"` and `wtype -M ctrl -M alt b -m alt -m ctrl`
+both work against a freshly spawned window in this session in principle -- but every attempt to
+reproduce that specifically against Tekstide failed the same way.
+
+**Attempt 1** repeated the original method (spawn via `niri msg action spawn-sh`, fresh `mktemp -d`
+`XDG_STATE_HOME`, plain-text probe first). The path field showed unrelated leftover text
+(`123456789`) that was never typed by this session -- inconclusive on its own, but enough to stop
+and flag it rather than proceed, since it meant keyboard input was landing somewhere unaccounted
+for.
+
+**Attempt 2**, after checking `niri msg focused-window` immediately beforehand and finding the
+user's own editor focused (not the test window) -- explaining attempt 1's stray input as reasonable
+focus contention on a shared desktop, not an environment defect. Relaunched, confirmed via
+`niri msg focused-window` that the fresh Tekstide window (not the editor) held focus at the moment
+of sending, then sent `Ctrl+Alt+B`. No folder browser opened; screen unchanged.
+
+**Attempt 3**, same as attempt 2 but checking focus **both immediately before and immediately
+after** sending the chord, closing the window in which the result could be explained by a focus
+change mid-send. Both checks confirmed the Tekstide window held focus throughout. `Ctrl+Alt+B` still
+produced no visible change.
+
+**Conclusion**: this rules out focus contention as the explanation for at least the last attempt.
+The `wtype` virtual-keyboard input is not reaching this specific application in this environment for
+a reason not yet identified -- confirmed under the exact controlled conditions the reviewer's own
+positive-control fix asks for, not merely repeating the original untested assumption. Leaving this
+as an open item rather than a fourth blind retry; see review request 361.
+
+### Gate (unchanged by R2's test-only fix)
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
+(4 tests): clean. Three consecutive full-workspace runs: **476 + 4 + 741, fully green** every
+time -- no flake this pass (test count unchanged; R2 strengthened two existing tests rather than
+adding new ones).
