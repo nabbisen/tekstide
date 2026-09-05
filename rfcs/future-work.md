@@ -243,6 +243,27 @@ Text contrast is excellent — comfortably past AAA. **`border_default` fails WC
 
 **What would reopen the dependency question**: snora reaching 1.0 (churn stops, and cargo compatibility stops breaking every minor), or this project genuinely needing a full design system — light/dark/high-contrast across many surfaces, with spacing and radius scales — rather than the ideas above.
 
+### Sent to snora 2026-09-05, replying to their 0.43.0 / 0.44.0 letter
+
+Neither release affects anyone's build. The letter carried a corrected statement (their prefab
+`toast`/`notice`/`progress` distinguish variants **by colour alone** — now asserted by a test rather
+than prose, replacing the claim they withdrew in 0.41.1) and two direct questions to consumers:
+whether they should carry the non-colour channel themselves, and whether anyone uses
+`snora_design::Emphasis` / `Size` before removing them at 0.45.0.
+
+**Both answers were no, and we said explicitly that neither is demand signal** — we are not a
+consumer, which is a different row in their register from a consumer who happens not to use a
+feature. Only the second kind is evidence about demand, and they are building that register from
+these replies while stating that silence is not evidence. `Emphasis`/`Size`: grepped, referenced
+nowhere.
+
+**They credited tekstide's 1.4.1 observation as the RFC behind their item 1** — that a contrast gate
+is structurally blind to `1.4.1`, because whether a colour pair is the *only* channel is a claim
+about what else is rendered. Worth recording the asymmetry it exposed rather than the credit: **they
+turned it into a test; ours is structural.** `Theme` having no semantic colour roles protects us
+only for as long as nobody adds one, and nothing fails when someone does (see
+`handoffs/derived-contrast-pairs.md`). Their guard is now the stronger of the two.
+
 ### Sent to snora 2026-09-02, replying to their 0.41.0 → 0.42.0 letter to all app teams
 
 Their letter withdrew a WCAG **1.4.1** conformance claim (their prefab toasts and notices varied
