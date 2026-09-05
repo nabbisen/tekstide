@@ -177,6 +177,26 @@ RFC-015's pack, because closed evidence documents are not edited to match a late
 a convention nobody can execute is worse than none, since it costs the next slice the same
 hour to rediscover.
 
+**Always send a positive control first, and never conclude "input does not land" from a chord
+alone.** Re-verified 2026-09-05, after PR-047-C reported that `wtype` reached a freshly spawned
+`alacritty` but that *"every keybinding sent to the Tekstide window produced no visible change"*
+across `Ctrl+Alt+U/P/O/T`, repeated attempts, explicit `focus-window`, and both spawn methods —
+and concluded live GUI evidence was impossible in this environment. **It is not.** Against the
+release binary in the same session: `wtype "PROBE-PLAIN"` put the text straight into the project
+path field, and `wtype -M ctrl -M alt b -m alt -m ctrl` opened the folder browser. Both work.
+
+The reason a chord-only probe misleads is that **a binding that lands and correctly does nothing is
+indistinguishable from input that never arrived.** `Ctrl+Alt+P` selects the Project Board — already
+the active route on launch, so it renders no change. `Ctrl+Alt+O` needs a second project. A probe
+built only from those two cannot tell "no input" from "no-op", and the natural reading is the wrong
+one. `wtype "<text>"` into any focused field, or `Ctrl+Alt+B` (the folder browser, which opens from
+the empty board), are unambiguous — one of them goes first, every time.
+
+Screenshots: `niri msg action screenshot-window --id <id>` returns rc=0 but may write no file, going
+to the clipboard instead. `wl-paste --type image/png > out.png` retrieves it. A capture taken this
+way renders the real `$HOME` in the folder browser, so it stays in `.git-exclude/` — see the
+committed-screenshot rule above.
+
 **Enumeration tests: pick the unit that matches the property.** A source-scanning test that
 guards "only X may do Y" comes in two shapes, and choosing wrongly silently weakens it.
 
