@@ -698,3 +698,21 @@ invocations rather than a new cause — consistent with this document's own prio
 its recorded rates were measured "incidentally, across ordinary development activity." Not treated
 as a new finding; each recurrence is dated and message-captured per this document's own standing
 rule, and none touches code this slice changed.
+
+## Recurrence, 2026-09-05 — PR-047-C response 361's review gate (reviewer's run)
+
+`approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` failed once,
+in run 2 of a three-run full-workspace gate. Row 5's recurring intermittent, unchanged in shape and
+consistent with its existing low rate.
+
+**Two caveats specific to this observation, recorded so it is not read as stronger evidence than it
+is.** First, that same gate's run 3 also reported a failure —
+`shell::tests::trust_grant_dialog_degraded_notice_does_not_imply_unsafe_or_fixable` — which was
+**not a flake and not a defect**: the reviewer was running an `en.ftl` ablation against the same
+working tree while that background gate was compiling, so run 3 built against a deliberately
+corrupted catalog string. A mutating ablation and a background gate must not share a working tree;
+the gate result is void, not merely noisy.
+
+Second, the clean re-run immediately afterwards (tree untouched, nothing else running) was **476 + 4
++ 741 green three times**, so this row records the `is_still_answerable` occurrence only, and the
+release-relevant gate for PR-047-C is the clean one.
