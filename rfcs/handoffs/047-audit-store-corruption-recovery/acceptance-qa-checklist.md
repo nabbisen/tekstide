@@ -108,16 +108,22 @@ created: "2026-08-28"
 
 - [x] Against a **`mktemp -d` fixture with a fresh `XDG_STATE_HOME`**, using RFC-036 PR-036-C's own
       corruption method.
-- [ ] **Still not captured, after five separate attempts** (2026-09-05, response 362 required
-      attempt 5). Reviewer's discriminating test, `wtype "ZZZ"`, was meant to settle between "landing
-      correctly", "keymap-slot substitution" (a repeated digit), and "not from input at all"
-      (`123456789` again). The actual result was a **fourth outcome matching none of the three**: an
-      empty field. The reviewer's own timing mitigation (`wtype -s 200`) produced the same empty
-      result. Not one of the three predicted cases, and not resolved by the suggested fix — reported
-      literally rather than forced into either standing hypothesis. The degraded state itself is
-      confirmed live and genuine (the D3 board line renders correctly against the real corrupted
-      fixture); the D4 confirmations are proven only by the ablated unit tests. Escalated again — see
-      review request 363.
+- [x] **Not captured — closed as a documented, investigated gap, per the reviewer's own bound**
+      (2026-09-06, response 363, attempt 6/final). Reviewer identified the real remaining doubt: the
+      screenshot pipeline goes through a clipboard (`niri msg action screenshot-window` returns
+      `rc=0` while writing nothing), and no prior attempt had verified it returns a *fresh* frame
+      rather than a stale one. Verified in order: (1) the clipboard does receive a real capture;
+      (2) two captures around `wtype "ZZZ"` on the same window are byte-identical, matching the
+      reviewer's own "stale" outcome; (3) — going one step further — two captures around a real,
+      compositor-driven change (`fullscreen-window`, independent of `wtype`) **do differ**, proving
+      the pipeline is not globally stuck; (4) re-running the actual D4 capture (corrupted-audit
+      fixture, `Ctrl+Alt+U` then `Ctrl+Alt+T`, both large enough to be unmissable if they landed)
+      against this now-proven-live pipeline still shows **no difference at all**. The stale-capture
+      doubt is closed in the direction that confirms five attempts of prior readings, not the
+      direction that overturns them. Per the reviewer's own explicit bound ("the next request either
+      carries the capture or records option 3 as decided"): **option 3, decided.** D4 is accepted on
+      the ablated unit-test evidence in this handoff; live GUI capture is a documented, thoroughly
+      investigated, not-resolved gap, not a silently dropped requirement.
 - [x] Whether a real mouse click was sent is stated either way. Zero mouse clicks for EVIDENCE-1/2;
       the D4 capture attempt used zero mouse clicks too (none available) and produced no usable
       screenshot, as stated above.

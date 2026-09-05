@@ -566,3 +566,52 @@ rather than fitting it to either standing hypothesis; see review request 363.
 No screenshots committed or retained (empty-board fixture only; deleted after inspection).
 
 Gate unchanged -- no code or test changed by this attempt.
+
+## PR-047-C — response 363 required follow-up (R1, attempt 6, final)
+
+Response 363 identified the real gap: every attempt 1-5 assumed `niri msg action screenshot-window`
++ `wl-paste` returns the *current* frame, and that was never verified. `screenshot-window` returns
+`rc=0` while writing nothing -- the frame reaches the clipboard, and a stale clipboard read would
+explain every anomaly seen so far (`123456789` identical across independent windows; `empty` at
+attempt 5 unmoved by `-s 200`) without implicating `wtype` at all. Prescribed two checks: does the
+clipboard receive a capture at all, and do two captures taken around a real change actually differ.
+
+**Check 1 (clipboard receives a capture):** `wl-copy --clear`, `screenshot-window -d true`,
+`wl-paste` -- a real, non-empty PNG (41697 bytes) came back. Confirmed.
+
+**Check 2 (do two captures differ around a change), run exactly as prescribed:** capture, `wtype
+"ZZZ"`, capture again. **Identical** (`cmp` exit 0, both 41697 bytes) -- matching the reviewer's own
+"stale capture" outcome exactly.
+
+**Went one step further before accepting that conclusion**, since accepting it meant declaring five
+rounds of negative evidence artifacts of measurement rather than fact, and that deserved its own
+check: is the capture pipeline ever capable of showing a real difference for this window, or is it
+globally stuck? Captured, then triggered a real, compositor-driven, wtype-independent change
+(`niri msg action fullscreen-window --id <id>`), captured again. **These two differed** (different
+byte count, `cmp` found the first differing byte at offset 19). So the pipeline is not globally
+stuck -- it picks up a real change when the compositor itself causes one.
+
+**Then ran the actual, real D4 capture attempt against this proven-live pipeline.** Fresh corrupted-
+audit fixture (EVIDENCE-2's method, `Degraded` confirmed via the D3 board line rendering correctly),
+capture, `Ctrl+Alt+U` (Trust Settings -- would change the whole route and layout), capture again:
+**identical.** Repeated with `Ctrl+Alt+T` (launch terminal -- an even larger layout change, a new
+pane): **also identical.**
+
+**Conclusion.** The measurement is proven live (the fullscreen test differs); the same measurement,
+around two keybindings each large enough to be unmissable if they landed, shows no difference at
+all. This is no longer explainable as a stale-capture artifact -- the one remaining doubt response
+363 raised is now closed, in the direction that confirms rather than overturns five attempts' worth
+of readings. The input is not reaching this application's keybinding handling in this environment,
+under the exact verification response 363 asked for.
+
+Six attempts, the reviewer's own three input-side hypotheses and one measurement-side hypothesis all
+tested and none holding, is where this closes per the reviewer's own explicit bound ("the next
+request either carries the capture or records option 3 as decided"). Recording option 3: D4 is
+accepted on the ablated unit-test evidence in this handoff (present/absent, wording-content, all
+independently ablated in both directions), with live GUI capture left as a documented, investigated,
+and not-resolved gap rather than a silently dropped requirement.
+
+No screenshots committed or retained from this attempt (fixture-only paths, no real `$HOME`;
+deleted after inspection).
+
+Gate unchanged -- no code or test changed by this attempt.
