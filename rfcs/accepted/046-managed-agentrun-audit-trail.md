@@ -1,6 +1,6 @@
 # RFC-046: Managed AgentRun Audit Trail
 
-Status: **Proposed 2026-09-06.** Reserved 2026-08-28 by RFC-036's triage, which found the defect by
+Status: **Accepted by the human owner 2026-09-06.** **D1–D5 decided by the architect on acceptance** — see "Decided on acceptance" at the end, which settles D4's actual name and adds D5, a boundary found while deciding. Proposed the same day. Reserved 2026-08-28 by RFC-036's triage, which found the defect by
 counting production callers rather than reading documentation. Authored after RFC-047 closed its
 last decision, because RFC-047 changed one of this RFC's answers before it was written — see D1.
 Target milestone: **M12**
@@ -133,8 +133,8 @@ terminating paths inventoried first. Reserve it; do not smuggle it in here.
 run.
 
 That mismatch is how a future reader concludes Supervised runs are unaudited and writes a second
-producer. **Decided: rename to match the guard** (`launch_audited_agent_run`, or equivalent), and
-keep the `Plain` rejection explicit and commented — Plain runs are the unsupervised passthrough and
+producer. **Decided: rename to `launch_audited_agent_run`** — settled on acceptance, not left as "or equivalent"; an implementer must not inherit a naming decision. Keep
+the `Plain` rejection explicit and commented — Plain runs are the unsupervised passthrough and
 deliberately out of scope.
 
 Naming is not cosmetic here: RFC-036 exists because a documented claim diverged from what the code
@@ -157,3 +157,44 @@ did, and this is the same divergence one layer down.
 - **This RFC gives the audit store its first mandatory-feeling producer on the hottest path.** RFC-047
   PR-047-D is landing changes to `AuditHealth` on that same path; sequence this after it, or the two
   slices will collide in `open_audit_store_recording_failure`'s callers.
+
+## Decided on acceptance (2026-09-06)
+
+### D5 — Record what the launch did. Do **not** add refusal records here.
+
+Found while deciding, by reading the production refusal path rather than the happy path.
+`attempt_agent_run_launch` can refuse for four reasons — `Validation`, `RunLimitExceeded`,
+`PlanTransition`, `Runtime` — and exactly **one** shape is audited today:
+`record_restricted_mode_blocked_if_applicable` records `WorkspaceDiscoveryBlocked`, the Restricted
+Mode case, and returns early for everything else.
+
+That asymmetry is correct and stays. **The distinction is whether a control refused, or a condition
+failed.**
+
+- **Restricted Mode blocking a launch is a security control doing its job**, and the record is the
+  evidence it did. Already recorded; unchanged by this RFC.
+- **`RunLimitExceeded` is a limit the user configured for themselves.** There is no third-party
+  accountability question in a user's own limit refusing the user's own action.
+- **`Validation` and `PlanTransition` are internal-state conditions**, not decisions about the user.
+  Recording them would fill the trail with events that carry no accountability meaning — RFC-034's
+  disclosure-density problem, moved into the audit store where it is harder to see.
+
+**So this RFC's boundary is: a launch that reaches the runtime gets `Authorized` → `Started` or
+`Failed`. A launch refused before that point adds no new record.** Named here rather than left for
+an implementer to infer from which branch happens to have a `record_*` call in it.
+
+If run-limit refusal should be recorded, that is a decision about RFC-023's resource limits and
+belongs with them, not smuggled in behind an audit-trail slice.
+
+### Reserved: RFC-048, AgentRun Termination Records
+
+D3 declines to record how a run *ends* and says the successor needs the three existing terminating
+paths inventoried first. **Number reserved now** — RFC-024 was authored just-in-time into a number
+the delivery plan had already reserved, and the reserved-numbers table exists because of it. A
+reservation is not a commitment to build.
+
+### Sequencing, restated
+
+**After RFC-047 PR-047-D.** Both change behaviour around `AuditHealth` on the same path, and
+PR-047-D redefines what `status()` means. Landing this first would mean writing the audited launch
+path against a definition about to change under it.
