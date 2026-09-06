@@ -101,6 +101,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 038 | [First-Run and Project Entry](./handoffs/038-first-run-and-project-entry/README.md) — **M12, first**; the product's missing door |
 | 024 | [Diff Preview Policy](./handoffs/024-diff-preview-policy/README.md) |
 | 043 | [Terminal Process Containment](./handoffs/043-terminal-process-containment/README.md) — **M12**; make closing a terminal mean what the dialog already says |
+| 046 | [Managed AgentRun Audit Trail](./handoffs/046-managed-agentrun-audit-trail/README.md) — **M12**; the launch that trust exists to control is unrecorded, and the producer that would record it encodes three decisions this product has since made differently |
 | 047 | [Audit Store Corruption Recovery](./handoffs/047-audit-store-corruption-recovery/README.md) — **M12**; connect four things that already exist, then answer the one that does not |
 | 036 | [Dormant Capability Closure](./handoffs/036-dormant-capability-closure/README.md) — **M12**; decide each orphan once, with evidence |
 | 044 | [Surface-Local Keyboard Affordances](./handoffs/044-surface-local-keyboard-affordances/README.md) — **M12**; two keyboard systems, one accountable |
