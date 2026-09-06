@@ -759,6 +759,20 @@ Status: active after `0.1.0`.
   corruption fixtures are a better `rusqlite` acceptance suite than anything we would write for the
   bump itself.
 
+  **A trap this slice can walk into, from arama via snora (2026-09-06).** A `cargo update` that makes
+  a lockfile **shrink** can re-resolve a transitive dependency *downward*. arama hit it upgrading
+  across snora 0.41→0.42: `gpu-allocator` pulled `windows` to 0.56 while `wgpu-hal` still required
+  0.58 — ten compile errors, **Windows only, invisible on Linux.** `cargo update -p gpu-allocator`
+  fixes it.
+
+  **We are exposed to the mechanism even though we are Linux-only.** `Cargo.lock` records every
+  platform, and ours carries `gpu-allocator 0.27.0` plus 29 `windows*` crates via `iced` → `wgpu`.
+  Our own CI compiles none of them, so a downward re-resolution introduced by the 63-update
+  `cargo update` above would be **completely silent here and would surface only at M14**, when
+  Windows support arrives and nobody is looking at a dependency bump from months earlier. Check the
+  lockfile diff for downgrades — not only additions — before accepting that update, and note that
+  "the tests passed" cannot speak for a platform we do not build.
+
   **`iced` needs nothing.** 0.14 is current; no newer major exists. We declare
   `features = ["tokio", "advanced"]` at the workspace root and use neither `canvas` nor `svg`, so
   the transitive-feature breakage in snora's 0.42.0 letter has no analogue here — and we do not
