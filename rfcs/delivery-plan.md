@@ -251,6 +251,48 @@ Response 115 Required A directed a full `Cc`+`Cf` category escaping implementati
 
 **A cycle may not consist entirely of headless work.** Headless parallel tracks exist to de-risk later milestones (ROADMAP §Parallel Tracks), not to become the only track. When a cycle's work is entirely unreachable by a user, either the release-bearing milestone gets capacity in the same cycle or the cadence commitment is explicitly suspended with the owner's agreement.
 
+### Cycle review: `0.16.0` → present, measured 2026-09-06
+
+24 commits, nine days, no release. **The longest gap since `0.11.0`** — the six releases from
+`0.11.0` to `0.16.0` ran at 1–3 day intervals. One RFC (047) accounts for the whole period.
+
+1. **Releasable-surface ratio: 5/24 (~21%).** Not the `0.3.0` failure mode — RFC-047 shipped real
+   user-visible behaviour (the board's degraded and recovery-disclosure lines, the two D4
+   confirmations, the recovery itself) plus the README logo fix. The other 19 are RFCs, risk
+   documents, checklists, correspondence records and the flake register. Acceptable for a cycle
+   carrying one security RFC; not acceptable twice in a row.
+2. **Milestone/version alignment: yes.** M12 bears `0.17.0` and RFC-047 is M12. This metric was the
+   one failing at `0.3.0`; it is clean now.
+3. **Review rounds per slice: 2.7 (8 requests / 3 slices), against a 1.6 baseline** — and the
+   criterion this metric carries **fails for the first time.** Metric 3 says extra rounds are not
+   waste *because each one found a real defect*. PR-047-A: 1 round. PR-047-B: 2 rounds, both
+   finding real defects (the dropped quarantine path, the untested branch). **PR-047-C: 5 rounds,
+   of which the last three found nothing** — attempts 4, 5 and 6 chased a live GUI capture that
+   ended in option 3, accepted on unit-test evidence. Three commits with zero product change.
+4. **Next-release contents named before the cycle: partly.** RFC-047 was scoped in advance;
+   `0.17.0`'s contents were never stated as a set, and PR-047-D was added mid-cycle by review.
+
+**The diagnosis is not "too slow".** It is that a single unreproducible evidence capture consumed
+four review rounds and roughly a third of the cycle, and **the reviewer never questioned the
+measurement instrument** — `screenshot-window` returns rc=0 while writing no file, the frame arrives
+via the clipboard, and whether that read was live went unchecked for three rounds while three
+successive input-side hypotheses were tested instead.
+
+### Standing rule: evidence capture is bounded
+
+**A live-evidence gap converts to a documented gap after three review rounds.** The slice proceeds
+on its ablated unit-test evidence, with the gap named in `qa-evidence.md` and the checklist box left
+unticked. Reopening it needs a new variable, not another attempt.
+
+**Before the second round, verify the instrument, not the subject.** If a capture or probe returns
+an unexpected result twice, the next test is whether the measurement is live — not a third
+hypothesis about the thing being measured. A discriminator is only as good as the instrument it is
+read through.
+
+This is not a rule against thoroughness: PR-047-B's two extra rounds each found a real defect and
+were worth every relay. It is a rule against *unbounded* thoroughness on a question that has stopped
+converging.
+
 ### Cycle review: `0.4.1` → present, measured 2026-08-08
 
 **Cadence is healthy. Composition has the same failure as the `0.3.0` cycle, for a different reason.**
