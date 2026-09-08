@@ -165,12 +165,42 @@ created: "2026-08-28"
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] **Accepted.** 2026-09-09, by the architect.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted on the evidence, ablations and gate runs reproduced independently by the reviewer at
+each of responses 357, 358, 359, 360, 361, 365 and 366 -- not on the implementer's report of
+them. Final gate re-run on the closed tree: 483 + 4 + 743, green three times.
+
+What this RFC actually delivered, against what it set out to do:
+
+- The defect it was written for is fixed. A corrupted audit store no longer fails silently: it
+  is detected, quarantined by rename rather than deleted, recovered, and the quarantine path is
+  named on screen. RFC-036 PR-036-C reproduced this same corruption against the release binary
+  and the interface reported "Calm".
+- D4 held its line. A degraded audit store does not refuse an agent run; it says, before the
+  click, that the run will not be recorded. Restricted Mode refuses what it cannot bound; an
+  unrecorded action is not that.
+
+Three things this RFC should be remembered for, none of them in its own D1-D4:
+
+1. PR-047-D was not planned. It was found in PR-047-B's review as a deeper instance of the
+   defect S3.1 had just fixed, and it was a real, reachable bug: a transient failure degraded a
+   session permanently while recording worked fine.
+2. The same class of defect recurred three times (S4.1) -- a sentence or number naming something
+   adjacent to what was measured. Every instance passed its tests, because each test asserted a
+   line was present, never that it was true. That is the lasting finding, and it is why S4.1 is
+   written as a rule rather than a war story.
+3. PR-047-C's live-capture evidence gap consumed four review rounds and was never resolved. The
+   cause was the reviewer testing three hypotheses about the input path without once checking
+   whether the measurement instrument was live. D4 is accepted on ablated unit tests, and the
+   delivery plan now bounds evidence capture at three rounds because of it.
+
+Reviewer error recorded rather than omitted: the PR-047-A checklist box contradicted the task
+breakdown and was mine; the S3/S4 collision that produced PR-047-B R1 was an unresolved gap in
+my own risk document; and the four-round capture chase above was mine to stop sooner.
 ```
