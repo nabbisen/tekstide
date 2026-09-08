@@ -100,6 +100,28 @@ Rule 3 is what makes rule 1 safe. Without it, clearing `status` on success would
 fact this RFC exists to surface — an action that was never recorded. **Capability returning is not
 the record healing.**
 
+### §4.1 Three times now: the sentence describes something adjacent to what was measured
+
+Added 2026-09-09, after the third instance. Each was found in review, none by a test:
+
+1. **PR-047-B** — a recovered store whose own record failed showed *"not recording"* and dropped the
+   quarantine path. The store was recording.
+2. **PR-047-C/D** — a transient open failure left the same line rendering for the rest of the
+   session. The store was recording.
+3. **PR-047-D** — `failure_count` counts *record writes*; the line says *actions*. Closing one
+   project with three terminals writes five best-effort records, so a degraded store yields
+   *"5 actions this session were not recorded"* for one action.
+
+**The shape is identical every time: a number or a sentence naming something near, but not equal to,
+the thing that was measured.** And every test passed, because each asserted the line was **present**
+under some condition — never that what it said was **true**.
+
+**So the rule for any new disclosure here: name the quantity you actually hold.** If the counter
+counts records, the sentence says records. If a claim needs a quantity the code does not have, either
+compute that quantity deliberately or weaken the sentence until it matches what is there. Rewording
+is cheap; a security surface that overstates is not, and a reader who catches it once discounts every
+other line on the same board.
+
 ## §4 A record about recovery is still a record, and it is written to a store that just failed
 
 D1 and D2 both write an `AuditStoreRecovery` record into a store that was, moments earlier,
