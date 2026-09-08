@@ -696,3 +696,34 @@ nothing about their rendered appearance changed here, only when each one is pres
 `fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
 (4 tests): clean. Three consecutive full-workspace runs: **482 + 4 + 743, fully green** every
 time -- no flake this pass (six new tests in `tekstide`, two new in `tekstide-core`).
+
+## PR-047-D — response 365 required follow-up (R1)
+
+Accepted with one required fix: the history line named a quantity it does not hold. `failure_count`
+is incremented once per *record write attempt* (`record_open_failure`/`record_write_failure`), and
+several best-effort producers do not short-circuit each other -- closing one project with three
+terminals writes five records (`record_safe_close_authorized`, `record_plain_terminal_terminated`
+once per terminal, `record_safe_close_decision`), so a degraded store during that close would have
+read *"5 actions this session were not recorded"* for one action. `grant_project_trust` doesn't show
+this because its `append_required` short-circuits before a second write -- which is why the path most
+tests exercise never surfaced it.
+
+This is the third instance in this RFC of the same shape (§4.1, added by the reviewer): a number or
+sentence naming something adjacent to what was actually measured, caught in review each time because
+every test asserted the line was *present*, never that it was *true*.
+
+**Fix**: `project-board-audit-history` now says "record(s)... were not written" rather than
+"action(s)... were not recorded" -- naming the quantity `failure_count` actually holds, not inventing
+an action-level counter (explicitly not asked for -- "action" has no definition in `AuditHealth`
+today, and inventing one inside a wording fix would be a second, unrequested design).
+
+**New test**: `project_board_audit_history_names_records_not_actions` -- checks the real catalog
+string (both plural forms) for "record" and the absence of "action". **Ablated**: reverted to the
+original "action(s)... recorded" wording -- failed, naming exactly the overclaim response 365
+described. Restored: passes.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
+(4 tests): clean. Three consecutive full-workspace runs: **483 + 4 + 743, fully green** every
+time -- no flake this pass (one new test).

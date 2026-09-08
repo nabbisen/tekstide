@@ -137,7 +137,9 @@ created: "2026-08-28"
       **470 + 4 + 741, fully green** every time — no flake this pass either. Re-run again same day
       after PR-047-C, six more new tests: **476 + 4 + 741, fully green** every time — no flake.
       Re-run 2026-09-09 after PR-047-D, six more new tests in `tekstide` and two in `tekstide-core`:
-      **482 + 4 + 743, fully green** every time — no flake.)*
+      **482 + 4 + 743, fully green** every time — no flake. Re-run again same day after response
+      365's R1 wording fix, one more new test: **483 + 4 + 743, fully green** every time — no
+      flake.)*
 
 ## The outcome this slice must not reach
 
@@ -151,6 +153,12 @@ created: "2026-08-28"
       also clearing `write_status` (the literal naive fix) fails only the "write survives a
       successful open" test; removing the board's history-line block fails only the history-line
       test. See `qa-evidence.md`.
+- [x] **The history line names what `failure_count` actually counts** (added 2026-09-09, response
+      365 required R1, §4.1 of the risk document) — record write attempts, not user actions; several
+      best-effort producers for one action (closing a project with several terminals) do not
+      short-circuit each other, so an action-level word would overstate. `project-board-audit-history`
+      says "record(s)... were not written". `project_board_audit_history_names_records_not_actions`,
+      ablated: reverting to "action(s)... recorded" fails, naming the exact overclaim.
 
 - [x] **PR-047-C is done.** D1–D3 connected in A/B; D4's own confirmations built and tested here,
       not left as the promise D1–D3 alone would have felt like keeping.

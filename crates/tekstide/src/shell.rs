@@ -6609,6 +6609,14 @@ fn project_board_audit_lines(state: &State) -> Vec<String> {
     // makes rule 1 (status clears on the success that cures it) safe:
     // without this line, clearing `status` would hide the very fact
     // this RFC exists to surface.
+    //
+    // Response 365 required R1, §4.1: `failure_count` counts *record
+    // write attempts* (each `record_open_failure`/`record_write_failure`
+    // call), not user actions -- a single action that makes several
+    // best-effort writes (closing a project with several terminals, for
+    // one) can increment this several times for itself alone. The
+    // catalog string says "records", matching what this variable
+    // actually counts, not "actions".
     let failure_count = state.audit_health.failure_count();
     if failure_count > 0 {
         lines.push(state.catalog.get_with_args(

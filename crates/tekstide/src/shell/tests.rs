@@ -4569,6 +4569,45 @@ fn project_board_audit_lines_still_shows_the_history_line_once_a_transient_open_
     );
 }
 
+/// Response 365 required R1, §4.1 of the risk document: the third
+/// instance in this RFC of a sentence naming something adjacent to what
+/// was measured, and the first caught before shipping. `failure_count`
+/// counts *record write attempts*, not user actions -- one action that
+/// makes several best-effort writes (closing a project with several
+/// terminals, say) increments it once per write, not once for the
+/// action. The catalog string must say "record(s)", never "action(s)",
+/// checked against the real string rather than trusted by inspection.
+#[test]
+fn project_board_audit_history_names_records_not_actions() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+
+    let one = catalog
+        .get_with_args(
+            "project-board-audit-history",
+            &crate::i18n::CatalogArgs::new().number("count", 1u32),
+        )
+        .to_lowercase();
+    let many = catalog
+        .get_with_args(
+            "project-board-audit-history",
+            &crate::i18n::CatalogArgs::new().number("count", 5u32),
+        )
+        .to_lowercase();
+
+    for line in [&one, &many] {
+        assert!(
+            line.contains("record"),
+            "must name the quantity actually held -- record write attempts: {line:?}"
+        );
+        assert!(
+            !line.contains("action"),
+            "failure_count does not count actions -- a single action can make several \
+             best-effort writes, so claiming N unrecorded actions for N failed record writes \
+             overstates by definition: {line:?}"
+        );
+    }
+}
+
 /// The other side of the same refusal: a fake profile whose executable
 /// genuinely does not exist, but whose workspace-discovery policy is
 /// `NoKnownWorkspaceDiscovery` (the default `AiCliProfile::new` sets) so

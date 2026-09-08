@@ -274,9 +274,18 @@ project-board-audit-recovered-quarantined = Audit: the previous audit file could
 # not the record healing": a session that had a real, unrecorded gap
 # earlier keeps saying so for the rest of the session, the same
 # "history, not a live gauge" shape `last_recovery` already uses.
+#
+# Response 365 required R1, §4.1 of the risk document: `$count` is
+# `AuditHealth::failure_count()`, which counts *record write attempts*,
+# not actions -- one user action (closing a project with several
+# terminals, say) can make several best-effort writes, none of which
+# short-circuits the others. Says "records", not "actions", because
+# that is the quantity actually held: the third instance of this RFC
+# naming a number for something adjacent to what was measured, and the
+# first one fixed before shipping rather than found in review.
 project-board-audit-history = { $count ->
-    [one] Audit: {$count} action this session was not recorded.
-   *[other] Audit: {$count} actions this session were not recorded.
+    [one] Audit: {$count} record this session was not written.
+   *[other] Audit: {$count} records this session were not written.
 }
 
 # RFC-017 PR-017-E: response 150 Required -- `session_bar.rs`'s entries
