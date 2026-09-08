@@ -2146,7 +2146,7 @@ fn project_board_audit_lines_shows_the_degraded_line_when_degraded() {
     let mut state = state_with(ApplicationShell::new());
     state
         .audit_health
-        .record_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
+        .record_open_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
 
     let lines = project_board_audit_lines(&state);
 
@@ -2209,7 +2209,7 @@ fn project_board_audit_lines_shows_the_collision_line_not_the_generic_degraded_l
         });
     state
         .audit_health
-        .record_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
+        .record_open_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
 
     let lines = project_board_audit_lines(&state);
 
@@ -4332,7 +4332,7 @@ fn agent_run_launch_audit_notice_present_when_degraded() {
     let mut state = state_with(ApplicationShell::new());
     state
         .audit_health
-        .record_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
+        .record_open_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
 
     let notice = agent_run_launch_audit_notice(&state);
 
@@ -4393,6 +4393,179 @@ fn agent_run_launch_audit_notice_does_not_imply_unsafe_or_fixable() {
             && !notice.contains("resolve")
             && !notice.contains("try again"),
         "must not imply the user can act on this from here -- they cannot: {notice:?}"
+    );
+}
+
+// --- RFC-047 PR-047-D: `status` is not a latch, §3.2 --------------------
+
+/// §3.2's own measured defect, reproduced then fixed: a transient open
+/// failure (`Busy`, the RFC's own example) followed by an ordinary
+/// successful open must not degrade the rest of the session. This is
+/// the "leaves no present-tense line" half of the required pair --
+/// ablating the clear (removing `health.clear_open_failure()` from the
+/// `Ok(store)` arm) must fail this test alone, not the history test
+/// below it.
+#[test]
+fn open_audit_store_recording_failure_clears_a_transient_open_failure_on_a_successful_open() {
+    let state_dir = temp_audit_state_dir("transient-open-failure-clears");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    health.record_open_failure(tekstide_core::audit::AuditStoreErrorReason::Busy);
+
+    let store = open_audit_store_recording_failure(&app_shell, &mut health);
+
+    assert!(
+        store.is_some(),
+        "a fresh, empty directory must open cleanly regardless of an earlier failure"
+    );
+    assert_eq!(
+        health.status(),
+        tekstide_core::audit::AuditHealthStatus::Healthy,
+        "capability returning clears the present-tense status -- a transient open failure must \
+         not go on degrading the session once the store opens again"
+    );
+}
+
+/// The required pair's other half: the same sequence as above must
+/// still preserve session history -- `failure_count`/`last_failure`
+/// survive the clear. Ablating rule 3 (making `clear_open_failure` also
+/// zero these) must fail this test alone, not the one above.
+#[test]
+fn open_audit_store_recording_failure_preserves_history_through_a_transient_open_failure_clearing()
+{
+    let state_dir = temp_audit_state_dir("transient-open-failure-preserves-history");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    health.record_open_failure(tekstide_core::audit::AuditStoreErrorReason::Busy);
+
+    let store = open_audit_store_recording_failure(&app_shell, &mut health);
+
+    assert!(store.is_some());
+    assert_eq!(
+        health.failure_count(),
+        1,
+        "capability returning is not the record healing -- session history must survive"
+    );
+    assert_eq!(
+        health.last_failure(),
+        Some(tekstide_core::audit::AuditStoreErrorReason::Busy),
+        "the fact of what failed must also survive, not only the count"
+    );
+}
+
+/// §3.2 rule 1, the test that catches the naive fix: a real, current
+/// *write* failure must survive an unrelated successful *open*. A
+/// single shared flag cleared by any success -- the fix that looks
+/// right and passes the two tests above -- would wrongly clear this.
+#[test]
+fn open_audit_store_recording_failure_does_not_clear_a_write_failure_on_a_successful_open() {
+    let state_dir = temp_audit_state_dir("write-failure-survives-successful-open");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    health.record_write_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
+
+    let store = open_audit_store_recording_failure(&app_shell, &mut health);
+
+    assert!(
+        store.is_some(),
+        "a fresh, empty directory must still open cleanly"
+    );
+    assert_eq!(
+        health.status(),
+        tekstide_core::audit::AuditHealthStatus::Degraded,
+        "a write failure says nothing about whether the store opens -- it must not be cleared by \
+         an unrelated successful open"
+    );
+}
+
+/// §3.2 rule 2, on the recovery path specifically: `clear_open_failure`/
+/// `clear_write_failure`, called inside `apply_recovery_outcome` on a
+/// successful recovery, must preserve `failure_count` -- the old,
+/// single `clear_degraded()` zeroed it, silently discarding session
+/// history on exactly the path most likely to have some.
+#[test]
+fn open_audit_store_recording_failure_recovery_path_preserves_failure_count() {
+    let state_dir = temp_audit_state_dir("recovery-path-preserves-failure-count");
+    {
+        let store = super::open_audit_store(&state_dir, Vec::new())
+            .expect("a fresh directory must produce a real store");
+        drop(store);
+    }
+    let db_path = state_dir.join("audit").join("audit.sqlite3");
+    std::fs::write(&db_path, [0xffu8; 4096]).unwrap();
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let app_shell = ApplicationShell::new();
+    let mut health = tekstide_core::audit::AuditHealth::default();
+    // An earlier, unrelated failure this session -- proves the
+    // recovery path's own clearing does not reach it.
+    health.record_open_failure(tekstide_core::audit::AuditStoreErrorReason::Busy);
+
+    let store = open_audit_store_recording_failure(&app_shell, &mut health);
+
+    assert!(
+        store.is_some(),
+        "a corrupt store must still recover into a real, usable one"
+    );
+    assert_eq!(
+        health.status(),
+        tekstide_core::audit::AuditHealthStatus::Healthy,
+        "a successful recovery clears the open side"
+    );
+    assert_eq!(
+        health.failure_count(),
+        1,
+        "the recovery path's own clear must not zero session history the way the old \
+         clear_degraded() did"
+    );
+}
+
+/// D3's own required pair, one layer up: `project_board_audit_lines`
+/// must not show the present-tense line once a transient open failure
+/// clears. Direct `AuditHealth` manipulation, matching this file's own
+/// established pattern for D3-level tests (`record_recovery` above).
+#[test]
+fn project_board_audit_lines_omits_the_present_tense_line_once_a_transient_open_failure_clears() {
+    let mut state = state_with(ApplicationShell::new());
+    state
+        .audit_health
+        .record_open_failure(tekstide_core::audit::AuditStoreErrorReason::Busy);
+    state.audit_health.clear_open_failure();
+
+    let lines = project_board_audit_lines(&state);
+
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line == &state.catalog.get("project-board-audit-degraded")),
+        "a cleared open failure must not go on claiming the session is not recording: {lines:?}"
+    );
+}
+
+/// The companion required test: the same sequence still renders the
+/// history line, independent of the present-tense one -- ablating rule
+/// 3 alone must fail this test and not the one above.
+#[test]
+fn project_board_audit_lines_still_shows_the_history_line_once_a_transient_open_failure_clears() {
+    let mut state = state_with(ApplicationShell::new());
+    state
+        .audit_health
+        .record_open_failure(tekstide_core::audit::AuditStoreErrorReason::Busy);
+    state.audit_health.clear_open_failure();
+
+    let lines = project_board_audit_lines(&state);
+
+    let expected = state.catalog.get_with_args(
+        "project-board-audit-history",
+        &crate::i18n::CatalogArgs::new().number("count", 1u32),
+    );
+    assert!(
+        lines.iter().any(|line| line == &expected),
+        "capability returning is not the record healing -- the session history line must still \
+         render: {lines:?}"
     );
 }
 

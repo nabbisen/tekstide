@@ -1392,6 +1392,67 @@ fn missing_authorization_rejects_a_bare_closed_record() {
     );
 }
 
+// --- RFC-047 PR-047-D: `status` is not a latch, §3.2 --------------------
+
+/// §3.2 rule 1's write-side half: a real, current write failure (the
+/// same `MissingAuthorization` refusal `missing_authorization_rejects_a_
+/// bare_closed_record` above triggers) must be cleared by the next
+/// *successful* write -- not left standing, and not requiring anything
+/// special beyond an ordinary write that actually succeeds.
+#[test]
+fn a_successful_write_clears_a_prior_write_failure() {
+    let dirs = TestAuditDirs::new("integration-write-failure-clears-on-success");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    health.record_write_failure(AuditStoreErrorReason::MissingAuthorization);
+    assert_eq!(health.status(), AuditHealthStatus::Degraded);
+
+    let project_id = ProjectId::for_test(5);
+    let operation_id = AuditOperationId::for_test(5);
+    let status = AuditCoordinator::new(&mut store, &mut health)
+        .record_safe_close_authorized(project_id, operation_id);
+
+    assert_eq!(status, AuditObservationStatus::Persisted);
+    assert_eq!(
+        health.status(),
+        AuditHealthStatus::Healthy,
+        "a genuine successful write must clear a prior write failure"
+    );
+    assert_eq!(
+        health.failure_count(),
+        1,
+        "session history is not what a success clears -- only the current-capability flag is"
+    );
+}
+
+/// §3.2 rule 1's other required independence, the mirror of
+/// `open_audit_store_recording_failure_does_not_clear_a_write_failure_
+/// on_a_successful_open` (`tekstide` crate): a real, current *open*
+/// failure must not be cleared by an unrelated successful *write* --
+/// the two capabilities are independent in both directions, not only
+/// the direction the naive one-flag fix happens to break first.
+#[test]
+fn a_successful_write_does_not_clear_a_prior_open_failure() {
+    let dirs = TestAuditDirs::new("integration-open-failure-survives-write-success");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    health.record_open_failure(AuditStoreErrorReason::Busy);
+    assert_eq!(health.status(), AuditHealthStatus::Degraded);
+
+    let project_id = ProjectId::for_test(6);
+    let operation_id = AuditOperationId::for_test(6);
+    let status = AuditCoordinator::new(&mut store, &mut health)
+        .record_safe_close_authorized(project_id, operation_id);
+
+    assert_eq!(status, AuditObservationStatus::Persisted);
+    assert_eq!(
+        health.status(),
+        AuditHealthStatus::Degraded,
+        "a write succeeding says nothing about whether the store still opens -- an open failure \
+         must survive an unrelated write success"
+    );
+}
+
 /// The declined half of `safe_close_decision`: `valid_safe_close`
 /// requires `Cancelled` to carry **no** `operation_id` -- there was no
 /// termination operation, because the user never authorized one.

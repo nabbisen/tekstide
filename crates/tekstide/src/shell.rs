@@ -5232,10 +5232,20 @@ pub(crate) fn open_audit_store_recording_failure(
     health: &mut tekstide_core::audit::AuditHealth,
 ) -> Option<tekstide_core::audit::AuditStore> {
     match open_real_audit_store(app_shell) {
-        Ok(store) => Some(store),
+        // RFC-047 PR-047-D, §3.2 rule 1: the one branch that used to
+        // touch nothing at all -- an ordinary successful open must
+        // clear a prior *open* failure (a transient `Busy`/environment
+        // failure does not degrade the rest of the session once the
+        // store opens again), while leaving any real, current *write*
+        // failure exactly as it was (a successful open does not cure a
+        // failed write).
+        Ok(store) => {
+            health.clear_open_failure();
+            Some(store)
+        }
         Err(AuditStoreOpenFailure::Environment) => {
             let reason = tekstide_core::audit::AuditStoreErrorReason::Path;
-            health.record_failure(reason);
+            health.record_open_failure(reason);
             eprintln!(
                 "[audit] the audit store did not open ({reason:?}) -- this session's \
                  actions will not be recorded until it recovers"
@@ -5285,14 +5295,19 @@ fn apply_recovery_outcome(
             // happened also succeeded. Only `status` depends on
             // `recovery_event_recorded`.
             health.record_recovery(tekstide_core::audit::AuditRecoveryDisclosure::Resumed);
+            // RFC-047 PR-047-D: the store reopened either way, so the
+            // *open* side always clears here -- what's conditional is
+            // only whether the recovery record's own *write* also
+            // succeeded.
+            health.clear_open_failure();
             if recovery_event_recorded {
-                health.clear_degraded();
+                health.clear_write_failure();
                 eprintln!(
                     "[audit] an interrupted migration was resumed; the audit store is \
                      usable again"
                 );
             } else {
-                health.record_failure(reason);
+                health.record_write_failure(reason);
                 eprintln!(
                     "[audit] the interrupted migration was resumed, but recording that \
                      it happened failed -- still degraded"
@@ -5312,14 +5327,18 @@ fn apply_recovery_outcome(
             health.record_recovery(tekstide_core::audit::AuditRecoveryDisclosure::Recovered {
                 quarantine_dir: quarantine_dir.clone(),
             });
+            // Same reasoning as the `Resumed` arm above: the store
+            // reopened, so the open side clears unconditionally; only
+            // the recovery record's own write is conditional.
+            health.clear_open_failure();
             if recovery_event_recorded {
-                health.clear_degraded();
+                health.clear_write_failure();
                 eprintln!(
                     "[audit] the audit store was unreadable; the old one was moved to \
                      {quarantine_dir:?} and a fresh one started"
                 );
             } else {
-                health.record_failure(reason);
+                health.record_write_failure(reason);
                 eprintln!(
                     "[audit] the audit store was unreadable and a fresh one was started \
                      at {quarantine_dir:?}, but recording that it happened failed -- \
@@ -5329,7 +5348,7 @@ fn apply_recovery_outcome(
             Some(store)
         }
         tekstide_core::audit::AuditRecoveryOutcome::Failed(failed_reason) => {
-            health.record_failure(failed_reason);
+            health.record_open_failure(failed_reason);
             eprintln!(
                 "[audit] the audit store did not open ({failed_reason:?}) and could not \
                  be recovered -- this session's actions will not be recorded"
@@ -6583,6 +6602,21 @@ fn project_board_audit_lines(state: &State) -> Vec<String> {
         }
         None => {}
     }
+
+    // RFC-047 PR-047-D, §3.2 rule 3: independent of the present-tense
+    // line above -- shown whenever a failure happened this session,
+    // even after `status()` has returned to `Healthy`. Rule 3 is what
+    // makes rule 1 (status clears on the success that cures it) safe:
+    // without this line, clearing `status` would hide the very fact
+    // this RFC exists to surface.
+    let failure_count = state.audit_health.failure_count();
+    if failure_count > 0 {
+        lines.push(state.catalog.get_with_args(
+            "project-board-audit-history",
+            &CatalogArgs::new().number("count", failure_count),
+        ));
+    }
+
     lines
 }
 

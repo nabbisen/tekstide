@@ -615,3 +615,84 @@ No screenshots committed or retained from this attempt (fixture-only paths, no r
 deleted after inspection).
 
 Gate unchanged -- no code or test changed by this attempt.
+
+## PR-047-D — `status` is not a latch (§3.2)
+
+### `AuditHealth` splits one shared flag into two independent capabilities
+
+`status: AuditHealthStatus` was a single field, set by both the shell seam's open-failure path and
+`AuditCoordinator::append_required`/`append_observation`'s write-failure path, cleared only by
+`clear_degraded()` on the recovery path -- nothing cleared it on an ordinary successful open, which
+is the measured defect (`record_failure(Busy)` then an ordinary open left `status=Degraded`
+permanently).
+
+Split into `open_status`/`write_status` (`integration.rs`), each its own
+`record_open_failure(reason)`/`record_write_failure(reason)` and
+`clear_open_failure()`/`clear_write_failure()`. `status()` is now computed --
+`Degraded` if either is currently down, `Healthy` only if both are up -- rather than stored, so there
+is no way for a caller to set it directly and no way for the two capabilities to be conflated by
+construction. `failure_count`/`last_failure` are untouched by either `clear_*` method (§3.2 rule 2):
+session history that survives capability returning, on every path including recovery, where the old
+`clear_degraded()` used to zero it.
+
+### Call sites, by kind
+
+- **Open**: `open_audit_store_recording_failure`'s `Ok(store)` arm (previously untouched --
+  the actual defect) now calls `clear_open_failure()`. Its `Environment` failure and
+  `apply_recovery_outcome`'s `Failed` outcome call `record_open_failure(reason)`. `apply_recovery_
+  outcome`'s `Resumed`/`Recovered` arms call `clear_open_failure()` unconditionally (the store did
+  reopen) and then `clear_write_failure()`/`record_write_failure(reason)` depending on whether the
+  recovery's own record write succeeded -- reclassified from "open" to "write" per §3.2, since by
+  this point the open itself is not in question, only the record.
+- **Write**: `append_required`/`append_observation` (`integration.rs`) call `record_write_failure`/
+  `clear_write_failure` around their own write attempt -- the successful-write branch previously
+  touched `AuditHealth` at all.
+
+### The board: two independent lines (§3.2 rule 3)
+
+`project_board_audit_lines` gains a history line, `project-board-audit-history` (pluralized,
+`$count`), rendered whenever `failure_count() > 0` -- independent of and in addition to the existing
+present-tense line, which still renders only while `status()` is `Degraded`. The two can and do
+render together (a currently-degraded session that also has history), and the history line alone can
+render once capability returns. Rule 3 is what makes rule 1 safe: without it, a cleared `status`
+would hide that an action this session went unrecorded.
+
+### Required tests, each ablated separately, all run by me
+
+- `open_audit_store_recording_failure_clears_a_transient_open_failure_on_a_successful_open` /
+  `..._preserves_history_through_a_transient_open_failure_clearing` -- the required pair.
+  **Ablated**: removing `clear_open_failure()` from the `Ok(store)` arm fails only the first;
+  making `clear_open_failure()` also zero `failure_count`/`last_failure` fails only the second (and
+  the recovery-path test below, not this pair's own "clears" half).
+- `open_audit_store_recording_failure_does_not_clear_a_write_failure_on_a_successful_open` -- the
+  test that catches the naive one-flag fix. **Ablated**: made `clear_open_failure()` also clear
+  `write_status` (the literal naive fix the risk document names) -- failed only this test; the
+  "clears a transient open failure" test above stayed green, since it is testing the direction the
+  naive fix gets right.
+- `open_audit_store_recording_failure_recovery_path_preserves_failure_count` -- §3.2 rule 2 on the
+  specific path most likely to have real history. **Ablated** together with the "preserves history"
+  test above (same underlying defect: `clear_open_failure` zeroing history) -- both failed, the
+  "clears" tests did not.
+- `project_board_audit_lines_omits_the_present_tense_line_once_a_transient_open_failure_clears` /
+  `..._still_shows_the_history_line_once_a_transient_open_failure_clears` -- D3's own required pair,
+  one layer up. **Ablated**: removing the history-line block from `project_board_audit_lines`
+  entirely failed only the second; the first (already covered by the pre-existing collision test's
+  own sibling assertions) was unaffected.
+- `a_successful_write_clears_a_prior_write_failure` / `a_successful_write_does_not_clear_a_prior_
+  open_failure` (`tekstide-core`, `audit/tests/integration.rs`) -- the write-side symmetry, not
+  explicitly required by the task breakdown's four items but the same rule 1 guarantee in the other
+  direction, checked for completeness against a genuine successful write
+  (`record_safe_close_authorized`) rather than only the open side.
+
+### Evidence
+
+Per the delivery plan's bounded-evidence rule and the task breakdown's own note ("unit-level is
+sufficient and expected... this slice changes when the D3 lines appear, not what they look like"),
+no live capture for this slice -- EVIDENCE-1/EVIDENCE-2 already show the lines' appearance live, and
+nothing about their rendered appearance changed here, only when each one is present.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
+(4 tests): clean. Three consecutive full-workspace runs: **482 + 4 + 743, fully green** every
+time -- no flake this pass (six new tests in `tekstide`, two new in `tekstide-core`).

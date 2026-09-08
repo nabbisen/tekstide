@@ -135,16 +135,22 @@ created: "2026-08-28"
       **row** in the register, not a mention. **468 + 4 + 741, fully green** every time — no flake
       this pass. *(Re-run 2026-09-02 after response 358's R1/R2 fix, two new tests added:
       **470 + 4 + 741, fully green** every time — no flake this pass either. Re-run again same day
-      after PR-047-C, six more new tests: **476 + 4 + 741, fully green** every time — no flake.)*
+      after PR-047-C, six more new tests: **476 + 4 + 741, fully green** every time — no flake.
+      Re-run 2026-09-09 after PR-047-D, six more new tests in `tekstide` and two in `tekstide-core`:
+      **482 + 4 + 743, fully green** every time — no flake.)*
 
 ## The outcome this slice must not reach
 
-- [ ] **PR-047-D is done.** `AuditHealth::status` is not a latch: each kind of failure is cleared
-      by the success that cures it, open and write failures are distinguishable, `failure_count`/
-      `last_failure` survive as session history, and the board renders present-tense and history as
-      independent lines (§3.2). **Ablation:** a transient `record_failure` followed by a successful
-      open must leave the board showing no present-tense "not recording" line, and must still show
-      the history line — both directions checked separately, not only in combination.
+- [x] **PR-047-D is done.** `AuditHealth::status` is not a latch: `open_status`/`write_status` are
+      separate fields, each cleared only by the success that cures it (`clear_open_failure`/
+      `clear_write_failure`); `failure_count`/`last_failure` survive as session history untouched by
+      either; the board renders present-tense (`status()`) and history (`failure_count() > 0`) as
+      independent lines (§3.2). **Ablated, each direction separately, all run by me**: removing the
+      open-success clear fails only the "clears" test; zeroing history inside `clear_open_failure`
+      fails only the "preserves history"/recovery-path tests; collapsing `clear_open_failure` into
+      also clearing `write_status` (the literal naive fix) fails only the "write survives a
+      successful open" test; removing the board's history-line block fails only the history-line
+      test. See `qa-evidence.md`.
 
 - [x] **PR-047-C is done.** D1–D3 connected in A/B; D4's own confirmations built and tested here,
       not left as the promise D1–D3 alone would have felt like keeping.

@@ -268,6 +268,17 @@ project-board-audit-recovered-resumed = Audit: an interrupted recovery finished.
 # string on this surface already follows.
 project-board-audit-recovered-quarantined = Audit: the previous audit file could not be read. It was moved to { $path } and a new one was started.
 
+# RFC-047 PR-047-D, §3.2 rule 3: independent from the present-tense line
+# above -- rendered whenever `AuditHealth::failure_count() > 0`, even
+# once `status()` has returned to `Healthy`. "Capability returning is
+# not the record healing": a session that had a real, unrecorded gap
+# earlier keeps saying so for the rest of the session, the same
+# "history, not a live gauge" shape `last_recovery` already uses.
+project-board-audit-history = { $count ->
+    [one] Audit: {$count} action this session was not recorded.
+   *[other] Audit: {$count} actions this session were not recorded.
+}
+
 # RFC-017 PR-017-E: response 150 Required -- `session_bar.rs`'s entries
 # were hardcoded English (`slot_label`/`status_label`), the same shape
 # `CountDisplay::label()`/`AttentionState::label()` are banned from this

@@ -58,15 +58,47 @@ pub enum AuditRecoveryDisclosure {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AuditHealth {
-    status: AuditHealthStatus,
+    /// RFC-047 PR-047-D, §3.2 rule 1: whether the store currently
+    /// *opens*. Cleared only by a successful open -- a successful write
+    /// does not cure an open failure, since the two are different
+    /// capabilities.
+    open_status: AuditHealthStatus,
+    /// §3.2 rule 1's other half: whether the store currently *accepts
+    /// writes*. Cleared only by a successful write. Kept as a separate
+    /// flag from `open_status` specifically because the naive fix --
+    /// one shared flag, cleared by any success -- would let a real,
+    /// current write failure be erased by an unrelated successful open
+    /// (measured 2026-09-02: `record_failure(Busy)` then an ordinary
+    /// open left the board falsely claiming health).
+    write_status: AuditHealthStatus,
+    /// §3.2 rule 2: session history, covering both kinds of failure.
+    /// Never cleared within a session by anything in this crate --
+    /// not by a later success of either kind, and not by
+    /// [`Self::clear_open_failure`]/[`Self::clear_write_failure`],
+    /// which today (pre-D) zeroed it and silently discarded the same
+    /// history on the recovery path. `status()` answers "can this
+    /// session record *right now*"; this answers "did it ever fail
+    /// this session," and the two must not share one field or clearing
+    /// one clears the other.
     failure_count: u32,
     last_failure: Option<AuditStoreErrorReason>,
     last_recovery: Option<AuditRecoveryDisclosure>,
 }
 
 impl AuditHealth {
+    /// §3.2 rule 1: answers only *can this session record right now* --
+    /// `Degraded` if either capability is currently down, regardless of
+    /// which. Not a latch: each capability clears on the success that
+    /// actually cures it (see the field docs on `open_status`/
+    /// `write_status`).
     pub fn status(&self) -> AuditHealthStatus {
-        self.status
+        if self.open_status == AuditHealthStatus::Degraded
+            || self.write_status == AuditHealthStatus::Degraded
+        {
+            AuditHealthStatus::Degraded
+        } else {
+            AuditHealthStatus::Healthy
+        }
     }
 
     pub fn failure_count(&self) -> u32 {
@@ -86,17 +118,41 @@ impl AuditHealth {
         self.last_recovery.as_ref()
     }
 
-    /// RFC-047 PR-047-A: `pub`, not `pub(crate)` -- until now the only
-    /// callers were `AuditCoordinator`'s own write-failure paths, inside
-    /// this module. The seam `open_audit_store` (`tekstide` crate) now
-    /// needs is the same fact recorded the same way when the store does
-    /// not *open* at all, onto the one `AuditHealth` a session
-    /// accumulates rather than the fresh, immediately-dropped instance
-    /// every one of its fourteen call sites used to construct.
-    pub fn record_failure(&mut self, reason: AuditStoreErrorReason) {
-        self.status = AuditHealthStatus::Degraded;
+    /// RFC-047 PR-047-D: the store did not *open*. The shell seam
+    /// (`open_audit_store_recording_failure`, `tekstide` crate) is the
+    /// only caller -- distinct from [`Self::record_write_failure`],
+    /// which `AuditCoordinator`'s own write paths call, so the two
+    /// capabilities stay independently clearable per §3.2 rule 1.
+    pub fn record_open_failure(&mut self, reason: AuditStoreErrorReason) {
+        self.open_status = AuditHealthStatus::Degraded;
         self.failure_count = self.failure_count.saturating_add(1);
         self.last_failure = Some(reason);
+    }
+
+    /// RFC-047 PR-047-D: a write to an already-open store failed --
+    /// `AuditCoordinator::append_required`/`append_observation`'s own
+    /// failure paths call this, never `record_open_failure`, since a
+    /// write failure says nothing about whether the store still opens.
+    pub fn record_write_failure(&mut self, reason: AuditStoreErrorReason) {
+        self.write_status = AuditHealthStatus::Degraded;
+        self.failure_count = self.failure_count.saturating_add(1);
+        self.last_failure = Some(reason);
+    }
+
+    /// §3.2 rule 1: a successful open cures an open failure, and only
+    /// an open failure -- a real, current write failure must survive
+    /// this call unchanged, which is the property the naive one-flag
+    /// fix breaks. `failure_count`/`last_failure` are untouched: session
+    /// history is not what this clears (rule 2).
+    pub fn clear_open_failure(&mut self) {
+        self.open_status = AuditHealthStatus::Healthy;
+    }
+
+    /// §3.2 rule 1's other half: a successful write cures a write
+    /// failure, and only a write failure. Same history exemption as
+    /// [`Self::clear_open_failure`].
+    pub fn clear_write_failure(&mut self) {
+        self.write_status = AuditHealthStatus::Healthy;
     }
 
     /// RFC-047 PR-047-B, §3.1 of the risk document (added response 358,
@@ -105,11 +161,12 @@ impl AuditHealth {
     /// resume really occurred and a usable store came back -- regardless
     /// of whether recording that fact into the durable store also
     /// succeeded. §4 governs `status` separately (see
-    /// [`Self::record_failure`]/[`Self::clear_degraded`]); this method
-    /// never touches it. **Failing to attest a rename does not un-rename
-    /// it** -- the collision §3.1 exists to resolve is exactly a caller
-    /// that let a failed record-write suppress this call too, leaving a
-    /// working store with a moved history and no way to find it.
+    /// [`Self::record_open_failure`]/[`Self::clear_open_failure`]); this
+    /// method never touches it. **Failing to attest a rename does not
+    /// un-rename it** -- the collision §3.1 exists to resolve is exactly
+    /// a caller that let a failed record-write suppress this call too,
+    /// leaving a working store with a moved history and no way to find
+    /// it.
     ///
     /// `last_recovery` is untouched by later failures -- it is history,
     /// not a live gauge. A second recovery this session replaces it with
@@ -117,19 +174,6 @@ impl AuditHealth {
     /// happened," not a log of every event.
     pub fn record_recovery(&mut self, disclosure: AuditRecoveryDisclosure) {
         self.last_recovery = Some(disclosure);
-    }
-
-    /// RFC-047 PR-047-B, §3.1: the other half of [`Self::record_recovery`]
-    /// -- call this only once a recovery's own `AuditStoreRecovery`
-    /// durable record is *confirmed written*, not merely once the store
-    /// reopens. The store reopening proves it is usable; it does not
-    /// prove the disclosure that just happened is itself durable, and
-    /// §4 is explicit that the latter is what `status` tracks. Does not
-    /// touch `last_recovery` -- the two facts are independent by design.
-    pub fn clear_degraded(&mut self) {
-        self.status = AuditHealthStatus::Healthy;
-        self.failure_count = 0;
-        self.last_failure = None;
     }
 }
 
@@ -744,17 +788,28 @@ impl<'a> AuditCoordinator<'a> {
         &mut self,
         record: &DurableAuditRecordV1,
     ) -> Result<(), AuditIntegrationError> {
-        self.writer.append_record(record).map_err(|error| {
-            self.health.record_failure(error.reason);
-            AuditIntegrationError::RequiredAuditUnavailable(error.reason)
-        })
+        match self.writer.append_record(record) {
+            Ok(()) => {
+                self.health.clear_write_failure();
+                Ok(())
+            }
+            Err(error) => {
+                self.health.record_write_failure(error.reason);
+                Err(AuditIntegrationError::RequiredAuditUnavailable(
+                    error.reason,
+                ))
+            }
+        }
     }
 
     fn append_observation(&mut self, record: &DurableAuditRecordV1) -> AuditObservationStatus {
         match self.writer.append_record(record) {
-            Ok(()) => AuditObservationStatus::Persisted,
+            Ok(()) => {
+                self.health.clear_write_failure();
+                AuditObservationStatus::Persisted
+            }
             Err(error) => {
-                self.health.record_failure(error.reason);
+                self.health.record_write_failure(error.reason);
                 AuditObservationStatus::Degraded
             }
         }
