@@ -14,7 +14,7 @@ Related RFCs:
 - [RFC-036](../done/036-dormant-capability-closure.md) — found this: `launch_managed_agent_run` and
   its siblings write real records, are proven against the real store, and have **zero production
   callers**. The crate README claimed otherwise until 2026-08-27.
-- [RFC-047](../accepted/047-audit-store-corruption-recovery.md) — decided what the product does when the audit
+- [RFC-047](../done/047-audit-store-corruption-recovery.md) — decided what the product does when the audit
   store cannot record. **D1 below is a direct consequence, and it overturns what the existing code
   does.**
 - [RFC-021/022](../done/022-adapter-spawn-and-command-approval-surface.md) — own the approval

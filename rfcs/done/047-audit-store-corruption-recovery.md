@@ -1,6 +1,14 @@
 # RFC-047: Audit Store Corruption Recovery
 
-Status: **Accepted by the human owner 2026-08-28.** **D1–D4 decided by the architect on acceptance** — see "Decided on acceptance" at the end, which also records a fourth built-and-unconnected layer found while deciding. Proposed the same day; reserved by RFC-036's own triage (PR-036-C), which reproduced the
+Status: **Implemented and closed 2026-09-09.** Four slices (PR-047-A through D), reviewed and
+accepted across responses 357–365. **PR-047-D was not one of this RFC's own D1–D4** — found during
+PR-047-B's own review (response 359) as a second, deeper instance of the class of defect §3.1
+already named (a claim describing something adjacent to what was actually true), decided and
+recorded as §3.2 of `what-a-degraded-audit-store-must-not-claim.md` rather than reopening this file.
+Original: **Accepted by the human owner 2026-08-28.** **D1–D4 decided by the architect on
+acceptance** — see "Decided on acceptance" at the end, which also records a fourth
+built-and-unconnected layer found while deciding. Proposed the same day; reserved by RFC-036's own
+triage (PR-036-C), which reproduced the
 defect against the release binary rather than reasoning about it, and recommended an RFC rather
 than a fix.
 Target milestone: **M12**

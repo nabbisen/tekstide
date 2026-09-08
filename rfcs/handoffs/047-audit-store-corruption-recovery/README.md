@@ -1,19 +1,19 @@
 ---
 title: "RFC-047: Audit Store Corruption Recovery — implementation handoff"
 rfc: "RFC-047"
-rfc_file: "../../accepted/047-audit-store-corruption-recovery.md"
-source_rfc_status: "Accepted 2026-08-28 — M12"
+rfc_file: "../../done/047-audit-store-corruption-recovery.md"
+source_rfc_status: "Implemented and closed 2026-09-09 — RFC-047 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-28"
 ---
 
 # Connect four things that already exist, then answer the one that does not
 
-Source RFC: [RFC-047](../../accepted/047-audit-store-corruption-recovery.md)
+Source RFC: [RFC-047](../../done/047-audit-store-corruption-recovery.md)
 
 | # | Read | Why |
 | --- | --- | --- |
-| 1 | [RFC-047](../../accepted/047-audit-store-corruption-recovery.md) | **Read "Decided on acceptance" first.** D1–D4 are settled, and two of them changed on facts checked while deciding |
+| 1 | [RFC-047](../../done/047-audit-store-corruption-recovery.md) | **Read "Decided on acceptance" first.** D1–D4 are settled, and two of them changed on facts checked while deciding |
 | 2 | [`what-a-degraded-audit-store-must-not-claim.md`](./what-a-degraded-audit-store-must-not-claim.md) | **Required.** This slice writes to an audit trail about the audit trail |
 | 3 | [`corrupted-audit-store-defect.md`](../036-dormant-capability-closure/corrupted-audit-store-defect.md) | The reproduction, with screenshots. Do not re-derive it |
 | 4 | [RFC-013](../../done/013-durable-audit-store-and-local-data-policy.md) | Built everything you are about to call |

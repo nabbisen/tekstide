@@ -1,8 +1,8 @@
 ---
 title: "RFC-047: Audit Store Corruption Recovery — QA evidence"
 rfc: "RFC-047"
-rfc_file: "../../accepted/047-audit-store-corruption-recovery.md"
-source_rfc_status: "Accepted 2026-08-28 — M12"
+rfc_file: "../../done/047-audit-store-corruption-recovery.md"
+source_rfc_status: "Implemented and closed 2026-09-09 — RFC-047 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-08-28"
 ---
