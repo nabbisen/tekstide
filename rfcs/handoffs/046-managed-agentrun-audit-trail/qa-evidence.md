@@ -97,3 +97,44 @@ D5: `RunLimitExceeded`/validation/plan-transition refusals never reach this func
 `fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
 (4 tests): clean. Three consecutive full-workspace runs: **483 + 4 + 743, fully green** every
 time -- no flake this pass (no new test count; one test renamed, five renamed only).
+
+## PR-046-A — response 367 required follow-up (R1)
+
+Response 367 identified the same defect shape named in §4.1, in test-naming form: the one test
+above carried two separate properties (launch succeeds unconditionally; no `Started` write is
+attempted once `Authorized` fails to persist), and ablating either one failed the *same* test under
+the *other* one's name — a future reader who broke the §3 consistency guarantee would have been told
+about launch unconditionality instead.
+
+**Split into two tests**, and it turned out the split was not purely mechanical: `launched.
+audit_status` and `health.status()` are themselves entangled with whether the `Started` write gets
+attempted. With `RecordingWriter::fail_on(1)`, a wrongly-attempted `Started` write is attempt 2,
+which *succeeds* — flipping `audit_status` to `Persisted` and clearing `write_status` back to
+`Healthy` via `clear_write_failure()`. Asserting either of those in the "launch still succeeds" test
+would have kept the same coupling under a different name. Resolved by moving both assertions to the
+§3 test, where they now correctly serve as *additional* symptoms of that specific property breaking,
+and leaving the "launch succeeds" test with only genuinely independent signals: the real process
+exists, and `failure_count` (monotonic, never cleared by any success) recorded the failure.
+
+- `managed_launch_still_creates_a_process_when_authorization_cannot_persist` — now asserts only:
+  `project.agent_runs()`/`terminal_sessions()` non-empty, `health.failure_count() == 1`.
+- `no_started_write_is_attempted_when_its_own_authorized_did_not_persist` (new) — asserts
+  `writer.attempt_count == 1`, `writer.records.is_empty()`, `launched.audit_status == Degraded`,
+  `health.status() == Degraded`.
+
+**Ablated both directions, run by me:**
+
+- Reverting `append_observation` → `append_required` (D1's own revert) fails both tests, as
+  expected — they share the same precondition (the launch must succeed at all before either
+  property can be checked), so this ablation cannot discriminate between them and was never claimed
+  to.
+- Forcing the `Started` write unconditionally (`if authorization_persisted` → `if true`, the
+  ablation that motivated the split) now fails **only** `no_started_write_is_attempted_when_its_own_
+  authorized_did_not_persist` — `managed_launch_still_creates_a_process_when_authorization_cannot_
+  persist` stays green. Confirmed the entanglement is fully resolved, not merely hidden.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
+(4 tests): clean. Three consecutive full-workspace runs: **483 + 4 + 744, fully green** every
+time -- no flake this pass (one new test).

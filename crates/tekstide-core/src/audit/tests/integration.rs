@@ -766,7 +766,7 @@ fn managed_launch_still_creates_a_process_when_authorization_cannot_persist() {
     let plan = launch_plan_for(&project, Path::new("/bin/sh"));
     let mut runtime = LinuxTerminalRuntime::new();
 
-    let launched = AuditCoordinator::with_writer(&mut writer, &mut health)
+    let _launched = AuditCoordinator::with_writer(&mut writer, &mut health)
         .launch_audited_agent_run(&mut project, plan, &mut runtime)
         .expect("a launch must not depend on the audit store accepting its own Authorized write");
 
@@ -776,25 +776,75 @@ fn managed_launch_still_creates_a_process_when_authorization_cannot_persist() {
     );
     assert!(!project.terminal_sessions().is_empty());
     assert_eq!(
+        health.failure_count(),
+        1,
+        "the failed write is still real session history -- monotonic, so this alone does not \
+         depend on what happens to any later write"
+    );
+
+    // Deliberately not asserted here: `launched.audit_status` and
+    // `health.status()`. Both are entangled with whether the `Started`
+    // write is attempted at all -- with `fail_on(1)`, a wrongly-attempted
+    // `Started` write is attempt 2, which *succeeds*, which would flip
+    // `audit_status` to `Persisted` and clear `write_status` back to
+    // `Healthy`. That is `no_started_write_is_attempted_when_its_own_
+    // authorized_did_not_persist`'s own property below, not this one's --
+    // asserting it here is exactly the entanglement response 367 named
+    // (this test's own first draft asserted both and failed under either
+    // ablation, so a broken §3 guarantee would have pointed a reader at
+    // launch unconditionality instead of at the thing that actually
+    // broke).
+}
+
+/// Response 367 required R1: split out of
+/// `managed_launch_still_creates_a_process_when_authorization_cannot_
+/// persist`, which carried this property and the previous test's own
+/// property under one name -- ablating the two independently both
+/// failed the same test, so a future reader who broke *this* guarantee
+/// would have been told about launch unconditionality instead, §4.1's
+/// own test-naming form of the RFC's recurring defect. §3: absent is
+/// permitted, inconsistent is not -- once the `Authorized` write fails
+/// to persist, the `Started` write must never even be attempted, not
+/// merely rejected by the store's own `MissingAuthorization` check.
+#[test]
+fn no_started_write_is_attempted_when_its_own_authorized_did_not_persist() {
+    let dirs = TestAuditDirs::new("integration-managed-no-started-without-authorized");
+    let mut health = AuditHealth::default();
+    let mut writer = RecordingWriter::fail_on(1);
+    let mut project = project_for(&dirs, 1);
+    let plan = launch_plan_for(&project, Path::new("/bin/sh"));
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let launched = AuditCoordinator::with_writer(&mut writer, &mut health)
+        .launch_audited_agent_run(&mut project, plan, &mut runtime)
+        .expect("a launch must not depend on the audit store accepting its own Authorized write");
+
+    // Both of these are symptoms specific to *this* property: if the
+    // `Started` write were wrongly attempted, it would succeed (attempt
+    // 2 under `fail_on(1)`), flipping `audit_status` to `Persisted` and
+    // clearing `write_status` back to `Healthy` -- exactly the two
+    // signals the sibling test above deliberately does not check.
+    assert_eq!(
         launched.audit_status,
         AuditObservationStatus::Degraded,
-        "the launch succeeded but its own authorization was never durably recorded"
+        "no write after the failed Authorized attempt can have succeeded, since none should have \
+         been attempted"
     );
     assert_eq!(
+        health.status(),
+        AuditHealthStatus::Degraded,
+        "a wrongly-attempted and wrongly-successful Started write would clear this"
+    );
+
+    assert_eq!(
         writer.attempt_count, 1,
-        "§3: no Started record may be attempted once its own Authorized failed to persist -- \
-         only the one failed Authorized attempt should exist, not a second, doomed write"
+        "no Started record may be attempted once its own Authorized failed to persist -- only the \
+         one failed Authorized attempt should exist, not a second, doomed write"
     );
     assert!(
         writer.records.is_empty(),
         "the one attempt failed, so nothing was actually persisted"
     );
-    assert_eq!(
-        health.failure_count(),
-        1,
-        "the failed write is still real session history"
-    );
-    assert_eq!(health.status(), AuditHealthStatus::Degraded);
 }
 
 #[test]

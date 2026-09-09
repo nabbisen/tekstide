@@ -24,14 +24,16 @@ wrong, not the implementer.
       than PR-047-B's store-won't-open fixtures, since those produce the wrong shape — a store that
       never opens, not one that opens and then refuses one write. See `qa-evidence.md` for the
       reasoning and where a genuinely unopenable store belongs instead (PR-046-C).
-- [ ] No `Started` record is attempted when its `Authorized` did not persist, **in its own test
-      under its own name** (response 367 R1 — unticked by the reviewer, not the implementer, who
-      disclosed the sharing plainly below). Ablating the gate alone must fail *that* test; today it
-      fails one named for the other property, so a reader who breaks the consistency guarantee is
-      told "still creates a process". The store's own
-      `MissingAuthorization` rejection is the backstop, never the mechanism. Same test:
-      `writer.attempt_count == 1` and `writer.records.is_empty()` prove the `Started` write was
-      never attempted, not merely that it would have been rejected.
+- [x] No `Started` record is attempted when its `Authorized` did not persist, **in its own test
+      under its own name** (response 367 R1). Split into `no_started_write_is_attempted_when_its_
+      own_authorized_did_not_persist`. Forcing the `Started` write unconditionally now fails **only**
+      this test, not the "still creates a process" one — confirmed by ablating both directions.
+      Splitting surfaced a second entanglement: `audit_status`/`health.status()` are themselves
+      sensitive to whether `Started` is attempted (a wrongly-attempted `Started` write succeeds
+      under `fail_on(1)`, which would flip both), so those assertions moved here too rather than
+      staying split across both tests. The store's own `MissingAuthorization` rejection is the
+      backstop, never the mechanism — `writer.attempt_count == 1` and `writer.records.is_empty()`
+      prove the write was never attempted, not merely that it would have been rejected.
 - [x] `Plain` is still rejected, with the reason commented. Unaffected by D1 — rejection happens
       before any write is attempted (`writer.attempt_count == 0`,
       `plain_agent_launch_is_not_relabelled_as_durably_authorized`).
