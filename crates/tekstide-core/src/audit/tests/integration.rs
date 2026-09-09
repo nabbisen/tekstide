@@ -165,6 +165,46 @@ fn managed_launch_persists_authorized_started_and_terminated_runtime_truth() {
     assert!(!debug.contains(project.root_path().to_string_lossy().as_ref()));
 }
 
+/// RFC-046 PR-046-B, D2, §4 of `what-an-unrecorded-launch-means.md`:
+/// `AuditedAgentLaunch` must carry whatever `prepare_agent_run_launch`
+/// returned rather than silently dropping it the way adopting the built
+/// API verbatim would have -- production's own `launch_agent_run_with_
+/// runtime` already returns it and `register_approval_channel`
+/// (`tekstide` crate) already consumes it by value.
+///
+/// Asserted against today's real value (`None` -- `Supervised`, this
+/// project's only real profile, never binds one) rather than invented
+/// for a `Managed` profile nothing calls yet: §4 is explicit that `None`
+/// today must not make the carrying test optional, since a test written
+/// for a hypothetical `Managed` endpoint cannot be written at all until
+/// one exists, and would be forgotten. **This is the literal "fails if
+/// the field is deleted" shape**: reading `launched.value.
+/// approval_endpoint` in an assertion means removing the field breaks
+/// this test at *compile time*, not merely changes what it asserts --
+/// a test that only checked the launch succeeded would keep compiling
+/// (and passing) with the field gone entirely, which is exactly what
+/// §4's own failure mode looks like: command approval quietly not
+/// existing, with nothing in the diff that removed it.
+#[test]
+fn managed_launch_carries_the_approval_endpoint_field_through() {
+    let dirs = TestAuditDirs::new("integration-managed-approval-endpoint");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let mut project = project_for(&dirs, 1);
+    let plan = launch_plan_for(&project, Path::new("/bin/sh"));
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let launched = AuditCoordinator::new(&mut store, &mut health)
+        .launch_audited_agent_run(&mut project, plan, &mut runtime)
+        .unwrap();
+
+    assert!(
+        launched.value.approval_endpoint.is_none(),
+        "Supervised never binds an approval channel, so this must be None -- read here so the \
+         field's own presence is what this test depends on, not merely the launch's success"
+    );
+}
+
 /// RFC-017 PR-017-F: `plain_terminal_observation`'s first producer,
 /// proven against a real, file-backed `AuditStore` (not a mock writer)
 /// -- the same convention `trust_grant_commits_authorization_before_mutation_and_applied_outcome`

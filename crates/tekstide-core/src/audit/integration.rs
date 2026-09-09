@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::agent::AgentRunLaunchPlan;
+use crate::approval::ApprovalChannelEndpoint;
 use crate::content::{SaveDecision, TextDocumentOpenError, TextDocumentSaveError};
 use crate::domain::{
     AgentCompatibilityLevel, AgentRunId, ApprovalId, AuditEventId, AuditOperationId, RiskLevel,
@@ -247,13 +248,30 @@ pub enum SafeCloseDecision {
     Cancelled,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// RFC-046 PR-046-B, D2: no longer `Clone`/`Eq`/`PartialEq` -- forced by
+/// `approval_endpoint` below, since `ApprovalChannelEndpoint` holds a
+/// live `UnixListener` and implements neither. Nothing outside this
+/// crate compared or cloned a value of this type before this change
+/// (checked, not assumed): the only real caller today is this
+/// producer's own test suite, which reads fields, not derived traits.
+#[derive(Debug)]
 pub struct AuditedAgentLaunch {
     agent_run_id: AgentRunId,
     terminal_id: TerminalId,
     operation_id: AuditOperationId,
     adapter_profile_ref: AuditReference,
     pub runtime_events: Vec<TerminalRuntimeEvent>,
+    /// RFC-046 PR-046-B, D2: what production's own
+    /// `launch_agent_run_with_runtime` already returns and
+    /// `register_approval_channel` (`tekstide` crate) already consumes
+    /// by value -- adopting the audited path must not silently drop
+    /// this. `None` today (`Supervised`, this project's only real
+    /// profile, never binds one), and `what-an-unrecorded-launch-means.md`
+    /// §4 is explicit that `None` must not make the carrying test
+    /// optional: the failure this guards against is command approval
+    /// quietly not existing the day a `Managed` profile ships, with
+    /// nothing in that day's diff naming why.
+    pub approval_endpoint: Option<ApprovalChannelEndpoint>,
 }
 
 impl AuditedAgentLaunch {
@@ -503,7 +521,7 @@ impl<'a> AuditCoordinator<'a> {
             return Err(AuditIntegrationError::InvalidTypedContext);
         }
 
-        project
+        let approval_endpoint = project
             .prepare_agent_run_launch(&mut plan)
             .map_err(AuditIntegrationError::AgentLaunch)?;
 
@@ -573,6 +591,7 @@ impl<'a> AuditCoordinator<'a> {
                 operation_id,
                 adapter_profile_ref,
                 runtime_events,
+                approval_endpoint,
             },
             audit_status,
         })

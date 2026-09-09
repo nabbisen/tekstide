@@ -46,10 +46,18 @@ wrong, not the implementer.
 
 ## PR-046-B — nothing is lost by becoming audited
 
-- [ ] `AuditedAgentLaunch` carries the approval endpoint, and the audited path returns everything
-      `launch_agent_run_with_runtime` returns.
-- [ ] A test asserts the endpoint is **carried**, and **fails if the field is deleted** — verified by
+- [x] `AuditedAgentLaunch` carries the approval endpoint, and the audited path returns everything
+      `launch_agent_run_with_runtime` returns. `prepare_agent_run_launch`'s own return value,
+      previously discarded outright, is now captured and threaded through. `Clone`/`Eq`/`PartialEq`
+      dropped from `AuditedAgentLaunch` (`ApprovalChannelEndpoint` holds a live `UnixListener` and
+      implements neither) — grepped the tree first; nothing outside this producer's own tests used
+      either.
+- [x] A test asserts the endpoint is **carried**, and **fails if the field is deleted** — verified by
       deleting it, not by inspection. Passing "because the launch succeeded" is not this test.
+      `managed_launch_carries_the_approval_endpoint_field_through`, against today's real value
+      (`None`, `Supervised`). **Ablated by deleting the field itself**: the crate failed to build
+      (`E0609` at this test's own assertion, `E0560` at the struct literal) — a compile-time
+      failure, not a runtime one, which is what "fails if the field is deleted" actually requires.
 
 ## PR-046-C — the trail exists in production
 

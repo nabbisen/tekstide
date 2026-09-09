@@ -138,3 +138,44 @@ exists, and `failure_count` (monotonic, never cleared by any success) recorded t
 `fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
 (4 tests): clean. Three consecutive full-workspace runs: **483 + 4 + 744, fully green** every
 time -- no flake this pass (one new test).
+
+## PR-046-B — nothing is lost by becoming audited
+
+**Still no production caller.** D2 only.
+
+### The endpoint is carried, not silently dropped
+
+`AuditedAgentLaunch` gains `pub approval_endpoint: Option<ApprovalChannelEndpoint>`, and
+`launch_audited_agent_run` now captures `prepare_agent_run_launch`'s own return value (previously
+discarded outright -- `project.prepare_agent_run_launch(&mut plan).map_err(...)?;`, the exact
+silent-drop the pack's own trap warns about) and threads it into the returned value. Matches what
+`launch_agent_run_with_runtime` already returns today and what `register_approval_channel`
+(`tekstide` crate) already consumes by value.
+
+**`ApprovalChannelEndpoint` holds a live `UnixListener`**, so it implements neither `Clone` nor
+`PartialEq`/`Eq`. `AuditedAgentLaunch` drops those three derives (`Debug` only now) -- checked, not
+assumed, that nothing outside this producer's own test suite relied on comparing or cloning a value
+of this type; grepped the tree for every use first.
+
+### Required test: reading the field is what makes it real
+
+`managed_launch_carries_the_approval_endpoint_field_through`: asserts `launched.value.
+approval_endpoint.is_none()` against a real launch through a real `Supervised` plan -- today's real
+value, per §4's own instruction not to invent a `Managed`-profile test that "cannot be written at
+all yet and will be forgotten."
+
+**The bar the task breakdown set**: "fails if the field is deleted", not merely "passes because the
+launch succeeded." Reading `launched.value.approval_endpoint` in the assertion is what gives this
+test that property -- it is a **compile-time** dependency, not a runtime one. **Ablated by literally
+deleting the field** (removed `approval_endpoint` from the struct and from the constructing struct
+literal, restoring the pre-D2 discard): the whole crate failed to build --
+`error[E0609]: no field approval_endpoint on type AuditedAgentLaunch` at this test's own assertion,
+plus `error[E0560]` at the struct literal that used to set it. A test that only checked the launch
+succeeded would have kept compiling and passing with the field entirely gone, which is exactly the
+silent-loss failure mode §4 describes. Restored: builds and passes again.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
+(4 tests): clean. Three consecutive full-workspace runs: **483 + 4 + 745, fully green** every
+time -- no flake this pass (one new test).
