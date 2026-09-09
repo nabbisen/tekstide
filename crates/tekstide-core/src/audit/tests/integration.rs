@@ -172,21 +172,17 @@ fn managed_launch_persists_authorized_started_and_terminated_runtime_truth() {
 /// runtime` already returns it and `register_approval_channel`
 /// (`tekstide` crate) already consumes it by value.
 ///
-/// Asserted against today's real value (`None` -- `Supervised`, this
-/// project's only real profile, never binds one) rather than invented
-/// for a `Managed` profile nothing calls yet: §4 is explicit that `None`
-/// today must not make the carrying test optional, since a test written
-/// for a hypothetical `Managed` endpoint cannot be written at all until
-/// one exists, and would be forgotten. **This is the literal "fails if
-/// the field is deleted" shape**: reading `launched.value.
-/// approval_endpoint` in an assertion means removing the field breaks
-/// this test at *compile time*, not merely changes what it asserts --
-/// a test that only checked the launch succeeded would keep compiling
-/// (and passing) with the field gone entirely, which is exactly what
-/// §4's own failure mode looks like: command approval quietly not
-/// existing, with nothing in the diff that removed it.
+/// **`Supervised` must not bind a channel at all** -- its own guard,
+/// response 369 required R1: `None` here is correct, but by itself
+/// proves less than it looks like it does (see
+/// `managed_launch_carries_a_real_bound_approval_endpoint` below for
+/// the property that actually needs `Some`). Reading `launched.value.
+/// approval_endpoint` in the assertion still makes the field's own
+/// *presence* a compile-time dependency of this test -- deleting the
+/// field breaks the build here, even though this test alone cannot
+/// distinguish a correctly-absent endpoint from one silently dropped.
 #[test]
-fn managed_launch_carries_the_approval_endpoint_field_through() {
+fn supervised_launch_does_not_bind_an_approval_endpoint() {
     let dirs = TestAuditDirs::new("integration-managed-approval-endpoint");
     let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
     let mut health = AuditHealth::default();
@@ -200,9 +196,78 @@ fn managed_launch_carries_the_approval_endpoint_field_through() {
 
     assert!(
         launched.value.approval_endpoint.is_none(),
-        "Supervised never binds an approval channel, so this must be None -- read here so the \
-         field's own presence is what this test depends on, not merely the launch's success"
+        "Supervised must never bind an approval channel"
     );
+}
+
+/// Response 369 required R1: §4 of `what-an-unrecorded-launch-means.md`
+/// claimed a test asserting a `Managed` launch's endpoint survives
+/// "cannot be written at all yet and will be forgotten" -- false,
+/// checked by writing it. The sibling `Supervised` test above fails only
+/// if `approval_endpoint` is *deleted*; it cannot fail if the endpoint
+/// were hardcoded `None`, or dropped anywhere in the plumbing between
+/// `prepare_agent_run_launch` and the returned struct, since `None` is
+/// also the correct answer for `Supervised` either way. **This is the
+/// test that actually catches all three losses** -- deleted, hardcoded
+/// `None`, dropped in transit -- because `Some(..)` is the only value a
+/// genuinely-working path can produce here.
+///
+/// Trap for the next person who binds a real approval channel in a
+/// test: the state root becomes part of a real Unix domain socket path,
+/// bound by the kernel's own ~108-byte `sun_path` limit.
+/// `TestAuditDirs`' own base (a `mktemp` path plus a descriptive label)
+/// overflows it and fails with `Bind(SocketPathTooLong)` -- a
+/// fixture-length problem that reads exactly like a bug in the code
+/// under test. Use a short path instead (`$TMPDIR/tk<pid>` here).
+#[test]
+fn managed_launch_carries_a_real_bound_approval_endpoint() {
+    let dirs = TestAuditDirs::new("integration-managed-approval-endpoint-some");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let mut project = project_for(&dirs, 1);
+    let approval_state_root = std::env::temp_dir().join(format!("tk{}", std::process::id()));
+    fs::create_dir_all(&approval_state_root).unwrap();
+
+    let mut profile = AiCliProfile::new(
+        "builtin-ai",
+        "Built-in AI",
+        AiCliProfileSource::BuiltIn,
+        AiCliExecutable::Absolute {
+            path: Path::new("/bin/sh").to_path_buf(),
+            provenance: AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        AgentCompatibilityLevel::Managed,
+    );
+    profile.workspace_discovery_policy = AiCliWorkspaceDiscoveryPolicy::DisabledByLaunch {
+        evidence: "reviewed project-config discovery disable flag".to_owned(),
+    };
+    profile.adapter_capabilities.structured_action_approval = true;
+    let request = AgentRunLaunchRequest::new(
+        project.id().clone(),
+        profile.id.clone(),
+        "private prompt sentinel",
+    )
+    .with_approval_channel(approval_state_root.clone());
+    let validation = AgentRunLaunchValidator
+        .validate(&project, &profile, &request)
+        .expect(
+            "a Managed profile with structured_action_approval and a configured approval \
+             channel must validate",
+        );
+    let plan = AgentRunLaunchPlan::from_validation(validation, "private command sentinel").unwrap();
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let launched = AuditCoordinator::new(&mut store, &mut health)
+        .launch_audited_agent_run(&mut project, plan, &mut runtime)
+        .expect("a Managed launch with a configured approval channel must launch and bind it");
+
+    assert!(
+        launched.value.approval_endpoint.is_some(),
+        "a Managed launch must carry a real, bound approval channel endpoint out -- None here \
+         would mean the endpoint was hardcoded, dropped in the plumbing, or never bound at all"
+    );
+
+    fs::remove_dir_all(&approval_state_root).ok();
 }
 
 /// RFC-017 PR-017-F: `plain_terminal_observation`'s first producer,

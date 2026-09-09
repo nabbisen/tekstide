@@ -52,17 +52,20 @@ wrong, not the implementer.
       dropped from `AuditedAgentLaunch` (`ApprovalChannelEndpoint` holds a live `UnixListener` and
       implements neither) — grepped the tree first; nothing outside this producer's own tests used
       either.
-- [ ] A **`Managed`** launch returns `Some(endpoint)` — the only assertion that fails on all three
-      losses: field deleted, hardcoded `None`, dropped in the plumbing. Writable today; §4 carries
-      the three-step recipe and the `SocketPathTooLong` trap. *(Unticked by the reviewer, response
-      369. §4 previously claimed this test was impossible, which is why the first attempt asserted
-      the weaker property — the fault is the instruction's, not the implementer's.)*
-- [ ] A **Supervised** launch returns `None`, kept alongside it: Supervised must not bind a channel.
+- [x] A **`Managed`** launch returns `Some(endpoint)` — the only assertion that fails on all three
+      losses: field deleted, hardcoded `None`, dropped in the plumbing.
+      `managed_launch_carries_a_real_bound_approval_endpoint`, following §4's own recipe (`Managed`
+      level, `structured_action_approval = true`, `.with_approval_channel(<short path>)` — a short
+      path, per §4's own `SocketPathTooLong` trap). **Ablated**: hardcoded `approval_endpoint: None`
+      in the struct literal (the "silently dropped in the plumbing" defect, response 227's own
+      historical shape) — failed only this test; `supervised_launch_does_not_bind_an_approval_
+      endpoint` stayed green, since `None` is also its own correct answer.
+- [x] A **Supervised** launch returns `None`, kept alongside it: Supervised must not bind a channel.
+      `supervised_launch_does_not_bind_an_approval_endpoint` (renamed from `managed_launch_carries_
+      the_approval_endpoint_field_through`, which the name no longer fit once its sibling existed).
 - [x] The field's presence is a **compile-time** dependency of a test, not merely a runtime one.
-      `managed_launch_carries_the_approval_endpoint_field_through` reads the field, so **ablating by
-      deleting the field itself** fails the build (`E0609` at the assertion, `E0560` at the struct
-      literal). This box is met and stays met; it is simply weaker than the two above, because a
-      field that still exists but is never populated compiles fine.
+      Either test above reads the field, so **ablating by deleting the field itself** fails the
+      build (`E0609` at either assertion, `E0560` at the struct literal).
 
 ## PR-046-C — the trail exists in production
 

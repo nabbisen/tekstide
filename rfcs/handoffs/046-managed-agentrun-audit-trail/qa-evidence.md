@@ -179,3 +179,42 @@ silent-loss failure mode §4 describes. Restored: builds and passes again.
 `fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
 (4 tests): clean. Three consecutive full-workspace runs: **483 + 4 + 745, fully green** every
 time -- no flake this pass (one new test).
+
+## PR-046-B — response 369 required follow-up (R1)
+
+§4 claimed a test asserting a `Managed` launch's endpoint survives "cannot be written at all yet and
+will be forgotten." The reviewer checked that claim by writing the test themselves against `fff3712`
+and found it false; corrected §4 and the checklist (`71cdcda`, `a4ca959`) with the working recipe.
+
+**Why the `Supervised`-only test wasn't enough**: `None` is both the correct answer for `Supervised`
+and the answer a silently-broken path would also produce (hardcoded `None`, or the endpoint dropped
+anywhere between `prepare_agent_run_launch` and the returned struct -- response 227's own historical
+defect, "silently dropped one layer down"). A test that can only see `None` cannot tell those apart.
+
+### The `Managed` test, following §4's recipe exactly
+
+`managed_launch_carries_a_real_bound_approval_endpoint`: `AgentCompatibilityLevel::Managed`,
+`profile.adapter_capabilities.structured_action_approval = true` (otherwise validation returns
+`ManagedCapabilityMissing`), `.with_approval_channel(<short path>)`. The approval channel's state
+root becomes part of a real Unix domain socket path, bound by the kernel's ~108-byte `sun_path`
+limit -- `TestAuditDirs`' own base overflows it (`Bind(SocketPathTooLong)`, a fixture-length failure
+that reads like a bug in the code under test); used `$TMPDIR/tk<pid>` instead, noted in the test's
+own doc comment for the next person who binds a real channel in a test.
+
+Renamed the sibling test to `supervised_launch_does_not_bind_an_approval_endpoint` -- its old name,
+`managed_launch_carries_the_approval_endpoint_field_through`, no longer fit once a genuine `Managed`
+sibling existed, and now correctly describes what it alone proves (a narrower, but still real,
+property: `Supervised` must never bind a channel).
+
+**Ablated**: hardcoded `approval_endpoint: None` in the returned struct literal (the "silently
+dropped in the plumbing" defect this test exists to catch) -- failed only `managed_launch_carries_
+a_real_bound_approval_endpoint`; `supervised_launch_does_not_bind_an_approval_endpoint` stayed
+green, correctly, since `None` is also its own real answer. Restored: both pass. Field-deletion
+ablation (from response 369's own review) still holds: either test reading the field means deleting
+it fails the whole crate's build, not just one test.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
+(4 tests): clean. Three consecutive full-workspace runs: **483 + 4 + 746, fully green** every
+time -- no flake this pass (one new test, one renamed).
