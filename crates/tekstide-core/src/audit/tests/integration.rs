@@ -115,7 +115,7 @@ fn managed_launch_persists_authorized_started_and_terminated_runtime_truth() {
     let mut runtime = LinuxTerminalRuntime::new();
 
     let launched = AuditCoordinator::new(&mut store, &mut health)
-        .launch_managed_agent_run(&mut project, plan, &mut runtime)
+        .launch_audited_agent_run(&mut project, plan, &mut runtime)
         .unwrap();
     assert_eq!(launched.audit_status, AuditObservationStatus::Persisted);
     let handle =
@@ -731,7 +731,7 @@ fn managed_launch_failure_is_recorded_after_authorization_without_process_attach
     let mut runtime = LinuxTerminalRuntime::new();
 
     let error = AuditCoordinator::new(&mut store, &mut health)
-        .launch_managed_agent_run(&mut project, plan, &mut runtime)
+        .launch_audited_agent_run(&mut project, plan, &mut runtime)
         .unwrap_err();
 
     assert!(matches!(error, AuditIntegrationError::AgentLaunch(_)));
@@ -747,8 +747,18 @@ fn managed_launch_failure_is_recorded_after_authorization_without_process_attach
     );
 }
 
+/// RFC-046 PR-046-A, D1: the inverse of what this test asserted before
+/// D1 -- renamed from `managed_launch_does_not_create_process_when_
+/// authorization_cannot_persist`, since that is exactly the behaviour
+/// D1 removes. RFC-047 D4: a broken audit store does not make an agent
+/// run more dangerous, only unrecorded, so a launch must proceed even
+/// when its own `Authorized` write fails. **This is the task
+/// breakdown's own required ablation target**: reverting
+/// `append_observation` back to `append_required` on the `Authorized`
+/// write must make this test fail (it would return `Err` before ever
+/// reaching the launch), not merely change what it asserts.
 #[test]
-fn managed_launch_does_not_create_process_when_authorization_cannot_persist() {
+fn managed_launch_still_creates_a_process_when_authorization_cannot_persist() {
     let dirs = TestAuditDirs::new("integration-managed-audit-failure");
     let mut health = AuditHealth::default();
     let mut writer = RecordingWriter::fail_on(1);
@@ -756,18 +766,35 @@ fn managed_launch_does_not_create_process_when_authorization_cannot_persist() {
     let plan = launch_plan_for(&project, Path::new("/bin/sh"));
     let mut runtime = LinuxTerminalRuntime::new();
 
-    let error = AuditCoordinator::with_writer(&mut writer, &mut health)
-        .launch_managed_agent_run(&mut project, plan, &mut runtime)
-        .unwrap_err();
+    let launched = AuditCoordinator::with_writer(&mut writer, &mut health)
+        .launch_audited_agent_run(&mut project, plan, &mut runtime)
+        .expect("a launch must not depend on the audit store accepting its own Authorized write");
 
-    assert_eq!(
-        error,
-        AuditIntegrationError::RequiredAuditUnavailable(AuditStoreErrorReason::StorageFull)
+    assert!(
+        !project.agent_runs().is_empty(),
+        "the real process must exist regardless of the failed write"
     );
-    assert!(project.agent_runs().is_empty());
-    assert!(project.terminal_sessions().is_empty());
-    assert_eq!(writer.attempt_count, 1);
-    assert_eq!(health.failure_count(), 1);
+    assert!(!project.terminal_sessions().is_empty());
+    assert_eq!(
+        launched.audit_status,
+        AuditObservationStatus::Degraded,
+        "the launch succeeded but its own authorization was never durably recorded"
+    );
+    assert_eq!(
+        writer.attempt_count, 1,
+        "§3: no Started record may be attempted once its own Authorized failed to persist -- \
+         only the one failed Authorized attempt should exist, not a second, doomed write"
+    );
+    assert!(
+        writer.records.is_empty(),
+        "the one attempt failed, so nothing was actually persisted"
+    );
+    assert_eq!(
+        health.failure_count(),
+        1,
+        "the failed write is still real session history"
+    );
+    assert_eq!(health.status(), AuditHealthStatus::Degraded);
 }
 
 #[test]
@@ -784,7 +811,7 @@ fn plain_agent_launch_is_not_relabelled_as_durably_authorized() {
     let mut runtime = LinuxTerminalRuntime::new();
 
     let error = AuditCoordinator::with_writer(&mut writer, &mut health)
-        .launch_managed_agent_run(&mut project, plan, &mut runtime)
+        .launch_audited_agent_run(&mut project, plan, &mut runtime)
         .unwrap_err();
 
     assert_eq!(error, AuditIntegrationError::InvalidTypedContext);
@@ -805,7 +832,7 @@ fn termination_truth_survives_observational_audit_failure() {
     let (launched, result) = {
         let mut coordinator = AuditCoordinator::with_writer(&mut writer, &mut health);
         let launched = coordinator
-            .launch_managed_agent_run(&mut project, plan, &mut runtime)
+            .launch_audited_agent_run(&mut project, plan, &mut runtime)
             .unwrap();
         let handle =
             TerminalRuntimeHandle::new(launched.value.terminal_id().clone(), project.id().clone());
@@ -843,7 +870,7 @@ fn orphaned_runtime_truth_is_not_mislabeled_as_durable_termination() {
     let mut runtime = LinuxTerminalRuntime::new();
     let mut coordinator = AuditCoordinator::with_writer(&mut writer, &mut health);
     let launched = coordinator
-        .launch_managed_agent_run(&mut project, plan, &mut runtime)
+        .launch_audited_agent_run(&mut project, plan, &mut runtime)
         .unwrap();
     let handle =
         TerminalRuntimeHandle::new(launched.value.terminal_id().clone(), project.id().clone());

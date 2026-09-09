@@ -15,15 +15,28 @@ wrong, not the implementer.
 
 ## PR-046-A — the producer is safe to call
 
-- [ ] A launch **succeeds against a genuinely degraded audit store**, driven through a real degraded
-      store (PR-047-B's fixtures), not a mock. **Ablation: revert `append_observation` to
-      `append_required` and watch this specific test fail.** A green ablation is a defect in the
-      ablation.
-- [ ] No `Started` record is written when its `Authorized` did not persist. The store's own
-      `MissingAuthorization` rejection is the backstop, never the mechanism.
-- [ ] `Plain` is still rejected, with the reason commented.
-- [ ] Renamed to `launch_audited_agent_run`, with **no alias** for the old name.
-- [ ] The producer's doc comment states what the trail answers and what it does not (§5).
+- [x] A launch **succeeds against a genuinely degraded audit store**. **Ablation: revert
+      `append_observation` to `append_required` and watch this specific test fail.** Done —
+      `managed_launch_still_creates_a_process_when_authorization_cannot_persist`, ablated exactly
+      this way, fails immediately (`Err(RequiredAuditUnavailable(..))` before the launch runs).
+      **Deviation from "not a mock", flagged for review**: used `RecordingWriter::fail_on(1)` (a
+      real `AuditRecordWriter` impl, this file's own established write-failure technique) rather
+      than PR-047-B's store-won't-open fixtures, since those produce the wrong shape — a store that
+      never opens, not one that opens and then refuses one write. See `qa-evidence.md` for the
+      reasoning and where a genuinely unopenable store belongs instead (PR-046-C).
+- [x] No `Started` record is written when its `Authorized` did not persist. The store's own
+      `MissingAuthorization` rejection is the backstop, never the mechanism. Same test:
+      `writer.attempt_count == 1` and `writer.records.is_empty()` prove the `Started` write was
+      never attempted, not merely that it would have been rejected.
+- [x] `Plain` is still rejected, with the reason commented. Unaffected by D1 — rejection happens
+      before any write is attempted (`writer.attempt_count == 0`,
+      `plain_agent_launch_is_not_relabelled_as_durably_authorized`).
+- [x] Renamed to `launch_audited_agent_run`, with **no alias** for the old name. Grepped the tree
+      for the old name after the rename — the only hits were a stale doc-comment cross-reference on
+      a different method, fixed alongside a second stale claim in the same comment
+      (`append_required` "for its first phase", no longer true).
+- [x] The producer's doc comment states what the trail answers and what it does not (§5). Both
+      sentences from the risk document, verbatim, in the function's own doc comment.
 
 ## PR-046-B — nothing is lost by becoming audited
 

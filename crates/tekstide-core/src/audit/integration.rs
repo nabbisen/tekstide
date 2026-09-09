@@ -407,13 +407,12 @@ impl<'a> AuditCoordinator<'a> {
     /// phase (`Applied`/`Failed`) with no matching `Authorized` record
     /// already persisted for that same `operation_id` is rejected
     /// (`MissingAuthorization`), the same `ManagedProcessLifecycle`
-    /// discipline [`Self::launch_managed_agent_run`] below already
-    /// follows -- this is that same shape, not a new one. Unlike that
-    /// producer's own `append_required` for its first phase, this one is
-    /// best-effort (`append_observation`): closing this project's local
-    /// session has no third-party-facing accountability property to
-    /// protect (`purge_project_transcripts`'s own reasoning above
-    /// applies unchanged), so gating a real termination sequence on
+    /// discipline [`Self::launch_audited_agent_run`] below also follows
+    /// -- this is that same shape, not a new one. This one is
+    /// best-effort (`append_observation`) for both phases: closing this
+    /// project's local session has no third-party-facing accountability
+    /// property to protect (`purge_project_transcripts`'s own reasoning
+    /// above applies unchanged), so gating a real termination sequence on
     /// whether the audit store happens to be open would cost the user
     /// the thing they asked for and buy nothing.
     pub fn record_safe_close_authorized(
@@ -453,7 +452,41 @@ impl<'a> AuditCoordinator<'a> {
         self.append_observation(&record)
     }
 
-    pub fn launch_managed_agent_run(
+    /// RFC-046 PR-046-A: renamed from `launch_managed_agent_run` (D4) --
+    /// the old name described a compatibility level this function does
+    /// not check (it accepts `Supervised` and `Managed` alike, rejecting
+    /// only `Plain`); the new one names what it does, audits the launch,
+    /// not a level it never inspects. `Plain` is rejected because it is
+    /// the unsupervised passthrough -- deliberately out of scope, since
+    /// nothing this function could write about a `Plain` run's own I/O
+    /// would be trustworthy when that I/O is itself unenforced.
+    ///
+    /// **What this trail answers, and what it does not**
+    /// (`what-an-unrecorded-launch-means.md` §5): *was an agent run
+    /// launched in this project, when, and under which adapter profile.*
+    /// It does **not** answer whether the run is still going, how it
+    /// ended (D3; a termination record is RFC-048, reserved and not
+    /// authored), or why a launch was refused beyond the one Restricted
+    /// Mode case `record_restricted_mode_blocked` already covers (D5) --
+    /// `RunLimitExceeded`/validation/plan-transition refusals never
+    /// reach this function at all and record nothing.
+    ///
+    /// **D1: a launch never depends on this store.** The `Authorized`
+    /// phase is `append_observation`, not `append_required` -- RFC-047
+    /// D4 decided a broken audit store must not refuse an agent run,
+    /// only leave it unrecorded, and PR-047-C already ships a notice
+    /// saying exactly that above the launch button; wiring this producer
+    /// with `append_required` would make that notice false.
+    ///
+    /// **§3: absent is permitted, inconsistent is not.** What the D1
+    /// trade keeps is that no `Started`/`Failed` record can exist whose
+    /// own `Authorized` was never persisted -- `AuditStore` enforces
+    /// this at the schema level (`MissingAuthorization`), but this
+    /// function does not lean on that as the mechanism: `authorization_
+    /// persisted` gates both the `Failed` and `Started` writes below, so
+    /// the store's own check is a backstop this producer should never
+    /// actually need, not the thing doing the work.
+    pub fn launch_audited_agent_run(
         &mut self,
         project: &mut ProjectSession,
         mut plan: AgentRunLaunchPlan,
@@ -482,21 +515,24 @@ impl<'a> AuditCoordinator<'a> {
             adapter_profile_ref.clone(),
             AuditOutcome::Authorized,
         );
-        self.append_required(&authorization)?;
+        let authorization_persisted =
+            self.append_observation(&authorization) == AuditObservationStatus::Persisted;
 
         let launch = project.launch_prepared_agent_run_with_runtime(plan, runtime);
         let (launched_agent_run_id, runtime_events) = match launch {
             Ok(launch) => launch,
             Err(error) => {
-                let mut failed = managed_process_record(
-                    project.id().clone(),
-                    agent_run_id,
-                    operation_id,
-                    adapter_profile_ref,
-                    AuditOutcome::Failed,
-                );
-                failed.reason_code = Some(AuditReasonCode::RuntimeFailure);
-                self.append_observation(&failed);
+                if authorization_persisted {
+                    let mut failed = managed_process_record(
+                        project.id().clone(),
+                        agent_run_id,
+                        operation_id,
+                        adapter_profile_ref,
+                        AuditOutcome::Failed,
+                    );
+                    failed.reason_code = Some(AuditReasonCode::RuntimeFailure);
+                    self.append_observation(&failed);
+                }
                 return Err(AuditIntegrationError::AgentLaunch(error));
             }
         };
@@ -516,15 +552,19 @@ impl<'a> AuditCoordinator<'a> {
             })
             .ok_or(AuditIntegrationError::InvalidTypedContext)?;
 
-        let mut started = managed_process_record(
-            project.id().clone(),
-            launched_agent_run_id.clone(),
-            operation_id.clone(),
-            adapter_profile_ref.clone(),
-            AuditOutcome::Started,
-        );
-        started.terminal_id = Some(terminal_id.clone());
-        let audit_status = self.append_observation(&started);
+        let audit_status = if authorization_persisted {
+            let mut started = managed_process_record(
+                project.id().clone(),
+                launched_agent_run_id.clone(),
+                operation_id.clone(),
+                adapter_profile_ref.clone(),
+                AuditOutcome::Started,
+            );
+            started.terminal_id = Some(terminal_id.clone());
+            self.append_observation(&started)
+        } else {
+            AuditObservationStatus::Degraded
+        };
 
         Ok(AuditActionResult {
             value: AuditedAgentLaunch {
