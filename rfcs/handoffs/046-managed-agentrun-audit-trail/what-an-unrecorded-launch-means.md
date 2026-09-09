@@ -71,9 +71,26 @@ weaken the store's check.
 registers it through `register_approval_channel`. Its own comment records that this endpoint *"used
 to be silently dropped one layer down"* — a defect found at response 227 and fixed.
 
-It is `None` today because the only profile is `Supervised`. **Do not let that make the test
-optional.** A test written as "the endpoint survives" is meaningful now; a test written as "a
-`Managed` profile's endpoint survives" cannot be written at all yet and will be forgotten.
+It is `None` in *production* today, because the only shipped profile is `Supervised`.
+
+*Corrected 2026-09-10, response 369.* This said a `Managed`-profile test "cannot be written at all
+yet". **That is false — I asserted a limitation instead of checking it, and the weaker test that
+resulted cannot fail for the failure mode this section exists to prevent.** A Supervised launch
+returns `None` whether the endpoint is carried, hardcoded `None`, or dropped in the plumbing; only
+*deleting the field* breaks such a test, and deletion is not what happened at response 227.
+
+**A `Managed` launch binding a real endpoint is writable today**, verified by running it:
+
+1. build the plan at `AgentCompatibilityLevel::Managed` (`launch_plan_for_level` already
+   parameterises this);
+2. set `profile.adapter_capabilities.structured_action_approval = true`, or validation returns
+   `ManagedCapabilityMissing`;
+3. pass a **short** approval state root — the socket path has a ~108-byte `sun_path` limit and
+   `TestAuditDirs`' own base overflows it, failing as `Bind(SocketPathTooLong)`, which reads like a
+   bug in the code under test rather than in the fixture.
+
+**Assert `Some`.** That fails on all three losses. Keep a Supervised `None` test alongside it —
+Supervised must not bind a channel, and both branches are reachable.
 
 The failure this prevents is not a crash. It is command approval quietly not existing for the first
 `Managed` profile that ships, months from now, with nothing in the diff that introduced it.
