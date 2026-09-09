@@ -60,6 +60,9 @@ wrong, not the implementer.
       in the struct literal (the "silently dropped in the plumbing" defect, response 227's own
       historical shape) — failed only this test; `supervised_launch_does_not_bind_an_approval_
       endpoint` stayed green, since `None` is also its own correct answer.
+      **Verified independently by the reviewer (response 370):** hardcoding
+      `approval_endpoint: None` — response 227's own historical shape — fails this test
+      alone, with the Supervised sibling correctly staying green.
 - [x] A **Supervised** launch returns `None`, kept alongside it: Supervised must not bind a channel.
       `supervised_launch_does_not_bind_an_approval_endpoint` (renamed from `managed_launch_carries_
       the_approval_endpoint_field_through`, which the name no longer fit once its sibling existed).
