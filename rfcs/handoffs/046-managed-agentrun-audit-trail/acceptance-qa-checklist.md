@@ -52,12 +52,17 @@ wrong, not the implementer.
       dropped from `AuditedAgentLaunch` (`ApprovalChannelEndpoint` holds a live `UnixListener` and
       implements neither) — grepped the tree first; nothing outside this producer's own tests used
       either.
-- [x] A test asserts the endpoint is **carried**, and **fails if the field is deleted** — verified by
-      deleting it, not by inspection. Passing "because the launch succeeded" is not this test.
-      `managed_launch_carries_the_approval_endpoint_field_through`, against today's real value
-      (`None`, `Supervised`). **Ablated by deleting the field itself**: the crate failed to build
-      (`E0609` at this test's own assertion, `E0560` at the struct literal) — a compile-time
-      failure, not a runtime one, which is what "fails if the field is deleted" actually requires.
+- [ ] A **`Managed`** launch returns `Some(endpoint)` — the only assertion that fails on all three
+      losses: field deleted, hardcoded `None`, dropped in the plumbing. Writable today; §4 carries
+      the three-step recipe and the `SocketPathTooLong` trap. *(Unticked by the reviewer, response
+      369. §4 previously claimed this test was impossible, which is why the first attempt asserted
+      the weaker property — the fault is the instruction's, not the implementer's.)*
+- [ ] A **Supervised** launch returns `None`, kept alongside it: Supervised must not bind a channel.
+- [x] The field's presence is a **compile-time** dependency of a test, not merely a runtime one.
+      `managed_launch_carries_the_approval_endpoint_field_through` reads the field, so **ablating by
+      deleting the field itself** fails the build (`E0609` at the assertion, `E0560` at the struct
+      literal). This box is met and stays met; it is simply weaker than the two above, because a
+      field that still exists but is never populated compiles fine.
 
 ## PR-046-C — the trail exists in production
 
