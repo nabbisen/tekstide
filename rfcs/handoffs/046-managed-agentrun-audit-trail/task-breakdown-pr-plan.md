@@ -28,11 +28,15 @@ misleads a reader, and it should be written against an API that is already corre
 
 **Required tests, each ablated separately:**
 
-- A launch **succeeds against a genuinely degraded store** and returns a real result. Use PR-047-B's
-  own fixtures; do not mock. **This must fail if `append_required` returns** — check that by
-  reverting the one word, not by reasoning about it.
-- The `Started` record is **not** written when the `Authorized` write did not persist (§3). The
-  store's own `MissingAuthorization` check must never be the thing that catches this in production.
+- A launch **succeeds when the authorization write does not persist**, and returns a real result.
+  Drive it through `with_writer` (§2, corrected) — PR-047-B's fixtures cannot reach this code, since
+  a coordinator can only be built around an already-open store. **This must fail if `append_required`
+  returns** — check that by reverting the one word, not by reasoning about it.
+- **`Started` is not attempted when the authorization did not persist — its own test, its own name.**
+  Bundling this with the box above leaves §3's property failing under a name that describes the other
+  one (response 367 R1).
+- The store's own `MissingAuthorization` check must never be the thing that catches this in
+  production — the producer skips the attempt itself.
 - `Plain` is still rejected.
 
 ## PR-046-B — the return value carries everything the current path returns

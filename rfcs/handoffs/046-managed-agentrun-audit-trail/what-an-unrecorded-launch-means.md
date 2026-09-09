@@ -36,9 +36,17 @@ call when the store will not write. **Changing it to `append_observation` is D1'
 content, and it is one word.** That is exactly why it needs a test: a one-word change is a one-word
 revert, and nothing else in the codebase would notice.
 
-**The test must be that a launch succeeds with a degraded store**, driven through a real degraded
-store rather than a mocked one — PR-047-B's own fixtures (`corrupt_and_interrupt_recovery_for_test`,
-the symlinked `recovery` directory) already produce that state.
+**The test must be that a launch succeeds when the authorization write does not persist.**
+
+*Corrected 2026-09-09, response 367.* This originally said "driven through a real degraded store…
+PR-047-B's own fixtures", and **that instruction could not be followed.** `AuditCoordinator::new`
+takes an already-open `&mut AuditStore`; PR-047-B's fixtures produce a store that will not open at
+all, so no coordinator can be built around one and the fixture cannot reach this code. Drive it
+through `with_writer`, the module's own `pub(crate)` injection seam, with a writer that fails the
+attempt — that is the real trait `AuditStore` implements, not a mock of the logic under test.
+
+**The unopenable-store fixture belongs at PR-046-C**, where the failure genuinely is the *open*, the
+path runs through `open_audit_store_recording_failure`, and "not a mock" is about production wiring.
 
 And it must fail if `append_required` comes back. A test that only asserts "a record was written on
 the happy path" passes unchanged when the store is degraded, because on the happy path it is not.

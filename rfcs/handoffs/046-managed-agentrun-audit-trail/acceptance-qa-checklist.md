@@ -24,7 +24,11 @@ wrong, not the implementer.
       than PR-047-B's store-won't-open fixtures, since those produce the wrong shape — a store that
       never opens, not one that opens and then refuses one write. See `qa-evidence.md` for the
       reasoning and where a genuinely unopenable store belongs instead (PR-046-C).
-- [x] No `Started` record is written when its `Authorized` did not persist. The store's own
+- [ ] No `Started` record is attempted when its `Authorized` did not persist, **in its own test
+      under its own name** (response 367 R1 — unticked by the reviewer, not the implementer, who
+      disclosed the sharing plainly below). Ablating the gate alone must fail *that* test; today it
+      fails one named for the other property, so a reader who breaks the consistency guarantee is
+      told "still creates a process". The store's own
       `MissingAuthorization` rejection is the backstop, never the mechanism. Same test:
       `writer.attempt_count == 1` and `writer.records.is_empty()` prove the `Started` write was
       never attempted, not merely that it would have been rejected.
