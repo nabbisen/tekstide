@@ -2,7 +2,7 @@
 
 ## 0.17.0 - The Audit Store Says When It Cannot Record, And Records The Launch
 
-Status: unreleased.
+Status: released on 2026-09-10.
 
 Two RFCs that belong together. **Before this release, a corrupted audit store failed completely
 silently, and launching an AI CLI agent was never recorded at all.** Both were found by RFC-036's
