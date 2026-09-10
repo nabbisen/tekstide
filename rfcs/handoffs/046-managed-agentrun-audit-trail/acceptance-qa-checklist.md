@@ -121,7 +121,13 @@ wrong, not the implementer.
       never a precondition, and the D3/D5 boundaries (no termination record, no new refusal record)
       explicitly rather than leaving them to be inferred.
 
-- [ ] **Live evidence not captured, documented rather than silently dropped.** RFC-047 PR-047-C
+- [x] **Live evidence not captured — accepted as a documented gap by the reviewer, 2026-09-10.**
+      The store read-back is the load-bearing evidence for this RFC by the task breakdown's own
+      instruction, and the delivery plan's bounded-evidence rule exists precisely so the `wtype`
+      question cannot consume another six rounds. Ticked as *disclosed and accepted*, not as
+      *captured*; the two record-reading tests carry the claim. Original note follows.
+
+      **Live evidence not captured, documented rather than silently dropped.** RFC-047 PR-047-C
       already spent six rounds establishing `wtype` does not reliably reach this application in this
       environment; the same route (`Ctrl+Alt+A`) is needed here. Not re-litigated — the task
       breakdown's own words: "the store read-back is the load-bearing evidence here, not a
