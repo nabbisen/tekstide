@@ -4732,6 +4732,170 @@ fn attempt_agent_run_launch_with_profile_spawns_registers_and_selects_a_real_run
     );
 }
 
+// --- RFC-046 PR-046-C: production calls it -----------------------------
+
+/// The task breakdown's own required proof, taken literally: not "the
+/// producer was called," the records, **read back from the store** --
+/// the same discipline `open_audit_store_recording_failure_resumes_and_
+/// records_the_recovery` (RFC-047 PR-047-B) already established for this
+/// exact class of claim. `attempt_agent_run_launch_with_profile` is
+/// production's own real entry point, unchanged by this slice; only what
+/// it now calls underneath is new.
+#[test]
+fn attempt_agent_run_launch_with_profile_writes_authorized_then_started_to_a_real_store() {
+    let state_dir = temp_audit_state_dir("agent-run-launch-writes-real-records");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("agent-run-launch-writes-real-records-project");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let bin_dir = fresh_project_dir("agent-run-launch-writes-real-records-bin");
+    let executable = bin_dir.join("fake-ai-cli");
+    std::fs::write(&executable, "#!/bin/sh\n").expect("test executable should be written");
+    let mut permissions = std::fs::metadata(&executable)
+        .expect("test executable metadata should be readable")
+        .permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions)
+        .expect("test executable permissions should be set");
+
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "fake-ai-cli",
+        "Fake AI CLI",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: executable,
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    attempt_agent_run_launch_with_profile(&mut state, profile)
+        .expect("a resolvable, trust-compatible profile should launch for real");
+
+    let agent_run_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .agent_runs()[0]
+        .id
+        .clone();
+
+    let store = super::open_audit_store(&state_dir, Vec::new())
+        .expect("the real store this launch just wrote to must still open");
+    let records = store
+        .query(&tekstide_core::audit::AuditQuery::latest(10))
+        .unwrap()
+        .records;
+    let matching: Vec<_> = records
+        .iter()
+        .filter(|record| record.record.agent_run_id.as_ref() == Some(&agent_run_id))
+        .collect();
+    assert_eq!(
+        matching.len(),
+        2,
+        "exactly Authorized and Started, read back from the real store, not asserted at the \
+         call site: {matching:?}"
+    );
+    assert!(
+        matching
+            .iter()
+            .any(|record| record.record.outcome == tekstide_core::audit::AuditOutcome::Authorized)
+    );
+    assert!(
+        matching
+            .iter()
+            .any(|record| record.record.outcome == tekstide_core::audit::AuditOutcome::Started)
+    );
+}
+
+/// **The box that proves D1 reached production, not just the API**
+/// (task breakdown's own framing): the exact "unrecoverable failure"
+/// fixture EVIDENCE-2 (RFC-047 PR-047-B) used -- a corrupted
+/// `audit.sqlite3` plus `recovery` replaced with a symlink, so the store
+/// will not even *open*, let alone write -- now finally has its real
+/// home, per response 369's own note that PR-046-A's fixture-shape
+/// mismatch belonged here. A `Managed` profile with a configured
+/// approval channel proves the *whole* production path still works
+/// end to end while unaudited: the process launches, and
+/// `register_approval_channel` still runs.
+#[test]
+fn attempt_agent_run_launch_with_profile_still_launches_and_registers_with_an_unopenable_store() {
+    let state_dir = temp_audit_state_dir("agent-run-launch-unopenable-store");
+    let audit_dir = state_dir.join("audit");
+    std::fs::create_dir_all(&audit_dir).unwrap();
+    std::fs::write(audit_dir.join("audit.sqlite3"), [0xffu8; 4096]).unwrap();
+    let elsewhere = temp_audit_state_dir("agent-run-launch-unopenable-store-target");
+    std::os::unix::fs::symlink(&elsewhere, audit_dir.join("recovery")).unwrap();
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("agent-run-launch-unopenable-store-project");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let bin_dir = fresh_project_dir("agent-run-launch-unopenable-store-bin");
+    let executable = bin_dir.join("fake-ai-cli");
+    std::fs::write(&executable, "#!/bin/sh\n").expect("test executable should be written");
+    let mut permissions = std::fs::metadata(&executable)
+        .expect("test executable metadata should be readable")
+        .permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions)
+        .expect("test executable permissions should be set");
+
+    let mut profile = tekstide_core::agent::AiCliProfile::new(
+        "fake-ai-cli-managed",
+        "Fake AI CLI (Managed)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: executable,
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Managed,
+    );
+    profile.workspace_discovery_policy =
+        tekstide_core::agent::AiCliWorkspaceDiscoveryPolicy::DisabledByLaunch {
+            evidence: "reviewed project-config discovery disable flag".to_owned(),
+        };
+    profile.adapter_capabilities.structured_action_approval = true;
+
+    assert_eq!(
+        state.audit_health.status(),
+        tekstide_core::audit::AuditHealthStatus::Healthy,
+        "precondition: nothing has touched the audit store yet"
+    );
+
+    attempt_agent_run_launch_with_profile(&mut state, profile).expect(
+        "D1: a launch must succeed even though its own audit store cannot be opened at all",
+    );
+
+    assert_eq!(
+        state.terminal_panes.len(),
+        1,
+        "the real process must exist regardless of the unopenable store"
+    );
+    assert_eq!(
+        state.approval_channels.len(),
+        1,
+        "the approval channel must still be registered -- D1 is about the audit trail, not \
+         about command approval, and the two must not become coupled"
+    );
+    assert_eq!(
+        state.audit_health.status(),
+        tekstide_core::audit::AuditHealthStatus::Degraded,
+        "the store genuinely never opened -- this is what proves no record could have been \
+         written, not merely that none happened to be"
+    );
+}
+
 /// **Response 247's required proof, and response 248's correction to
 /// it**: not "the trust flag changed," but the actual chain trust was
 /// blocking -- and not from a dispatched `AppCommand`/`Message`, but

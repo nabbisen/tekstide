@@ -218,3 +218,86 @@ it fails the whole crate's build, not just one test.
 `fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
 (4 tests): clean. Three consecutive full-workspace runs: **483 + 4 + 746, fully green** every
 time -- no flake this pass (one new test, one renamed).
+
+## PR-046-C — production calls it
+
+**The trail exists.** `attempt_agent_run_launch_with_profile_state_root_and_capture` (`shell.rs`)
+now goes through `open_audit_store_recording_failure` -- the one seam every other audit-writing call
+site already uses -- and, when a store comes back, calls `AuditCoordinator::launch_audited_agent_run`
+instead of `AppState::launch_agent_run_with_runtime`. When the store will not even open at all
+(`None`), the call falls back to `ProjectSession::launch_agent_run_with_runtime` directly --
+unaudited, but the launch still proceeds, per D1.
+
+### Substitution, not rewrite
+
+Everything downstream of the launch call is unchanged: the pre-launch generated-change baseline
+capture, its insertion keyed by `agent_run_id`, the fresh terminal-id read from the real record
+rather than a cached value, `register_approval_channel`'s own call, and pane registration. Only the
+launch call itself and the tuple it produces changed shape (`AuditedAgentLaunch`'s own
+`agent_run_id()`/`runtime_events`/`approval_endpoint` instead of the plain tuple
+`AppState::launch_agent_run_with_runtime` returned) -- confirmed by the existing, unmodified
+regression tests for the baseline (`agent_run_change_baselines` keying) and for refusals
+(`a_real_workspace_discovery_refusal_writes_a_real_restricted_mode_blocked_record`,
+`a_restricted_mode_blocked_record_appears_only_for_workspace_discovery_refusals`) all staying green
+without any change to their own code.
+
+The one internal-consistency question this substitution raised: `launch_audited_agent_run` can
+return `AuditIntegrationError::InvalidTypedContext`/`RequiredAuditUnavailable`, neither of which
+`AppState::launch_agent_run_with_runtime`'s own error type could ever produce. Both are structurally
+unreachable from this exact call site (the plan and project are always the same validated pair by
+construction; the `Authorized` write is `append_observation`, never `append_required`, so its
+own "required" failure can't arise) -- handled with a `panic!` naming the invariant, the same
+`.expect()`-a-structural-guarantee convention this same function already uses for
+`open_real_agent_run_state_root()`, rather than inventing a new refusal for a state that cannot
+occur.
+
+### Required tests, each read back from a real store or a real running process
+
+- `attempt_agent_run_launch_with_profile_writes_authorized_then_started_to_a_real_store` -- a real
+  launch through production's own real entry point (`attempt_agent_run_launch_with_profile`,
+  unchanged), then the store is **reopened and queried** for the launched `agent_run_id`: exactly
+  `Authorized` and `Started`, not asserted at the call site. **Ablated**: reverted the launch call
+  to the old unaudited path -- failed, zero matching records (the store was never touched at all).
+  Restored: passes.
+- `attempt_agent_run_launch_with_profile_still_launches_and_registers_with_an_unopenable_store` --
+  **the box that proves D1 reached production, not just the API.** EVIDENCE-2's own fixture
+  (corrupted `audit.sqlite3`, `recovery` replaced with a symlink, so the store genuinely will not
+  open) finally has its real home, per response 369's own note. A `Managed` profile with a
+  configured approval channel proves the whole path still works end to end while unaudited: the
+  real process launches (`state.terminal_panes.len() == 1`), the approval channel still registers
+  (`state.approval_channels.len() == 1`), and `state.audit_health.status() == Degraded` proves the
+  store genuinely never opened -- the only way to be sure nothing could have been written, rather
+  than merely observing that nothing happened to be. **Ablated**: same revert as above -- failed,
+  `audit_health` stayed `Healthy` (the unaudited path never touches it at all). Restored: passes.
+- Generated-change baseline keying and refusal recording: covered by existing, unmodified regression
+  tests (see above) -- unaffected by this substitution, confirmed rather than assumed.
+
+### Live evidence: documented gap, per the delivery plan's bounded-evidence rule
+
+Not captured. RFC-047 PR-047-C already spent six escalation rounds establishing that synthetic
+keyboard input (`wtype`) does not reliably reach this application in this environment, closed by the
+reviewer's own explicit bound ("the next request either carries the capture or records option 3 as
+decided") in favor of unit-test evidence. The same environment limitation applies here -- launching
+an agent run through the real GUI needs the identical `Ctrl+Alt+A` keyboard route already
+established as unreliable to drive synthetically. Not re-litigated: the task breakdown's own words
+are explicit that "the store read-back is the load-bearing evidence here, not a screenshot," and
+that evidence is what the two tests above provide, against a real store, through production's real
+entry point.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
+(4 tests): clean. Three consecutive full-workspace runs: **485 + 4 + 746, fully green** every
+time -- no flake this pass (two new tests).
+
+### Documentation
+
+- `launch_audited_agent_run`'s own doc comment (PR-046-A) states the trail's boundary; the new call
+  site in `shell.rs` now points there explicitly, rather than leaving a reader of production code to
+  find it only in this handoff pack.
+- `crates/tekstide-core/README.md`'s own claim -- corrected once already by RFC-036, for this exact
+  producer -- rewritten again: launching an AI CLI agent is recorded as of `0.16.0`, best-effort,
+  never a precondition for the launch; the trail answers *launched, when, under which profile* and
+  not *still running*, *how it ended*, or *why a non-Restricted-Mode refusal happened*.
+- `rfcs/README.md`/`rfcs/delivery-plan.md`'s own RFC-046 rows are **not** touched here, per response
+  367's explicit instruction: fold the update in when RFC-046 closes, not slice by slice.

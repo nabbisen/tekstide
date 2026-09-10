@@ -72,23 +72,46 @@ wrong, not the implementer.
 
 ## PR-046-C — the trail exists in production
 
-- [ ] A real launch through the production path writes `Authorized` then `Started`, **read back from
+- [x] A real launch through the production path writes `Authorized` then `Started`, **read back from
       the store**, not asserted at the call site.
-- [ ] The same launch with a **degraded** store still launches, still registers the approval channel,
+      `attempt_agent_run_launch_with_profile_writes_authorized_then_started_to_a_real_store` —
+      launches through production's own real entry point, reopens the store, queries it. **Ablated**:
+      reverted to the old unaudited call — zero matching records. Restored: passes.
+- [x] The same launch with a **degraded** store still launches, still registers the approval channel,
       and writes no records. This is the box that proves D1 reached production.
-- [ ] The generated-change baseline is still captured and still keyed to the launched run.
-- [ ] Restricted Mode still records its blocked launch; run-limit, validation and plan-transition
-      still record nothing (D5).
-- [ ] Every post-launch step of the current path still happens, in the same order. **Substitution,
-      not rewrite.**
+      `attempt_agent_run_launch_with_profile_still_launches_and_registers_with_an_unopenable_store` —
+      EVIDENCE-2's own unopenable-store fixture, a real `Managed` launch with a configured approval
+      channel. **Ablated**: same revert — `audit_health` stayed `Healthy` (the unaudited path never
+      touches it). Restored: passes.
+- [x] The generated-change baseline is still captured and still keyed to the launched run. Unchanged
+      code path; existing regression tests (`agent_run_change_baselines` keying) stayed green
+      unmodified.
+- [x] Restricted Mode still records its blocked launch; run-limit, validation and plan-transition
+      still record nothing (D5). Unchanged code path (the refusal branches sit above the launch call
+      this slice touched); existing regression tests stayed green unmodified.
+- [x] Every post-launch step of the current path still happens, in the same order. **Substitution,
+      not rewrite.** Only the launch call and its return shape changed; baseline insertion,
+      terminal-id re-read, approval-channel registration, and pane creation are byte-for-byte the
+      same code, confirmed by the unmodified regression tests above passing unchanged.
 
 ## Whole-RFC
 
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`,
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`,
       `rfc_docs_invariants` clean.
-- [ ] Three consecutive full-workspace runs, green, with any recurring flake given a dated row in
-      `test-process-leak.md`.
-- [ ] **The trail's boundary is documented where a reader meets it** — not only in this pack.
-- [ ] `crates/tekstide-core/README.md` does not claim more than the trail delivers. RFC-036 corrected
+- [x] Three consecutive full-workspace runs, green, with any recurring flake given a dated row in
+      `test-process-leak.md`. **485 + 4 + 746, fully green** every time — no flake.
+- [x] **The trail's boundary is documented where a reader meets it** — not only in this pack. The new
+      call site in `shell.rs` points to `launch_audited_agent_run`'s own doc comment explicitly,
+      rather than leaving a production-code reader to find the boundary only in this handoff.
+- [x] `crates/tekstide-core/README.md` does not claim more than the trail delivers. RFC-036 corrected
       it once for exactly this producer; check it again rather than assuming that correction still
-      fits.
+      fits. **Rewritten**: no longer says "no production caller" (it does now); states best-effort,
+      never a precondition, and the D3/D5 boundaries (no termination record, no new refusal record)
+      explicitly rather than leaving them to be inferred.
+
+- [ ] **Live evidence not captured, documented rather than silently dropped.** RFC-047 PR-047-C
+      already spent six rounds establishing `wtype` does not reliably reach this application in this
+      environment; the same route (`Ctrl+Alt+A`) is needed here. Not re-litigated — the task
+      breakdown's own words: "the store read-back is the load-bearing evidence here, not a
+      screenshot," and the two required tests above provide exactly that, through production's real
+      entry point.
