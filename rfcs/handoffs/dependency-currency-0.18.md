@@ -63,6 +63,14 @@ the numbers — a green check that was actually run is evidence; an unrun one is
 Compare `name`/`version` pairs across the before/after lockfile and assert nothing moved backwards,
 rather than reading the `Updating …` lines, which only ever say "Updating".
 
+**Compare pairs, not a name-keyed map (added 2026-09-10, response 375).** Dozens of crates appear at
+two major versions at once — `bitflags` 1.x and 2.x, `syn` 2.x and 3.x, `getrandom`, `hashbrown`,
+and more. A check that builds `map[name] = version` silently keeps whichever entry it read last and
+compares the wrong pair, or none. **The reviewer's own first check had exactly this defect**, and
+the implementer's did not. Build a multiset of `(name, version)` pairs, group by `(name, major)`,
+and compare the maximum within each track. Counting by track and counting by name differ by design:
+this update is **73 tracks** or **72 names**, because `syn` moved on both of its.
+
 **Span both steps as one before/after (corrected 2026-09-10, response 374).** The first attempt ran
 this check across the `cargo update` alone, where nothing was removed, and reported "0 names lost
 entirely". Two were: `rusqlite 0.39.0` depends on `sqlite-wasm-rs` (and `rsqlite-vfs` behind it) and
