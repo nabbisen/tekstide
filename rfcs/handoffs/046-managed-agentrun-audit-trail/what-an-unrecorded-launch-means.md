@@ -125,6 +125,31 @@ Both were proven to crash the application through the real production entry poin
 This is §4.1 at its most expensive: not a sentence on a board overstating damage, but a fatal error
 naming the wrong cause.
 
+### §6.1 The residual, recorded rather than fixed (2026-09-10, response 372)
+
+R1 removed both *input*-reachable panics. What remains is narrowed to genuine
+"the code is wrong" conditions, which is a defensible panic and matches this project's `.expect()`
+convention. **Two things about it are still true and should not be rediscovered.**
+
+`launch_audited_agent_run` can return `Err` from two places that sit **after**
+`launch_prepared_agent_run_with_runtime` has returned `Ok`: the `launched_agent_run_id != agent_run_id`
+comparison, and the terminal-id lookup's own `.ok_or(InvalidTypedContext)`. The call site's comment
+names only the *pre-launch* id check as "the one way left in."
+
+**By then the process is running and `plan` has been moved.** The caller has no recovery: falling
+back would double-launch (and will not compile), and refusing would be a lie, because the run exists.
+A panic there kills the application and orphans a spawned process — the outcome RFC-043 exists to
+prevent.
+
+**The fix, if it is ever wanted, is producer-side and is a change to the return contract, not a
+slice of this RFC:** `launch_audited_agent_run` must not return `Err` once a process exists. It
+should return the launch with a degraded audit status, the same way every other best-effort producer
+here reports a write it could not make.
+
+Left deliberately: both conditions are internal-consistency violations rather than ordinary inputs,
+which is exactly what separates them from `Plain` and an invalid profile id — those were *valid
+data*, and valid data must never reach a `panic!`.
+
 ## §5 Say what the trail answers, in the trail's own documentation
 
 After this slice the audit trail answers:
