@@ -737,7 +737,20 @@ Status: active after `0.1.0`.
 - Decide whether future releases need scripts, `xtask`, or CI gates.
 - Keep the changelog aligned with implemented and deferred scope.
 - **`NOTICE` and third-party dependency trees (`iced` and similar): not owed today, becomes owed at RFC-029.** A `cargo publish` tarball redistributes only this project's own sources — confirmed for `0.4.0` by inspecting `cargo package --list`, which shows no third-party files in either crate. The Apache-2.0 §4(d) notice-propagation obligation attaches to redistributing a work, and `cargo publish` does not redistribute `iced`'s sources, only a dependency reference resolved separately by Cargo. This becomes live the day a prebuilt binary ships (RFC-029: documentation, CI, release automation, M14) — audit `iced`'s dependency tree for upstream `NOTICE` obligations then, not at every source-only release before it.
-- **Dependency currency — measured 2026-09-02, scheduled as one slice after RFC-047 closes.**
+- **Dependency currency — done 2026-09-10, landed in `0.18.0`.** `cargo update`: 69 upgraded, 1
+  added (`zcheapstr`, transitive), 0 removed, **0 downgraded** — the arama trap named below did not
+  fire, checked via a full lockfile name/version diff rather than assumed. `rusqlite` 0.39.0 →
+  0.40.2 needed zero Rust code changes; what moved is bundled SQLite `3.51.3` → `3.53.2`
+  (`libsqlite3-sys` 0.37.0 → 0.38.2) under the durable audit store, and RFC-047's own corruption
+  fixtures (487 + 4 + 746, three consecutive green runs) are the acceptance suite for that engine
+  change — nothing else in this project would have noticed a difference in how SQLite reports a
+  damaged file. The one open risk — whether a store written by 3.53 survives a downgrade back to
+  3.51 — was checked directly: a store written under 0.40.2/3.53.2 opened and read back cleanly
+  under 0.39.0/3.51.3, and the reverse direction also succeeded. `NOTICE` (root and
+  `crates/tekstide-core`) and `CHANGELOG.md`'s `0.18.0` entry carry the resolved versions.
+  Handoff: `handoffs/dependency-currency-0.18.md`. Original scoping note follows.
+
+  **Measured 2026-09-02, scheduled as one slice after RFC-047 closes.**
   Prompted by the owner asking whether updating to a dependency's latest is easy. Measured with
   `cargo update --dry-run`, not estimated.
 

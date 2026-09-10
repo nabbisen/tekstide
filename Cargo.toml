@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version         = "0.17.0"
+version         = "0.18.0"
 edition         = "2024"
 license             = "Apache-2.0"
 authors             = ["nabbisen"]
@@ -23,7 +23,7 @@ serde                       = { version = "1", features = ["derive"] }
 serde_json                  = "1"
 toml                        = "1"
 uuid                        = { version = "1", features = ["v4"] }
-rusqlite                    = { version = "0.39", default-features = false, features = ["bundled"] }
+rusqlite                    = { version = "0.40", default-features = false, features = ["bundled"] }
 
 iced                        = { version = "0.14", features = ["tokio", "advanced"] }
 alacritty_terminal          = "0.26"
