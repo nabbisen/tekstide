@@ -3186,19 +3186,35 @@ fn attempt_agent_run_launch_with_profile_state_root_and_capture(
                         // `append_observation`) and `InvalidTypedContext` for a
                         // `Plain` plan or an invalid profile id (both already
                         // filtered out above by `plan_is_auditable`) never
-                        // actually arise from this call site any more -- the one
-                        // way left in is the project/agent-run-id mismatch check,
-                        // which really is guaranteed by construction here (this
-                        // same `project_id` built the request that produced
-                        // `plan`). Matches this module's own convention of
-                        // `.expect()`-ing a structural invariant rather than
-                        // inventing a refusal for a state that cannot occur
-                        // (`open_real_agent_run_state_root()`'s own `.expect()` a
-                        // few lines below is the same call).
+                        // actually arise from this call site any more. Three
+                        // `InvalidTypedContext` sources remain inside
+                        // `launch_audited_agent_run`, all genuine internal-
+                        // consistency checks rather than ordinary bad input,
+                        // unlike the two `plan_is_auditable` already routes
+                        // around: the pre-launch project/agent-run-id mismatch
+                        // (guaranteed consistent here -- this same `project_id`
+                        // built the request that produced `plan`), and two
+                        // checks *after* `launch_prepared_agent_run_with_runtime`
+                        // has already returned `Ok` -- `launched_agent_run_id !=
+                        // agent_run_id`, and the terminal-id lookup's own
+                        // `.ok_or(InvalidTypedContext)`. By the time either of
+                        // those two could fire, the real process already exists
+                        // and `plan` has been consumed: there is no fallback
+                        // left to take (it would double-launch, and cannot
+                        // compile anyway), so this `panic!` -- with its orphaned,
+                        // still-running child process -- is what response 372
+                        // recorded as the honest cost of a producer that returns
+                        // `Err` after a process already exists, rather than a
+                        // launch with a degraded audit status. Matches this
+                        // module's own convention of `.expect()`-ing a structural
+                        // invariant rather than inventing a refusal for a state
+                        // that cannot occur (`open_real_agent_run_state_root()`'s
+                        // own `.expect()` a few lines below is the same call).
                         other => panic!(
                             "launch_audited_agent_run returned {other:?} from production, where \
                          plan_is_auditable already ruled out every InvalidTypedContext cause but \
-                         the project/agent-run-id pair, which is consistent here by construction"
+                         a genuine internal-consistency violation -- if this fires after the \
+                         process was already spawned, it is left running, orphaned"
                         ),
                     })?
                     .value;

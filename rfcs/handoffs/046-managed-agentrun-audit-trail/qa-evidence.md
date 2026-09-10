@@ -1,8 +1,8 @@
 ---
 title: "RFC-046: Managed AgentRun Audit Trail — QA evidence"
 rfc: "RFC-046"
-rfc_file: "../../accepted/046-managed-agentrun-audit-trail.md"
-source_rfc_status: "Accepted 2026-09-06 — M12"
+rfc_file: "../../done/046-managed-agentrun-audit-trail.md"
+source_rfc_status: "Implemented and closed 2026-09-10 — RFC-046 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-09-09"
 ---

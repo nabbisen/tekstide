@@ -1,8 +1,23 @@
 # RFC-046: Managed AgentRun Audit Trail
 
-Status: **Accepted by the human owner 2026-09-06.** **D1–D5 decided by the architect on acceptance** — see "Decided on acceptance" at the end, which settles D4's actual name and adds D5, a boundary found while deciding. Proposed the same day. Reserved 2026-08-28 by RFC-036's triage, which found the defect by
-counting production callers rather than reading documentation. Authored after RFC-047 closed its
-last decision, because RFC-047 changed one of this RFC's answers before it was written — see D1.
+Status: **Implemented and closed 2026-09-10.** Three slices (PR-046-A through C), reviewed and
+accepted across responses 367–372. Production now calls the audited launch producer this RFC's own
+D1–D5 shaped: `attempt_agent_run_launch_with_profile_state_root_and_capture` opens the audit store
+through the seam RFC-047 established, and calls `AuditCoordinator::launch_audited_agent_run` when a
+store comes back — falling back to the pre-existing unaudited launch when it does not, or when the
+plan itself is out of audit scope (a `Plain` profile, or a profile id the store's own bounded
+charset cannot represent). **Found during review, response 371**: the first cut of that fallback
+crashed the application on exactly those two inputs, via a `panic!` whose own comment named a
+different invariant (the plan/project pair, always consistent by construction) than the one that
+actually failed — `tekstide_core::audit::plan_is_auditable` now exposes the producer's own gate so
+the caller can route around it before the plan is consumed, rather than discovering the mismatch
+from the error the producer returns. Original:
+**Accepted by the human owner 2026-09-06.** **D1–D5 decided by the architect on acceptance** — see
+"Decided on acceptance" at the end, which settles D4's actual name and adds D5, a boundary found
+while deciding. Proposed the same day. Reserved 2026-08-28 by RFC-036's triage, which found the
+defect by counting production callers rather than reading documentation. Authored after RFC-047
+closed its last decision, because RFC-047 changed one of this RFC's answers before it was written —
+see D1.
 Target milestone: **M12**
 Date: 2026-09-06
 
@@ -19,6 +34,8 @@ Related RFCs:
   does.**
 - [RFC-021/022](../done/022-adapter-spawn-and-command-approval-surface.md) — own the approval
   endpoint that D2 exists to protect.
+- [RFC-048](../future-work.md) — reserved, not authored. D3 below declines to record how a run
+  *ends*; this is where that would go, once the three existing terminating paths are inventoried.
 
 ## Why
 
