@@ -141,6 +141,26 @@ The workspace dry-run is the release-candidate gate for same-workspace dependenc
       the tarball." Same failure shape as the README item above, which had to be amended
       for the same reason.
 - [ ] Build or test from generated package artifacts rather than only the working tree.
+      **Two things fail from an unpacked package and are not defects — measured at `0.17.0`, after
+      they cost the cutter ten minutes each.**
+
+      **(a) Build the binary target first.** `cargo test` in
+      `target/package/tekstide-core-<version>/` fails **ten** tests with *"expected the
+      reference_adapter binary at …/target/debug/reference_adapter; the `[[bin]]` target may not
+      have built"* — and `--all-targets` does **not** fix it. Those tests shell out to a real
+      adapter process. Run `cargo build --offline --bin reference_adapter` first, then test: 745
+      pass. The bin source *is* in the archive (`src/bin/reference_adapter.rs`, with an explicit
+      `[[bin]]` in cargo's generated manifest); nothing is missing from the package.
+
+      **(b) One test cannot pass from a package, by construction.**
+      `real_repository_filesystem_scan_cost_headless_benchmark` asserts it is measuring a real
+      repository and walks up looking for `.git/`. An unpacked package is not a repository, so it
+      fails with *"must be measuring a real repository with a real .git/, found none"*. That is the
+      test doing its job — it refuses to report a benchmark number for something that is not a
+      repository, which is the correct behaviour and the reason it is written that way.
+
+      **So the pass condition for this box is: 745 passed, 1 failed, and the one failure is (b).**
+      Anything else is a real finding.
 - [ ] Confirm package output does not include `.git/`, `.git-exclude/`, local agent config, `target/`, or temporary state.
 - [ ] Confirm crates.io package pages and README badges describe the intended release scope and do not overclaim the full AI CLI workbench.
 - [ ] Any distributed prebuilt binary must ship with `NOTICE` alongside it. Releases assembled as project-structure tarballs satisfy this automatically because `NOTICE` sits at the archive root; a bare binary uploaded on its own does not.
