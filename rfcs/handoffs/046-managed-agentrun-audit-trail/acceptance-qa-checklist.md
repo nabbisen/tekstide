@@ -94,6 +94,11 @@ wrong, not the implementer.
       terminal-id re-read, approval-channel registration, and pane creation are byte-for-byte the
       same code, confirmed by the unmodified regression tests above passing unchanged.
 
+- [ ] **No input reaches a `panic!` on the launch path.** A `Plain` profile and a profile id outside
+      `[A-Za-z0-9-_.:]` both launch — unaudited — rather than crashing (§6, response 371). Each in
+      its own test, driven through `attempt_agent_run_launch_with_profile`, the real entry point.
+      Any `panic!` that survives must be justified by the invariant that would actually fail.
+
 ## Whole-RFC
 
 - [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`,

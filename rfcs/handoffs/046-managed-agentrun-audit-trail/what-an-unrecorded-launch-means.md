@@ -95,6 +95,36 @@ Supervised must not bind a channel, and both branches are reachable.
 The failure this prevents is not a crash. It is command approval quietly not existing for the first
 `Managed` profile that ships, months from now, with nothing in the diff that introduced it.
 
+## §6 "This cannot happen" is a claim, and a `panic!` is how it gets tested in front of a user
+
+Added 2026-09-10, response 371, after PR-046-C put a `panic!` on the agent-launch path.
+
+`launch_audited_agent_run` returns `InvalidTypedContext` for **three** different reasons, and only
+one of them is a plan/project mismatch. The other two are ordinary inputs:
+
+- **`AgentCompatibilityLevel::Plain`** — not a malformed state. It is the unsupervised passthrough
+  this RFC deliberately excludes from auditing (D4). The producer is saying *"I decline to audit
+  this"*, not *"you have handed me something impossible."*
+- **A profile id outside `[A-Za-z0-9-_.:]`** — `AuditReference::new` rejects it. Profile ids are
+  `AiCliProfile` data, and RFC-023's configuration system exists to supply that data from a user.
+
+Both were proven to crash the application through the real production entry point, not argued about.
+
+**The rule this leaves:**
+
+1. **A producer declining to audit a plan is not an error the caller cannot handle.** It is the same
+   situation as the store failing to open, and it has the same answer, which D1 already decided:
+   **launch, unaudited.** Never refuse, and never crash.
+2. **A `panic!` justified by an invariant must be justified by the invariant that actually fails.**
+   Both crashes above asserted "the plan and project are always mutually consistent by construction"
+   — a claim not at stake in either case, which would have sent a debugger to the wrong file.
+3. **Precedent is not a justification.** This one cited `open_real_agent_run_state_root()`'s
+   `.expect()`. That one is genuinely structural and its comment proves it. Citing a sound
+   `.expect()` nearby does not make a new one sound.
+
+This is §4.1 at its most expensive: not a sentence on a board overstating damage, but a fatal error
+naming the wrong cause.
+
 ## §5 Say what the trail answers, in the trail's own documentation
 
 After this slice the audit trail answers:
