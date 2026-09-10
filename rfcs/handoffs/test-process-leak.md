@@ -737,3 +737,35 @@ runs in the same binary, in parallel, and derives its directory from the test pr
 recorded here only so that if this row's rate ever does climb, the next reader has the one candidate
 that was introduced in the same window, instead of re-deriving it. Do not treat this paragraph as a
 finding.
+
+## Recurrence, 2026-09-10 — `0.17.0`'s release gate, and a reviewer mistake made for the third time
+
+`shell::tests::change_review_content_view_build_cost_by_line_count_measurement` failed once in run 3
+of the release gate's three runs. Runs 1 and 2 were green at 487 + 4 + 746.
+
+**Evidence it was load, not a regression** — circumstantial, and labelled as such:
+
+- Run 3's `tekstide` suite took **9.00s** against 5.85s and 6.24s for runs 1 and 2 on the same tree.
+- `uptime` shortly afterwards showed a 5-minute load average of **5.63** and a 15-minute of 6.36.
+- The test passes in isolation (0.25s), and **three further full-workspace runs immediately after
+  were green** — including one where the load average reached **14.25**, higher than during the
+  failure. A budget that holds at load 14 did not fail at load ~6 because of a code change.
+
+**The test itself is exemplary and should be left alone.** Its assertion reads `/proc/loadavg` and
+its own failure message says: *"This is either a real regression or this machine was under load when
+it ran… A number well above the core count points at load, not a regression — rerun on an idle
+machine before treating this as one."* That is precisely the correction made after the earlier
+wall-clock assertion whose message claimed a failure **could not** be load.
+
+**And the reviewer threw that away.** The gate was run as
+`cargo test --workspace 2>&1 | grep -E "^test result:|FAILED|^error"`, which discards the panic body
+— so the `elapsed_ms` and the load figure the test had gone to the trouble of measuring **were never
+captured**. This document already records the same mistake twice (rows 5 and 6, both noting the run
+was filtered to `test result:|FAILED` only). **This is the third time**, and the first two were the
+dev team's while this one is the reviewer's, which makes it a property of the habit rather than of
+the person.
+
+**The rule, stated so it is not relearned a fourth time: a gate run whose output is filtered cannot
+report a flake.** Redirect the full output to a file and grep the file. `0.17.0`'s re-run did that
+(`.git-exclude/release-evidence/0.17.0/gate-full-output.txt`), which is why its three green runs are
+worth more than the first attempt's two.
