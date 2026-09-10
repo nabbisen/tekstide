@@ -773,6 +773,15 @@ Status: active after `0.1.0`.
   lockfile diff for downgrades — not only additions — before accepting that update, and note that
   "the tests passed" cannot speak for a platform we do not build.
 
+  **Re-measured 2026-09-10 against released `0.17.0`, and the shape changed.** `rusqlite` 0.40.2
+  needs **zero Rust code changes** — it builds clean and the whole gate passes. The bump is not an
+  API migration at all. What it actually carries is **bundled SQLite 3.51.3 → 3.53.2**
+  (`libsqlite3-sys` 0.37.0 → 0.38.2): a storage engine two minors newer under a durable audit store,
+  which `cargo build` cannot see. The `cargo update` half measured 69 upgraded, 1 added, 0 removed,
+  **0 downgraded** — the arama trap did not fire on this update, checked rather than assumed.
+  Scoped as `handoffs/dependency-currency-0.18.md`, which carries the one risk still open: whether a
+  store written by 3.53 can be read by 3.51 after a user downgrades.
+
   **`iced` needs nothing.** 0.14 is current; no newer major exists. We declare
   `features = ["tokio", "advanced"]` at the workspace root and use neither `canvas` nor `svg`, so
   the transitive-feature breakage in snora's 0.42.0 letter has no analogue here — and we do not
