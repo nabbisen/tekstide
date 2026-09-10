@@ -58,10 +58,18 @@ arama hit it via snora: `gpu-allocator` pulled `windows` to 0.56 while `wgpu-hal
 ten compile errors, **Windows only, invisible on Linux**. We carry `gpu-allocator` and 29 `windows*`
 crates in `Cargo.lock` via `iced` → `wgpu` and compile none of them.
 
-**Measured on this update: 0 removed, 0 downgraded.** The trap did not fire. Run the check anyway
-and record the numbers — a green check that was actually run is evidence; an unrun one is an
-assumption. Compare `name`/`version` pairs across the before/after lockfile and assert nothing moved
-backwards, rather than reading the `Updating …` lines, which only ever say "Updating".
+**Measured on this update: 0 downgraded.** The trap did not fire. Run the check anyway and record
+the numbers — a green check that was actually run is evidence; an unrun one is an assumption.
+Compare `name`/`version` pairs across the before/after lockfile and assert nothing moved backwards,
+rather than reading the `Updating …` lines, which only ever say "Updating".
+
+**Span both steps as one before/after (corrected 2026-09-10, response 374).** The first attempt ran
+this check across the `cargo update` alone, where nothing was removed, and reported "0 names lost
+entirely". Two were: `rusqlite 0.39.0` depends on `sqlite-wasm-rs` (and `rsqlite-vfs` behind it) and
+`0.40.2` does not, so **the manifest bump is the half that shrank the graph** — and a shrinking
+lockfile is the trap's own trigger condition, because it leaves the resolver fewer constraints and
+frees it to pick a *lower* version elsewhere. Checking the step that did not shrink is checking the
+safe half. Take one lockfile snapshot before any change and one after both.
 
 ### 2. A store written by the new engine must still be readable by the old one
 
@@ -69,6 +77,13 @@ backwards, rather than reading the `Updating …` lines, which only ever say "Up
 close.** SQLite's file format is stable across versions as a rule, but a newer engine can enable
 behaviour an older one rejects, and this store is a durable record a user may need after
 *downgrading* tekstide.
+
+**Keep the scaffolding (added 2026-09-10, response 374).** This check recurs at every `rusqlite`
+minor, because each one carries a new bundled SQLite. Whatever performs it belongs in
+`crates/tekstide-core/examples/` with a header saying it must be run under two different lockfile
+pins — not written, run once, and deleted. The default of "verification scaffolding is not product
+code" is right in general and wrong here, because the property being verified belongs to the storage
+engine and changes on someone else's release schedule.
 
 **The test: create and populate an audit store under `rusqlite` 0.40 (SQLite 3.53.2), then open and
 query it under 0.39 (3.51.3).** Both directions matter, but this is the one that can lose a user's
