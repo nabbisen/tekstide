@@ -133,3 +133,54 @@ wrong, not the implementer.
       breakdown's own words: "the store read-back is the load-bearing evidence here, not a
       screenshot," and the two required tests above provide exactly that, through production's real
       entry point.
+
+## Final Acceptance Decision
+
+*(Section added at the close, 2026-09-10. Its absence was an omission in this pack — RFC-047's
+carried one, and the reviewer's judgment belongs in the pack rather than only in a response chain.)*
+
+- [x] **Accepted.** 2026-09-10, by the architect.
+- [ ] Accepted with required follow-up.
+- [ ] Requires re-review after changes.
+
+Reviewer notes:
+
+```text
+Accepted on ablations and gate runs reproduced independently by the reviewer at responses 367,
+368, 369, 370, 371, 372 and 373 -- not on the implementer's report of them. Final gate on the
+closed tree: 487 + 4 + 746, green in two of three runs, with one occurrence of
+bind_recovers_from_a_stale_socket_file, a known ~2% intermittent, given its own dated register
+row.
+
+What this RFC delivered:
+
+- Launching an AI CLI agent -- the action workspace trust and command approval exist to control
+  -- now writes a durable audit record. RFC-036 found the producer built, tested against the
+  real store, and reachable by nothing, with the crate README claiming otherwise.
+- D1 held the line RFC-047 D4 drew: the record is never a precondition. A degraded audit store
+  makes a run unrecorded, not refused, and the trail can be absent but never inconsistent.
+- D2 stopped a security control from being silently lost. AuditedAgentLaunch now carries the
+  approval endpoint; a Managed launch binding a real UnixListener proves it, where the first
+  attempt could only have caught deletion.
+
+Three findings worth carrying forward, none of them from the RFC's own D1-D5:
+
+1. The first cut of the production call site crashed the application on two ordinary inputs -- a
+   Plain profile and a profile id containing a space -- behind a panic! whose message named an
+   invariant that was never at stake. Proven by probe, not argued. This is the most severe defect
+   found in either of the two audit RFCs, and it was a panic justified by precedent rather than
+   by the invariant that would actually fail (S6).
+2. The fix was better than the instruction: plan_is_auditable made the caller's gate and the
+   producer's gate the same predicate, so they cannot drift -- the same move as computing
+   AuditHealth::status() rather than storing it.
+3. A residual is recorded rather than fixed (S6.1): the producer can still return Err after a
+   process exists, where the caller has no recovery and a panic orphans a spawned process. That
+   is a return-contract change, deliberately not smuggled into this RFC.
+
+Reviewer errors recorded rather than omitted: I twice handed over an instruction that could not
+be followed as written -- PR-046-A's fixture, which no coordinator can be constructed around,
+and S4's claim that a Managed-endpoint test "cannot be written at all yet", which was merely
+untried and produced a weaker test than the defect required. Both were cheap to check. Neither
+was checked until a slice had been built around it. And I accepted the .expect() precedent as
+sufficient justification for the panic in (1), which is what made it look settled.
+```
