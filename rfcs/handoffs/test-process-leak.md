@@ -716,3 +716,24 @@ the gate result is void, not merely noisy.
 Second, the clean re-run immediately afterwards (tree untouched, nothing else running) was **476 + 4
 + 741 green three times**, so this row records the `is_still_answerable` occurrence only, and the
 release-relevant gate for PR-047-C is the clean one.
+
+## Recurrence, 2026-09-10 — RFC-046's close gate (reviewer's run)
+
+`approval::tests::channel::bind_recovers_from_a_stale_socket_file` failed once in run 1 of a
+three-run full-workspace gate on the closed tree; runs 2 and 3 clean at 487 + 4 + 746. The same
+test and shape this document's ~2% historical baseline already covers.
+
+**Rate, measured rather than impressionistic:** this is **one failure in roughly twenty-seven
+full-workspace runs** by the reviewer across responses 365–373 — consistent with the existing
+baseline, not elevated.
+
+**One thing changed in this window that touches the same resource, recorded without claiming it is
+the cause.** RFC-046 PR-046-B added `managed_launch_carries_a_real_bound_approval_endpoint`, which
+binds a **real Unix domain socket** — the first test outside `approval::tests::channel` to do so. It
+runs in the same binary, in parallel, and derives its directory from the test process's own PID
+(`$TMPDIR/tk<pid>`), so every test in that binary shares the one path.
+
+**No evidence links the two**, and a single observation at the baseline rate is not evidence. It is
+recorded here only so that if this row's rate ever does climb, the next reader has the one candidate
+that was introduced in the same window, instead of re-deriving it. Do not treat this paragraph as a
+finding.
