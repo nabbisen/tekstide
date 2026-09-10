@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.17.0 - The Audit Store Says When It Cannot Record, And Records The Launch
+
+Status: unreleased.
+
+Two RFCs that belong together. **Before this release, a corrupted audit store failed completely
+silently, and launching an AI CLI agent was never recorded at all.** Both were found by RFC-036's
+reachability audit, which reproduced the first against the release binary and watched the interface
+report "Calm".
+
+### Fixed — a broken audit store now says so, recovers, and says where the old file went
+
+- **A corrupted audit store no longer fails silently.** It is detected, the unreadable database is
+  moved aside (renamed, not deleted), a fresh one is started, and the project board says so —
+  naming the directory the old file was moved to. Previously: no log line, no indicator, no dialog,
+  and every audit-writing action quietly doing nothing for the whole session. RFC-047.
+
+- **An interrupted migration resumes** instead of leaving the store permanently unopenable.
+  RFC-047 D1.
+
+- **A degraded audit store does not refuse anything.** Launching an agent run and granting workspace
+  trust say, before the click and while the control is still live, that the action will not be
+  recorded. Restricted Mode refuses actions whose *danger* it cannot bound; a broken audit store
+  does not make an agent run more dangerous, only unrecorded — so the product says so and lets the
+  person decide. RFC-047 D4.
+
+- **The indicator tracks what is true now, in both directions.** A transient failure no longer
+  leaves the board claiming "not recording" for the rest of the session once recording has
+  recovered; and a session that had failures still says so, separately, after capability returns.
+  Found during RFC-047's own review, not planned. RFC-047 PR-047-D.
+
+### Fixed — launching an AI CLI agent is recorded
+
+- **An agent-run launch now writes a durable audit record**: authorized, then started or failed,
+  tied by one operation id. **It wrote nothing before.** This is the action workspace trust and
+  command approval exist to control, and `crates/tekstide-core`'s own README claimed it was
+  recorded until 2026-08-27, when RFC-036 corrected it. RFC-046.
+
+- **The record is never a precondition for the launch.** A degraded audit store makes a run
+  unrecorded, not refused — the same rule as above. The trail can therefore be *absent*, but it can
+  never be *inconsistent*: a "started" record whose "authorized" never persisted is rejected by the
+  store itself. RFC-046 D1.
+
+### What this release does not do
+
+- **It does not record how an agent run ends.** The trail answers *was a run launched, when, and
+  under which adapter profile* — not *is it still running* or *how did it end*. Three separate
+  paths already end a run, and a fourth record covering all of them would be wrong in a way nobody
+  would notice. Reserved as RFC-048, not written. RFC-046 D3.
+
+- **It does not record refused launches**, beyond the Restricted Mode refusal already recorded. A
+  security control refusing is evidence it worked; a limit a user configured for themselves
+  refusing their own action is not. RFC-046 D5.
+
+- **Screen-reader support does not exist.** Unchanged, and stated every release: `iced` offers no
+  accessibility bridge, so there is no partial support to describe.
+
 ## 0.16.0 - What The Reachability Audit Found, Two Sessions Later
 
 Status: released on 2026-08-28.
