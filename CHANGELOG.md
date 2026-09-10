@@ -4,27 +4,31 @@
 
 Status: unreleased.
 
-Maintenance, not a feature: 69 in-semver dependency upgrades, and one that needed a `Cargo.toml`
-edit. Scheduled deliberately after RFC-047 and RFC-046 closed, so a storage-engine change would not
-arrive entangled with the corruption-recovery and audit-trail behaviour those RFCs were still
-writing. Handoff: `rfcs/handoffs/dependency-currency-0.18.md`.
+Maintenance, not a feature: 72 in-semver dependency upgrades, and one manifest edit that shrank the
+dependency graph by two crates. Scheduled deliberately after RFC-047 and RFC-046 closed, so a
+storage-engine change would not arrive entangled with the corruption-recovery and audit-trail
+behaviour those RFCs were still writing. Handoff: `rfcs/handoffs/dependency-currency-0.18.md`.
 
 ### Dependencies
 
-- **69 packages upgraded, 1 added, 0 removed, 0 downgraded** — a plain `cargo update`, no manifest
-  change. Checked explicitly for the one failure mode that matters and does not show up in a diff
-  count: a lockfile shrink re-resolving a transitive dependency *downward* (the mechanism another
-  project on this team hit, Windows-only, invisible on Linux). Confirmed by comparing every
-  `(name, version)` pair before and after: nothing moved backward, and the 29 `windows*` crates plus
-  `gpu-allocator` this workspace carries but never compiles (via `iced` → `wgpu`) are byte-for-byte
-  unchanged.
+- **72 packages upgraded, 2 removed, 1 added, 0 downgraded** — a plain `cargo update` plus the
+  `rusqlite` manifest edit below, checked as one before/after span rather than per step (the first
+  pass checked only the `cargo update` half and missed that the manifest edit is what shrinks the
+  graph — corrected before this line shipped). Checked explicitly for the one failure mode that
+  matters and does not show up in a diff count: a lockfile shrink re-resolving a transitive
+  dependency *downward* (the mechanism another project on this team hit, Windows-only, invisible on
+  Linux). Confirmed by comparing every `(name, version)` pair across the whole change: nothing moved
+  backward, and the 29 `windows*` crates plus `gpu-allocator` this workspace carries but never
+  compiles (via `iced` → `wgpu`) are byte-for-byte unchanged.
 - **`rusqlite` `0.39.0` → `0.40.2`.** Zero Rust code changes — it is a non-event at the API level.
-  What actually moved is **bundled SQLite `3.51.3` → `3.53.2`** (`libsqlite3-sys` `0.37.0` →
-  `0.38.2`), a storage engine two minor versions newer underneath a durable, security-relevant audit
-  store. `cargo build` has nothing to say about that; RFC-047's own corruption-detection fixtures —
-  which depend on exactly how SQLite reports a damaged file, not a stability-guaranteed interface —
-  are what actually licenses this bump, and they pass. `NOTICE` (root, `crates/tekstide-core`,
-  `crates/tekstide`) updated to the resolved versions.
+  The two removals above are `0.40`'s own dependencies (`sqlite-wasm-rs` and, behind it,
+  `rsqlite-vfs`) falling away, not anything this project depends on directly. What actually moved is
+  **bundled SQLite `3.51.3` → `3.53.2`** (`libsqlite3-sys` `0.37.0` → `0.38.2`), a storage engine two
+  minor versions newer underneath a durable, security-relevant audit store. `cargo build` has
+  nothing to say about that; RFC-047's own corruption-detection fixtures — which depend on exactly
+  how SQLite reports a damaged file, not a stability-guaranteed interface — are what actually
+  licenses this bump, and they pass. `NOTICE` (root, `crates/tekstide-core`, `crates/tekstide`)
+  updated to the resolved versions.
 - **Checked directly: a store written by the new engine survives a downgrade back to the old one.**
   A real audit store created and populated under `rusqlite 0.40.2`/SQLite `3.53.2` opened and read
   back correctly under `rusqlite 0.39.0`/SQLite `3.51.3`, and the reverse direction succeeded too.
