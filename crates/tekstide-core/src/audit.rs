@@ -12,7 +12,7 @@ pub use diagnostics::{AuditDiagnosticStatus, AuditDiagnostics, AuditDiagnosticsR
 pub use integration::{
     AuditActionResult, AuditCoordinator, AuditHealth, AuditHealthStatus, AuditIntegrationError,
     AuditObservationStatus, AuditRecoveryDisclosure, AuditedAgentLaunch, CommandDecisionActionKind,
-    SafeCloseDecision,
+    SafeCloseDecision, plan_is_auditable,
 };
 pub use path::{
     AuditPathError, AuditPathErrorReason, AuditPathRequest, AuditPathResolver, AuditStoragePath,

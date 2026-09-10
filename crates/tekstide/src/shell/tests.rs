@@ -4896,6 +4896,158 @@ fn attempt_agent_run_launch_with_profile_still_launches_and_registers_with_an_un
     );
 }
 
+/// **Response 371 R1: the two things `plan_is_auditable` exists to catch,
+/// each proven through production's real entry point, not by calling the
+/// producer directly.** Before this fix, both crashed the app with
+/// `panic!("launch_audited_agent_run returned InvalidTypedContext ...")`
+/// -- a claim about plan/project consistency that was never at stake in
+/// either case. A real, pinned store is used (not a degraded one) so a
+/// pass here cannot be confused with D1's own "still launches when the
+/// store won't open" property: this is about a store that opens fine but
+/// correctly declines to audit this particular plan.
+#[test]
+fn attempt_agent_run_launch_with_profile_launches_a_plain_profile_unaudited_instead_of_panicking() {
+    let state_dir = temp_audit_state_dir("agent-run-launch-plain-unaudited");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("agent-run-launch-plain-unaudited-project");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let bin_dir = fresh_project_dir("agent-run-launch-plain-unaudited-bin");
+    let executable = bin_dir.join("fake-ai-cli");
+    std::fs::write(&executable, "#!/bin/sh\n").expect("test executable should be written");
+    let mut permissions = std::fs::metadata(&executable)
+        .expect("test executable metadata should be readable")
+        .permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions)
+        .expect("test executable permissions should be set");
+
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "fake-ai-cli-plain",
+        "Fake AI CLI (Plain)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: executable,
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Plain,
+    );
+
+    attempt_agent_run_launch_with_profile(&mut state, profile).expect(
+        "a Plain profile is out of audit scope, not malformed -- it must still launch, unaudited",
+    );
+
+    assert_eq!(
+        state.terminal_panes.len(),
+        1,
+        "the real process must exist -- this is not a refusal, only a declined audit"
+    );
+
+    let agent_run_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .agent_runs()[0]
+        .id
+        .clone();
+    let store = super::open_audit_store(&state_dir, Vec::new())
+        .expect("the real store this test pinned must still open");
+    let records = store
+        .query(&tekstide_core::audit::AuditQuery::latest(10))
+        .unwrap()
+        .records;
+    assert!(
+        records
+            .iter()
+            .all(|record| record.record.agent_run_id.as_ref() != Some(&agent_run_id)),
+        "a Plain launch must write nothing -- it took the unaudited fallback, not a producer \
+         that happened to fail silently"
+    );
+}
+
+/// **Response 371 R1, the second reachable cause.** `AuditReference::new`
+/// rejects any byte outside `[A-Za-z0-9-_.:]` -- a space is enough. Not
+/// reachable through `claude_code_linux_default()` today, but profile ids
+/// are `AiCliProfile` data, and RFC-045 is reserved to make a
+/// configuration-supplied profile reach exactly this path. Uses
+/// `Supervised`, not `Plain`, so this proves the profile-id check
+/// specifically, independent of the sibling test above.
+#[test]
+fn attempt_agent_run_launch_with_profile_launches_a_profile_with_an_invalid_id_unaudited_instead_of_panicking()
+ {
+    let state_dir = temp_audit_state_dir("agent-run-launch-bad-profile-id-unaudited");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("agent-run-launch-bad-profile-id-unaudited-project");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let bin_dir = fresh_project_dir("agent-run-launch-bad-profile-id-unaudited-bin");
+    let executable = bin_dir.join("fake-ai-cli");
+    std::fs::write(&executable, "#!/bin/sh\n").expect("test executable should be written");
+    let mut permissions = std::fs::metadata(&executable)
+        .expect("test executable metadata should be readable")
+        .permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions)
+        .expect("test executable permissions should be set");
+
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "fake ai cli",
+        "Fake AI CLI (invalid id)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: executable,
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+    assert!(
+        tekstide_core::audit::AuditReference::new(&profile.id).is_none(),
+        "precondition: this id must actually be outside AuditReference's bounded charset"
+    );
+
+    attempt_agent_run_launch_with_profile(&mut state, profile).expect(
+        "an unauditable profile id must still launch, unaudited, not crash the application",
+    );
+
+    assert_eq!(
+        state.terminal_panes.len(),
+        1,
+        "the real process must exist regardless of the profile id being unauditable"
+    );
+
+    let agent_run_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .agent_runs()[0]
+        .id
+        .clone();
+    let store = super::open_audit_store(&state_dir, Vec::new())
+        .expect("the real store this test pinned must still open");
+    let records = store
+        .query(&tekstide_core::audit::AuditQuery::latest(10))
+        .unwrap()
+        .records;
+    assert!(
+        records
+            .iter()
+            .all(|record| record.record.agent_run_id.as_ref() != Some(&agent_run_id)),
+        "an unauditable-id launch must write nothing -- it took the unaudited fallback"
+    );
+}
+
 /// **Response 247's required proof, and response 248's correction to
 /// it**: not "the trust flag changed," but the actual chain trust was
 /// blocking -- and not from a dispatched `AppCommand`/`Message`, but

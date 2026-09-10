@@ -3148,6 +3148,15 @@ fn attempt_agent_run_launch_with_profile_state_root_and_capture(
     // plain, unaudited launch below rather than refusing anything.
     let mut audit_store =
         open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health);
+    // RFC-046 PR-046-C response 371 R1: checked *before* `plan` is moved
+    // into `launch_audited_agent_run` below, using that function's own
+    // exported predicate -- a `Plain` profile or a profile id outside
+    // `AuditReference`'s bounded charset both mean "launch this
+    // unaudited," the same as the store itself failing to open, not a
+    // crash. Deciding here (rather than matching on the error that
+    // producer would have returned) is what keeps `plan` available for
+    // the fallback branch to still consume.
+    let plan_is_auditable = tekstide_core::audit::plan_is_auditable(&plan);
     let Some(project) = state.app_shell.state_mut().project_mut(&project_id) else {
         // Same shape `AppState::launch_agent_run_with_runtime`'s own
         // wrapper already produced for this case -- calling
@@ -3164,39 +3173,42 @@ fn attempt_agent_run_launch_with_profile_state_root_and_capture(
         ));
     };
     let (agent_run_id, _events, approval_endpoint) = match &mut audit_store {
-        Some(store) => {
-            let launched = tekstide_core::audit::AuditCoordinator::new(
-                store,
-                &mut state.audit_health,
-            )
-            .launch_audited_agent_run(project, plan, &mut runtime)
-            .map_err(|error| match error {
-                tekstide_core::audit::AuditIntegrationError::AgentLaunch(error) => {
-                    AgentRunLaunchRefusal::Runtime(error)
-                }
-                // D1's own two failure kinds (`RequiredAuditUnavailable`,
-                // now unreachable since the `Authorized` write is
-                // `append_observation`) and `InvalidTypedContext` (the
-                // plan and the project it validated against are always
-                // the same pair here, by construction) never actually
-                // arise from this call site -- matches this module's own
-                // convention of `.expect()`-ing a structural invariant
-                // rather than inventing a refusal for a state that
-                // cannot occur (`open_real_agent_run_state_root()`'s own
-                // `.expect()` a few lines below is the same call).
-                other => panic!(
-                    "launch_audited_agent_run returned {other:?} from production, where the \
-                         plan and project are always mutually consistent by construction"
-                ),
-            })?
-            .value;
+        Some(store) if plan_is_auditable => {
+            let launched =
+                tekstide_core::audit::AuditCoordinator::new(store, &mut state.audit_health)
+                    .launch_audited_agent_run(project, plan, &mut runtime)
+                    .map_err(|error| match error {
+                        tekstide_core::audit::AuditIntegrationError::AgentLaunch(error) => {
+                            AgentRunLaunchRefusal::Runtime(error)
+                        }
+                        // D1's own failure kind (`RequiredAuditUnavailable`, now
+                        // unreachable since the `Authorized` write is
+                        // `append_observation`) and `InvalidTypedContext` for a
+                        // `Plain` plan or an invalid profile id (both already
+                        // filtered out above by `plan_is_auditable`) never
+                        // actually arise from this call site any more -- the one
+                        // way left in is the project/agent-run-id mismatch check,
+                        // which really is guaranteed by construction here (this
+                        // same `project_id` built the request that produced
+                        // `plan`). Matches this module's own convention of
+                        // `.expect()`-ing a structural invariant rather than
+                        // inventing a refusal for a state that cannot occur
+                        // (`open_real_agent_run_state_root()`'s own `.expect()` a
+                        // few lines below is the same call).
+                        other => panic!(
+                            "launch_audited_agent_run returned {other:?} from production, where \
+                         plan_is_auditable already ruled out every InvalidTypedContext cause but \
+                         the project/agent-run-id pair, which is consistent here by construction"
+                        ),
+                    })?
+                    .value;
             (
                 launched.agent_run_id().clone(),
                 launched.runtime_events,
                 launched.approval_endpoint,
             )
         }
-        None => project
+        _ => project
             .launch_agent_run_with_runtime(plan, &mut runtime)
             .map_err(AgentRunLaunchRefusal::Runtime)?,
     };

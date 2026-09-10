@@ -510,11 +510,12 @@ impl<'a> AuditCoordinator<'a> {
         mut plan: AgentRunLaunchPlan,
         runtime: &mut LinuxTerminalRuntime,
     ) -> Result<AuditActionResult<AuditedAgentLaunch>, AuditIntegrationError> {
-        if plan.spec().compatibility_level() == AgentCompatibilityLevel::Plain {
+        if !plan_is_auditable(&plan) {
             return Err(AuditIntegrationError::InvalidTypedContext);
         }
-        let adapter_profile_ref = AuditReference::new(plan.spec().profile_id())
-            .ok_or(AuditIntegrationError::InvalidTypedContext)?;
+        let adapter_profile_ref = AuditReference::new(plan.spec().profile_id()).expect(
+            "plan_is_auditable already confirmed this profile id is a valid AuditReference",
+        );
         let project_id = project.id().clone();
         let agent_run_id = plan.agent_run().id.clone();
         if plan.spec().project_id() != &project_id || plan.agent_run().project_id != project_id {
@@ -1236,6 +1237,30 @@ fn sensitive_config_changed_record(
     record.reason_code = Some(AuditReasonCode::PolicyChanged);
     record.operation_id = operation_id;
     record
+}
+
+/// RFC-046 PR-046-C response 371 R1: whether [`AuditCoordinator::
+/// launch_audited_agent_run`] will accept this plan for its own producer
+/// role, rather than declining to audit it (`InvalidTypedContext`).
+/// Exposed so a production call site can decide -- *before* `plan` is
+/// moved into that function -- whether to route the launch there at all,
+/// or straight to the unaudited fallback
+/// (`ProjectSession::launch_agent_run_with_runtime`) instead of finding
+/// out only after the fact. `Plain` is the unsupervised passthrough
+/// RFC-046 deliberately places out of audit scope, not a malformed
+/// state; a profile id outside `AuditReference`'s bounded charset is
+/// unreachable today only because production hardcodes
+/// `claude_code_linux_default()`, and RFC-045 is reserved to make it
+/// reachable. Neither is a bug to crash on -- both mean "launch this
+/// unaudited," the same as the audit store itself failing to open.
+///
+/// This mirrors the first two checks at the top of
+/// `launch_audited_agent_run` exactly -- the two are meant to be edited
+/// together, and that function's own first checks now call this rather
+/// than repeating the logic, so they cannot drift apart silently.
+pub fn plan_is_auditable(plan: &AgentRunLaunchPlan) -> bool {
+    plan.spec().compatibility_level() != AgentCompatibilityLevel::Plain
+        && AuditReference::new(plan.spec().profile_id()).is_some()
 }
 
 fn managed_process_record(

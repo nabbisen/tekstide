@@ -94,17 +94,24 @@ wrong, not the implementer.
       terminal-id re-read, approval-channel registration, and pane creation are byte-for-byte the
       same code, confirmed by the unmodified regression tests above passing unchanged.
 
-- [ ] **No input reaches a `panic!` on the launch path.** A `Plain` profile and a profile id outside
+- [x] **No input reaches a `panic!` on the launch path.** A `Plain` profile and a profile id outside
       `[A-Za-z0-9-_.:]` both launch — unaudited — rather than crashing (§6, response 371). Each in
       its own test, driven through `attempt_agent_run_launch_with_profile`, the real entry point.
       Any `panic!` that survives must be justified by the invariant that would actually fail.
+      `plan_is_auditable` (exported from `tekstide_core::audit`) shares the same two checks
+      `launch_audited_agent_run` makes internally, so a caller can route around it before `plan` is
+      moved in. The one `panic!` left is narrowed to the project/agent-run-id mismatch — the only
+      case the comment's claim was ever true for. Both new tests ablate by reverting the
+      `Some(store) if plan_is_auditable` guard to unconditional `Some(store)`: both panic at the
+      named line. See `qa-evidence.md`.
 
 ## Whole-RFC
 
 - [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`,
       `rfc_docs_invariants` clean.
 - [x] Three consecutive full-workspace runs, green, with any recurring flake given a dated row in
-      `test-process-leak.md`. **485 + 4 + 746, fully green** every time — no flake.
+      `test-process-leak.md`. **487 + 4 + 746, fully green** every time — no flake (response 371
+      R1's two new tests brought the first count up from 485).
 - [x] **The trail's boundary is documented where a reader meets it** — not only in this pack. The new
       call site in `shell.rs` points to `launch_audited_agent_run`'s own doc comment explicitly,
       rather than leaving a production-code reader to find the boundary only in this handoff.

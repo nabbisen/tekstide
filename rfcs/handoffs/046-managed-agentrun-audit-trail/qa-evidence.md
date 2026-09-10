@@ -301,3 +301,60 @@ time -- no flake this pass (two new tests).
   not *still running*, *how it ended*, or *why a non-Restricted-Mode refusal happened*.
 - `rfcs/README.md`/`rfcs/delivery-plan.md`'s own RFC-046 rows are **not** touched here, per response
   367's explicit instruction: fold the update in when RFC-046 closes, not slice by slice.
+
+## PR-046-C — response 371 required follow-up (R1)
+
+**The `panic!` above was wrong, and it was the most serious finding of the RFC.** Its own comment
+claimed every `InvalidTypedContext` at this call site reduces to "the plan and project it validated
+against are always the same pair, by construction." That is true of only one of the three checks
+inside `launch_audited_agent_run` that produce `InvalidTypedContext`. The other two have nothing to
+do with plan/project consistency, and both are real, production-reachable inputs:
+
+- **A `Plain` profile.** `Plain` is not malformed -- it is the unsupervised passthrough RFC-046
+  deliberately places out of audit scope. The producer declining to audit it is not a state that
+  "cannot occur"; it is the expected answer for every `Plain` launch there will ever be.
+- **A profile id outside `AuditReference`'s bounded charset** (`[A-Za-z0-9-_.:]`). Unreachable today
+  only because production hardcodes `claude_code_linux_default()` -- RFC-045 is reserved to make a
+  configuration-supplied profile id reach exactly this path.
+
+Both crashed the application before this fix. Proved, not reasoned about: two probe tests through
+the real production entry point panicked at the exact line, both naming the plan/project-consistency
+invariant that was never at stake in either case -- exactly the shape §4.1 warns about, in its most
+expensive form: a fatal error naming the wrong invariant.
+
+**The fix**: `AuditCoordinator::launch_audited_agent_run`'s own first two checks (`Plain` rejection,
+`AuditReference::new(profile_id)`) are now exposed as a standalone predicate,
+`tekstide_core::audit::plan_is_auditable`, so a caller can decide *before* moving `plan` into that
+function which branch to take. `shell.rs`'s launch-call block now checks `plan_is_auditable(&plan)`
+up front and routes a `Some(store)` with an unauditable plan to the same unaudited fallback
+(`ProjectSession::launch_agent_run_with_runtime`) that a `None` store already used -- "the producer
+will not audit this plan" and "the audit store will not open" are the same situation from the
+caller's side. `launch_audited_agent_run` itself now calls the same predicate rather than repeating
+the two checks inline, so the two cannot drift apart silently. The remaining `panic!` arm is
+narrowed to the one case it was ever actually true for: a project/agent-run-id mismatch, which really
+is guaranteed by construction at this call site (this same `project_id` built the request that
+produced `plan`).
+
+### Required tests, each driven through the real production entry point
+
+- `attempt_agent_run_launch_with_profile_launches_a_plain_profile_unaudited_instead_of_panicking` --
+  a `Plain` profile against a real, pinned, healthy store. Asserts the process launches
+  (`state.terminal_panes.len() == 1`) and that the store, reopened and queried, has **zero** records
+  for the launched `agent_run_id` -- proving the unaudited fallback was taken, not that a producer
+  call merely failed to crash by accident. **Ablated**: reverted the `Some(store) if
+  plan_is_auditable` guard to unconditional `Some(store)` -- panics at the exact line response 371
+  named. Restored: passes.
+- `attempt_agent_run_launch_with_profile_launches_a_profile_with_an_invalid_id_unaudited_instead_of_panicking`
+  -- a `Supervised` profile (independent of the `Plain` check above) with an id containing a space,
+  against the same kind of real, pinned, healthy store. Same assertions: process launches, zero
+  matching records. **Ablated**: same revert -- panics at the same line. Restored: passes.
+
+Both use a real, healthy, pinned store deliberately (not a degraded one), so a pass cannot be
+confused with D1's own "still launches when the store won't open" property: this is a store that
+opens fine and correctly declines to audit this particular plan.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`
+(4 tests): clean. Three consecutive full-workspace runs: **487 + 4 + 746, fully green** every
+time -- no flake this pass (two new tests, replacing the prior slice's 485 baseline).
