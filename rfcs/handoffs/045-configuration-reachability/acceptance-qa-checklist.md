@@ -43,7 +43,10 @@ contradiction named — that is the reviewer's error to fix, not the implementer
 ## PR-045-B — boot, board, limits, retention
 
 - [ ] The store loads before CLI project paths open; path-resolution failure does not exit.
-- [ ] Board line: one of three states (§6), absent when clean. **Ablation:** force the "ignored"
+- [ ] Board line: one of three states (§6), absent when clean. **The "loaded with warnings" state
+      names the warned key** — a typo like `defualt_profile` warns and does nothing (PR-045-A's
+      refuse-versus-warn split, adopted at response 376), and this line is the only thing that
+      tells the user. A count is not a name. **Ablation:** force the "ignored"
       text on a clean load; the absent-when-clean test fails alone.
 - [ ] `agent_run_limit` reaches `set_resource_limits`: the second launch in a limited project is
       refused, through the real launch path.

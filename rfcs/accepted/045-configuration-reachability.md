@@ -199,6 +199,20 @@ Each future RFC that wires a setting adds its key back **in the same change as t
 RFC-036 D2's named-consumer rule applied to configuration keys. Restricted Mode policy from
 configuration is RFC-004 territory and security-critical; refused here, reserved, not smuggled.
 
+**D3′, corrected by PR-045-A (request 376).** "No effect *yet*" is the wrong sentence for three
+keys: `projects.default_trust`, `terminal.multiline_paste_protection`, and
+`security.require_approval_for_adapter_destructive_commands`. Each was made unrepresentable by
+responses 266/270 because it would bypass a deliberate per-use act another RFC requires; withdrawing
+the field deletes that type-level guarantee, so the refusal is now the whole protection, and
+promising a future in which configuration grants trust is §1's failure shape pointed at a security
+setting. **They refuse at any value, name the governing act, and cite the RFC.** The implementer
+saw this and I did not.
+
+**Refuse versus warn, settled the same way.** Keys RFC-023 *defined* that this build cannot deliver
+are refused; keys never defined — a typo, or one from a newer Tekstide — warn, so a file written
+for a newer version still loads on an older one. The cost is that a typo warns and does nothing,
+which is why PR-045-B's "loaded with warnings" line **must name the warned key**.
+
 ### D8 — which profile launches: `default_profile`, absent means built-in
 
 `AgentSettings.profiles` is a map. RFC-023 never says which entry the launch button uses, and no
