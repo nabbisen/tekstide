@@ -1,6 +1,6 @@
 # RFC-045: Configuration Reachability
 
-Status: **Proposed 2026-09-12.** Reserved 2026-08-27 by RFC-036's D2 as the named consumer for four
+Status: **Accepted by the human owner 2026-09-12.** **D1–D9 decided by the architect on acceptance** — see "Decided on acceptance" at the end, which **widens D3 from three keys to most of the file** on a measurement made after the owner accepted, adds D8 (which profile launches) and D9 (retention is the one key with a consumer waiting). Proposed the same day. Reserved 2026-08-27 by RFC-036's D2 as the named consumer for four
 built-and-unreached rows. Authored after RFC-046 closed, because RFC-046's `plan_is_auditable`
 changed one of this RFC's answers before it was written — see D2.
 Target milestone: **M12**
@@ -162,3 +162,72 @@ slice is how a slice acquires a second design. Named here; not decided here.
   cost RFC-023 OQ3 accepted. It is once per session, not once per launch.
 - **D6 adds a config key.** Small, but it is new surface; the handoff must state its default (none —
   absent means unlimited, matching `Option<u32>`) so absence is not mistaken for zero.
+
+## Decided on acceptance (2026-09-12)
+
+Made after acceptance, on a measurement the proposal did not contain. The owner accepted the RFC as
+proposed; these do not reverse any of D1–D7, but D3′ changes its scale enough that it is stated as a
+change rather than folded in silently.
+
+### D3′ — the accepted key set is the set with a consumer, and today that is four keys plus profiles
+
+I grepped every field of `ConfigurationDocument` for a consumer outside `config/` and outside tests.
+**Every distinctively-named configurable value is unreached** — not only `args`/`adapter`/
+`environment_policy`, but `scrollback_lines`, `shell_path`, all three font families, `font_size`,
+`show_status_labels`, `open_duplicate_root`, `recent_projects_limit`, `default_project_board`,
+`capture_changed_files`, `max_concurrent_global`/`_per_project`, all three `max_*` resource keys,
+`redact_secret_like_environment_names`, `default_environment_policy`, and **all three
+`restricted_mode_blocks_*`** — the fields the security-sensitive machinery was built around, which
+never reach `RestrictedModeFeature`. And on the consumer side there is nowhere for them to go:
+`Theme` is constants, `KeybindingPolicy` has no override API, terminal launch takes no scrollback or
+shell path, the recent-project store takes no limit.
+
+RFC-023 built a parser, validator, diff and reload for a file whose values have no destination.
+That is not a criticism of RFC-023 — it scoped consumers out explicitly — but D3 applied honestly
+means the parser must now refuse what it cannot deliver. **Decided: `parse_and_validate` accepts
+exactly these, and refuses every other key with a diagnostic naming it and saying it has no effect
+yet:**
+
+| Key | Consumer |
+| --- | --- |
+| `[agent.profile.<id>]` `display_name`, `command` | `to_ai_cli_profile` → the launch path, via D8 |
+| `[agent] default_profile` | **new, D8** — the launch path |
+| `[agent] transcript_retention_days` | **D9** — `TranscriptPrivacyPolicy::max_age_days` |
+| `[resources] agent_run_limit` | **new, D6** — `set_resource_limits` |
+
+Each future RFC that wires a setting adds its key back **in the same change as the consumer** —
+RFC-036 D2's named-consumer rule applied to configuration keys. Restricted Mode policy from
+configuration is RFC-004 territory and security-critical; refused here, reserved, not smuggled.
+
+### D8 — which profile launches: `default_profile`, absent means built-in
+
+`AgentSettings.profiles` is a map. RFC-023 never says which entry the launch button uses, and no
+surface lists or chooses one. Without this, D2–D4 make profiles definable and still unlaunchable.
+
+**Decided:** `[agent] default_profile = "<id>"`. The launch path resolves it through
+`to_ai_cli_profile`; **absent means `claude_code_linux_default()`**, unchanged from today. A
+`default_profile` naming an id not defined in the file is a `ConfigDiagnostic`. A profile may be
+defined without being the default — it is reachable in principle through this key, which is the
+D3′ test. A picker is a GUI feature and is not this RFC.
+
+### D9 — retention is the one key with a consumer waiting, so wire it
+
+`TranscriptPrivacyPolicy` has a real `max_age_days` and a constructor that takes it; today every
+launch gets the compiled `DEFAULT_TRANSCRIPT_MAX_AGE_DAYS`. `transcript_retention_days` is already
+`SecuritySensitiveField::AgentTranscriptRetentionDays`. **Decided:** reach it. It applies to runs
+launched after load or after a confirmed reload (§Hot Reload: *new tasks*), and it is the one key
+that exercises D4's increase/reduce path with a real field rather than a fixture.
+
+### Settled details an implementer must not inherit
+
+- **Boot order:** the store loads **before** CLI project paths are opened, so D6's limit applies to
+  them. Failure to resolve the config path is a diagnostic, not an exit.
+- **Confirmed-profile state** lives on `State`, session-scoped like `AuditHealth`, as the set of
+  confirmed ids; a reload whose pending changes include `AgentProfiles` clears it.
+- **D5's action** is `ReloadConfiguration`, in RFC-044's surface-action registry. The chord is the
+  handoff's to pick from what is free.
+- **D1's board line** renders `key` and `message`, and the config file path — the user's own screen
+  may show their own path. **Committed evidence sets `XDG_CONFIG_HOME=$(mktemp -d)`**, because the
+  real path is under `$HOME` by definition and no fixture project changes that.
+- **`agent_run_limit`'s default is absent = unlimited**, matching `Option<u32>`; `0` is a diagnostic,
+  since a limit of zero refuses every launch and is far more likely a typo than an intent.
