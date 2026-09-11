@@ -799,9 +799,16 @@ fn sensitive_config_policy_reduce_schema_rejects_a_present_operation_id() {
 /// direction occurred. A distinctive, secret-shaped string is not
 /// merely absent from the real, persisted, queried-back record; there
 /// is no code path by which one could reach it, the same "inert by
-/// construction" shape this pack has used throughout (`ConfigDiagnostic.message`,
-/// `RestrictedDefaultTrust`). Proven against the real store round-trip
-/// (write, persist, query, format), not by reading the source.
+/// construction" shape this pack has used throughout
+/// (`ConfigDiagnostic.message`, whose type is `&'static str`). Proven
+/// against the real store round-trip (write, persist, query, format),
+/// not by reading the source.
+///
+/// RFC-045 removed the other example this comment used to cite,
+/// `RestrictedDefaultTrust` — a one-valued type guarding a field D3'
+/// withdrew. The property it demonstrated now lives in the parser's own
+/// permanent refusal of `projects.default_trust`
+/// (`config::tests::model::configuration_can_never_grant_workspace_trust`).
 #[test]
 fn no_config_value_can_reach_a_sensitive_config_changed_record() {
     let dirs = TestAuditDirs::new("config-policy-sentinel");

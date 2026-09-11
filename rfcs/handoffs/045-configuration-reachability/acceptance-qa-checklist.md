@@ -14,13 +14,31 @@ contradiction named — that is the reviewer's error to fix, not the implementer
 
 ## PR-045-A — the parser tells the truth
 
-- [ ] Exactly the D3′ key set parses; every other former key is refused **by name** with "no effect
+- [x] Exactly the D3′ key set parses; every other former key is refused **by name** with "no effect
       yet" in the diagnostic. One test per removed section, each failing alone.
-- [ ] A profile id `AuditReference::new` rejects is a diagnostic naming the audit trail.
+      `the_whole_accepted_key_set_parses` covers the positive half; one `*_is_refused_because_
+      nothing_reads_it` test per section covers the negative. **Ablated two ways, each failing one
+      test alone**: removing a `WITHDRAWN_KEYS` row (live sections), and dropping a section's
+      refusal call (withdrawn sections). **Deviation, flagged for review**: three keys
+      (`projects.default_trust`, `terminal.multiline_paste_protection`,
+      `security.require_approval_for_adapter_destructive_commands`) are refused with a *permanent*
+      message rather than "no effect yet", because that phrase would promise a future version
+      granting what responses 266/270 decided must never be grantable. Nothing is accepted either
+      way; see `qa-evidence.md`.
+- [x] A profile id `AuditReference::new` rejects is a diagnostic naming the audit trail.
       **Ablation:** swap in a hand-written check that admits one extra character; the test must fail.
-- [ ] `default_profile` naming an undefined profile is refused.
-- [ ] `agent_run_limit = 0` is refused; absent is unlimited.
-- [ ] The unreached fields are **gone from the model structs**, not parsed-and-ignored.
+      Done exactly that (admitted a space) — `a_profile_id_the_audit_trail_cannot_record_is_refused`
+      failed alone.
+- [x] `default_profile` naming an undefined profile is refused. Two tests (an undefined name
+      alongside a defined profile, and with no profiles at all); ablated by dropping
+      `validate_default_profile` — both failed, nothing else did.
+- [x] `agent_run_limit = 0` is refused; absent is unlimited. `Option<u32>` plus a dedicated
+      `take_agent_run_limit`, so absent and zero are structurally distinguishable rather than
+      sharing a sentinel. Ablated by making the zero check unreachable.
+- [x] The unreached fields are **gone from the model structs**, not parsed-and-ignored.
+      `ConfigurationDocument` is two sections; six section types and three one-valued guard types
+      are deleted, along with six `SecuritySensitiveField` variants. Full inventory in
+      `qa-evidence.md`.
 
 ## PR-045-B — boot, board, limits, retention
 

@@ -769,3 +769,45 @@ the person.
 report a flake.** Redirect the full output to a file and grep the file. `0.17.0`'s re-run did that
 (`.git-exclude/release-evidence/0.17.0/gate-full-output.txt`), which is why its three green runs are
 worth more than the first attempt's two.
+
+## Recurrence, 2026-09-12 — RFC-045 PR-045-A's gate, and what a self-inflicted load average buys
+
+**Four failures in thirty full-workspace runs on the PR-045-A tree**, across three already-recorded
+tests and one member of the same load-sensitive family:
+
+| Test | Runs | Register row |
+| --- | --- | --- |
+| `approval::tests::channel::bind_recovers_from_a_stale_socket_file` | twice | row 1 |
+| `approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` | once | row 5 |
+| `surface::terminal::tests::resize_makes_the_pty_the_emulator_and_the_render_path_agree` | once | new here — PTY timing, the same shape as row 7's cause, not process leak |
+
+**13% is well above this document's ~2% baseline, and the load was the implementer's own.** Every
+failure landed while running suites back to back — `uptime` read 4.65 at the first, 7.42 and 11.82
+during the middle rounds, and **28.18** by the end, on a machine whose ordinary gate runs sit near
+5. Twenty consecutive `-p tekstide-core` runs alone were **green**; eight consecutive
+full-workspace runs in the quietest stretch were **green**. The failures cluster with load, not
+with the change.
+
+**The change itself has no mechanism here.** PR-045-A is a TOML parser in `tekstide-core`: no
+sockets, no PTY, no processes, no audit store. The only contact with these tests is that it adds
+nine net tests to the same binary, which is a 1.2% increase in that binary's parallel test count.
+Recorded as the one candidate introduced in the same window, per the 2026-09-10 entry's own
+convention — **not** as a finding.
+
+### A controlled before/after was attempted twice and is not possible this way
+
+Both attempts compared the working tree against a `git worktree` checked out at `HEAD`, and both
+produced a baseline that failed **every** run for reasons that are properties of worktrees, not of
+the code:
+
+1. `cargo test --workspace` in the worktree ran before its own `[[bin]]` targets were built —
+   23 deterministic failures per run, all `expected the reference_adapter binary at …`.
+2. After `cargo build --workspace --bins` fixed that, the baseline still failed every run:
+   **a worktree's `.git` is a file, not a directory**, so
+   `project::tests::change_detection::real_repository_filesystem_scan_cost_headless_benchmark`
+   refuses to run there — *"must be measuring a real repository with a real .git/, found none"*.
+
+**So there is no controlled baseline for the numbers above, and they must not be read as one.**
+The next person wanting one should use a second full clone, not a worktree, and should not run the
+two trees back to back on one machine — doing so is what produced the load that this entry is
+mostly about. Recorded so the attempt is not repeated a third time.

@@ -29,9 +29,6 @@ fn configured_profile(command: impl Into<String>) -> ConfiguredAiCliProfile {
     ConfiguredAiCliProfile {
         display_name: "Test Profile".to_owned(),
         command: command.into(),
-        args: Vec::new(),
-        adapter: "terminal-native".to_owned(),
-        environment_policy: "explicit".to_owned(),
     }
 }
 
@@ -204,25 +201,27 @@ fn config_profile_relying_on_a_project_local_path_entry_is_rejected() {
 
 /// `to_ai_cli_profile` never sets `compatibility_level: Managed` --
 /// structural, not a policy this function enforces at runtime (see its
-/// own doc comment). Proven directly, for a wide range of `adapter`
-/// strings including ones that read as an attempt to request Managed.
+/// own doc comment).
+///
+/// **RFC-045 D3' removed the vector this test used to probe.** It looped
+/// over `adapter` strings (`"managed"`, `"MANAGED"`, …) checking that
+/// none of them produced a `Managed` profile; there is no `adapter` key
+/// for a file to set any more, and `a_profile_adapter_key_is_refused_
+/// rather_than_parsed_and_dropped` (`tests/load.rs`) proves the parser
+/// refuses it outright. What remains, and is asserted here, is the
+/// property that made those strings harmless in the first place: this
+/// function produces `Supervised` and no structured-action approval for
+/// every profile a file can define, because those are the only values it
+/// is capable of producing.
 #[test]
 fn to_ai_cli_profile_never_sets_managed_compatibility_or_structured_action_approval() {
-    for adapter in ["terminal-native", "managed", "reference", "", "MANAGED"] {
-        let mut configured = configured_profile("claude");
-        configured.adapter = adapter.to_owned();
-        let profile = to_ai_cli_profile("probe", &configured);
+    let profile = to_ai_cli_profile("probe", &configured_profile("claude"));
 
-        assert_eq!(
-            profile.compatibility_level,
-            AgentCompatibilityLevel::Supervised,
-            "adapter = {adapter:?} must not produce a Managed profile"
-        );
-        assert!(
-            !profile.adapter_capabilities.structured_action_approval,
-            "adapter = {adapter:?} must not set structured_action_approval"
-        );
-    }
+    assert_eq!(
+        profile.compatibility_level,
+        AgentCompatibilityLevel::Supervised
+    );
+    assert!(!profile.adapter_capabilities.structured_action_approval);
 }
 
 /// The second, independent guarantee `to_ai_cli_profile`'s own doc

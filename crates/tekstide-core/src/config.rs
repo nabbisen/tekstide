@@ -8,11 +8,7 @@ pub use load::{
     ConfigDiagnostic, ConfigLoadOutcome, ConfigLoadReport, ConfigReloadOutcome, ConfigStore,
     ConfigWarning, parse_and_validate,
 };
-pub use model::{
-    AgentSettings, ConfigurationDocument, ConfiguredAiCliProfile, CoreSettings, KeybindingSettings,
-    ProjectSettings, RequiredDestructiveCommandApproval, RequiredMultilinePasteConfirmation,
-    ResourceSettings, RestrictedDefaultTrust, SecuritySettings, TerminalSettings, UiSettings,
-};
+pub use model::{AgentSettings, ConfigurationDocument, ConfiguredAiCliProfile, ResourceSettings};
 pub use path::{
     ConfigPathError, ConfigPathErrorReason, ConfigPathProvider, ConfigPathResolver,
     ConfigStoragePath,

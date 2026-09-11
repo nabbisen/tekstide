@@ -45,19 +45,23 @@ use super::model::ConfiguredAiCliProfile;
 /// `config/tests/profile.rs`, proves the second guarantee directly,
 /// independent of this function).
 ///
-/// `configured.args` has no corresponding field on `AiCliProfile` at
-/// all -- the launch pipeline has no argv-template concept for a
-/// profile to configure yet, so this function does not attempt to wire
-/// it anywhere. Not silently dropped without record: this is the same
-/// "typed storage, no consumer yet" status this pack's own Scoping
-/// section already gives keybindings, theme values, and several other
-/// fields -- stated here, and in `qa-evidence.md`, rather than left for
-/// a reader to discover that a configured value does nothing.
-/// `environment_policy`'s string value is the same story: nothing here
-/// parses it into a specific [`AiCliEnvironmentPolicy`] yet, so every
-/// configuration-defined profile gets [`AiCliEnvironmentPolicy::Minimal`]
-/// -- the least environment exposure `AiCliProfile::new` itself already
-/// defaults to, not a weaker one invented for this translation.
+/// **RFC-045 D3' removed the three fields this comment used to explain
+/// away.** RFC-023 parsed `args`, `adapter` and `environment_policy`
+/// into [`ConfiguredAiCliProfile`] and this function read none of them,
+/// recording that fact in a doc comment and in `qa-evidence.md` --
+/// which is not where a user of the configuration file looks. A profile
+/// with `args = ["--model", "x"]` validated, appeared, launched, and
+/// dropped `--model` in silence. The fields are gone from the model and
+/// [`super::parse_and_validate`] now refuses the keys by name, so the
+/// silence is gone with them; each returns when `AiCliProfile` grows the
+/// field that would carry it (an argv template is an RFC-010 amendment,
+/// reserved and not written).
+///
+/// Every configuration-defined profile therefore gets
+/// [`AiCliEnvironmentPolicy::Minimal`] -- the least environment exposure
+/// `AiCliProfile::new` itself already defaults to, not a weaker one
+/// invented for this translation, and now not a value a file can ask to
+/// change without the code to honour the request.
 pub fn to_ai_cli_profile(id: &str, configured: &ConfiguredAiCliProfile) -> AiCliProfile {
     let mut profile = AiCliProfile::new(
         id,

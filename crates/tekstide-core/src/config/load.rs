@@ -3,12 +3,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::audit::AuditReference;
 use crate::config::ConfigurationDocument;
-use crate::config::model::{
-    AgentSettings, ConfiguredAiCliProfile, CoreSettings, KeybindingSettings, ProjectSettings,
-    RequiredDestructiveCommandApproval, RequiredMultilinePasteConfirmation, ResourceSettings,
-    RestrictedDefaultTrust, SecuritySettings, TerminalSettings, UiSettings,
-};
+use crate::config::model::{AgentSettings, ConfiguredAiCliProfile, ResourceSettings};
 use crate::config::sensitive::{self, SecuritySensitiveField};
 
 /// RFC-023 PR-023-C: a bounded, content-free diagnostic. `message` is
@@ -88,9 +85,164 @@ fn bound_key_segment(raw: &str) -> String {
 /// An unrecognized key: not fatal, per RFC-023's own rule ("unknown
 /// keys warn; they do not fail") -- forward compatibility for a file
 /// users hand-edit matters more than strictness here.
+///
+/// **RFC-045 D3' narrowed what reaches this type, and the distinction is
+/// the point.** A key this parser has never heard of -- a typo, or a key
+/// from a newer Tekstide -- still warns. A key RFC-023 really did define
+/// and this build has no consumer for is a [`ConfigDiagnostic`] instead:
+/// the user wrote something the schema documents, and telling them
+/// "unknown key" would be false while telling them nothing at all is the
+/// failure §1 of the risk document names. See [`WITHDRAWN_KEYS`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfigWarning {
     pub key: String,
+}
+
+/// RFC-045 D3': the withdrawn keys **of the two sections that still
+/// exist**. Each is refused by name rather than warned (it is real
+/// schema, not a typo) and rather than parsed into a field nothing reads
+/// (§1: *a key that does nothing is a lie the user reads*).
+///
+/// `(section, field)`. Only `agent` and `resources` appear, and the
+/// reason is worth stating: a section that survives has live keys, so
+/// this table is what separates a withdrawn key (refuse) from one this
+/// build has never heard of (warn). The six sections that lost *every*
+/// key -- `core`, `ui`, `keybindings`, `terminal`, `projects`,
+/// `security` -- need no rows, because nothing in them is accepted at
+/// all: [`refuse_withdrawn_free_form_section`] refuses every key they
+/// contain, known or not. Listing them here as well would be data no
+/// behaviour depends on, which a test cannot hold to account.
+///
+/// **Adding a consumer removes its row from this table in the same
+/// change** -- RFC-036 D2's named-consumer rule. Do not remove a row to
+/// make a file load.
+const WITHDRAWN_KEYS: &[(&str, &str)] = &[
+    ("agent", "max_concurrent_global"),
+    ("agent", "max_concurrent_per_project"),
+    ("agent", "default_environment_policy"),
+    ("agent", "capture_changed_files"),
+    ("resources", "max_terminal_output_mb_per_session"),
+    ("resources", "max_agent_transcript_mb_per_run"),
+    ("resources", "max_file_watch_events_per_batch"),
+];
+
+/// Keys refused for a reason that is **not** "no consumer yet," and
+/// whose message must therefore not say so. All three sit in sections
+/// that are otherwise entirely withdrawn, so
+/// [`refuse_withdrawn_free_form_section`] would already refuse them --
+/// what this table changes is *what the diagnostic says*, which is the
+/// whole of the difference between a refusal a user can wait out and one
+/// they cannot.
+///
+/// RFC-023 made each of these unrepresentable in memory -- a field type
+/// with exactly one value -- after response 266/270 found that each would
+/// bypass a deliberate per-use act another RFC requires
+/// (`default_trust` bypasses RFC-032's trust grant; the other two bypass
+/// confirmations that are unconditional in the real pipelines today).
+/// D3' withdraws the *fields*, which removes the type-level guarantee
+/// along with the field it guarded, leaving this refusal as the whole of
+/// the protection. **It must keep saying why.** Telling a user that
+/// `default_trust = "trusted"` "has no effect yet" would promise a
+/// future version in which configuration grants workspace trust, which is
+/// the opposite of a settled decision -- §1's own failure shape, pointed
+/// at the reader of a security setting.
+const PERMANENTLY_REFUSED_KEYS: &[(&str, &str, &str)] = &[
+    (
+        "projects",
+        "default_trust",
+        "configuration cannot grant workspace trust, at any value -- a project is trusted by a \
+         deliberate per-project act; see RFC-032",
+    ),
+    (
+        "terminal",
+        "multiline_paste_protection",
+        "configuration cannot disable this protection -- every multiline paste is confirmed in \
+         the terminal itself; see RFC-018",
+    ),
+    (
+        "security",
+        "require_approval_for_adapter_destructive_commands",
+        "configuration cannot disable this protection -- a destructive adapter command is \
+         approved per command, in the moment; see RFC-021",
+    ),
+];
+
+/// The message every ordinary withdrawn key carries. Deliberately says
+/// **"no effect yet"** and names the return condition: the key is not
+/// wrong, it is early, and it comes back with the code that reads it.
+const NO_CONSUMER_MESSAGE: &str = "this key has no consumer in this build, so it would have no effect yet -- it returns to the \
+     file in the same change as the feature that reads it";
+
+fn permanently_refused_key_message(section: &str, field: &str) -> Option<&'static str> {
+    PERMANENTLY_REFUSED_KEYS
+        .iter()
+        .find(|(refused_section, refused_field, _)| {
+            *refused_section == section && *refused_field == field
+        })
+        .map(|(_, _, message)| *message)
+}
+
+fn is_withdrawn_key(section: &str, field: &str) -> bool {
+    WITHDRAWN_KEYS
+        .iter()
+        .any(|(withdrawn_section, withdrawn_field)| {
+            *withdrawn_section == section && *withdrawn_field == field
+        })
+}
+
+/// Refuses any withdrawn key present in `table`, before the section's
+/// own surviving keys are read. Called first in every section extractor
+/// so a file mixing a live key with a withdrawn one is refused whole --
+/// there is no order of keys in which half a section applies.
+///
+/// Only one diagnostic can be returned, so when a section carries both
+/// kinds, **the permanent refusal is reported in preference to the
+/// "no effect yet" one** -- deliberately, rather than by whichever key
+/// happens to sort first. A user who asked for something this product
+/// will never grant should read that, not a sentence about a different
+/// key that is merely early.
+fn refuse_withdrawn_keys(table: &toml::Table, section: &str) -> Result<(), ConfigDiagnostic> {
+    let refuse = |field: &str, message: &'static str| ConfigDiagnostic {
+        path: None,
+        key: format!("{section}.{field}"),
+        location: None,
+        message,
+    };
+    for field in table.keys() {
+        if let Some(message) = permanently_refused_key_message(section, field) {
+            return Err(refuse(field, message));
+        }
+    }
+    for field in table.keys() {
+        if is_withdrawn_key(section, field) {
+            return Err(refuse(field, NO_CONSUMER_MESSAGE));
+        }
+    }
+    Ok(())
+}
+
+/// A section whose every key is withdrawn, including the free-form
+/// `[keybindings]` map and the sections `ConfigurationDocument` no longer
+/// models at all. An **empty** section header configures nothing and
+/// says nothing false, so it passes: §1 is about a key that does
+/// nothing, and there is no key here.
+fn refuse_withdrawn_free_form_section(
+    root: &mut toml::Table,
+    section: &str,
+) -> Result<(), ConfigDiagnostic> {
+    let Some(table) = section_table(root, section)? else {
+        return Ok(());
+    };
+    refuse_withdrawn_keys(&table, section)?;
+    match table.keys().next() {
+        None => Ok(()),
+        Some(field) => Err(ConfigDiagnostic {
+            path: None,
+            key: format!("{section}.{}", bound_key_segment(field)),
+            location: None,
+            message: NO_CONSUMER_MESSAGE,
+        }),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -106,6 +258,13 @@ pub struct ConfigLoadOutcome {
 /// [`ConfigurationDocument`] comes back, or the first problem found
 /// aborts the whole call and nothing is returned at all. There is no
 /// value this function can hand back that represents "half-applied."
+///
+/// **RFC-045 D3': this function accepts exactly the keys with a
+/// consumer.** Four, plus `[agent.profile.<id>]`'s `display_name` and
+/// `command`. Everything else RFC-023's schema defined is refused by
+/// name -- see [`WITHDRAWN_KEYS`] for why that is a refusal and not a
+/// warning, and [`PERMANENTLY_REFUSED_KEYS`] for the three whose refusal
+/// is not waiting on anything.
 pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagnostic> {
     let mut root: toml::Table =
         source
@@ -121,16 +280,26 @@ pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagn
 
     let mut warnings = Vec::new();
 
+    // RFC-045 D3': the six sections with nothing left in them are
+    // refused before the two that survive are read. Only one diagnostic
+    // is ever returned, so which problem a user is shown first is this
+    // order, not the order they wrote their file in -- a fixed order is
+    // the point (the same two documents always produce the same
+    // diagnostic), but it is not "the first mistake in the file," and a
+    // caller must not describe it as one.
+    refuse_withdrawn_free_form_section(&mut root, "core")?;
+    refuse_withdrawn_free_form_section(&mut root, "ui")?;
+    refuse_withdrawn_free_form_section(&mut root, "keybindings")?;
+    refuse_withdrawn_free_form_section(&mut root, "terminal")?;
+    refuse_withdrawn_free_form_section(&mut root, "projects")?;
+    refuse_withdrawn_free_form_section(&mut root, "security")?;
+
     let document = ConfigurationDocument {
-        core: extract_core(&mut root, &mut warnings)?,
-        ui: extract_ui(&mut root, &mut warnings)?,
-        keybindings: extract_keybindings(&mut root)?,
-        terminal: extract_terminal(&mut root, &mut warnings)?,
-        projects: extract_projects(&mut root, &mut warnings)?,
         agent: extract_agent(&mut root, &mut warnings)?,
-        security: extract_security(&mut root, &mut warnings)?,
         resources: extract_resources(&mut root, &mut warnings)?,
     };
+
+    validate_default_profile(&document)?;
 
     for key in root.keys() {
         warnings.push(ConfigWarning {
@@ -139,6 +308,26 @@ pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagn
     }
 
     Ok(ConfigLoadOutcome { document, warnings })
+}
+
+/// RFC-045 D8: `default_profile` naming an id the file does not define
+/// is a diagnostic, not a silent fallback to the built-in profile. A
+/// user who misspells their own profile's id would otherwise get
+/// `claude_code_linux_default()` and no indication that the profile they
+/// configured is not the one that launched.
+fn validate_default_profile(document: &ConfigurationDocument) -> Result<(), ConfigDiagnostic> {
+    let Some(default_profile) = &document.agent.default_profile else {
+        return Ok(());
+    };
+    if document.agent.profiles.contains_key(default_profile) {
+        return Ok(());
+    }
+    Err(ConfigDiagnostic {
+        path: None,
+        key: "agent.default_profile".to_owned(),
+        location: None,
+        message: "names a profile this file does not define",
+    })
 }
 
 fn section_table(
@@ -162,55 +351,6 @@ fn warn_unconsumed(table: toml::Table, section: &str, warnings: &mut Vec<ConfigW
         warnings.push(ConfigWarning {
             key: format!("{section}.{}", bound_key_segment(key)),
         });
-    }
-}
-
-fn take_bool(
-    table: &mut toml::Table,
-    section: &str,
-    field: &str,
-    default: bool,
-) -> Result<bool, ConfigDiagnostic> {
-    match table.remove(field) {
-        None => Ok(default),
-        Some(toml::Value::Boolean(value)) => Ok(value),
-        Some(_) => Err(ConfigDiagnostic {
-            path: None,
-            key: format!("{section}.{field}"),
-            location: None,
-            message: "expected a boolean",
-        }),
-    }
-}
-
-/// Response 270: like `default_trust`'s handling, this is deliberately
-/// **not** `take_bool` -- a file that says `false` must be an explicit,
-/// named error rather than silently coerced to the safe default. The
-/// setting's type (`RequiredMultilinePasteConfirmation`/
-/// `RequiredDestructiveCommandApproval`) already makes the dangerous
-/// value unrepresentable in memory; this is the loader-side half of
-/// that same guarantee, refusing a file that asks for it rather than
-/// quietly ignoring the request.
-fn take_required_true(
-    table: &mut toml::Table,
-    section: &str,
-    field: &str,
-) -> Result<(), ConfigDiagnostic> {
-    match table.remove(field) {
-        None => Ok(()),
-        Some(toml::Value::Boolean(true)) => Ok(()),
-        Some(toml::Value::Boolean(false)) => Err(ConfigDiagnostic {
-            path: None,
-            key: format!("{section}.{field}"),
-            location: None,
-            message: "must be true -- configuration cannot disable this protection",
-        }),
-        Some(_) => Err(ConfigDiagnostic {
-            path: None,
-            key: format!("{section}.{field}"),
-            location: None,
-            message: "expected a boolean",
-        }),
     }
 }
 
@@ -277,195 +417,6 @@ fn require_string(
     }
 }
 
-fn take_string_array(
-    table: &mut toml::Table,
-    section: &str,
-    field: &str,
-) -> Result<Vec<String>, ConfigDiagnostic> {
-    match table.remove(field) {
-        None => Ok(Vec::new()),
-        Some(toml::Value::Array(items)) => items
-            .into_iter()
-            .map(|item| match item {
-                toml::Value::String(value) => Ok(value),
-                _ => Err(ConfigDiagnostic {
-                    path: None,
-                    key: format!("{section}.{field}"),
-                    location: None,
-                    message: "expected an array of strings",
-                }),
-            })
-            .collect(),
-        Some(_) => Err(ConfigDiagnostic {
-            path: None,
-            key: format!("{section}.{field}"),
-            location: None,
-            message: "expected an array of strings",
-        }),
-    }
-}
-
-fn extract_core(
-    root: &mut toml::Table,
-    warnings: &mut Vec<ConfigWarning>,
-) -> Result<CoreSettings, ConfigDiagnostic> {
-    let defaults = CoreSettings::default();
-    let Some(mut table) = section_table(root, "core")? else {
-        return Ok(defaults);
-    };
-    let settings = CoreSettings {
-        default_project_board: take_bool(
-            &mut table,
-            "core",
-            "default_project_board",
-            defaults.default_project_board,
-        )?,
-        recent_projects_limit: take_u32(
-            &mut table,
-            "core",
-            "recent_projects_limit",
-            defaults.recent_projects_limit,
-        )?,
-    };
-    warn_unconsumed(table, "core", warnings);
-    Ok(settings)
-}
-
-fn extract_ui(
-    root: &mut toml::Table,
-    warnings: &mut Vec<ConfigWarning>,
-) -> Result<UiSettings, ConfigDiagnostic> {
-    let defaults = UiSettings::default();
-    let Some(mut table) = section_table(root, "ui")? else {
-        return Ok(defaults);
-    };
-    let settings = UiSettings {
-        theme: take_string(&mut table, "ui", "theme", &defaults.theme)?,
-        editor_font_family: take_string(
-            &mut table,
-            "ui",
-            "editor_font_family",
-            &defaults.editor_font_family,
-        )?,
-        terminal_font_family: take_string(
-            &mut table,
-            "ui",
-            "terminal_font_family",
-            &defaults.terminal_font_family,
-        )?,
-        ui_font_family: take_string(&mut table, "ui", "ui_font_family", &defaults.ui_font_family)?,
-        font_size: take_u32(&mut table, "ui", "font_size", defaults.font_size)?,
-        show_status_labels: take_bool(
-            &mut table,
-            "ui",
-            "show_status_labels",
-            defaults.show_status_labels,
-        )?,
-    };
-    warn_unconsumed(table, "ui", warnings);
-    Ok(settings)
-}
-
-/// Free-form: every key is a binding name, so there is no "unknown
-/// key" for this section -- unlike the fixed-field sections, nothing
-/// here is ever unconsumed.
-fn extract_keybindings(root: &mut toml::Table) -> Result<KeybindingSettings, ConfigDiagnostic> {
-    let Some(table) = section_table(root, "keybindings")? else {
-        return Ok(KeybindingSettings::default());
-    };
-    let mut overrides = BTreeMap::new();
-    for (key, value) in table {
-        match value {
-            toml::Value::String(binding) => {
-                overrides.insert(key, binding);
-            }
-            _ => {
-                return Err(ConfigDiagnostic {
-                    path: None,
-                    key: format!("keybindings.{}", bound_key_segment(&key)),
-                    location: None,
-                    message: "expected a binding string",
-                });
-            }
-        }
-    }
-    Ok(KeybindingSettings { overrides })
-}
-
-fn extract_terminal(
-    root: &mut toml::Table,
-    warnings: &mut Vec<ConfigWarning>,
-) -> Result<TerminalSettings, ConfigDiagnostic> {
-    let defaults = TerminalSettings::default();
-    let Some(mut table) = section_table(root, "terminal")? else {
-        return Ok(defaults);
-    };
-    take_required_true(&mut table, "terminal", "multiline_paste_protection")?;
-    let settings = TerminalSettings {
-        shell_path: take_string(&mut table, "terminal", "shell_path", &defaults.shell_path)?,
-        scrollback_lines: take_u32(
-            &mut table,
-            "terminal",
-            "scrollback_lines",
-            defaults.scrollback_lines,
-        )?,
-        multiline_paste_protection: RequiredMultilinePasteConfirmation,
-        safe_escape_sequences: take_bool(
-            &mut table,
-            "terminal",
-            "safe_escape_sequences",
-            defaults.safe_escape_sequences,
-        )?,
-    };
-    warn_unconsumed(table, "terminal", warnings);
-    Ok(settings)
-}
-
-/// `default_trust` is deliberately **not** a `take_string`/`take_bool`
-/// call: response 266 requires the dangerous value to be an explicit,
-/// named error rather than silently coerced or defaulted away, so a
-/// user who writes `default_trust = "trusted"` learns their file was
-/// refused, not that Tekstide quietly ignored what they asked for.
-fn extract_projects(
-    root: &mut toml::Table,
-    warnings: &mut Vec<ConfigWarning>,
-) -> Result<ProjectSettings, ConfigDiagnostic> {
-    let defaults = ProjectSettings::default();
-    let Some(mut table) = section_table(root, "projects")? else {
-        return Ok(defaults);
-    };
-    let default_trust = match table.remove("default_trust") {
-        None => RestrictedDefaultTrust,
-        Some(toml::Value::String(value)) if value == "restricted" => RestrictedDefaultTrust,
-        Some(_) => {
-            return Err(ConfigDiagnostic {
-                path: None,
-                key: "projects.default_trust".to_owned(),
-                location: None,
-                message: "must be exactly \"restricted\" -- configuration cannot grant \
-                          workspace trust; see RFC-032",
-            });
-        }
-    };
-    let settings = ProjectSettings {
-        default_trust,
-        restore_recent_projects: take_bool(
-            &mut table,
-            "projects",
-            "restore_recent_projects",
-            defaults.restore_recent_projects,
-        )?,
-        open_duplicate_root: take_string(
-            &mut table,
-            "projects",
-            "open_duplicate_root",
-            &defaults.open_duplicate_root,
-        )?,
-    };
-    warn_unconsumed(table, "projects", warnings);
-    Ok(settings)
-}
-
 fn extract_agent(
     root: &mut toml::Table,
     warnings: &mut Vec<ConfigWarning>,
@@ -474,37 +425,26 @@ fn extract_agent(
     let Some(mut table) = section_table(root, "agent")? else {
         return Ok(defaults);
     };
+    refuse_withdrawn_keys(&table, "agent")?;
     let profiles = extract_agent_profiles(&mut table, warnings)?;
     let settings = AgentSettings {
-        max_concurrent_global: take_u32(
-            &mut table,
-            "agent",
-            "max_concurrent_global",
-            defaults.max_concurrent_global,
-        )?,
-        max_concurrent_per_project: take_u32(
-            &mut table,
-            "agent",
-            "max_concurrent_per_project",
-            defaults.max_concurrent_per_project,
-        )?,
-        default_environment_policy: take_string(
-            &mut table,
-            "agent",
-            "default_environment_policy",
-            &defaults.default_environment_policy,
-        )?,
+        default_profile: match table.remove("default_profile") {
+            None => None,
+            Some(toml::Value::String(value)) => Some(value),
+            Some(_) => {
+                return Err(ConfigDiagnostic {
+                    path: None,
+                    key: "agent.default_profile".to_owned(),
+                    location: None,
+                    message: "expected a string",
+                });
+            }
+        },
         transcript_retention_days: take_u32(
             &mut table,
             "agent",
             "transcript_retention_days",
             defaults.transcript_retention_days,
-        )?,
-        capture_changed_files: take_bool(
-            &mut table,
-            "agent",
-            "capture_changed_files",
-            defaults.capture_changed_files,
         )?,
         profiles,
     };
@@ -545,16 +485,31 @@ fn extract_agent_profiles(
             });
         };
         let section = format!("agent.profile.{bounded_name}");
+
+        // RFC-045 D2: the id is validated **by calling
+        // `AuditReference::new`**, never by a character class copied
+        // from it. RFC-046's `plan_is_auditable` routes a launch whose
+        // profile id this function rejects to the *unaudited* fallback
+        // rather than crashing -- correct for a launch path, and the
+        // wrong outcome for a definition: a user who writes
+        // `[agent.profile."my tool"]` would get an executable every
+        // launch of which is silently unrecorded. If the two checks ever
+        // disagreed, this one would be wrong in the direction of
+        // accepting something the trail will not hold, so there is only
+        // one check.
+        if AuditReference::new(name.as_str()).is_none() {
+            return Err(ConfigDiagnostic {
+                path: None,
+                key: section,
+                location: None,
+                message: "profile ids must be recordable in the audit trail: 1 to 128 characters \
+                          from A-Z, a-z, 0-9, and -_.: only",
+            });
+        }
+
+        refuse_withdrawn_profile_keys(&profile_table, &section)?;
         let display_name = take_string(&mut profile_table, &section, "display_name", &name)?;
         let command = require_string(&mut profile_table, &section, "command")?;
-        let args = take_string_array(&mut profile_table, &section, "args")?;
-        let adapter = take_string(&mut profile_table, &section, "adapter", "terminal-native")?;
-        let environment_policy = take_string(
-            &mut profile_table,
-            &section,
-            "environment_policy",
-            "explicit",
-        )?;
 
         warn_unconsumed(profile_table, &section, warnings);
 
@@ -563,59 +518,76 @@ fn extract_agent_profiles(
             ConfiguredAiCliProfile {
                 display_name,
                 command,
-                args,
-                adapter,
-                environment_policy,
             },
         );
     }
     Ok(profiles)
 }
 
-fn extract_security(
-    root: &mut toml::Table,
-    warnings: &mut Vec<ConfigWarning>,
-) -> Result<SecuritySettings, ConfigDiagnostic> {
-    let defaults = SecuritySettings::default();
-    let Some(mut table) = section_table(root, "security")? else {
-        return Ok(defaults);
+/// RFC-045 D3' inside a `[agent.profile.<id>]` table. `args` is §1's own
+/// opening example -- the key RFC-023 parsed, `to_ai_cli_profile`
+/// dropped, and nothing reported. `adapter` and `environment_policy` are
+/// the same shape. Each returns with the field on `AiCliProfile` that
+/// would carry it (an argv template is an RFC-010 amendment, reserved).
+///
+/// Not in [`WITHDRAWN_KEYS`] because a profile's section name contains
+/// the user's own profile id, so these three cannot be matched by a
+/// fixed `(section, field)` pair.
+const WITHDRAWN_PROFILE_KEYS: &[&str] = &["args", "adapter", "environment_policy"];
+
+fn refuse_withdrawn_profile_keys(
+    profile_table: &toml::Table,
+    section: &str,
+) -> Result<(), ConfigDiagnostic> {
+    for field in profile_table.keys() {
+        if WITHDRAWN_PROFILE_KEYS.contains(&field.as_str()) {
+            return Err(ConfigDiagnostic {
+                path: None,
+                key: format!("{section}.{field}"),
+                location: None,
+                message: NO_CONSUMER_MESSAGE,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// RFC-045 D6. **Absent and zero are different answers, so this cannot
+/// be `take_u32` with a default**: absent means *unlimited*, matching
+/// `ProjectResourceLimits`' own `Option<u32>`, while `0` is refused --
+/// a limit of zero refuses every launch, and a file that quietly turned
+/// the launch button off would be indistinguishable from one that never
+/// set a limit at all. Far more likely a typo than an intent.
+fn take_agent_run_limit(table: &mut toml::Table) -> Result<Option<u32>, ConfigDiagnostic> {
+    let limit = match table.remove("agent_run_limit") {
+        None => return Ok(None),
+        Some(toml::Value::Integer(value)) => {
+            u32::try_from(value).map_err(|_| ConfigDiagnostic {
+                path: None,
+                key: "resources.agent_run_limit".to_owned(),
+                location: None,
+                message: "expected an integer between 1 and 4294967295",
+            })?
+        }
+        Some(_) => {
+            return Err(ConfigDiagnostic {
+                path: None,
+                key: "resources.agent_run_limit".to_owned(),
+                location: None,
+                message: "expected an integer",
+            });
+        }
     };
-    let settings = SecuritySettings {
-        restricted_mode_blocks_workspace_prompts: take_bool(
-            &mut table,
-            "security",
-            "restricted_mode_blocks_workspace_prompts",
-            defaults.restricted_mode_blocks_workspace_prompts,
-        )?,
-        restricted_mode_blocks_workspace_lsp: take_bool(
-            &mut table,
-            "security",
-            "restricted_mode_blocks_workspace_lsp",
-            defaults.restricted_mode_blocks_workspace_lsp,
-        )?,
-        restricted_mode_blocks_workspace_plugins: take_bool(
-            &mut table,
-            "security",
-            "restricted_mode_blocks_workspace_plugins",
-            defaults.restricted_mode_blocks_workspace_plugins,
-        )?,
-        redact_secret_like_environment_names: take_bool(
-            &mut table,
-            "security",
-            "redact_secret_like_environment_names",
-            defaults.redact_secret_like_environment_names,
-        )?,
-        require_approval_for_adapter_destructive_commands: {
-            take_required_true(
-                &mut table,
-                "security",
-                "require_approval_for_adapter_destructive_commands",
-            )?;
-            RequiredDestructiveCommandApproval
-        },
-    };
-    warn_unconsumed(table, "security", warnings);
-    Ok(settings)
+    if limit == 0 {
+        return Err(ConfigDiagnostic {
+            path: None,
+            key: "resources.agent_run_limit".to_owned(),
+            location: None,
+            message: "a limit of zero would refuse every agent run -- omit the key entirely for \
+                      no limit",
+        });
+    }
+    Ok(Some(limit))
 }
 
 fn extract_resources(
@@ -626,25 +598,9 @@ fn extract_resources(
     let Some(mut table) = section_table(root, "resources")? else {
         return Ok(defaults);
     };
+    refuse_withdrawn_keys(&table, "resources")?;
     let settings = ResourceSettings {
-        max_terminal_output_mb_per_session: take_u32(
-            &mut table,
-            "resources",
-            "max_terminal_output_mb_per_session",
-            defaults.max_terminal_output_mb_per_session,
-        )?,
-        max_agent_transcript_mb_per_run: take_u32(
-            &mut table,
-            "resources",
-            "max_agent_transcript_mb_per_run",
-            defaults.max_agent_transcript_mb_per_run,
-        )?,
-        max_file_watch_events_per_batch: take_u32(
-            &mut table,
-            "resources",
-            "max_file_watch_events_per_batch",
-            defaults.max_file_watch_events_per_batch,
-        )?,
+        agent_run_limit: take_agent_run_limit(&mut table)?,
     };
     warn_unconsumed(table, "resources", warnings);
     Ok(settings)

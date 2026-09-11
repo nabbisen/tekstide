@@ -1,58 +1,33 @@
 use std::collections::BTreeMap;
 
-use crate::config::model::{
-    AgentSettings, ConfigurationDocument, ConfiguredAiCliProfile, ResourceSettings,
-    SecuritySettings,
-};
+use crate::config::model::{AgentSettings, ConfigurationDocument, ConfiguredAiCliProfile};
 
-/// RFC-023 §Security-Sensitive Settings, as corrected by this pack's
-/// own review responses (266-272): the fields that "may never be
-/// applied silently, may never be hot-reloaded, and may never come
-/// from workspace configuration." `default_trust`,
-/// `multiline_paste_protection`, and
-/// `require_approval_for_adapter_destructive_commands` are **not**
-/// listed here -- they are inert by construction
-/// (`RestrictedDefaultTrust`/`RequiredMultilinePasteConfirmation`/
-/// `RequiredDestructiveCommandApproval`), so they cannot differ between
-/// two [`ConfigurationDocument`]s at all, and gating a value that can
-/// never change would be a no-op dressed up as a control.
+/// RFC-023 §Security-Sensitive Settings: the fields that "may never be
+/// applied silently, may never be hot-reloaded, and may never come from
+/// workspace configuration."
 ///
-/// `AgentProfiles` is one coarse entry covering the whole
-/// `[agent.profile.*]` table -- per-profile add/remove/modify direction
-/// (RFC-023's own examples: adding a profile increases permitted
-/// capability, removing one reduces it) is classified by
-/// [`agent_profiles_direction`], PR-023-E's own addition, since that
-/// slice is where profile identity and validation actually live.
-/// `AgentDefaultEnvironmentPolicy` has no defined value ordering yet
-/// (today's only real value is `"explicit"`); reload-gated here like
-/// every other field in this list, but its audit-producer direction is
-/// still deferred, for the same reason.
+/// **RFC-045 D3' removed six of the eight variants, and removed them for
+/// a reason worth stating rather than inferring**: each classified a
+/// field that no code read. `RestrictedModeBlocksWorkspace*` and
+/// `RedactSecretLikeEnvironmentNames` classified the `[security]`
+/// settings the sensitive machinery was built around -- which never
+/// reached `RestrictedModeFeature` at all; `AgentDefaultEnvironmentPolicy`
+/// and `ResourcesMaxAgentTranscriptMbPerRun` the same. A confirmation
+/// gate on a value nothing consumes is a control over nothing. **Each
+/// returns with its own consumer, in the same change** -- and Restricted
+/// Mode policy from configuration specifically is RFC-004 territory,
+/// reserved there, not here.
 ///
-/// Response 272: RFC-023 §Security-Sensitive Settings names "transcript
-/// retention **and purge** policy" as one policy -- RFC-011 implements
-/// it as four bounds (per-transcript bytes, per-project bytes, app-wide
-/// bytes, max age), and this classification originally covered only
-/// `AgentTranscriptRetentionDays` (max age), because the model happens
-/// to put the other three under `[resources]` rather than `[agent]`.
-/// `ResourcesMaxAgentTranscriptMbPerRun` (`max_bytes_per_transcript`)
-/// closes that gap -- classified by the *policy* the RFC names, not by
-/// which section of the typed model the field happens to sit in.
-/// `max_terminal_output_mb_per_session` (live output, not persisted
-/// except through the already-covered transcript path) and
-/// `max_file_watch_events_per_batch` (a throughput bound for the M13
-/// watcher, which does not exist yet) are deliberately **not**
-/// classified -- neither is retention policy, so the boundary excludes
-/// them on purpose, not because nobody looked.
+/// What is left is what a file can actually change today:
+/// `AgentTranscriptRetentionDays` (RFC-045 D9 -- reaches
+/// `TranscriptPrivacyPolicy::max_age_days`) and `AgentProfiles` (D8 --
+/// reaches the launch path through `default_profile`). Both are real
+/// policy, both have a direction, and `AgentProfiles` additionally
+/// re-arms D4's first-use confirmation when a reload changes it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SecuritySensitiveField {
-    RestrictedModeBlocksWorkspacePrompts,
-    RestrictedModeBlocksWorkspaceLsp,
-    RestrictedModeBlocksWorkspacePlugins,
-    RedactSecretLikeEnvironmentNames,
-    AgentDefaultEnvironmentPolicy,
     AgentTranscriptRetentionDays,
     AgentProfiles,
-    ResourcesMaxAgentTranscriptMbPerRun,
 }
 
 /// A change's direction under RFC-013's frozen `config_policy_increase`/
@@ -77,86 +52,35 @@ pub fn security_sensitive_diff(
     candidate: &ConfigurationDocument,
 ) -> Vec<SecuritySensitiveField> {
     let mut diff = Vec::new();
-    if current.security.restricted_mode_blocks_workspace_prompts
-        != candidate.security.restricted_mode_blocks_workspace_prompts
-    {
-        diff.push(SecuritySensitiveField::RestrictedModeBlocksWorkspacePrompts);
-    }
-    if current.security.restricted_mode_blocks_workspace_lsp
-        != candidate.security.restricted_mode_blocks_workspace_lsp
-    {
-        diff.push(SecuritySensitiveField::RestrictedModeBlocksWorkspaceLsp);
-    }
-    if current.security.restricted_mode_blocks_workspace_plugins
-        != candidate.security.restricted_mode_blocks_workspace_plugins
-    {
-        diff.push(SecuritySensitiveField::RestrictedModeBlocksWorkspacePlugins);
-    }
-    if current.security.redact_secret_like_environment_names
-        != candidate.security.redact_secret_like_environment_names
-    {
-        diff.push(SecuritySensitiveField::RedactSecretLikeEnvironmentNames);
-    }
-    if current.agent.default_environment_policy != candidate.agent.default_environment_policy {
-        diff.push(SecuritySensitiveField::AgentDefaultEnvironmentPolicy);
-    }
     if current.agent.transcript_retention_days != candidate.agent.transcript_retention_days {
         diff.push(SecuritySensitiveField::AgentTranscriptRetentionDays);
     }
     if current.agent.profiles != candidate.agent.profiles {
         diff.push(SecuritySensitiveField::AgentProfiles);
     }
-    if current.resources.max_agent_transcript_mb_per_run
-        != candidate.resources.max_agent_transcript_mb_per_run
-    {
-        diff.push(SecuritySensitiveField::ResourcesMaxAgentTranscriptMbPerRun);
-    }
     diff
 }
 
 /// The direction a *specific, already-known-to-differ* field's change
-/// takes, for the seven fields with a defined ordering. Returns `None`
-/// only for `AgentDefaultEnvironmentPolicy` -- not because it has no
-/// direction, but because this module does not yet define one for it
-/// (see the type's own doc comment). A caller must not treat `None` as
-/// "safe to apply" -- direction is an audit-producer question;
-/// reload-gating (`security_sensitive_diff`) already held the field
-/// back regardless of whether a direction is classifiable yet.
+/// takes. Both surviving fields have a defined ordering, so unlike
+/// RFC-023's version this returns a direction rather than an `Option`:
+/// the one variant that had none (`AgentDefaultEnvironmentPolicy`, whose
+/// only real value was `"explicit"`) is gone with the field it
+/// classified, and a `None` arm no caller can reach would be a branch
+/// inviting a reader to handle a case that cannot occur.
 pub fn direction(
     field: SecuritySensitiveField,
     current: &ConfigurationDocument,
     candidate: &ConfigurationDocument,
-) -> Option<SecuritySensitiveDirection> {
+) -> SecuritySensitiveDirection {
     match field {
-        SecuritySensitiveField::RestrictedModeBlocksWorkspacePrompts => Some(bool_direction(
-            current.security.restricted_mode_blocks_workspace_prompts,
-            candidate.security.restricted_mode_blocks_workspace_prompts,
-        )),
-        SecuritySensitiveField::RestrictedModeBlocksWorkspaceLsp => Some(bool_direction(
-            current.security.restricted_mode_blocks_workspace_lsp,
-            candidate.security.restricted_mode_blocks_workspace_lsp,
-        )),
-        SecuritySensitiveField::RestrictedModeBlocksWorkspacePlugins => Some(bool_direction(
-            current.security.restricted_mode_blocks_workspace_plugins,
-            candidate.security.restricted_mode_blocks_workspace_plugins,
-        )),
-        SecuritySensitiveField::RedactSecretLikeEnvironmentNames => Some(bool_direction(
-            current.security.redact_secret_like_environment_names,
-            candidate.security.redact_secret_like_environment_names,
-        )),
-        SecuritySensitiveField::AgentTranscriptRetentionDays => Some(retention_direction(
+        SecuritySensitiveField::AgentTranscriptRetentionDays => retention_direction(
             current.agent.transcript_retention_days,
             candidate.agent.transcript_retention_days,
-        )),
-        SecuritySensitiveField::ResourcesMaxAgentTranscriptMbPerRun => Some(retention_direction(
-            current.resources.max_agent_transcript_mb_per_run,
-            candidate.resources.max_agent_transcript_mb_per_run,
-        )),
-        SecuritySensitiveField::AgentProfiles => Some(agent_profiles_direction(
-            &current.agent.profiles,
-            &candidate.agent.profiles,
-        )),
-        SecuritySensitiveField::AgentDefaultEnvironmentPolicy => None,
+        ),
+        SecuritySensitiveField::AgentProfiles => {
+            agent_profiles_direction(&current.agent.profiles, &candidate.agent.profiles)
+        }
     }
 }
 
@@ -164,11 +88,12 @@ pub fn direction(
 /// classification `sensitive.rs`'s own doc comment deferred to this
 /// slice. RFC-023 gives two clean examples -- adding a profile
 /// increases permitted capability, removing one reduces it -- but does
-/// not say what *modifying* an existing profile's `command`/`args`/
-/// `adapter`/`environment_policy` is: that could tighten or loosen
-/// depending on specifics this module has no principled way to judge
-/// (a new `command` value is not comparably "more" or "less" than the
-/// old one the way a retention day-count is). So the rule here is
+/// not say what *modifying* an existing profile is. Since RFC-045 D3'
+/// that means its `display_name` or its `command`, and a `command` in
+/// particular could tighten or loosen depending on specifics this module
+/// has no principled way to judge (a new executable path is not
+/// comparably "more" or "less" than the old one the way a retention
+/// day-count is). So the rule here is
 /// worst-case-wins, the same reasoning `retention_direction`'s
 /// less-is-safer logic generalises to a set-valued field: `candidate`
 /// is `Reduce` only if it is a **pure subset** of `current` -- every
@@ -195,11 +120,14 @@ fn agent_profiles_direction(
     }
 }
 
-/// Shared by both halves of RFC-011's retention policy this module
-/// classifies (max age, max bytes per transcript): a **larger** bound
-/// keeps more data around for longer -- weakens the privacy posture
-/// RFC-011/RFC-033 exist to bound, regardless of which unit (days,
-/// megabytes) the bound is measured in.
+/// A **larger** retention bound keeps more data around for longer --
+/// weakens the privacy posture RFC-011/RFC-033 exist to bound.
+///
+/// This used to serve both halves of the retention policy response 272
+/// classified (max age, and max bytes per transcript). RFC-045 D3'
+/// withdrew `resources.max_agent_transcript_mb_per_run`, so `max_age_days`
+/// is the only half a file can still ask about; the unit-agnostic
+/// wording is kept because the other half returns with its consumer.
 fn retention_direction(was: u32, now: u32) -> SecuritySensitiveDirection {
     debug_assert_ne!(was, now, "retention_direction called on an unchanged value");
     if now > was {
@@ -209,74 +137,33 @@ fn retention_direction(was: u32, now: u32) -> SecuritySensitiveDirection {
     }
 }
 
-/// `true` is the blocking/protecting/redacting state for every boolean
-/// this module classifies -- turning it `false` always weakens the
-/// posture, matching every field's own compiled default (`true`) under
-/// "fail closed."
-fn bool_direction(was: bool, now: bool) -> SecuritySensitiveDirection {
-    debug_assert_ne!(was, now, "bool_direction called on an unchanged value");
-    if now {
-        SecuritySensitiveDirection::Reduce
-    } else {
-        SecuritySensitiveDirection::Increase
-    }
-}
-
-/// Builds the document that actually takes effect on reload: every
-/// safe field from `candidate` (the freshly parsed file), every
+/// Builds the document that actually takes effect on reload: every safe
+/// field from `candidate` (the freshly parsed file), every
 /// security-sensitive field held at `current`'s existing value. Because
 /// this constructs one complete, new `ConfigurationDocument` value
-/// before the caller ever assigns it anywhere, there is no
-/// intermediate state where some but not all of a section's fields
-/// have been decided -- the same "compute first, assign once"
-/// discipline `ConfigStore::reload` already uses for the atomic
+/// before the caller ever assigns it anywhere, there is no intermediate
+/// state where some but not all of a section's fields have been decided
+/// -- the same "compute first, assign once" discipline
+/// `ConfigStore::reload` already uses for the atomic
 /// parse/validate/construct/swap pipeline, extended one level.
+///
+/// **RFC-045: `default_profile` and `agent_run_limit` are safe fields**,
+/// and neither is an oversight. Repointing `default_profile` does not
+/// bypass D4's first-use gate -- that gate is keyed by profile id, so a
+/// default moved to a profile this session has not confirmed still
+/// stops for the confirmation that names its resolved executable.
+/// `agent_run_limit` is not in RFC-023's classification, and D7 declines
+/// to widen that vocabulary from inside a reachability slice.
 pub fn apply_safe_fields(
     current: &ConfigurationDocument,
     candidate: &ConfigurationDocument,
 ) -> ConfigurationDocument {
     ConfigurationDocument {
-        core: candidate.core.clone(),
-        ui: candidate.ui.clone(),
-        keybindings: candidate.keybindings.clone(),
-        terminal: candidate.terminal.clone(),
-        projects: candidate.projects.clone(),
         agent: AgentSettings {
-            max_concurrent_global: candidate.agent.max_concurrent_global,
-            max_concurrent_per_project: candidate.agent.max_concurrent_per_project,
-            default_environment_policy: current.agent.default_environment_policy.clone(),
+            default_profile: candidate.agent.default_profile.clone(),
             transcript_retention_days: current.agent.transcript_retention_days,
-            capture_changed_files: candidate.agent.capture_changed_files,
             profiles: current.agent.profiles.clone(),
         },
-        security: SecuritySettings {
-            restricted_mode_blocks_workspace_prompts: current
-                .security
-                .restricted_mode_blocks_workspace_prompts,
-            restricted_mode_blocks_workspace_lsp: current
-                .security
-                .restricted_mode_blocks_workspace_lsp,
-            restricted_mode_blocks_workspace_plugins: current
-                .security
-                .restricted_mode_blocks_workspace_plugins,
-            redact_secret_like_environment_names: current
-                .security
-                .redact_secret_like_environment_names,
-            // Inert -- always equal between `current` and `candidate`
-            // (there is only one possible value), so which side this
-            // reads from cannot matter. Reads from `candidate` only to
-            // avoid a redundant `current`/`candidate` split for a field
-            // that can never actually differ.
-            require_approval_for_adapter_destructive_commands: candidate
-                .security
-                .require_approval_for_adapter_destructive_commands,
-        },
-        resources: ResourceSettings {
-            max_terminal_output_mb_per_session: candidate
-                .resources
-                .max_terminal_output_mb_per_session,
-            max_agent_transcript_mb_per_run: current.resources.max_agent_transcript_mb_per_run,
-            max_file_watch_events_per_batch: candidate.resources.max_file_watch_events_per_batch,
-        },
+        resources: candidate.resources.clone(),
     }
 }
