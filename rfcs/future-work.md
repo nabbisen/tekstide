@@ -728,6 +728,21 @@ Status: deferred after `0.1.0`.
 - Multi-document tabs or another explicit multi-document model.
 - Richer editor internals if `String`-backed buffers become limiting.
 
+### A launch does not retain its transcript retention limits — RFC-011 amendment, reserved
+
+Found by RFC-045 PR-045-B (request 377) while wiring `transcript_retention_days` to a real launch.
+The configured value reaches `TranscriptPrivacyPolicy::max_age_days` on the plan production builds
+— and then nothing retains it: the plan is consumed by the launch, `AgentRun` does not carry the
+limits, and the `Transcript` attached afterwards stores a fixed policy *name*
+(`"local-bounded-agent-run"`), not the limits themselves. So "a running transcript is bounded by the
+configured retention" cannot be tested end to end; the strongest available evidence reads the plan,
+which is weaker, and the slice said so rather than claiming more.
+
+**Widening what a launch retains is a data-model change owned by RFC-011, not a rider on a
+reachability slice.** Reserved here as the row; it becomes an RFC or an amendment when something
+needs to *read* the limits back — the first candidate is any changelog sentence that promises
+retention behaviour, which must not be written until this exists.
+
 ### Release Process
 
 Status: active after `0.1.0`.

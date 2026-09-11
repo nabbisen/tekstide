@@ -85,6 +85,8 @@ contradiction named — that is the reviewer's error to fix, not the implementer
 - [ ] Increase requires confirmation and records `_increase`; reduce applies and records
       `_reduce`. Both directions, separately.
 - [ ] `ReloadConfiguration` is in the registry and therefore in Help and `--help`.
+- [ ] **The `#[allow(dead_code)]` on `default_profile` is removed** — PR-045-B carried it naming
+      this slice as the consumer; an allow that names its closing slice must be closed by it.
 - [ ] Nothing was added to the config-change record (§4). Grep `sensitive_config_changed_record`'s
       call sites for new arguments.
 
@@ -96,6 +98,10 @@ contradiction named — that is the reviewer's error to fix, not the implementer
       flake gets a dated row in `test-process-leak.md`.
 - [ ] Live capture of the first-use confirmation with `XDG_CONFIG_HOME=$(mktemp -d)`, or a
       documented gap after three rounds.
+- [ ] **Any catalog key that gained an argument was run through
+      `i18n::enforcement::every_source_locale_key_resolves_in_every_shipped_locale`.** PR-045-B's
+      two board lines rendered as their own key names until the full suite caught `$key` missing
+      from `generic_args()` — a filtered *test run* is the filtered-*output* rule one level down.
 - [ ] RFC-023's acceptance criteria re-read against the result: **"no configuration values reach
       durable audit"** still holds.
 - [ ] `crates/tekstide-core/README.md` and the RFC-023 row say what the file can now do — and no
