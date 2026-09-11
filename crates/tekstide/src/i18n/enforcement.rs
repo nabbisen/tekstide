@@ -596,6 +596,17 @@ fn generic_args() -> CatalogArgs<'static> {
         // already covers this key's own `$max`, shared with RFC-041's
         // byte-bound refusal.
         .number("lines", 1u64)
+        // RFC-045 PR-045-B: the configuration board lines' `$key` --
+        // `"section.field"` read out of the user's own file, so
+        // untrusted, and routed through the real `quote_untrusted` here
+        // the same way `name`/`message`/`path` above are. (The parser
+        // has already length-capped and control/bidi-escaped it before
+        // the shell sees it; this fixture only has to supply *some*
+        // resolvable value.)
+        .untrusted(
+            "key",
+            &tekstide_core::text_safety::quote_untrusted("agent.fixture_key"),
+        )
 }
 
 fn shipped_additional_locales() -> Vec<String> {

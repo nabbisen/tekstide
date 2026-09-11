@@ -905,6 +905,97 @@ pub struct State {
     /// recovery, not a merely-lucky write, should turn this back to
     /// healthy).
     audit_health: tekstide_core::audit::AuditHealth,
+    /// RFC-045 PR-045-B: the configuration RFC-023 built and nothing
+    /// constructed. Threaded in from `boot()` for the same reason
+    /// `audit_health` is -- the store must load **before** CLI project
+    /// paths are opened, so D6's `agent_run_limit` applies to them, and
+    /// `State` does not exist yet at that point.
+    configuration: ConfigurationState,
+}
+
+/// RFC-045 PR-045-B: what `boot()` made of the user's configuration
+/// file, carried for the session.
+///
+/// **A missing file, an unreadable one, and an invalid one all boot
+/// normally with compiled defaults** — RFC-023's own rule, which this
+/// slice reaches rather than changes: refusing to start would turn a
+/// typo into a denial of service. What D1 adds is that the user can
+/// *see* it happened (`project_board_configuration_lines`).
+#[derive(Debug)]
+pub struct ConfigurationState {
+    /// `None` only when the configuration **path** could not be
+    /// resolved at all (no `$XDG_CONFIG_HOME`, no `$HOME`) — there is
+    /// no file to load, reload, or name. Every other failure still
+    /// yields a store holding compiled defaults, because
+    /// `ConfigStore::load` does not fail.
+    store: Option<tekstide_core::config::ConfigStore>,
+    /// Why the file on disk was not used, when it was not. `None` means
+    /// either "loaded fine" or "there is no file", which are the same
+    /// thing to every reader here: the defaults are in force and
+    /// nothing is wrong.
+    diagnostic: Option<tekstide_core::config::ConfigDiagnostic>,
+    /// Keys this build has never heard of. Non-fatal by RFC-023's own
+    /// forward-compatibility rule — **and the reason D1's board line
+    /// must name them** (response 376): since PR-045-A a typo like
+    /// `defualt_profile` warns and does nothing, and this line is the
+    /// only thing standing between that and a user who believes their
+    /// profile is the default.
+    warnings: Vec<tekstide_core::config::ConfigWarning>,
+    /// D8, **resolved but not launched in this slice.** The launch path
+    /// still uses `claude_code_linux_default()` until PR-045-C builds
+    /// the first-use confirmation: nothing configuration-defined may
+    /// execute before there is a deliberate act in front of it (§3).
+    ///
+    /// `#[allow(dead_code)]` with the closing slice named, the same
+    /// shape `ControlCoverage::MouseOnly` uses: production writes this
+    /// field and deliberately does not read it yet. **PR-045-C is the
+    /// consumer** — an RFC number, not an intention, which is RFC-036
+    /// D2's own bar. `a_configured_default_profile_is_resolved_but_does_
+    /// not_launch_in_this_slice` is what holds the "not yet" to account.
+    #[allow(dead_code)]
+    default_profile: Option<tekstide_core::agent::AiCliProfile>,
+}
+
+impl ConfigurationState {
+    /// No file, no store, nothing to say -- the state every test that
+    /// does not care about configuration gets. `#[allow(dead_code)]`
+    /// for the same reason `default_profile` above carries one:
+    /// production always has a real `ConfigurationState` from
+    /// `load_configuration_at_boot`, so this constructor exists for the
+    /// tests written before this slice, which must keep asserting what
+    /// they always did.
+    #[allow(dead_code)]
+    pub fn unconfigured() -> Self {
+        Self {
+            store: None,
+            diagnostic: None,
+            warnings: Vec::new(),
+            default_profile: None,
+        }
+    }
+
+    /// D6. `None` means unlimited, which is both the compiled default
+    /// and what `ProjectResourceLimits` already means by `None`.
+    fn agent_run_limit(&self) -> Option<u32> {
+        self.store.as_ref()?.current().resources.agent_run_limit
+    }
+
+    /// D9. Falls back to the compiled constant when there is no store,
+    /// so a caller never has to handle "unset" -- the same totality
+    /// `ConfigurationDocument`'s own defaults provide.
+    fn transcript_retention_days(&self) -> u32 {
+        self.store.as_ref().map_or(
+            tekstide_core::transcript::DEFAULT_TRANSCRIPT_MAX_AGE_DAYS,
+            |store| store.current().agent.transcript_retention_days,
+        )
+    }
+
+    /// `#[allow(dead_code)]`: see the field's own comment -- PR-045-C
+    /// is the named consumer.
+    #[allow(dead_code)]
+    pub fn default_profile(&self) -> Option<&tekstide_core::agent::AiCliProfile> {
+        self.default_profile.as_ref()
+    }
 }
 
 impl State {
@@ -919,6 +1010,7 @@ impl State {
         mut app_shell: ApplicationShell,
         catalog: Catalog,
         mut audit_health: tekstide_core::audit::AuditHealth,
+        configuration: ConfigurationState,
     ) -> Self {
         // RFC-032 PR-032-C, response 245: the audit store, not the
         // user-writable recent-projects cache, is authoritative for
@@ -942,6 +1034,14 @@ impl State {
         // when `State::new` runs.
         verify_restored_trust(&mut app_shell, &mut audit_health);
         let seeded_change_review_demo = seed_change_review_demo_data(&mut app_shell);
+        // RFC-045 PR-045-B, D6: every project that already exists at
+        // boot -- the CLI arguments `boot()` opened just above, and any
+        // restored session -- gets the configured limit here, in the one
+        // place all of them are in hand before the event loop starts.
+        // The three mid-session open routes apply it themselves, the
+        // same division `verify_restored_trust` above already has.
+        apply_configured_resource_limits(&mut app_shell, &configuration);
+
         let measurement = Measurement::from_env();
         let typing_doc = if matches!(
             measurement.as_ref().map(Measurement::criterion),
@@ -1021,6 +1121,7 @@ impl State {
             project_board_row_highlight: 0,
             tab_strip_highlight: 0,
             audit_health,
+            configuration,
         }
     }
 
@@ -3066,6 +3167,68 @@ fn attempt_agent_run_launch_with_profile_and_state_root(
 /// `prepare_adapter_approval`'s own fallback to `transcript_state_root`
 /// (RFC-022 PR-022-C response 216) was never wrong -- this call site
 /// simply never took up the escape hatch response 216 built.
+/// RFC-045 PR-045-B: the launch plan production builds, split out of
+/// [`attempt_agent_run_launch_with_profile_state_root_and_capture`] --
+/// the fourth testability split that function has had, and for the
+/// familiar reason: **the value D9 configures is not readable back from
+/// a launched run.**
+///
+/// Nothing retains `TranscriptRetentionLimits` past the launch. The plan
+/// is consumed, `AgentRun` does not carry it, and the `Transcript`
+/// attached afterwards records a fixed `retention_policy` string
+/// (`"local-bounded-agent-run"`) rather than the limits themselves. So a
+/// test that wants to prove the configured value **reached a real
+/// launch's `TranscriptPrivacyPolicy`**, rather than merely that the
+/// file parsed, has to read the plan production builds -- which is what
+/// this function returns, from the same code the real launch runs.
+///
+/// Widening what a launch retains would be a change to RFC-011's data
+/// model, not a rider on a reachability slice; named in `qa-evidence.md`
+/// rather than taken here.
+fn configured_agent_run_launch_plan(
+    project: &tekstide_core::project::ProjectSession,
+    configuration: &ConfigurationState,
+    profile: &tekstide_core::agent::AiCliProfile,
+    state_root: Option<std::path::PathBuf>,
+    capture_enabled: bool,
+) -> Result<tekstide_core::agent::AgentRunLaunchPlan, AgentRunLaunchRefusal> {
+    let mut request = tekstide_core::agent::AgentRunLaunchRequest::new(
+        project.id().clone(),
+        &profile.id,
+        "Interactive Claude Code session",
+    );
+    // RFC-045 PR-045-B, D9: the one configured value with a consumer
+    // already waiting. `transcript_retention_days` is already a
+    // `SecuritySensitiveField`, so it is also the one key that
+    // exercises PR-045-C's increase/reduce path against a real field
+    // rather than a fixture.
+    //
+    // Only `max_age_days` moves: the other three bounds keep
+    // `agent_run_default()`'s values because the file has no key for any
+    // of them (D3' withdrew `max_agent_transcript_mb_per_run` with the
+    // rest), and building the whole limits struct from a document that
+    // knows one field is how the other three would silently acquire this
+    // function's opinion of them.
+    let mut retention_limits =
+        tekstide_core::transcript::TranscriptRetentionLimits::agent_run_default();
+    retention_limits.max_age_days = configuration.transcript_retention_days();
+    request = request.with_transcript_retention_limits(retention_limits);
+    if let Some(state_root) = state_root {
+        request = if capture_enabled {
+            request.with_local_bounded_transcript(state_root.clone())
+        } else {
+            request.without_transcript_capture()
+        };
+        request = request.with_approval_channel(state_root);
+    }
+
+    let validation = tekstide_core::agent::AgentRunLaunchValidator
+        .validate(project, profile, &request)
+        .map_err(AgentRunLaunchRefusal::Validation)?;
+    tekstide_core::agent::AgentRunLaunchPlan::from_validation(validation, "Claude Code")
+        .map_err(AgentRunLaunchRefusal::PlanTransition)
+}
+
 fn attempt_agent_run_launch_with_profile_state_root_and_capture(
     state: &mut State,
     profile: tekstide_core::agent::AiCliProfile,
@@ -3082,25 +3245,13 @@ fn attempt_agent_run_launch_with_profile_state_root_and_capture(
             return Err(AgentRunLaunchRefusal::RunLimitExceeded { limit });
         }
 
-        let mut request = tekstide_core::agent::AgentRunLaunchRequest::new(
-            project.id().clone(),
-            &profile.id,
-            "Interactive Claude Code session",
-        );
-        if let Some(state_root) = state_root {
-            request = if capture_enabled {
-                request.with_local_bounded_transcript(state_root.clone())
-            } else {
-                request.without_transcript_capture()
-            };
-            request = request.with_approval_channel(state_root);
-        }
-
-        let validation = tekstide_core::agent::AgentRunLaunchValidator
-            .validate(project, &profile, &request)
-            .map_err(AgentRunLaunchRefusal::Validation)?;
-        tekstide_core::agent::AgentRunLaunchPlan::from_validation(validation, "Claude Code")
-            .map_err(AgentRunLaunchRefusal::PlanTransition)?
+        configured_agent_run_launch_plan(
+            project,
+            &state.configuration,
+            &profile,
+            state_root,
+            capture_enabled,
+        )?
     };
 
     let project_id = plan.spec().project_id().clone();
@@ -3817,6 +3968,12 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
             record_new_project_added(state, project_id);
             verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
+            // RFC-045 PR-045-B, D6: "projects opened after load"
+            // includes this one. Applied here rather than centrally
+            // for the same reason `verify_restored_trust` above is:
+            // there is no single point every newly-opened project
+            // passes through.
+            apply_configured_resource_limits(&mut state.app_shell, &state.configuration);
         }
         // Should not normally happen -- a `Recent*`-kind row is, by
         // construction, not currently open -- but if the board's rows
@@ -4420,6 +4577,12 @@ fn attempt_open_project_from_path_field(state: &mut State) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
             record_new_project_added(state, project_id);
             verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
+            // RFC-045 PR-045-B, D6: "projects opened after load"
+            // includes this one. Applied here rather than centrally
+            // for the same reason `verify_restored_trust` above is:
+            // there is no single point every newly-opened project
+            // passes through.
+            apply_configured_resource_limits(&mut state.app_shell, &state.configuration);
             state.path_field.clear();
             state.path_field_requested = false;
         }
@@ -4553,6 +4716,12 @@ fn choose_current_browsed_directory(state: &mut State) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
             record_new_project_added(state, project_id);
             verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
+            // RFC-045 PR-045-B, D6: "projects opened after load"
+            // includes this one. Applied here rather than centrally
+            // for the same reason `verify_restored_trust` above is:
+            // there is no single point every newly-opened project
+            // passes through.
+            apply_configured_resource_limits(&mut state.app_shell, &state.configuration);
             state.modal = None;
         }
         Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
@@ -5315,6 +5484,108 @@ pub(crate) fn open_real_audit_store(
 /// again this slice, now covering the recovered case too: a caller
 /// that only wants "do I have a store" needs no changes to keep working
 /// with a resumed or recovered one.
+/// RFC-045 PR-045-B, D1: boot's own configuration load, and the whole
+/// of what `tekstide` does with a configuration file at startup.
+///
+/// **Never refuses to start, and never exits.** A path that cannot be
+/// resolved is a diagnostic, exactly like a file that cannot be parsed:
+/// RFC-023 decided a typo must not become a denial of service, and a
+/// missing `$HOME` is not a better reason to refuse than a missing
+/// bracket. The caller is `boot()`, and it calls this **before** opening
+/// CLI project paths so D6's `agent_run_limit` applies to them.
+///
+/// D8's `default_profile` is resolved here into a real `AiCliProfile`
+/// through `to_ai_cli_profile` — and goes no further in this slice. The
+/// launch path still uses `claude_code_linux_default()`; nothing
+/// configuration-defined executes before PR-045-C's confirmation exists.
+/// `parse_and_validate` has already refused a `default_profile` naming
+/// a profile the file does not define (D8, PR-045-A), so the lookup
+/// here cannot silently fall back to the built-in profile for a name
+/// the user did write.
+pub(crate) fn load_configuration_at_boot(
+    provider: Result<
+        tekstide_core::config::ConfigPathProvider,
+        tekstide_core::config::ConfigPathError,
+    >,
+) -> ConfigurationState {
+    let storage_path =
+        provider.and_then(|provider| tekstide_core::config::ConfigPathResolver.resolve(&provider));
+    let storage_path = match storage_path {
+        Ok(storage_path) => storage_path,
+        Err(_) => {
+            return ConfigurationState {
+                store: None,
+                diagnostic: Some(tekstide_core::config::ConfigDiagnostic {
+                    path: None,
+                    key: "<config-path>".to_owned(),
+                    location: None,
+                    message: "the configuration directory could not be resolved",
+                }),
+                warnings: Vec::new(),
+                default_profile: None,
+            };
+        }
+    };
+
+    let (store, report) =
+        tekstide_core::config::ConfigStore::load(storage_path.config_file().to_path_buf());
+    let default_profile = store
+        .current()
+        .agent
+        .default_profile
+        .as_ref()
+        .and_then(|id| {
+            store
+                .current()
+                .agent
+                .profiles
+                .get(id)
+                .map(|configured| tekstide_core::config::to_ai_cli_profile(id, configured))
+        });
+    ConfigurationState {
+        store: Some(store),
+        diagnostic: report.diagnostic,
+        warnings: report.warnings,
+        default_profile,
+    }
+}
+
+/// RFC-045 PR-045-B, D6: the configured `agent_run_limit` reaches a
+/// real project's own `ProjectResourceLimits`.
+///
+/// Called at every point a project becomes open — boot's CLI arguments
+/// and each of the three mid-session routes — rather than once, because
+/// "projects opened after load" (RFC-023 §Hot Reload's *new tasks*) is
+/// a per-project event, not a startup one. The same shape
+/// `verify_restored_trust` already has, and for the same reason: there
+/// is no single place every project passes through.
+///
+/// Leaves the project's other two limits exactly as they are: the file
+/// has no key for either, and writing a whole `ProjectResourceLimits`
+/// from a document that knows one field would silently reset the other
+/// two to whatever this function happened to think they were.
+fn apply_configured_resource_limits(
+    app_shell: &mut ApplicationShell,
+    configuration: &ConfigurationState,
+) {
+    let Some(agent_run_limit) = configuration.agent_run_limit() else {
+        return;
+    };
+    let project_ids: Vec<_> = app_shell
+        .state()
+        .projects()
+        .iter()
+        .map(|project| project.id().clone())
+        .collect();
+    for project_id in project_ids {
+        if let Some(project) = app_shell.state_mut().project_mut(&project_id) {
+            let mut limits = project.resource_limits();
+            limits.agent_run_limit = Some(agent_run_limit);
+            project.set_resource_limits(limits);
+        }
+    }
+}
+
 pub(crate) fn open_audit_store_recording_failure(
     app_shell: &ApplicationShell,
     health: &mut tekstide_core::audit::AuditHealth,
@@ -6716,6 +6987,58 @@ fn project_board_audit_lines(state: &State) -> Vec<String> {
     lines
 }
 
+/// RFC-045 PR-045-B, D1 and §6 of the risk document: **which of three
+/// things is true of the user's configuration file**, on the project
+/// board, absent when nothing is wrong.
+///
+/// §6 names three states and they are genuinely different, so this
+/// renders one line per state rather than one line that tries to cover
+/// them: **ignored** (a diagnostic — the file exists and was not used,
+/// compiled defaults are in force), and **loaded with warnings** (the
+/// file was used, and some of what it says does nothing). The third,
+/// *loaded with changes pending confirmation*, arrives with PR-045-C's
+/// reload; there is no way to reach it in this slice, so nothing here
+/// pretends to render it.
+///
+/// **The warnings line names a key, and that is a requirement rather
+/// than a courtesy** (response 376). Since PR-045-A the parser refuses
+/// keys it cannot deliver and *warns* only about keys it has never
+/// heard of — so a typo (`defualt_profile = "x"`) loads fine, does
+/// nothing, and this line is the only thing that will ever tell the
+/// user. A count would say "something you wrote was ignored" without
+/// saying what, which is §1's failure shape wearing a number.
+///
+/// Absent when clean, per RFC-047 §2 and D3's own precedent: a
+/// permanent "configuration: fine" line is how a surface stops being
+/// read.
+fn project_board_configuration_lines(state: &State) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    if let Some(diagnostic) = &state.configuration.diagnostic {
+        let key = tekstide_core::text_safety::quote_untrusted(&diagnostic.key);
+        lines.push(state.catalog.get_with_args(
+            "project-board-configuration-ignored",
+            &CatalogArgs::new().untrusted("key", &key),
+        ));
+    }
+
+    // Each warned key gets its own line. A file with several unknown
+    // keys is a file whose author mistyped several things, and naming
+    // one while silently dropping the rest would be the same defect one
+    // layer down. Bounded already: `ConfigWarning::key` is escaped and
+    // length-capped by the parser (`bound_key_segment`), which is why
+    // this can render file-derived text at all.
+    for warning in &state.configuration.warnings {
+        let key = tekstide_core::text_safety::quote_untrusted(&warning.key);
+        lines.push(state.catalog.get_with_args(
+            "project-board-configuration-unknown-key",
+            &CatalogArgs::new().untrusted("key", &key),
+        ));
+    }
+
+    lines
+}
+
 /// RFC-047 PR-047-C, D4: the agent-launch half of "say it before the
 /// click" -- `trust_grant_dialog_body`'s `degraded` parameter is the
 /// trust-grant half. Unlike D3's board line, this is scoped to one
@@ -6760,12 +7083,13 @@ fn content_area(state: &State) -> Element<'_, Message> {
                     state.project_board_row_highlight,
                     Message::ReopenRecentProjectRowPressed,
                 );
-                let audit_lines = project_board_audit_lines(state);
-                if audit_lines.is_empty() {
+                let mut board_lines = project_board_audit_lines(state);
+                board_lines.extend(project_board_configuration_lines(state));
+                if board_lines.is_empty() {
                     board
                 } else {
                     let mut items = column![board].spacing(4);
-                    for line in audit_lines {
+                    for line in board_lines {
                         items = items.push(text(line).size(state.theme.font_size_status()));
                     }
                     items.into()

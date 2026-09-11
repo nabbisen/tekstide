@@ -288,6 +288,28 @@ project-board-audit-history = { $count ->
    *[other] Audit: {$count} records this session were not written.
 }
 
+# RFC-045 PR-045-B, D1 and §6 of `what-a-configuration-file-must-not-do.md`:
+# the user's configuration file exists and was **not** used -- compiled
+# defaults are in force. Names the key responsible, which is the whole
+# point: "your configuration was ignored" without saying which line
+# broke it leaves a user re-reading a file whose error they cannot see.
+# `$key` is file-derived (`section.field`, or a `<toml>`/`<file>`
+# sentinel), already length-capped and control/bidi-escaped by the
+# parser's own `bound_key_segment`, and routed through
+# `text_safety::quote_untrusted` before reaching this key -- the same
+# discipline `project-board-audit-recovered-quarantined` follows for a
+# filesystem path.
+project-board-configuration-ignored = Configuration: ignored, defaults in force. The problem is at { $key }.
+
+# §6's second state, and response 376's requirement that it name the
+# key rather than count keys. Since PR-045-A the parser *refuses* every
+# key it cannot deliver, so what survives to warn is only a key this
+# build has never heard of -- a typo, or a key from a newer Tekstide.
+# Either way the file loaded and that line does nothing, and this is
+# the only place the user will ever be told. One line per key: a file
+# with three typos is a file whose author mistyped three things.
+project-board-configuration-unknown-key = Configuration: { $key } is not a setting this version knows, and has no effect.
+
 # RFC-017 PR-017-E: response 150 Required -- `session_bar.rs`'s entries
 # were hardcoded English (`slot_label`/`status_label`), the same shape
 # `CountDisplay::label()`/`AttentionState::label()` are banned from this

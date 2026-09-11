@@ -95,6 +95,18 @@ fn boot() -> shell::State {
     // `State` starts existing to hold it.
     let mut audit_health = tekstide_core::audit::AuditHealth::default();
 
+    // RFC-045 PR-045-B, D1: **before** the CLI project paths below, so
+    // D6's configured `agent_run_limit` applies to them -- a project
+    // opened from the command line is as much "opened after load" as one
+    // opened from the board, and loading afterwards would leave exactly
+    // the projects a user named explicitly as the ones the limit missed.
+    // Never exits: an unresolvable path, an unreadable file and an
+    // invalid file all boot with compiled defaults, and the project
+    // board says so (`project_board_configuration_lines`).
+    let configuration = shell::load_configuration_at_boot(
+        tekstide_core::config::ConfigPathProvider::linux_default(),
+    );
+
     let store = match AppStatePathProvider::linux_default() {
         Ok(path_provider) => Some(RecentProjectStore::new(path_provider)),
         Err(error) => {
@@ -132,7 +144,7 @@ fn boot() -> shell::State {
     }
 
     let catalog = i18n::Catalog::resolve(i18n::LocalePreference::default(), Some(&locales_dir()));
-    shell::State::new(app_shell, catalog, audit_health)
+    shell::State::new(app_shell, catalog, audit_health, configuration)
 }
 
 /// RFC-031 PR-031-B: the real, testable open-a-project-from-the-CLI

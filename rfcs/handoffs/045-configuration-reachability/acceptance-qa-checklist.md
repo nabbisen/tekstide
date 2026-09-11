@@ -42,16 +42,36 @@ contradiction named — that is the reviewer's error to fix, not the implementer
 
 ## PR-045-B — boot, board, limits, retention
 
-- [ ] The store loads before CLI project paths open; path-resolution failure does not exit.
-- [ ] Board line: one of three states (§6), absent when clean. **The "loaded with warnings" state
+- [x] The store loads before CLI project paths open; path-resolution failure does not exit.
+      `boot()` calls `load_configuration_at_boot` above the CLI-argument loop, so D6's limit
+      applies to projects named on the command line. `an_unresolvable_configuration_path_is_a_
+      diagnostic_not_an_exit` drives the real loader with an environment that resolves to nothing.
+- [x] Board line: one of three states (§6), absent when clean. **The "loaded with warnings" state
       names the warned key** — a typo like `defualt_profile` warns and does nothing (PR-045-A's
       refuse-versus-warn split, adopted at response 376), and this line is the only thing that
       tells the user. A count is not a name. **Ablation:** force the "ignored"
       text on a clean load; the absent-when-clean test fails alone.
-- [ ] `agent_run_limit` reaches `set_resource_limits`: the second launch in a limited project is
-      refused, through the real launch path.
-- [ ] `transcript_retention_days` reaches a real launch's `TranscriptPrivacyPolicy`, read back.
-- [ ] **A config-defined `default_profile` does not launch in this slice.** Ablate by wiring it.
+      Two of the three states are reachable in this slice; *pending confirmation* arrives with
+      PR-045-C and nothing here pretends to render it. One line per warned key.
+      **Ablated**: forcing the ignored text failed `a_clean_configuration_renders_no_board_line_
+      at_all` and `no_configuration_file_at_all_renders_no_board_line` — the same property for two
+      genuinely different clean inputs — and nothing else. (A third test failed on the first
+      attempt; its line-count assertion coupled it to this property and was changed to assert
+      naming only. See `qa-evidence.md`.)
+- [x] `agent_run_limit` reaches `set_resource_limits`: the second launch in a limited project is
+      refused, through the real launch path. Plus a second test for a project opened **mid-session**
+      through the real path field, since the limit is applied at four call sites rather than one.
+      Both ablated separately, each failing alone.
+- [x] `transcript_retention_days` reaches a real launch's `TranscriptPrivacyPolicy`, read back.
+      **Read back from the plan production builds, not from a launched run** — nothing retains
+      `TranscriptRetentionLimits` past the launch (the plan is consumed; `Transcript` stores a fixed
+      policy *string*). Widening what a launch retains is an RFC-011 data-model change; flagged in
+      `qa-evidence.md` rather than taken here. Ablated by not applying the configured value.
+- [x] **A config-defined `default_profile` does not launch in this slice.** Ablate by wiring it.
+      Done — wiring `default_profile` into `attempt_agent_run_launch` failed this test alone. The
+      test proves the negative through the two profiles' *different refusals*: the built-in profile
+      is blocked by RFC-032's trust gate in a fresh project, and a configured profile (always
+      `NoKnownWorkspaceDiscovery`) would not be — so that refusal is itself the evidence.
 
 ## PR-045-C — the deliberate act
 

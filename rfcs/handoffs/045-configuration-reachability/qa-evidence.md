@@ -147,7 +147,7 @@ document, and this project does not edit closed documents to match a later state
 project's own rule that a filtered gate run cannot report a flake: **487 + 4 + 756, green every
 time.**
 
-**Flakes, measured and disclosed rather than re-run away.** Earlier in the same session this tree
+**Flakes for this slice, measured and disclosed rather than re-run away.** Earlier in the same session this tree
 saw **4 failures in 30 full-workspace runs** — `bind_recovers_from_a_stale_socket_file` (twice),
 `is_still_answerable_reflects_the_real_connection_state`, and
 `resize_makes_the_pty_the_emulator_and_the_render_path_agree` — all already-registered
@@ -158,3 +158,108 @@ runs in the quietest stretch. A controlled before/after was attempted **twice** 
 and is impossible that way — a worktree's `.git` is a file, so the repository-scan benchmark refuses
 to run in one. Dated row added to `test-process-leak.md`, including the failed methodology, so it is
 not attempted a third time.
+
+## PR-045-B — boot, board, limits, retention
+
+**The configuration system has a production caller for the first time.** `boot()` loads the store;
+the project board says when the file was not used; `agent_run_limit` and `transcript_retention_days`
+reach real consumers. **Nothing configuration-defined executes** — that is PR-045-C.
+
+### D1: loaded at boot, before the CLI project paths
+
+`boot()` calls `load_configuration_at_boot` **before** the CLI-argument loop, so D6's limit applies
+to projects named on the command line. Loading afterwards would have left exactly the projects a
+user named explicitly as the ones the limit missed.
+
+`ConfigurationState` (on `State`, threaded in from `boot()` the same way `audit_health` is, because
+`State` does not exist yet at that point) carries the store, the diagnostic, the warnings, and D8's
+resolved profile. **Nothing exits**: an unresolvable config *path* is a diagnostic, exactly like an
+unparseable file — a missing `$HOME` is not a better reason to refuse to start than a missing
+bracket, and RFC-023 already decided a typo must not become a denial of service.
+
+### D1/§6: the board line, and why it names a key
+
+Two of §6's three states are reachable in this slice and each gets its own line: **ignored** (a
+diagnostic — defaults are in force) and **loaded with warnings**. The third, *pending confirmation*,
+arrives with PR-045-C's reload; nothing here pretends to render it.
+
+**The warnings line names the key** (response 376's requirement). Since PR-045-A the parser refuses
+what it cannot deliver and warns only about keys it has never heard of — so `defualt_profile = "x"`
+loads fine, does nothing, and this line is the only thing that will ever tell the user. One line per
+key: a file with three typos is a file whose author mistyped three things. The key is already
+length-capped and control/bidi-escaped by the parser, then routed through `quote_untrusted`, the
+same discipline the quarantine-path line follows.
+
+Absent when clean, per RFC-047 §2.
+
+### D6 and D9 reach real consumers
+
+- **`agent_run_limit` → `set_resource_limits`**, applied at boot (`State::new`, covering CLI
+  arguments and restored sessions) and at each of the three mid-session open routes — the same
+  division `verify_restored_trust` already has, because there is no single point every newly-opened
+  project passes through. Only `agent_run_limit` is written; the project's other two limits are
+  preserved, since the file has no key for either and writing the whole struct is how they would
+  silently acquire this function's opinion of them.
+- **`transcript_retention_days` → `TranscriptRetentionLimits::max_age_days`** on the real launch
+  request. Only `max_age_days` moves, for the same reason.
+
+### Required tests, each ablated separately
+
+| Test | Ablation | Result |
+| --- | --- | --- |
+| `an_invalid_configuration_file_boots_with_defaults_and_the_board_says_it_was_ignored` | — | names the offending key |
+| `a_typo_in_the_configuration_file_is_named_on_the_board` | — | names `defualt_profile` |
+| `a_clean_configuration_renders_no_board_line_at_all` + `no_configuration_file_at_all_renders_no_board_line` | force the ignored text on every load | **both fail, and only those two** |
+| `an_unresolvable_configuration_path_is_a_diagnostic_not_an_exit` | — | diagnostic, no exit |
+| `a_configured_agent_run_limit_refuses_the_second_launch_in_a_project_opened_afterwards` | drop the boot-time application | fails alone |
+| `a_configured_agent_run_limit_reaches_a_project_opened_mid_session` | drop all three mid-session call sites | fails alone |
+| `a_configured_transcript_retention_reaches_a_real_launch_plans_privacy_policy` | stop applying the configured value | fails alone |
+| `a_configured_default_profile_is_resolved_but_does_not_launch_in_this_slice` | wire `default_profile` into `attempt_agent_run_launch` | fails alone |
+
+**The absent-when-clean ablation fails two tests, and that is correct rather than entangled**: both
+assert the same property for two genuinely different clean inputs (a valid file, and no file at
+all). A third test did fail at first — the typo test pinned `lines.len() == 1`, which coupled it to
+the ignored line's behaviour and would have reported a regression in *absence* under the *naming*
+test's name. Changed to assert that some line names the key, which is its own property.
+
+### Two things this slice could not do as written, named rather than worked around
+
+**1. D9's value is not readable back from a launched run.** Nothing retains
+`TranscriptRetentionLimits` past the launch: the plan is consumed, `AgentRun` does not carry it, and
+the `Transcript` attached afterwards records a fixed `retention_policy` string
+(`"local-bounded-agent-run"`), not the limits. So the test reads the **plan** production builds —
+`configured_agent_run_launch_plan`, a fourth testability split on the launch function, used by
+production — and asserts on the real `TranscriptPrivacyPolicy` it carries. That is stronger than
+"the file parsed" and weaker than "a running transcript is bounded by it". **Widening what a launch
+retains is an RFC-011 data-model change, not a rider on a reachability slice** — flagged for the
+reviewer rather than taken.
+
+**2. `default_profile` is written by production and read only by a test in this slice**, which
+clippy's `-D warnings` correctly flags. Carried with `#[allow(dead_code)]` and the closing slice
+named (PR-045-C), the same shape `ControlCoverage::MouseOnly` uses and the bar RFC-036 D2 sets: a
+number, not an intention. `a_configured_default_profile_is_resolved_but_does_not_launch_in_this_slice`
+is what holds the "not yet" to account.
+
+### The test that proves a negative, and how it does it
+
+`a_configured_default_profile_is_resolved_but_does_not_launch_in_this_slice` does not assert "the
+launched run has the built-in id" — in a fresh, untrusted project the built-in profile never
+launches at all, because it declares `MayDiscoverWorkspaceFiles` and RFC-032's trust gate refuses
+it. **That refusal is the proof.** `to_ai_cli_profile` can only produce
+`NoKnownWorkspaceDiscovery`, so a configured profile would sail past that same gate: if
+`default_profile` were wired into the launch path, the call would not produce this refusal. The
+test asserts the configured profile's policy first, so the reasoning is checked rather than assumed.
+
+### One catalog obligation the gate caught
+
+`i18n::enforcement::every_source_locale_key_resolves_in_every_shipped_locale` failed on the two new
+board-line keys: both introduce `$key`, which the enforcement fixture's `generic_args()` did not
+supply, so they fell through every fallback stage and rendered as their own names. Added `key` as an
+untrusted arg. Found by the full suite rather than by review — and only because the suite was run
+whole, having been filtered to configuration tests up to that point.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`:
+clean. Three consecutive full-workspace runs, output redirected to files, at a settled load average
+of 3.42: **496 + 4 + 756, green every time.** No flake this pass.

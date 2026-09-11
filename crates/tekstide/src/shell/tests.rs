@@ -4,16 +4,17 @@ use std::path::{Path, PathBuf};
 use tekstide_core::shell::ApplicationShell;
 
 use super::{
-    AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ExternalChangeButton,
-    FolderBrowserModal, MAX_PATH_FIELD_CHARS, Message, ModalButton, ModalContent,
-    PasteConfirmButton, PathFieldError, ProjectCloseButton, State, TerminalPasteRefusal,
-    TranscriptPurgeButton, TrustGrantButton, agent_run_launch_audit_notice,
+    AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ConfigurationState,
+    ExternalChangeButton, FolderBrowserModal, MAX_PATH_FIELD_CHARS, Message, ModalButton,
+    ModalContent, PasteConfirmButton, PathFieldError, ProjectCloseButton, State,
+    TerminalPasteRefusal, TranscriptPurgeButton, TrustGrantButton, agent_run_launch_audit_notice,
     agent_run_launch_refusal_text, apply_recovery_outcome, attempt_agent_run_launch_with_profile,
     attempt_agent_run_launch_with_profile_and_state_root,
-    attempt_agent_run_launch_with_profile_state_root_and_capture, content_within_bound,
-    evaluate_promotion, focus_marker, main_area_key, main_area_label, modal_scrim_style,
-    open_audit_store_recording_failure, open_real_audit_store, path_field_error_text,
-    poll_approval_channels, project_board_audit_lines, project_close_dialog_body,
+    attempt_agent_run_launch_with_profile_state_root_and_capture, configured_agent_run_launch_plan,
+    content_within_bound, evaluate_promotion, focus_marker, main_area_key, main_area_label,
+    modal_scrim_style, open_audit_store_recording_failure, open_real_audit_store,
+    path_field_error_text, poll_approval_channels, project_board_audit_lines,
+    project_board_configuration_lines, project_close_dialog_body,
     project_close_dialog_names_running_processes, project_close_dialog_path,
     project_close_dialog_reasons_line, sidebar_label, status_bar_summary,
     terminal_paste_refusal_text, terminated_outcome_and_session_confirmation, test_audit_state_dir,
@@ -28,12 +29,40 @@ fn real_locales_dir() -> PathBuf {
 }
 
 fn state_with(app_shell: ApplicationShell) -> State {
+    state_with_configuration(app_shell, ConfigurationState::unconfigured())
+}
+
+/// RFC-045 PR-045-B: the same fixture with a real configuration in
+/// hand. `state_with` stays the no-configuration default so that every
+/// test written before this slice keeps asserting what it always did.
+fn state_with_configuration(
+    app_shell: ApplicationShell,
+    configuration: ConfigurationState,
+) -> State {
     let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
     State::new(
         app_shell,
         catalog,
         tekstide_core::audit::AuditHealth::default(),
+        configuration,
     )
+}
+
+/// A real `config.toml` in a real, throwaway `XDG_CONFIG_HOME`, loaded
+/// through the real boot path. **Not `$HOME`**: the production resolver
+/// reads the environment, and the pack requires committed evidence to
+/// set `XDG_CONFIG_HOME=$(mktemp -d)` because the real path is under
+/// `$HOME` by definition.
+fn configuration_from_file(label: &str, contents: &str) -> (ConfigurationState, PathBuf) {
+    let config_home = fresh_project_dir(label);
+    let config_dir = config_home.join("tekstide");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(config_dir.join("config.toml"), contents).unwrap();
+    let provider = tekstide_core::config::ConfigPathProvider::linux_from_env(
+        Some(config_home.as_os_str()),
+        None::<&std::ffi::OsStr>,
+    );
+    (super::load_configuration_at_boot(provider), config_home)
 }
 
 fn fresh_project_dir(label: &str) -> PathBuf {
@@ -5045,6 +5074,332 @@ fn attempt_agent_run_launch_with_profile_launches_a_profile_with_an_invalid_id_u
             .iter()
             .all(|record| record.record.agent_run_id.as_ref() != Some(&agent_run_id)),
         "an unauditable-id launch must write nothing -- it took the unaudited fallback"
+    );
+}
+
+// --- RFC-045 PR-045-B: boot, board, limits, retention ------------------
+
+/// D1: an invalid file boots with compiled defaults and the board says
+/// so. **"Boots" is the load-bearing half** — RFC-023 decided a typo
+/// must not become a denial of service, and this is the first slice
+/// where that decision is reachable by a real user.
+#[test]
+fn an_invalid_configuration_file_boots_with_defaults_and_the_board_says_it_was_ignored() {
+    let (configuration, _config_home) = configuration_from_file(
+        "config-invalid",
+        "[agent]\ntranscript_retention_days = \"not a number\"\n",
+    );
+    let state = state_with_configuration(ApplicationShell::new(), configuration);
+
+    let lines = project_board_configuration_lines(&state);
+    assert_eq!(
+        lines.len(),
+        1,
+        "exactly the ignored line, and nothing else: {lines:?}"
+    );
+    assert!(
+        lines[0].contains("agent.transcript_retention_days"),
+        "the line must name the key that broke the file, or a user re-reads a file whose error \
+         they cannot see: {}",
+        lines[0]
+    );
+    assert!(
+        lines[0].contains("ignored"),
+        "the line must say the file was not used: {}",
+        lines[0]
+    );
+}
+
+/// §6's other reachable state, and response 376's requirement that it
+/// **name** the key. Since PR-045-A a key this build never defined
+/// warns rather than refusing, so `defualt_profile` loads fine and does
+/// nothing — this line is the only thing that will ever tell the user.
+#[test]
+fn a_typo_in_the_configuration_file_is_named_on_the_board() {
+    let (configuration, _config_home) =
+        configuration_from_file("config-typo", "[agent]\ndefualt_profile = \"codex\"\n");
+    let state = state_with_configuration(ApplicationShell::new(), configuration);
+
+    // Asserts that *some* line names the key, deliberately without
+    // pinning how many lines there are: how many lines the board shows
+    // is the absent-when-clean property's business
+    // (`a_clean_configuration_renders_no_board_line_at_all`), and a
+    // count here would make a regression in that one fail under this
+    // one's name.
+    let lines = project_board_configuration_lines(&state);
+    assert!(
+        lines.iter().any(|line| line.contains("defualt_profile")),
+        "a count would say something was ignored without saying what: {lines:?}"
+    );
+}
+
+/// Absent when clean — RFC-047 §2's rule, which D1 inherits: a
+/// permanent "configuration: fine" line is how a surface stops being
+/// read. **This is the test the checklist's own ablation targets**:
+/// force the ignored text onto a clean load and only this fails.
+#[test]
+fn a_clean_configuration_renders_no_board_line_at_all() {
+    let (configuration, _config_home) = configuration_from_file(
+        "config-clean",
+        "[agent]\ntranscript_retention_days = 7\n\n[resources]\nagent_run_limit = 2\n",
+    );
+    let state = state_with_configuration(ApplicationShell::new(), configuration);
+
+    assert!(
+        project_board_configuration_lines(&state).is_empty(),
+        "a file that loaded correctly has nothing to say: {:?}",
+        project_board_configuration_lines(&state)
+    );
+}
+
+/// A missing file is not a problem — RFC-023 §Format and Location's
+/// "a missing configuration file is not an error", reached for real.
+#[test]
+fn no_configuration_file_at_all_renders_no_board_line() {
+    let config_home = fresh_project_dir("config-absent");
+    let provider = tekstide_core::config::ConfigPathProvider::linux_from_env(
+        Some(config_home.as_os_str()),
+        None::<&std::ffi::OsStr>,
+    );
+    let state = state_with_configuration(
+        ApplicationShell::new(),
+        super::load_configuration_at_boot(provider),
+    );
+
+    assert!(project_board_configuration_lines(&state).is_empty());
+}
+
+/// The settled detail the pack names: *"failure to resolve the config
+/// path is a diagnostic, not an exit."* Proven through the real boot
+/// loader with an environment that resolves to nothing at all.
+#[test]
+fn an_unresolvable_configuration_path_is_a_diagnostic_not_an_exit() {
+    let provider = tekstide_core::config::ConfigPathProvider::linux_from_env(
+        None::<&std::ffi::OsStr>,
+        None::<&std::ffi::OsStr>,
+    );
+    let state = state_with_configuration(
+        ApplicationShell::new(),
+        super::load_configuration_at_boot(provider),
+    );
+
+    let lines = project_board_configuration_lines(&state);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("ignored"), "{}", lines[0]);
+}
+
+/// D6, through the **real launch path**: a configured `agent_run_limit`
+/// of 1 lets the first launch through and refuses the second. Not an
+/// assertion that `set_resource_limits` was called — the refusal a user
+/// would actually meet.
+#[test]
+fn a_configured_agent_run_limit_refuses_the_second_launch_in_a_project_opened_afterwards() {
+    let (configuration, _config_home) =
+        configuration_from_file("config-run-limit", "[resources]\nagent_run_limit = 1\n");
+
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("config-run-limit-project");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with_configuration(app_shell, configuration);
+
+    let bin_dir = fresh_project_dir("config-run-limit-bin");
+    let executable = bin_dir.join("fake-ai-cli");
+    std::fs::write(&executable, "#!/bin/sh\n").expect("test executable should be written");
+    let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions).unwrap();
+    let profile = || {
+        tekstide_core::agent::AiCliProfile::new(
+            "fake-ai-cli",
+            "Fake AI CLI",
+            tekstide_core::agent::AiCliProfileSource::BuiltIn,
+            tekstide_core::agent::AiCliExecutable::Absolute {
+                path: executable.clone(),
+                provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+            },
+            tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+        )
+    };
+
+    attempt_agent_run_launch_with_profile(&mut state, profile())
+        .expect("the first launch is within the configured limit of 1");
+
+    let refusal = attempt_agent_run_launch_with_profile(&mut state, profile())
+        .expect_err("the second launch must be refused by the configured limit");
+    assert!(
+        matches!(
+            refusal,
+            AgentRunLaunchRefusal::RunLimitExceeded { limit: 1 }
+        ),
+        "{refusal:?}"
+    );
+    assert_eq!(
+        state.terminal_panes.len(),
+        1,
+        "the refused launch must not have spawned anything"
+    );
+}
+
+/// D6 for a project opened **mid-session**, not at boot. The limit is
+/// applied at each of the three open routes rather than centrally (the
+/// same division `verify_restored_trust` has), so boot coverage alone
+/// would leave three real call sites unproven. Driven through the real
+/// path field — the same route
+/// `opening_a_project_through_the_real_field_writes_exactly_one_real_
+/// project_added_record` uses — not by calling the helper directly.
+#[test]
+fn a_configured_agent_run_limit_reaches_a_project_opened_mid_session() {
+    let (configuration, _config_home) = configuration_from_file(
+        "config-run-limit-mid-session",
+        "[resources]\nagent_run_limit = 3\n",
+    );
+    let mut state = state_with_configuration(ApplicationShell::new(), configuration);
+    assert!(
+        state.app_shell.state().projects().is_empty(),
+        "precondition: no project exists at boot, so nothing could have been limited then"
+    );
+
+    let project_dir = fresh_project_dir("config-run-limit-mid-session-project");
+    type_through_the_real_path_field(&mut state, &project_dir.display().to_string());
+    press_enter_in_the_real_path_field(&mut state);
+
+    let project = state
+        .app_shell
+        .state()
+        .active_project()
+        .expect("the field must have opened a project");
+    assert_eq!(
+        project.resource_limits().agent_run_limit,
+        Some(3),
+        "a project opened after load is 'opened after load' however it was opened"
+    );
+}
+
+/// D9, read back from the **`TranscriptPrivacyPolicy` the real plan
+/// carries** rather than from the parsed document — the difference
+/// between "the file said 7" and "a launch would retain for 7".
+///
+/// Reads the plan rather than a launched run because nothing retains
+/// the limits past launch (see `configured_agent_run_launch_plan`'s own
+/// doc comment); the plan comes from the same function production runs.
+#[test]
+fn a_configured_transcript_retention_reaches_a_real_launch_plans_privacy_policy() {
+    let (configuration, _config_home) = configuration_from_file(
+        "config-retention",
+        "[agent]\ntranscript_retention_days = 7\n",
+    );
+
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("config-retention-project");
+    app_shell.add_project_from_path(&project_dir).unwrap();
+
+    let bin_dir = fresh_project_dir("config-retention-bin");
+    let executable = bin_dir.join("fake-ai-cli");
+    std::fs::write(&executable, "#!/bin/sh\n").unwrap();
+    let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions).unwrap();
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "fake-ai-cli",
+        "Fake AI CLI",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: executable,
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    let state_root = fresh_project_dir("config-retention-state-root");
+    let project = app_shell.state().active_project().unwrap();
+    let plan =
+        configured_agent_run_launch_plan(project, &configuration, &profile, Some(state_root), true)
+            .expect("a resolvable profile in a fresh project should plan cleanly");
+
+    let policy = plan.spec().transcript_capture().capture_policy().privacy;
+    let retention = policy
+        .retention
+        .expect("a local-bounded capture carries a real retention bound");
+    assert_eq!(
+        retention.max_age_days,
+        Some(7),
+        "the configured retention must reach the privacy policy a launch would run under"
+    );
+}
+
+/// The box that keeps this slice honest: **a configuration-defined
+/// `default_profile` is resolved and does not launch.** Nothing
+/// configuration-defined executes before PR-045-C puts a confirmation
+/// in front of it (§3). Ablate by wiring `default_profile` into
+/// `attempt_agent_run_launch` and watch this fail.
+#[test]
+fn a_configured_default_profile_is_resolved_but_does_not_launch_in_this_slice() {
+    let bin_dir = fresh_project_dir("config-default-profile-bin");
+    let executable = bin_dir.join("configured-cli");
+    std::fs::write(&executable, "#!/bin/sh\n").unwrap();
+    let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions).unwrap();
+
+    let (configuration, _config_home) = configuration_from_file(
+        "config-default-profile",
+        &format!(
+            "[agent]\ndefault_profile = \"configured\"\n\n\
+             [agent.profile.configured]\ncommand = {:?}\n",
+            executable.to_str().unwrap()
+        ),
+    );
+
+    let resolved = configuration
+        .default_profile()
+        .expect("D8: the default profile must be resolved at boot");
+    assert_eq!(resolved.id, "configured");
+
+    // The two profiles are distinguishable by their refusals, and that
+    // is what makes this assertion sharp. The built-in profile declares
+    // `MayDiscoverWorkspaceFiles`, so in a fresh, untrusted project it
+    // is refused by RFC-032's trust gate before anything spawns. The
+    // configured profile declares `NoKnownWorkspaceDiscovery`
+    // (`to_ai_cli_profile`'s only possible value) and would sail past
+    // that same gate -- so if `default_profile` were wired into the
+    // launch path, this call would **not** produce this refusal.
+    assert!(
+        matches!(
+            resolved.workspace_discovery_policy,
+            tekstide_core::agent::AiCliWorkspaceDiscoveryPolicy::NoKnownWorkspaceDiscovery { .. }
+        ),
+        "precondition: the configured profile must be the one that would pass the trust gate, \
+         or this test proves nothing about which profile was used"
+    );
+
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("config-default-profile-project");
+    app_shell.add_project_from_path(&project_dir).unwrap();
+    let mut state = state_with_configuration(app_shell, configuration);
+
+    let refusal = super::attempt_agent_run_launch(&mut state)
+        .expect_err("the built-in profile is still what this slice launches, and it is refused");
+    assert!(
+        matches!(
+            refusal,
+            AgentRunLaunchRefusal::Validation(
+                tekstide_core::agent::AgentRunLaunchValidationError::WorkspaceDiscoveryBlocked { .. }
+            )
+        ),
+        "PR-045-B must not launch a configuration-defined profile -- that needs PR-045-C's \
+         first-use confirmation in front of it. Got {refusal:?}"
+    );
+    assert!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .unwrap()
+            .agent_runs()
+            .is_empty(),
+        "nothing configuration-defined may execute in this slice"
     );
 }
 
