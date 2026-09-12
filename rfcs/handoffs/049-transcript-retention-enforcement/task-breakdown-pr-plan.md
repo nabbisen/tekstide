@@ -73,6 +73,13 @@ created: "2026-09-12"
 
 ## PR-049-C — the triggers, the record, the refusal
 
+**Partly paused, 2026-09-13 (request 387).** A session knows only the transcripts launched in the
+current process, so the triggers, the removal disclosure, D4′'s exhaustion path and §6's changelog
+sentence would act on almost nothing. They wait for loading transcripts from disk, to be scoped as
+its own RFC. **Land now:** refusing `transcript_retention_days = 0`; the actor/source pairing and
+no record for an empty cleanup; stale `Expired` marks re-checked and cleared; "a deletion failed"
+reported separately; D5 as restated below; and the disclosure of the purge defect.
+
 - **Two triggers** (D2): agent-run launch preflight, and project open. **No timer.**
 - **Audit** (D6): `(AppPolicy, ExplicitCleanup)` on `TranscriptPurge`, via
   `transcript_purge_record` gaining the pairing as a parameter — not a second constructor.
@@ -92,8 +99,9 @@ created: "2026-09-12"
 - A cleanup that deletes nothing writes **no** record. Ablate by recording unconditionally.
 - Exhausted at launch: the process **starts** and **no transcript exists** for it — assert both.
 - The confirmation's notice is present when exhausted and absent otherwise, each ablated alone.
-- D5: the summary's `budget_pressure` changes when the configured limit changes. Ablate by
-  restoring `agent_run_default()` and watch it alone fail.
+- D5: implemented, **and stated as unobservable** — `budget_pressure` reads only the byte budgets,
+  none of which is configurable, so no configured value can move it (request 387). No test pretends
+  otherwise.
 
 **Evidence:** unit-level, plus one live capture of the launch confirmation naming a run whose output
 will not be kept (D4′; the refusal it replaced is unreachable), against a `mktemp -d`

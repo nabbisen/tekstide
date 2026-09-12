@@ -354,3 +354,30 @@ share one age measure, so among transcripts that are not live every expired one 
 non-expired one, and both orders delete the same set — **when no deletion fails**; PR-049-B's model
 did not vary failures. The order decides whether a removal is reported as `expired` or `budget` — the
 distinction RFC-011's aggregate accounting asks for.
+
+### Found at PR-049-C (2026-09-13, request 387): a session knows only this process's transcripts
+
+**Verified by the architect, link by link.** `ProjectSession::new` starts with no transcripts; the only
+production code that adds one is the launch's `attach_agent_run_transcript` (`add_transcript` is
+compiled for tests only); `close_project` drops the session; opening restores trust and the capture
+opt-out and nothing else; and nothing reads `transcripts/` back from disk. **So this RFC, and RFC-033's
+purge before it, act only on transcripts launched since the project was opened in the current
+process.** The project-open trigger would find nothing, expiry would reach nothing old enough to
+expire, budgets would reset at every restart so D4′ would almost never fire, and §6's changelog
+sentence would be false.
+
+**Two facts measured at review, for the RFC that fixes it.** The transcript writer is a thread inside
+the Tekstide process, so a file left by an earlier process has **no writer in this one**, whatever
+became of its child — `Detached` is not the hard case for such a file. And **nothing prevents a second
+Tekstide on the same state root** — that is the hard case, because its live files look exactly like
+leftovers.
+
+**Decided:** the parts of PR-049-C that act on known transcripts land now; the rest waits for loading
+transcripts from disk, to be scoped as its own RFC because RFC-033's shipped purge has the same cause
+and must be fixed whether or not retention ships. **One loading path, not a purge that walks the
+directory**: a second route to transcript files would be a second deletion path (§3) and a second
+source for the retained figure.
+
+**D5 is implemented and unobservable.** `budget_pressure` reads only the byte budgets, none
+configurable, so no configured value moves it; the checklist says so rather than keeping a test that
+cannot fail.

@@ -10,6 +10,16 @@ capture deletes anything already written; those are two acts and the surface kee
 distinguishable. Accepted by the human owner 2026-08-18; see
 [the handoff pack](../handoffs/033-transcript-lifecycle-controls/README.md) for the full
 evidence. Original acceptance note: closes a limitation `0.11.1` had to publish on a privacy claim.
+
+**Correction, 2026-09-13 (found at RFC-049 PR-049-C, request 387):** purge and the retained-size
+figure cover **only transcripts from runs launched since the project was opened in the current
+process.** A `ProjectSession` starts with no transcripts, only a launch adds one, closing drops the
+session, and nothing reads `transcripts/` back from disk. After a restart or a reopen, Trust Settings
+shows none of the earlier transcripts and purge removes none of them; they stay on disk. **Shipped
+this way from `0.12.0` through `0.18.0`.** This RFC's gate asserted the bytes were gone, but only for
+transcripts a single process had launched — this document's own failure mode (*"the UI would then
+report zero retained"*), reached through records that were never loaded rather than records removed
+without their bytes. The fix is to be scoped as its own RFC.
 Target milestone: M11
 Date: 2026-08-18
 
