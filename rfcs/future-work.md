@@ -739,6 +739,11 @@ limits, and the `Transcript` attached afterwards stores a fixed policy *name*
 configured retention" cannot be tested end to end; the strongest available evidence reads the plan,
 which is weaker, and the slice said so rather than claiming more.
 
+**Scoped 2026-09-12 as RFC-049, and it is larger than this row said.** Widening what a launch
+retains is the small half; the measurement found that **three of RFC-011's four retention budgets
+are unenforced**, not just the age one — the per-project and app-wide byte budgets are computed
+into `budget_pressure` and acted on by nothing. This row's original text follows.
+
 **Widening what a launch retains is a data-model change owned by RFC-011, not a rider on a
 reachability slice.** Reserved here as the row; it becomes an RFC or an amendment when something
 needs to *read* the limits back — the first candidate is any changelog sentence that promises
