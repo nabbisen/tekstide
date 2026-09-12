@@ -159,8 +159,11 @@ The workspace dry-run is the release-candidate gate for same-workspace dependenc
       test doing its job — it refuses to report a benchmark number for something that is not a
       repository, which is the correct behaviour and the reason it is written that way.
 
-      **So the pass condition for this box is: 745 passed, 1 failed, and the one failure is (b).**
-      Anything else is a real finding.
+      **So the pass condition for this box is: everything passes except (b).** Stated as a shape
+      rather than a count, corrected at `0.18.0`: this line read *"745 passed, 1 failed"*, which was
+      `0.17.0`'s measurement and went stale the moment a slice added a test — `0.18.0` measured
+      **757 passed, 1 failed**. A count here is state-asserting text about a number that changes
+      every release. Any failure other than (b) is a real finding.
 - [ ] Confirm package output does not include `.git/`, `.git-exclude/`, local agent config, `target/`, or temporary state.
 - [ ] Confirm crates.io package pages and README badges describe the intended release scope and do not overclaim the full AI CLI workbench.
 - [ ] Any distributed prebuilt binary must ship with `NOTICE` alongside it. Releases assembled as project-structure tarballs satisfy this automatically because `NOTICE` sits at the archive root; a bare binary uploaded on its own does not.

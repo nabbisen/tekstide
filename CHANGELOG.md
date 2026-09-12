@@ -68,6 +68,24 @@ are the ones worth keeping. The file lives at `$XDG_CONFIG_HOME/tekstide/config.
   that it was authorized. The record says the direction, never which setting or what value — there
   is no field on it that could.
 
+### What this release does not do
+
+- **`transcript_retention_days` is recorded, not enforced.** Said once above and once here because
+  it is the claim most likely to be read as more than it is: there is no age-based purge, and
+  nothing in this release makes one.
+
+- **There is no settings GUI, and there will not be one soon.** The file is the interface; the
+  board line and the two confirmations are the whole surface. Configuration is **not** re-read
+  automatically when the file changes — `Ctrl+Alt+C` is the only way, until the file watcher lands.
+
+- **Workspace configuration is not loaded.** Only defaults and your user-global file; a
+  `.tekstide/config.toml` inside a project is not read, deliberately, and a cloned repository
+  cannot configure anything.
+
+- **Screen-reader support does not exist.** Unchanged, and stated every release: `iced` offers no
+  accessibility bridge, so there is no partial support to describe. Re-checked this release
+  (`cargo tree -p tekstide | grep -i accesskit`, empty).
+
 ### Dependencies
 
 Maintenance, alongside the feature above: 72 in-semver dependency upgrades, and one manifest edit
