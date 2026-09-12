@@ -1,6 +1,6 @@
 # RFC-049: Transcript Retention Enforcement
 
-Status: **Proposed 2026-09-12.** Scoped after `0.18.0` shipped a configuration key whose value
+Status: **Accepted by the human owner 2026-09-12.** **D1–D9 decided by the architect on acceptance** — see "Decided on acceptance" at the end, which adds **D6 (the audit record RFC-013 already reserved a slot for)**, D7 (the clock seam), D8 (what "oldest" and "inactive" mean) and D9 (age arithmetic on a string timestamp). Proposed the same day. Scoped after `0.18.0` shipped a configuration key whose value
 nothing enforces. Reserved by no earlier RFC — the `future-work.md` row opened at response 377 said
 "RFC-011 data-model change", and the measurement below shows it is larger than a data model.
 Target milestone: **M12**
@@ -124,3 +124,82 @@ different budget than the one that governs is §4.1's shape in arithmetic rather
   delete every transcript older than the configured age **on its first qualifying trigger**. That is
   correct behaviour and a surprising first run; the changelog must say it plainly, and this is the
   one item in the RFC most likely to be under-disclosed.
+
+## Decided on acceptance (2026-09-12)
+
+Four things an implementer would otherwise have had to invent, all found by reading the code the
+RFC talks about rather than the RFC.
+
+### D6 — Policy cleanup is audited, and RFC-013 reserved the exact pairing for it
+
+`valid_transcript_purge` permits **three** actor/source pairings:
+
+```
+(User,      TrustedUi | AppCommand)      -- RFC-033's manual purge
+(AppPolicy, ExplicitCleanup)             -- nothing produces this
+```
+
+**`AuditActionSource::ExplicitCleanup` exists in the frozen vocabulary, paired with `AppPolicy`,
+for this family, and has no producer anywhere.** Its name is RFC-011's own phrase — *"explicit
+cleanup/harness paths"*. RFC-013 reserved a slot for this RFC's cleanup before this RFC existed.
+
+**Decided: policy cleanup writes a `TranscriptPurge` record as `(AppPolicy, ExplicitCleanup)`.**
+Not as `User`: the product is deleting a user's data on its own initiative, and a trail that cannot
+tell that from a purge the user clicked is worse than no trail. `transcript_purge_record` gains the
+pairing as a parameter rather than a second near-identical constructor.
+
+**This is the one place this RFC touches the audit schema, and it touches nothing**: the pairing is
+already legal, already tested by the validator, and needs no schema change. If an implementation
+finds itself wanting a new field, a new outcome, or a new reason code, it has left this decision.
+
+### D7 — The cleanup takes `now` as a parameter; it does not call the clock
+
+There is **no clock seam in this crate** — `DomainTimestamp::now_utc()` calls `SystemTime::now()`
+directly, everywhere. A cleanup that calls it internally is a test that depends on wall-clock time,
+and this project keeps a flake register largely populated by tests that depend on timing.
+
+**Decided: every function that decides expiry takes `now: &DomainTimestamp` from its caller.**
+Production passes `DomainTimestamp::now_utc()` at the two D2 trigger points. Tests pass a fixed
+value and are deterministic by construction, not by tolerance. **No `#[cfg(test)]` clock, no
+injectable trait** — a parameter is the whole seam, and it is the smallest one that works.
+
+### D8 — "Oldest" and "inactive", named against real fields
+
+RFC-011 says *"inactive transcripts first, oldest first by retention metadata"* without naming
+either. `Transcript` carries `created_at` and `last_write_at: Option<DomainTimestamp>`.
+
+**Decided:**
+
+- **Inactive** = has no live writer. The existing `lifecycle_state` is the authority, not the
+  presence of `last_write_at` — a transcript can be between writes and still have a running agent.
+  **A transcript with a live writer is never selected, at any budget pressure**, which is RFC-011's
+  *"running transcript writers must not be silently deleted underneath active AgentRuns"*.
+- **Oldest** = by `last_write_at`, falling back to `created_at` when it is `None`. A transcript
+  written yesterday is not older than one created yesterday and never written, and byte pressure is
+  about what is still accumulating.
+
+### D9 — Age arithmetic needs seconds, and `DomainTimestamp` is a string
+
+`DomainTimestamp` wraps a formatted UTC **string**; it exposes `now_utc`, `from_utc_string`,
+`as_str`, and **no way to get seconds back**. Age comparison needs arithmetic the type does not
+offer.
+
+**Decided: add the inverse of `format_unix_seconds_utc` to `domain::time`, and compare in
+seconds.** Not by string ordering — that happens to work for this format and is a trap the moment
+the format gains a suffix or a different width. Not by re-parsing with a date library; this crate
+has none and this RFC is not the place to add one.
+
+The new function is the first thing PR-049-A builds, with round-trip tests against
+`format_unix_seconds_utc` including the boundaries that bite: epoch, a leap day, and a value where
+the naive string comparison and the correct arithmetic disagree.
+
+### Settled details
+
+- **Trigger order at launch preflight**: expiry first, then byte budgets. Expiring a transcript may
+  free enough bytes that no budget cleanup is needed, and doing it the other way can delete a
+  transcript the user still wanted while an expired one sits next to it.
+- **A cleanup that deletes nothing writes no record.** The trail says what happened, and "nothing
+  happened" is not an event. This matters because the triggers are frequent.
+- **Cleanup failure never fails the thing that triggered it**, except the `RequiredLocalBounded`
+  preflight refusal D4 already specifies. A failed deletion is a degraded state to report, not a
+  reason a project will not open.
