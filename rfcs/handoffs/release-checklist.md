@@ -201,6 +201,38 @@ Checked every release, because a watch that depends on someone remembering is no
 - [ ] Include known limitations and deferred themes.
 - [ ] Receive an accepted review response before tagging.
 
+## Post-Publish Verification
+
+- [ ] **Download both published `.crate` files and compare their *contents*, not their bytes.** A
+      `.crate` is a gzip envelope; the published and local archives differ byte-wise every time.
+      `tar xzf` both and `diff -r` the extracted trees.
+
+- [ ] **Two differences are expected, and neither is a defect. Anything else is.** Added 2026-09-12,
+      after `0.18.0`'s verification produced both and they read alarming for about a minute:
+
+      **(a) `Cargo.lock` differs in the `tekstide` package, and the published one is the correct
+      one.** `cargo package -p tekstide` resolves `tekstide-core` from **crates.io** — the
+      *previous* release — because the new one is not published yet, so the local archive's
+      lockfile carries the previous release's transitive versions. `cargo publish --workspace`
+      publishes core **first**, so the published `tekstide`'s lockfile resolves against the new
+      core. At `0.18.0` the local archive said `libsqlite3-sys 0.37.0` and carried `rsqlite-vfs`;
+      the published one said `0.38.2` and dropped it, matching the working tree. This is the same
+      version-range arrangement the `cargo package -p tekstide` note above describes, seen from the
+      other end.
+
+      **So the check is not "published == local". It is: the published `tekstide` lockfile names
+      the version of `tekstide-core` just published, and its transitive versions match the working
+      tree's `Cargo.lock`.**
+
+      **(b) `.cargo_vcs_info.json` names the commit `cargo publish` ran from, which is HEAD — not
+      the tag**, if any commit landed between the reviewed candidate and the publish. At `0.18.0`
+      it named the flake-register commit one past the tag. Content is unaffected; provenance
+      metadata points one commit later. **Publish from the tagged commit if you want them to
+      agree**, or accept it knowingly — but do not discover it after the fact twice.
+
+- [ ] `LICENSE` and `NOTICE` present in **both published** archives, and `NOTICE` names the
+      versions actually shipped. Checked against the download, not the local package directory.
+
 ## Tagging
 
 - [ ] Tag name matches the release version.

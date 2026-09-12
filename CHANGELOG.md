@@ -2,7 +2,7 @@
 
 ## 0.18.0 - The Configuration File Does Something
 
-Status: unreleased.
+Status: released on 2026-09-12.
 
 **Before this release, Tekstide never read your configuration file.** RFC-023 shipped a complete
 configuration system — path resolution, parsing, validation, diagnostics, a security-sensitive
