@@ -853,3 +853,28 @@ are one cause with two names, and a future attempt to chase either should treat 
 **No mechanism from the change.** RFC-045's commits touch `config/*`, `navigation.rs`, and the
 `tekstide` crate's shell — no `approval` code in either crate. Recorded as a known intermittent at
 its baseline rate, not as a candidate.
+
+## Recurrence, 2026-09-12 — `0.18.0`'s release-candidate gate (reviewer's run)
+
+`approval::tests::channel::bind_recovers_from_a_stale_socket_file` failed once in run 2 of three
+full-workspace runs on candidate `45aeb7b`; runs 1 and 3 green at 507 + 4 + 758. **Row 1** — the
+original, response 213.
+
+```
+second bind must clear the stale file and succeed: ApprovalChannelError { reason: Io, source: None }
+```
+
+Same message as the 2026-08-28 occurrence, so this row's shape is now confirmed across three weeks
+rather than asserted.
+
+**Load was 18.18, and the reviewer's own back-to-back gate runs drove it** — the same self-inflicted
+pattern the PR-045-A entry above documents, this time on the reviewing side. Worth stating plainly:
+a three-run gate on one machine *is* a load generator, so a flake observed during one is observed
+under conditions the release itself will never see.
+
+**Row 1 is not rows 3 and 5.** Those two are a socket-close *observation* race, connected in the
+entry above. This is a **bind against a stale socket file** — a different mechanism, and it must not
+be folded into them by a future reader tidying the register.
+
+**No mechanism from the candidate.** `0.18.0` carries RFC-045 (configuration, navigation, shell) and
+a dependency bump; no `approval` code changed in either.
