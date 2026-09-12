@@ -232,6 +232,22 @@ launch gets the compiled `DEFAULT_TRANSCRIPT_MAX_AGE_DAYS`. `transcript_retentio
 launched after load or after a confirmed reload (§Hot Reload: *new tasks*), and it is the one key
 that exercises D4's increase/reduce path with a real field rather than a fixture.
 
+**D9, corrected by PR-045-C's review (request 378).** "The one key with a consumer waiting" overstated
+it. `transcript_retention_days` reaches `TranscriptRetentionLimits::max_age_days` and is stored on
+each launch's `BoundedTranscriptRetention` — and **nothing reads it to enforce anything**: no purge,
+expiry or sweep consults `max_age_days`; the only readers are the constructor chain and
+`is_bounded()`'s `> 0` check. A stored value nothing reads is what D3′ refuses, and I called it a
+consumer because a struct had a slot with the right name. The key **stays**, on the thin but real
+grounds that `is_bounded()` reads it and it is stored where RFC-011's purge will read it; refusing it
+now and re-admitting it later would be churn. But no user-facing text may say transcripts are
+*kept* for that many days until the purge exists — `future-work.md` carries the row.
+
+**D5, reconciled by PR-045-C.** I wrote "surface-action registry" and "a chord" in the same
+decision; they conflict, because `SurfaceAction` entries are bare surface-scoped keys. The chord
+registry is `NavigationAction`, and that is where `ReloadConfiguration` lives, with a collision test
+over every rule's `default_binding`. The requirement that mattered — Help and `--help` by
+construction — is met literally: the variant does not compile without its catalog and coverage arms.
+
 ### Settled details an implementer must not inherit
 
 - **Boot order:** the store loads **before** CLI project paths are opened, so D6's limit applies to

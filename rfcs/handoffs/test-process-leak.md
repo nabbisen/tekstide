@@ -811,3 +811,21 @@ the code:
 The next person wanting one should use a second full clone, not a worktree, and should not run the
 two trees back to back on one machine — doing so is what produced the load that this entry is
 mostly about. Recorded so the attempt is not repeated a third time.
+
+## Recurrence, 2026-09-12 — RFC-045 PR-045-C's review gate (reviewer's run), message captured
+
+`approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` failed once,
+in run 3 of three full-workspace runs on `072c5df`; runs 1 and 2 green at 507 + 4 + 758. Row 5's
+recurring intermittent, at its baseline rate. One-minute load average after the run: ?.
+
+**The assertion message, captured this time** — the gate was run with output redirected to a file,
+per the rule this document added on 2026-09-10 after losing it three times:
+
+```
+thread 'approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state' (2271980) panicked at crates/tekstide-core/src/approval/tests/coordinator.rs:350:5:
+once the peer closes its end, the same request must no longer be answerable
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+```
+
+Recorded so row 5 finally has one verbatim message on file. No new candidate: PR-045-C touches
+configuration, a modal, and the audit producers; nothing near `approval::channel`.
