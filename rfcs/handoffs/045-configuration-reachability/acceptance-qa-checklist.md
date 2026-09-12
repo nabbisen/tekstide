@@ -138,6 +138,10 @@ contradiction named — that is the reviewer's error to fix, not the implementer
       two board lines rendered as their own key names until the full suite caught `$key` missing
       from `generic_args()` — a filtered *test run* is the filtered-*output* rule one level down.
       Run again this slice for `$executable`; it caught that one too, before shipping.
+- [ ] **No user-facing text says transcripts are *kept* for `transcript_retention_days` days.** The
+      value is recorded on each launch's policy and validated; no age-based purge reads it (RFC-011
+      row in `future-work.md`). PR-045-C's first changelog and README wording claimed enforcement;
+      required at response 378 R1.
 - [x] RFC-023's acceptance criteria re-read against the result: **"no configuration values reach
       durable audit"** still holds. Re-read and re-proven, twice: a sentinel test on the records
       themselves (not the call sites — the producers take no arguments, so a grep proves little),

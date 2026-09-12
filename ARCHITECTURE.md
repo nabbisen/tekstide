@@ -192,6 +192,13 @@ built only from those two cannot tell "no input" from "no-op", and the natural r
 one. `wtype "<text>"` into any focused field, or `Ctrl+Alt+B` (the folder browser, which opens from
 the empty board), are unambiguous — one of them goes first, every time.
 
+**The negative result above was environment-bound, not permanent.** On 2026-09-12 (kernel 7.2.4),
+RFC-045 PR-045-C's capture reached the application with `wtype` on the first attempt, after RFC-047
+PR-047-C had spent six rounds establishing that it did not (kernel 7.2.3) and the reviewer had
+reproduced that independently. Recorded as a fact, not a mechanism. The next slice needing a live
+capture should **try before assuming the gap**; the bounded-evidence rule still applies if it does
+not land.
+
 Screenshots: `niri msg action screenshot-window --id <id>` returns rc=0 but may write no file, going
 to the clipboard instead. `wl-paste --type image/png > out.png` retrieves it. A capture taken this
 way renders the real `$HOME` in the folder browser, so it stays in `.git-exclude/` — see the
