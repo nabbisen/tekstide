@@ -153,3 +153,59 @@ contradiction named — that is the reviewer's error to fix, not the implementer
       without a deliberate act naming its resolved path. RFC-023's row in `rfcs/README.md` now says
       it was reached by RFC-045 in `0.18.0` — and that its eight-field reload rule is two fields
       now, the other six returning with the code that reads them.
+
+## Final Acceptance Decision
+
+*(Section added at the close, 2026-09-12 — this pack shipped without one, the same omission RFC-046's
+pack had. The reviewer's judgment belongs in the pack, not only in a response chain.)*
+
+- [x] **Accepted.** 2026-09-12, by the architect.
+- [ ] Accepted with required follow-up.
+- [ ] Requires re-review after changes.
+
+Reviewer notes:
+
+```text
+Accepted on ablations and gate runs reproduced independently by the reviewer at responses 376,
+377, 378 and 379 -- not on the implementer's report of them. Final gate on the closed tree:
+507 + 4 + 758, green in three of four runs, with one occurrence of row 3's known socket-close
+intermittent, message captured and registered.
+
+What this RFC delivered:
+
+- RFC-023's configuration system has a production caller. boot() reads the file; before this,
+  a user could write a valid config.toml and the product behaved exactly as if they had not.
+- No configuration-defined executable runs without a deliberate act naming the path it
+  resolved to -- never the display_name, which is text the file itself supplies. That is the
+  spoof the dialog exists to make visible, and it is ablated: rendering the display name in
+  its place fails one test, alone.
+- The parser accepts only keys with a consumer and refuses the rest by name. A key the file
+  accepts and the product ignores is a lie the user reads, and RFC-023 shipped ~30 of them.
+
+Three of this RFC's own decisions were corrected during implementation, each on a measurement,
+and all three corrections came from the implementer:
+
+1. D3' would have told a user that default_trust "has no effect yet" -- promising a future in
+   which configuration grants workspace trust, which is the opposite of settled. The three
+   settings configuration must never grant now refuse at any value, naming the act that
+   governs them. The instruction I wrote would have produced the wrong sentence.
+2. D5 said "surface-action registry" and "a chord" in one decision; those conflict, because
+   SurfaceAction entries are bare surface-scoped keys. NavigationAction is the chord registry.
+3. D9 called transcript_retention_days "the one key with a consumer waiting". It has a struct
+   field waiting, not an enforcer: nothing reads max_age_days to purge anything. A stored
+   value nothing reads is precisely what D3' refuses, and I called it a consumer because a
+   slot had the right name.
+
+Reviewer errors recorded rather than omitted: D9 above; and two false-green ablations of my
+own, at responses 377 and 378, both caused by guessing an anchor's shape instead of reading it
+first -- the same false-green shape this project keeps finding in tests, applied to the
+instrument that checks them. Commit 4577edf's message also claimed two edits it did not
+carry; b880284 carries them, and says so.
+
+The fourth instance of S4.1's shape in this project's history is this RFC's own changelog: the
+pack said the retention value "reaches the policy", which is exactly true, and the changelog
+said transcripts are "kept" for that many days, which is not. The implementer's own
+qa-evidence names the distinction -- reaches-the-policy and is-enforced are the same sentence
+from the changelog's distance, and the changelog is the document written for someone who
+cannot check.
+```

@@ -829,3 +829,27 @@ note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
 Recorded so row 5 finally has one verbatim message on file. No new candidate: PR-045-C touches
 configuration, a modal, and the audit producers; nothing near `approval::channel`.
+
+## Recurrence, 2026-09-12 — RFC-045's close gate (reviewer's run), row 3's message captured
+
+`approval::tests::coordinator::agent_run_queue_limit_is_enforced_and_only_counts_live_entries`
+failed once in run 1 of three full-workspace runs on `0b72679`; runs 2 and 3 green at 507 + 4 + 758.
+**Row 3** of the table above — first reported at request 260 — not a new test.
+
+**The assertion message, captured** (gate output redirected to a file, per the 2026-09-10 rule):
+
+```
+an expired entry must not continue occupying the live budget: QueueLimitExceeded { scope: PerAgentRun, limit: 2 }
+```
+
+**Same mechanism as row 5, stated because the two rows have never been connected here.** The test
+does `drop(first_peer)` and then requires the coordinator to see that entry as expired on the very
+next receive. Row 5's `is_still_answerable_reflects_the_real_connection_state` requires the same
+observation — *"once the peer closes its end, the same request must no longer be answerable"*, the
+message captured on 2026-09-12 one entry above. **Both are a socket-close observation race**: the
+close is initiated locally, and the coordinator's view of it is not instantaneous under load. They
+are one cause with two names, and a future attempt to chase either should treat them as one.
+
+**No mechanism from the change.** RFC-045's commits touch `config/*`, `navigation.rs`, and the
+`tekstide` crate's shell — no `approval` code in either crate. Recorded as a known intermittent at
+its baseline rate, not as a candidate.
