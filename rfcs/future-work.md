@@ -786,8 +786,10 @@ capturing runs becoming common.
 `main.rs` renames a corrupt recent-project file aside, prints the error to stderr, starts with an empty
 list, and **saves that empty list**. Every project then reopens under a new id: every restored trust
 decision is gone, and every transcript directory becomes unclaimable (RFC-050 D6′). Nothing on screen
-says any of this happened. RFC-050 counts and shows the unclaimed bytes; it does not repair the store.
-Recovering it, and saying so on screen, is RFC-047's shape applied to a different store.
+says any of this happened. **RFC-050 now makes it visible** (owner's decision, 2026-09-13): the board says the list was reset
+and that earlier transcripts remain on disk, and Trust Settings shows their bytes. **What stays here
+is the repair:** recovering the store and the trust decisions it lost, which is RFC-047's shape
+applied to a different store.
 
 **Trigger to revisit:** the first report of trust or transcripts vanishing after a crash, or any
 slice that touches `RecentProjectStore`.

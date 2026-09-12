@@ -177,10 +177,23 @@ once, with nothing on screen. A deleted state file does the same.
 - Unclaimable directories are never loaded and never deleted in-app, as D6 said. Trust Settings shows
   their bytes and where they are. **After a reset that is every transcript the user has**, so this
   line is the main surface, not a corner case.
-- **If a removal act is ever added**, it must say that the project's transcripts stay on disk.
-- **The silent reset itself is not fixed here.** It also drops every restored trust decision, and
-  recovering the recent-project store is RFC-047's problem shape, not this one. Reserved in
-  `future-work.md`.
+- **Decided by the owner, 2026-09-13: yes, tell the user.** Removing a project from the recent list
+  says that its transcripts stay on disk, and where. The architect had recorded the question as
+  dissolved, because no removal act exists. That was too narrow: the owner's reason is to keep users
+  from being confused about their own data, and it applies wherever transcripts lose their project.
+  **The rule:** *whenever transcripts stop belonging to any project, the user is told what happened
+  and where the files are, at the next moment they can see it.* It covers two cases:
+  - **A removal act.** None exists today, so there is nothing to build now. Any removal added later
+    carries this in its confirmation; `remove_recent_project`'s doc comment names the rule, so the
+    next caller meets it in the code. No unused API is added for it, per RFC-036.
+  - **The silent reset, which does happen today.** On the first start after `recent-projects.json`
+    could not be read, the project board says so once. The notice states that the list was reset,
+    that transcripts from before remain on disk (how many bytes, and where), and where the unreadable
+    file was moved. It is absent on every other start. It uses the same board-line pattern as RFC-045's
+    configuration notice. **Moved into PR-050-C** from `future-work.md`.
+- **Repairing the store is still not done here.** The reset also drops every restored trust decision,
+  and recovering the recent-project store is RFC-047's problem shape. It stays reserved in
+  `future-work.md`. This RFC makes the reset visible; it does not undo it.
 
 ### Details decided
 

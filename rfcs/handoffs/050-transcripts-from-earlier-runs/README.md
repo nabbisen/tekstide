@@ -48,5 +48,6 @@ goes in `qa-evidence.md`, written by the implementer.
 
 - A persisted transcript index; restoring agent runs or terminals; in-app deletion of unclaimed
   directories; coordination between instances beyond the writer's lock; platforms other than Linux.
-- **Repairing a corrupt `recent-projects.json`.** Reserved in `future-work.md`. This slice only shows
-  the bytes that reset leaves unclaimed.
+- **Repairing a corrupt `recent-projects.json`**, or restoring the trust decisions it loses. Reserved
+  in `future-work.md`. This slice makes the reset **visible**: it shows the unclaimed bytes and, on the
+  start it happens, a board notice (the owner's decision, 2026-09-13).

@@ -61,6 +61,16 @@ first one's saved recent-project state, never a session that simply kept its rec
 
 ## PR-050-C — say it, and stop saying the old thing
 
+**The rule this slice serves (owner, 2026-09-13):** whenever transcripts stop belonging to any
+project, the user is told what happened and where the files are, at the next moment they can see it.
+
+- **The reset notice.** When `recent-projects.json` could not be read at startup, the project board
+  says so **once**, on that start: the recent list was reset, transcripts from before remain on disk
+  (bytes and location), and where the unreadable file was moved. Today the error reaches only stderr
+  in `main.rs`; carry it to the board with the same pattern as RFC-045's configuration line. Absent
+  on every other start.
+- `remove_recent_project`'s doc comment names the rule, so any future removal control carries it in
+  its confirmation. **Add no caller and no new API**; nothing removes a project today (RFC-036).
 - Trust Settings shows **unclaimed bytes and where they are** when there are any, and nothing when
   there are none. After a recent-project reset this is every transcript the user has (D6′), so word it
   for that case: state the fact, do not imply the user did something, do not imply it is dangerous.
@@ -70,7 +80,8 @@ first one's saved recent-project state, never a session that simply kept its rec
   `transcripts/` was the only complete removal.
 
 **Required tests:** each notice is present when true and absent when false, as separate assertions,
-each ablated alone.
+each ablated alone. **The reset notice also appears on the reset start only:** a second start with a
+readable file shows nothing.
 
 **Evidence:** a live walkthrough against a `mktemp -d` state root and config. Launch, quit the app,
 start it again, open Trust Settings and see the earlier transcript counted, purge it, and show the

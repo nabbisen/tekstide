@@ -55,6 +55,12 @@ implementer's to paper over.
       there are none. Each case is ablated alone. The wording fits the reset case (D6′): it does not
       imply the user did something, or that anything is dangerous.
 - [ ] The purge dialog names files still being written; absent when none. Each case is ablated alone.
+- [ ] **The reset notice (owner's decision, 2026-09-13).** On a start where `recent-projects.json`
+      could not be read, the board says the list was reset, that earlier transcripts remain on disk
+      (bytes and where), and where the unreadable file went. It appears on that start only; a later
+      start with a readable file shows nothing. **Ablation:** drop the notice; its test fails alone.
+- [ ] `remove_recent_project`'s doc comment states that any removal control must say the project's
+      transcripts stay on disk. No caller or API is added for it.
 - [ ] The request-387 disclosure is removed from the book, `README.md` and the changelog **in the
       same commit** that makes purge true.
 - [ ] The changelog defect entry names `0.12.0` through `0.18.0`, what a user saw, and that deleting
