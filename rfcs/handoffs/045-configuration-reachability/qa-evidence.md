@@ -1,8 +1,8 @@
 ---
 title: "RFC-045 — QA evidence"
 rfc: "RFC-045"
-rfc_file: "../../accepted/045-configuration-reachability.md"
-source_rfc_status: "Accepted 2026-09-12 — M12"
+rfc_file: "../../done/045-configuration-reachability.md"
+source_rfc_status: "Implemented and closed 2026-09-12 — RFC-045 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-09-12"
 ---
@@ -377,3 +377,36 @@ slice needing a live capture should try before assuming it cannot.
 
 `fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`:
 clean.
+
+## PR-045-C — response 378 required follow-up (R1)
+
+**"How many days transcripts are kept" was not true, and I wrote it.** The changelog and
+`crates/tekstide-core/README.md` both described `transcript_retention_days` as controlling how long
+transcripts are kept. It does not.
+
+Traced rather than argued: `max_age_days` reaches `TranscriptRetentionLimits`, then
+`BoundedTranscriptRetention::by_size_and_age`, and is stored on each launch's policy. Every reader
+of it in either crate is the constructor chain, `is_bounded()`'s `> 0` check (twice), and this
+slice's own config write. **There is no purge, expiry or sweep that consults it.** The only purge in
+the product is RFC-033's manual, per-project one. The number is recorded and unenforced.
+
+**The distinction the pack's own language kept and the changelog lost.** Every sentence in this
+evidence file and the checklist says the value *reaches the policy* — which is exactly true, and
+exactly what the test asserts. "Reaches the policy" and "is enforced" are the same sentence from the
+changelog's distance, and that is where the claim slipped: §4.1's shape again, in the one document
+written for someone who cannot check.
+
+Corrected in three places, each saying the same thing once and not softening it into "will be
+enforced":
+
+- `CHANGELOG.md`'s `0.18.0` entry — retention now has its own bullet: the limit is *recorded* on
+  each launch's transcript policy and checked for validity, **no age-based purge reads it yet**, and
+  transcripts are not kept for N days and then removed.
+- `crates/tekstide-core/README.md` — the same, in one sentence.
+- `rfcs/README.md`'s RFC-023 row, which inherited the claim through "narrowed the file to the
+  settings that have a consumer."
+
+The reviewer corrected D9 in the RFC itself (`4577edf`): the key stays — `is_bounded()` reads it and
+it is stored where RFC-011's purge will read it, so refusing it now and re-admitting it later would
+be churn — but it is not a consumer in D3′'s sense, and no user-facing text may say otherwise until
+the purge exists. `future-work.md` carries that row, reserved one slice earlier at response 377.

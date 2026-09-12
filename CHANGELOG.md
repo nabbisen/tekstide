@@ -17,9 +17,14 @@ reload rule — and nothing in the application constructed any of it. You could 
   wonder whether it was read. The line is absent when there is nothing wrong.
 
 - **What a configuration file can change today**: which AI CLI profile the launch button runs
-  (`[agent] default_profile`, with the profile defined in `[agent.profile.<id>]`), how many agent
-  runs a project allows (`[resources] agent_run_limit`), and how many days transcripts are kept
-  (`[agent] transcript_retention_days`).
+  (`[agent] default_profile`, with the profile defined in `[agent.profile.<id>]`), and how many
+  agent runs a project allows (`[resources] agent_run_limit`).
+
+- **`[agent] transcript_retention_days` sets the retention limit recorded on each launch's
+  transcript policy** — recorded, and checked for validity. **No age-based purge reads it yet**:
+  transcripts are not kept for N days and then removed, and nothing in this release makes them be.
+  The only purge is the manual, per-project one that has existed since `0.12.0`. The value is stored
+  where an age-based purge will read it when one is built (`rfcs/future-work.md`, RFC-011).
 
 - **`Ctrl+Alt+C` re-reads the file** without restarting. RFC-023 specified "a command or API call"
   and only the API call existed.

@@ -40,6 +40,7 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | Filesystem safety | `REQ-SEC-040`..`043` | Complete |
 | Session recovery | `REQ-RECOVER-001`, `003`, `004` | Recent projects and run records restore |
 | i18n and text safety | Project rules, UI/UX §18 | **Complete** — catalog, locale fallback, pluralization, shared text-safety primitive, and mechanical enforcement. Translation *content* and runtime locale switching remain out of scope (RFC-016 closed 2026-08-01) |
+| Configuration system | `REQ-CONFIG-001`..`007` | **Built by RFC-023, reached by RFC-045 (2026-09-12).** The file is read at startup and four keys plus a profile definition take effect; every other key RFC-023's schema defined is refused by name until it has a consumer, so "implemented" here means the mechanism, not the whole illustrative schema. `transcript_retention_days` is recorded and not yet enforced — no age-based purge reads it (RFC-011, reserved) |
 | Command approval | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **Model complete and audited; headless and unreachable** — no adapter-spawn pathway, no dialog. Cooperative, not enforced. RFC-021 closed 2026-07-30 |
 
 ### Not implemented
@@ -47,14 +48,13 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | Area | Requirements | Milestone |
 | --- | --- | --- |
 | **Desktop GUI** — every rendered surface | External design §3, UI/UX baseline | M8-M11 |
-| **Configuration system** — no module at all | `REQ-CONFIG-001`..`007` | M12 |
 | **Git integration** — no module; RFC-012 detector reports Git unavailable | `REQ-GIT-001`..`007` | M12 |
 | **Notifications** — no domain type | `REQ-NOTIFY-001`..`005` | M12 |
 | **File watcher** | `REQ-FILE-003`, `004` | M13 |
 | **Multi-document** — one active document only | External design §3.4 | M13 |
 | **Syntax highlighting** | `REQ-EDIT-003` | M10 (optional) |
 | **Crash / unsaved buffer recovery** | `REQ-RECOVER-005` | M13 |
-| **Audit producers** — ~~7~~ ~~3~~ **2** of 12 families unwired as of 2026-08-19 (`safe_close_decision`, `sensitive_config_changed`). **`safe_close_decision` is unblocked as of RFC-039's acceptance** — it was scoped out of RFC-031 for want of a close dialog, and RFC-039 D2 builds one and wires it | `REQ-SEC-014` | M12 |
+| **Audit producers** — ~~7~~ ~~3~~ ~~2~~ **0** of 12 families unwired as of 2026-09-12. `safe_close_decision` was wired by RFC-039 D2's close dialog; `sensitive_config_changed` by RFC-045 PR-045-C's two confirmation surfaces. **Every family has a producer** | `REQ-SEC-014` | Done |
 | **LSP** | `REQ-LSP-001`..`005` | Deferred beyond 1.0 by design |
 | **Cross-platform** — Linux only | `NFR-PORT-001`..`003` | M14 |
 | **Documentation** — `docs/` absent | Project rules | **Split 2026-08-01 at the owner's direction ("as soon as possible").** Minimal user documentation → **M9, alongside RFC-017**. Full `docs/src` mdBook by persona stays with RFC-029 (M14). |
@@ -69,9 +69,10 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 **Re-checked against the code 2026-08-19, at RFC-031's closeout — the table below had been
 stale in four rows.** `paste_blocked` and `plain_terminal_observation` were recorded as having
 no producer long after RFC-017/RFC-018 gave them one, and `command_approval` was recorded as
-having no caller after RFC-022 gave it a real audited producer. **Ten of twelve families now
-have producers** (nine at RFC-031's closeout, plus `transcript_purge` at RFC-033's the same day);
-two remain, each owned by an accepted RFC.
+having no caller after RFC-022 gave it a real audited producer. **Re-checked again 2026-09-12, at RFC-045's closeout: all twelve families have producers.**
+Ten had them at RFC-033's closeout; `safe_close_decision` was wired by RFC-039 D2 and
+`sensitive_config_changed` by RFC-045 PR-045-C, which gave RFC-023's two built-and-uncalled
+producers the confirmation surfaces they were waiting for.
 
 | Family | Producer | Owner |
 | --- | --- | --- |
@@ -84,8 +85,8 @@ two remain, each owned by an accepted RFC.
 | `command_approval` | wired, with a real producer as of RFC-022 — but exercisable only by the reference adapter, since no shipping AI CLI speaks RFC-021's protocol | — |
 | `restricted_mode_blocked` | **wired 2026-08-19 (RFC-031)** | — |
 | `project_added` | **wired 2026-08-19 (RFC-031)** | — |
-| `safe_close_decision` | none — blocked on a dialog that does not exist | RFC-031 scoped it out; needs a surface first |
-| `sensitive_config_changed` | **API built, zero callers** (`AuditCoordinator::record_sensitive_config_policy_increase`/`_reduce`, RFC-023) | RFC-036 — re-homed 2026-08-22 when RFC-023 closed headless. Not a missing producer: a sensitive setting cannot change at runtime in an application that never loads configuration |
+| `safe_close_decision` | **wired (RFC-039 PR-039-C)** — `record_safe_close_authorized` then `record_safe_close_decision`, both called from the real project-close dialog (`shell.rs`). Stale here until 2026-09-12: this row still said "blocked on a dialog that does not exist" long after RFC-039 D2 built one | — |
+| `sensitive_config_changed` | **wired 2026-09-12 (RFC-045 PR-045-C)** — both producers called from the real confirmation surfaces: `_increase` when a user confirms a configuration-defined profile's first use or a weakening reload, `_reduce` when a reload tightens | — |
 | `transcript_purge` | **wired 2026-08-19 (RFC-033)** — records the purge and its scope, never a path or a byte count | — |
 
 **Nothing renders the audit store.** Every row above describes what is *recorded*, not what any
@@ -112,7 +113,7 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | 043 | Terminal Process Containment | M12 | 008, 009, 013 | **yes** | **Implemented and closed 2026-08-27.** Moved to `done/`. Session-scoped termination, master-close before `SIGHUP` on both paths, zombies excluded from the survivor scan, and the safe-close audit field read from a real session re-scan instead of inferred from an outcome variant that could not see a sibling process group. Eight review rounds; the leak guard from PR-043-A caught two of the regressions in PR-043-B within days of being built. Orphans 28 → 0, measured |
 | 035 | Change Detection Coverage and Disclosure | M12 | 012, 020 | no | **Implemented and closed 2026-08-25.** The `.git/hooks`/`.git/config` supervision hole closed and `max_changed_paths` stops discarding a list it computed. Items 3 and 4 (mid-run triggers, baseline surviving the application) stay deferred. **Added to this queue retroactively at Final Acceptance** — authored, accepted, implemented and closed without ever appearing here, the third instance of the bookkeeping gap RFC-032's own row records |
 | 036 | Dormant Capability Closure | M12 | — | no | **Implemented and closed 2026-08-28.** Moved to `done/`. A decision per orphan with a measured count and D4's search shape. Nine functions off the published surface into `0.16.0`, named individually; four kept against RFC-045; zero wired, stated as a finding. Found two shipped defects its own opening argument predicted — an agent-run launch writes no durable audit record (RFC-046), and a corrupted audit store fails silently while the interface reports "Calm" (RFC-047) |
-| 045 | Configuration Reachability | M12 | 023, 036 | no | **Accepted 2026-09-12; D1–D9 decided on acceptance, D3′ widened on measurement.** Sequence after nothing — RFC-046 is closed and the D2 interaction is settled. Blocks RFC-025. **Reserved 2026-08-27 by RFC-036's D2.** RFC-023 shipped a configuration system nothing constructs: `ConfigStore`, `to_ai_cli_profile`, `set_resource_limits` and the `sensitive_config_changed` producer are all correct, all tested, none reachable. They are conditioned rather than dead, and D2's named-consumer rule needs that consumer to exist as a number rather than an intention. Also carries RFC-023's own OQ3 first-use confirmation gate, deferred to exactly this slice |
+| 045 | Configuration Reachability | M12 | 023, 036 | no | **Implemented and closed 2026-09-12.** Moved to `done/`. RFC-023's configuration system has a production caller: `boot()` loads the file before CLI project paths open, the project board says when it was ignored or carries an unknown key, `agent_run_limit` reaches `set_resource_limits`, and **no configuration-defined executable runs without a confirmation naming its resolved path** (D4/§5) — recorded as `config_policy_increase`, with `Ctrl+Alt+C` re-reading the file and RFC-023's tighten-applies / weaken-waits asymmetry finally reaching a surface. D3′ narrowed the file to the keys with a consumer and refuses the rest **by name**. Unblocks RFC-025. **Three of its own decisions were corrected during implementation** — D3′'s refusal wording for the settings configuration must never grant, D5's registry, and D9's "consumer waiting" (a struct field, not an enforcer: the retention key stays, but no text may claim transcripts are kept for N days until RFC-011's purge reads it) |
 | 046 | Managed AgentRun Audit Trail | M12 | 013, 036 | **yes** | **Implemented and closed 2026-09-10.** Moved to `done/`. Sequenced after RFC-047 PR-047-D, as planned. Three slices: **A** made the producer (renamed `launch_managed_agent_run` → `launch_audited_agent_run`) safe to call — `append_observation`, not `append_required`, so a launch never depends on the audit store (D1); **B** made becoming audited lose nothing — `AuditedAgentLaunch` now carries the approval endpoint production already returns (D2); **C** wired production to call it. **Found during review**: the wiring's first cut crashed the app on a `Plain` profile or an out-of-charset profile id — fixed by exposing the producer's own admission checks as `plan_is_auditable` so the caller routes around them before the plan is consumed. No termination record (D3, RFC-048 reserved); only Restricted Mode's existing refusal stays audited (D5) |
 | 047 | Audit Store Corruption Recovery | M12 | 013, 004, 036 | **yes** | **Implemented and closed 2026-09-09.** Moved to `done/`. D1 resumes and records; D2 auto-recovers (`recover()` is `fs::rename`, quarantines rather than deletes) and surfaces the quarantined path; D3 gives `AuditHealth` its first reader, on screen only when degraded; D4 declines to refuse and says so before the click instead, since a broken store makes a run unrecorded, not more dangerous. **PR-047-D, found during review**: `AuditHealth::status` was a latch (a transient failure degraded a session permanently) — open and write failures now clear independently, and `failure_count` survives as session history. Three review-caught instances of one defect shape (a claim adjacent to what was measured, never caught by a test that only asserted presence) are named in the risk document so a fourth is pattern-matched, not rediscovered |
 | 041 | Change Content Preview | M12 | 024, 020 | no | **Implemented and closed 2026-08-26.** Moved to `done/`. RFC-024 built and gated content access in `0.7.0`; it sat with zero production callers for six releases because `add_detected_generated_change_set` discarded the `DetectedChanges` it needed. A change review row is now a real button and renders the file's content per change kind, with a stale baseline refusing and naming why. Content preview, not a diff — the two-sided case stays blocked on RFC-030, disclosed on the surface itself, not cancelled |

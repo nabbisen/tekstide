@@ -1,6 +1,25 @@
 # RFC-045: Configuration Reachability
 
-Status: **Accepted by the human owner 2026-09-12.** **D1–D9 decided by the architect on acceptance** — see "Decided on acceptance" at the end, which **widens D3 from three keys to most of the file** on a measurement made after the owner accepted, adds D8 (which profile launches) and D9 (retention is the one key with a consumer waiting). Proposed the same day. Reserved 2026-08-27 by RFC-036's D2 as the named consumer for four
+Status: **Implemented and closed 2026-09-12.** Three slices (PR-045-A through C), reviewed and
+accepted across responses 376–379. RFC-023's configuration system has a production caller: `boot()`
+loads the file, the project board says when it was not used, and **no configuration-defined
+executable runs without a deliberate act naming its resolved path** (D4/§5). The parser accepts only
+keys with a consumer and refuses the rest by name (D3′).
+
+**Three of this RFC's own decisions were corrected during implementation, each on a measurement
+rather than an argument**, and each is recorded in place below rather than rewritten away: **D3′**'s
+"refused ... saying it has no effect yet" was wrong for the three settings responses 266/270 made
+unrepresentable — "no effect *yet*" promises a future that must never arrive (request 376); **D5**
+named the surface-action registry and a chord in the same decision, which conflict —
+`NavigationAction` is the chord registry (request 378); **D9** called `transcript_retention_days`
+"the one key with a consumer waiting" when it has a struct *field* waiting and no enforcer, so the
+key stays but no user-facing text may say transcripts are *kept* for that many days (request 378).
+
+Original: **Accepted by the human owner 2026-09-12.** **D1–D9 decided by the architect on
+acceptance** — see "Decided on acceptance" at the end, which **widens D3 from three keys to most of
+the file** on a measurement made after the owner accepted, adds D8 (which profile launches) and D9
+(retention is the one key with a consumer waiting). Proposed the same day. Reserved 2026-08-27 by
+RFC-036's D2 as the named consumer for four
 built-and-unreached rows. Authored after RFC-046 closed, because RFC-046's `plan_is_auditable`
 changed one of this RFC's answers before it was written — see D2.
 Target milestone: **M12**

@@ -1,8 +1,8 @@
 ---
 title: "What a configuration file must not do"
 rfc: "RFC-045"
-rfc_file: "../../accepted/045-configuration-reachability.md"
-source_rfc_status: "Accepted 2026-09-12 — M12"
+rfc_file: "../../done/045-configuration-reachability.md"
+source_rfc_status: "Implemented and closed 2026-09-12 — RFC-045 is in rfcs/done/"
 target_milestone: "M12"
 created: "2026-09-12"
 ---
