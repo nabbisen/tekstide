@@ -1,6 +1,6 @@
 ---
 title: "Dependency currency: 69 in-semver updates, and a storage engine that moves two minors"
-status: "Scoped 2026-09-10 by the architect. Not started."
+status: "**Complete and released in `0.18.0`** (2026-09-12), across requests 374 and 375. Scoped 2026-09-10 by the architect. Kept for the two checks it records, which recur at every `rusqlite` minor. Corrected 2026-09-13: this field still read \"Not started\" two releases after the work shipped — found by PR-DOC-A's review, and the same state-asserting drift the documentation handoff exists to remove."
 rfc_file: "none — maintenance slice, scheduled at the 0.16.0→0.17.0 cycle review"
 target_milestone: "M12"
 created: "2026-09-10"

@@ -770,6 +770,30 @@ either was written.
 **Trigger to revisit:** the first report of a budget that will not clear, or `Detached` becoming
 common rather than rare. Until then this is a bounded, disclosed leak and the alternative is worse.
 
+### The test gate runs only on developer machines — no CI, noticed when the first workflow landed
+
+`0.18.0` shipped from a repository with **no `.github/workflows` directory at all**. RFC-049's
+PR-DOC-A added `docs.yml`, the first workflow this project has ever had, and observed the obvious
+thing on the way past: every gate in this project — `fmt`, `clippy -D warnings`, three consecutive
+full-workspace runs, `cargo audit`, package smoke — is run by an agent on one machine and re-run by
+a second agent on the same machine.
+
+**That has worked, and it is not nothing:** the reviewer re-runs every ablation and every gate
+independently, which is stronger than a CI badge in the ways that matter most and weaker in exactly
+one — **nobody outside this pair can verify any of it**, and a contributor's pull request is gated
+by whoever remembers to run things.
+
+**Deliberately not proposed here.** Adding CI is cheap to start and expensive to get right: the
+suite launches real PTYs, binds real Unix sockets, spawns real processes, and has a flake register
+documenting how load-sensitive several tests are (rows 1, 3, 5 and the measurement tests). A CI
+runner is a slower, more contended machine than the one that produced those rows — so the first
+honest CI run would likely be red for reasons this project already understands and has chosen not
+to chase.
+
+**Trigger to revisit:** the first outside contributor, or the first release where the two-agent gate
+misses something a machine would have caught. Sequenced after that, it wants the flake register read
+first.
+
 ### Release Process
 
 Status: active after `0.1.0`.
