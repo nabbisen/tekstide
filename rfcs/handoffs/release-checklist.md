@@ -165,6 +165,25 @@ The workspace dry-run is the release-candidate gate for same-workspace dependenc
 - [ ] Confirm crates.io package pages and README badges describe the intended release scope and do not overclaim the full AI CLI workbench.
 - [ ] Any distributed prebuilt binary must ship with `NOTICE` alongside it. Releases assembled as project-structure tarballs satisfy this automatically because `NOTICE` sits at the archive root; a bare binary uploaded on its own does not.
 
+## Dependency Advisories
+
+- [ ] **`cargo audit`** — **zero vulnerabilities**, and the `unmaintained`/`unsound` warning list
+      matches `dependency-advisories.md` **exactly**. A warning not in that register is a finding: a
+      new advisory, or a dependency change that pulled one in. A row in the register that no longer
+      appears is retired and must be **deleted** from it.
+
+      **Added 2026-09-12, before `0.18.0`. There was no advisory scan in this project for seventeen
+      releases.** The gap was found because the snora team told five *other* teams that their own
+      first scan had found two real DoS CVEs in `quick-xml`, reached through `iced` → `winit` →
+      `wayland-scanner` — iced's graph, not snora's, so it applied here and we were not on the
+      letter. **We were clean only because the dependency-currency slice's `cargo update` two days
+      earlier had already taken the fixed versions.** Nothing would have told us if it had not.
+
+      `cargo audit` exits non-zero on a vulnerability; `unmaintained` and `unsound` are warnings and
+      do not fail it. **Read the warnings — do not trust the exit code alone.** That is the same
+      shape as the filtered-gate rule in `test-process-leak.md`: a green summary that hides what you
+      needed to see.
+
 ## Standing Watches
 
 Checked every release, because a watch that depends on someone remembering is not a watch.
