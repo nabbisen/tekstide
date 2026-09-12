@@ -148,6 +148,11 @@ project workflows, configuration reference, and the local-data/privacy detail.
   already owns "what shipped when" and `rfcs/README.md` owns RFC status. Moving 25 version mentions
   into the book relocates the drift generator; deleting them and linking the two canonical homes
   removes it.
+- **`SUMMARY.md` completeness, as two tests in `rfc_docs_invariants`**: every page under
+  `docs/src/` is listed, and every `SUMMARY.md` entry names a page that exists. `mdbook build`
+  succeeds either way, so an unlisted page renders nowhere and nothing warns. *(Added 2026-09-13.
+  Response 383 said this was "added to B's boxes" and the handoff was never edited — PR-DOC-B
+  implemented it from the response and flagged the gap at request 384. Delivered in `d23d1e1`.)*
 - **Acceptance:** no chapter under `docs/src/users/` is a pure include of `README.md`, and every
   claim moved out is either in the book or in a document that already owned it.
 
