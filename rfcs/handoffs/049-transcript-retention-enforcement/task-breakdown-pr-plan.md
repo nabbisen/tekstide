@@ -35,8 +35,19 @@ created: "2026-09-12"
 
 ## PR-049-B — selection and cleanup (core only, no production caller)
 
-- **Selection** (D8): inactive by `lifecycle_state`; **a live writer is never a candidate**, at
-  any pressure (§2). Order by `last_write_at`, falling back to `created_at`.
+- **Liveness** (**D8′**, replacing D8 — read it before anything else in this slice): the authority
+  is the transcript's `AgentRun.status` via `Transcript.agent_run_id`, **not** `lifecycle_state`,
+  which production never moves off `Active`. A **new predicate**, matching **exhaustively** with
+  only `Completed | Failed | Cancelled` not-live, so a future `AgentRunStatus` variant fails to
+  compile rather than becoming deletable. **`Detached` is live.** Do not reuse
+  `agent_run_status_is_active` or `agent_run_status_blocks_strong_association`.
+- **Liveness gates marking too** (D8′-a): a live transcript is neither marked `Expired` nor
+  selected. PR-049-A's arithmetic is unchanged; nothing calls it for a live transcript.
+- **Selection**: **a live writer is never a candidate**, at any pressure (§2). Order by
+  `last_write_at` falling back to `created_at` — in production always the latter, which is correct
+  because a live run is never reached.
+- **Bytes** (D8′-b): `ProjectSession::real_retained_transcript_bytes()`. **Never
+  `Transcript.byte_count`**, which is `0` in production.
 - **Cleanup** calls **RFC-033's existing purge** (§3, D3): bytes deleted, state `Purged`,
   content-free tombstone preserved. Expiry-driven and budget-driven cleanup share this.
 - **Order**: expiry first, then byte budgets — expiring may free enough that no budget cleanup runs,
@@ -47,7 +58,13 @@ created: "2026-09-12"
 
 - **A transcript with a live writer is not selected when it is the only candidate and the app-wide
   budget is exhausted.** This is §2's whole content; ablate by removing the liveness filter and
-  watch this test alone fail.
+  watch this test alone fail. **Drive liveness through a real `AgentRun` whose status production
+  actually sets** — a test that assigns `lifecycle_state` directly is the defect D8′ exists to
+  remove, reproduced in the test file.
+- **A `Detached` run's transcript is not selected** (D8′), and **a `Completed` one is** — one test
+  each, so the boundary is visible rather than inferred.
+- **A live transcript is not marked `Expired`** even when its age exceeds the limit (D8′-a). This is
+  the forty-day-live-writer case; ablate by moving the liveness check after the marking.
 - Oldest-first order, with a `last_write_at`/`created_at` pair that inverts under the wrong field.
 - Expiry runs before byte selection: a case where running them the other way deletes a different
   transcript, asserted on **which** transcript survived.

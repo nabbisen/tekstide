@@ -193,6 +193,87 @@ The new function is the first thing PR-049-A builds, with round-trip tests again
 `format_unix_seconds_utc` including the boundaries that bite: epoch, a leap day, and a value where
 the naive string comparison and the correct arithmetic disagree.
 
+### D8′ — D8 named a field production never writes. The liveness authority is the **AgentRun**.
+
+**Added 2026-09-13, response 382. D8 was wrong and PR-049-B was right to stop.**
+
+D8 said *"the existing `lifecycle_state` is the authority"*. In the compiled product
+`Transcript.lifecycle_state` is `Active` at creation and moved only by `mark_purged()` — its other
+mutators, `record_active_write`/`record_truncated_write`, lost their only caller when **RFC-036
+deleted `record_transcript_write_summary`**, whose verdict was *delete*, on the recorded ground that
+*"a tracked counter is only ever correct prospectively."* So "inactive by `lifecycle_state`" selects
+**nothing**: cleanup would be inert in production and green in tests, because a test sets the field
+directly. RFC-036's own shape, and §4.1's. **I asserted a property of the code from its shape** —
+the third time in this project, after D9's "consumer waiting" and `transcript_retention_days = 0`.
+
+**Decided: liveness is the transcript's `AgentRun.status`, reached through
+`Transcript.agent_run_id`** — `Some(..)` on every production transcript, because
+`attach_agent_run_transcript` is the sole production caller of `Transcript::metadata`. The status is
+driven from real call sites (`apply_agent_terminal_outcome`, reached at `shell.rs:2701` and `4690`).
+The transcript does not know whether it is being written; the run does.
+
+**Enumerate not-live, never live.** Ten `AgentRunStatus` variants exist. Retention's predicate
+matches **exhaustively** on the not-live set:
+
+```
+Completed | Failed | Cancelled   →  not live, selectable
+everything else                  →  live, never touched
+```
+
+A variant added later therefore **fails to compile** rather than silently becoming deletable. That
+is §1 expressed in the type system, and it is the same construction as RFC-044's exhaustive mirror
+and RFC-046's `plan_is_auditable`.
+
+**`Detached` is live, and the cost is disclosed rather than designed away.** Two precedents in
+`session.rs` disagree: `agent_run_status_is_active` excludes it, and
+`agent_run_status_blocks_strong_association` includes it. Retention takes the conservative one,
+because its question — *might a claim about this run's output be wrong?* — is retention's question,
+while the other exists to count processes the close flow must terminate. `AgentRun.status`'s own
+field comment says it is *"not proof of supervision after `Detached`"*, so a detached process may
+still be writing and we cannot know.
+
+**The consequence: a detached run's transcript is never reclaimed, and its bytes occupy the budget
+permanently.** Under §1 that is the right trade — but taken far enough, an app-wide budget full of
+detached transcripts would refuse launches forever under D4. **Reserved as a `future-work.md` row**,
+not solved here: solving it needs to know whether a process is gone, which we cannot, and the
+available heuristic is a file-mtime threshold — the ambient read and magic number PR-049-B correctly
+flagged.
+
+**Write a new predicate; do not reuse either existing one.** Their names and purposes belong to the
+close-confirmation flow and to change association. A future adjustment for RFC-020's reasons would
+change deletion safety silently — the "reusing a field for a different meaning" defect response 224
+already caught here once.
+
+### D8′-a — Liveness gates marking as well as selection
+
+PR-049-B found the second half: `last_write_at` is `None` on every production transcript, for the
+same deleted recorder, so PR-049-A's age falls back to `created_at` — **a run writing for forty days
+under a thirty-day limit reads as expired while it is being written.**
+
+**Decided: liveness is checked before any retention action, not just before selection.** A live
+transcript is neither marked `Expired` nor selected. PR-049-A's arithmetic is correct as written and
+stays; what changes is that nothing calls it for a live transcript. Marking a record `Expired` while
+it is being appended to would be a false state on a durable record — §4.1 again.
+
+### D8′-b — Bytes come from the filesystem, never from `byte_count`
+
+`Transcript.byte_count` is `0` in production, same cause. **Use
+`ProjectSession::real_retained_transcript_bytes()`**, RFC-033's existing `fs::metadata` route — the
+same source `remove_transcript_file` uses at delete time, so the figure selected on and the figure
+deleted agree by construction. RFC-036 recorded this precedent; PR-049-B found it independently.
+
+**And D7's seam survives intact**, which is why no mtime is needed: liveness comes from in-memory
+`AgentRun.status` and age from in-memory `created_at`, so **byte accounting is the only filesystem
+read in the slice**, through a method production already calls. PR-049-B's concern about a second
+ambient input arriving behind D7 is real and is answered by not needing it.
+
+### D8′-c — The deleted recorder stays deleted
+
+Wiring `record_transcript_write_summary` would make D8 true as originally written. **It is not an
+option:** RFC-036 is closed, its verdict was *delete*, and its reasoning — a counter is correct only
+prospectively, so every transcript written before the wiring reads `0` — applies unchanged. Nothing
+above needs it.
+
 ### Settled details
 
 - **Trigger order at launch preflight**: expiry first, then byte budgets. Expiring a transcript may

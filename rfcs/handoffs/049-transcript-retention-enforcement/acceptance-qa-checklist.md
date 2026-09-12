@@ -47,6 +47,16 @@ refusing `0`, not this function deleting on it. See `qa-evidence.md`.
 
 - [ ] **A live writer is never selected** — including when it is the only candidate and the app-wide
       budget is exhausted (§2). **Ablation:** remove the liveness filter; this test alone fails.
+      **Liveness is driven through a real `AgentRun` status**, not by assigning `lifecycle_state`.
+- [ ] The liveness predicate is **new**, matches `AgentRunStatus` **exhaustively**, and names only
+      `Completed | Failed | Cancelled` as not-live (D8′). **Ablation:** add a variant to
+      `AgentRunStatus` and confirm the crate **fails to compile** rather than defaulting it to
+      deletable.
+- [ ] **`Detached` is not selected**, and `Completed` is — one test each.
+- [ ] A **live** transcript is not marked `Expired` even past its age limit (D8′-a). **Ablation:**
+      move the liveness check after the marking.
+- [ ] Byte selection uses `real_retained_transcript_bytes()`, **never `Transcript.byte_count`**
+      (D8′-b). Grep the slice for `byte_count`.
 - [ ] Oldest-first by `last_write_at` falling back to `created_at`, proven with a pair that
       inverts under the wrong field.
 - [ ] Expiry runs before byte-budget selection, asserted on **which transcript survived**.

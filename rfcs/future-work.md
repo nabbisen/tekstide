@@ -749,6 +749,27 @@ reachability slice.** Reserved here as the row; it becomes an RFC or an amendmen
 needs to *read* the limits back — the first candidate is any changelog sentence that promises
 retention behaviour, which must not be written until this exists.
 
+### Detached agent runs hold transcript budget permanently — RFC-049 D8′'s disclosed cost
+
+RFC-049 D8′ counts an `AgentRun` in `Detached` status as **live**, so its transcript is never expired
+and never reclaimed. That is deliberate: `AgentRun.status`'s own field comment says it is *"not proof
+of supervision after `Detached`"*, so a detached process may still be writing and deleting under it
+is the one thing §2 forbids absolutely.
+
+**The cost, stated rather than designed away:** those bytes occupy the per-project and app-wide
+budgets forever. Taken far enough — many detached runs, never reclaimed — the app-wide budget fills
+and RFC-049 D4 refuses `RequiredLocalBounded` launches permanently, which is a denial of service on
+the user's own workbench caused by a safety rule.
+
+**Not solved in RFC-049, and the reason is that the available fix is bad.** Reclaiming needs to know
+whether a process is gone, which Tekstide cannot know after detaching. The obvious heuristic is a
+file-mtime threshold — an ambient filesystem read inside selection (which D7's seam exists to keep
+out) plus a magic number about how long a quiet file has been quiet. PR-049-B flagged both before
+either was written.
+
+**Trigger to revisit:** the first report of a budget that will not clear, or `Detached` becoming
+common rather than rare. Until then this is a bounded, disclosed leak and the alternative is worse.
+
 ### Release Process
 
 Status: active after `0.1.0`.
