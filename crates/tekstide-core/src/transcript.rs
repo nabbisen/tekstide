@@ -1,6 +1,7 @@
 mod path;
 mod policy;
 mod reader;
+mod retention;
 mod writer;
 
 pub use path::{
@@ -16,6 +17,9 @@ pub use policy::{
 pub use reader::{
     DEFAULT_TRANSCRIPT_WINDOW_BYTES, TranscriptReadError, TranscriptReadErrorReason,
     TranscriptReadPolicy, TranscriptWindow, read_window,
+};
+pub use retention::{
+    is_transcript_expired, mark_transcript_expired_if_due, most_recent_activity_seconds,
 };
 pub use writer::{
     BoundedTranscriptWriter, TranscriptWriteError, TranscriptWriteErrorReason,

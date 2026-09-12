@@ -2,7 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::domain::AgentRunId;
+use crate::domain::{
+    AgentRunId, DomainTimestamp, TerminalId, Transcript, TranscriptLifecycleState,
+};
 use crate::project::ProjectId;
 use crate::transcript::TranscriptStoragePath;
 use crate::transcript::{
@@ -11,7 +13,8 @@ use crate::transcript::{
     TranscriptBudgetScope, TranscriptCaptureMode, TranscriptCapturePolicy,
     TranscriptLocalDataSummary, TranscriptPathErrorReason, TranscriptPathRequest,
     TranscriptPathResolver, TranscriptRetentionLimits, TranscriptRetentionState,
-    TranscriptWriteErrorReason, TranscriptWriterConfig,
+    TranscriptWriteErrorReason, TranscriptWriterConfig, is_transcript_expired,
+    mark_transcript_expired_if_due, most_recent_activity_seconds,
 };
 
 #[test]
@@ -452,4 +455,232 @@ fn resolved_storage_path(label: &str) -> (TestDirs, crate::transcript::Transcrip
     );
     let storage_path = TranscriptPathResolver.resolve_agent_run(request).unwrap();
     (temp, storage_path)
+}
+
+// --- RFC-049 PR-049-A: expiry marking, no deletion --------------------
+//
+// Every instant below is a **literal** timestamp, not one computed from
+// seconds by a helper. A helper would have to reimplement the civil-date
+// arithmetic these tests exist to check, which is a second opinion about
+// the calendar able to disagree with the code under test — the same
+// reason `unix_seconds_from_utc_string` is defined by round-trip rather
+// than by its own validator. Ten days after 2026-01-01 is 2026-01-11,
+// and a reader can confirm that without running anything.
+
+fn at(value: &str) -> DomainTimestamp {
+    DomainTimestamp::from_utc_string(value).expect("fixture instants must be a valid shape")
+}
+
+fn transcript_created_at(created: &str) -> Transcript {
+    let mut transcript = Transcript::metadata(
+        ProjectId::for_test(1),
+        TerminalId::for_test(1),
+        Some(AgentRunId::for_test(1)),
+        "/state/transcripts/run.log",
+        "local-bounded-agent-run",
+    );
+    transcript.created_at = at(created);
+    transcript.last_write_at = None;
+    transcript.byte_count = 1_024;
+    transcript
+}
+
+fn ten_day_limits() -> TranscriptRetentionLimits {
+    let mut limits = TranscriptRetentionLimits::agent_run_default();
+    limits.max_age_days = 10;
+    limits
+}
+
+/// **§1, and the ablation target the plan names.** A transcript exactly
+/// at its limit has not passed it. Ablate by changing `>` to `>=` in
+/// `is_transcript_expired` and this fails alone.
+#[test]
+fn exactly_at_the_limit_is_not_expired() {
+    let transcript = transcript_created_at("2026-01-01T00:00:00Z");
+
+    assert!(
+        !is_transcript_expired(&transcript, ten_day_limits(), &at("2026-01-11T00:00:00Z")),
+        "exactly ten days on a ten-day limit: a transcript survives its last day -- §1"
+    );
+    assert!(
+        is_transcript_expired(&transcript, ten_day_limits(), &at("2026-01-11T00:00:01Z")),
+        "and one second past it is expired, or the limit would mean nothing"
+    );
+}
+
+/// Age is measured from the most recent evidence of activity, not from
+/// creation: a transcript written recently is not old because it was
+/// created long ago. §1 again — the later timestamp keeps more.
+#[test]
+fn age_is_measured_from_the_last_write_not_the_creation() {
+    let mut transcript = transcript_created_at("2026-01-01T00:00:00Z");
+    transcript.last_write_at = Some(at("2026-01-20T00:00:00Z"));
+
+    assert!(
+        !is_transcript_expired(&transcript, ten_day_limits(), &at("2026-01-25T00:00:00Z")),
+        "created 24 days earlier but written 5 days earlier: not expired on a 10-day limit"
+    );
+    assert!(
+        is_transcript_expired(&transcript, ten_day_limits(), &at("2026-02-01T00:00:00Z")),
+        "twelve days after that write, it is"
+    );
+}
+
+/// A store that hands back a write earlier than the creation is corrupt
+/// in a small way, and §1 says which way to resolve it: take the later
+/// instant, which keeps the transcript longer.
+#[test]
+fn a_write_recorded_before_the_creation_does_not_shorten_the_life() {
+    let mut transcript = transcript_created_at("2026-01-20T00:00:00Z");
+    transcript.last_write_at = Some(at("2026-01-01T00:00:00Z"));
+
+    assert_eq!(
+        most_recent_activity_seconds(&transcript),
+        at("2026-01-20T00:00:00Z").unix_seconds(),
+        "the later of the two instants is the reference"
+    );
+    assert!(
+        !is_transcript_expired(&transcript, ten_day_limits(), &at("2026-01-25T00:00:00Z")),
+        "so this is five days old, not twenty-four"
+    );
+}
+
+/// **An age that cannot be computed is not an age.** A shape-valid but
+/// calendar-impossible timestamp is something a persisted store can hand
+/// back, and it must not be read as "very old".
+#[test]
+fn a_transcript_whose_timestamp_names_no_instant_is_never_expired() {
+    let mut transcript = transcript_created_at("2026-01-01T00:00:00Z");
+    transcript.created_at = at("2026-13-45T00:00:00Z");
+    transcript.last_write_at = None;
+
+    assert_eq!(most_recent_activity_seconds(&transcript), None);
+    assert!(
+        !is_transcript_expired(&transcript, ten_day_limits(), &at("2099-01-01T00:00:00Z")),
+        "an uncomputable age must not delete a user's data"
+    );
+}
+
+/// A clock that appears to run backwards expires nothing: the elapsed
+/// span is unknown, not negative.
+#[test]
+fn a_now_that_precedes_the_transcript_expires_nothing() {
+    let transcript = transcript_created_at("2026-06-01T00:00:00Z");
+
+    assert!(!is_transcript_expired(
+        &transcript,
+        ten_day_limits(),
+        &at("2026-01-01T00:00:00Z")
+    ));
+}
+
+/// **Flagged decision (see `qa-evidence.md`).** `is_bounded()` already
+/// treats `max_age_days == 0` as unbounded, and RFC-045's parser accepts
+/// a configured `0`. Reading zero as "delete everything now" is the most
+/// destructive available reading of a value a user could have typed by
+/// accident, so §1 sends it the other way: unbounded limits enforce
+/// nothing.
+#[test]
+fn limits_that_are_not_bounded_expire_nothing() {
+    let transcript = transcript_created_at("2026-01-01T00:00:00Z");
+    let mut zero_age = TranscriptRetentionLimits::agent_run_default();
+    zero_age.max_age_days = 0;
+    assert!(
+        !zero_age.is_bounded(),
+        "precondition: zero is what is_bounded() already calls unbounded"
+    );
+
+    assert!(!is_transcript_expired(
+        &transcript,
+        zero_age,
+        &at("2099-01-01T00:00:00Z")
+    ));
+}
+
+/// D3: marking keeps the bytes. `Expired` means *eligible*, not
+/// *deleted* — which is what keeps `has_retained_bytes()` true and lets
+/// a user see a transcript is due before it goes.
+#[test]
+fn marking_expired_keeps_the_bytes_and_still_reports_them_as_retained() {
+    let mut transcript = transcript_created_at("2026-01-01T00:00:00Z");
+    let byte_count_before = transcript.byte_count;
+    let storage_path_before = transcript.storage_path.clone();
+
+    assert!(mark_transcript_expired_if_due(
+        &mut transcript,
+        ten_day_limits(),
+        &at("2026-02-01T00:00:00Z")
+    ));
+
+    assert_eq!(
+        transcript.lifecycle_state,
+        TranscriptLifecycleState::Expired
+    );
+    assert_eq!(
+        transcript.byte_count, byte_count_before,
+        "D3: Expired keeps its bytes -- cleanup deletes them, marking does not"
+    );
+    assert_eq!(
+        transcript.storage_path, storage_path_before,
+        "and the bytes must still have somewhere to be"
+    );
+    assert!(
+        transcript.has_retained_bytes(),
+        "has_retained_bytes() must stay true for Expired, so no existing caller changes meaning"
+    );
+}
+
+/// Marking is idempotent and reports it: the second call changes
+/// nothing, so §4's "a cleanup that deletes nothing writes nothing" has
+/// something honest to count.
+#[test]
+fn marking_an_already_expired_transcript_reports_no_change() {
+    let mut transcript = transcript_created_at("2026-01-01T00:00:00Z");
+    assert!(mark_transcript_expired_if_due(
+        &mut transcript,
+        ten_day_limits(),
+        &at("2026-02-01T00:00:00Z")
+    ));
+    assert!(
+        !mark_transcript_expired_if_due(
+            &mut transcript,
+            ten_day_limits(),
+            &at("2026-02-01T00:00:00Z")
+        ),
+        "the second call marked nothing new"
+    );
+}
+
+/// A transcript with no bytes left has nothing to expire, and claiming
+/// otherwise would say it has bytes.
+#[test]
+fn a_purged_transcript_is_not_marked_expired() {
+    let mut transcript = transcript_created_at("2026-01-01T00:00:00Z");
+    transcript.mark_purged();
+
+    assert!(!mark_transcript_expired_if_due(
+        &mut transcript,
+        ten_day_limits(),
+        &at("2026-02-01T00:00:00Z")
+    ));
+    assert_eq!(transcript.lifecycle_state, TranscriptLifecycleState::Purged);
+}
+
+/// D7, stated as a test: the same inputs give the same answer every run,
+/// and the signature is what guarantees it — there is no path from this
+/// function to the wall clock. A test that called `now_utc()` instead
+/// would pass today and depend on the date.
+#[test]
+fn a_fixed_now_gives_the_same_answer_every_run() {
+    let transcript = transcript_created_at("2026-01-01T00:00:00Z");
+    let now = at("2026-02-01T00:00:00Z");
+    let first = is_transcript_expired(&transcript, ten_day_limits(), &now);
+
+    for _ in 0..100 {
+        assert_eq!(
+            is_transcript_expired(&transcript, ten_day_limits(), &now),
+            first
+        );
+    }
+    assert!(first);
 }

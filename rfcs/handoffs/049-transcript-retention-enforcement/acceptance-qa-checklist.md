@@ -14,14 +14,34 @@ contradiction named — the reviewer's error to fix, not the implementer's to pa
 
 ## PR-049-A — arithmetic and marking
 
-- [ ] Seconds round-trip against `format_unix_seconds_utc`, covering **epoch, a leap day, and a
+- [x] Seconds round-trip against `format_unix_seconds_utc`, covering **epoch, a leap day, and a
       pair where string comparison and correct arithmetic disagree**.
-- [ ] Exactly at `max_age_days` is **not** expired (§1). **Ablation:** `>` → `>=`; this test
-      alone fails.
-- [ ] `Expired` keeps its bytes and still reports `has_retained_bytes()`.
-- [ ] Every expiry decision takes `now` as a parameter — **no `now_utc()` inside any of them**
+      Both ends of a leap day, the day after, and past 2100 — the century rule a naive
+      every-fourth-year implementation gets wrong. The disagreement test uses years either side of
+      the formatter's four-digit width (`"10000-…"` sorts before `"2026-…"`), asserts the
+      disagreement exists, and then that the wide year has **no age at all**. **The inverse is
+      defined by round-trip** rather than by its own validator, so it cannot hold a second opinion
+      about the calendar; ablating that check fails two tests.
+- [x] Exactly at `max_age_days` is **not** expired (§1). **Ablation:** `>` → `>=`; this test
+      alone fails. Done exactly that — fails alone.
+- [x] `Expired` keeps its bytes and still reports `has_retained_bytes()`. Byte count, storage path
+      and `has_retained_bytes()` all asserted; `record_lifecycle_state` only zeroes bytes for
+      states whose `has_retained_bytes()` is false, and `Expired`'s is true.
+- [x] Every expiry decision takes `now` as a parameter — **no `now_utc()` inside any of them**
       (D7). Grep the new functions; a clock call is a defect even if the test passes.
-- [ ] Nothing deletes in this slice.
+      Grepped: the only `now_utc` hits in `retention.rs` are doc comments. Also stated as a test
+      (a hundred calls, one answer), though the signature is what guarantees it.
+- [x] Nothing deletes in this slice. Grepped `remove_file|remove_dir|mark_purged|purge` in
+      `retention.rs`: no matches. No production caller exists either — the three new functions are
+      called only from `tekstide-core`'s own tests, and no user-facing text says transcripts are
+      removed (§6).
+
+**One decision flagged for review, and it is a §1 call.** `max_age_days == 0` enforces **nothing**
+rather than everything: RFC-045's parser accepts a configured `0`, and `is_bounded()` already
+treats `0` as unbounded, so `is_transcript_expired` defers to it. The literal reading — delete
+everything immediately — is the most destructive available reading of a value a user could type by
+accident. If the RFC wants that reading instead, the honest place to fix it is RFC-045's parser
+refusing `0`, not this function deleting on it. See `qa-evidence.md`.
 
 ## PR-049-B — selection and cleanup
 
