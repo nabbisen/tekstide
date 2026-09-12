@@ -1,6 +1,6 @@
 ---
 title: "Documentation: a 554-line landing page, and a book that includes it"
-status: "Scoped 2026-09-13 by the architect. **PR-DOC-A implemented 2026-09-13** (workflow, `site-url`, the corrected `introduction.md` sentence) — awaiting review, and the Pages source must still be switched to GitHub Actions by the owner before any URL answers. PR-DOC-B and PR-DOC-C not started."
+status: "**PR-DOC-A complete and verified live 2026-09-13** — the book publishes at `https://nabbisen.github.io/tekstide/`; all nine chapter URLs answer 200, every `{{#include}}` renders content from outside `docs/`, and `.git-exclude/` is 404 on the live site. **PR-DOC-B and PR-DOC-C are both unblocked** (C was waiting only on the URL answering). Scoped 2026-09-13 by the architect."
 rfc_file: "none — documentation slice; no behaviour, no security surface. Owner authorized a handoff rather than an RFC."
 target_milestone: "M12"
 created: "2026-09-13"
@@ -120,6 +120,23 @@ the keyboard model hides the thing this application is navigated by.
 - Correct `introduction.md`'s "every chapter is an include" to what is true.
 - **Acceptance:** the book has a stable absolute URL, and `SUMMARY.md` lists every page under
   `docs/src/` — the guideline's own §4 note.
+
+### PR-DOC-A — verified live, 2026-09-13
+
+The owner switched Pages to GitHub Actions; two workflow runs have succeeded (≈20s each). **A's
+acceptance is now fully discharged**, including the half the implementer correctly declined to
+claim:
+
+| Checked against the live site | Result |
+| --- | --- |
+| `https://nabbisen.github.io/tekstide/` | **HTTP 200**, serving `<title>Introduction - Tekstide</title>` |
+| All **nine** chapter URLs | 200, every one |
+| `{{#include}}` content from outside `docs/` actually renders | README's `cargo install tekstide`, the `0.18.0` changelog entry, and `ARCHITECTURE.md`'s synthetic-input note all present |
+| `404.html`'s `<base href>` | `/tekstide/` — and its assets, which are **relative** and content-hashed in mdBook 0.5.4, all resolve. The `site-url` change does exactly what PR-DOC-A measured. |
+| `.git-exclude/` on the live site | **404.** Nothing internal is published. |
+| Every `{{#include}}` target | resolves to a **tracked** file — no chapter reaches untracked or git-excluded content |
+
+**The URL may now be written into documents a reader sees**, which is what C was waiting for.
 
 ### PR-DOC-B — real user chapters
 
