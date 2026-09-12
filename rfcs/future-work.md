@@ -781,6 +781,17 @@ owned by different terminals — a concurrency design, not a rider on RFC-049 (r
 **Trigger to revisit:** a report of retained bytes materially above a budget, or many concurrently
 capturing runs becoming common.
 
+### A corrupt `recent-projects.json` silently resets every project's identity — found at RFC-050's acceptance
+
+`main.rs` renames a corrupt recent-project file aside, prints the error to stderr, starts with an empty
+list, and **saves that empty list**. Every project then reopens under a new id: every restored trust
+decision is gone, and every transcript directory becomes unclaimable (RFC-050 D6′). Nothing on screen
+says any of this happened. RFC-050 counts and shows the unclaimed bytes; it does not repair the store.
+Recovering it, and saying so on screen, is RFC-047's shape applied to a different store.
+
+**Trigger to revisit:** the first report of trust or transcripts vanishing after a crash, or any
+slice that touches `RecentProjectStore`.
+
 ### The test gate runs only on developer machines — no CI, noticed when the first workflow landed
 
 `0.18.0` shipped from a repository with **no `.github/workflows` directory at all**. RFC-049's

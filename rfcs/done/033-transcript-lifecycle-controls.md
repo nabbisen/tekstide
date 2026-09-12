@@ -19,7 +19,7 @@ shows none of the earlier transcripts and purge removes none of them; they stay 
 this way from `0.12.0` through `0.18.0`.** This RFC's gate asserted the bytes were gone, but only for
 transcripts a single process had launched — this document's own failure mode (*"the UI would then
 report zero retained"*), reached through records that were never loaded rather than records removed
-without their bytes. The fix is to be scoped as its own RFC.
+without their bytes. The fix is [RFC-050](../accepted/050-transcripts-from-earlier-runs.md).
 Target milestone: M11
 Date: 2026-08-18
 

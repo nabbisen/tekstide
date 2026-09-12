@@ -1,6 +1,6 @@
 # RFC-050: Transcripts From Earlier Runs
 
-Status: **Proposed 2026-09-13.** Scoped at the owner's word after RFC-049 PR-049-C stopped on request
+Status: **Accepted by the human owner 2026-09-13.** **D1–D9 decided by the architect on acceptance** — see the end; **D6 is restated on a measurement**, which dissolves its open question. Proposed the same day, scoped at the owner's word after RFC-049 PR-049-C stopped on request
 387, which found that a project knows only the transcripts launched since it was opened in the
 current process. That makes RFC-033's purge, shipped in `0.12.0`, remove nothing from earlier runs,
 while its confirmation says it removes everything retained for the project.
@@ -157,3 +157,38 @@ the configured age"*) becomes true.
 - A symlinked run directory, a non-UUID name, and a stray file are each skipped and not deleted.
 - The app-wide figure includes a closed project's transcripts.
 - The request-387 disclosure is gone, and the changelog carries the defect entry.
+
+## Decided on acceptance (2026-09-13)
+
+**D1–D5 and D7–D9 as recommended.** D6 restated below, plus four details the recommendations left
+open.
+
+### D6′ — the unclaimable directory comes from a reset, not a removal
+
+**The proposal's premise was wrong, and the owner's open question dissolves with it.**
+`remove_recent_project` has **no caller in the GUI**, so no user act removes a project from the list.
+The real source was measured in `main.rs`: a corrupt `recent-projects.json` is renamed aside, the
+error goes to stderr only, the app starts with an empty list, and it **saves that empty list**.
+Every project then reopens under a new id, and **every** transcript directory becomes unclaimable at
+once, with nothing on screen. A deleted state file does the same.
+
+**Decided:**
+
+- Unclaimable directories are never loaded and never deleted in-app, as D6 said. Trust Settings shows
+  their bytes and where they are. **After a reset that is every transcript the user has**, so this
+  line is the main surface, not a corner case.
+- **If a removal act is ever added**, it must say that the project's transcripts stay on disk.
+- **The silent reset itself is not fixed here.** It also drops every restored trust decision, and
+  recovering the recent-project store is RFC-047's problem shape, not this one. Reserved in
+  `future-work.md`.
+
+### Details decided
+
+- **A writer that cannot take its lock does not capture.** The run starts with capture disabled and
+  its detail says why, as in RFC-049 D4′. It never writes unlocked.
+- **The load-time probe takes the lock and drops it at once.** It never holds a lock past the probe.
+- **The loader takes the state root as a parameter**, as the launch does, and resolves it through the
+  same split as `resolve_agent_run_state_dir`. **No test may enumerate the real state root.**
+- **Slices:** A (writer lock, `AgentRunId` validation, liveness by origin; core, no loading) →
+  B (loader, enumeration safety, figures, purge honouring the lock) → C (the unclaimed-bytes line,
+  the disclosure removed, the changelog defect entry, and a restart walkthrough).
