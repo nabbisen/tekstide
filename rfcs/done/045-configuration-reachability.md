@@ -267,6 +267,17 @@ registry is `NavigationAction`, and that is where `ReloadConfiguration` lives, w
 over every rule's `default_binding`. The requirement that mattered — Help and `--help` by
 construction — is met literally: the variant does not compile without its catalog and coverage arms.
 
+**A correction found after closure (response 381, RFC-049 PR-049-A).** Response 378 recorded that
+`transcript_retention_days = 0` is "accepted… semantically the tightest *reduce*" — i.e. delete
+everything. **`TranscriptRetentionLimits::is_bounded()` already treated `0` as *unbounded*** — delete
+nothing — and had since before RFC-045. Two opposite semantics for one value, and the reviewer
+asserted one without reading the other.
+
+RFC-049 PR-049-A resolved it toward keeping, which is correct under its own §1. **The value itself is
+refused at RFC-049 PR-049-C**: a value the file accepts and the product ignores is this RFC's own D3′
+failure one level down, and `transcript_capture_declined` already expresses zero retention, so
+refusing `0` strands no need.
+
 ### Settled details an implementer must not inherit
 
 - **Boot order:** the store loads **before** CLI project paths are opened, so D6's limit applies to

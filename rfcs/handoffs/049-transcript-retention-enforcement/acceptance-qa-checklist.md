@@ -65,6 +65,12 @@ refusing `0`, not this function deleting on it. See `qa-evidence.md`.
       the absent process, not the refusal value.
 - [ ] The refusal's wording meets RFC-047 §5: states the fact, implies no danger, implies no fix
       available from there.
+- [ ] **RFC-045's parser refuses `transcript_retention_days = 0`**, naming the transcript
+      opt-out as the way to express what the user probably meant. Required at response 381:
+      `is_bounded()` already treats `0` as *unbounded* while response 378 called it the tightest
+      *reduce* — two opposite semantics for one value. PR-049-A resolved it toward keeping (§1),
+      correctly; but a **value** the file accepts and the product ignores is RFC-045 D3′'s own
+      failure one level down, and `transcript_capture_declined` already expresses zero retention.
 - [ ] D5: the summary uses the session's configured limits. **Ablation:** restore
       `agent_run_default()`.
 
