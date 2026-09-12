@@ -607,6 +607,15 @@ fn generic_args() -> CatalogArgs<'static> {
             "key",
             &tekstide_core::text_safety::quote_untrusted("agent.fixture_key"),
         )
+        // RFC-045 PR-045-C: the first-use confirmation's `$executable` --
+        // the path `resolve_executable` produced, read out of the user's
+        // own file, so untrusted and routed through the real
+        // `quote_untrusted` here like every other one above. The same
+        // message's `$path` reuses the `path` arg already present.
+        .untrusted(
+            "executable",
+            &tekstide_core::text_safety::quote_untrusted("/fixture/bin/ai-cli"),
+        )
 }
 
 fn shipped_additional_locales() -> Vec<String> {

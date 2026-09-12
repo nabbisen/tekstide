@@ -658,3 +658,58 @@ fn reload_with_an_unreadable_file_is_an_error_naming_the_path_but_not_its_conten
     // Running as root (some CI/dev containers) makes permissions unenforceable;
     // in that case the read succeeds and this test has nothing to assert.
 }
+
+/// RFC-045 PR-045-C: `reload` holds every sensitive change back, and
+/// this is the only way one is released. Proves the two halves that
+/// matter: the candidate really does carry the held-back value (it is
+/// nowhere else), and applying one field leaves the other alone — the
+/// property that makes RFC-023's own asymmetry expressible, since a
+/// reload can hold an increase and a reduce at the same time and they
+/// are released by different acts.
+#[test]
+fn a_confirmed_security_sensitive_field_can_be_applied_one_at_a_time() {
+    let temp = TestDir::new("apply-pending");
+    fs::write(
+        temp.config_file(),
+        "[agent]\ntranscript_retention_days = 30\n",
+    )
+    .unwrap();
+    let (mut store, _) = ConfigStore::load(temp.config_file());
+
+    fs::write(
+        temp.config_file(),
+        "[agent]\ntranscript_retention_days = 365\n\n\
+         [agent.profile.codex]\ncommand = \"codex\"\n",
+    )
+    .unwrap();
+    let outcome = store.reload().unwrap();
+    assert_eq!(
+        outcome.pending_security_sensitive_changes,
+        vec![
+            SecuritySensitiveField::AgentTranscriptRetentionDays,
+            SecuritySensitiveField::AgentProfiles,
+        ]
+    );
+    assert_eq!(
+        store.current().agent.transcript_retention_days,
+        30,
+        "nothing is applied by the reload itself"
+    );
+    assert_eq!(
+        outcome.candidate.agent.transcript_retention_days, 365,
+        "the held-back value exists only on the candidate"
+    );
+
+    store.apply_security_sensitive_field(
+        SecuritySensitiveField::AgentTranscriptRetentionDays,
+        &outcome.candidate,
+    );
+    assert_eq!(store.current().agent.transcript_retention_days, 365);
+    assert!(
+        store.current().agent.profiles.is_empty(),
+        "applying one field must not carry the other, unconfirmed one along with it"
+    );
+
+    store.apply_security_sensitive_field(SecuritySensitiveField::AgentProfiles, &outcome.candidate);
+    assert!(store.current().agent.profiles.contains_key("codex"));
+}

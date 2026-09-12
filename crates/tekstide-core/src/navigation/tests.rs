@@ -424,6 +424,7 @@ fn advertised_bindings_are_exactly_the_live_ones() {
             "Ctrl+Alt+D",
             "Ctrl+Alt+K",
             "Ctrl+Alt+B",
+            "Ctrl+Alt+C",
         ],
     );
 
@@ -443,4 +444,32 @@ fn advertised_bindings_are_exactly_the_live_ones() {
             rule.action
         );
     }
+}
+
+/// RFC-045 PR-045-C, D5: `Ctrl+Alt+C` -- checked mechanically against
+/// every other rule, reserved or not, the same shape every other real
+/// binding here already uses. The chord was the handoff's to pick "from
+/// what is free," and this is what makes "free" a measured claim rather
+/// than a reading of the list.
+#[test]
+fn reload_configuration_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::ReloadConfiguration)
+        .expect("Reload Configuration should have a keyboard policy");
+
+    assert_eq!(rule.default_binding, Some("Ctrl+Alt+C"));
+    assert_eq!(rule.status, KeybindingStatus::Candidate);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::ReloadConfiguration)
+        .filter(|other| other.default_binding == rule.default_binding)
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Alt+C must not collide with any other rule, reserved or not: {collisions:?}"
+    );
 }

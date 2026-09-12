@@ -1,15 +1,68 @@
 # Changelog
 
-## 0.18.0 - A Storage Engine, Two Minors Newer, Under The Audit Store
+## 0.18.0 - The Configuration File Does Something
 
 Status: unreleased.
 
-Maintenance, not a feature: 72 in-semver dependency upgrades, and one manifest edit that shrank the
-dependency graph by two crates. Scheduled deliberately after RFC-047 and RFC-046 closed, so a
-storage-engine change would not arrive entangled with the corruption-recovery and audit-trail
-behaviour those RFCs were still writing. Handoff: `rfcs/handoffs/dependency-currency-0.18.md`.
+**Before this release, Tekstide never read your configuration file.** RFC-023 shipped a complete
+configuration system — path resolution, parsing, validation, diagnostics, a security-sensitive
+reload rule — and nothing in the application constructed any of it. You could write a valid
+`config.toml` and the product would behave exactly as if you had not. RFC-045.
+
+### Added — a configuration file that is read, and says so when it is not
+
+- **Tekstide reads `$XDG_CONFIG_HOME/tekstide/config.toml` at startup.** A missing file is normal.
+  An unreadable or invalid one still starts the application with built-in defaults — and **the
+  project board now says so**, naming the key that broke the file, rather than leaving you to
+  wonder whether it was read. The line is absent when there is nothing wrong.
+
+- **What a configuration file can change today**: which AI CLI profile the launch button runs
+  (`[agent] default_profile`, with the profile defined in `[agent.profile.<id>]`), how many agent
+  runs a project allows (`[resources] agent_run_limit`), and how many days transcripts are kept
+  (`[agent] transcript_retention_days`).
+
+- **`Ctrl+Alt+C` re-reads the file** without restarting. RFC-023 specified "a command or API call"
+  and only the API call existed.
+
+### Changed — every other key is refused by name, not quietly ignored
+
+RFC-023's schema defined roughly thirty keys, and **none of them had a consumer**: fonts, theme,
+keybindings, scrollback, concurrency limits, and more were parsed into fields nothing read. A
+profile's `args` were parsed and dropped, so `args = ["--model", "x"]` validated, appeared, launched,
+and silently did nothing.
+
+**A key the file accepts and the product ignores is a lie you read**, so each of those keys is now
+**refused by name**, with a diagnostic saying it has no effect yet. Each returns to the file in the
+same change as the code that reads it — not before. A key this version has simply never heard of (a
+typo, or a key from a newer Tekstide) still loads with a warning, and the board names it, because
+that is the case where nothing is wrong with the file itself.
+
+Three keys are refused permanently rather than "not yet", and say why: configuration cannot grant
+workspace trust, cannot disable multiline-paste confirmation, and cannot disable destructive-command
+approval. Those are decisions per-use acts exist to make, and no file may make them in advance.
+
+### Added (security) — nothing from a configuration file runs without a deliberate act
+
+- **The first launch of a configuration-defined AI CLI asks first**, and the confirmation names the
+  **executable path it actually resolved to** and the file that defined it — never only the display
+  name, which is text the file itself supplies. A profile calling itself "Claude Code" while
+  pointing somewhere else is exactly what this is for. Once per session, not once per launch.
+
+- **A reload that weakens a security-relevant setting waits for the same kind of confirmation.** One
+  that tightens applies immediately — tightening never needs permission. Changing a profile's
+  definition re-arms the first-use question, because the same name now means a different executable.
+
+- **Confirming is recorded** in the durable audit trail: that a sensitive setting was weakened, and
+  that it was authorized. The record says the direction, never which setting or what value — there
+  is no field on it that could.
 
 ### Dependencies
+
+Maintenance, alongside the feature above: 72 in-semver dependency upgrades, and one manifest edit
+that shrank the dependency graph by two crates. Scheduled deliberately after RFC-047 and RFC-046
+closed, so a storage-engine change would not arrive entangled with the corruption-recovery and
+audit-trail behaviour those RFCs were still writing. Handoff:
+`rfcs/handoffs/dependency-currency-0.18.md`.
 
 - **72 packages upgraded, 2 removed, 1 added, 0 downgraded** — a plain `cargo update` plus the
   `rusqlite` manifest edit below, checked as one before/after span rather than per step (the first

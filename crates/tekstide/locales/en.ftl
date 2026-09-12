@@ -310,6 +310,42 @@ project-board-configuration-ignored = Configuration: ignored, defaults in force.
 # with three typos is a file whose author mistyped three things.
 project-board-configuration-unknown-key = Configuration: { $key } is not a setting this version knows, and has no effect.
 
+# RFC-045 PR-045-C, D5: the `Ctrl+Alt+C` command RFC-023 §Hot Reload
+# specified and never got. Named for what it does to the file, not for
+# the dialog it may raise -- a reload that changes nothing sensitive
+# raises none.
+keyboard-help-reload-configuration = Re-read the configuration file
+
+# RFC-045 PR-045-C, §5 -- **a security control, not a formatting
+# preference.** `display_name` is user-controlled text a project can
+# ship, so a profile calling itself "Claude Code" while pointing at
+# /tmp/x is the exact spoof this confirmation exists to make visible.
+# The body therefore names `$executable`, the path `resolve_executable`
+# actually produced, and `$path`, the file the profile came from. Both
+# are routed through `text_safety::quote_untrusted` before reaching this
+# key. RFC-047 §5's wording constraints apply: state the fact, do not
+# imply danger this profile does not carry, do not imply the user can
+# fix anything from this dialog.
+configured-profile-dialog-title = Launch a configured AI CLI?
+configured-profile-dialog-body = Your configuration file asks to launch { $executable }. It was defined in { $path }. Nothing from that file has run yet this session.
+configured-profile-dialog-launch = Launch it
+configured-profile-dialog-cancel = Cancel
+
+# RFC-045 PR-045-C, D4's reload half. Only *weakening* changes reach
+# this dialog: RFC-023's asymmetry applies a tightening change directly,
+# so a user who only tightened their settings is never asked anything.
+# Says how many are waiting rather than naming them, because the audit
+# record deliberately carries no field name either (D7/§4) and a dialog
+# that named fields the record cannot would promise a traceability that
+# does not exist.
+configuration-reload-dialog-title = Apply weakened settings?
+configuration-reload-dialog-body = { $count ->
+    [one] Your configuration file changed {$count} security-relevant setting in a way that allows more than before.
+   *[other] Your configuration file changed {$count} security-relevant settings in ways that allow more than before.
+}
+configuration-reload-dialog-apply = Apply them
+configuration-reload-dialog-cancel = Leave them unapplied
+
 # RFC-017 PR-017-E: response 150 Required -- `session_bar.rs`'s entries
 # were hardcoded English (`slot_label`/`status_label`), the same shape
 # `CountDisplay::label()`/`AttentionState::label()` are banned from this

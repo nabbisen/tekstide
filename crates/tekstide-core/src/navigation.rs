@@ -72,6 +72,23 @@ pub enum NavigationAction {
     /// accelerator alongside the real button on the Project Board, not
     /// the only route to it.
     OpenFolderBrowser,
+    /// RFC-045 PR-045-C, D5: re-reads and re-validates the user's
+    /// `config.toml`. RFC-023 §Hot Reload specifies "a command or API
+    /// call"; the API call existed (`ConfigStore::reload`) and no
+    /// command did, so a file a user edited stayed unread until restart.
+    ///
+    /// **A global action rather than a surface-local one, and the RFC's
+    /// own wording is worth reconciling here.** D5 says "one action in
+    /// RFC-044's surface-action registry"; RFC-044's `SurfaceAction`
+    /// registry is scoped to actions *within* a surface, each bound to a
+    /// bare key valid only there (Enter, Space, Delete). Reloading
+    /// configuration belongs to no surface -- and the RFC's own settled
+    /// details call for "a chord," which is this registry's shape, not
+    /// that one's. Both registries feed the Help modal and `--help`
+    /// through exhaustive matches, so D5's actual requirement -- that it
+    /// appear there *by construction rather than by remembering* -- is
+    /// met either way.
+    ReloadConfiguration,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -328,6 +345,17 @@ impl KeybindingPolicy {
                 KeybindingRule::new(
                     NavigationAction::OpenFolderBrowser,
                     Some("Ctrl+Alt+B"),
+                    KeybindingStatus::Candidate,
+                ),
+                // RFC-045 PR-045-C, D5. `Ctrl+Alt+C` for
+                // *configuration*, in the same `Ctrl+Alt+<letter>` shape
+                // every other action here uses -- unclaimed by any other
+                // rule, checked mechanically by
+                // `reload_configuration_shortcut_is_a_candidate_that_collides_with_no_other_rule`
+                // rather than by reading the list.
+                KeybindingRule::new(
+                    NavigationAction::ReloadConfiguration,
+                    Some("Ctrl+Alt+C"),
                     KeybindingStatus::Candidate,
                 ),
             ],

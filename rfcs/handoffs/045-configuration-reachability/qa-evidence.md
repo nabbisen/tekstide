@@ -263,3 +263,117 @@ whole, having been filtered to configuration tests up to that point.
 `fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`:
 clean. Three consecutive full-workspace runs, output redirected to files, at a settled load average
 of 3.42: **496 + 4 + 756, green every time.** No flake this pass.
+
+## PR-045-C — the deliberate act
+
+**Between the file and the process there is now always one click that names the executable.** D4's
+two triggers, D5's command, D8's launch, D7's producers as built.
+
+### One core addition, and why it was needed
+
+`ConfigStore::reload` holds *every* security-sensitive change back, because RFC-023 had no
+confirmation surface to release one from. D4 builds that surface, so the store needed a way to say
+*this field, now*: `ConfigStore::apply_security_sensitive_field(field, &candidate)`, plus
+`ConfigReloadOutcome::candidate` — the freshly parsed document, which is **the only place a
+held-back value exists** (`current()` does not have it).
+
+One field per call, never "apply the candidate": a single reload can hold an increase and a reduce
+at once, and RFC-023's asymmetry releases them by different acts — a whole-document swap would carry
+the unconfirmed one along with the confirmed one. The caller passes the candidate back rather than
+the store retaining it, because a retained candidate goes stale on the next reload with nothing in
+the type system to say so.
+
+### D5: the command, and a reconciliation the RFC's own wording needs
+
+`NavigationAction::ReloadConfiguration`, bound to **`Ctrl+Alt+C`**, checked mechanically against
+every other rule (`reload_configuration_shortcut_is_a_candidate_that_collides_with_no_other_rule`).
+
+**D5 says "one action in RFC-044's surface-action registry"; this is in the global
+`NavigationAction` registry instead**, and the RFC's own settled details are what decide it: they
+call for "a chord", and `SurfaceAction` entries are surface-scoped, each bound to a bare key valid
+only within one surface (Enter, Space, Delete). Reloading configuration belongs to no surface. Both
+registries feed Help and `--help` through exhaustive matches, so D5's actual requirement — that it
+appear there *by construction rather than by remembering* — is met either way. **It was met
+literally by construction here**: adding the variant failed to compile until `action_catalog_key`
+and `control_coverage` both had arms for it.
+
+`control_coverage` answers `KeyboardOnly` with a reason: RFC-045's own "What this RFC must not
+become" scopes the surface to "the board line and two confirmations", and a reload button is surface
+for a command M13's file watcher is scheduled to make unnecessary.
+
+### Required tests, each ablated
+
+| Box | Ablation | Result |
+| --- | --- | --- |
+| §3 invariant | delete the `confirmed_config_profiles.contains` check | `a_configured_profile_with_no_confirmation_on_record_launches_nothing` fails, plus the composition test below |
+| §5 resolved path | make the modal carry `display_name` instead | `the_first_use_confirmation_names_the_resolved_executable_not_the_display_name` **fails alone** |
+| confirm records `Authorized`+`Applied` | — | read back from a real store |
+| decline records nothing, launches nothing | — | and leaves the profile unconfirmed |
+| reload: reduce applies directly, records `_reduce` | treat every direction as an increase | `a_reducing_reload_applies_directly_and_records_reduce` fails |
+| reload: increase waits, records `_increase` on confirm | apply increases without confirming | the three tests of that gate fail |
+| `AgentProfiles` pending clears the confirmed set | — | split from the re-arm assertion, see below |
+| D7: nothing added to the record | — | asserted on the **records**, not the call sites |
+
+**The §3 ablation fails two tests, and the second is deliberate.**
+`a_cleared_confirmed_set_re_arms_the_first_use_gate` is labelled in its own doc comment as a
+*composition*: it asserts nothing the two tests it builds on do not already assert separately, and
+exists because "re-arms first use" is the behaviour a user meets and should be findable end to end.
+It therefore fails if either underlying behaviour breaks — which is why neither is tested only
+there. The first draft had this as one test asserting both clearing *and* re-arming; split after
+the ablation showed the RFC-046 response-367 shape.
+
+**Two other couplings were found by ablation and removed**: the shared fixture originally opened the
+confirmation by pressing the real launch action, so deleting the gate failed all five first-use
+tests; it now constructs the dialog through `configured_profile_confirmation`, the same function
+production builds it with, leaving §3's test the only one that presses launch. And §3's test
+originally asserted the modal's *contents*, which made a §5 regression fail under §3's name.
+
+### D7/§4, asserted on the records rather than the call sites
+
+The checklist says to grep `sensitive_config_changed_record`'s call sites for new arguments. The
+producers take **no** arguments at all, so there is nothing a call site could pass — which makes a
+grep a weak check. `no_configuration_value_or_field_name_reaches_the_change_record` reloads a file
+whose `display_name` and `command` are both a distinctive sentinel, then asserts on every
+`SensitiveConfigChanged` record actually written: the sentinel appears in none of them, and
+`subject_ref`/`adapter_profile_ref` are `None`. RFC-023's acceptance criterion — *no configuration
+values reach durable audit* — still holds.
+
+### Live evidence: captured, first attempt
+
+**`rfcs/handoffs/045-configuration-reachability/evidence/pr-045-c/`**, against the release binary
+with `XDG_CONFIG_HOME=$(mktemp -d)` **and `XDG_STATE_HOME=$(mktemp -d)`** — the second because the
+project board renders recent projects from the state home, and a committed image must show throwaway
+state only.
+
+- `00-first-use-confirmation-names-the-resolved-executable.png` — `Ctrl+Alt+A` on a project with a
+  configured `default_profile` whose `display_name` is **"Demo AI CLI"**. The dialog names
+  `/tmp/tmp.R8NZTdBZBv/demo-ai-cli` and the file it came from; **"Demo AI CLI" appears nowhere**.
+  §5, live. Focus defaults to `> Cancel`.
+- `01-confirming-launches-the-configured-profile.png` — Tab, Enter: `Terminal 1 (Hidden) — Running`.
+
+**Read back from that session's own real audit store**, which is the strongest form this evidence
+takes:
+
+```
+project_added            | applied    | project_add
+sensitive_config_changed | authorized | config_policy_increase
+sensitive_config_changed | applied    | config_policy_increase
+managed_process_lifecycle| authorized | managed_agent_launch   (adapter_profile_ref = demo)
+managed_process_lifecycle| started    | managed_agent_launch
+```
+
+The confirmation's two-stage record, then RFC-046's launch trail for a **configuration-defined**
+profile — the two RFCs meeting for the first time. `subject_ref` and `adapter_profile_ref` are
+`None` on both config records: §4 holding in a real store, not only in a test.
+
+**`wtype` reached the application on the first attempt.** RFC-047 PR-047-C spent six rounds
+establishing that it did not, and the reviewer reproduced that finding independently; the
+bounded-evidence rule was invoked to close it. It worked here immediately, with the window freshly
+launched and confirmed focused. The environment has moved since (kernel 7.2.3 → 7.2.4 between
+sessions). **Recorded as a fact, not a theory**: the documented gap may be closable, and the next
+slice needing a live capture should try before assuming it cannot.
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`:
+clean.

@@ -48,6 +48,85 @@ fn state_with_configuration(
     )
 }
 
+/// RFC-045 PR-045-C: a `State` whose configured `default_profile` points
+/// at a real, executable file, with the first-use confirmation already
+/// open — every test below starts from the moment a user pressed the
+/// launch key and met the dialog.
+fn state_with_a_configured_profile(label: &str) -> (State, PathBuf, PathBuf) {
+    state_with_a_configured_profile_named(label, "configured")
+}
+
+fn state_with_a_configured_profile_named(
+    label: &str,
+    display_name: &str,
+) -> (State, PathBuf, PathBuf) {
+    let bin_dir = fresh_project_dir(&format!("configured-profile-{label}-bin"));
+    let executable = bin_dir.join("configured-cli");
+    std::fs::write(&executable, "#!/bin/sh\n").unwrap();
+    let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions).unwrap();
+
+    let (configuration, config_home) = configuration_from_file(
+        &format!("configured-profile-{label}"),
+        &format!(
+            "[agent]\ndefault_profile = \"configured\"\n\n\
+             [agent.profile.configured]\ndisplay_name = {display_name:?}\ncommand = {:?}\n",
+            executable.to_str().unwrap()
+        ),
+    );
+
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir(&format!("configured-profile-{label}-project"));
+    app_shell.add_project_from_path(&project_dir).unwrap();
+    let state = state_with_configuration(app_shell, configuration);
+
+    (state, executable, config_home)
+}
+
+/// Opens the confirmation **without** going through the launch gate, by
+/// calling the one function production builds it with.
+///
+/// Deliberate: a test about what confirming or declining *does* must not
+/// also depend on the gate that opens the dialog, or deleting that gate
+/// would fail every one of them under its own name instead of under
+/// §3's. `a_configured_profile_with_no_confirmation_on_record_launches_
+/// nothing` is the one test that owns the gate, and it presses the real
+/// launch action to get there.
+fn open_first_use_confirmation(state: &mut State) {
+    let profile = state
+        .configuration
+        .default_profile()
+        .cloned()
+        .expect("fixture: a configured default profile");
+    let source_file = state
+        .configuration
+        .config_file()
+        .expect("fixture: a real config file")
+        .to_path_buf();
+    state.modal = Some(ModalContent::ConfiguredProfileFirstUse(
+        super::configured_profile_confirmation(&profile, source_file),
+    ));
+}
+
+/// Every `SensitiveConfigChanged` outcome in a real store — the
+/// read-back these tests assert on rather than trusting that a producer
+/// was called.
+fn config_change_outcomes(
+    store: &tekstide_core::audit::AuditStore,
+) -> Vec<tekstide_core::audit::AuditOutcome> {
+    store
+        .query(&tekstide_core::audit::AuditQuery {
+            family: Some(tekstide_core::audit::AuditEventFamily::SensitiveConfigChanged),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
+        .expect("querying the real audit store must succeed")
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record.outcome)
+        .collect()
+}
+
 /// A real `config.toml` in a real, throwaway `XDG_CONFIG_HOME`, loaded
 /// through the real boot path. **Not `$HOME`**: the production resolver
 /// reads the environment, and the pack requires committed evidence to
@@ -5329,68 +5408,24 @@ fn a_configured_transcript_retention_reaches_a_real_launch_plans_privacy_policy(
     );
 }
 
-/// The box that keeps this slice honest: **a configuration-defined
-/// `default_profile` is resolved and does not launch.** Nothing
-/// configuration-defined executes before PR-045-C puts a confirmation
-/// in front of it (§3). Ablate by wiring `default_profile` into
+// --- RFC-045 PR-045-C: the deliberate act ------------------------------
+
+/// **§3's invariant, and the box PR-045-B carried as "not yet."** That
+/// slice asserted a configuration-defined profile does not launch
+/// *because nothing had wired it*; this one asserts it does not launch
+/// **because it has not been confirmed**, which is the property that has
+/// to survive from here on: between the file and the process there is
+/// always one click that names the executable.
+///
+/// Ablation: delete the `confirmed_config_profiles.contains` check in
 /// `attempt_agent_run_launch` and watch this fail.
 #[test]
-fn a_configured_default_profile_is_resolved_but_does_not_launch_in_this_slice() {
-    let bin_dir = fresh_project_dir("config-default-profile-bin");
-    let executable = bin_dir.join("configured-cli");
-    std::fs::write(&executable, "#!/bin/sh\n").unwrap();
-    let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
-    permissions.set_mode(0o700);
-    std::fs::set_permissions(&executable, permissions).unwrap();
+fn a_configured_profile_with_no_confirmation_on_record_launches_nothing() {
+    let (mut state, _executable, _config_home) = state_with_a_configured_profile("no-confirmation");
 
-    let (configuration, _config_home) = configuration_from_file(
-        "config-default-profile",
-        &format!(
-            "[agent]\ndefault_profile = \"configured\"\n\n\
-             [agent.profile.configured]\ncommand = {:?}\n",
-            executable.to_str().unwrap()
-        ),
-    );
+    super::attempt_agent_run_launch(&mut state)
+        .expect("an unconfirmed configured profile opens the confirmation rather than failing");
 
-    let resolved = configuration
-        .default_profile()
-        .expect("D8: the default profile must be resolved at boot");
-    assert_eq!(resolved.id, "configured");
-
-    // The two profiles are distinguishable by their refusals, and that
-    // is what makes this assertion sharp. The built-in profile declares
-    // `MayDiscoverWorkspaceFiles`, so in a fresh, untrusted project it
-    // is refused by RFC-032's trust gate before anything spawns. The
-    // configured profile declares `NoKnownWorkspaceDiscovery`
-    // (`to_ai_cli_profile`'s only possible value) and would sail past
-    // that same gate -- so if `default_profile` were wired into the
-    // launch path, this call would **not** produce this refusal.
-    assert!(
-        matches!(
-            resolved.workspace_discovery_policy,
-            tekstide_core::agent::AiCliWorkspaceDiscoveryPolicy::NoKnownWorkspaceDiscovery { .. }
-        ),
-        "precondition: the configured profile must be the one that would pass the trust gate, \
-         or this test proves nothing about which profile was used"
-    );
-
-    let mut app_shell = ApplicationShell::new();
-    let project_dir = fresh_project_dir("config-default-profile-project");
-    app_shell.add_project_from_path(&project_dir).unwrap();
-    let mut state = state_with_configuration(app_shell, configuration);
-
-    let refusal = super::attempt_agent_run_launch(&mut state)
-        .expect_err("the built-in profile is still what this slice launches, and it is refused");
-    assert!(
-        matches!(
-            refusal,
-            AgentRunLaunchRefusal::Validation(
-                tekstide_core::agent::AgentRunLaunchValidationError::WorkspaceDiscoveryBlocked { .. }
-            )
-        ),
-        "PR-045-B must not launch a configuration-defined profile -- that needs PR-045-C's \
-         first-use confirmation in front of it. Got {refusal:?}"
-    );
     assert!(
         state
             .app_shell
@@ -5399,8 +5434,460 @@ fn a_configured_default_profile_is_resolved_but_does_not_launch_in_this_slice() 
             .unwrap()
             .agent_runs()
             .is_empty(),
-        "nothing configuration-defined may execute in this slice"
+        "nothing configuration-defined may execute without a deliberate act"
     );
+    assert!(state.terminal_panes.is_empty(), "and no process, either");
+
+    let Some(ModalContent::ConfiguredProfileFirstUse(modal)) = &state.modal else {
+        panic!(
+            "the confirmation must be what the user meets: {:?}",
+            state.modal
+        );
+    };
+    // Only the *identity* is checked here. What the confirmation says
+    // is §5's property, asserted by
+    // `the_first_use_confirmation_names_the_resolved_executable_not_the_
+    // display_name` -- pinning the body here too would make a §5
+    // regression fail under this test's name.
+    assert_eq!(modal.profile_id, "configured");
+
+    // Asking again does not smuggle a launch past the gate either.
+    super::attempt_agent_run_launch(&mut state).expect("still a confirmation, still not an error");
+    assert!(state.terminal_panes.is_empty());
+}
+
+/// **§5 is a security control.** `display_name` is user-controlled text,
+/// so a profile calling itself "Claude Code" while pointing somewhere
+/// else is exactly the spoof this confirmation exists to make visible.
+/// The body must carry the **resolved path** and the **source file**;
+/// carrying only the display name must fail this test.
+#[test]
+fn the_first_use_confirmation_names_the_resolved_executable_not_the_display_name() {
+    let (mut state, executable, config_home) =
+        state_with_a_configured_profile_named("spoof", "Claude Code");
+    open_first_use_confirmation(&mut state);
+
+    let Some(ModalContent::ConfiguredProfileFirstUse(modal)) = &state.modal else {
+        panic!(
+            "precondition: the confirmation must be open: {:?}",
+            state.modal
+        );
+    };
+    let body = super::configured_profile_dialog_body(&state.catalog, modal);
+
+    assert!(
+        body.contains(executable.to_str().unwrap()),
+        "§5: the body must name the path resolve_executable produced: {body}"
+    );
+    assert!(
+        body.contains(
+            &config_home
+                .join("tekstide")
+                .join("config.toml")
+                .display()
+                .to_string()
+        ),
+        "§5: the body must name the file the profile came from: {body}"
+    );
+    assert!(
+        !body.contains("Claude Code"),
+        "§5: a body carrying only the display name is the spoof this dialog exists to prevent \
+         -- it may show the name too, but never instead: {body}"
+    );
+}
+
+/// Confirming is the deliberate act: it launches, it marks the profile
+/// confirmed for the session, and it records `Authorized` then `Applied`
+/// (`record_sensitive_config_policy_increase`'s own two-stage shape),
+/// read back from a real store.
+#[test]
+fn confirming_the_first_use_launches_and_records_authorized_then_applied() {
+    let state_dir = temp_audit_state_dir("configured-profile-confirm");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+    let (mut state, _executable, _config_home) = state_with_a_configured_profile("confirm");
+    open_first_use_confirmation(&mut state);
+
+    let _ = super::update(&mut state, Message::ConfiguredProfileLaunchPressed);
+
+    assert_eq!(
+        state.terminal_panes.len(),
+        1,
+        "confirming must actually launch the profile the user just confirmed"
+    );
+    assert!(
+        state
+            .configuration
+            .confirmed_config_profiles
+            .contains("configured"),
+        "the confirmation is session-scoped and must be remembered for this session"
+    );
+
+    let store = super::open_audit_store(&state_dir, Vec::new())
+        .expect("the real store this confirmation just wrote to must still open");
+    let outcomes = config_change_outcomes(&store);
+    assert!(
+        outcomes.contains(&tekstide_core::audit::AuditOutcome::Authorized)
+            && outcomes.contains(&tekstide_core::audit::AuditOutcome::Applied),
+        "the confirming act must be recorded as Authorized then Applied: {outcomes:?}"
+    );
+}
+
+/// Declining launches nothing, records nothing, and leaves the profile
+/// unconfirmed — a dismissal is not an answer, so the next launch asks
+/// again.
+#[test]
+fn declining_the_first_use_launches_nothing_and_records_nothing() {
+    let state_dir = temp_audit_state_dir("configured-profile-decline");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+    let (mut state, _executable, _config_home) = state_with_a_configured_profile("decline");
+    open_first_use_confirmation(&mut state);
+
+    let _ = super::update(&mut state, Message::ModalDismiss);
+
+    assert!(state.modal.is_none(), "dismissing closes the confirmation");
+    assert!(
+        state.terminal_panes.is_empty(),
+        "declining must launch nothing"
+    );
+    assert!(
+        state.configuration.confirmed_config_profiles.is_empty(),
+        "a dismissal is not an answer -- the next launch must ask again"
+    );
+
+    let store =
+        super::open_audit_store(&state_dir, Vec::new()).expect("the real store must still open");
+    assert!(
+        config_change_outcomes(&store).is_empty(),
+        "nothing was decided, so nothing may be recorded"
+    );
+}
+
+/// Once confirmed, the same profile launches without asking again —
+/// §3's invariant is *one* deliberate act per session per executable,
+/// not one per launch. (RFC-045's own risk note: "It is once per
+/// session, not once per launch.")
+#[test]
+fn a_confirmed_profile_launches_again_without_a_second_confirmation() {
+    let (mut state, _executable, _config_home) = state_with_a_configured_profile("second-launch");
+    open_first_use_confirmation(&mut state);
+    let _ = super::update(&mut state, Message::ConfiguredProfileLaunchPressed);
+    assert_eq!(state.terminal_panes.len(), 1);
+
+    super::attempt_agent_run_launch(&mut state).expect("a confirmed profile just launches");
+
+    assert!(
+        state.modal.is_none(),
+        "a confirmed profile must not ask again: {:?}",
+        state.modal
+    );
+    assert_eq!(
+        state.terminal_panes.len(),
+        2,
+        "the second launch must actually happen"
+    );
+}
+
+// --- RFC-045 PR-045-C: D5's reload command, and D4's reload trigger ----
+
+/// Presses the real `Ctrl+Alt+C` chord, through the same
+/// `RoutedInput::Shell` path the keyboard produces — not by calling
+/// `reload_configuration` directly, so what is under test is the
+/// dispatch a user actually reaches.
+fn press_reload_configuration(state: &mut State) {
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::ReloadConfiguration,
+    );
+    let _ = super::update(
+        state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+}
+
+/// Rewrites the `config.toml` a `ConfigurationState` was loaded from.
+fn rewrite_config(config_home: &Path, contents: &str) {
+    std::fs::write(config_home.join("tekstide").join("config.toml"), contents).unwrap();
+}
+
+/// **RFC-023's asymmetry, reached at last.** Tightening needs no
+/// deliberate act: a shorter retention keeps less data for less time, so
+/// it applies immediately and records `_reduce`. No dialog appears at
+/// all — a user who only tightened their settings is never asked
+/// anything.
+#[test]
+fn a_reducing_reload_applies_directly_and_records_reduce() {
+    let state_dir = temp_audit_state_dir("config-reload-reduce");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+    let (configuration, config_home) = configuration_from_file(
+        "config-reload-reduce",
+        "[agent]\ntranscript_retention_days = 30\n",
+    );
+    let mut state = state_with_configuration(ApplicationShell::new(), configuration);
+
+    rewrite_config(&config_home, "[agent]\ntranscript_retention_days = 7\n");
+    press_reload_configuration(&mut state);
+
+    assert!(
+        state.modal.is_none(),
+        "tightening needs no confirmation: {:?}",
+        state.modal
+    );
+    assert_eq!(
+        state.configuration.transcript_retention_days(),
+        7,
+        "a reduce applies directly -- that is what the asymmetry means"
+    );
+
+    let store =
+        super::open_audit_store(&state_dir, Vec::new()).expect("the real store must still open");
+    let outcomes = config_change_outcomes(&store);
+    assert_eq!(
+        outcomes,
+        vec![tekstide_core::audit::AuditOutcome::Applied],
+        "a reduce is one stage -- Applied, with no Authorized, since nothing authorized it"
+    );
+}
+
+/// The other direction, and the one the whole mechanism exists for: a
+/// longer retention keeps more data for longer, so it **waits**. The
+/// value in force is still the old one until a deliberate act says
+/// otherwise.
+#[test]
+fn an_increasing_reload_waits_for_a_confirmation_and_records_nothing_until_it_comes() {
+    let state_dir = temp_audit_state_dir("config-reload-increase");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+    let (configuration, config_home) = configuration_from_file(
+        "config-reload-increase",
+        "[agent]\ntranscript_retention_days = 30\n",
+    );
+    let mut state = state_with_configuration(ApplicationShell::new(), configuration);
+
+    rewrite_config(&config_home, "[agent]\ntranscript_retention_days = 365\n");
+    press_reload_configuration(&mut state);
+
+    assert!(
+        matches!(state.modal, Some(ModalContent::ConfigurationReload(_))),
+        "a weakening change must stop for a confirmation: {:?}",
+        state.modal
+    );
+    assert_eq!(
+        state.configuration.transcript_retention_days(),
+        30,
+        "and must not take effect while it waits"
+    );
+    let store =
+        super::open_audit_store(&state_dir, Vec::new()).expect("the real store must still open");
+    assert!(
+        config_change_outcomes(&store).is_empty(),
+        "nothing has been decided yet, so nothing may be recorded yet"
+    );
+
+    let _ = super::update(&mut state, Message::ConfigurationReloadApplyPressed);
+
+    assert_eq!(
+        state.configuration.transcript_retention_days(),
+        365,
+        "confirming applies it"
+    );
+    // Reopened, because the write happened after the handle above was
+    // taken and a SQLite connection does not see another connection's
+    // later writes.
+    let store =
+        super::open_audit_store(&state_dir, Vec::new()).expect("the real store must still open");
+    let outcomes = config_change_outcomes(&store);
+    assert!(
+        outcomes.contains(&tekstide_core::audit::AuditOutcome::Authorized)
+            && outcomes.contains(&tekstide_core::audit::AuditOutcome::Applied),
+        "and records the authorization that released it: {outcomes:?}"
+    );
+}
+
+/// Declining an increase leaves the store exactly as the reload left it
+/// — the old value still in force, nothing recorded.
+#[test]
+fn declining_an_increasing_reload_applies_nothing() {
+    let state_dir = temp_audit_state_dir("config-reload-decline");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+    let (configuration, config_home) = configuration_from_file(
+        "config-reload-decline",
+        "[agent]\ntranscript_retention_days = 30\n",
+    );
+    let mut state = state_with_configuration(ApplicationShell::new(), configuration);
+
+    rewrite_config(&config_home, "[agent]\ntranscript_retention_days = 365\n");
+    press_reload_configuration(&mut state);
+    let _ = super::update(&mut state, Message::ModalDismiss);
+
+    assert_eq!(
+        state.configuration.transcript_retention_days(),
+        30,
+        "declining leaves the old value in force"
+    );
+    let store =
+        super::open_audit_store(&state_dir, Vec::new()).expect("the real store must still open");
+    assert!(config_change_outcomes(&store).is_empty());
+}
+
+/// **A changed profile is a new executable with an old name**, so a
+/// reload that changes `[agent.profile.*]` re-arms the first-use gate
+/// rather than letting an earlier session's confirmation vouch for it.
+#[test]
+fn a_reload_that_changes_profiles_clears_the_confirmed_set() {
+    let (mut state, _executable, config_home) = state_with_a_configured_profile("reload-rearm");
+    open_first_use_confirmation(&mut state);
+    let _ = super::update(&mut state, Message::ConfiguredProfileLaunchPressed);
+    assert!(
+        state
+            .configuration
+            .confirmed_config_profiles
+            .contains("configured"),
+        "precondition: the profile is confirmed for this session"
+    );
+
+    // The same id, a different executable -- the exact substitution the
+    // confirmed set must not vouch for.
+    let other_bin = fresh_project_dir("configured-profile-reload-rearm-other");
+    let other = other_bin.join("other-cli");
+    std::fs::write(&other, "#!/bin/sh\n").unwrap();
+    let mut permissions = std::fs::metadata(&other).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&other, permissions).unwrap();
+    rewrite_config(
+        &config_home,
+        &format!(
+            "[agent]\ndefault_profile = \"configured\"\n\n\
+             [agent.profile.configured]\ncommand = {:?}\n",
+            other.to_str().unwrap()
+        ),
+    );
+
+    press_reload_configuration(&mut state);
+    // Changing an existing profile's command is an `Increase`
+    // (`agent_profiles_direction`'s worst-case-wins rule), so it stops
+    // for a confirmation first.
+    let _ = super::update(&mut state, Message::ConfigurationReloadApplyPressed);
+
+    assert!(
+        state.configuration.confirmed_config_profiles.is_empty(),
+        "a changed profile table voids every confirmation this session collected"
+    );
+}
+
+/// The composition of the two facts above: with the set cleared, the
+/// §3 gate asks again and launches nothing.
+///
+/// **Deliberately a composition, and named as one.** It asserts nothing
+/// the two tests it builds on do not already assert separately — it
+/// exists because "re-arms first use" is the behaviour a user meets, and
+/// a reader should be able to find it asserted end to end rather than
+/// inferring it. It therefore fails if *either* underlying behaviour
+/// breaks, which is why neither of those behaviours is tested only here.
+#[test]
+fn a_cleared_confirmed_set_re_arms_the_first_use_gate() {
+    let (mut state, _executable, _config_home) = state_with_a_configured_profile("re-arm-gate");
+    open_first_use_confirmation(&mut state);
+    let _ = super::update(&mut state, Message::ConfiguredProfileLaunchPressed);
+    assert_eq!(state.terminal_panes.len(), 1, "precondition: it launched");
+
+    state.configuration.confirmed_config_profiles.clear();
+
+    super::attempt_agent_run_launch(&mut state).expect("the gate re-arms rather than erroring");
+    assert!(
+        matches!(
+            state.modal,
+            Some(ModalContent::ConfiguredProfileFirstUse(_))
+        ),
+        "first use must be asked again: {:?}",
+        state.modal
+    );
+    assert_eq!(
+        state.terminal_panes.len(),
+        1,
+        "and nothing may launch until it is answered"
+    );
+}
+
+/// D5's own box: the action is in the registry, so Help and `--help`
+/// list it **by construction**. `keyboard_help_lines` is the single
+/// source both surfaces render from, and `action_catalog_key`'s match is
+/// exhaustive — adding the action without a catalog key would not have
+/// compiled, which is the property D5 asked for.
+#[test]
+fn the_reload_configuration_command_is_advertised_in_help_and_usage_text() {
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let lines = crate::keyboard_help::keyboard_help_lines(&catalog);
+
+    let line = lines
+        .iter()
+        .find(|line| line.binding == "Ctrl+Alt+C")
+        .expect("Ctrl+Alt+C must be one of the advertised live bindings");
+    assert!(
+        !line.description.is_empty() && line.description != "keyboard-help-reload-configuration",
+        "the description must resolve through the catalog, not render as its own key: {}",
+        line.description
+    );
+
+    let usage = crate::keyboard_help::usage_text(&catalog, "tekstide");
+    assert!(
+        usage.contains("Ctrl+Alt+C"),
+        "--help is generated from the same registry and must list it too"
+    );
+}
+
+/// §4/D7: the config-change record carries no field name, and this slice
+/// added none. The producers take no arguments at all — so this asserts
+/// what the *records* hold, not what the call sites look like: a
+/// `SensitiveConfigChanged` record has no `subject_ref` and no
+/// `adapter_profile_ref`, whatever the reload was about.
+#[test]
+fn no_configuration_value_or_field_name_reaches_the_change_record() {
+    let state_dir = temp_audit_state_dir("config-record-holds-nothing");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+    let sentinel = "sk-live-config-sentinel-never-in-a-record";
+    let (configuration, config_home) = configuration_from_file(
+        "config-record-holds-nothing",
+        "[agent]\ntranscript_retention_days = 30\n",
+    );
+    let mut state = state_with_configuration(ApplicationShell::new(), configuration);
+
+    // A reduce, so it applies and records without a dialog -- and a
+    // profile whose every string is the sentinel, so if any of them
+    // could reach a record, it would.
+    rewrite_config(
+        &config_home,
+        &format!(
+            "[agent]\ntranscript_retention_days = 7\ndefault_profile = \"probe\"\n\n\
+             [agent.profile.probe]\ndisplay_name = {sentinel:?}\ncommand = {sentinel:?}\n"
+        ),
+    );
+    press_reload_configuration(&mut state);
+
+    let store =
+        super::open_audit_store(&state_dir, Vec::new()).expect("the real store must still open");
+    let records = store
+        .query(&tekstide_core::audit::AuditQuery {
+            family: Some(tekstide_core::audit::AuditEventFamily::SensitiveConfigChanged),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
+        .expect("querying the real audit store must succeed")
+        .records;
+    assert!(
+        !records.is_empty(),
+        "precondition: something must have been recorded for this to prove anything"
+    );
+    for sequenced in &records {
+        let rendered = format!("{:?}", sequenced.record);
+        assert!(
+            !rendered.contains(sentinel),
+            "no configuration value may reach a durable record: {rendered}"
+        );
+        assert!(
+            sequenced.record.subject_ref.is_none()
+                && sequenced.record.adapter_profile_ref.is_none(),
+            "RFC-023's acceptance criterion, still holding: the trail says a sensitive setting \
+             changed, never which: {:?}",
+            sequenced.record
+        );
+    }
 }
 
 /// **Response 247's required proof, and response 248's correction to
@@ -10264,7 +10751,7 @@ fn opening_help_through_a_real_key_event_shows_every_live_binding() {
     let lines = crate::keyboard_help::keyboard_help_lines(&state.catalog);
     assert_eq!(
         lines.len(),
-        14,
+        15,
         "the Help modal's own data source must list every live binding, Ctrl+Alt+K included"
     );
 }

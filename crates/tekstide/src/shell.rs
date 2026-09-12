@@ -158,6 +158,64 @@ pub(crate) enum TrustGrantButton {
     Cancel,
 }
 
+/// RFC-045 PR-045-C, D4: the first-use confirmation's own two-item
+/// cycle. A distinct type rather than reusing `TrustGrantButton` for the
+/// same reason `TranscriptPurgeButton` is distinct: "Launch"/"Cancel" do
+/// not describe what granting workspace trust decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfiguredProfileButton {
+    Launch,
+    Cancel,
+}
+
+impl ConfiguredProfileButton {
+    const ORDER: [ConfiguredProfileButton; 2] = [
+        ConfiguredProfileButton::Launch,
+        ConfiguredProfileButton::Cancel,
+    ];
+
+    fn next(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + 1) % Self::ORDER.len()]
+    }
+
+    fn previous(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + Self::ORDER.len() - 1) % Self::ORDER.len()]
+    }
+}
+
+/// RFC-045 PR-045-C, D4 first use. **Carries the resolved executable
+/// path, not the display name** — §5 is a security control, not a
+/// formatting preference: `display_name` is user-controlled text, so a
+/// profile calling itself "Claude Code" while pointing at `/tmp/x` is
+/// precisely the spoof this confirmation exists to make visible.
+#[derive(Debug)]
+pub(crate) struct ConfiguredProfileConfirmModal {
+    /// The profile id, which is what the confirmed set is keyed by.
+    profile_id: String,
+    /// What `resolve_executable` actually produced, rendered verbatim.
+    resolved_executable: String,
+    /// The file the profile came from — §5's other half. A user who did
+    /// not know they had a `config.toml` learns where it is.
+    source_file: std::path::PathBuf,
+    focus: ConfiguredProfileButton,
+}
+
+/// RFC-045 PR-045-C, D4 reload: the confirmation for a reload that wants
+/// to weaken the current posture. Reduces never reach here — they have
+/// already applied by the time this exists.
+#[derive(Debug)]
+pub(crate) struct ConfigurationReloadConfirmModal {
+    focus: ConfiguredProfileButton,
+}
+
 impl TrustGrantButton {
     const ORDER: [TrustGrantButton; 2] = [TrustGrantButton::Grant, TrustGrantButton::Cancel];
 
@@ -546,6 +604,17 @@ pub(crate) enum ModalContent {
     /// paste dialog's shape, not the approval dialog's (both of that
     /// one's buttons are real decisions).
     TrustGrant(TrustGrantModal),
+    /// RFC-045 PR-045-C, D4 first use. Opened from the launch attempt
+    /// itself, not from a control — the one modal here that a user
+    /// reaches by asking for something else. Only `Launch` is a real
+    /// decision; `Cancel`/Escape launch nothing and confirm nothing,
+    /// the paste dialog's shape.
+    ConfiguredProfileFirstUse(ConfiguredProfileConfirmModal),
+    /// RFC-045 PR-045-C, D4 reload. Same shape: only `Apply` (spelled
+    /// `Launch` in the shared button type) applies the held-back
+    /// increases; anything else leaves the store exactly as the reload
+    /// left it, which is with every sensitive change still pending.
+    ConfigurationReload(ConfigurationReloadConfirmModal),
     /// RFC-033 PR-033-C: opened manually from the `TrustSettings`
     /// surface's own purge control (`Message::OpenTranscriptPurgeDialog`),
     /// the same manual-only shape `TrustGrant` above uses. Only `Purge`
@@ -941,19 +1010,53 @@ pub struct ConfigurationState {
     /// only thing standing between that and a user who believes their
     /// profile is the default.
     warnings: Vec<tekstide_core::config::ConfigWarning>,
-    /// D8, **resolved but not launched in this slice.** The launch path
-    /// still uses `claude_code_linux_default()` until PR-045-C builds
-    /// the first-use confirmation: nothing configuration-defined may
-    /// execute before there is a deliberate act in front of it (§3).
-    ///
-    /// `#[allow(dead_code)]` with the closing slice named, the same
-    /// shape `ControlCoverage::MouseOnly` uses: production writes this
-    /// field and deliberately does not read it yet. **PR-045-C is the
-    /// consumer** — an RFC number, not an intention, which is RFC-036
-    /// D2's own bar. `a_configured_default_profile_is_resolved_but_does_
-    /// not_launch_in_this_slice` is what holds the "not yet" to account.
-    #[allow(dead_code)]
+    /// D8: the profile the launch button runs, when the file names one.
+    /// **PR-045-C consumed this and removed the `#[allow(dead_code)]`
+    /// PR-045-B carried** — an allow that names its closing slice is
+    /// closed by that slice, or it was never a plan.
     default_profile: Option<tekstide_core::agent::AiCliProfile>,
+    /// D4: which configuration-defined profile ids this **session** has
+    /// confirmed. Session-scoped like `AuditHealth`, and deliberately
+    /// not persisted: §3's invariant is that between the file and the
+    /// process there is always one click that names the executable, and
+    /// a confirmation remembered across restarts would mean a file
+    /// edited while Tekstide was closed launches a new executable under
+    /// an old name with no act at all.
+    ///
+    /// Cleared by a reload whose pending changes include `AgentProfiles`
+    /// — a changed profile is a new executable with an old name, so the
+    /// first-use gate re-arms rather than a second dialog stacking on
+    /// the first.
+    confirmed_config_profiles: std::collections::BTreeSet<String>,
+    /// D4's reload half: the freshly parsed document whose
+    /// security-sensitive values are still held back, kept only between
+    /// `ReloadConfiguration` opening its confirmation and that
+    /// confirmation being answered. `None` whenever no reload is
+    /// awaiting an answer.
+    ///
+    /// Held here rather than inside `ConfigStore` for the reason
+    /// `ConfigReloadOutcome::candidate`'s own doc gives: a retained
+    /// candidate goes stale on the next reload with nothing to say so.
+    /// Replaced wholesale by each new reload, so the answer always
+    /// applies to the parse the user was shown.
+    pending_reload: Option<PendingConfigurationReload>,
+}
+
+/// RFC-045 PR-045-C, D4's reload trigger: what one `ReloadConfiguration`
+/// found that needs a deliberate act before it can take effect.
+///
+/// Only *increases* land here. RFC-023's asymmetry is that tightening
+/// applies directly — `reload_configuration` applies each reducing field
+/// and records `_reduce` before this value is ever built, so anything in
+/// `fields` is a change that weakens the current posture and is waiting
+/// on the user.
+#[derive(Debug)]
+pub(crate) struct PendingConfigurationReload {
+    /// The parse the pending values come from. Answering an older
+    /// reload's confirmation against a newer parse is exactly the
+    /// staleness `ConfigReloadOutcome::candidate` exists to prevent.
+    candidate: tekstide_core::config::ConfigurationDocument,
+    fields: Vec<tekstide_core::config::SecuritySensitiveField>,
 }
 
 impl ConfigurationState {
@@ -971,6 +1074,8 @@ impl ConfigurationState {
             diagnostic: None,
             warnings: Vec::new(),
             default_profile: None,
+            confirmed_config_profiles: std::collections::BTreeSet::new(),
+            pending_reload: None,
         }
     }
 
@@ -990,9 +1095,11 @@ impl ConfigurationState {
         )
     }
 
-    /// `#[allow(dead_code)]`: see the field's own comment -- PR-045-C
-    /// is the named consumer.
-    #[allow(dead_code)]
+    /// The file `ConfigStore` was loaded from, when there is one.
+    pub fn config_file(&self) -> Option<&std::path::Path> {
+        self.store.as_ref().map(|store| store.config_file())
+    }
+
     pub fn default_profile(&self) -> Option<&tekstide_core::agent::AiCliProfile> {
         self.default_profile.as_ref()
     }
@@ -1193,6 +1300,14 @@ pub enum Message {
     /// same shape as [`Message::PasteConfirmAcceptPressed`]. "Cancel"
     /// dispatches `ModalDismiss` directly.
     TrustGrantGrantPressed,
+    /// RFC-045 PR-045-C, D4 first use: the configured-profile
+    /// confirmation's real "Launch" button -- same shape as
+    /// [`Message::TrustGrantGrantPressed`]. "Cancel" dispatches
+    /// `ModalDismiss` directly, so a stray keystroke can only decline.
+    ConfiguredProfileLaunchPressed,
+    /// RFC-045 PR-045-C, D4 reload: applies the held-back increases this
+    /// reload found. Same shape and same default-to-decline property.
+    ConfigurationReloadApplyPressed,
     /// RFC-040 PR-040-B: the transcript-purge dialog's real "Purge"
     /// button -- same shape as [`Message::PasteConfirmAcceptPressed`].
     /// "Cancel" dispatches `ModalDismiss` directly.
@@ -1576,6 +1691,11 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::ApprovalApproveOncePressed
         | Message::ApprovalRejectPressed
         | Message::TrustGrantGrantPressed
+        // RFC-045 PR-045-C: both confirmations' committing button --
+        // the same classification every other two-button modal's real
+        // decision already has.
+        | Message::ConfiguredProfileLaunchPressed
+        | Message::ConfigurationReloadApplyPressed
         | Message::TranscriptPurgePressed
         | Message::ProjectCloseClosePressed
         | Message::FolderBrowserRowPressed(_)
@@ -1681,6 +1801,27 @@ fn activate_current_modal(state: &mut State) {
         Some(ModalContent::ProjectClose(modal)) => {
             record_project_close_cancelled(state, &modal.project_id);
         }
+        // RFC-045 PR-045-C, D4 first use: the paste dialog's shape --
+        // only `Launch` is a real decision, and it is the *only* thing
+        // that puts this profile in the session's confirmed set. Any
+        // other focus (`Cancel`), or `ModalDismiss` (Escape), launches
+        // nothing and confirms nothing, so §3's invariant survives
+        // every dismissal path rather than only the deliberate one.
+        Some(ModalContent::ConfiguredProfileFirstUse(modal))
+            if modal.focus == ConfiguredProfileButton::Launch =>
+        {
+            confirm_and_launch_configured_profile(state, &modal);
+        }
+        // RFC-045 PR-045-C, D4 reload: same shape. Declining leaves the
+        // store exactly as the reload left it -- every sensitive change
+        // still pending, nothing applied.
+        Some(ModalContent::ConfigurationReload(modal))
+            if modal.focus == ConfiguredProfileButton::Launch =>
+        {
+            apply_pending_configuration_reload(state);
+        }
+        Some(ModalContent::ConfiguredProfileFirstUse(_))
+        | Some(ModalContent::ConfigurationReload(_)) => {}
         // RFC-038 PR-038-G: unlike every arm above, this one
         // does not represent a final decision -- `Enter` (or a row
         // click, RFC-040 PR-040-B) navigates the browser, it does not
@@ -1832,6 +1973,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // both converge on `open_folder_browser`.
             if action == NavigationAction::OpenFolderBrowser {
                 open_folder_browser(state);
+            }
+            // RFC-045 PR-045-C, D5: RFC-023 §Hot Reload specified "a
+            // command or API call" and only the API call existed, so a
+            // file a user edited stayed unread until restart. This is
+            // the command.
+            if action == NavigationAction::ReloadConfiguration {
+                reload_configuration(state);
             }
             // RFC-039 PR-039-B: no single `AppCommand` can express
             // "switch to the next project" -- *which* project that is
@@ -2059,6 +2207,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.next(),
             Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.next(),
             Some(ModalContent::ProjectClose(modal)) => modal.focus = modal.focus.next(),
+            Some(ModalContent::ConfiguredProfileFirstUse(modal)) => {
+                modal.focus = modal.focus.next()
+            }
+            Some(ModalContent::ConfigurationReload(modal)) => modal.focus = modal.focus.next(),
             // RFC-038 PR-038-C: nothing to focus -- a read-only surface,
             // not a dialog with buttons.
             Some(ModalContent::Help) => {}
@@ -2083,6 +2235,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::ProjectClose(modal)) => modal.focus = modal.focus.previous(),
+            Some(ModalContent::ConfiguredProfileFirstUse(modal)) => {
+                modal.focus = modal.focus.previous()
+            }
+            Some(ModalContent::ConfigurationReload(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::Help) => {}
             Some(ModalContent::FolderBrowser(modal)) => {
                 modal.highlight = modal.highlight.saturating_sub(1);
@@ -2132,6 +2288,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::TranscriptPurgePressed => {
             if let Some(ModalContent::TranscriptPurge(modal)) = state.modal.as_mut() {
                 modal.focus = TranscriptPurgeButton::Purge;
+            }
+            activate_current_modal(state);
+        }
+        // RFC-045 PR-045-C: both follow `TrustGrantGrantPressed`'s exact
+        // shape -- set focus to the committing button, then run the one
+        // shared decision path, so a mouse decision and a keyboard
+        // decision are never two copies of the same logic.
+        Message::ConfiguredProfileLaunchPressed => {
+            if let Some(ModalContent::ConfiguredProfileFirstUse(modal)) = state.modal.as_mut() {
+                modal.focus = ConfiguredProfileButton::Launch;
+            }
+            activate_current_modal(state);
+        }
+        Message::ConfigurationReloadApplyPressed => {
+            if let Some(ModalContent::ConfigurationReload(modal)) = state.modal.as_mut() {
+                modal.focus = ConfiguredProfileButton::Launch;
             }
             activate_current_modal(state);
         }
@@ -3048,11 +3220,89 @@ thread_local! {
 ///
 /// No active project is a silent no-op, matching [`attempt_terminal_launch`]'s
 /// own precedent.
+/// RFC-045 PR-045-C, D8's launch and **§3's invariant**: *between the
+/// file and the process there is always one click that names the
+/// executable.*
+///
+/// A configuration-defined `default_profile` launches only once this
+/// session has confirmed that id. Until then this opens the
+/// confirmation — which names the resolved executable path and the file
+/// it came from (§5) — and **launches nothing**. That is the refusal:
+/// not an error message the user must go elsewhere to clear, but the
+/// deliberate act itself, offered while the launch they asked for is
+/// still completable.
+///
+/// Absent a configured default, this is exactly what it always was.
 fn attempt_agent_run_launch(state: &mut State) -> Result<(), AgentRunLaunchRefusal> {
-    attempt_agent_run_launch_with_profile(
-        state,
-        tekstide_core::agent::AiCliProfile::claude_code_linux_default(),
-    )
+    let Some(profile) = state.configuration.default_profile().cloned() else {
+        return attempt_agent_run_launch_with_profile(
+            state,
+            tekstide_core::agent::AiCliProfile::claude_code_linux_default(),
+        );
+    };
+
+    if state
+        .configuration
+        .confirmed_config_profiles
+        .contains(&profile.id)
+    {
+        return attempt_agent_run_launch_with_profile(state, profile);
+    }
+
+    // Never replace an open modal -- the same guard every other
+    // modal-opening handler in this file carries.
+    if state.modal.is_none() {
+        let source_file = state
+            .configuration
+            .config_file()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_default();
+        state.modal = Some(ModalContent::ConfiguredProfileFirstUse(
+            configured_profile_confirmation(&profile, source_file),
+        ));
+    }
+    Ok(())
+}
+
+/// §5's content, built in one place so what a test asserts about the
+/// confirmation is what production puts in it — and so asserting that
+/// content does not require the launch gate above to have fired, which
+/// would tie a test about *the dialog* to a test about *the gate*.
+fn configured_profile_confirmation(
+    profile: &tekstide_core::agent::AiCliProfile,
+    source_file: std::path::PathBuf,
+) -> ConfiguredProfileConfirmModal {
+    ConfiguredProfileConfirmModal {
+        profile_id: profile.id.clone(),
+        resolved_executable: configured_profile_resolved_executable(profile),
+        source_file,
+        // Defaults to declining: a stray Enter must not start a process
+        // the user has never been shown the path of.
+        focus: ConfiguredProfileButton::Cancel,
+    }
+}
+
+/// §5: **the path `resolve_executable` actually produced**, never the
+/// display name. `AiCliExecutable` is the resolved value
+/// `to_ai_cli_profile` built — an absolute path as written, or a bare
+/// command that will be looked up on the reviewed system path, rendered
+/// as what it is so the user is not shown a bare word that looks like a
+/// path.
+fn configured_profile_resolved_executable(profile: &tekstide_core::agent::AiCliProfile) -> String {
+    match &profile.executable {
+        tekstide_core::agent::AiCliExecutable::Absolute { path, .. } => path.display().to_string(),
+        tekstide_core::agent::AiCliExecutable::PathLookup {
+            command,
+            lookup_paths,
+            ..
+        } => {
+            let searched: Vec<String> = lookup_paths
+                .iter()
+                .map(|lookup| lookup.path.display().to_string())
+                .collect();
+            format!("{command} (found on: {})", searched.join(", "))
+        }
+    }
 }
 
 /// RFC-040 PR-040-C: `Message::LaunchAgentRunButtonPressed`'s handler,
@@ -5054,7 +5304,15 @@ fn trusted_ui_state(state: &State) -> TerminalTrustedUiState {
         // RFC-039 PR-039-C: same generic bucket, same reason -- not a
         // terminal-paste concern, but modal exclusivity still needs it
         // to read as active while it is open.
-        | Some(ModalContent::ProjectClose(_)) => TerminalTrustedUiState::SecurityDialogActive,
+        | Some(ModalContent::ProjectClose(_))
+        // RFC-045 PR-045-C: same generic bucket, same reason --
+        // neither confirmation is a terminal-paste concern, and
+        // both must read as active so modal exclusivity holds
+        // while they are open.
+        | Some(ModalContent::ConfiguredProfileFirstUse(_))
+        | Some(ModalContent::ConfigurationReload(_)) => {
+            TerminalTrustedUiState::SecurityDialogActive
+        }
     }
 }
 
@@ -5523,6 +5781,8 @@ pub(crate) fn load_configuration_at_boot(
                 }),
                 warnings: Vec::new(),
                 default_profile: None,
+                confirmed_config_profiles: std::collections::BTreeSet::new(),
+                pending_reload: None,
             };
         }
     };
@@ -5547,6 +5807,8 @@ pub(crate) fn load_configuration_at_boot(
         diagnostic: report.diagnostic,
         warnings: report.warnings,
         default_profile,
+        confirmed_config_profiles: std::collections::BTreeSet::new(),
+        pending_reload: None,
     }
 }
 
@@ -6188,6 +6450,12 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         // above -- opening the folder-browser modal is shell-local UI
         // state, not a core route/mode change.
         | NavigationAction::OpenFolderBrowser
+        // RFC-045 PR-045-C, D5: re-reading a file and possibly opening a
+        // confirmation modal is shell-local work on `State`'s own
+        // `ConfigurationState`, not a core route or mode change --
+        // `update`'s `Shell` arm calls `reload_configuration` directly,
+        // the same shape `OpenHelp`/`OpenFolderBrowser` above use.
+        | NavigationAction::ReloadConfiguration
         | NavigationAction::OpenCommandPalette
         | NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenSafeCloseDialog => None,
@@ -6263,6 +6531,12 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ModalContent::Help => help_modal_view(state),
             ModalContent::FolderBrowser(modal) => folder_browser_modal_view(state, modal),
             ModalContent::ProjectClose(modal) => project_close_dialog_view(state, modal),
+            ModalContent::ConfiguredProfileFirstUse(modal) => {
+                configured_profile_dialog_view(state, modal)
+            }
+            ModalContent::ConfigurationReload(modal) => {
+                configuration_reload_dialog_view(state, modal)
+            }
         };
         let scrim = center(modal_view).style(modal_scrim_style(state.theme));
         stack![base, opaque(scrim)].into()
@@ -8352,6 +8626,187 @@ fn open_trust_grant_dialog(state: &mut State) {
 /// (or the audit store being unavailable) is a silent no-op: there is
 /// nothing left to grant trust *to*, matching `decide_approval`'s own
 /// "cannot record either way, leave state as it was" precedent.
+/// RFC-045 PR-045-C, D4 first use: the deliberate act itself.
+///
+/// **Order matters and is the point.** The profile joins the session's
+/// confirmed set *before* the launch is attempted, so the launch call
+/// below finds it confirmed and proceeds. `record_sensitive_config_
+/// policy_increase` observes a change that has already been confirmed
+/// by the time it is called — its own doc comment says exactly that,
+/// and this is the confirmation surface it was waiting for.
+///
+/// The audit write is best-effort and never gates the launch: RFC-047
+/// D4's rule, which RFC-046 D1 already applies to this same action.
+/// A broken audit store makes this launch unrecorded, not refused.
+fn confirm_and_launch_configured_profile(state: &mut State, modal: &ConfiguredProfileConfirmModal) {
+    state
+        .configuration
+        .confirmed_config_profiles
+        .insert(modal.profile_id.clone());
+
+    if let Some(mut audit_store) =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+    {
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut state.audit_health)
+            .record_sensitive_config_policy_increase();
+    }
+
+    let Some(profile) = state.configuration.default_profile().cloned() else {
+        return;
+    };
+    let _ = attempt_agent_run_launch_with_profile(state, profile);
+}
+
+/// RFC-045 PR-045-C, D4 reload: applies the increases the user just
+/// confirmed, one field at a time, and records **one**
+/// `config_policy_increase` for the act.
+///
+/// One record per confirming act, not per field: the record carries no
+/// field name (D7/§4 — `valid_config_change` forbids it), so writing one
+/// per field would produce several indistinguishable records for a
+/// single click and say nothing more than one does.
+fn apply_pending_configuration_reload(state: &mut State) {
+    let Some(pending) = state.configuration.pending_reload.take() else {
+        return;
+    };
+    let Some(store) = state.configuration.store.as_mut() else {
+        return;
+    };
+    for field in &pending.fields {
+        store.apply_security_sensitive_field(*field, &pending.candidate);
+    }
+    // A confirmed profile change re-arms the first-use gate: the same
+    // id now names a different executable, and §3's invariant is about
+    // the executable, not the name.
+    if pending
+        .fields
+        .contains(&tekstide_core::config::SecuritySensitiveField::AgentProfiles)
+    {
+        clear_confirmed_configured_profiles(state);
+    }
+    resolve_configured_default_profile(state);
+
+    if let Some(mut audit_store) =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+    {
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut state.audit_health)
+            .record_sensitive_config_policy_increase();
+    }
+}
+
+/// A changed `[agent.profile.*]` table means every previously confirmed
+/// id may now name a different executable, so every confirmation this
+/// session collected is void. Clearing the whole set rather than
+/// diffing: a profile that vanished and came back identical is still an
+/// id whose meaning this session cannot vouch for without re-reading the
+/// file, and the cost of being wrong is an unconfirmed executable.
+fn clear_confirmed_configured_profiles(state: &mut State) {
+    state.configuration.confirmed_config_profiles.clear();
+}
+
+/// Re-resolves D8's profile from whatever the store now holds — called
+/// after a reload applies anything, so `default_profile` never describes
+/// a document that is no longer current.
+fn resolve_configured_default_profile(state: &mut State) {
+    let resolved = state.configuration.store.as_ref().and_then(|store| {
+        let document = store.current();
+        document.agent.default_profile.as_ref().and_then(|id| {
+            document
+                .agent
+                .profiles
+                .get(id)
+                .map(|configured| tekstide_core::config::to_ai_cli_profile(id, configured))
+        })
+    });
+    state.configuration.default_profile = resolved;
+}
+
+/// RFC-045 PR-045-C, D5 and D4's reload half: `Ctrl+Alt+C`'s handler.
+///
+/// **RFC-023's asymmetry, applied where the surface finally exists.** A
+/// reload holds every security-sensitive change back (`ConfigStore::
+/// reload` cannot know which are safe to release). Here each one's
+/// direction decides:
+///
+/// - **Reduce** — tightening — applies immediately and records
+///   `_reduce`. RFC-023 is explicit that this direction needs no
+///   deliberate act, and `record_sensitive_config_policy_reduce`'s own
+///   actor is `AppPolicy`/`PolicyEngine` rather than `User`/`TrustedUi`
+///   for exactly that reason.
+/// - **Increase** — weakening — waits for [`ModalContent::
+///   ConfigurationReload`]'s confirmation.
+///
+/// Diagnostics and warnings land on D1's board line, unchanged: this
+/// replaces the whole `ConfigurationState` report, so a file that was
+/// broken and is now fixed stops complaining.
+fn reload_configuration(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    let Some(store) = state.configuration.store.as_mut() else {
+        return;
+    };
+    let outcome = match store.reload() {
+        Ok(outcome) => outcome,
+        Err(diagnostic) => {
+            // The file is now invalid. `reload` left `current` entirely
+            // untouched, so what is in force is what was in force
+            // before -- the board line says the file was ignored, and
+            // that is the whole truth of it.
+            state.configuration.diagnostic = Some(diagnostic);
+            state.configuration.warnings = Vec::new();
+            return;
+        }
+    };
+    state.configuration.diagnostic = None;
+    state.configuration.warnings = outcome.warnings;
+
+    let current = store.current().clone();
+    let mut increases = Vec::new();
+    let mut reduced = Vec::new();
+    for field in outcome.pending_security_sensitive_changes {
+        match tekstide_core::config::direction(field, &current, &outcome.candidate) {
+            tekstide_core::config::SecuritySensitiveDirection::Reduce => {
+                store.apply_security_sensitive_field(field, &outcome.candidate);
+                reduced.push(field);
+            }
+            tekstide_core::config::SecuritySensitiveDirection::Increase => increases.push(field),
+        }
+    }
+
+    if reduced.contains(&tekstide_core::config::SecuritySensitiveField::AgentProfiles) {
+        clear_confirmed_configured_profiles(state);
+    }
+    if !reduced.is_empty() {
+        resolve_configured_default_profile(state);
+        if let Some(mut audit_store) =
+            open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+        {
+            tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut state.audit_health)
+                .record_sensitive_config_policy_reduce();
+        }
+    }
+
+    if increases.is_empty() {
+        // Nothing needs an act, so nothing is held: a reload that only
+        // tightened, or changed nothing sensitive at all, is finished.
+        state.configuration.pending_reload = None;
+        return;
+    }
+
+    state.configuration.pending_reload = Some(PendingConfigurationReload {
+        candidate: outcome.candidate,
+        fields: increases,
+    });
+    state.modal = Some(ModalContent::ConfigurationReload(
+        ConfigurationReloadConfirmModal {
+            // Defaults to declining, the same property every
+            // consequential dialog in this crate has.
+            focus: ConfiguredProfileButton::Cancel,
+        },
+    ));
+}
+
 fn apply_workspace_trust_grant(state: &mut State, modal: &TrustGrantModal) {
     let Some(mut audit_store) =
         open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
@@ -10422,6 +10877,125 @@ fn trust_grant_dialog_view<'a>(
         text(state.catalog.get("trust-grant-dialog-hint"))
             .size(state.theme.font_size_status())
             .into(),
+    ];
+
+    modal_dialog_box(state, column(lines).spacing(10).into())
+}
+
+/// RFC-045 PR-045-C, **§5 — this is a security control, not a
+/// formatting preference.**
+///
+/// `display_name` is user-controlled text. A profile with
+/// `display_name = "Claude Code"` and `command = "/tmp/x"` is exactly the
+/// spoof this confirmation exists to make visible, so the body names the
+/// **path `resolve_executable` actually produced** and the **file the
+/// profile came from**. It may show the display name too; it never shows
+/// it *instead*. That is RFC-018's trusted-UI evidence rule applied to a
+/// launch: what the user confirms is the thing that will run.
+///
+/// RFC-047 §5's wording constraints carry over — state the fact, do not
+/// imply danger the profile does not carry, do not imply the user can
+/// fix anything from this dialog.
+fn configured_profile_dialog_body(
+    catalog: &Catalog,
+    modal: &ConfiguredProfileConfirmModal,
+) -> String {
+    let executable = tekstide_core::text_safety::quote_untrusted(&modal.resolved_executable);
+    let source =
+        tekstide_core::text_safety::quote_untrusted(&modal.source_file.display().to_string());
+    catalog.get_with_args(
+        "configured-profile-dialog-body",
+        &CatalogArgs::new()
+            .untrusted("executable", &executable)
+            .untrusted("path", &source),
+    )
+}
+
+/// RFC-045 PR-045-C, D4 first use. Same construction as
+/// [`trust_grant_dialog_view`]: focus defaults to `Cancel`
+/// (`ConfiguredProfileConfirmModal`'s own construction), only `Launch`
+/// is a real decision, and the body is composed by
+/// [`configured_profile_dialog_body`] rather than assembled here.
+fn configured_profile_dialog_view<'a>(
+    state: &'a State,
+    modal: &'a ConfiguredProfileConfirmModal,
+) -> Element<'a, Message> {
+    let button_line = |target: ConfiguredProfileButton, label_key: &str, on_press: Message| {
+        let marker = if modal.focus == target { "> " } else { "  " };
+        button(
+            text(format!("{marker}{}", state.catalog.get(label_key)))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(on_press)
+    };
+
+    let lines: Vec<Element<'_, Message>> = vec![
+        text(state.catalog.get("configured-profile-dialog-title"))
+            .size(state.theme.font_size_heading())
+            .into(),
+        text(configured_profile_dialog_body(&state.catalog, modal))
+            .size(state.theme.font_size_body())
+            .into(),
+        button_line(
+            ConfiguredProfileButton::Launch,
+            "configured-profile-dialog-launch",
+            Message::ConfiguredProfileLaunchPressed,
+        )
+        .into(),
+        button_line(
+            ConfiguredProfileButton::Cancel,
+            "configured-profile-dialog-cancel",
+            Message::ModalDismiss,
+        )
+        .into(),
+    ];
+
+    modal_dialog_box(state, column(lines).spacing(10).into())
+}
+
+/// RFC-045 PR-045-C, D4 reload. Names how many settings are waiting and
+/// that they weaken the current posture — a reduce never reaches here,
+/// having already applied.
+fn configuration_reload_dialog_view<'a>(
+    state: &'a State,
+    modal: &'a ConfigurationReloadConfirmModal,
+) -> Element<'a, Message> {
+    let pending_count = state
+        .configuration
+        .pending_reload
+        .as_ref()
+        .map_or(0, |pending| pending.fields.len());
+    let button_line = |target: ConfiguredProfileButton, label_key: &str, on_press: Message| {
+        let marker = if modal.focus == target { "> " } else { "  " };
+        button(
+            text(format!("{marker}{}", state.catalog.get(label_key)))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(on_press)
+    };
+
+    let lines: Vec<Element<'_, Message>> = vec![
+        text(state.catalog.get("configuration-reload-dialog-title"))
+            .size(state.theme.font_size_heading())
+            .into(),
+        text(state.catalog.get_with_args(
+            "configuration-reload-dialog-body",
+            &CatalogArgs::new().number("count", pending_count as u32),
+        ))
+        .size(state.theme.font_size_body())
+        .into(),
+        button_line(
+            ConfiguredProfileButton::Launch,
+            "configuration-reload-dialog-apply",
+            Message::ConfigurationReloadApplyPressed,
+        )
+        .into(),
+        button_line(
+            ConfiguredProfileButton::Cancel,
+            "configuration-reload-dialog-cancel",
+            Message::ModalDismiss,
+        )
+        .into(),
     ];
 
     modal_dialog_box(state, column(lines).spacing(10).into())

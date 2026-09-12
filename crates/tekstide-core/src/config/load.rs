@@ -629,6 +629,17 @@ pub struct ConfigLoadReport {
 pub struct ConfigReloadOutcome {
     pub warnings: Vec<ConfigWarning>,
     pub pending_security_sensitive_changes: Vec<SecuritySensitiveField>,
+    /// RFC-045 PR-045-C: the freshly parsed document, **including the
+    /// sensitive values that were held back**. `ConfigStore::current()`
+    /// does not have them; this is the only place they exist, and
+    /// [`ConfigStore::apply_security_sensitive_field`] is what releases
+    /// one once its own deliberate act has happened.
+    ///
+    /// Carried on the outcome rather than retained inside the store so
+    /// that "which parse is this value from" stays a visible property of
+    /// the caller's own code — a retained candidate would go stale on
+    /// the next reload with nothing in the type system to say so.
+    pub candidate: ConfigurationDocument,
 }
 
 /// RFC-023 PR-023-C: the stateful holder `reload` (this slice) and the
@@ -689,6 +700,10 @@ impl ConfigStore {
                 return Ok(ConfigReloadOutcome {
                     warnings: Vec::new(),
                     pending_security_sensitive_changes: Vec::new(),
+                    // Nothing is held back, so the candidate *is* what
+                    // took effect -- there is no second document here
+                    // the way there is on a real parse.
+                    candidate: ConfigurationDocument::default(),
                 });
             }
             Err(_) => {
@@ -708,7 +723,42 @@ impl ConfigStore {
         Ok(ConfigReloadOutcome {
             warnings: outcome.warnings,
             pending_security_sensitive_changes: pending,
+            candidate: outcome.document,
         })
+    }
+
+    /// RFC-045 PR-045-C: apply **one** held-back security-sensitive
+    /// field, once its own deliberate act has happened.
+    ///
+    /// `reload` holds every sensitive change back because RFC-023 had no
+    /// confirmation surface to release one from; D4 builds that surface,
+    /// and this is the only way it can say *this field, now*. One field
+    /// per call, never "apply the candidate": a reload can hold two
+    /// changes whose directions differ, and RFC-023's asymmetry means
+    /// they are released by different acts (a reduce applies directly, an
+    /// increase waits for a confirmation) — a whole-document swap would
+    /// silently carry the unconfirmed one along with the confirmed one.
+    ///
+    /// **The caller passes back the `candidate` its own reload
+    /// returned**, rather than this type retaining it. A retained
+    /// candidate is a second source of truth that goes stale the moment
+    /// anything else reloads, and nothing in the type system would say
+    /// so; passing it back makes "which parse is this from" the caller's
+    /// visible responsibility.
+    pub fn apply_security_sensitive_field(
+        &mut self,
+        field: SecuritySensitiveField,
+        candidate: &ConfigurationDocument,
+    ) {
+        match field {
+            SecuritySensitiveField::AgentTranscriptRetentionDays => {
+                self.current.agent.transcript_retention_days =
+                    candidate.agent.transcript_retention_days;
+            }
+            SecuritySensitiveField::AgentProfiles => {
+                self.current.agent.profiles = candidate.agent.profiles.clone();
+            }
+        }
     }
 }
 

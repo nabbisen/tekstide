@@ -60,6 +60,7 @@ fn action_catalog_key(action: NavigationAction) -> Option<&'static str> {
         NavigationAction::OpenTrustSettings => Some("keyboard-help-open-trust-settings"),
         NavigationAction::OpenHelp => Some("keyboard-help-open-help"),
         NavigationAction::OpenFolderBrowser => Some("keyboard-help-open-folder-browser"),
+        NavigationAction::ReloadConfiguration => Some("keyboard-help-reload-configuration"),
         NavigationAction::SwitchActiveProject => Some("keyboard-help-switch-active-project"),
         NavigationAction::OpenDiffReview => Some("keyboard-help-open-diff-review"),
         NavigationAction::CycleVisibleTerminalSession
@@ -151,6 +152,14 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
             description: "the Project Board's \"Browse...\" button (RFC-038 PR-038-G)",
             on_press_snippet: "Message::OpenFolderBrowserButtonPressed",
         }),
+        NavigationAction::ReloadConfiguration => Some(ControlCoverage::KeyboardOnly(
+            "RFC-045's own What this RFC must not become: \"a settings GUI -- the file is the \
+             interface; the board line and two confirmations are the whole surface.\" A reload \
+             button is not in that list, and it is surface for a command M13's file watcher is \
+             scheduled to make unnecessary: automatic reload is RFC-023 §Hot Reload's real \
+             destination, and this command exists because that watcher does not. Permanent for \
+             this design; revisit with the watcher, not before.",
+        )),
         NavigationAction::PasteIntoTerminal => Some(ControlCoverage::KeyboardOnly(
             "D3: terminals conventionally paste by keyboard; a paste button on a terminal grid \
              would confuse more than help. Permanent.",
