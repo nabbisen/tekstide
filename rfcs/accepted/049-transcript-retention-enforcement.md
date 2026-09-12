@@ -95,6 +95,44 @@ process start. The last clause is the one with teeth: **a launch that cannot hon
 retention contract must not start a process.** `rejects_launch_when_unavailable()` already exists
 and already gates launch validation; this gives it the budget case it was written for.
 
+**Superseded in part by D4′, below.** The last two sentences are true of the code and false of the
+product.
+
+### D4′ — exhaustion at launch disables capture for that run, and says so (2026-09-13, response 386)
+
+**Why D4 could not stand.** No production launch requests `RequiredLocalBounded`. Its builder's only
+callers are tests, the GUI builds every request with `with_local_bounded_transcript` or
+`without_transcript_capture`, and RFC-011 says the mode *"must not become the default or be used by
+an unreviewed workflow"*. So the refusal D4 named is reachable from nothing a user does. Meanwhile
+the mode real runs use, `LocalBounded`, had RFC-011's exhaustion behaviour unimplemented: the writer's
+only ceiling is `max_bytes_per_transcript`. D4 inferred reachability from the shape of the code — the
+architect's fourth error of that kind in this RFC, found by PR-049-C before it wrote anything.
+
+**Decided:**
+
+- **When the launch trigger's cleanup leaves the project or app-wide budget exhausted, the run starts
+  with capture disabled.** RFC-011's *"disable further writes with metadata"*, applied at the one point
+  where nothing has been written. **Not a refusal**, by RFC-047 D4's rule: a full budget makes a run
+  unrecorded, not more dangerous, and the causes (a `Detached` run, a failed deletion) may be ones the
+  user cannot clear.
+- **Disclosed in the existing agent-launch confirmation**, not a new one. Present when exhausted, absent
+  otherwise, worded under RFC-047 §5. Where a deletion failed, it says so (response 385).
+- **What the confirmation shows is what the launch applies.** The cleanup that decides runs when the
+  confirmation is prepared — that is the launch preflight D2 names — and the decision is carried into
+  the launch, not recomputed after the click. "Not kept" followed by a kept transcript would be false
+  in the privacy-worse direction.
+- **Recorded on the run, not as a transcript state.** A capture-less launch creates no `Transcript`
+  record, and no existing state is true of this case: `DisabledByOptOut` says the user declined,
+  `CaptureFailed` says a write failed. The run carries the reason, and its detail view says why there
+  is no transcript, distinctly from opt-out. Nothing durable stores capture mode today; this adds none.
+- **`RequiredLocalBounded` stays refused in core** on an unfreeable budget, unit-tested through its
+  builder and stated as unreachable from the product. No production path is added to reach it.
+- **D1, stated honestly:** the project and app-wide budgets are enforced **at launch** — no new capture
+  begins while one is exhausted. They are not a hard ceiling: runs already capturing continue to their
+  per-transcript limit, so a budget can be exceeded by up to *capturing runs × that limit*. Mid-stream
+  enforcement needs byte accounting shared across writers in different terminals and is reserved in
+  `future-work.md`, not done here.
+
 ## D5 — The summary must be computed against the limits in force
 
 `transcript_local_data_summary_for` passes `TranscriptRetentionLimits::agent_run_default()` — the
@@ -119,12 +157,13 @@ different budget than the one that governs is §4.1's shape in arithmetic rather
 
 - **This RFC deletes user data on a schedule the user set, and deletion is not reversible.** Every
   other slice in this area has been about disclosure; this one acts. D2's predictable triggers and
-  D3's visible-before-removed state are the mitigations, and they are the reason the design is
+  PR-049-C's disclosure of policy removals are the mitigations (D3's visible-before-removed state,
+  corrected at response 385, is not one), and they are the reason the design is
   slower than a sweep would be.
-- **`RequiredLocalBounded` failing preflight turns a full disk into a refused launch.** That is
-  RFC-011's decision and it is correct — a run whose transcript cannot be retained is a run whose
-  record will not exist — but it is the first case where a *retention* budget can stop work, and the
-  refusal must say so in the terms RFC-047 §5 established.
+- **A full budget launches runs without transcripts (D4′).** Quieter than a refusal, and that is the
+  risk: a user can be missing a record they assumed exists. The launch confirmation and the run's
+  detail both say so, and only when it is true. *(Replaced at response 386: this bullet described a
+  `RequiredLocalBounded` refusal that no product path can reach.)*
 - **The age default is 30 days and nothing has ever expired.** The first release carrying this will
   delete every transcript older than the configured age **on its first qualifying trigger**. That is
   correct behaviour and a surprising first run; the changelog must say it plainly, and this is the
@@ -239,7 +278,8 @@ still be writing and we cannot know.
 
 **The consequence: a detached run's transcript is never reclaimed, and its bytes occupy the budget
 permanently.** Under §1 that is the right trade — but taken far enough, an app-wide budget full of
-detached transcripts would refuse launches forever under D4. **Reserved as a `future-work.md` row**,
+detached transcripts would launch every new run without a transcript under D4′, disclosed each time
+*(corrected at response 386; this read "would refuse launches forever under D4")*. **Reserved as a `future-work.md` row**,
 not solved here: solving it needs to know whether a process is gone, which we cannot, and the
 available heuristic is a file-mtime threshold — the ambient read and magic number PR-049-B correctly
 flagged.
@@ -286,9 +326,9 @@ above needs it.
   transcript the user still wanted while an expired one sits next to it.
 - **A cleanup that deletes nothing writes no record.** The trail says what happened, and "nothing
   happened" is not an event. This matters because the triggers are frequent.
-- **Cleanup failure never fails the thing that triggered it**, except the `RequiredLocalBounded`
-  preflight refusal D4 already specifies. A failed deletion is a degraded state to report, not a
-  reason a project will not open.
+- **Cleanup failure never fails the thing that triggered it.** A failed deletion is a degraded state
+  to report, not a reason a project will not open or a run will not start. *(Corrected at response
+  386: this read "except the `RequiredLocalBounded` preflight refusal D4 already specifies".)*
 
 ### Decided at PR-049-B review (2026-09-13, response 385)
 
@@ -297,14 +337,16 @@ Deleting project B's transcripts because the user acted in project A is the less
 of D2, and `AppState::app_wide_retained_transcript_bytes` sums only **open** projects — its own doc
 comment says so — so a cross-project "oldest" would be chosen from a partial list. The cost: the
 app-wide figure can read exhausted while an older transcript sits in another open project, and that
-refuses a `RequiredLocalBounded` launch under D4 rather than deleting someone else's data. That is §1.
+launches the next run without a transcript under D4′ rather than deleting someone else's data. That is
+§1. *(Corrected at response 386; this read "refuses a `RequiredLocalBounded` launch under D4".)*
 
 **A failed deletion stops the budget pass and not the expiry pass** (decision 2, accepted). A budget
 pass that continued would delete a newer transcript only because an older one could not be removed;
 an expired transcript is independently past its limit whatever happens to its neighbours. **The
 consequence is carried into PR-049-C:** a candidate whose deletion failed stays a candidate, is reached
 again on every trigger, and stops the budget pass each time — so one undeletable file can keep
-`project_budget_exhausted` true indefinitely and D4 refuses launches. C's refusal must distinguish *a
+`project_budget_exhausted` true indefinitely, so every new run launches without a transcript under D4′
+*(corrected at response 386; this read "D4 refuses launches")*. C's disclosure must distinguish *a
 deletion failed* from *nothing is deletable*: two facts, two remedies.
 
 **Expiry-before-budgets is observable as attribution, not as survivors.** Expiry and budget selection

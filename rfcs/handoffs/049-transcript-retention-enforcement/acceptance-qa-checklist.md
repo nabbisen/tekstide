@@ -79,10 +79,23 @@ refusing `0`, not this function deleting on it. See `qa-evidence.md`.
       purge in the same file writes `(User, TrustedUi)` — **both read back from a real store**, so
       the distinction §4 requires is visible in one place.
 - [ ] A cleanup that deleted nothing writes **no record**. **Ablation:** record unconditionally.
-- [ ] `RequiredLocalBounded` on an unfreeable budget is refused **and no process starts** — assert
-      the absent process, not the refusal value.
-- [ ] The refusal's wording meets RFC-047 §5: states the fact, implies no danger, implies no fix
-      available from there.
+- [ ] **D4′: launch cleanup leaves a budget exhausted → the run starts with capture disabled.** Assert
+      the process started **and** no transcript file or `Transcript` record exists for it.
+      **Ablation:** capture anyway; the test fails alone.
+- [ ] **The launch confirmation says so — present when exhausted, absent otherwise**, each its own
+      assertion, ablated separately. Wording meets RFC-047 §5: states the fact and why, implies no
+      danger, implies no fix available from there.
+- [ ] **What the confirmation shows is what the launch applies** — the decision is carried into the
+      launch, not recomputed after the click. Test: bytes freed between the two do not produce a
+      transcript the user was told would not exist.
+- [ ] **The run's detail says why it has no transcript**, distinct from opt-out. Neither
+      `DisabledByOptOut` nor `CaptureFailed` is written for this case — neither is true of it.
+- [ ] `RequiredLocalBounded` on an unfreeable budget is still refused in core and **no process
+      starts**, unit-tested through the builder and **labelled unreachable from the product**. No
+      production caller added (RFC-011: *"must not… be used by an unreviewed workflow"*).
+- [ ] RFC-011's row states the project and app-wide budgets are enforced **at launch**, with the
+      overshoot bound (capturing runs × per-transcript limit) — D1 without overstating it.
+- [ ] `tests/retention.rs`'s message *"so PR-049-C can refuse a RequiredLocalBounded launch"* says D4′.
 - [ ] **RFC-045's parser refuses `transcript_retention_days = 0`**, naming the transcript
       opt-out as the way to express what the user probably meant. Required at response 381:
       `is_bounded()` already treats `0` as *unbounded* while response 378 called it the tightest
@@ -97,8 +110,8 @@ refusing `0`, not this function deleting on it. See `qa-evidence.md`.
       nothing was removed. **Ablation:** suppress the disclosure; its test fails alone.
 - [ ] **"A deletion failed" is reported distinctly from "nothing is deletable"** when the budget
       stays exhausted (response 385). A failed candidate stops the budget pass on every trigger,
-      so one undeletable file can make D4 refuse launches indefinitely; the refusal must name the
-      failure, which has a remedy the other case does not.
+      so one undeletable file can disable capture for every new run indefinitely (D4′); the
+      disclosure must name the failure, which has a remedy the other case does not.
 - [ ] **A stale `Expired` mark is re-checked, not trusted — and cleared**, with a test: a transcript
       whose deletion failed stays marked; raise the configured age; at the next trigger it survives
       **and is no longer `Expired`**. PR-049-B's decision 5 (survival) follows from the code and was

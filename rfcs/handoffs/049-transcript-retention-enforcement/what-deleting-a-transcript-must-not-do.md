@@ -27,8 +27,8 @@ that is exactly at its limit is **not** over it. A transcript whose liveness can
 RFC-011: *"Running transcript writers must not be silently deleted underneath active AgentRuns."*
 
 Not "deprioritised". Not "selected last". **Never selected**, even when the app-wide budget is
-exhausted and nothing else can be freed — that case has its own answer, which is
-`RequiredLocalBounded` failing preflight (D4), not deleting from under a running process.
+exhausted and nothing else can be freed — that case has its own answer, which is the new run
+launching without a transcript and saying so (**D4′**), not deleting from under a running process.
 
 Liveness comes from the transcript's **`AgentRun.status`** — not from `lifecycle_state`, which
 production never moves off `Active`, and not from `last_write_at`, which production never

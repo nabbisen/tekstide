@@ -758,8 +758,9 @@ is the one thing §2 forbids absolutely.
 
 **The cost, stated rather than designed away:** those bytes occupy the per-project and app-wide
 budgets forever. Taken far enough — many detached runs, never reclaimed — the app-wide budget fills
-and RFC-049 D4 refuses `RequiredLocalBounded` launches permanently, which is a denial of service on
-the user's own workbench caused by a safety rule.
+and every new run launches without a transcript (RFC-049 D4′), disclosed each time — a quiet loss of
+records caused by a safety rule. *(Corrected at response 386: this read "D4 refuses
+`RequiredLocalBounded` launches permanently", a mode no product path requests.)*
 
 **Not solved in RFC-049, and the reason is that the available fix is bad.** Reclaiming needs to know
 whether a process is gone, which Tekstide cannot know after detaching. The obvious heuristic is a
@@ -769,6 +770,16 @@ either was written.
 
 **Trigger to revisit:** the first report of a budget that will not clear, or `Detached` becoming
 common rather than rare. Until then this is a bounded, disclosed leak and the alternative is worse.
+
+### Project and app-wide transcript budgets are enforced at launch, not mid-stream — RFC-049 D4′
+
+D4′ stops new capture from beginning while a budget is exhausted. It does not stop a run already
+capturing: each continues to `max_bytes_per_transcript`, so a budget can be exceeded by up to
+*capturing runs × that limit*. Enforcing mid-stream needs live byte accounting shared across writers
+owned by different terminals — a concurrency design, not a rider on RFC-049 (request 386's option B).
+
+**Trigger to revisit:** a report of retained bytes materially above a budget, or many concurrently
+capturing runs becoming common.
 
 ### The test gate runs only on developer machines — no CI, noticed when the first workflow landed
 

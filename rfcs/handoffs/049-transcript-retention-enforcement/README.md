@@ -19,7 +19,8 @@ budgets are computed into `TranscriptLocalDataSummary::budget_pressure` and read
 `TranscriptRetentionState::Expired` exists with **no producer**.
 
 RFC-011 already specified the cleanup — oldest-inactive-first, never a live writer,
-`RequiredLocalBounded` failing preflight on exhaustion. This slice builds it.
+`LocalBounded` disabling capture on exhaustion. This slice builds it — at launch, disclosed (**D4′**,
+response 386; the `RequiredLocalBounded` refusal RFC-011 also names is reachable from no product path).
 
 ## Read these first, in this order
 

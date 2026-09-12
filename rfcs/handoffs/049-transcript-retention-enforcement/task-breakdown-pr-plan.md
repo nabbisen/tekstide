@@ -77,8 +77,11 @@ created: "2026-09-12"
 - **Audit** (D6): `(AppPolicy, ExplicitCleanup)` on `TranscriptPurge`, via
   `transcript_purge_record` gaining the pairing as a parameter — not a second constructor.
   **A cleanup that deleted nothing writes nothing** (§4).
-- **`RequiredLocalBounded` preflight refusal** when the budget cannot be freed: wording under
-  RFC-047 §5 — state the fact, do not imply the user can fix it from there, do not imply danger.
+- **D4′ (response 386), replacing the refusal:** when launch cleanup leaves a budget exhausted, the
+  run starts with capture disabled; the existing launch confirmation says so, worded under RFC-047 §5;
+  the decision shown is the decision applied; the run's detail says why it has no transcript,
+  distinctly from opt-out. `RequiredLocalBounded`'s core refusal stays a unit test, labelled
+  unreachable. **The parts that do not depend on D4′ may land first as their own commit.**
 - **D5**: `transcript_local_data_summary_for` takes the session's configured limits.
 
 **Required tests:**
@@ -87,12 +90,13 @@ created: "2026-09-12"
   store** with `AppPolicy`/`ExplicitCleanup` — and a user purge in the same test writes
   `User`/`TrustedUi`. **Both pairings, one test file, so the distinction is visible.**
 - A cleanup that deletes nothing writes **no** record. Ablate by recording unconditionally.
-- `RequiredLocalBounded` is refused, and **no process starts** — assert the absence of the
-  process, not just the refusal value.
+- Exhausted at launch: the process **starts** and **no transcript exists** for it — assert both.
+- The confirmation's notice is present when exhausted and absent otherwise, each ablated alone.
 - D5: the summary's `budget_pressure` changes when the configured limit changes. Ablate by
   restoring `agent_run_default()` and watch it alone fail.
 
-**Evidence:** unit-level, plus one live capture of the preflight refusal against a `mktemp -d`
+**Evidence:** unit-level, plus one live capture of the launch confirmation naming a run whose output
+will not be kept (D4′; the refusal it replaced is unreachable), against a `mktemp -d`
 fixture with `XDG_CONFIG_HOME` and `XDG_STATE_HOME` both throwaway. Per `ARCHITECTURE.md`, **try
 `wtype` before assuming the documented capture gap** — it reached the application first try at
 PR-045-C. Bounded-evidence rule applies: three rounds, then the store read-back carries it.
