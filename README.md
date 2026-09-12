@@ -258,9 +258,9 @@ not exist. Anyone reading "command approval shipped" into this is reading more t
 record says.
 
 The **approval-history surface** — where past decisions and expired requests are
-disclosed — is likewise implemented and tested, but no key is bound to it, so it cannot
-be opened at all. That is a defect, recorded in `rfcs/future-work.md`, not a design
-choice.
+disclosed — is likewise implemented and tested, and it opens with `Ctrl+Alt+H`. A real
+user opening it today sees it **empty**, correctly rather than as a bug: with no adapter
+speaking the protocol, there are no decisions to disclose.
 
 **It is cooperative, not enforced.** Approval works only if the adapter asks. Tekstide
 does not intercept process execution and has no execution path of its own to withhold,

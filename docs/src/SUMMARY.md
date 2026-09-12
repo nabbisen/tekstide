@@ -5,6 +5,11 @@
 # For users
 
 - [Getting started](./users/getting-started.md)
+- [What works today](./users/what-works-today.md)
+- [Working with projects](./users/working-with-projects.md)
+- [Configuration](./users/configuration.md)
+- [Keyboard reference](./users/keyboard-reference.md)
+- [Local data and privacy](./users/local-data-and-privacy.md)
 
 # For contributors
 

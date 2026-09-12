@@ -1,6 +1,6 @@
 ---
 title: "Documentation: a 554-line landing page, and a book that includes it"
-status: "**PR-DOC-A complete and verified live 2026-09-13** — the book publishes at `https://nabbisen.github.io/tekstide/`; all nine chapter URLs answer 200, every `{{#include}}` renders content from outside `docs/`, and `.git-exclude/` is 404 on the live site. **PR-DOC-B and PR-DOC-C are both unblocked** (C was waiting only on the URL answering). Scoped 2026-09-13 by the architect."
+status: "**PR-DOC-B implemented 2026-09-13** — six owned chapters under `docs/src/users/`, no chapter includes `README.md` any more, and `rfc_docs_invariants` now guards `SUMMARY.md` in both directions; awaiting review. **PR-DOC-A complete and verified live 2026-09-13** — the book publishes at `https://nabbisen.github.io/tekstide/`; all nine chapter URLs answer 200, every `{{#include}}` renders content from outside `docs/`, and `.git-exclude/` is 404 on the live site. **PR-DOC-C is unblocked** (it was waiting only on the URL answering) and is the remaining slice: the README is deliberately untrimmed until then. Scoped 2026-09-13 by the architect."
 rfc_file: "none — documentation slice; no behaviour, no security surface. Owner authorized a handoff rather than an RFC."
 target_milestone: "M12"
 created: "2026-09-13"

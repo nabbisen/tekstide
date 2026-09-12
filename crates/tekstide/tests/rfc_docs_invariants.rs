@@ -415,3 +415,115 @@ fn every_relative_link_in_the_rfc_tree_resolves() {
         broken.join("\n")
     );
 }
+
+fn book_src_dir() -> Option<PathBuf> {
+    let dir = repo_root().join("docs/src");
+    dir.is_dir().then_some(dir)
+}
+
+/// Every target `SUMMARY.md` links to, as a path relative to `docs/src`.
+fn summary_targets(book_src: &Path) -> Vec<String> {
+    let Ok(source) = std::fs::read_to_string(book_src.join("SUMMARY.md")) else {
+        return Vec::new();
+    };
+    let mut targets = Vec::new();
+    for (index, _) in source.match_indices("](") {
+        let tail = &source[index + 2..];
+        let Some(end) = tail.find(')') else { continue };
+        let raw = &tail[..end];
+        if raw.contains("://") || raw.starts_with('/') || raw.starts_with('#') {
+            continue;
+        }
+        let target = raw.split('#').next().unwrap_or(raw);
+        if !target.ends_with(".md") {
+            continue;
+        }
+        targets.push(target.trim_start_matches("./").to_owned());
+    }
+    targets
+}
+
+/// Every page under `docs/src/` is listed in `SUMMARY.md`.
+///
+/// **A page mdBook is never told about is invisible in the book and
+/// nothing says so.** `mdbook build` succeeds, the file is simply not
+/// rendered and not reachable from any navigation -- the same class of
+/// silent failure as the status fields above, which is why this is a
+/// test rather than a convention. Bought at PR-DOC-B, the slice that
+/// starts adding pages: the risk is only real once `docs/src/users/`
+/// holds chapters someone can forget to list.
+///
+/// `SUMMARY.md` is not a page and does not list itself.
+#[test]
+fn every_page_in_the_book_is_listed_in_its_summary() {
+    let Some(book_src) = book_src_dir() else {
+        eprintln!("skipped: docs/ is not packaged with the published crate");
+        return;
+    };
+
+    let mut pages = Vec::new();
+    markdown_files(&book_src, &mut pages);
+    assert!(!pages.is_empty(), "docs/src/ exists but holds no markdown");
+
+    let targets = summary_targets(&book_src);
+    let mut orphaned = Vec::new();
+    for page in &pages {
+        let relative = page
+            .strip_prefix(&book_src)
+            .expect("a page is under docs/src")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if relative == "SUMMARY.md" {
+            continue;
+        }
+        if !targets.contains(&relative) {
+            orphaned.push(format!("  docs/src/{relative}"));
+        }
+    }
+
+    assert!(
+        orphaned.is_empty(),
+        "page(s) under docs/src/ that SUMMARY.md never lists, so they are in the repository \
+         but not in the book:\n{}\nmdBook does not report this -- the build succeeds and the \
+         page is simply unreachable.",
+        orphaned.join("\n")
+    );
+}
+
+/// The reverse direction: every `SUMMARY.md` entry names a file that
+/// exists.
+///
+/// **Deliberately a separate test from the one above, not a second
+/// assertion inside it.** An unlisted page and an entry pointing at
+/// nothing are different defects with different fixes -- one is a page
+/// nobody can reach, the other a navigation entry that breaks when
+/// clicked -- and one test failing for either reason cannot tell a
+/// reader which happened. (Response 367's lesson: a test asserting two
+/// properties, where ablating either fails the same test, is why they
+/// are two.)
+#[test]
+fn every_summary_entry_names_a_page_that_exists() {
+    let Some(book_src) = book_src_dir() else {
+        eprintln!("skipped: docs/ is not packaged with the published crate");
+        return;
+    };
+
+    let targets = summary_targets(&book_src);
+    assert!(
+        !targets.is_empty(),
+        "docs/src/SUMMARY.md lists no pages at all"
+    );
+
+    let mut dangling = Vec::new();
+    for target in &targets {
+        if !book_src.join(target).exists() {
+            dangling.push(format!("  SUMMARY.md -> {target}"));
+        }
+    }
+
+    assert!(
+        dangling.is_empty(),
+        "SUMMARY.md entr(ies) naming a file that does not exist:\n{}",
+        dangling.join("\n")
+    );
+}
