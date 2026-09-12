@@ -46,6 +46,13 @@ Three keys are refused permanently rather than "not yet", and say why: configura
 workspace trust, cannot disable multiline-paste confirmation, and cannot disable destructive-command
 approval. Those are decisions per-use acts exist to make, and no file may make them in advance.
 
+**If you already wrote a `config.toml`** — against RFC-023's published schema, since `0.12.0` said
+plainly that writing one had no effect — **it is now refused rather than ignored, and the board says
+so.** Nothing you set was taking effect before and nothing is taken away now; what changed is that
+you are told. **To fix it: delete the key the board names, or delete the file.** The four keys above
+are the ones worth keeping. The file lives at `$XDG_CONFIG_HOME/tekstide/config.toml`, or
+`~/.config/tekstide/config.toml` when `XDG_CONFIG_HOME` is unset; Tekstide never writes it.
+
 ### Added (security) — nothing from a configuration file runs without a deliberate act
 
 - **The first launch of a configuration-defined AI CLI asks first**, and the confirmation names the

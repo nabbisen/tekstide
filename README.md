@@ -30,7 +30,9 @@ switching. It includes:
   model-level trusted UI boundaries;
 - AI CLI profiles as reviewed launch contracts, with Restricted Mode blocking
   workspace-local executables, wrappers, project-local `PATH`, and implicit CLI
-  workspace-config discovery;
+  workspace-config discovery — **definable in a configuration file as of `0.18.0`**
+  (RFC-045), with one deliberate act naming the resolved executable between the file
+  and any process it starts; see *Configuring It*;
 - AgentRun launch through project-owned terminals, with honest Plain/Supervised/
   Managed labels and active-file safety before process start;
 - bounded local transcript capture with retention limits and purge policy — **reached for real by AI CLI runs**, with an in-app per-project opt-out and purge on the Trust Settings surface, see *Local Data and Privacy*;
@@ -232,8 +234,12 @@ lacking workspace-discovery trust) and the project-added producer (a real projec
 opened from the CLI-argument path, distinct from a remembered project merely restored
 on boot, which writes nothing). RFC-039 (M12) wired the safe-close producer: closing a
 project with live terminals or an active agent run records the decision, both outcomes
-(closed and cancelled). Configuration-change producers remain defined in the audit
-schema but not yet wired.
+(closed and cancelled). RFC-045 (`0.18.0`) wired the configuration-change producers,
+the last two of the twelve: confirming a configuration-defined AI CLI profile's first
+use, or a reload that weakens a security-relevant setting, records that a sensitive
+setting changed and in which direction — never which setting or what value, and there
+is no field on the record that could. **All twelve audit event families now have a
+producer.**
 
 ### Command approval
 
@@ -360,6 +366,51 @@ which a later, unrelated change does not undo.
 already retained, both per project — live on the same Trust Settings surface (`Ctrl+Alt+U`).
 See *Local Data and Privacy* below for exactly what is recorded and how to remove it.
 
+## Configuring It (`0.18.0`)
+
+Tekstide reads `$XDG_CONFIG_HOME/tekstide/config.toml` (or `~/.config/tekstide/config.toml`) at
+startup. **A missing file is normal**, and an invalid one still starts the application with
+built-in defaults — the Project Board then says the file was ignored and names the key that broke
+it. `Ctrl+Alt+C` re-reads the file without restarting.
+
+**Four settings take effect today**, and the file is deliberately narrow:
+
+```toml
+[agent]
+default_profile = "my-cli"          # which AI CLI the launch button runs
+transcript_retention_days = 30      # recorded on each run's policy; see the caveat below
+
+[agent.profile.my-cli]
+display_name = "My AI CLI"
+command = "/usr/local/bin/my-cli"   # absolute path, or a bare name found on the system path
+
+[resources]
+agent_run_limit = 3                 # per project; omit for no limit
+```
+
+**Every other key is refused by name, with the file reported as ignored.** RFC-023 designed a
+much larger schema — fonts, theme, keybindings, scrollback, concurrency limits — and none of those
+settings has code that reads them. A key the file accepts and the product ignores is a lie you
+read, so each is refused until the feature that honours it exists, and each returns to the file in
+the same change as that feature. A key Tekstide has simply never heard of (a typo, or one from a
+newer version) loads with a warning instead, named on the board, because then nothing is wrong
+with the file itself.
+
+**Nothing a configuration file defines runs without a deliberate act.** The first launch of a
+configuration-defined AI CLI asks first, and the confirmation names the **executable path it
+resolved to** and the file that defined it — not the `display_name`, which is text the file itself
+supplies. Once per session, not once per launch. A reload that weakens a security-relevant setting
+asks the same way; one that tightens applies immediately.
+
+**Three things configuration can never do**, and the file is refused if it asks: grant workspace
+trust (that is a per-project act, `Ctrl+Alt+U`), disable multiline-paste confirmation, or disable
+destructive-command approval.
+
+**Caveat on `transcript_retention_days`:** the value is recorded on each run's transcript policy
+and checked for validity, but **no age-based purge reads it yet** — transcripts are not kept for
+that many days and then removed. The only purge is the manual, per-project one on the Trust
+Settings surface. See *Local Data and Privacy*.
+
 ## Keyboard Reference
 
 The shell is keyboard-navigable by design. These bindings exist today
@@ -382,6 +433,7 @@ The shell is keyboard-navigable by design. These bindings exist today
 | `Ctrl+Alt+R` | Open the AgentRun Report for the most recently launched run in the active project |
 | `Ctrl+Alt+D` | Open the Change Review surface for the active project's most recent change set (RFC-020) |
 | `Ctrl+Alt+K` | Open this keyboard reference, from anywhere (RFC-038) |
+| `Ctrl+Alt+C` | Re-read the configuration file (`0.18.0`, RFC-045) |
 | `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |
 
 `Ctrl+Shift+P` is reserved for a command palette that does not exist yet — it is
