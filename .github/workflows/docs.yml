@@ -1,0 +1,89 @@
+# Builds the mdBook in `docs/` and publishes it to GitHub Pages.
+#
+# This is the repository's first workflow. Two choices in it are
+# deliberate and are the kind this project records rather than leaves to
+# be re-derived:
+#
+# **No `paths:` filter, on purpose.** Six of the book's nine pages are
+# `{{#include}}`s of files *outside* `docs/` — `README.md`,
+# `CHANGELOG.md`, `ROADMAP.md`, `ARCHITECTURE.md`,
+# `rfcs/delivery-plan.md`, `rfcs/future-work.md`. A path filter would
+# have to list all six, and would then silently publish a stale book the
+# first time a chapter includes a seventh file. A hand-maintained list of
+# include targets is exactly the drift generator
+# `rfcs/handoffs/documentation-readme-and-book.md` exists to remove, so
+# this rebuilds on every push to `main` and accepts a one-minute build
+# instead.
+#
+# **`mdbook` is pinned by version *and* checksum.** A version alone still
+# trusts whatever that URL serves later; the SHA-256 below was recorded
+# 2026-09-13 against the asset as served then. If rust-lang re-cuts the
+# release the download fails loudly, which is the correct direction for a
+# job holding a Pages deploy token. Third-party actions are avoided for
+# the same reason — only first-party `actions/*`, each pinned to a commit
+# SHA with its tag in a trailing comment.
+#
+# `docs/book/` is git-ignored (`.gitignore:28`) and stays that way: the
+# book is built here and published from the artifact, never committed.
+
+name: docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One Pages deployment at a time, and never cancel one in flight — a
+# cancelled deploy can leave the site mid-swap.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  MDBOOK_VERSION: "0.5.4"
+  MDBOOK_SHA256: "3f28de05dafca9d0f2eab99c662116b0e37b89b1d96a08f8f430b9eeae958cd7"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install mdBook (pinned version, verified checksum)
+        run: |
+          set -euo pipefail
+          # Everything happens in the runner's own temp dir: nothing is
+          # downloaded into the checkout, and the step assumes nothing
+          # about which system directories this runner image lets us
+          # write. `$GITHUB_PATH` puts it on PATH for the build step.
+          asset="mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          mkdir -p "$RUNNER_TEMP/bin"
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o "$asset" \
+            "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/${asset}"
+          echo "${MDBOOK_SHA256}  ${asset}" | sha256sum --check --strict
+          tar xzf "$asset" -C "$RUNNER_TEMP/bin" mdbook
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/mdbook" --version
+
+      - name: Build the book
+        run: mdbook build docs
+
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: docs/book
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

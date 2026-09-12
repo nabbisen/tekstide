@@ -3,10 +3,18 @@
 A local-first, multi-project AI-CLI development workbench.
 
 This book is assembled from the repository's canonical documents rather than restating
-them. Every chapter is an `{{#include}}` of the file that owns its content, so there is
-exactly one place to edit and no copy that can drift.
+them. Where a document already has a canonical home in the repository — `ARCHITECTURE.md`,
+`CHANGELOG.md`, `ROADMAP.md`, the RFC tree — its chapter is an `{{#include}}` of that file,
+so there is exactly one place to edit and no copy that can drift.
 
-That constraint is deliberate. This project has repeatedly found documentation asserting
+Chapters the book **owns** are the exception, and what separates them is where the content's
+canonical home is rather than how important the content is: a chapter owns what no file
+outside `docs/` owns. This page is one. So is
+[Security decisions](./contributors/security-decisions.md), which says as much in its
+opening sentence — someone asking *"why does it behave like this?"* needs one place to look,
+and neither an RFC nor a review note is that place.
+
+That division is deliberate. This project has repeatedly found documentation asserting
 things the code had stopped doing — a README that said "there is no editor" after the
 editor shipped, four releases describing themselves as unreleased release candidates, a
 board that reported a feature as unimplemented while it ran. A book that paraphrased its

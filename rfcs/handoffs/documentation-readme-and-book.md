@@ -1,6 +1,6 @@
 ---
 title: "Documentation: a 554-line landing page, and a book that includes it"
-status: "Scoped 2026-09-13 by the architect. Not started."
+status: "Scoped 2026-09-13 by the architect. **PR-DOC-A implemented 2026-09-13** (workflow, `site-url`, the corrected `introduction.md` sentence) — awaiting review, and the Pages source must still be switched to GitHub Actions by the owner before any URL answers. PR-DOC-B and PR-DOC-C not started."
 rfc_file: "none — documentation slice; no behaviour, no security surface. Owner authorized a handoff rather than an RFC."
 target_milestone: "M12"
 created: "2026-09-13"

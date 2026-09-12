@@ -7,3 +7,11 @@ src = "src"
 [output.html]
 default-theme = "dark"
 git-repository-url = "https://github.com/nabbisen/tekstide"
+# Published as a GitHub Pages *project* site, so every page lives under
+# `/tekstide/`. This is the only thing that value changes, checked by
+# diffing two builds: `404.html`'s `<base href>` becomes `/tekstide/`
+# instead of `/`. That page is the one a reader reaches only by following
+# a broken link, and it is served for *any* missing depth -- without the
+# right base, its own relative asset and navigation paths resolve against
+# whatever directory the bad URL named, and it renders bare.
+site-url = "/tekstide/"
