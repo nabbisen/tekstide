@@ -79,8 +79,13 @@ content-free tombstone transcript reference by default"*.
 - **Cleanup deletes the bytes and transitions to `Purged`**, reusing RFC-033's purge path rather
   than writing a second deletion. One code path deletes transcript bytes in this product, and it
   stays one.
-- A transcript may therefore be **visibly eligible before it is removed**, which is what D2's
-  "not hidden" requires in practice.
+- A transcript may therefore be **visibly eligible before it is removed** — *corrected at
+  response 385: only when its deletion fails.* PR-049-B marks and purges in the same pass at the
+  same trigger, so normally a transcript goes `Active → Expired → Purged` inside one call and
+  nobody sees it eligible. That is the specified behaviour, not a slice defect; what it changes is
+  **where "not hidden from the user" is discharged** — not by a visible `Expired` state, but by
+  PR-049-C telling the user afterwards that transcripts were removed by policy, on a surface they
+  actually read. The audit record is not that surface.
 
 ## D4 — Budget exhaustion: RFC-011 decided it, this RFC implements it
 
@@ -284,3 +289,26 @@ above needs it.
 - **Cleanup failure never fails the thing that triggered it**, except the `RequiredLocalBounded`
   preflight refusal D4 already specifies. A failed deletion is a degraded state to report, not a
   reason a project will not open.
+
+### Decided at PR-049-B review (2026-09-13, response 385)
+
+**App-wide pressure is relieved from the triggering project only** (PR-049-B decision 1, accepted).
+Deleting project B's transcripts because the user acted in project A is the less predictable reading
+of D2, and `AppState::app_wide_retained_transcript_bytes` sums only **open** projects — its own doc
+comment says so — so a cross-project "oldest" would be chosen from a partial list. The cost: the
+app-wide figure can read exhausted while an older transcript sits in another open project, and that
+refuses a `RequiredLocalBounded` launch under D4 rather than deleting someone else's data. That is §1.
+
+**A failed deletion stops the budget pass and not the expiry pass** (decision 2, accepted). A budget
+pass that continued would delete a newer transcript only because an older one could not be removed;
+an expired transcript is independently past its limit whatever happens to its neighbours. **The
+consequence is carried into PR-049-C:** a candidate whose deletion failed stays a candidate, is reached
+again on every trigger, and stops the budget pass each time — so one undeletable file can keep
+`project_budget_exhausted` true indefinitely and D4 refuses launches. C's refusal must distinguish *a
+deletion failed* from *nothing is deletable*: two facts, two remedies.
+
+**Expiry-before-budgets is observable as attribution, not as survivors.** Expiry and budget selection
+share one age measure, so among transcripts that are not live every expired one is older than every
+non-expired one, and both orders delete the same set — **when no deletion fails**; PR-049-B's model
+did not vary failures. The order decides whether a removal is reported as `expired` or `budget` — the
+distinction RFC-011's aggregate accounting asks for.

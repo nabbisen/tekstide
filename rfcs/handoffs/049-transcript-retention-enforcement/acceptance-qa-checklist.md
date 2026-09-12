@@ -59,12 +59,15 @@ refusing `0`, not this function deleting on it. See `qa-evidence.md`.
       (D8′-b). Grep the slice for `byte_count`.
 - [x] Oldest-first by `last_write_at` falling back to `created_at`, proven with a pair that
       inverts under the wrong field.
-- [ ] Expiry runs before byte-budget selection, asserted on **which transcript survived**.
-      **Left unticked: not constructable as written, contradiction named.** With one shared age
-      reference the two orders leave identical survivors in every case — an expired transcript is
-      always among the oldest, so a budget pass reaches it first anyway (exhaustive model:
-      17,310,000 configurations, 0 differ). Expiry-first **is implemented**; what the order
-      actually changes — **attribution** — is tested and ablated instead. See `qa-evidence.md`.
+- [x] **Expiry-first is observable as attribution, not as survivors** (corrected at response 385):
+      a transcript past its age is reported under `expired`, never `budget`; swapping the two
+      passes fails `a_transcript_past_its_age_is_removed_by_expiry_not_by_the_budget` alone.
+      This box originally required the order to be "asserted on which transcript survived",
+      which cannot be satisfied: expiry and budget selection share one age measure, so both
+      orders leave identical survivors. PR-049-B modelled 17,310,000 configurations with 0
+      differences and left the box unticked with the contradiction named, as the preamble asks.
+      Ticked by the reviewer against the corrected wording, after swapping the passes and
+      watching that test fail alone.
 - [x] Cleanup routes through RFC-033's purge — the **tombstone and `Purged` state** are asserted,
       which a raw deletion would not produce (§3).
 - [x] No production caller exists yet.
@@ -88,6 +91,20 @@ refusing `0`, not this function deleting on it. See `qa-evidence.md`.
       failure one level down, and `transcript_capture_declined` already expresses zero retention.
 - [ ] D5: the summary uses the session's configured limits. **Ablation:** restore
       `agent_run_default()`.
+- [ ] **Policy removal is told to the user, on a surface they read** (response 385). B marks and
+      purges in one pass, so nothing is ever visibly `Expired` unless its deletion fails — the
+      audit record is therefore the *only* trace, and nobody reads the audit store. Absent when
+      nothing was removed. **Ablation:** suppress the disclosure; its test fails alone.
+- [ ] **"A deletion failed" is reported distinctly from "nothing is deletable"** when the budget
+      stays exhausted (response 385). A failed candidate stops the budget pass on every trigger,
+      so one undeletable file can make D4 refuse launches indefinitely; the refusal must name the
+      failure, which has a remedy the other case does not.
+- [ ] **A stale `Expired` mark is re-checked, not trusted — and cleared**, with a test: a transcript
+      whose deletion failed stays marked; raise the configured age; at the next trigger it survives
+      **and is no longer `Expired`**. PR-049-B's decision 5 (survival) follows from the code and was
+      stated as untested. The clearing is new: nothing in production moves a transcript out of
+      `Expired` (reviewer's grep, response 385), so today a saved transcript keeps a durable state
+      that is no longer true.
 
 ## Whole-RFC
 

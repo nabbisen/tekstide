@@ -30,8 +30,12 @@ Not "deprioritised". Not "selected last". **Never selected**, even when the app-
 exhausted and nothing else can be freed — that case has its own answer, which is
 `RequiredLocalBounded` failing preflight (D4), not deleting from under a running process.
 
-Liveness comes from `lifecycle_state`, not from `last_write_at` (D8): a transcript between
-writes still has a running agent behind it.
+Liveness comes from the transcript's **`AgentRun.status`** — not from `lifecycle_state`, which
+production never moves off `Active`, and not from `last_write_at`, which production never
+writes (**D8′**, replacing D8 on 2026-09-13). Only `Completed | Failed | Cancelled` are not
+live; **`Detached` is live**; a transcript naming no run is live. *(Corrected at response 385:
+this line still read "from `lifecycle_state`… (D8)" in the required reading, after D8′ had
+reversed it.)*
 
 ## §3 One function deletes transcript bytes
 
