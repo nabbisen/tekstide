@@ -1,6 +1,6 @@
 ---
 title: "Documentation: a 554-line landing page, and a book that includes it"
-status: "**PR-DOC-A and PR-DOC-B complete and verified live 2026-09-13.** The book publishes at `https://nabbisen.github.io/tekstide/`; six owned user chapters answer 200, and `SUMMARY.md` completeness is guarded by two tests. **PR-DOC-C not started, and unblocked** — `README.md` is **deliberately untrimmed** until it lands, so its content exists in both the README and the book for exactly this interval. Scoped 2026-09-13 by the architect."
+status: "**PR-DOC-A and PR-DOC-B complete and verified live 2026-09-13.** The book publishes at `https://nabbisen.github.io/tekstide/`; six owned user chapters answer 200, and `SUMMARY.md` completeness is guarded by two tests. **PR-DOC-C not started, and scheduled next (2026-09-13)**: after the purge-defect disclosure commit (response 387), so the trim carries that disclosure, and before PR-049-C's independent list — RFC-050 must be accepted before anything behind it is built, which leaves this slice the unblocked one. The owner asked twice. `README.md` is **deliberately untrimmed** until it lands, so its content exists in both the README and the book for exactly this interval. Scoped 2026-09-13 by the architect."
 rfc_file: "none — documentation slice; no behaviour, no security surface. Owner authorized a handoff rather than an RFC."
 target_milestone: "M12"
 created: "2026-09-13"
