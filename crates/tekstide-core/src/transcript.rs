@@ -19,7 +19,8 @@ pub use reader::{
     TranscriptReadPolicy, TranscriptWindow, read_window,
 };
 pub use retention::{
-    is_transcript_expired, mark_transcript_expired_if_due, most_recent_activity_seconds,
+    agent_run_may_still_be_writing, is_transcript_expired, mark_transcript_expired_if_due,
+    most_recent_activity_seconds,
 };
 pub use writer::{
     BoundedTranscriptWriter, TranscriptWriteError, TranscriptWriteErrorReason,

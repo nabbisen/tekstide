@@ -6,7 +6,10 @@ use crate::runtime::terminal::{
     LinuxTerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntimeEvent,
     TerminationOutcome,
 };
-use crate::transcript::{TranscriptLocalDataSummary, TranscriptRetentionLimits};
+use crate::transcript::{
+    TranscriptLocalDataSummary, TranscriptRetentionLimits, agent_run_may_still_be_writing,
+    is_transcript_expired, mark_transcript_expired_if_due, most_recent_activity_seconds,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -897,6 +900,139 @@ impl ProjectSession {
         self.purge_transcripts_by_id(transcript_ids)
     }
 
+    /// RFC-049 PR-049-B: expire, then relieve byte budgets, deleting only
+    /// through RFC-033's purge. **No production caller yet** — PR-049-C
+    /// adds the two triggers D2 names.
+    ///
+    /// **Order: expiry first, then byte budgets.** With one shared notion
+    /// of age, the two orders leave the *same* transcripts behind — an
+    /// expired transcript is always among the oldest, so a budget pass
+    /// reaches it first anyway. What the order changes is **attribution**:
+    /// a transcript removed because it was past its age is reported under
+    /// `expired`, not under `budget`, which is the distinction RFC-011
+    /// asks the record to carry.
+    ///
+    /// **Liveness gates marking as well as deletion** (D8′-a). Production
+    /// never records `last_write_at`, so age always falls back to
+    /// `created_at`, and a run writing for forty days under a thirty-day
+    /// limit reads as expired while it is being written. Checking liveness
+    /// only before deletion would still stamp a false `Expired` on a
+    /// durable record; it is checked before anything is touched.
+    ///
+    /// **A live writer is never a budget candidate, at any pressure** (§2).
+    /// When nothing else can be freed, the budget stays exhausted and says
+    /// so in the result — refusing a `RequiredLocalBounded` launch on that
+    /// is PR-049-C's D4 refusal, never deleting from under a running run.
+    ///
+    /// **Bytes come from the files** (D8′-b), through
+    /// [`Self::real_retained_transcript_bytes`] — the source
+    /// `remove_transcript_file` reads at delete time, so the figure cleanup
+    /// selects on and the figure it deletes agree. `Transcript.byte_count`
+    /// is `0` for every production transcript.
+    ///
+    /// **App-wide pressure is relieved from this project's transcripts
+    /// only**, flagged for review. RFC-011 says app-wide cleanup processes
+    /// inactive transcripts oldest first, and does not say across which
+    /// projects. Deleting another project's transcripts because the user
+    /// acted in this one is the less predictable reading of D2, and
+    /// `AppState` can only count *open* projects anyway, so a cross-project
+    /// "oldest" would be chosen from a partial list. Keeping more is §1's
+    /// direction; the cost is that an app-wide budget can read exhausted
+    /// while an older transcript sits in another project.
+    ///
+    /// **Failures never abort the call**, and the two passes treat them
+    /// differently, both toward keeping: the expiry pass moves on, because
+    /// one transcript failing to delete makes no other one less expired;
+    /// the budget pass **stops**, because continuing would delete a newer
+    /// transcript only because an older one could not be removed.
+    ///
+    /// Limits that are not bounded clean nothing, the same reading of
+    /// `is_bounded()` PR-049-A's expiry already takes.
+    pub fn apply_transcript_retention(
+        &mut self,
+        limits: TranscriptRetentionLimits,
+        retained_bytes_in_other_projects: u64,
+        now: &DomainTimestamp,
+    ) -> TranscriptRetentionCleanup {
+        let mut cleanup = TranscriptRetentionCleanup::default();
+        if !limits.is_bounded() {
+            return cleanup;
+        }
+
+        for index in 0..self.transcripts.len() {
+            if self.transcript_may_still_be_written(index) {
+                continue;
+            }
+            if !self.transcripts[index].lifecycle_state.has_retained_bytes()
+                || !is_transcript_expired(&self.transcripts[index], limits, now)
+            {
+                continue;
+            }
+            if mark_transcript_expired_if_due(&mut self.transcripts[index], limits, now) {
+                cleanup.marked_expired += 1;
+            }
+            match self.purge_transcript_at(index) {
+                Ok(summary) => cleanup.expired.merge(summary),
+                Err(error) => cleanup.failures.push(error),
+            }
+        }
+
+        let mut project_bytes = self.real_retained_transcript_bytes();
+        for index in self.retention_budget_candidates_oldest_first() {
+            if !budget_exceeded(project_bytes, retained_bytes_in_other_projects, limits) {
+                break;
+            }
+            match self.purge_transcript_at(index) {
+                Ok(summary) => cleanup.budget.merge(summary),
+                Err(error) => {
+                    cleanup.failures.push(error);
+                    break;
+                }
+            }
+            project_bytes = self.real_retained_transcript_bytes();
+        }
+
+        cleanup.project_budget_exhausted = project_bytes > limits.max_bytes_per_project;
+        cleanup.app_budget_exhausted = retained_bytes_in_other_projects
+            .saturating_add(project_bytes)
+            > limits.max_bytes_app_wide;
+        cleanup
+    }
+
+    /// D8′, through the transcript's own run. **Unknown is live** (§1): a
+    /// transcript naming no run, or a run this session does not hold, is
+    /// never touched. Production always has both, which is exactly why the
+    /// unknown case must not be the one that deletes.
+    fn transcript_may_still_be_written(&self, index: usize) -> bool {
+        let Some(agent_run_id) = &self.transcripts[index].agent_run_id else {
+            return true;
+        };
+        match self.agent_run(agent_run_id) {
+            Ok(run) => agent_run_may_still_be_writing(run.status),
+            Err(_) => true,
+        }
+    }
+
+    /// Oldest first by most recent activity — the later of `last_write_at`
+    /// and `created_at`, the same age expiry measures. Only transcripts
+    /// [`Self::real_retained_transcript_bytes`] counts are eligible, so
+    /// nothing is selected that the budget figure does not include. A
+    /// transcript whose age cannot be computed is not a candidate.
+    fn retention_budget_candidates_oldest_first(&self) -> Vec<usize> {
+        let mut candidates = self
+            .transcripts
+            .iter()
+            .enumerate()
+            .filter(|(_, transcript)| !transcript.is_tombstone())
+            .filter(|(index, _)| !self.transcript_may_still_be_written(*index))
+            .filter_map(|(index, transcript)| {
+                most_recent_activity_seconds(transcript).map(|seconds| (seconds, index))
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_unstable();
+        candidates.into_iter().map(|(_, index)| index).collect()
+    }
+
     fn attach_agent_run_transcript(
         &mut self,
         agent_run_id: AgentRunId,
@@ -1748,6 +1884,36 @@ impl ProjectTranscriptPurgeSummary {
         self.bytes_removed += other.bytes_removed;
         self.tombstones_preserved += other.tombstones_preserved;
     }
+}
+
+/// RFC-049 PR-049-B: what [`ProjectSession::apply_transcript_retention`]
+/// did, for PR-049-C's triggers to record and act on.
+///
+/// `expired` and `budget` are kept apart because the record must say
+/// **why** a transcript was removed. `project_budget_exhausted` and
+/// `app_budget_exhausted` are the facts D4's `RequiredLocalBounded`
+/// refusal reads: a budget still over its limit after every inactive
+/// candidate was tried. **Strictly greater** — a budget exactly at its
+/// limit is not over it (§1), the same comparison
+/// `TranscriptLocalDataSummary` already uses for pressure.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TranscriptRetentionCleanup {
+    pub marked_expired: u64,
+    pub expired: ProjectTranscriptPurgeSummary,
+    pub budget: ProjectTranscriptPurgeSummary,
+    pub failures: Vec<ProjectTranscriptError>,
+    pub project_budget_exhausted: bool,
+    pub app_budget_exhausted: bool,
+}
+
+fn budget_exceeded(
+    project_bytes: u64,
+    retained_bytes_in_other_projects: u64,
+    limits: TranscriptRetentionLimits,
+) -> bool {
+    project_bytes > limits.max_bytes_per_project
+        || retained_bytes_in_other_projects.saturating_add(project_bytes)
+            > limits.max_bytes_app_wide
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

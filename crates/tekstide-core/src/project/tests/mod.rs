@@ -5,6 +5,7 @@ mod collections;
 mod content;
 mod metadata;
 mod references;
+mod retention;
 mod transcripts;
 
 fn project_session(sequence: u64) -> ProjectSession {

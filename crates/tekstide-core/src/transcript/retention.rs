@@ -1,4 +1,4 @@
-use crate::domain::{DomainTimestamp, Transcript, TranscriptLifecycleState};
+use crate::domain::{AgentRunStatus, DomainTimestamp, Transcript, TranscriptLifecycleState};
 
 use super::policy::TranscriptRetentionLimits;
 
@@ -118,4 +118,46 @@ pub fn mark_transcript_expired_if_due(
     }
     transcript.record_lifecycle_state(TranscriptLifecycleState::Expired);
     true
+}
+
+/// RFC-049 D8′: whether an `AgentRun` in this status may still be
+/// writing its transcript — the liveness authority for every retention
+/// action, marking as well as deletion.
+///
+/// **Not `Transcript.lifecycle_state`.** Production never moves that
+/// field off `Active`: the recorder that did was deleted by RFC-036, so a
+/// liveness check reading it would select nothing in the product while
+/// passing every test that sets the field by hand. The transcript does
+/// not know whether it is being written; its run does, and the run's
+/// status is driven from real call sites.
+///
+/// **The match is exhaustive and names every variant, deliberately.**
+/// Only `Completed | Failed | Cancelled` are not live. A variant added to
+/// `AgentRunStatus` later fails to compile here rather than falling into
+/// a wildcard — and a wildcard on the not-live side would make a status
+/// nobody has thought about deletable, which is §1 of
+/// `what-deleting-a-transcript-must-not-do.md` inverted.
+///
+/// **`Detached` is live.** `AgentRun.status`'s own field comment says it
+/// is not proof of supervision after `Detached`, so a detached process may
+/// still be writing and nothing here can tell. The cost — that run's
+/// bytes are never reclaimed — is disclosed in `rfcs/future-work.md`, not
+/// designed away.
+///
+/// **A new predicate rather than `agent_run_status_is_active` or
+/// `agent_run_status_blocks_strong_association`.** Those two already
+/// disagree about `Detached`, and each answers a different question for a
+/// different flow; reusing either would let a later change made for that
+/// flow's reasons silently change what retention deletes.
+pub fn agent_run_may_still_be_writing(status: AgentRunStatus) -> bool {
+    match status {
+        AgentRunStatus::Completed | AgentRunStatus::Failed | AgentRunStatus::Cancelled => false,
+        AgentRunStatus::Draft
+        | AgentRunStatus::Ready
+        | AgentRunStatus::Preparing
+        | AgentRunStatus::Running
+        | AgentRunStatus::AwaitingApproval
+        | AgentRunStatus::ReviewReady
+        | AgentRunStatus::Detached => true,
+    }
 }

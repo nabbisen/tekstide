@@ -139,3 +139,137 @@ user-facing says transcripts are removed (§6).
 `fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`, `rfc_docs_invariants`:
 clean. Three consecutive full-workspace runs, output redirected to files: **507 + 4 + 773, green
 every time** (+15 tests).
+
+## PR-049-B — selection and cleanup
+
+`tekstide-core` only. **No production caller** — grepped; every hit outside tests is a definition,
+an export, or the method's own internal use. Nothing user-facing changed, so §6 holds.
+
+Built under **D8′**, which replaced D8 after this slice first stopped (request 382): liveness is the
+transcript's `AgentRun.status`, not `lifecycle_state`, which production never moves off `Active`.
+
+### What was added
+
+- **`agent_run_may_still_be_writing(AgentRunStatus)`** in `transcript/retention.rs` — a **new**
+  predicate, reusing neither `agent_run_status_is_active` nor
+  `agent_run_status_blocks_strong_association`. It matches **every variant by name**: only
+  `Completed | Failed | Cancelled` are not live; `Detached` is live.
+- **`ProjectSession::apply_transcript_retention(limits, retained_bytes_in_other_projects, now)`** —
+  expiry pass, then byte-budget pass, deleting **only** through RFC-033's `purge_transcript_at`.
+- **`TranscriptRetentionCleanup`** — the result PR-049-C's triggers will read: `marked_expired`,
+  `expired` and `budget` purge summaries kept apart so the record can say **why**, `failures`, and
+  `project_budget_exhausted` / `app_budget_exhausted` for D4's `RequiredLocalBounded` refusal.
+
+### How liveness is driven in the tests, checked by grep
+
+The checklist forbids assigning `lifecycle_state`, because that is the defect D8′ removes. Runs
+reach `Running` through `AgentRun::transition_to` — the validated transition the real launch path
+uses — and leave it through `ProjectSession::apply_agent_terminal_outcome`, the call production makes
+when a terminal exits (`Exited { 0 }` → `Completed`, `OrphanedUnknown` → `Detached`).
+
+```
+lifecycle_state assignments in the new tests:           none
+record_active_write / record_truncated_write / ...:     none
+```
+
+Transcripts are **production-shaped**: `byte_count` stays `0` and `last_write_at` stays `None`. One
+test sets `last_write_at`, to state an **age** for the oldest-first case, and says so in a comment.
+
+### Decisions the slice had to make, each resolved toward keeping (§1) and flagged
+
+1. **App-wide pressure is relieved from the triggering project's transcripts only.** RFC-011 says
+   app-wide cleanup processes *"inactive transcripts first, oldest first"* and does not say across
+   which projects. Deleting project B's transcripts because the user acted in project A is the less
+   predictable reading of D2, and `AppState::app_wide_retained_transcript_bytes` sums only **open**
+   projects, so a cross-project "oldest" would be chosen from a partial list. **Cost:** an app-wide
+   budget can read exhausted while an older transcript sits in another project. Cheap to overrule —
+   selection is one private method over a candidate list.
+2. **A failed deletion stops the budget pass, but not the expiry pass.** Continuing the budget pass
+   would delete a *newer* transcript only because an older one could not be removed; one transcript
+   failing to delete makes no other one less expired. Neither aborts the call.
+3. **Liveness that cannot be determined is live.** A transcript naming no run, or a run the session
+   does not hold, is never touched. Production always has both — which is exactly why the unknown
+   case must not be the one that deletes.
+4. **Limits that are not bounded clean nothing**, the same reading of `is_bounded()` PR-049-A's
+   expiry already takes and response 381 accepted.
+5. **A previously marked `Expired` transcript that is no longer due** (the configured age was raised
+   since) is **kept**: the expiry pass re-checks age against the limits in force rather than trusting
+   the mark. **This follows from the code, not from a test** — no test in this slice constructs a
+   stale mark. Stated so it is not read as covered.
+
+### A checklist box that cannot be satisfied as written
+
+> *Expiry runs before byte-budget selection, asserted on **which transcript survived**.*
+
+**With one shared notion of age, the two orders leave the same survivors in every case.** Expiry
+measures age from most recent activity; budget selection orders oldest-first by the same measure. So
+every expired transcript is older than every non-expired one, and a budget pass reaches the expired
+ones first anyway. I modelled both orders exhaustively before claiming this:
+
+```
+ages 1..4, sizes 1..3, live or not, 1..4 transcripts, budgets 0..9, age limits 0..4
+17,310,000 configurations, 0 differ
+```
+
+**Expiry-first is implemented as specified.** What the order observably changes is **attribution**:
+a transcript past its age is reported under `expired`, not `budget` — the distinction RFC-011 line
+150 asks the record to carry. That is what
+`a_transcript_past_its_age_is_removed_by_expiry_not_by_the_budget` asserts, and swapping the passes
+fails it alone. **The box stays unticked with the contradiction named**, per the checklist preamble.
+
+### Ablations — each run from a clean tree, restoration verified by sha256
+
+| Box | Ablation | Result |
+| --- | --- | --- |
+| §2: a live writer is never selected, only candidate, app budget exhausted | remove the liveness filter from budget selection | `a_live_writer_…` **fails alone** |
+| Exhaustive predicate (D8′) | add `AgentRunStatus::Paused` | **fails to compile**, exactly once: `retention.rs:153: error[E0004]: non-exhaustive patterns: AgentRunStatus::Paused not covered` |
+| `Detached` is live | map `Detached` to not-live | `a_detached_runs_transcript_is_not_selected` **fails alone** |
+| D8′-a: live not marked `Expired` | move the liveness check after the marking | `a_live_transcript_past_its_age_limit_…` **fails alone** |
+| Oldest-first by most recent activity | order by `created_at` only | `budget_selection_is_oldest_first_…` **fails alone** |
+| Expiry before budget (attribution) | swap the two passes | `a_transcript_past_its_age_is_removed_by_expiry_…` **fails alone** |
+| Cleanup routes through RFC-033's purge | a raw `fs::remove_file` that still reports the deletion | `cleanup_goes_through_the_purge_and_leaves_a_tombstone` **fails alone** |
+| Unknown liveness is live | an unlinked transcript counts as not live | `a_transcript_with_no_agent_run_is_never_selected` **fails alone** |
+| A failed budget deletion stops the pass | remove the `break` | `a_failed_budget_deletion_stops_…` **fails alone** |
+| D8′-b: bytes from the files | read `Transcript.byte_count` instead | **three tests** — see below |
+
+**The byte-source ablation is a disclosed composition, and the ablation corrected my disclosure.**
+Every budget test is production-shaped and every real `byte_count` is `0`, so with the tracked
+count no budget is ever over and budget cleanup never runs: the real-bytes test, the oldest-first
+test, and the stop-on-failure test all fail. The test's doc comment first named only **two** of
+those; the ablation found the third and the comment now names all three. Isolating it would mean
+giving the other tests a `byte_count` production never writes.
+
+The raw-deletion ablation deliberately **still reports** the deletion in the summary — the realistic
+shape of a second deletion loop — so the only thing it lacks is RFC-033's tombstone, and the only
+test that fails is the one asserting it.
+
+### The first ablation run was invalid, and left the tree corrupted
+
+**The Bash tool here runs zsh**, which does not word-split an unquoted `$FILES`. The first script's
+backup, every restore, and every sha256 check acted on one nonexistent path and failed **silently**,
+so the ablations **stacked**: each ran on top of every earlier one. Only its first result — the §2
+ablation, run on a clean tree — was valid; failure counts climbing run over run exposed the rest.
+
+Recovery was **not** by reversing ten stacked edits. The corrupted files were saved to the
+scratchpad, restored from `HEAD` (`domain/agent.rs` had no slice changes, confirmed from
+`git status` before the run), and the slice re-applied from its original edits. **The rebuild was
+then proven identical to the pre-ablation slice**: diffing the corrupted copies against it, every
+hunk is one of the ablations and nothing else.
+
+The valid run above wraps the script in `bash`, uses an array, and **refuses to ablate unless the
+baseline checksum file holds exactly three lines** — the check that would have stopped the first run
+before it touched anything. A verification that can fail silently is not one.
+
+### Greps the checklist asks for
+
+```
+byte_count in apply_transcript_retention and its helpers:  none
+byte_count in transcript/retention.rs:                     none
+production callers of apply_transcript_retention:          none
+```
+
+### Gate
+
+`fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`: clean. **Three
+consecutive full-workspace runs, output redirected to files: 507 + 6 + 783, green every time**
+(+10 tests). No flake.

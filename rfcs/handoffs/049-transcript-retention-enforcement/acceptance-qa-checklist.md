@@ -45,24 +45,29 @@ refusing `0`, not this function deleting on it. See `qa-evidence.md`.
 
 ## PR-049-B — selection and cleanup
 
-- [ ] **A live writer is never selected** — including when it is the only candidate and the app-wide
+- [x] **A live writer is never selected** — including when it is the only candidate and the app-wide
       budget is exhausted (§2). **Ablation:** remove the liveness filter; this test alone fails.
       **Liveness is driven through a real `AgentRun` status**, not by assigning `lifecycle_state`.
-- [ ] The liveness predicate is **new**, matches `AgentRunStatus` **exhaustively**, and names only
+- [x] The liveness predicate is **new**, matches `AgentRunStatus` **exhaustively**, and names only
       `Completed | Failed | Cancelled` as not-live (D8′). **Ablation:** add a variant to
       `AgentRunStatus` and confirm the crate **fails to compile** rather than defaulting it to
       deletable.
-- [ ] **`Detached` is not selected**, and `Completed` is — one test each.
-- [ ] A **live** transcript is not marked `Expired` even past its age limit (D8′-a). **Ablation:**
+- [x] **`Detached` is not selected**, and `Completed` is — one test each.
+- [x] A **live** transcript is not marked `Expired` even past its age limit (D8′-a). **Ablation:**
       move the liveness check after the marking.
-- [ ] Byte selection uses `real_retained_transcript_bytes()`, **never `Transcript.byte_count`**
+- [x] Byte selection uses `real_retained_transcript_bytes()`, **never `Transcript.byte_count`**
       (D8′-b). Grep the slice for `byte_count`.
-- [ ] Oldest-first by `last_write_at` falling back to `created_at`, proven with a pair that
+- [x] Oldest-first by `last_write_at` falling back to `created_at`, proven with a pair that
       inverts under the wrong field.
 - [ ] Expiry runs before byte-budget selection, asserted on **which transcript survived**.
-- [ ] Cleanup routes through RFC-033's purge — the **tombstone and `Purged` state** are asserted,
+      **Left unticked: not constructable as written, contradiction named.** With one shared age
+      reference the two orders leave identical survivors in every case — an expired transcript is
+      always among the oldest, so a budget pass reaches it first anyway (exhaustive model:
+      17,310,000 configurations, 0 differ). Expiry-first **is implemented**; what the order
+      actually changes — **attribution** — is tested and ablated instead. See `qa-evidence.md`.
+- [x] Cleanup routes through RFC-033's purge — the **tombstone and `Purged` state** are asserted,
       which a raw deletion would not produce (§3).
-- [ ] No production caller exists yet.
+- [x] No production caller exists yet.
 
 ## PR-049-C — triggers, record, refusal
 
