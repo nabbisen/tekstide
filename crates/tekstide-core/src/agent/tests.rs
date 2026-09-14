@@ -6,7 +6,7 @@ use crate::approval::{ApprovalCoordinator, DecideOutcome, ReceiveOutcome, Simple
 use crate::content::{SaveDecision, TextDocumentState};
 use crate::domain::{
     AgentCompatibilityLevel, AgentRunId, AgentRunStatus, OwnershipError, TerminalId, TerminalKind,
-    TerminalSession, TerminalStatus,
+    TerminalSession, TerminalStatus, TranscriptAbsence,
 };
 use crate::project::{
     ProjectActiveFileLaunchBlockReason, ProjectAgentActiveFileLaunchError, ProjectAgentLaunchError,
@@ -582,6 +582,78 @@ fn project_session_launches_agent_run_through_terminal_runtime_and_completes() {
     cleanup_root(root);
 }
 
+/// RFC-050 PR-050-A, D3: a run whose transcript file another handle has
+/// locked **starts without capture**. It is not refused — the run is
+/// unrecorded, not more dangerous — and it never writes unlocked. No record
+/// points at the held file, the held bytes are untouched, and the run says
+/// why it has no transcript.
+#[test]
+fn a_launch_whose_transcript_file_is_locked_starts_without_capture() {
+    let root = test_root("agent-transcript-locked-root");
+    let state_root = test_root("agent-transcript-locked-state");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let validation = AgentRunLaunchValidator
+        .validate(
+            &project,
+            &profile,
+            &request_for(&project, &profile).with_local_bounded_transcript(&state_root),
+        )
+        .expect("local bounded transcript launch should validate");
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
+
+    let held = TranscriptPathResolver
+        .resolve_agent_run(TranscriptPathRequest::new(
+            &state_root,
+            &root,
+            project.id().clone(),
+            plan.agent_run().id.clone(),
+        ))
+        .unwrap();
+    std::fs::create_dir_all(held.transcript_dir()).unwrap();
+    std::fs::write(held.transcript_file(), b"bytes another writer owns").unwrap();
+    let holder = std::fs::File::open(held.transcript_file()).unwrap();
+    holder.try_lock().unwrap();
+
+    let mut runtime = LinuxTerminalRuntime::new();
+    let (agent_run_id, _events, _endpoint) = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect("a locked transcript file must not refuse the launch (RFC-050 D3)");
+
+    assert_eq!(
+        project.runtime_summary().running_processes,
+        1,
+        "the process started"
+    );
+    let run = project
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .expect("AgentRun should be recorded");
+    assert_eq!(run.status, AgentRunStatus::Running);
+    assert_eq!(run.transcript_ref, None);
+    assert!(
+        project.transcripts().is_empty(),
+        "no record may point this session's purge at a file another handle holds"
+    );
+    assert_eq!(
+        run.transcript_absence,
+        Some(TranscriptAbsence::WriterLockUnavailable),
+        "the run says why it has no transcript, which opt-out never sets"
+    );
+    assert_eq!(
+        std::fs::read(held.transcript_file()).unwrap(),
+        b"bytes another writer owns"
+    );
+
+    let handle = TerminalRuntimeHandle::new(run.terminal_id.clone().unwrap(), project.id().clone());
+    runtime.write_input(&handle, b"exit 0\n").unwrap();
+    let _ = runtime.wait_for_exit(&handle, Duration::from_secs(5));
+    drop(holder);
+    cleanup_root(root);
+    cleanup_root(state_root);
+}
+
 #[test]
 fn local_bounded_agent_run_transcript_capture_attaches_metadata_and_writes_output() {
     let root = test_root("agent-transcript-capture-root");
@@ -622,8 +694,8 @@ fn local_bounded_agent_run_transcript_capture_attaches_metadata_and_writes_outpu
         .expect("transcript metadata should be recorded");
 
     assert_eq!(terminal.transcript_ref, Some(transcript_id.clone()));
-    assert_eq!(transcript.agent_run_id, Some(agent_run_id.clone()));
-    assert_eq!(transcript.terminal_id, terminal_id);
+    assert_eq!(transcript.agent_run_id(), Some(&agent_run_id));
+    assert_eq!(transcript.terminal_id(), Some(&terminal_id));
     assert!(transcript.storage_path.starts_with(&state_root));
     assert!(!transcript.storage_path.starts_with(&root));
 

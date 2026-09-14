@@ -8,7 +8,9 @@ mod terminal;
 mod time;
 mod transcript;
 
-pub use agent::{AgentCompatibilityLevel, AgentRun, AgentRunStatus, AgentRunTransitionError};
+pub use agent::{
+    AgentCompatibilityLevel, AgentRun, AgentRunStatus, AgentRunTransitionError, TranscriptAbsence,
+};
 pub use approval::{
     ApprovalDecision, ApprovalDecisionError, ApprovalRequest, RiskLevel, RiskReason,
 };
@@ -25,7 +27,7 @@ pub use terminal::{
     TerminalKind, TerminalSession, TerminalStatus, TerminalTransitionError, VisibleSlot,
 };
 pub use time::{DomainTimestamp, TimestampParseError};
-pub use transcript::{Transcript, TranscriptLifecycleState, TruncationState};
+pub use transcript::{Transcript, TranscriptLifecycleState, TranscriptOrigin, TruncationState};
 
 #[cfg(test)]
 mod tests;

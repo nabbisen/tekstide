@@ -14,13 +14,13 @@
 //! to state an *age*, not a liveness, and says so.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunId, AgentRunStatus, DomainTimestamp, TerminalId,
     TerminalKind, TerminalSession, TerminalStatus, Transcript, TranscriptId,
-    TranscriptLifecycleState,
+    TranscriptLifecycleState, TranscriptOrigin, TruncationState,
 };
 use crate::project::{ProjectId, ProjectSession, ProjectTranscriptError};
 use crate::runtime::terminal::{BoundedRuntimeSummary, TerminationOutcome};
@@ -54,8 +54,8 @@ fn a_live_writer_is_not_selected_when_it_is_the_only_candidate_and_the_app_wide_
     assert_eq!(cleanup.budget.purged_transcripts, 0);
     assert!(
         cleanup.app_budget_exhausted,
-        "the exhaustion must be reported, so PR-049-C can refuse a RequiredLocalBounded launch \
-         instead of deleting"
+        "the exhaustion must be reported, so PR-049-C can start the run without capture and \
+         say so (RFC-049 D4′) instead of deleting"
     );
 }
 
@@ -285,6 +285,71 @@ fn a_failed_budget_deletion_stops_budget_cleanup_rather_than_deleting_something_
         "an older transcript that cannot be removed does not make a newer one eligible in its place"
     );
     assert!(cleanup.project_budget_exhausted);
+}
+
+/// RFC-050 PR-050-A: liveness matches on **origin** first. Nothing loads a
+/// found record yet (PR-050-B does); these are built the way the loader will
+/// build them, with no terminal and no run.
+#[test]
+fn a_found_transcript_whose_lock_was_held_at_load_is_never_touched() {
+    let dirs = TestDirs::new("found-locked");
+    let mut project = project_session(&dirs);
+    let path = write_transcript_file(&dirs, "found-locked", b"still being written elsewhere");
+    project
+        .add_transcript(found_on_disk(&project, &path, LONG_AGO, true))
+        .unwrap();
+
+    let cleanup = project.apply_transcript_retention(limits(1, 1, 10_000, 30), 0, &at(NOW));
+
+    assert!(
+        path.exists(),
+        "a lock held at load means some process may still be writing (RFC-050 D3)"
+    );
+    assert_eq!(
+        cleanup.expired.purged_transcripts + cleanup.budget.purged_transcripts,
+        0
+    );
+}
+
+#[test]
+fn a_found_transcript_whose_lock_was_free_at_load_is_retained_like_a_finished_one() {
+    let dirs = TestDirs::new("found-free");
+    let mut project = project_session(&dirs);
+    let path = write_transcript_file(&dirs, "found-free", b"left by an earlier process");
+    project
+        .add_transcript(found_on_disk(&project, &path, LONG_AGO, false))
+        .unwrap();
+
+    project.apply_transcript_retention(limits(100, 1_000, 10_000, 30), 0, &at(NOW));
+
+    assert!(
+        !path.exists(),
+        "a file an earlier process left has no writer in this one, so its age applies"
+    );
+}
+
+/// A record as PR-050-B's loader will build it: its own id, its project,
+/// its path and mtime, and **no terminal or run** — the origin carries none.
+fn found_on_disk(
+    project: &ProjectSession,
+    path: &Path,
+    last_write_at: &str,
+    writer_held_lock_at_load: bool,
+) -> Transcript {
+    Transcript {
+        id: TranscriptId::new_uuid(),
+        project_id: project.id().clone(),
+        origin: TranscriptOrigin::FoundOnDisk {
+            writer_held_lock_at_load,
+        },
+        storage_path: path.to_path_buf(),
+        byte_count: 0,
+        truncation_state: TruncationState::Complete,
+        lifecycle_state: TranscriptLifecycleState::Active,
+        retention_policy: "local-bounded-agent-run".to_owned(),
+        created_at: at(last_write_at),
+        last_write_at: Some(at(last_write_at)),
+    }
 }
 
 struct AttachedRun {

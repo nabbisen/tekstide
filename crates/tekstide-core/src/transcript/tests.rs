@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::domain::{
     AgentRunId, DomainTimestamp, TerminalId, Transcript, TranscriptLifecycleState,
@@ -683,4 +683,112 @@ fn a_fixed_now_gives_the_same_answer_every_run() {
         );
     }
     assert!(first);
+}
+
+// --- RFC-050 PR-050-A: the writer's lock ---------------------------------
+
+#[test]
+fn a_live_writer_holds_an_exclusive_lock_until_it_is_dropped() {
+    let (_temp, storage_path) = resolved_storage_path("writer-holds-lock");
+    let writer = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
+        storage_path.clone(),
+        TranscriptRetentionLimits::agent_run_default(),
+        TranscriptCaptureMode::LocalBounded,
+    ))
+    .unwrap();
+    let probe = fs::File::open(storage_path.transcript_file()).unwrap();
+
+    assert!(
+        matches!(probe.try_lock(), Err(fs::TryLockError::WouldBlock)),
+        "while the writer lives, any other handle must see its file as held (RFC-050 D3)"
+    );
+
+    drop(writer);
+    // Released, but not necessarily at the same instant. While any other
+    // thread in this test binary is between `fork` and `exec`, its child holds
+    // a copy of every open descriptor, and an `flock` lives until the last
+    // copy closes. Measured for request 388: with process-spawning tests
+    // alongside, 1 run in 40 saw the lock still held straight after the drop;
+    // alone, 0 in 40. So release is asserted within a bound. A writer that
+    // never releases (its handle leaked) still fails here.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let released = loop {
+        if probe.try_lock().is_ok() {
+            break true;
+        }
+        if Instant::now() >= deadline {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(
+        released,
+        "dropping the writer releases the lock, so a file with no writer reads as free"
+    );
+}
+
+#[test]
+fn a_writer_is_not_created_on_a_file_another_handle_has_locked() {
+    let (_temp, storage_path) = resolved_storage_path("writer-refuses-locked");
+    let _holder = hold_lock_on_existing_transcript(&storage_path, b"bytes a live writer owns");
+
+    let error = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
+        storage_path.clone(),
+        TranscriptRetentionLimits::agent_run_default(),
+        TranscriptCaptureMode::LocalBounded,
+    ))
+    .expect_err("a writer that cannot lock must not exist, so it can never write unlocked");
+
+    assert_eq!(error.reason, TranscriptWriteErrorReason::LockUnavailable);
+}
+
+#[test]
+fn a_writer_that_finds_its_file_locked_leaves_the_bytes_untouched() {
+    let (_temp, storage_path) = resolved_storage_path("writer-leaves-locked-bytes");
+    let _holder = hold_lock_on_existing_transcript(&storage_path, b"bytes a live writer owns");
+
+    let _ = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
+        storage_path.clone(),
+        TranscriptRetentionLimits::agent_run_default(),
+        TranscriptCaptureMode::LocalBounded,
+    ));
+
+    assert_eq!(
+        fs::read(storage_path.transcript_file()).unwrap(),
+        b"bytes a live writer owns",
+        "truncating on open, before taking the lock, would wipe a file another writer still holds"
+    );
+}
+
+/// The truncation that moved after the lock still happens. Before RFC-050
+/// the writer opened with `truncate(true)`; it now truncates once it holds
+/// the lock. An unlocked leftover at the same path must still start empty,
+/// or a new run's transcript would carry an earlier file's bytes.
+#[test]
+fn a_writer_on_an_unlocked_existing_file_starts_it_empty() {
+    let (_temp, storage_path) = resolved_storage_path("writer-truncates-unlocked");
+    fs::create_dir_all(storage_path.transcript_dir()).unwrap();
+    fs::write(storage_path.transcript_file(), b"an earlier file's bytes").unwrap();
+
+    let mut writer = BoundedTranscriptWriter::create(TranscriptWriterConfig::new(
+        storage_path.clone(),
+        TranscriptRetentionLimits::agent_run_default(),
+        TranscriptCaptureMode::LocalBounded,
+    ))
+    .expect("an unlocked file is not a reason to refuse the writer");
+    writer.append(b"new").unwrap();
+    writer.flush().unwrap();
+
+    assert_eq!(fs::read(storage_path.transcript_file()).unwrap(), b"new");
+}
+
+fn hold_lock_on_existing_transcript(
+    storage_path: &crate::transcript::TranscriptStoragePath,
+    bytes: &[u8],
+) -> fs::File {
+    fs::create_dir_all(storage_path.transcript_dir()).unwrap();
+    fs::write(storage_path.transcript_file(), bytes).unwrap();
+    let holder = fs::File::open(storage_path.transcript_file()).unwrap();
+    holder.try_lock().unwrap();
+    holder
 }

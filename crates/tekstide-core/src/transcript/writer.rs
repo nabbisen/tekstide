@@ -66,6 +66,10 @@ pub enum TranscriptWriteErrorReason {
     InvalidStoragePath,
     CreateDirectoryFailed,
     OpenFileFailed,
+    /// RFC-050 D3: another handle holds the file's exclusive lock, so a
+    /// writer may still be using it. The writer is not created, and the
+    /// file is left exactly as it was.
+    LockUnavailable,
     WriteFailed,
     FlushFailed,
 }
@@ -123,6 +127,9 @@ impl std::error::Error for TranscriptWriteError {}
 
 #[derive(Debug)]
 pub struct BoundedTranscriptWriter {
+    /// Holds the file's exclusive lock (RFC-050 D3) for the writer's whole
+    /// lifetime. Dropping the writer closes the handle and releases it, so
+    /// a file with no writer reads as free to every other process.
     file: File,
     transcript_file: PathBuf,
     max_bytes: u64,
@@ -155,9 +162,13 @@ impl BoundedTranscriptWriter {
             )
         })?;
 
+        // RFC-050 D3: open **without** truncating, take the exclusive lock,
+        // and only then truncate. Truncating on open would wipe a file
+        // another writer still holds before this one discovered the lock —
+        // RFC-049 §2's deletion under a live writer, by a different route.
         let file = OpenOptions::new()
             .create(true)
-            .truncate(true)
+            .truncate(false)
             .write(true)
             .open(config.storage_path.transcript_file())
             .map_err(|_| {
@@ -167,6 +178,33 @@ impl BoundedTranscriptWriter {
                     0,
                 )
             })?;
+
+        // **A writer that cannot lock does not write.** Any failure, not
+        // only `WouldBlock`: a filesystem that cannot lock at all would
+        // otherwise produce a writer every other process reads as dead,
+        // and the loader would treat its file as a leftover.
+        if file.try_lock().is_err() {
+            return Err(TranscriptWriteError::new(
+                TranscriptWriteErrorReason::LockUnavailable,
+                config.storage_path.transcript_file(),
+                0,
+            ));
+        }
+        // Truncate only a **regular** file, which is exactly what
+        // `truncate(true)` on open used to affect: `O_TRUNC` is ignored for a
+        // FIFO or a character device, while `ftruncate` refuses them. So
+        // skipping those keeps the behaviour this replaced, and the three
+        // reader tests that capture into `/dev/full` or a FIFO still launch.
+        let is_regular_file = file.metadata().map(|metadata| metadata.is_file());
+        if !matches!(is_regular_file, Ok(false)) {
+            file.set_len(0).map_err(|_| {
+                TranscriptWriteError::new(
+                    TranscriptWriteErrorReason::OpenFileFailed,
+                    config.storage_path.transcript_file(),
+                    0,
+                )
+            })?;
+        }
 
         Ok(Self {
             file,

@@ -180,6 +180,11 @@ pub enum TerminalRuntimeEvent {
     ProcessStarted {
         handle: TerminalRuntimeHandle,
     },
+    /// RFC-050 D3: the run's transcript file was locked by another handle,
+    /// so no writer was created and the process started without capture.
+    TranscriptWriterLockUnavailable {
+        handle: TerminalRuntimeHandle,
+    },
     OutputBuffered {
         handle: TerminalRuntimeHandle,
         summary: TerminalOutputSummary,

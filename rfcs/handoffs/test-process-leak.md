@@ -28,6 +28,8 @@ resulting pressure, each disclosed separately and each moved past:
 | `shell::tests::change_review_surface_renders_a_real_change_set_from_a_real_agent_run` | request 329 (2026-08-26) — **candidate, not confirmed** |
 | `shell::tests::change_review_content_view_build_cost_by_line_count_measurement` | review 338 (2026-08-26) — **not this document's own cause; see below** |
 | `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` | `0.16.0` release gate (2026-08-28) — **PTY read timing, not process leak or audit store.** Once in three runs. The assertion message was captured: *"the marker must be followed by a real, parseable PID"*, with the read having returned only the shell's **echo of the command line** and not yet the `descendant-pid:` line it prints. A read that outran the shell's own output, not a failure of the termination behaviour the test covers. Distinct from every row above: no socket, no audit store, no PTY exhaustion — `/dev/pts` was well below its limit throughout. |
+| `transcript::tests::a_live_writer_holds_an_exclusive_lock_until_it_is_dropped` | request 388 (2026-09-13) — **new test; fork-duplicated descriptor keeps an `flock` alive past the drop. Fixed in the test, see the dated entry.** |
+| `runtime::terminal::reader::tests::local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable` and `…required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it` | request 388 (2026-09-13) — **caused by PR-050-A, not load: the two tests share `/dev/full`'s lock. First attributed to load, wrongly; see the dated entry's correction. Fixed by serializing them.** |
 
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
@@ -878,3 +880,74 @@ be folded into them by a future reader tidying the register.
 
 **No mechanism from the candidate.** `0.18.0` carries RFC-045 (configuration, navigation, shell) and
 a dependency bump; no `approval` code changed in either.
+
+## Two observations, 2026-09-13 — RFC-050 PR-050-A, both under load I generated
+
+**1. `transcript::tests::a_live_writer_holds_an_exclusive_lock_until_it_is_dropped` — a new test, and a
+mechanism no row above has.** Its second assertion — the lock is free straight after the writer drops
+— failed once during an ablation run. Measured afterwards in a loop:
+
+| Run alongside | Runs | Release assertion failed |
+| --- | --- | --- |
+| the two PTY-spawning launch tests | 40 | **1** |
+| nothing else | 40 | **0** |
+
+The first assertion (the lock is held while the writer lives) never failed, and could not fail this
+way: the race only makes a lock look held for longer.
+
+**Mechanism — inferred from that measurement and from `flock` semantics, not observed directly.** A
+concurrent `fork` copies every open descriptor into the child until its `exec` closes them, and an
+`flock` lasts until the last copy of the open file description closes. So for the width of another
+thread's fork-to-exec window, a dropped writer's lock is still held.
+
+**Fixed in the test, not tolerated as a flake**: release is asserted within a 5 s bound. A writer that
+genuinely never releases still fails it, and that is ablated. **Product consequence, for PR-050-B**:
+the load-time probe can briefly read a writer that has just finished as live. That errs toward
+keeping, which is the direction RFC-049 §1 requires.
+
+**2. The two `/dev/full` reader tests — first recorded here as load-induced. That was wrong; corrected
+2026-09-15.**
+
+`local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable`
+and `required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it`
+both time out with:
+
+```
+transcript_write_summary did not reach CaptureFailed within 5s (last seen: None)
+```
+
+**The original entry said the load was mine and the change had no part in it.** Both halves were
+wrong. The next ablation run showed these tests failing inside ablations that do not touch them, and
+under the ablation that refuses a launch on `LockUnavailable` the failure named the cause directly:
+`transcript write failed: LockUnavailable … agent-run-…/transcript.log`, on a path symlinked to
+`/dev/full`.
+
+**Mechanism, confirmed from the fixture.** Both tests go through
+`launch_with_unwritable_transcript_capture`, which symlinks the transcript path to `/dev/full` — the
+**same device inode** for both — and `RealProcessLimiter` admits six concurrent real-process tests.
+Since PR-050-A the writer takes an `flock` on its file. When the two overlap, the second cannot take
+the lock, its launch correctly starts **without capture** (RFC-050 D3), and it then waits for a
+`CaptureFailed` that cannot come. Alone, each passes every time, which is why 5 isolated runs of 5
+proved nothing about the cause.
+
+**Fixed in the tests**: both now hold a shared mutex for their whole duration. The overlap is an
+artifact of the fixture, since a real run writes its own freshly named regular file, so the fixture
+is serialized rather than the lock rule weakened.
+
+**The lesson, stated so it is not repeated:** a failure that passes in isolation was treated as load
+without checking whether *my* change made concurrent tests interact. Isolation shows a test is not
+broken on its own; it does not show the change is innocent.
+
+## Recurrence, 2026-09-15 — RFC-050 PR-050-A's ablation run
+
+`approval::tests::channel::bind_recovers_from_a_stale_socket_file` failed once, in the whole-library
+run under ablation L8 (which removes UUID parsing from `from_persisted`). **Row 1** — the original,
+response 213.
+
+**Not the ablation, and not the slice.** L8 changes id validation; this test binds an approval socket
+over a stale socket file and uses no persisted id. PR-050-A touches no `approval` code. Every other
+run this slice made, before and after, passed it.
+
+**The machine was not quiet.** Another project's `cargo build --release`, a wasm build, and a
+`cargo test --all-features` were running throughout — none of them mine. Stated because a failure
+observed during unrelated heavy load is observed under conditions this test's own runs never set.

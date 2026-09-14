@@ -39,6 +39,9 @@ pub struct AgentRun {
     pub started_at: Option<DomainTimestamp>,
     pub ended_at: Option<DomainTimestamp>,
     pub transcript_ref: Option<TranscriptId>,
+    /// Why this run has no transcript, when the product knows. `None` covers
+    /// a run that has one, and the cases no reason is recorded for yet.
+    pub transcript_absence: Option<TranscriptAbsence>,
     pub approval_ids: Vec<ApprovalId>,
     pub change_set_ids: Vec<ChangeSetId>,
     pub artifact_refs: Vec<String>,
@@ -46,6 +49,19 @@ pub struct AgentRun {
     // Runtime lifecycle summary. It records Tekstide's known lifecycle state, not a process
     // handle or proof of supervision after `Detached`.
     pub status: AgentRunStatus,
+}
+
+/// Why a run has no transcript (RFC-050 D3; RFC-049 D4′ adds its own case).
+///
+/// Kept **on the run** because a run without a transcript has no
+/// `Transcript` record to hold a state, and neither existing lifecycle state
+/// is true of these cases: `DisabledByOptOut` says the user declined, and
+/// `CaptureFailed` says a write failed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TranscriptAbsence {
+    /// The transcript file's exclusive lock was held by another handle when
+    /// the run started, so this run never wrote to it.
+    WriterLockUnavailable,
 }
 
 impl AgentRun {
@@ -66,6 +82,7 @@ impl AgentRun {
             started_at: None,
             ended_at: None,
             transcript_ref: None,
+            transcript_absence: None,
             approval_ids: Vec::new(),
             change_set_ids: Vec::new(),
             artifact_refs: Vec::new(),

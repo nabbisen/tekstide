@@ -7156,7 +7156,7 @@ fn purging_transcripts_through_a_real_key_sequence_removes_the_real_file() {
     let transcript = project
         .transcripts()
         .iter()
-        .find(|transcript| transcript.agent_run_id.as_ref() == Some(&agent_run_id))
+        .find(|transcript| transcript.agent_run_id() == Some(&agent_run_id))
         .expect("the purged transcript's own record must still exist");
     assert!(
         transcript.is_tombstone(),
@@ -7370,7 +7370,7 @@ fn cancelling_the_purge_dialog_leaves_the_real_transcript_file_untouched() {
     let transcript = project
         .transcripts()
         .iter()
-        .find(|transcript| transcript.agent_run_id.as_ref() == Some(&agent_run_id))
+        .find(|transcript| transcript.agent_run_id() == Some(&agent_run_id))
         .expect("the transcript's own record must still exist");
     assert!(
         !transcript.is_tombstone(),

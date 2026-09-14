@@ -15,17 +15,29 @@ implementer's to paper over.
 
 ## PR-050-A — the lock, the id, the origin
 
-- [ ] The writer holds an exclusive lock for its lifetime. A second handle gets `WouldBlock` while
+- [x] The writer holds an exclusive lock for its lifetime. A second handle gets `WouldBlock` while
       the writer lives and succeeds after it drops. **Ablation:** remove the lock; that assertion fails
       alone.
-- [ ] **A writer that cannot lock does not write.** The launch proceeds without capture, and the
+      *L1 fails the lock test's held assertion — and three more tests, because every test about the
+      lock needs the lock. "Alone" cannot hold for this ablation; disclosed as a composition.
+      Release is asserted within 5 s: a concurrent fork briefly holds a dropped writer's descriptor.*
+- [x] **A writer that cannot lock does not write.** The launch proceeds without capture, and the
       run's reason is distinct from opt-out.
-- [ ] `AgentRunId` rejects a non-UUID string.
-- [ ] `Transcript`'s origin is an exhaustive type. A found record names no terminal or run the
+      *Refused-writer and untouched-bytes tests; the launch-degrade test asserts the process started,
+      no `Transcript` record, held bytes untouched, and `TranscriptAbsence::WriterLockUnavailable` —
+      a reason opt-out never sets. Rendering it in the run detail is not in this core-only slice.*
+- [x] `AgentRunId` rejects a non-UUID string.
+      *The constructor already existed (`impl_id!`). It still accepts uppercase, hyphen-less, braced
+      and `urn:` spellings — a finding for PR-050-B, not fixed here; see `qa-evidence.md`.*
+- [x] `Transcript`'s origin is an exhaustive type. A found record names no terminal or run the
       session lacks. **Grep:** no id is fabricated to satisfy an ownership check.
-- [ ] The liveness predicate matches on origin first. **Ablation:** add an origin variant; the compile
+      *`terminal_id`/`agent_run_id` moved into `TranscriptOrigin::LaunchedHere`; grepped, no id is
+      minted to satisfy an ownership check.*
+- [x] The liveness predicate matches on origin first. **Ablation:** add an origin variant; the compile
       error appears only in the predicate.
-- [ ] Nothing is loaded from disk yet.
+      *L7: one compile error, `project/session.rs:1029`, and nowhere else.*
+- [x] Nothing is loaded from disk yet.
+      *`FoundOnDisk` is built only in tests; no directory walk exists.*
 
 ## PR-050-B — load, count, purge
 

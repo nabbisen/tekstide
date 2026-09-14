@@ -41,18 +41,32 @@ impl LinuxTerminalRuntime {
     ) -> Result<(TerminalSession, Vec<TerminalRuntimeEvent>), TerminalLaunchError> {
         validate_launch_spec(project, &spec)?;
 
-        let (transcript_writer, transcript_capture_mode) = match spec.transcript_writer_config() {
-            Some(config) => {
-                let mode = config.mode;
-                let writer = BoundedTranscriptWriter::create(config.clone()).map_err(|error| {
-                    TerminalLaunchError::TranscriptWriterUnavailable {
-                        summary: transcript_write_error_summary(&error),
+        // RFC-050 D3: a transcript file another handle has locked is not
+        // a reason to refuse the launch — the run is unrecorded, not more
+        // dangerous — and it is never a reason to write unlocked. The
+        // process starts without capture, and the event lets the session
+        // record why. Every other writer failure still refuses, as before.
+        let (transcript_writer, transcript_capture_mode, transcript_lock_unavailable) =
+            match spec.transcript_writer_config() {
+                Some(config) => {
+                    let mode = config.mode;
+                    match BoundedTranscriptWriter::create(config.clone()) {
+                        Ok(writer) => (Some(writer), Some(mode), false),
+                        Err(error)
+                            if error.reason
+                                == crate::transcript::TranscriptWriteErrorReason::LockUnavailable =>
+                        {
+                            (None, None, true)
+                        }
+                        Err(error) => {
+                            return Err(TerminalLaunchError::TranscriptWriterUnavailable {
+                                summary: transcript_write_error_summary(&error),
+                            });
+                        }
                     }
-                })?;
-                (Some(writer), Some(mode))
-            }
-            None => (None, None),
-        };
+                }
+                None => (None, None, false),
+            };
         let mut pty = OpenPty::new(spec.dimensions)
             .map_err(|summary| TerminalLaunchError::PtyUnavailable { summary })?;
         let mut terminal = TerminalSession::new(
@@ -85,15 +99,18 @@ impl LinuxTerminalRuntime {
             },
         );
 
-        Ok((
-            terminal,
-            vec![
-                TerminalRuntimeEvent::LaunchAccepted {
-                    handle: handle.clone(),
-                },
-                TerminalRuntimeEvent::ProcessStarted { handle },
-            ],
-        ))
+        let mut events = vec![
+            TerminalRuntimeEvent::LaunchAccepted {
+                handle: handle.clone(),
+            },
+            TerminalRuntimeEvent::ProcessStarted {
+                handle: handle.clone(),
+            },
+        ];
+        if transcript_lock_unavailable {
+            events.push(TerminalRuntimeEvent::TranscriptWriterLockUnavailable { handle });
+        }
+        Ok((terminal, events))
     }
 
     /// RFC-022 PR-022-C: launches `spec.shell` as an approval-token-bearing
@@ -125,18 +142,32 @@ impl LinuxTerminalRuntime {
             .ok_or(TerminalLaunchError::MissingAdapterApprovalConfig)?
             .clone();
 
-        let (transcript_writer, transcript_capture_mode) = match spec.transcript_writer_config() {
-            Some(config) => {
-                let mode = config.mode;
-                let writer = BoundedTranscriptWriter::create(config.clone()).map_err(|error| {
-                    TerminalLaunchError::TranscriptWriterUnavailable {
-                        summary: transcript_write_error_summary(&error),
+        // RFC-050 D3: a transcript file another handle has locked is not
+        // a reason to refuse the launch — the run is unrecorded, not more
+        // dangerous — and it is never a reason to write unlocked. The
+        // process starts without capture, and the event lets the session
+        // record why. Every other writer failure still refuses, as before.
+        let (transcript_writer, transcript_capture_mode, transcript_lock_unavailable) =
+            match spec.transcript_writer_config() {
+                Some(config) => {
+                    let mode = config.mode;
+                    match BoundedTranscriptWriter::create(config.clone()) {
+                        Ok(writer) => (Some(writer), Some(mode), false),
+                        Err(error)
+                            if error.reason
+                                == crate::transcript::TranscriptWriteErrorReason::LockUnavailable =>
+                        {
+                            (None, None, true)
+                        }
+                        Err(error) => {
+                            return Err(TerminalLaunchError::TranscriptWriterUnavailable {
+                                summary: transcript_write_error_summary(&error),
+                            });
+                        }
                     }
-                })?;
-                (Some(writer), Some(mode))
-            }
-            None => (None, None),
-        };
+                }
+                None => (None, None, false),
+            };
         let mut pty = OpenPty::new(spec.dimensions)
             .map_err(|summary| TerminalLaunchError::PtyUnavailable { summary })?;
         let mut terminal = TerminalSession::new(
@@ -169,15 +200,18 @@ impl LinuxTerminalRuntime {
             },
         );
 
-        Ok((
-            terminal,
-            vec![
-                TerminalRuntimeEvent::LaunchAccepted {
-                    handle: handle.clone(),
-                },
-                TerminalRuntimeEvent::ProcessStarted { handle },
-            ],
-        ))
+        let mut events = vec![
+            TerminalRuntimeEvent::LaunchAccepted {
+                handle: handle.clone(),
+            },
+            TerminalRuntimeEvent::ProcessStarted {
+                handle: handle.clone(),
+            },
+        ];
+        if transcript_lock_unavailable {
+            events.push(TerminalRuntimeEvent::TranscriptWriterLockUnavailable { handle });
+        }
+        Ok((terminal, events))
     }
 
     pub fn write_input(

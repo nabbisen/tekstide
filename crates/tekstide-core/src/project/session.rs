@@ -20,7 +20,7 @@ use crate::domain::{
     ApprovalDecision, ApprovalId, ApprovalRequest, AuditEvent, ChangeAssociationConfidence,
     ChangeDetectionStatus, ChangeSet, ChangeSetId, DomainTimestamp, OwnershipError, ReviewState,
     TerminalId, TerminalKind, TerminalSession, TerminalStatus, TerminalTransitionError, Transcript,
-    TranscriptId, VisibleSlot,
+    TranscriptAbsence, TranscriptId, TranscriptOrigin, VisibleSlot,
 };
 
 use super::change_detection::{
@@ -646,7 +646,20 @@ impl ProjectSession {
         plan.transition_agent_run_to(AgentRunStatus::Running)?;
 
         let agent_run_id = self.attach_agent_launch_plan(plan, terminal)?;
-        if let Some(storage_path) = transcript_storage_path {
+        // RFC-050 D3: the runtime could not take the transcript file's lock,
+        // so no writer exists and nothing was written. Attaching a record
+        // would point this session's purge and retention at a file another
+        // handle holds; the run records why it has no transcript instead.
+        let writer_lock_unavailable = events.iter().any(|event| {
+            matches!(
+                event,
+                TerminalRuntimeEvent::TranscriptWriterLockUnavailable { .. }
+            )
+        });
+        if writer_lock_unavailable {
+            self.agent_run_mut(&agent_run_id)?.transcript_absence =
+                Some(TranscriptAbsence::WriterLockUnavailable);
+        } else if let Some(storage_path) = transcript_storage_path {
             self.attach_agent_run_transcript(
                 agent_run_id.clone(),
                 terminal_id,
@@ -843,8 +856,10 @@ impl ProjectSession {
     #[cfg(any(test, feature = "test-support"))]
     pub fn add_transcript(&mut self, transcript: Transcript) -> Result<(), OwnershipError> {
         self.ensure_project_member(&transcript.project_id)?;
-        self.ensure_terminal_exists(&transcript.terminal_id)?;
-        if let Some(agent_run_id) = &transcript.agent_run_id {
+        if let Some(terminal_id) = transcript.terminal_id() {
+            self.ensure_terminal_exists(terminal_id)?;
+        }
+        if let Some(agent_run_id) = transcript.agent_run_id() {
             self.ensure_agent_run_exists(agent_run_id)?;
         }
         if self
@@ -881,7 +896,7 @@ impl ProjectSession {
         let transcript_ids = self
             .transcripts
             .iter()
-            .filter(|transcript| transcript.agent_run_id.as_ref() == Some(agent_run_id))
+            .filter(|transcript| transcript.agent_run_id() == Some(agent_run_id))
             .map(|transcript| transcript.id.clone())
             .collect::<Vec<_>>();
 
@@ -999,17 +1014,31 @@ impl ProjectSession {
         cleanup
     }
 
-    /// D8′, through the transcript's own run. **Unknown is live** (§1): a
-    /// transcript naming no run, or a run this session does not hold, is
-    /// never touched. Production always has both, which is exactly why the
-    /// unknown case must not be the one that deletes.
+    /// Liveness, **by origin first** (RFC-050 D3). This is the one exhaustive
+    /// match on `TranscriptOrigin`: a new origin fails to compile here, in
+    /// the function that decides whether a transcript may be deleted.
+    ///
+    /// - **Launched here:** RFC-049 D8′, unchanged — through the run.
+    ///   **Unknown is live** (§1): a transcript naming no run, or a run this
+    ///   session does not hold, is never touched.
+    /// - **Found on disk:** whatever the one probe at load measured. A held
+    ///   lock is live for the whole session. A free lock is not: a file an
+    ///   earlier process left has no writer here, and a new run never
+    ///   reopens an old file, because it writes under its own run id.
     fn transcript_may_still_be_written(&self, index: usize) -> bool {
-        let Some(agent_run_id) = &self.transcripts[index].agent_run_id else {
-            return true;
-        };
-        match self.agent_run(agent_run_id) {
-            Ok(run) => agent_run_may_still_be_writing(run.status),
-            Err(_) => true,
+        match &self.transcripts[index].origin {
+            TranscriptOrigin::LaunchedHere { agent_run_id, .. } => {
+                let Some(agent_run_id) = agent_run_id else {
+                    return true;
+                };
+                match self.agent_run(agent_run_id) {
+                    Ok(run) => agent_run_may_still_be_writing(run.status),
+                    Err(_) => true,
+                }
+            }
+            TranscriptOrigin::FoundOnDisk {
+                writer_held_lock_at_load,
+            } => *writer_held_lock_at_load,
         }
     }
 
