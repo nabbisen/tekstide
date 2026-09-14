@@ -35,7 +35,9 @@ Every item below was checked in the code by the architect, not taken from the re
   persisted anywhere except its bytes.
 - Files live at `<state>/transcripts/<project_id>/<agent_run_id>/transcript.log`. A project's id is
   reused on reopen only while it is in `recent-projects.json`. `ProjectId::from_persisted` requires a
-  UUID; `AgentRunId` has no validating constructor.
+  UUID, and `AgentRunId` gets the same constructor from `impl_id!`. Run directories are named
+  `agent-run-<uuid>`, not a bare UUID. *(Corrected at response 388: this said `AgentRunId` had no
+  validating constructor — a search for `impl AgentRunId`, which a macro does not contain.)*
 - The Trust Settings figure and the purge dialog both come from the session's records
   (`transcript_local_data_summary_for`). `app_wide_retained_transcript_bytes` sums open sessions only,
   and its doc comment says so.
@@ -113,8 +115,9 @@ transcripts stay on disk?
 
 - Symlinks are refused at every level (`symlink_metadata`, never `metadata`).
 - Only a regular file named `transcript.log`, two levels down, is a transcript.
-- Both directory names must parse as UUIDs. `AgentRunId` gains the validating constructor
-  `ProjectId` already has.
+- A run directory's name must be **exactly the spelling this product writes**: `agent-run-` and a
+  lowercase, hyphenated UUID. *(Corrected at response 388: this said both names parse as bare UUIDs,
+  and that `AgentRunId` needed a constructor it already had.)*
 - The existing containment checks and purge's project-local refusal stay as they are.
 - **Anything unrecognized is skipped, never deleted**, and is counted in D6's figure.
 
@@ -205,3 +208,28 @@ once, with nothing on screen. A deleted state file does the same.
 - **Slices:** A (writer lock, `AgentRunId` validation, liveness by origin; core, no loading) →
   B (loader, enumeration safety, figures, purge honouring the lock) → C (the unclaimed-bytes line,
   the disclosure removed, the changelog defect entry, and a restart walkthrough).
+
+## Decided at PR-050-A review (2026-09-15, response 388)
+
+- **The lock covers regular files only (D3 narrowed).** The loader never loads anything else (D7), so
+  a lock on a FIFO or a device protects nothing. On a shared device it serialises unrelated writers:
+  two fixture tests capturing into `/dev/full` degraded each other, and PR-050-A had to add a test-only
+  mutex to hide that. **One `fstat` on the opened handle decides both the lock and the truncate.** A
+  regular file is never written unlocked; a non-regular file is neither locked nor loaded. The mutex is
+  removed.
+- **`RequiredLocalBounded` refuses when the lock is unavailable.** PR-050-A degraded every mode, at
+  both launch sites, because the branch checks the error reason and not the mode. RFC-011 says that
+  mode rejects the launch when capture cannot be prepared. Only `LocalBounded` degrades.
+- **Run-directory names must match the product's own spelling exactly; `from_persisted` stays as it
+  is.** `uuid::Uuid::parse_str` also accepts uppercase, simple, braced and `urn:` forms, so
+  `from_persisted` would let the loader make deletable a directory this product never wrote.
+  Tightening `from_persisted` itself would change what `recent-projects.json` and the audit store
+  accept, and a hand-edited recent-projects file would then trigger D6′'s silent reset. The loader
+  instead requires the name to equal `agent-run-` followed by the parsed UUID's lowercase hyphenated
+  form.
+- **D8 stands; the plan was wrong.** Purge becomes true in PR-050-B, so the disclosure's removal and
+  the changelog defect entry move from C to B. From B on, the purge dialog counts only what purge
+  will delete, so between B and C it never promises to remove a file that is still being written.
+- **`rust-version`:** 1.89.0 is when `File::try_lock` was stabilised (read from the std source), not
+  a measured minimum for either crate. Declare a `rust-version` only after both crates build on that
+  toolchain, at the next release gate.

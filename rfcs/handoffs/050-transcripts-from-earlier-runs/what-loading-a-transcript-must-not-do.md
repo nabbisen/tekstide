@@ -19,17 +19,22 @@ transcript, or treating a file something is still writing as a leftover.
   directory pointing somewhere else would make purge delete a file the user owns outside the state
   root.
 - **Only a regular file named `transcript.log`, exactly two levels under `transcripts/`.**
-- **Both directory names must parse as UUIDs.** `ProjectId::from_persisted` already checks this;
-  `AgentRunId` gains the same check.
+- **A run directory is named exactly as this product names it**: `agent-run-` plus a lowercase,
+  hyphenated UUID, checked as a round trip. `from_persisted` alone also accepts uppercase, simple,
+  braced and `urn:` spellings, so it is not the test. *(Corrected at response 388.)*
 - **Anything unrecognised is skipped and never deleted.** It is counted in the unclaimed figure, so
   the user can see it.
 - RFC-033's containment checks and purge's project-local refusal stay exactly as they are.
 
 ## §2 A locked file is live, and a writer never writes unlocked
 
-- The writer takes an exclusive `try_lock` when it creates the file and holds it while it writes.
-  **If it cannot take the lock, it does not capture.** The run starts with capture disabled and its
-  detail says why. A writer that wrote unlocked would look dead to every other process, which is how
+- **Regular files only (response 388).** §1 never loads anything else, so a lock on a FIFO or a
+  device protects nothing, and on a shared device it serialises unrelated writers. One `fstat` on the
+  opened handle decides both the lock and the truncate.
+- **`RequiredLocalBounded` refuses** when the lock is unavailable. Only `LocalBounded` degrades.
+- The writer takes an exclusive `try_lock` when it creates a regular file and holds it while it
+  writes. **If it cannot take the lock, it does not capture.** A `LocalBounded` run starts with
+  capture disabled and its detail says why. A writer that wrote unlocked would look dead to every other process, which is how
   §2 of RFC-049's risk document gets broken by a different route.
 - The loader probes each file **once, at load**, and drops the lock at once. A held lock means live:
   never marked, never selected, never purged.
@@ -65,6 +70,6 @@ throwaway state.
 ## §6 The disclosure leaves in the commit that makes it false
 
 The disclosure added after request 387, in the book, `README.md` and the changelog, is removed in the
-same commit that makes purge true. It goes neither earlier nor later. The changelog entry states the
-defect plainly: `0.12.0` through `0.18.0`, what a user saw, and that deleting `transcripts/` was the
+same commit that makes purge true, which is **PR-050-B's**, not C's (corrected at response 388). It
+goes neither earlier nor later. The changelog entry states the defect plainly: `0.12.0` through `0.18.0`, what a user saw, and that deleting `transcripts/` was the
 only complete removal.

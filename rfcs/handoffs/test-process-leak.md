@@ -951,3 +951,14 @@ run this slice made, before and after, passed it.
 **The machine was not quiet.** Another project's `cargo build --release`, a wasm build, and a
 `cargo test --all-features` were running throughout — none of them mine. Stated because a failure
 observed during unrelated heavy load is observed under conditions this test's own runs never set.
+
+## Recurrence, 2026-09-15 — RFC-050 PR-050-A's review (reviewer's run)
+
+`approval::tests::coordinator::agent_run_queue_limit_is_enforced_and_only_counts_live_entries` failed
+once, in a `-p tekstide-core` run under the reviewer's ablation M1, which treats every found-on-disk
+transcript as not live. **This is the row first reported at request 260.**
+
+**Not the ablation.** M1 changes one match arm in retention's liveness predicate. This test exercises
+the approval coordinator's queue limit and touches no transcript. Afterwards it **passed 20 of 20 runs
+alone**, and passed in all three of the reviewer's consecutive full-workspace runs on the restored
+tree. The five-minute load average was 7.18 just after that gate, from the reviewer's own runs.

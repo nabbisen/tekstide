@@ -39,6 +39,17 @@ implementer's to paper over.
 - [x] Nothing is loaded from disk yet.
       *`FoundOnDisk` is built only in tests; no directory walk exists.*
 
+## PR-050-A follow-up (response 388)
+
+- [ ] **`RequiredLocalBounded` refuses on a lock failure**, at both launch sites: no process starts,
+      and the held bytes are untouched. **Ablation:** degrade regardless of mode; the test fails alone.
+      *(Found at review: PR-050-A degraded every mode, and no test launched that mode against a locked
+      file.)*
+- [ ] **Regular files only are locked**, decided with the truncate by one `fstat` on the opened
+      handle. Two writers on one FIFO both create; a second writer on a locked regular file is refused.
+      **Ablation:** lock every file type; the FIFO test fails alone.
+- [ ] The `/dev/full` test mutex is removed, and the register entry that called it the fix says why.
+
 ## PR-050-B — load, count, purge
 
 - [ ] **A real restart** (a fresh `AppState` restored from saved recent-project state): the earlier
@@ -58,6 +69,13 @@ implementer's to paper over.
       unclaimed.
 - [ ] The dialog's count is of retained transcripts, not tombstones. Verify the reading first; if it
       was wrong, say so here.
+- [ ] **Run-directory names are the product's own spelling.** Uppercase, hyphen-less, braced and
+      `urn:uuid:` spellings are each skipped and still present. `from_persisted` is unchanged.
+- [ ] **The dialog counts only what purge will delete**: a live found file is never counted.
+- [ ] **In the commit that makes purge true:** the request-387 disclosure is removed from the book,
+      `README.md` and the changelog, and the changelog defect entry names `0.12.0` through `0.18.0`,
+      what a user saw, and that deleting `transcripts/` was the only complete removal. *(Moved from C
+      at response 388.)*
 - [ ] **No test enumerates the real state root.** Every fixture is `mktemp -d`, reached through the
       `cfg(test)` split.
 
@@ -73,10 +91,8 @@ implementer's to paper over.
       start with a readable file shows nothing. **Ablation:** drop the notice; its test fails alone.
 - [ ] `remove_recent_project`'s doc comment states that any removal control must say the project's
       transcripts stay on disk. No caller or API is added for it.
-- [ ] The request-387 disclosure is removed from the book, `README.md` and the changelog **in the
-      same commit** that makes purge true.
-- [ ] The changelog defect entry names `0.12.0` through `0.18.0`, what a user saw, and that deleting
-      `transcripts/` was the only complete removal.
+- *(The disclosure's removal and the changelog defect entry are PR-050-B boxes now; see response
+  388.)*
 - [ ] Live walkthrough of launch, quit, restart, the count shown, purge, and the file gone, against
       throwaway state only.
 
@@ -87,6 +103,8 @@ implementer's to paper over.
       file.
 - [ ] Every new intermittent failure has a row in `test-process-leak.md`.
 - [ ] Commits are pushed once the gate is green.
+- [ ] **`rust-version` is declared only after both crates build on that toolchain.** 1.89.0 is when
+      `File::try_lock` was stabilised, not a measured minimum.
 
 ## Final Acceptance Decision
 

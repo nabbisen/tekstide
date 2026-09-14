@@ -178,4 +178,3 @@ reads of the removed fields:              none
 clean after removing a trailing blank line my register edit left. **Three consecutive full-workspace
 runs, output redirected to files: 507 + 6 + 791, green every time** (+8 core tests). Load rose from
 6.3 to 9.2 across them, with another project's builds running.
-

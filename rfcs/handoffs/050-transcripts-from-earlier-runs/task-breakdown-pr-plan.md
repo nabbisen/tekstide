@@ -31,6 +31,21 @@ created: "2026-09-13"
 - The predicate is exhaustive over origin. **Ablation:** add an origin variant; the crate fails to
   compile, in the predicate only.
 
+## PR-050-A follow-up (response 388) — before B
+
+- **`RequiredLocalBounded` refuses on a lock failure**, in `launch_project_shell` **and**
+  `launch_project_adapter`; the two branches are duplicates. Only `LocalBounded` degrades.
+- **Lock regular files only.** Take one `fstat` on the opened handle; if it is a regular file, lock
+  it, then truncate it; otherwise do neither. **Remove the `/dev/full` test mutex** and update the
+  register entry that called it the fix.
+
+**Required tests:**
+
+- A `RequiredLocalBounded` launch against a locked file is refused: no process starts, and the held
+  bytes are untouched. **Ablation:** degrade regardless of mode; the test fails alone.
+- Two writers on the same FIFO both create. A second writer on a locked regular file is still
+  refused. **Ablation:** lock every file type; the FIFO test fails alone.
+
 ## PR-050-B — load, count, purge
 
 - At project open, enumerate `<state>/transcripts/<project_id>/` under the rules in the risk
@@ -43,6 +58,13 @@ created: "2026-09-13"
   entries) are computed separately.
 - **Purge honours the lock.** A live found file is skipped, and the purge summary reports it.
 - Verify the dialog's count against tombstones (risk document §4) and fix it if the reading holds.
+- **Run-directory names must be the product's own spelling** (risk document §1): `agent-run-` and a
+  lowercase hyphenated UUID, as a round trip. `from_persisted` stays unchanged.
+- **The dialog counts only what purge will delete**, so a live found file is never promised.
+- **In the commit that makes purge true (D8):** remove the request-387 disclosure from the book,
+  `README.md` and the changelog, and add the changelog defect entry: `0.12.0` through `0.18.0`, what a
+  user saw, and that deleting `transcripts/` was the only complete removal. *(Moved here from C at
+  response 388.)*
 
 **Required tests:** each **drives a real restart**, meaning a fresh `AppState` restored from the
 first one's saved recent-project state, never a session that simply kept its records.
@@ -58,6 +80,8 @@ first one's saved recent-project state, never a session that simply kept its rec
 - The app-wide figure includes a project that is closed.
 - A directory whose project id is not in the recent list is not loaded, not deleted, and counted as
   unclaimed.
+- Run directories spelled uppercase, without hyphens, braced, and `urn:uuid:` are each skipped and
+  still present. **Ablation:** accept whatever `from_persisted` accepts; the test fails alone.
 
 ## PR-050-C — say it, and stop saying the old thing
 
@@ -75,9 +99,8 @@ project, the user is told what happened and where the files are, at the next mom
   there are none. After a recent-project reset this is every transcript the user has (D6′), so word it
   for that case: state the fact, do not imply the user did something, do not imply it is dangerous.
 - The purge dialog names files still being written and will not be removed; absent when none.
-- **Remove the request-387 disclosure** from the book, `README.md` and the changelog, in this commit.
-- **Changelog defect entry**: `0.12.0` through `0.18.0`, what a user saw, and that deleting
-  `transcripts/` was the only complete removal.
+- *(The disclosure's removal and the changelog defect entry moved to PR-050-B at response 388: D8
+  puts them in the commit that makes purge true.)*
 
 **Required tests:** each notice is present when true and absent when false, as separate assertions,
 each ablated alone. **The reset notice also appears on the reset start only:** a second start with a
