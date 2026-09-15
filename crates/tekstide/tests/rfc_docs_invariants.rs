@@ -547,7 +547,8 @@ fn every_summary_entry_names_a_page_that_exists() {
 }
 
 /// The book's published root. `README.md` links here with absolute URLs,
-/// because crates.io resolves no relative link.
+/// because crates.io rewrites a relative link against the crate's own
+/// directory, where it does not exist (see `the_readme_has_no_relative_links`).
 const BOOK_URL: &str = "https://nabbisen.github.io/tekstide/";
 
 /// PR-DOC-C: the relative-link check, extended to the book's own source and
@@ -576,11 +577,53 @@ fn every_relative_link_in_the_book_source_and_contributing_resolves() {
     );
 }
 
+/// Every link target in `source` that a renderer would follow, in three
+/// forms: markdown `[text](target)`, HTML `src="…"` / `href="…"` attributes,
+/// and reference-style definitions `[label]: target`. Response 392 found the
+/// first version caught only the markdown form, and **the HTML form is the one
+/// that broke the logo at `0.14.0`**.
+fn readme_link_targets(source: &str) -> Vec<String> {
+    let mut targets = markdown_link_targets(source)
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+    for attribute in ["src=", "href="] {
+        for (index, _) in source.match_indices(attribute) {
+            let tail = &source[index + attribute.len()..];
+            let Some(quote) = tail.chars().next().filter(|c| *c == '"' || *c == '\'') else {
+                continue;
+            };
+            if let Some(end) = tail[1..].find(quote) {
+                targets.push(tail[1..1 + end].to_owned());
+            }
+        }
+    }
+
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if line.len() - trimmed.len() > 3 || !trimmed.starts_with('[') {
+            continue;
+        }
+        let Some(close) = trimmed.find("]:") else {
+            continue;
+        };
+        if let Some(target) = trimmed[close + 2..].split_whitespace().next() {
+            targets.push(target.trim_matches(|c| c == '<' || c == '>').to_owned());
+        }
+    }
+
+    targets
+}
+
 /// `README.md` is the `tekstide` crate's crates.io page
-/// (`readme = "../../README.md"`), and **crates.io resolves no relative
-/// link**. A relative link there works on GitHub and is broken for every
-/// registry reader, which is why its links are all absolute. A same-document
-/// anchor (`#…`) is not a path and is allowed.
+/// (`readme = "../../README.md"`). **crates.io rewrites a relative link
+/// against the crate's own directory**: a relative `CHANGELOG.md` in `0.18.0`'s
+/// README rendered as `…/blob/HEAD/crates/tekstide/CHANGELOG.md`, which does
+/// not exist (response 392 fetched it). So a relative link that works on GitHub
+/// is broken for every registry reader, which is why every link here is
+/// absolute. All three link forms are checked. A same-document anchor (`#…`) is
+/// not a path and is allowed.
 #[test]
 fn the_readme_has_no_relative_links() {
     let Some(_) = book_src_dir() else {
@@ -590,7 +633,7 @@ fn the_readme_has_no_relative_links() {
     let source = std::fs::read_to_string(repo_root().join("README.md"))
         .expect("README.md exists at the repository root");
 
-    let relative = markdown_link_targets(&source)
+    let relative = readme_link_targets(&source)
         .into_iter()
         .filter(|target| !target.contains("://") && !target.starts_with('#'))
         .map(|target| format!("  README.md -> {target}"))
@@ -598,8 +641,9 @@ fn the_readme_has_no_relative_links() {
 
     assert!(
         relative.is_empty(),
-        "relative link(s) in README.md, which crates.io cannot resolve:\n{}\nWrite them as \
-         absolute URLs: the book at {BOOK_URL}, repository files under \
+        "relative link(s) in README.md:\n{}\ncrates.io rewrites these against the crate's own \
+         directory (crates/tekstide/), where they do not exist, so every registry reader gets a \
+         broken link. Write them as absolute URLs: the book at {BOOK_URL}, repository files under \
          https://github.com/nabbisen/tekstide/blob/main/.",
         relative.join("\n")
     );

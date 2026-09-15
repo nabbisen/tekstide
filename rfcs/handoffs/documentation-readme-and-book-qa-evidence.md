@@ -370,3 +370,34 @@ to the next release gate.
 **One run, not three**: this slice changes documents and a test binary that reads documents, neither
 of which can perturb timing, the same reasoning response 383 accepted for PR-DOC-A.
 `git diff --cached --check` after staging: clean.
+
+## PR-DOC-C follow-up (response 392) — landed in RFC-050 PR-050-B's first commit
+
+### The README link test now checks three link forms
+
+Response 392 showed `the_readme_has_no_relative_links` caught only markdown `[text](target)`. A
+relative HTML `<img src>` and a reference-style definition both passed it, and **the HTML form is the
+one that broke the logo at `0.14.0`**. A new helper, `readme_link_targets`, collects all three forms:
+markdown links, HTML `src="…"` / `href="…"` attributes (either quote), and `[label]: target`
+definitions indented no more than three spaces.
+
+| | Ablation | Fails |
+| --- | --- | --- |
+| E1 | a relative `<img src="assets/…">` appended to `README.md` | `the_readme_has_no_relative_links` **alone** |
+| E2 | a reference definition `[changelog]: CHANGELOG.md` | `the_readme_has_no_relative_links` **alone** |
+| E3 | a relative markdown link | `the_readme_has_no_relative_links` **alone** |
+
+The committed README still passes: its HTML logo is absolute, and it has no reference definitions.
+
+### The messages now say what crates.io does
+
+The first version said *"crates.io resolves no relative link"*. Response 392 fetched `0.18.0`'s
+rendered README and found that **crates.io rewrites a relative link against the crate's own
+directory**: `CHANGELOG.md` became `…/blob/HEAD/crates/tekstide/CHANGELOG.md`, which does not exist.
+The test's doc comment, its failure message, the `BOOK_URL` comment and `CONTRIBUTING.md` now say that.
+The finding stands — those links were broken — but the reason given was wrong.
+
+### `CONTRIBUTING.md`'s gate example
+
+The example wrote three runs to one `test-run.log`, each overwriting the last. It now writes one file
+per run: `for run in 1 2 3; do cargo test --workspace > "test-run-$run.log" 2>&1; done`.

@@ -30,7 +30,7 @@ resulting pressure, each disclosed separately and each moved past:
 | `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` | `0.16.0` release gate (2026-08-28) — **PTY read timing, not process leak or audit store.** Once in three runs. The assertion message was captured: *"the marker must be followed by a real, parseable PID"*, with the read having returned only the shell's **echo of the command line** and not yet the `descendant-pid:` line it prints. A read that outran the shell's own output, not a failure of the termination behaviour the test covers. Distinct from every row above: no socket, no audit store, no PTY exhaustion — `/dev/pts` was well below its limit throughout. |
 | `transcript::tests::a_live_writer_holds_an_exclusive_lock_until_it_is_dropped` | request 388 (2026-09-13) — **new test; fork-duplicated descriptor keeps an `flock` alive past the drop. Fixed in the test, see the dated entry.** |
 | `runtime::terminal::reader::tests::local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable` and `…required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it` | request 388 (2026-09-13) — **caused by PR-050-A, not load: the two tests share `/dev/full`'s lock. First attributed to load, wrongly; see the dated entry's correction. First masked by a test mutex; fixed at response 388 by locking regular files only, and the mutex removed.** |
-| `runtime::terminal::reader::tests::the_wake_notifier_wakes_when_real_pty_output_arrives` | review of request 391 (2026-09-15) — **new here; a race inside the test, inferred from reading it, not observed.** It writes `printf …; exit` before starting the thread that waits for the first wake, so a fast shell can finish first. See the dated entry. |
+| `runtime::terminal::reader::tests::the_wake_notifier_wakes_when_real_pty_output_arrives` | review of request 391 (2026-09-15) — **a race inside the test; mechanism confirmed by measurement and fixed in RFC-050 PR-050-B's first commit (2026-09-16).** The test now holds `exit` back until the first wake is observed. See the dated entries. |
 
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
@@ -997,3 +997,28 @@ assertion fails. The product behaviour is correct; the race is in the test's ord
 
 **Proposed fix, test-only:** spawn the waiting thread, and let it block, before writing the input.
 Assigned to the next commit that touches `tekstide-core` tests.
+
+## Fixed, 2026-09-16 — `the_wake_notifier_wakes_when_real_pty_output_arrives`
+
+The 2026-09-15 entry inferred the mechanism from reading the test. **It is now measured, and the test
+is fixed.**
+
+**Why "start the waiter first" was not enough.** `WakeNotifier::block_until_woken` returns
+`reader_alive` as it stands **when it reads the eventfd**, not when the wake was signalled. A waiter
+already blocked can be woken by the output and still read after the shell has run `exit`. Starting the
+waiter first narrows the window without closing it.
+
+**The fix: hold `exit` back.** The test starts the waiter, writes the `printf` alone, waits for the
+first wake, and only then writes `exit`. The shell is still waiting for input when that wake is read,
+so the reader is alive. It is ordering, not timing.
+
+**Measured with a throwaway probe**, which put a 500 ms sleep in the waiter before its read and was
+removed afterwards, with the file's hash checked:
+
+| Order | Runs | Failed with *"…not that the reader has already stopped"* |
+| --- | --- | --- |
+| old: `printf; exit` before the waiter starts | 10 | **9** |
+| new: waiter, `printf`, first wake, then `exit` | 10 | **0** |
+
+The one old-order pass under a 500 ms head start is itself a reason to fix the order rather than tune
+a delay.

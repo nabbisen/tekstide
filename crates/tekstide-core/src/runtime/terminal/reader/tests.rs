@@ -55,6 +55,15 @@ fn real_pty_output_reaches_the_channel_end_to_end() {
 /// real blocking wait, run on its own thread and joined with a bounded
 /// timeout so a regression fails this test rather than hanging the
 /// suite.
+///
+/// **`exit` is sent only after the first wake is observed.** The test
+/// used to write `printf …; exit` before the waiting thread existed, and
+/// failed intermittently (register, 2026-09-15). `block_until_woken`
+/// reports whether the reader is alive **when it reads**, not when it was
+/// woken, so any ordering that lets the shell exit before that read can
+/// report *stopped*. Starting the waiter first would only narrow the
+/// window. Holding `exit` back closes it: the shell is still waiting for
+/// input when the first wake is read, so the reader is alive.
 #[test]
 fn the_wake_notifier_wakes_when_real_pty_output_arrives() {
     let _real_process_slot = RealProcessLimiter::acquire();
@@ -74,15 +83,15 @@ fn the_wake_notifier_wakes_when_real_pty_output_arrives() {
         .try_clone_wake_notifier()
         .expect("wake notifier should clone against a live reader");
 
-    runtime
-        .write_input(&handle, b"printf 'tekstide-wake-ok\\n'\nexit\n")
-        .expect("marker command should write to PTY");
-
     let (done_sender, done_receiver) = mpsc::channel();
     std::thread::spawn(move || {
         let more_coming = notifier.block_until_woken();
         let _ = done_sender.send(more_coming);
     });
+
+    runtime
+        .write_input(&handle, b"printf 'tekstide-wake-ok\\n'\n")
+        .expect("marker command should write to PTY");
 
     match done_receiver.recv_timeout(Duration::from_secs(5)) {
         Ok(more_coming) => assert!(
@@ -95,6 +104,10 @@ fn the_wake_notifier_wakes_when_real_pty_output_arrives() {
              eventfd is not being signalled on a successful send"
         ),
     }
+
+    runtime
+        .write_input(&handle, b"exit\n")
+        .expect("exit should write to PTY once the first wake has been observed");
 
     let outcome = runtime
         .wait_for_exit(&handle, Duration::from_secs(5))

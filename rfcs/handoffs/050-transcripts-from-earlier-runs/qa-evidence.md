@@ -263,3 +263,59 @@ BoundedTranscriptWriter::create called at:                  inside prepare_trans
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean. **Three consecutive
 full-workspace runs, output redirected to files: 507 + 6 + 794, green every time** — no new tests, as
 the ruling asked. `git diff --cached --check` after staging: clean.
+
+## PR-050-B — first commit: two carried fixes
+
+Two items assigned to this slice's first commit by other reviews. Neither touches the loader.
+
+### The wake-notifier test's first-wake race (response 391)
+
+`runtime::terminal::reader::tests::the_wake_notifier_wakes_when_real_pty_output_arrives` wrote
+`printf …; exit` to the shell **before** it started the thread that waits for the first wake, and it
+failed once in the reviewer's gate.
+
+**The proposed fix was to start the waiting thread first. That narrows the window but does not close
+it**, because of how `block_until_woken` reports:
+
+```rust
+pub fn block_until_woken(&self) -> bool {
+    if !block_on_eventfd(self.file.as_raw_fd()) { return false; }
+    let mut buffer = [0_u8; 8];
+    let _ = (&self.file).read(&mut buffer);
+    self.reader_alive.load(Ordering::Acquire)
+}
+```
+
+It answers whether the reader is alive **when it reads**, not when it was woken. A waiter that is
+already blocked can still be woken by the output, lose the scheduler, and read `reader_alive` after
+the shell has run `exit`. **The fix used instead holds `exit` back**: start the waiter, write the
+`printf` alone, observe the first wake, then write `exit`. The shell is still waiting for input when
+the first wake is read, so the reader cannot have stopped. The test's doc comment says why.
+
+**Measured, not inferred.** A throwaway probe put a 500 ms sleep in the waiting thread before its
+read, deliberately widening the window. It was run, then removed, and the file's hash was checked
+afterwards.
+
+| Order | Runs with the 500 ms delay | Failed, with *"…not that the reader has already stopped"* |
+| --- | --- | --- |
+| **old**: `printf; exit` written before the waiter starts | 10 | **9** |
+| **new**: waiter, `printf`, first wake, then `exit` | 10 | **0** |
+
+So the reviewer's reading of the mechanism is right, and the new order holds under the same stress
+that breaks the old one nine times in ten. The one old-order pass shows that even a 500 ms head start
+does not always let the reader stop first. That is further reason the fix is ordering rather than
+timing.
+
+### PR-DOC-C's link-test follow-up (response 392)
+
+Recorded where that slice's evidence lives: `rfcs/handoffs/documentation-readme-and-book-qa-evidence.md`,
+*PR-DOC-C follow-up*. In short, `the_readme_has_no_relative_links` now checks markdown, HTML
+`src`/`href` and reference-style definitions, each ablated alone. Its messages say crates.io rewrites
+relative links against `crates/tekstide/`, and `CONTRIBUTING.md`'s gate example writes one log per
+run.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean.
+`rfc_docs_invariants`: 9 passed. **Three consecutive full-workspace runs, output redirected to files:
+507 + 9 + 794, green every time.** `git diff --cached --check` after staging: clean.

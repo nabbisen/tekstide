@@ -22,7 +22,7 @@ Run this before asking for review. Every step must pass:
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace > test-run.log 2>&1   # three consecutive runs, each to a file
+for run in 1 2 3; do cargo test --workspace > "test-run-$run.log" 2>&1; done
 ```
 
 - **Three consecutive runs, with output redirected to a file.** Several tests launch real processes,
@@ -54,4 +54,5 @@ inherits. The two that most often catch people:
 - **`docs/book/` is build output**, also git-ignored. The book is built and published by
   `.github/workflows/docs.yml` on every push to `main`.
 - Each published crate carries only its own directory. `README.md` is the `tekstide` crate's
-  crates.io page, so **every link in it must be absolute**.
+  crates.io page, and crates.io rewrites a relative link against `crates/tekstide/`, where it does
+  not exist, so **every link in it must be absolute**.
