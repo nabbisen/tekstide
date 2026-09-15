@@ -41,12 +41,19 @@ implementer's to paper over.
 
 ## PR-050-A follow-up (response 388)
 
-- [x] **`RequiredLocalBounded` refuses on a lock failure**, at both launch sites: no process starts,
+- [ ] **`RequiredLocalBounded` refuses on a lock failure**, at both launch sites: no process starts,
       and the held bytes are untouched. **Ablation:** degrade regardless of mode; the test fails alone.
       *(Found at review: PR-050-A degraded every mode, and no test launched that mode against a locked
       file.)*
       *`a_required_local_bounded_launch_is_refused_when_its_transcript_file_is_locked`: refused for the
       writer, no process, no run or transcript, held bytes untouched. F1 fails it alone.*
+      *Unticked by the reviewer at response 390: the test launches `/bin/sh` without an adapter, so it
+      reaches `launch_project_shell` only. Removing the mode check from `launch_project_adapter` alone
+      left all 794 tests green. The adapter site is correct, but nothing holds it.*
+- [ ] **One helper prepares the transcript writer for both launch sites** (response 390). Neither
+      `launch_project_shell` nor `launch_project_adapter` calls `BoundedTranscriptWriter::create`
+      directly (**grep**), so the required-mode test holds both. **Ablation:** degrade every mode inside
+      the helper; the required-mode test fails alone. Then tick the box above.
 - [x] **Regular files only are locked**, decided with the truncate by one `fstat` on the opened
       handle. Two writers on one FIFO both create; a second writer on a locked regular file is refused.
       **Ablation:** lock every file type; the FIFO test fails alone.

@@ -233,3 +233,8 @@ once, with nothing on screen. A deleted state file does the same.
 - **`rust-version`:** 1.89.0 is when `File::try_lock` was stabilised (read from the std source), not
   a measured minimum for either crate. Declare a `rust-version` only after both crates build on that
   toolchain, at the next release gate.
+- **One helper prepares the transcript writer for both launch sites (response 390).** The
+  follow-up's required-mode fix landed correctly in both duplicated branches, but its test reached only
+  the shell site: removing the check from the adapter site alone left every test green. The writer
+  block has needed the same fix twice, so it moves into one helper. The rest of each launch function
+  stays duplicated, for RFC-022's reason.

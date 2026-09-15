@@ -46,6 +46,17 @@ created: "2026-09-13"
 - Two writers on the same FIFO both create. A second writer on a locked regular file is still
   refused. **Ablation:** lock every file type; the FIFO test fails alone.
 
+### Second follow-up (response 390) — before PR-DOC-C
+
+- **Move the transcript-writer preparation into one helper that both launch sites call.** The block
+  that creates the writer and decides between degrading and refusing is duplicated in
+  `launch_project_shell` and `launch_project_adapter`, and it has needed the same fix twice. The
+  required-mode test reaches only the shell site. **Move that block and nothing else**: RFC-022's
+  reason for duplicating the rest of the orchestration still holds.
+- **No new test.** The existing required-mode test holds the helper, and so both sites.
+  **Grep:** neither launch site calls `BoundedTranscriptWriter::create` directly. **Ablation:**
+  degrade every mode inside the helper; the required-mode test fails alone.
+
 ## PR-050-B — load, count, purge
 
 - At project open, enumerate `<state>/transcripts/<project_id>/` under the rules in the risk

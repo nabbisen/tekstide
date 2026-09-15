@@ -965,3 +965,15 @@ transcript as not live. **This is the row first reported at request 260.**
 the approval coordinator's queue limit and touches no transcript. Afterwards it **passed 20 of 20 runs
 alone**, and passed in all three of the reviewer's consecutive full-workspace runs on the restored
 tree. The five-minute load average was 7.18 just after that gate, from the reviewer's own runs.
+
+## Recurrence, 2026-09-15 — RFC-050 PR-050-A follow-up's review (reviewer's run)
+
+`approval::tests::channel::bind_recovers_from_a_stale_socket_file` failed once, in a `-p tekstide-core`
+run under the reviewer's ablation G4, which truncates a regular transcript file before taking its
+lock. **This is row 1, the original from response 213.**
+
+**Not the ablation.** G4 changes one line in `BoundedTranscriptWriter::create`. This test binds an
+approval socket over a stale socket file, and no transcript writer is involved. The other three
+ablation runs in the same batch passed it, and so did all three of the reviewer's consecutive
+full-workspace runs on the restored tree, immediately afterwards. The load at the failure itself was
+not measured; the one-minute load average was 7.77 just after that gate, from the reviewer's own runs.
