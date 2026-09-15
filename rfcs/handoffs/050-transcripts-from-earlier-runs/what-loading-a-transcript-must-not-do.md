@@ -38,9 +38,10 @@ transcript, or treating a file something is still writing as a leftover.
   §2 of RFC-049's risk document gets broken by a different route.
 - The loader probes each file **once, at load**, and drops the lock at once. A held lock means live:
   never marked, never selected, never purged.
-- **User purge obeys this too.** Today's purge unlinks a file under a running writer. After this
-  slice it skips that file, and the dialog names files still being written. When there are none, the
-  dialog says nothing about them.
+- **User purge obeys this for a file whose writer this session does not own** (D3′, response 393). A
+  found file whose lock was held at load is skipped, and the dialog names it; when there are none,
+  the dialog says nothing about them. A run **this session launched** is purged when the user asks,
+  as it has been since `0.12.0`: the session owns that record, and deletion is what was asked.
 - The probe was measured before acceptance: a second handle in the same process gets `WouldBlock`
   while the writer holds the lock. **Test in-process; do not ship a test that needs a second binary to
   be meaningful.**

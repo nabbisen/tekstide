@@ -48,7 +48,9 @@ Every item below was checked in the code by the architect, not taken from the re
   leftovers.
 - **Today's purge does not check liveness either.** It unlinks a file under a running writer, which
   keeps writing to an inode nobody can see, while Trust Settings reports zero. Found while scoping
-  this; it has the same shape as the defect above and the same fix.
+  this; it has the same shape as the defect above and the same fix. *(Narrowed at response 393: not
+  the same shape. This session owns a run it launched, and deleting that run's transcript is what
+  the user asked for. See D3′.)*
 - **`std::fs::File::try_lock` works on this toolchain** (1.98.1, edition 2024), with no new
   dependency. Probed: a second handle in the same process gets `WouldBlock` while the writer holds
   the lock, and succeeds once the writer's handle drops. So the rule below can be tested in-process.
@@ -85,7 +87,8 @@ loader probes each file **once, at load**:
 `Detached` is not the hard case for a found file: its writer died with the process that owned it. For
 launched records, RFC-049's D8′ stands unchanged; the predicate matches on origin first.
 
-**User purge honours the same rule**, which fixes the finding above. The purge dialog names files
+**User purge honours the same rule for a file whose writer this session does not own** (narrowed at
+response 393, D3′ below). The purge dialog names files
 that are still being written and will not be removed, and says nothing when there are none.
 
 ### D4 — Age: the file's mtime, read once at load
@@ -238,3 +241,24 @@ once, with nothing on screen. A deleted state file does the same.
   the shell site: removing the check from the adapter site alone left every test green. The writer
   block has needed the same fix twice, so it moves into one helper. The rest of each launch function
   stays duplicated, for RFC-022's reason.
+
+## Decided at PR-050-B review (2026-09-16, response 393)
+
+- **D3′: purge skips a file only when this session does not own its writer.** A found file whose
+  lock was held at load is skipped, as D3 says. A transcript of a run **this session launched** is
+  purged when the user asks, even while the run is still going, as it has been since `0.12.0`. Three
+  reasons. The session owns that run's record, so no other session's view is contradicted. The user's
+  request is deletion, and skipping would keep the transcript they asked to remove, which is the
+  privacy-worse direction. And the skip exists to protect a writer the session cannot see, which is
+  not this case. **The cost, disclosed:** the run's writer keeps appending to the unlinked file until
+  the run ends. No path can reach it, and it is freed when the writer closes, but until then it uses
+  disk space no figure shows. Stopping capture on purge is the clean fix; it needs a path from the
+  session to the runtime's writer, and is reserved in `future-work.md`. **PR-050-C's dialog says so:**
+  when a purgeable transcript belongs to a run still in progress, it says the run keeps running and its
+  transcript is deleted too.
+- **The GUI's app-wide figure is a cache**, refreshed at boot, at each load and after each purge. It
+  misses bytes written since. RFC-049 PR-049-C's launch-time exhaustion check must scan at preflight,
+  not read that cache.
+- **Two figure properties had no test at review, and go into PR-050-C.** Dropping recent projects from
+  the claimed set, and counting sizes through symlinks, each left every test green. Neither affects
+  what is deleted. Both affect the unclaimed figure C puts on screen.

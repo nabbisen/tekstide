@@ -86,6 +86,8 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
 - **Audit** (D6): `(AppPolicy, ExplicitCleanup)` on `TranscriptPurge`, via
   `transcript_purge_record` gaining the pairing as a parameter — not a second constructor.
   **A cleanup that deleted nothing writes nothing** (§4).
+- **A fresh scan at launch (RFC-050, response 393):** the exhaustion check scans `transcripts/` at
+  preflight. The GUI's cached app-wide figure lags new writes and must not decide it.
 - **D4′ (response 386), replacing the refusal:** when launch cleanup leaves a budget exhausted, the
   run starts with capture disabled; the existing launch confirmation says so, worded under RFC-047 §5;
   the decision shown is the decision applied; the run's detail says why it has no transcript,

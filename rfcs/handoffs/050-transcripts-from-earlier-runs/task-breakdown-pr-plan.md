@@ -113,6 +113,11 @@ project, the user is told what happened and where the files are, at the next mom
   there are none. After a recent-project reset this is every transcript the user has (D6′), so word it
   for that case: state the fact, do not imply the user did something, do not imply it is dangerous.
 - The purge dialog names files still being written and will not be removed; absent when none.
+- **A run still in progress** (D3′, response 393): when a purgeable transcript belongs to a run this
+  session launched that is still running, the dialog says the run keeps running and its transcript
+  is deleted too.
+- **Two figure tests missing at review** (response 393): a closed recent project's bytes are claimed,
+  not unclaimed; and a symlink under `transcripts/` adds no bytes to either figure.
 - *(The disclosure's removal and the changelog defect entry moved to PR-050-B at response 388: D8
   puts them in the commit that makes purge true.)*
 

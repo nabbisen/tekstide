@@ -129,6 +129,15 @@ implementer's to paper over.
       there are none. Each case is ablated alone. The wording fits the reset case (D6′): it does not
       imply the user did something, or that anything is dangerous.
 - [ ] The purge dialog names files still being written; absent when none. Each case is ablated alone.
+- [ ] **A run still in progress** (D3′, response 393): when a purgeable transcript belongs to a run
+      this session launched that is still running, the dialog says the run keeps running and its
+      transcript is deleted too; absent otherwise. Each case ablated alone.
+- [ ] **Unclaimed bytes exclude closed recent projects** (response 393): a recent project that is not
+      open has its transcript bytes counted as claimed, not unclaimed. *(Dropping recent projects
+      from the claimed set failed nothing at review.)*
+- [ ] **Byte counts never follow a symlink** (response 393): a symlink under `transcripts/` pointing
+      at a file outside the state root adds nothing to the total or the unclaimed figure. *(Counting
+      through symlinks failed nothing at review.)*
 - [ ] **The reset notice (owner's decision, 2026-09-13).** On a start where `recent-projects.json`
       could not be read, the board says the list was reset, that earlier transcripts remain on disk
       (bytes and where), and where the unreadable file went. It appears on that start only; a later

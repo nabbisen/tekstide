@@ -771,6 +771,18 @@ either was written.
 **Trigger to revisit:** the first report of a budget that will not clear, or `Detached` becoming
 common rather than rare. Until then this is a bounded, disclosed leak and the alternative is worse.
 
+### Purging a running run's transcript leaves its writer appending to an unlinked file — RFC-050 D3′
+
+Purge deletes the transcript of a run this session launched even while the run is still going, which
+is what the user asked for. The writer is not told. It keeps appending the rest of the run's output
+to the unlinked file until the run ends. Nothing can reach it through the filesystem, and it is freed
+when the writer closes, but until then it uses disk space, up to the per-transcript cap, that no
+figure shows. **The clean fix is for purge to stop capture for that run.** That needs a path from the
+session to the runtime's reader thread, which does not exist today.
+
+**Trigger to revisit:** a report of disk use the retained figure does not explain, or any slice that
+gives the session a handle on a running writer.
+
 ### Project and app-wide transcript budgets are enforced at launch, not mid-stream — RFC-049 D4′
 
 D4′ stops new capture from beginning while a budget is exhausted. It does not stop a run already

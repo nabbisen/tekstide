@@ -88,6 +88,9 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
       purge in the same file writes `(User, TrustedUi)` — **both read back from a real store**, so
       the distinction §4 requires is visible in one place.
 - [ ] A cleanup that deleted nothing writes **no record**. **Ablation:** record unconditionally.
+- [ ] **The exhaustion check reads a fresh scan** (RFC-050, response 393). The GUI's app-wide figure is
+      a cache, refreshed at boot, at each load and after each purge, so it misses bytes written since.
+      The launch check scans `transcripts/` at preflight and never reads that cache.
 - [ ] **D4′: launch cleanup leaves a budget exhausted → the run starts with capture disabled.** Assert
       the process started **and** no transcript file or `Transcript` record exists for it.
       **Ablation:** capture anyway; the test fails alone.
