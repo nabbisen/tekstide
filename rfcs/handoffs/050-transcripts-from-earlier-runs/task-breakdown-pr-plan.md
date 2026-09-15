@@ -59,6 +59,9 @@ created: "2026-09-13"
 
 ## PR-050-B — load, count, purge
 
+**First commit, carried from other reviews:** the wake-notifier test's ordering fix (response 391),
+and PR-DOC-C's link-test follow-up (response 392, in the documentation handoff).
+
 - At project open, enumerate `<state>/transcripts/<project_id>/` under the rules in the risk
   document's §1. Add a found record per accepted file, with `last_write_at` from mtime, and probe its
   lock once.

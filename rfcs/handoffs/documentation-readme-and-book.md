@@ -1,6 +1,6 @@
 ---
 title: "Documentation: a 554-line landing page, and a book that includes it"
-status: "**PR-DOC-C implemented 2026-09-15** — `README.md` 561 → 123 lines, `CONTRIBUTING.md` written, every README link absolute, three link tests added; awaiting review. The README is no longer untrimmed. **PR-DOC-A and PR-DOC-B complete and verified live 2026-09-13.** The book publishes at `https://nabbisen.github.io/tekstide/`; six owned user chapters answer 200, and `SUMMARY.md` completeness is guarded by two tests. **PR-DOC-C not started, and scheduled next (2026-09-13)**: after the purge-defect disclosure commit (response 387), so the trim carries that disclosure, and before PR-050-B. Order set at response 388: the disclosure, the PR-050-A follow-up, this slice, then PR-050-B. PR-050-A landed first, out of that order; the disclosure followed at `c2f5092` (request 389), so this slice now comes after the PR-050-A follow-up. The owner asked twice. Scoped 2026-09-13 by the architect."
+status: "**Complete. PR-DOC-C implemented 2026-09-15** — `README.md` 561 → 123 lines, `CONTRIBUTING.md` written, every README link absolute, three link tests added; **accepted at response 392**, with one test follow-up (HTML `src`/`href` and reference-style links) in PR-050-B's first commit, and the rendered crates.io page to be read at the next release gate. The README is no longer untrimmed. **PR-DOC-A and PR-DOC-B complete and verified live 2026-09-13.** The book publishes at `https://nabbisen.github.io/tekstide/`; six owned user chapters answer 200, and `SUMMARY.md` completeness is guarded by two tests. **PR-DOC-C not started, and scheduled next (2026-09-13)**: after the purge-defect disclosure commit (response 387), so the trim carries that disclosure, and before PR-050-B. Order set at response 388: the disclosure, the PR-050-A follow-up, this slice, then PR-050-B. PR-050-A landed first, out of that order; the disclosure followed at `c2f5092` (request 389), so this slice now comes after the PR-050-A follow-up. The owner asked twice. Scoped 2026-09-13 by the architect."
 rfc_file: "none — documentation slice; no behaviour, no security surface. Owner authorized a handoff rather than an RFC."
 target_milestone: "M12"
 created: "2026-09-13"
@@ -52,20 +52,26 @@ deletes reachable content in favour of unreachable content for every crates.io r
 
 ## Five deviations from the source guideline
 
-### 1. `README.md` is a registry landing page for two published crates — this is a hard floor
+### 1. `README.md` is the `tekstide` crate's registry landing page — this is a hard floor
 
 ```
 crates/tekstide-core/Cargo.toml:  readme = "README.md"
 crates/tekstide/Cargo.toml:       readme = "../../README.md"
 ```
 
+*(Corrected at response 392: `readme` resolves relative to each crate's own manifest, so
+`tekstide-core` publishes its own `crates/tekstide-core/README.md`. Only `tekstide` publishes this
+file. This section first said both crates point here.)*
+
 **`docs/` is in neither published archive** (checked: zero `docs/` entries in both `0.18.0`
-`.crate` files), and relative links do not resolve on crates.io — established at `0.14.0`, which is
-why the logo is an absolute `raw.githubusercontent.com` URL.
+`.crate` files), and relative links break on crates.io — established at `0.14.0`, which is
+why the logo is an absolute `raw.githubusercontent.com` URL. *(Corrected at response 392: crates.io
+does rewrite relative links, but against the crate's own directory. `0.18.0`'s page links
+`…/blob/HEAD/crates/tekstide/CHANGELOG.md`, which answers 404.)*
 
 **So:** anything a reader needs to **evaluate** or **install** stays in `README.md`, and every link
 out of it is **absolute** to the published book. The guideline's "offload aggressively" is bounded
-by this, and the bound is not negotiable while both crates point here.
+by this, and the bound is not negotiable while `tekstide` points here.
 
 ### 2. The book includes canonical documents; it may own user chapters
 
@@ -175,6 +181,19 @@ link in RFC-046 written by the architect. **Link rot in the front door should be
 a release-gate finding** — and this slice is the moment to buy that, because it is the slice that
 creates the links.
 
+### PR-DOC-C follow-up (response 392) — in PR-050-B's first commit
+
+- **`the_readme_has_no_relative_links` misses two link forms.** A relative HTML `<img src=…>` (the
+  form that broke the logo at `0.14.0`) and a reference-style definition (`[cl]: CHANGELOG.md`) each
+  left all nine tests green. Extend it to HTML `src`/`href` attributes and to reference-style
+  definitions. **Ablation:** each form, separately, fails that test alone.
+- **Say what crates.io does.** The test messages say crates.io "resolves no relative link"; it
+  resolves them against the crate's directory, which is wrong for a README at the workspace root.
+- **`CONTRIBUTING.md`'s gate example** writes all three runs to one `test-run.log`, so each run
+  overwrites the last. Name one file per run.
+- **At the next release gate**, read `tekstide`'s rendered README on crates.io and confirm every link
+  works from there. The page changes only when a release is published.
+
 ## What this must not become
 
 - **A rewrite of the technical content.** The README's claims are unusually careful — it discloses a
@@ -184,5 +203,5 @@ creates the links.
   precede C for exactly this reason.
 - **A second copy of anything.** If content has a canonical home, link or include it. The book's own
   founding principle is the rule here.
-- **A crates.io regression.** After C, read both crates' rendered README on crates.io and confirm
+- **A crates.io regression.** After C, read `tekstide`'s rendered README on crates.io and confirm
   every link works from there. A landing page that is lean and broken is worse than long.
