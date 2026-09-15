@@ -77,9 +77,11 @@ refusing `0`, not this function deleting on it. See `qa-evidence.md`.
 **Partly paused, 2026-09-13 (request 387).** A session knows only the transcripts launched in the
 current process, so the triggers, the removal disclosure, D4′'s exhaustion path and §6's changelog
 sentence would act on almost nothing. They wait for loading transcripts from disk, to be scoped as
-its own RFC. **Land now:** refusing `transcript_retention_days = 0`; the actor/source pairing and
-no record for an empty cleanup; stale `Expired` marks re-checked and cleared; "a deletion failed"
-reported separately; D5 as restated below; and the disclosure of the purge defect.
+its own RFC — [RFC-050](../../accepted/050-transcripts-from-earlier-runs.md). **After RFC-050's
+PR-050-C, as PR-049-C's first commit** (order set at response 389; response 387 had said "land
+now"): refusing `transcript_retention_days = 0`; the actor/source pairing and no record for an
+empty cleanup; stale `Expired` marks re-checked and cleared; "a deletion failed" reported
+separately; and D5 as restated below. The purge-defect disclosure landed on its own at `c2f5092`.
 
 - [ ] Both triggers fire; **no timer, watcher, or idle sweep exists anywhere** (D2). Grep for one.
 - [ ] A policy cleanup writes `TranscriptPurge` as **`(AppPolicy, ExplicitCleanup)`**, and a user
@@ -112,10 +114,12 @@ reported separately; D5 as restated below; and the disclosure of the purge defec
 - [ ] D5: the summary uses the session's configured limits — **stated as unobservable today**:
       `budget_pressure` reads only byte budgets and none is configurable, so the original ablation
       (restore `agent_run_default()`) changes nothing a test can see (request 387).
-- [ ] **The purge defect is disclosed before it is fixed**: the book's privacy page, `README.md`,
+- [x] **The purge defect is disclosed before it is fixed**: the book's privacy page, `README.md`,
       and `CHANGELOG.md` Unreleased say that after a restart or reopen, Trust Settings and purge cover
       only transcripts from runs since the project was opened, and that earlier ones stay in
       `transcripts/` until that directory is deleted.
+      *`c2f5092` (request 389): README, the book's privacy page, and a `CHANGELOG.md` Unreleased
+      entry. The reviewer built the book, and checked the text on the live site.*
 - [ ] **Policy removal is told to the user, on a surface they read** (response 385). B marks and
       purges in one pass, so nothing is ever visibly `Expired` unless its deletion fails — the
       audit record is therefore the *only* trace, and nobody reads the audit store. Absent when

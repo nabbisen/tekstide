@@ -41,9 +41,9 @@ goes in `qa-evidence.md`, written by the implementer.
 ## Sequencing
 
 - **Ahead of RFC-049 PR-049-C's paused parts**, which resume on loaded records.
-- **Order, set at response 388:** the purge-defect disclosure (response 387, item 1; **not yet
-  written**), then the PR-050-A follow-up, then PR-DOC-C, then PR-050-B. D8 removes the disclosure in
-  B, in the commit that makes purge true.
+- **Order, set at responses 388 and 389:** the PR-050-A follow-up, then PR-DOC-C, then PR-050-B, then
+  PR-050-C, then RFC-049 PR-049-C, starting with its independent list. The purge-defect disclosure
+  landed at `c2f5092`, and D8 removes it in B, in the commit that makes purge true.
 
 ## Not in this slice
 
