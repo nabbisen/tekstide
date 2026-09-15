@@ -125,22 +125,29 @@ implementer's to paper over.
 
 ## PR-050-C — say it, and stop saying the old thing
 
-- [ ] Trust Settings shows unclaimed bytes and where they are when there are some, and nothing when
+- [x] Trust Settings shows unclaimed bytes and where they are when there are some, and nothing when
       there are none. Each case is ablated alone. The wording fits the reset case (D6′): it does not
       imply the user did something, or that anything is dangerous.
       *P5 and P6 each fail their own test alone. Wording states the fact without blame or warning.*
       *Unticked at response 394 (F2): the line says "on this computer", but the figure is one state
       directory's; and `unclaimed_bytes` also counts unrecognised files inside claimed project
       directories, which do belong to a project. The wording must describe what is measured.*
+      *Re-ticked: the line now names the directory it measured and says the bytes "belong to no
+      project in the recent list, or are files Tekstide does not recognise". No claim about the
+      computer, and both halves of the figure are named.*
 - [x] The purge dialog names files still being written; absent when none. Each case is ablated alone.
       *P1 and P2 each fail their own test alone.*
-- [ ] **A run still in progress** (D3′, response 393): when a purgeable transcript belongs to a run
+- [x] **A run still in progress** (D3′, response 393): when a purgeable transcript belongs to a run
       this session launched that is still running, the dialog says the run keeps running and its
       transcript is deleted too; absent otherwise. Each case ablated alone.
       *P3 and P4 each fail their own test alone; the count's status check is held by P11.*
       *Unticked at response 394 (F3): the count uses the conservative liveness predicate, which includes
       `ReviewReady` and `Detached`, so "The run keeps running" can be false. Say what is known: the run
       may still be in progress.*
+      *Re-ticked: the notice says the transcripts "may belong" to a run still in progress, that the
+      transcript is deleted either way, and that deleting it does not stop the run. The test asserts
+      "may belong" and that "keeps running" is absent; R3 (restore the old wording) fails it alone.
+      The test is renamed `the_purge_dialog_says_a_run_may_still_be_in_progress`.*
 - [x] **Unclaimed bytes exclude closed recent projects** (response 393): a recent project that is not
       open has its transcript bytes counted as claimed, not unclaimed. *(Dropping recent projects
       from the claimed set failed nothing at review.)*
@@ -149,7 +156,7 @@ implementer's to paper over.
       at a file outside the state root adds nothing to the total or the unclaimed figure. *(Counting
       through symlinks failed nothing at review.)*
       *`a_symlink_under_transcripts_adds_no_bytes_to_either_figure`; P10 fails it alone.*
-- [ ] **The reset notice (owner's decision, 2026-09-13).** On a start where `recent-projects.json`
+- [x] **The reset notice (owner's decision, 2026-09-13).** On a start where `recent-projects.json`
       could not be read, the board says the list was reset, that earlier transcripts remain on disk
       (bytes and where), and where the unreadable file went. It appears on that start only; a later
       start with a readable file shows nothing. **Ablation:** drop the notice; its test fails alone.
@@ -158,6 +165,10 @@ implementer's to paper over.
       transcripts are written and the figure refreshes, "Transcripts from before" includes bytes that
       are not from before. Snapshot the figure at boot, and say nothing about transcripts when there
       were none.*
+      *Re-ticked: `RecentProjectsReset.transcript_bytes_at_boot` is frozen in
+      `with_recent_projects_reset`, and the transcripts sentence is its own line, absent at zero.
+      `the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes` (R1 fails it alone) and
+      `the_reset_notice_says_nothing_about_transcripts_when_there_were_none` (R2 fails it alone).*
 - [x] `remove_recent_project`'s doc comment states that any removal control must say the project's
       transcripts stay on disk. No caller or API is added for it.
       *Stated; no caller and no API added.*

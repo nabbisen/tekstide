@@ -300,8 +300,13 @@ project-board-audit-history = { $count ->
 # discipline `project-board-audit-recovered-quarantined` follows for a
 # filesystem path.
 # RFC-050 PR-050-C (D6′): shown on the one start whose recent-projects.json could
-# not be read. The second line appears only when the file was moved aside.
-project-board-recent-projects-reset = The recent-projects list could not be read, so this start began with an empty one. Transcripts from before remain on disk: { $bytes } bytes in { $path }.
+# not be read. The second line appears only when there were transcripts on disk at
+# that start, and the third only when the file was moved aside.
+# Response 394 (F1): the bytes are the figure read at boot, held in
+# `RecentProjectsReset`, not the live one -- transcripts written later in the
+# session are not "from before".
+project-board-recent-projects-reset = The recent-projects list could not be read, so this start began with an empty one.
+project-board-recent-projects-reset-transcripts = Transcripts from before this start remain on disk: { $bytes } bytes in { $path }.
 project-board-recent-projects-reset-moved = The unreadable list was moved to { $path }.
 project-board-configuration-ignored = Configuration: ignored, defaults in force. The problem is at { $key }.
 
@@ -679,10 +684,15 @@ trust-settings-retained-transcripts = Retained locally: { $count ->
    *[other] {$count} transcripts
 } ({ $bytes } bytes)
 trust-settings-purge-button = Purge Project Transcripts…
-# RFC-050 PR-050-C (D6′): bytes of transcripts no open or recent project owns.
-# After a recent-list reset this is every transcript the user has, so it states
-# the fact only: it does not say the user did something, or that it is dangerous.
-trust-settings-unclaimed-transcripts = { $bytes } bytes of transcripts on this computer belong to no project in the recent list. They stay in { $path } until they are deleted there; purge does not reach them.
+# RFC-050 PR-050-C (D6′): bytes under this state directory's `transcripts/` that
+# no purge will delete. After a recent-list reset this is every transcript the
+# user has, so it states the fact only: it does not say the user did something,
+# or that it is dangerous.
+# Response 394 (F2): it says what `scan_transcript_disk_usage` measures. The
+# figure is **one state directory**, not the computer, and `unclaimed_bytes` also
+# counts entries this product did not write that sit inside a claimed project's
+# directory -- so the line names both, rather than calling all of it orphaned.
+trust-settings-unclaimed-transcripts = { $bytes } bytes in { $path } belong to no project in the recent list, or are files Tekstide does not recognise. Purge does not reach them; they stay there until they are deleted.
 
 # RFC-047 PR-047-C, D4: rendered only while `AuditHealth::status()` is
 # `Degraded` -- absent the rest of the time, per §2/§5 of the risk
@@ -943,11 +953,16 @@ transcript-purge-dialog-still-being-written = { $count ->
     [one] { $count } transcript was
    *[other] { $count } transcripts were
 } still being written when this project opened, and will not be removed.
-# RFC-050 D3′: a transcript purge deletes whose run is still in progress. Absent when none.
+# RFC-050 D3′: a transcript purge deletes whose run may still be in progress.
+# Absent when none.
+# Response 394 (F3): "may", not "does". The count uses the deletion predicate,
+# which is deliberately conservative -- `ReviewReady` and `Detached` count as
+# live -- so a run this names can already have finished. The line says what is
+# known: purge deletes the transcript either way, and does not stop a run.
 transcript-purge-dialog-running-run = { $count ->
-    [one] { $count } of these belongs
-   *[other] { $count } of these belong
-} to a run that is still in progress. The run keeps running, and its transcript is deleted too.
+    [one] { $count } of these may belong
+   *[other] { $count } of these may belong
+} to a run that is still in progress. Its transcript is deleted either way, and deleting it does not stop the run.
 transcript-purge-dialog-purge = Purge
 transcript-purge-dialog-cancel = Cancel
 transcript-purge-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.

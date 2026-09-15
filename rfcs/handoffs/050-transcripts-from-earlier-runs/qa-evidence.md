@@ -499,7 +499,7 @@ is **absent when its fact is false**, and each is tested both ways as separate t
 | **Project board** | only on a start whose `recent-projects.json` could not be read | the list was reset; how many bytes of earlier transcripts remain, and where; and, when the file was moved aside, where it went |
 | **Trust Settings** | when transcripts belong to no open or recent project | how many bytes, and where; that purge does not reach them |
 | **Purge dialog** | when a found file was still being written when the project opened | how many, and that they will not be removed |
-| **Purge dialog** | when a transcript it deletes belongs to a run still in progress (D3′) | the run keeps running, and its transcript is deleted too |
+| **Purge dialog** | when a transcript it deletes may belong to a run still in progress (D3′) | the transcript is deleted either way, and deleting it does not stop the run |
 
 **Wording for the reset case (D6′).** After a reset, the unclaimed figure is every transcript the user
 has, so the Trust Settings line states the fact: those bytes belong to no project in the recent list,
@@ -600,3 +600,64 @@ committed.
 
 The app wrote one line to stderr on the reset start, the parse error (`expected ident at line 1
 column 2`). I did not check whether earlier builds wrote it too.
+
+## PR-050-C follow-up (response 394) — three notices, reworded to what they measure
+
+No behaviour changes except the reset notice's figure. Nothing new is deletable, and no count changed.
+
+### F1 — the reset notice's figure is frozen at boot
+
+The notice stays on the board all session, and `transcript_disk_usage` is refreshed after every load
+and every purge, so the old line's *"Transcripts from before"* counted transcripts **this** session
+wrote. `RecentProjectsReset` now carries `transcript_bytes_at_boot`, frozen in
+`State::with_recent_projects_reset` — the one point where `new()` has just scanned `transcripts/` and
+nothing has been written since. The render never reads the live figure.
+
+**The transcripts sentence is now its own catalog line**, so it can be absent: at zero bytes the
+notice says the list was reset and where the file went, and nothing about transcripts. A *"0 bytes
+in …"* sentence would hand the user a path to nothing.
+
+| Test | Proves |
+| --- | --- |
+| `the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes` | the boot figure survives a later refresh. The live figure is moved **downwards** (777 → 12), so an implementation that re-read it could not accidentally agree |
+| `the_reset_notice_says_nothing_about_transcripts_when_there_were_none` | the reset and moved-to sentences stay; no sentence mentions bytes |
+
+### F2 — the unclaimed line says what `scan_transcript_disk_usage` measures
+
+Two things were wrong with *"bytes of transcripts on this computer belong to no project"*. The figure
+is **one state directory**, not the computer; and `unclaimed_bytes` also adds `skipped_bytes` from
+**inside** claimed project directories — entries this product did not write, which are not orphaned
+transcripts. The line now names the directory, and says the bytes *"belong to no project in the
+recent list, or are files Tekstide does not recognise"*. Both halves of the figure, and no claim
+beyond them.
+
+### F3 — "may still be in progress", not "keeps running"
+
+`purgeable_transcripts_of_running_runs_count` uses the **deletion** predicate, which is deliberately
+conservative: `ReviewReady` and `Detached` read as live. So a run the old line asserted was running
+could already have finished. The notice now says the transcripts *may* belong to a run still in
+progress, that the transcript is deleted either way, and that deleting it does not stop the run —
+each of which is true under the predicate as written. The test asserts *"may belong"* **and** the
+absence of *"keeps running"*, and is renamed to match.
+
+### Ablations, each restored and hash-checked, `--no-fail-fast`
+
+| | Ablation | Fails |
+| --- | --- | --- |
+| R1 | render the live figure instead of the boot snapshot | `the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes` **alone** |
+| R2 | always render the transcripts sentence | `the_reset_notice_says_nothing_about_transcripts_when_there_were_none` **alone** |
+| R3 | restore the old running-run wording | `the_purge_dialog_says_a_run_may_still_be_in_progress` **alone** |
+
+### Carried wording
+
+The CHANGELOG's *"What you will now see"* and the book's privacy page repeated both old claims; both
+now match the shipped strings. `retention.rs`'s D3′ test doc comment and
+`TranscriptPurgeModal.running_run_transcripts` said "keeps running" too, and now say what the
+predicate knows.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean.
+`rfc_docs_invariants`: 9 passed. `mdbook build docs`: clean. **Three consecutive full-workspace runs
+with `--no-fail-fast`, output redirected to files: 519 + 9 + 807, green every time** (+2 shell tests).
+`git diff --cached --check` after staging: clean.

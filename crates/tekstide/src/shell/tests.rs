@@ -13555,12 +13555,18 @@ fn the_purge_dialog_says_nothing_about_files_still_being_written_when_there_are_
 }
 
 #[test]
-fn the_purge_dialog_says_a_run_in_progress_keeps_running() {
+fn the_purge_dialog_says_a_run_may_still_be_in_progress() {
     let state = state_with(ApplicationShell::new());
     let notice =
         super::transcript_purge_running_run_notice(&state.catalog, &purge_modal_with(0, 1))
             .expect("a transcript of a run still in progress must be named (D3′)");
-    assert!(notice.contains("keeps running"), "{notice}");
+    // Response 394 (F3): the predicate is conservative, so the notice may not
+    // assert the run is running -- only that it may be.
+    assert!(notice.contains("may belong"), "{notice}");
+    assert!(
+        !notice.contains("keeps running"),
+        "the notice must not assert what the conservative count cannot know: {notice}"
+    );
 }
 
 #[test]
@@ -13610,27 +13616,101 @@ fn the_board_says_the_recent_list_was_reset_on_the_start_it_happened() {
             moved_to: Some(moved_to),
         },
     );
-    let mut state = state_with(ApplicationShell::new())
-        .with_recent_projects_reset(super::recent_projects_reset_from(&loaded));
+    let mut state = state_with(ApplicationShell::new());
+    // The figure must be in place before the reset is attached: that call is
+    // where the boot snapshot is taken (response 394, F1).
     state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage {
         total_bytes: 777,
         unclaimed_bytes: 777,
     };
+    let state = state.with_recent_projects_reset(super::recent_projects_reset_from(&loaded));
+
+    let lines = super::project_board_recent_projects_reset_lines(&state);
+
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(
+        lines[0].contains("reset") || lines[0].contains("empty"),
+        "{lines:?}"
+    );
+    assert!(
+        lines[1].contains("777"),
+        "earlier transcripts' bytes: {lines:?}"
+    );
+    assert!(
+        lines[2].contains("recent-projects.json.corrupt"),
+        "where the file went: {lines:?}"
+    );
+}
+
+/// Response 394 (F1): the notice stays on the board for the whole session, and
+/// the live figure refreshes after every load and purge. Rendering the live one
+/// would make "transcripts from before this start" count transcripts this
+/// session wrote — so the figure is snapshotted at boot and never re-read.
+///
+/// The live figure here is moved **downwards**, to what a purge would leave, so
+/// an implementation that re-read it could not accidentally agree.
+#[test]
+fn the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes() {
+    let loaded = Err(
+        tekstide_core::project::recent::RecentProjectStoreError::CorruptState {
+            message: "not json".to_owned(),
+            moved_to: None,
+        },
+    );
+    let mut state = state_with(ApplicationShell::new());
+    state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage {
+        total_bytes: 777,
+        unclaimed_bytes: 777,
+    };
+    let mut state = state.with_recent_projects_reset(super::recent_projects_reset_from(&loaded));
+
+    state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage {
+        total_bytes: 12,
+        unclaimed_bytes: 12,
+    };
+
+    let lines = super::project_board_recent_projects_reset_lines(&state);
+
+    assert_eq!(lines.len(), 2, "no file was moved aside here: {lines:?}");
+    assert!(
+        lines[1].contains("777"),
+        "the notice must render the boot figure: {lines:?}"
+    );
+    assert!(
+        !lines[1].contains("12"),
+        "the notice must not re-read the live figure: {lines:?}"
+    );
+}
+
+/// Response 394 (F1): with nothing on disk at boot there is nothing to say about
+/// transcripts, so the sentence is absent rather than reading "0 bytes in …",
+/// which would hand the user a path to nothing. The reset itself is still said.
+#[test]
+fn the_reset_notice_says_nothing_about_transcripts_when_there_were_none() {
+    let loaded = Err(
+        tekstide_core::project::recent::RecentProjectStoreError::CorruptState {
+            message: "not json".to_owned(),
+            moved_to: Some(PathBuf::from("/fixture/state/recent-projects.json.corrupt")),
+        },
+    );
+    let mut state = state_with(ApplicationShell::new());
+    state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage::default();
+    let state = state.with_recent_projects_reset(super::recent_projects_reset_from(&loaded));
 
     let lines = super::project_board_recent_projects_reset_lines(&state);
 
     assert_eq!(lines.len(), 2, "{lines:?}");
     assert!(
         lines[0].contains("reset") || lines[0].contains("empty"),
-        "{lines:?}"
-    );
-    assert!(
-        lines[0].contains("777"),
-        "earlier transcripts' bytes: {lines:?}"
+        "the reset is still said: {lines:?}"
     );
     assert!(
         lines[1].contains("recent-projects.json.corrupt"),
-        "where the file went: {lines:?}"
+        "and where the file went: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains("bytes")),
+        "no sentence about transcripts when there were none: {lines:?}"
     );
 }
 

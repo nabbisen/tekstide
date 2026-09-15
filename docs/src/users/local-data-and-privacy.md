@@ -85,7 +85,8 @@ project opened — by a second Tekstide on the same state directory, for example
 from under its writer. And transcripts whose project is no longer in the recent list, for example
 after `recent-projects.json` could not be read, belong to no project, so no project's purge reaches
 them. **Both are shown, not hidden.** The purge dialog names files it will leave, Trust Settings
-says how many bytes belong to no project and where they are, and on a start where
+says how many bytes no purge will delete — those belonging to no project, and files Tekstide does
+not recognise — and where they are, and on a start where
 `recent-projects.json` could not be read, the project board says the list was reset and where the
 earlier transcripts are.
 

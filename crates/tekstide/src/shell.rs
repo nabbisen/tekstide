@@ -299,8 +299,9 @@ pub(crate) struct TranscriptPurgeModal {
     /// RFC-050 D3: found files still being written when the project opened.
     /// Purge leaves them, and the dialog says so.
     still_being_written: u64,
-    /// RFC-050 D3′: transcripts purge will delete whose run is still in
-    /// progress. The run keeps running, and the dialog says so.
+    /// RFC-050 D3′: transcripts purge will delete whose run **may** still be in
+    /// progress, by the conservative deletion predicate. The dialog says so, in
+    /// those terms (response 394, F3).
     running_run_transcripts: u64,
     focus: TranscriptPurgeButton,
 }
@@ -1253,8 +1254,17 @@ impl State {
 
     /// RFC-050 PR-050-C: `boot()` hands in what loading the recent list
     /// found, so the board can say, on that start only, that it was reset.
+    ///
+    /// **This is where the byte figure is frozen** (response 394, F1). `new()`
+    /// has just scanned `transcripts/`, and nothing has been written or purged
+    /// since, so `transcript_disk_usage.total_bytes` here is exactly "what was on
+    /// disk before this start". The notice renders that number for the rest of
+    /// the session, never the live one.
     pub(crate) fn with_recent_projects_reset(mut self, reset: Option<RecentProjectsReset>) -> Self {
-        self.recent_projects_reset = reset;
+        self.recent_projects_reset = reset.map(|reset| RecentProjectsReset {
+            transcript_bytes_at_boot: self.transcript_disk_usage.total_bytes,
+            ..reset
+        });
         self
     }
 
@@ -7326,6 +7336,12 @@ fn project_board_audit_lines(state: &State) -> Vec<String> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RecentProjectsReset {
     moved_to: Option<std::path::PathBuf>,
+    /// Bytes under `transcripts/` **as they were at boot** (response 394, F1).
+    /// The notice stays on the board all session, and the live figure refreshes
+    /// after every load and purge, so rendering the live one would let
+    /// "transcripts from before this start" count transcripts this session
+    /// wrote. Snapshotted once, in `State::with_recent_projects_reset`.
+    transcript_bytes_at_boot: u64,
 }
 
 /// What loading the recent list means for the board. A corrupt file (renamed
@@ -7342,8 +7358,12 @@ pub(crate) fn recent_projects_reset_from(
     match loaded {
         Err(RecentProjectStoreError::CorruptState { moved_to, .. }) => Some(RecentProjectsReset {
             moved_to: moved_to.clone(),
+            transcript_bytes_at_boot: 0,
         }),
-        Err(RecentProjectStoreError::Io(_)) => Some(RecentProjectsReset { moved_to: None }),
+        Err(RecentProjectStoreError::Io(_)) => Some(RecentProjectsReset {
+            moved_to: None,
+            transcript_bytes_at_boot: 0,
+        }),
         Ok(_) | Err(RecentProjectStoreError::PathUnavailable(_)) => None,
     }
 }
@@ -7359,14 +7379,20 @@ fn project_board_recent_projects_reset_lines(state: &State) -> Vec<String> {
         .map(|state_root| state_root.join("transcripts").display().to_string())
         .unwrap_or_default();
     let transcripts = tekstide_core::text_safety::quote_untrusted(&transcripts);
-    let mut lines = vec![
-        state.catalog.get_with_args(
-            "project-board-recent-projects-reset",
-            &CatalogArgs::new()
-                .number("bytes", state.transcript_disk_usage.total_bytes)
-                .untrusted("path", &transcripts),
-        ),
-    ];
+    let mut lines = vec![state.catalog.get("project-board-recent-projects-reset")];
+    // Response 394 (F1): the boot snapshot, not the live figure -- and no
+    // sentence about transcripts at all when there were none, rather than a
+    // "0 bytes in ..." line that gives the user a path to nothing.
+    if reset.transcript_bytes_at_boot > 0 {
+        lines.push(
+            state.catalog.get_with_args(
+                "project-board-recent-projects-reset-transcripts",
+                &CatalogArgs::new()
+                    .number("bytes", reset.transcript_bytes_at_boot)
+                    .untrusted("path", &transcripts),
+            ),
+        );
+    }
     if let Some(moved_to) = &reset.moved_to {
         let moved_to = tekstide_core::text_safety::quote_untrusted(&moved_to.display().to_string());
         lines.push(state.catalog.get_with_args(
@@ -11209,8 +11235,13 @@ fn transcript_purge_still_being_written_notice(
     })
 }
 
-/// RFC-050 D3′: says a run still in progress keeps running while its transcript
-/// is deleted. `None` when no purgeable transcript belongs to a running run.
+/// RFC-050 D3′: says a transcript purge deletes **may** belong to a run still in
+/// progress. `None` when none does.
+///
+/// Response 394 (F3): "may". The count comes from the deletion predicate, which
+/// is deliberately conservative — `ReviewReady` and `Detached` read as live — so
+/// a run this names can already have finished. What is certainly true is what the
+/// line says: the transcript goes either way, and deleting it does not stop a run.
 fn transcript_purge_running_run_notice(
     catalog: &Catalog,
     modal: &TranscriptPurgeModal,

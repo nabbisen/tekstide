@@ -352,9 +352,9 @@ fn found_on_disk(
     }
 }
 
-/// RFC-050 D3′: the purge dialog says a run keeps running when a transcript
-/// it would delete belongs to a run still in progress. The count comes from the
-/// run's real status.
+/// RFC-050 D3′: the purge dialog says a transcript it would delete may belong to
+/// a run still in progress. The count comes from the run's real status, through
+/// the same conservative predicate deletion uses (response 394, F3).
 #[test]
 fn a_purgeable_transcript_of_a_running_run_is_counted() {
     let dirs = TestDirs::new("purge-running-run");
