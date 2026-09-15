@@ -23,6 +23,17 @@ the retained count and purge cover them. The count also no longer includes trans
   could not be read. They belong to no project, so no project's purge reaches them. Deleting
   `transcripts/` removes them.
 
+**What you will now see:**
+
+- **Trust Settings** says how many bytes of transcripts belong to no project in the recent list, and
+  where they are, when there are any.
+- **The purge dialog** says when a file was still being written when the project opened and will be
+  left, and when a transcript it deletes belongs to a run still in progress — the run keeps running,
+  and its transcript is deleted too.
+- **The project board**, on a start where `recent-projects.json` could not be read, says the list was
+  reset, how many bytes of earlier transcripts remain and where, and where the unreadable file was
+  moved. It says nothing on any other start.
+
 ## 0.18.0 - The Configuration File Does Something
 
 Status: released on 2026-09-12.

@@ -81,9 +81,13 @@ transcript because of its age.
   above.
 
 **Purge leaves two kinds of file in place.** A transcript that was still being written when the
-project opened — by a second Tekstide on the same state directory, for example — is never deleted from
-under its writer. And transcripts whose project is no longer in the recent list, for example after
-`recent-projects.json` could not be read, belong to no project, so no project's purge reaches them.
+project opened — by a second Tekstide on the same state directory, for example — is never deleted
+from under its writer. And transcripts whose project is no longer in the recent list, for example
+after `recent-projects.json` could not be read, belong to no project, so no project's purge reaches
+them. **Both are shown, not hidden.** The purge dialog names files it will leave, Trust Settings
+says how many bytes belong to no project and where they are, and on a start where
+`recent-projects.json` could not be read, the project board says the list was reset and where the
+earlier transcripts are.
 
 **To remove every transcript, delete the `transcripts/` directory** — the path is above — preferably
 with Tekstide closed.

@@ -352,6 +352,28 @@ fn found_on_disk(
     }
 }
 
+/// RFC-050 D3′: the purge dialog says a run keeps running when a transcript
+/// it would delete belongs to a run still in progress. The count comes from the
+/// run's real status.
+#[test]
+fn a_purgeable_transcript_of_a_running_run_is_counted() {
+    let dirs = TestDirs::new("purge-running-run");
+    let mut project = project_session(&dirs);
+    attach_running_run(&mut project, &dirs, "running", b"still writing", YESTERDAY);
+
+    assert_eq!(project.purgeable_transcripts_of_running_runs_count(), 1);
+}
+
+#[test]
+fn a_completed_runs_transcript_is_not_counted_as_running() {
+    let dirs = TestDirs::new("purge-completed-run");
+    let mut project = project_session(&dirs);
+    let run = attach_running_run(&mut project, &dirs, "completed", b"done", YESTERDAY);
+    complete(&mut project, &run);
+
+    assert_eq!(project.purgeable_transcripts_of_running_runs_count(), 0);
+}
+
 struct AttachedRun {
     terminal_id: TerminalId,
     agent_run_id: AgentRunId,

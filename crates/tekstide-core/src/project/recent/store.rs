@@ -62,15 +62,21 @@ impl AppStatePathProvider {
 pub enum RecentProjectStoreError {
     PathUnavailable(String),
     Io(String),
-    CorruptState(String),
+    /// The file could not be parsed. `moved_to` is where it was renamed, so
+    /// the board can say where it went (RFC-050 PR-050-C); `None` when the
+    /// rename itself failed.
+    CorruptState {
+        message: String,
+        moved_to: Option<PathBuf>,
+    },
 }
 
 impl fmt::Display for RecentProjectStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PathUnavailable(message) | Self::Io(message) | Self::CorruptState(message) => {
-                formatter.write_str(message)
-            }
+            Self::PathUnavailable(message)
+            | Self::Io(message)
+            | Self::CorruptState { message, .. } => formatter.write_str(message),
         }
     }
 }
@@ -105,8 +111,11 @@ impl RecentProjectStore {
         match RecentProjectState::from_json(&content) {
             Ok(state) => Ok(state),
             Err(error) => {
-                let _ = self.rename_corrupt_state();
-                Err(RecentProjectStoreError::CorruptState(error))
+                let moved_to = self.rename_corrupt_state().ok();
+                Err(RecentProjectStoreError::CorruptState {
+                    message: error,
+                    moved_to,
+                })
             }
         }
     }

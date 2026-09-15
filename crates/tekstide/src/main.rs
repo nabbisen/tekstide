@@ -115,8 +115,14 @@ fn boot() -> shell::State {
         }
     };
 
+    // RFC-050 PR-050-C: a list that could not be read starts empty and is saved
+    // empty below, so every earlier transcript loses its project. The board says
+    // so on this start (`project_board_recent_projects_reset_lines`).
+    let mut recent_projects_reset = None;
     if let Some(store) = &store {
-        match store.load() {
+        let loaded = store.load();
+        recent_projects_reset = shell::recent_projects_reset_from(&loaded);
+        match loaded {
             Ok(recent_project_state) => app_shell.restore_recent_projects(recent_project_state),
             Err(error) => eprintln!("{error}"),
         }
@@ -145,6 +151,7 @@ fn boot() -> shell::State {
 
     let catalog = i18n::Catalog::resolve(i18n::LocalePreference::default(), Some(&locales_dir()));
     shell::State::new(app_shell, catalog, audit_health, configuration)
+        .with_recent_projects_reset(recent_projects_reset)
 }
 
 /// RFC-031 PR-031-B: the real, testable open-a-project-from-the-CLI

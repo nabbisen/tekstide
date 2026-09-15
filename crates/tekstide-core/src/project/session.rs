@@ -398,6 +398,23 @@ impl ProjectSession {
             .sum()
     }
 
+    /// RFC-050 D3′: purgeable transcripts whose run, launched by this session,
+    /// is still in progress. Purge deletes them when asked, and the run keeps
+    /// running; the purge dialog says so. A found transcript has no run here
+    /// and is never counted.
+    pub fn purgeable_transcripts_of_running_runs_count(&self) -> u64 {
+        self.transcripts
+            .iter()
+            .filter(|transcript| transcript_is_purgeable(transcript))
+            .filter(|transcript| {
+                transcript
+                    .agent_run_id()
+                    .and_then(|agent_run_id| self.agent_run(agent_run_id).ok())
+                    .is_some_and(|run| agent_run_may_still_be_writing(run.status))
+            })
+            .count() as u64
+    }
+
     /// Found transcripts whose lock was held when the project opened. The
     /// purge dialog names them; purge leaves them in place.
     pub fn transcripts_still_being_written_count(&self) -> u64 {

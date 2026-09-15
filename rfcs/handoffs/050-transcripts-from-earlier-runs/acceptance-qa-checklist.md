@@ -125,25 +125,32 @@ implementer's to paper over.
 
 ## PR-050-C — say it, and stop saying the old thing
 
-- [ ] Trust Settings shows unclaimed bytes and where they are when there are some, and nothing when
+- [x] Trust Settings shows unclaimed bytes and where they are when there are some, and nothing when
       there are none. Each case is ablated alone. The wording fits the reset case (D6′): it does not
       imply the user did something, or that anything is dangerous.
-- [ ] The purge dialog names files still being written; absent when none. Each case is ablated alone.
-- [ ] **A run still in progress** (D3′, response 393): when a purgeable transcript belongs to a run
+      *P5 and P6 each fail their own test alone. Wording states the fact without blame or warning.*
+- [x] The purge dialog names files still being written; absent when none. Each case is ablated alone.
+      *P1 and P2 each fail their own test alone.*
+- [x] **A run still in progress** (D3′, response 393): when a purgeable transcript belongs to a run
       this session launched that is still running, the dialog says the run keeps running and its
       transcript is deleted too; absent otherwise. Each case ablated alone.
-- [ ] **Unclaimed bytes exclude closed recent projects** (response 393): a recent project that is not
+      *P3 and P4 each fail their own test alone; the count's status check is held by P11.*
+- [x] **Unclaimed bytes exclude closed recent projects** (response 393): a recent project that is not
       open has its transcript bytes counted as claimed, not unclaimed. *(Dropping recent projects
       from the claimed set failed nothing at review.)*
-- [ ] **Byte counts never follow a symlink** (response 393): a symlink under `transcripts/` pointing
+      *`a_closed_recent_projects_transcripts_count_as_claimed`; P9 fails it alone.*
+- [x] **Byte counts never follow a symlink** (response 393): a symlink under `transcripts/` pointing
       at a file outside the state root adds nothing to the total or the unclaimed figure. *(Counting
       through symlinks failed nothing at review.)*
-- [ ] **The reset notice (owner's decision, 2026-09-13).** On a start where `recent-projects.json`
+      *`a_symlink_under_transcripts_adds_no_bytes_to_either_figure`; P10 fails it alone.*
+- [x] **The reset notice (owner's decision, 2026-09-13).** On a start where `recent-projects.json`
       could not be read, the board says the list was reset, that earlier transcripts remain on disk
       (bytes and where), and where the unreadable file went. It appears on that start only; a later
       start with a readable file shows nothing. **Ablation:** drop the notice; its test fails alone.
-- [ ] `remove_recent_project`'s doc comment states that any removal control must say the project's
+      *P7 (drop it) and P8 (show it on a readable start) each fail their own test alone.*
+- [x] `remove_recent_project`'s doc comment states that any removal control must say the project's
       transcripts stay on disk. No caller or API is added for it.
+      *Stated; no caller and no API added.*
 - *(The disclosure's removal and the changelog defect entry are PR-050-B boxes now; see response
   388.)*
 - [ ] Live walkthrough of launch, quit, restart, the count shown, purge, and the file gone, against

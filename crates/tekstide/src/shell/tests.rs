@@ -13520,6 +13520,156 @@ fn reopening_a_project_loads_an_earlier_runs_transcript_and_purge_deletes_it() {
     );
 }
 
+// --- RFC-050 PR-050-C: say it ------------------------------------------------
+
+fn purge_modal_with(
+    still_being_written: u64,
+    running_run_transcripts: u64,
+) -> super::TranscriptPurgeModal {
+    super::TranscriptPurgeModal {
+        project_id: tekstide_core::project::ProjectId::new_uuid(),
+        transcript_count: 1,
+        retained_bytes: 1,
+        still_being_written,
+        running_run_transcripts,
+        focus: TranscriptPurgeButton::Cancel,
+    }
+}
+
+#[test]
+fn the_purge_dialog_names_files_still_being_written() {
+    let state = state_with(ApplicationShell::new());
+    let notice =
+        super::transcript_purge_still_being_written_notice(&state.catalog, &purge_modal_with(2, 0))
+            .expect("a file still being written when the project opened must be named");
+    assert!(notice.contains('2'), "{notice}");
+}
+
+#[test]
+fn the_purge_dialog_says_nothing_about_files_still_being_written_when_there_are_none() {
+    let state = state_with(ApplicationShell::new());
+    assert_eq!(
+        super::transcript_purge_still_being_written_notice(&state.catalog, &purge_modal_with(0, 3)),
+        None
+    );
+}
+
+#[test]
+fn the_purge_dialog_says_a_run_in_progress_keeps_running() {
+    let state = state_with(ApplicationShell::new());
+    let notice =
+        super::transcript_purge_running_run_notice(&state.catalog, &purge_modal_with(0, 1))
+            .expect("a transcript of a run still in progress must be named (D3′)");
+    assert!(notice.contains("keeps running"), "{notice}");
+}
+
+#[test]
+fn the_purge_dialog_says_nothing_about_running_runs_when_there_are_none() {
+    let state = state_with(ApplicationShell::new());
+    assert_eq!(
+        super::transcript_purge_running_run_notice(&state.catalog, &purge_modal_with(4, 0)),
+        None
+    );
+}
+
+#[test]
+fn trust_settings_shows_unclaimed_transcripts_and_where_they_are() {
+    let mut state = state_with(ApplicationShell::new());
+    state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage {
+        total_bytes: 4096,
+        unclaimed_bytes: 1234,
+    };
+    let line = super::trust_settings_unclaimed_transcripts_line(&state)
+        .expect("unclaimed bytes must be shown when there are some");
+    assert!(line.contains("1234"), "{line}");
+    assert!(
+        line.contains("transcripts"),
+        "the line says where they are: {line}"
+    );
+}
+
+#[test]
+fn trust_settings_shows_nothing_about_unclaimed_transcripts_when_there_are_none() {
+    let mut state = state_with(ApplicationShell::new());
+    state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage {
+        total_bytes: 4096,
+        unclaimed_bytes: 0,
+    };
+    assert_eq!(
+        super::trust_settings_unclaimed_transcripts_line(&state),
+        None
+    );
+}
+
+#[test]
+fn the_board_says_the_recent_list_was_reset_on_the_start_it_happened() {
+    let moved_to = PathBuf::from("/fixture/state/recent-projects.json.corrupt");
+    let loaded = Err(
+        tekstide_core::project::recent::RecentProjectStoreError::CorruptState {
+            message: "not json".to_owned(),
+            moved_to: Some(moved_to),
+        },
+    );
+    let mut state = state_with(ApplicationShell::new())
+        .with_recent_projects_reset(super::recent_projects_reset_from(&loaded));
+    state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage {
+        total_bytes: 777,
+        unclaimed_bytes: 777,
+    };
+
+    let lines = super::project_board_recent_projects_reset_lines(&state);
+
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines[0].contains("reset") || lines[0].contains("empty"),
+        "{lines:?}"
+    );
+    assert!(
+        lines[0].contains("777"),
+        "earlier transcripts' bytes: {lines:?}"
+    );
+    assert!(
+        lines[1].contains("recent-projects.json.corrupt"),
+        "where the file went: {lines:?}"
+    );
+}
+
+#[test]
+fn the_board_says_nothing_about_a_reset_on_a_start_with_a_readable_list() {
+    let loaded = Ok(tekstide_core::project::recent::RecentProjectState::default());
+    let state = state_with(ApplicationShell::new())
+        .with_recent_projects_reset(super::recent_projects_reset_from(&loaded));
+
+    assert!(super::project_board_recent_projects_reset_lines(&state).is_empty());
+}
+
+/// Response 393's N6: dropping recent projects from the claimed set failed
+/// nothing. A recent project that is not open still owns its transcripts, so
+/// they count as claimed, not unclaimed.
+#[test]
+fn a_closed_recent_projects_transcripts_count_as_claimed() {
+    let (mut state, project_id, _project_dir) =
+        state_with_cached_trusted_recent_project("closed-recent-claimed");
+    let state_root =
+        super::resolve_agent_run_state_dir().expect("a test build always has its own state root");
+    let bytes = b"a transcript of a project that is remembered but not open";
+    let path = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(tekstide_core::domain::AgentRunId::new_uuid().as_str())
+        .join("transcript.log");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, bytes).unwrap();
+
+    super::refresh_transcript_disk_usage(&mut state);
+
+    assert_eq!(state.transcript_disk_usage.total_bytes, bytes.len() as u64);
+    assert_eq!(
+        state.transcript_disk_usage.unclaimed_bytes, 0,
+        "a remembered project's transcripts belong to it even while it is closed"
+    );
+}
+
 /// RFC-040 PR-040-B: the real, clickable "Close" button -- same
 /// real-termination-and-two-phase-audit proof
 /// `confirming_the_close_terminates_the_real_process_and_removes_the_project`

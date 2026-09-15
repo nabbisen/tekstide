@@ -239,6 +239,28 @@ fn corrupt_state_file_is_renamed_and_reported() {
     assert!(state_dir.join("recent-projects.json.corrupt").exists());
 }
 
+/// RFC-050 PR-050-C: the board says where the unreadable list went, so the
+/// error must carry the path the rename produced.
+#[test]
+fn a_corrupt_state_reports_where_it_was_moved() {
+    let sandbox = TestSandbox::new("corrupt-state-moved-to");
+    let state_dir = sandbox.create_dir("state");
+    fs::write(state_dir.join("recent-projects.json"), b"not json").unwrap();
+    let store = RecentProjectStore::new(AppStatePathProvider::from_state_dir(&state_dir));
+
+    let error = store.load().expect_err("corrupt state should be reported");
+
+    match error {
+        crate::project::recent::RecentProjectStoreError::CorruptState { moved_to, .. } => {
+            assert_eq!(
+                moved_to,
+                Some(state_dir.join("recent-projects.json.corrupt"))
+            )
+        }
+        other => panic!("expected CorruptState, got {other:?}"),
+    }
+}
+
 #[test]
 fn corrupt_state_rename_does_not_overwrite_existing_corrupt_file() {
     let sandbox = TestSandbox::new("corrupt-state-collision");

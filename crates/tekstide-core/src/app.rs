@@ -553,6 +553,16 @@ impl AppState {
             .ok_or(RemoveProjectError::ProjectNotFound)
     }
 
+    /// Removes a project from the recent list. **Nothing calls this today**, and
+    /// no control is added for it (RFC-036).
+    ///
+    /// **RFC-050 D6′, the owner's rule (2026-09-13): whenever transcripts stop
+    /// belonging to any project, the user is told what happened and where the
+    /// files are.** Removing a project from this list does exactly that: a
+    /// later open gives it a new id, so its transcript directory belongs to no
+    /// project and no purge reaches it. **Any control that calls this must say,
+    /// in its confirmation, that the project's transcripts stay on disk, and
+    /// where.**
     pub fn remove_recent_project(
         &mut self,
         project_id: &ProjectId,

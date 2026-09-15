@@ -485,3 +485,90 @@ the test fails alone"***, which K1 could not satisfy at the core layer.
 `rfc_docs_invariants`: 9 passed. `mdbook build docs`: clean. **Three consecutive full-workspace runs,
 output redirected to files: 508 + 9 + 803, green every time** (+1 shell test).
 `git diff --cached --check` after staging: clean.
+
+## PR-050-C — say it
+
+**The owner's rule this slice serves:** whenever transcripts stop belonging to any project, the user
+is told what happened and where the files are, at the next moment they can see it. Every notice below
+is **absent when its fact is false**, and each is tested both ways as separate tests.
+
+### What the user now sees
+
+| Where | When | What it says |
+| --- | --- | --- |
+| **Project board** | only on a start whose `recent-projects.json` could not be read | the list was reset; how many bytes of earlier transcripts remain, and where; and, when the file was moved aside, where it went |
+| **Trust Settings** | when transcripts belong to no open or recent project | how many bytes, and where; that purge does not reach them |
+| **Purge dialog** | when a found file was still being written when the project opened | how many, and that they will not be removed |
+| **Purge dialog** | when a transcript it deletes belongs to a run still in progress (D3′) | the run keeps running, and its transcript is deleted too |
+
+**Wording for the reset case (D6′).** After a reset, the unclaimed figure is every transcript the user
+has, so the Trust Settings line states the fact: those bytes belong to no project in the recent list,
+stay where they are until deleted, and are not reached by purge. It does not say the user did anything,
+and it does not warn.
+
+### How the reset reaches the board
+
+`RecentProjectStoreError::CorruptState` now carries `moved_to`, the path the rename actually produced
+(`None` if the rename failed); before this, `load` discarded it. `boot()` passes the load result
+through `shell::recent_projects_reset_from`, which treats two cases as a reset:
+
+- **a corrupt file**, which is renamed aside;
+- **an unreadable file**, which also starts the list empty, and which `boot()` then overwrites on save.
+
+A missing file (a first start) and an unresolvable path are not resets. The value lives only in
+`State`, never persisted, so **a later start with a readable file shows nothing**.
+
+`RecentProjectStore`'s own test, `a_corrupt_state_reports_where_it_was_moved`, checks the path against
+a real renamed file.
+
+### `remove_recent_project`
+
+Its doc comment now states the rule: removing a project from the recent list orphans its transcripts,
+so **any control that calls it must say, in its confirmation, that the project's transcripts stay on
+disk, and where**. Nothing calls it, and no API was added (RFC-036).
+
+### Two figure tests response 393 found missing
+
+- `a_closed_recent_projects_transcripts_count_as_claimed`, at GUI level. N6 had dropped recent
+  projects from the shell's claimed set, and the core test passed its own claimed list, so nothing
+  failed.
+- `a_symlink_under_transcripts_adds_no_bytes_to_either_figure`, in the core. It covers a symlinked run
+  directory inside a claimed project, a symlinked project directory, and a symlinked file at the root.
+
+### Catalog
+
+Five `en.ftl` keys, using only the existing `count`, `bytes` and `path` placeholders, so nothing is
+added to `generic_args()`. The locale test resolves them in `pl` through the English fallback, as it
+does for every other key that locale lacks.
+
+### Ablations, each restored and hash-checked
+
+| | Ablation | Fails |
+| --- | --- | --- |
+| P1 | never show the still-being-written notice | its presence test **alone** |
+| P2 | always show it | its absence test **alone** |
+| P3 | never show the running-run notice | its presence test **alone** |
+| P4 | always show it | its absence test **alone** |
+| P5 | never show the unclaimed line | its presence test **alone** |
+| P6 | always show it | its absence test **alone** |
+| P7 | drop the reset notice | `the_board_says_the_recent_list_was_reset_on_the_start_it_happened` **alone** |
+| P8 | treat a readable list as a reset | `the_board_says_nothing_about_a_reset_on_a_start_with_a_readable_list` **alone** |
+| P9 | drop recent projects from the claimed set | `a_closed_recent_projects_transcripts_count_as_claimed` **alone** |
+| P10 | byte counts follow symlinks (core) | `a_symlink_under_transcripts_adds_no_bytes_to_either_figure` **alone**; shell tests green |
+| P11 | count any run as running (core) | `a_completed_runs_transcript_is_not_counted_as_running` **alone**; shell tests green |
+
+The two core ablations were checked against the core **and** the shell test binaries in separate
+runs, so a failure in one could not hide a result in the other.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean.
+`rfc_docs_invariants`: 9 passed. **Three consecutive full-workspace runs with `--no-fail-fast`, output
+redirected to files: 517 + 9 + 807, green every time** (+9 shell, +4 core).
+`git diff --cached --check` after staging: clean.
+
+### Live walkthrough
+
+**Not yet captured.** It follows in a separate commit against the release binary, with throwaway
+`XDG_CONFIG_HOME` and `XDG_STATE_HOME`: launch, quit, restart, the earlier transcript counted, purge,
+and the file gone. Its checklist box stays unticked until then.

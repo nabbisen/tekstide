@@ -296,6 +296,12 @@ pub(crate) struct TranscriptPurgeModal {
     project_id: tekstide_core::project::ProjectId,
     transcript_count: u64,
     retained_bytes: u64,
+    /// RFC-050 D3: found files still being written when the project opened.
+    /// Purge leaves them, and the dialog says so.
+    still_being_written: u64,
+    /// RFC-050 D3′: transcripts purge will delete whose run is still in
+    /// progress. The run keeps running, and the dialog says so.
+    running_run_transcripts: u64,
     focus: TranscriptPurgeButton,
 }
 
@@ -985,6 +991,10 @@ pub struct State {
     /// when a project's transcripts load and after a purge — never from a
     /// view, which runs every frame.
     transcript_disk_usage: tekstide_core::transcript::TranscriptDiskUsage,
+    /// RFC-050 PR-050-C (D6′): `Some` only on the one start whose
+    /// `recent-projects.json` could not be read. Never persisted, so a later
+    /// start with a readable file has `None` and shows nothing.
+    recent_projects_reset: Option<RecentProjectsReset>,
 }
 
 /// RFC-045 PR-045-B: what `boot()` made of the user's configuration
@@ -1237,7 +1247,15 @@ impl State {
             audit_health,
             configuration,
             transcript_disk_usage,
+            recent_projects_reset: None,
         }
+    }
+
+    /// RFC-050 PR-050-C: `boot()` hands in what loading the recent list
+    /// found, so the board can say, on that start only, that it was reset.
+    pub(crate) fn with_recent_projects_reset(mut self, reset: Option<RecentProjectsReset>) -> Self {
+        self.recent_projects_reset = reset;
+        self
     }
 
     pub fn window_title(&self) -> String {
@@ -7302,6 +7320,85 @@ fn project_board_audit_lines(state: &State) -> Vec<String> {
 /// Absent when clean, per RFC-047 §2 and D3's own precedent: a
 /// permanent "configuration: fine" line is how a surface stops being
 /// read.
+/// RFC-050 PR-050-C (D6′): the start whose `recent-projects.json` could not be
+/// read. The list starts empty and is saved empty, so every project reopens under
+/// a new id and every earlier transcript belongs to no project.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RecentProjectsReset {
+    moved_to: Option<std::path::PathBuf>,
+}
+
+/// What loading the recent list means for the board. A corrupt file (renamed
+/// aside) and an unreadable one both start empty and are overwritten on save, so
+/// both are a reset. A missing file is a first start, and a path that cannot be
+/// resolved has no file to lose; neither is a reset.
+pub(crate) fn recent_projects_reset_from(
+    loaded: &Result<
+        tekstide_core::project::recent::RecentProjectState,
+        tekstide_core::project::recent::RecentProjectStoreError,
+    >,
+) -> Option<RecentProjectsReset> {
+    use tekstide_core::project::recent::RecentProjectStoreError;
+    match loaded {
+        Err(RecentProjectStoreError::CorruptState { moved_to, .. }) => Some(RecentProjectsReset {
+            moved_to: moved_to.clone(),
+        }),
+        Err(RecentProjectStoreError::Io(_)) => Some(RecentProjectsReset { moved_to: None }),
+        Ok(_) | Err(RecentProjectStoreError::PathUnavailable(_)) => None,
+    }
+}
+
+/// The owner's rule (2026-09-13): whenever transcripts stop belonging to any
+/// project, say what happened and where the files are, at the next moment the
+/// user can see it. Absent on every other start.
+fn project_board_recent_projects_reset_lines(state: &State) -> Vec<String> {
+    let Some(reset) = &state.recent_projects_reset else {
+        return Vec::new();
+    };
+    let transcripts = resolve_agent_run_state_dir()
+        .map(|state_root| state_root.join("transcripts").display().to_string())
+        .unwrap_or_default();
+    let transcripts = tekstide_core::text_safety::quote_untrusted(&transcripts);
+    let mut lines = vec![
+        state.catalog.get_with_args(
+            "project-board-recent-projects-reset",
+            &CatalogArgs::new()
+                .number("bytes", state.transcript_disk_usage.total_bytes)
+                .untrusted("path", &transcripts),
+        ),
+    ];
+    if let Some(moved_to) = &reset.moved_to {
+        let moved_to = tekstide_core::text_safety::quote_untrusted(&moved_to.display().to_string());
+        lines.push(state.catalog.get_with_args(
+            "project-board-recent-projects-reset-moved",
+            &CatalogArgs::new().untrusted("path", &moved_to),
+        ));
+    }
+    lines
+}
+
+/// RFC-050 PR-050-C (D6′): bytes of transcripts no open or recent project
+/// claims, and where they are. After a reset this is every transcript the user
+/// has, so it states the fact without implying the user did something or that
+/// anything is dangerous. `None` when there are none.
+fn trust_settings_unclaimed_transcripts_line(state: &State) -> Option<String> {
+    let bytes = state.transcript_disk_usage.unclaimed_bytes;
+    if bytes == 0 {
+        return None;
+    }
+    let transcripts = resolve_agent_run_state_dir()?.join("transcripts");
+    let transcripts =
+        tekstide_core::text_safety::quote_untrusted(&transcripts.display().to_string());
+    Some(
+        state.catalog.get_with_args(
+            "trust-settings-unclaimed-transcripts",
+            &CatalogArgs::new()
+                .number("bytes", bytes)
+                .untrusted("path", &transcripts),
+        ),
+    )
+}
+
 fn project_board_configuration_lines(state: &State) -> Vec<String> {
     let mut lines = Vec::new();
 
@@ -7376,6 +7473,7 @@ fn content_area(state: &State) -> Element<'_, Message> {
                 );
                 let mut board_lines = project_board_audit_lines(state);
                 board_lines.extend(project_board_configuration_lines(state));
+                board_lines.extend(project_board_recent_projects_reset_lines(state));
                 if board_lines.is_empty() {
                     board
                 } else {
@@ -9020,6 +9118,8 @@ fn open_transcript_purge_dialog(state: &mut State) {
         project_id: project.id().clone(),
         transcript_count: project.purgeable_transcript_count(),
         retained_bytes: project.purgeable_transcript_bytes(),
+        still_being_written: project.transcripts_still_being_written_count(),
+        running_run_transcripts: project.purgeable_transcripts_of_running_runs_count(),
         focus: TranscriptPurgeButton::Cancel,
     }));
 }
@@ -9305,6 +9405,9 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
         .size(state.theme.font_size_body())
         .into(),
     );
+    if let Some(line) = trust_settings_unclaimed_transcripts_line(state) {
+        lines.push(text(line).size(state.theme.font_size_body()).into());
+    }
     lines.push(
         button(
             text(state.catalog.get("trust-settings-purge-button"))
@@ -11092,6 +11195,34 @@ fn configuration_reload_dialog_view<'a>(
 /// a tombstone remains, per `purge_project_transcripts`'s own real
 /// behavior, and this message says only what the surface can honestly
 /// promise.
+/// RFC-050 D3: says purge will leave the files that were still being written
+/// when the project opened. `None` when there are none.
+fn transcript_purge_still_being_written_notice(
+    catalog: &Catalog,
+    modal: &TranscriptPurgeModal,
+) -> Option<String> {
+    (modal.still_being_written > 0).then(|| {
+        catalog.get_with_args(
+            "transcript-purge-dialog-still-being-written",
+            &CatalogArgs::new().number("count", modal.still_being_written),
+        )
+    })
+}
+
+/// RFC-050 D3′: says a run still in progress keeps running while its transcript
+/// is deleted. `None` when no purgeable transcript belongs to a running run.
+fn transcript_purge_running_run_notice(
+    catalog: &Catalog,
+    modal: &TranscriptPurgeModal,
+) -> Option<String> {
+    (modal.running_run_transcripts > 0).then(|| {
+        catalog.get_with_args(
+            "transcript-purge-dialog-running-run",
+            &CatalogArgs::new().number("count", modal.running_run_transcripts),
+        )
+    })
+}
+
 fn transcript_purge_dialog_body(catalog: &Catalog, modal: &TranscriptPurgeModal) -> String {
     catalog.get_with_args(
         "transcript-purge-dialog-body",
@@ -11117,7 +11248,7 @@ fn transcript_purge_dialog_view<'a>(
         .on_press(on_press)
     };
 
-    let lines: Vec<Element<'_, Message>> = vec![
+    let mut lines: Vec<Element<'_, Message>> = vec![
         text(state.catalog.get("transcript-purge-dialog-title"))
             .size(state.theme.font_size_heading())
             .into(),
@@ -11140,6 +11271,18 @@ fn transcript_purge_dialog_view<'a>(
             .size(state.theme.font_size_status())
             .into(),
     ];
+    // RFC-050 PR-050-C: each notice sits under the body, and is absent when its
+    // count is zero.
+    let notices = [
+        transcript_purge_still_being_written_notice(&state.catalog, modal),
+        transcript_purge_running_run_notice(&state.catalog, modal),
+    ];
+    for (offset, notice) in notices.into_iter().flatten().enumerate() {
+        lines.insert(
+            2 + offset,
+            text(notice).size(state.theme.font_size_body()).into(),
+        );
+    }
 
     modal_dialog_box(state, column(lines).spacing(10).into())
 }

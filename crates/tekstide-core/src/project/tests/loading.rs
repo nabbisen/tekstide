@@ -265,6 +265,39 @@ fn the_app_wide_figure_includes_a_closed_project() {
     assert_eq!(usage.unclaimed_bytes, b"stray".len() as u64);
 }
 
+/// Response 393's N8: counting through a symlink failed nothing. A symlink
+/// under `transcripts/` points at something outside the state root, so it adds
+/// no bytes to the total or to the unclaimed figure.
+#[test]
+fn a_symlink_under_transcripts_adds_no_bytes_to_either_figure() {
+    let dirs = TestDirs::new("symlink-bytes");
+    let outside = dirs.base.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(
+        outside.join("transcript.log"),
+        b"bytes that are not in the state root",
+    )
+    .unwrap();
+    let transcripts = dirs.state_root.join("transcripts");
+    let claimed = ProjectId::for_test(1);
+    let claimed_dir = transcripts.join(claimed.as_str());
+    fs::create_dir_all(&claimed_dir).unwrap();
+    std::os::unix::fs::symlink(&outside, claimed_dir.join(AgentRunId::new_uuid().as_str()))
+        .unwrap();
+    std::os::unix::fs::symlink(&outside, transcripts.join(ProjectId::for_test(2).as_str()))
+        .unwrap();
+    std::os::unix::fs::symlink(
+        outside.join("transcript.log"),
+        transcripts.join("stray-link"),
+    )
+    .unwrap();
+
+    let usage = scan_transcript_disk_usage(&dirs.state_root, &[claimed]);
+
+    assert_eq!(usage.total_bytes, 0, "no symlink is counted through");
+    assert_eq!(usage.unclaimed_bytes, 0);
+}
+
 #[test]
 fn a_transcript_this_session_already_has_is_not_loaded_twice() {
     let dirs = TestDirs::new("already-known");

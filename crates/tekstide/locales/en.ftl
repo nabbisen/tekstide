@@ -299,6 +299,10 @@ project-board-audit-history = { $count ->
 # `text_safety::quote_untrusted` before reaching this key -- the same
 # discipline `project-board-audit-recovered-quarantined` follows for a
 # filesystem path.
+# RFC-050 PR-050-C (D6′): shown on the one start whose recent-projects.json could
+# not be read. The second line appears only when the file was moved aside.
+project-board-recent-projects-reset = The recent-projects list could not be read, so this start began with an empty one. Transcripts from before remain on disk: { $bytes } bytes in { $path }.
+project-board-recent-projects-reset-moved = The unreadable list was moved to { $path }.
 project-board-configuration-ignored = Configuration: ignored, defaults in force. The problem is at { $key }.
 
 # §6's second state, and response 376's requirement that it name the
@@ -675,6 +679,10 @@ trust-settings-retained-transcripts = Retained locally: { $count ->
    *[other] {$count} transcripts
 } ({ $bytes } bytes)
 trust-settings-purge-button = Purge Project Transcripts…
+# RFC-050 PR-050-C (D6′): bytes of transcripts no open or recent project owns.
+# After a recent-list reset this is every transcript the user has, so it states
+# the fact only: it does not say the user did something, or that it is dangerous.
+trust-settings-unclaimed-transcripts = { $bytes } bytes of transcripts on this computer belong to no project in the recent list. They stay in { $path } until they are deleted there; purge does not reach them.
 
 # RFC-047 PR-047-C, D4: rendered only while `AuditHealth::status()` is
 # `Degraded` -- absent the rest of the time, per §2/§5 of the risk
@@ -930,6 +938,16 @@ transcript-purge-dialog-body = This permanently deletes { $count ->
     [one] {$count} transcript
    *[other] {$count} transcripts
 } ({ $bytes } bytes) stored locally for this project. Other projects are not affected. This cannot be undone.
+# RFC-050 D3: found files still being written when the project opened. Absent when none.
+transcript-purge-dialog-still-being-written = { $count ->
+    [one] { $count } transcript was
+   *[other] { $count } transcripts were
+} still being written when this project opened, and will not be removed.
+# RFC-050 D3′: a transcript purge deletes whose run is still in progress. Absent when none.
+transcript-purge-dialog-running-run = { $count ->
+    [one] { $count } of these belongs
+   *[other] { $count } of these belong
+} to a run that is still in progress. The run keeps running, and its transcript is deleted too.
 transcript-purge-dialog-purge = Purge
 transcript-purge-dialog-cancel = Cancel
 transcript-purge-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.
