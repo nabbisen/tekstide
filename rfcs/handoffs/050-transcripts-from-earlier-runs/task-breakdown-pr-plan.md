@@ -129,6 +129,20 @@ readable file shows nothing.
 start it again, open Trust Settings and see the earlier transcript counted, purge it, and show the
 file gone. Try `wtype` first, per `ARCHITECTURE.md`.
 
+### PR-050-C follow-up (response 394) — before RFC-049 PR-049-C
+
+Three notices say something adjacent to what they measure. Fix the wording and the one figure;
+RFC-050 closes at that review.
+
+- **F1, the reset notice:** snapshot the transcript bytes **at boot** into `RecentProjectsReset`, and
+  render that, not the live `transcript_disk_usage`. When the snapshot is zero, drop the transcripts
+  sentence and keep the reset and moved-to sentences. **Test:** after the live figure changes, the
+  notice still shows the boot figure. **Ablation:** read the live figure; the test fails alone.
+- **F2, the unclaimed line:** describe what is measured. It covers one state directory, not "this
+  computer", and it includes files Tekstide does not recognise inside project directories.
+- **F3, the running-run notice:** "may still be in progress", not "keeps running". The count uses the
+  deletion predicate, which is deliberately conservative.
+
 ## After this
 
 RFC-049 PR-049-C's paused parts resume on loaded records. Its changelog sentence (*"the first run

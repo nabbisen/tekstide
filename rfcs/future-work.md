@@ -803,6 +803,12 @@ and that earlier transcripts remain on disk, and Trust Settings shows their byte
 is the repair:** recovering the store and the trust decisions it lost, which is RFC-047's shape
 applied to a different store.
 
+**An I/O error is worse than corruption (found at response 394).** A file that fails to parse is renamed
+to `recent-projects.json.corrupt` first. A file that cannot be *read*, for any reason other than not
+existing, is not moved, and `boot()` then saves the empty list over it with an atomic rename, so the
+old list is gone with no copy. PR-050-C's board notice says the list was reset, which is true, but not
+that nothing was kept.
+
 **Trigger to revisit:** the first report of trust or transcripts vanishing after a crash, or any
 slice that touches `RecentProjectStore`.
 
