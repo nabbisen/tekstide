@@ -153,8 +153,10 @@ implementer's to paper over.
       *Stated; no caller and no API added.*
 - *(The disclosure's removal and the changelog defect entry are PR-050-B boxes now; see response
   388.)*
-- [ ] Live walkthrough of launch, quit, restart, the count shown, purge, and the file gone, against
+- [x] Live walkthrough of launch, quit, restart, the count shown, purge, and the file gone, against
       throwaway state only.
+      *Release binary, `mktemp -d` state; seven images in `evidence/pr-050-c/`. Also the reset notice
+      and the unclaimed line, using a hand-placed stand-in file (disclosed).*
 
 ## Whole-RFC
 

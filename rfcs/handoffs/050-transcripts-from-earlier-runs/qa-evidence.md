@@ -569,6 +569,34 @@ redirected to files: 517 + 9 + 807, green every time** (+9 shell, +4 core).
 
 ### Live walkthrough
 
-**Not yet captured.** It follows in a separate commit against the release binary, with throwaway
-`XDG_CONFIG_HOME` and `XDG_STATE_HOME`: launch, quit, restart, the earlier transcript counted, purge,
-and the file gone. Its checklist box stays unticked until then.
+Against `target/release/tekstide` built from `0dfde2b`, with `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, the
+project and the configured AI CLI each in its own `mktemp -d`. The CLI is a shell script that writes a
+marker line and exits. Input was `wtype`, after a positive control; each capture cleared the clipboard
+first. Every image below shows only those `/tmp` directories. The positive-control capture is not
+committed.
+
+| Step | What happened | Image |
+| --- | --- | --- |
+| 1 | Session 1: launched the configured CLI; the first-use confirmation names the throwaway script and config | `evidence/pr-050-c/01-first-session-launch-confirmation.png` |
+| 2 | The run wrote a 29-byte transcript containing the marker; Trust Settings: *1 transcript (29 bytes)* | `02-first-session-trust-settings.png` |
+| 3 | Quit through the compositor (`close-window`); the process exited | — |
+| 4 | Session 2, same state home: Trust Settings still reads *1 transcript (29 bytes)* — **the earlier run's transcript was loaded** | `03-after-restart-trust-settings.png` |
+| 5 | The purge dialog: *permanently deletes 1 transcript (29 bytes)*, with neither notice (nothing live, no running run) | `04-after-restart-purge-dialog.png` |
+| 6 | Purge (Tab, Enter). **The file is gone from disk; `transcripts/` holds 0 files**; Trust Settings reads *0 transcripts (0 bytes)* | `05-after-purge-trust-settings.png` |
+| 7 | Quit. A 47-byte `transcript.log` was **placed by hand** under the old project id, and `recent-projects.json` overwritten with non-JSON | — |
+| 8 | Session 3: the board says the list could not be read, that 47 bytes remain in `…/tekstide/transcripts`, and that the file moved to `recent-projects.json.corrupt` (present on disk) | `06-reset-start-board.png` |
+| 9 | The project reopened under a **new** id; Trust Settings counts 0 transcripts for it and says 47 bytes belong to no project in the recent list, and purge does not reach them | `07-reset-start-trust-settings.png` |
+
+**Two things to read carefully.**
+
+- **Images 02 and 03 are byte-identical** (sha256 `c6696ded9ef48f2b…`). The two renders are the same
+  pixels, because the figure did not change across the restart, which is the point. I suspected a stale
+  clipboard, so I recaptured 03 after `wl-copy --clear` and got the same bytes again. The restart itself is
+  evidenced by the process ids (session 1 exited before session 2 started), not by the image.
+- **The 47-byte file in steps 7–9 is a stand-in, not a transcript a run wrote.** Step 6 had already
+  purged the real one. It sits at the product's path under the pre-reset project id, which is exactly
+  what a reset orphans. Steps 8–9 show the reset notice and the unclaimed line; they do not show a
+  run's transcript becoming orphaned end to end.
+
+The app wrote one line to stderr on the reset start, the parse error (`expected ident at line 1
+column 2`). I did not check whether earlier builds wrote it too.
