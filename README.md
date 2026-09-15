@@ -3,7 +3,7 @@
 # Tekst IDE
 
 ![Status](https://img.shields.io/badge/status-early--implementation-orange)
-[![license](https://img.shields.io/crates/l/tekstide.svg)](LICENSE)
+[![license](https://img.shields.io/crates/l/tekstide.svg)](https://github.com/nabbisen/tekstide/blob/main/LICENSE)
 [![crates.io](https://img.shields.io/crates/v/tekstide.svg?label=tekstide)](https://crates.io/crates/tekstide)
 [![docs.rs](https://img.shields.io/docsrs/tekstide?version=latest)](https://docs.rs/tekstide)
 [![Dependency Status](https://deps.rs/crate/tekstide/latest/status.svg)](https://deps.rs/crate/tekstide)
@@ -13,526 +13,89 @@
 
 Tekst IDE (`tekstide`) is a local-first, multi-project workbench for supervising terminal-based AI development workflows.
 
-## Current Status
+**Documentation: [the Tekstide book](https://nabbisen.github.io/tekstide/).** Start with
+[What works today](https://nabbisen.github.io/tekstide/users/what-works-today.html), which states the limits as plainly as the
+capabilities.
 
-The current implementation is a headless core through RFC-013, the command-approval
-model of RFC-021 (rendered as of `0.10.0`), and the shared text-safety primitive of
-RFC-016 PR-016-C: terminal runtime, AgentRun launch, transcript retention,
-generated-change review, and durable audit storage. As of RFC-015 (now closed,
-`rfcs/done/`), there is also a real desktop GUI application shell with mode
-switching. It includes:
+## What it does
 
-- Project Board and ProjectSession state, root-bound file access, bounded explorer,
-  UTF-8 text buffers, and safe save with external-change detection;
-- project-owned Linux PTY terminal lifecycle with bounded IO, resize, and
-  process-group termination;
-- conservative terminal output security policy, paste classification, and
-  model-level trusted UI boundaries;
-- AI CLI profiles as reviewed launch contracts, with Restricted Mode blocking
-  workspace-local executables, wrappers, project-local `PATH`, and implicit CLI
-  workspace-config discovery — **definable in a configuration file as of `0.18.0`**
-  (RFC-045), with one deliberate act naming the resolved executable between the file
-  and any process it starts; see *Configuring It*;
-- AgentRun launch through project-owned terminals, with honest Plain/Supervised/
-  Managed labels and active-file safety before process start;
-- bounded local transcript capture with retention limits and purge policy — **reached for real by AI CLI runs**, with an in-app per-project opt-out and purge on the Trust Settings surface, see *Local Data and Privacy*;
-- metadata-only generated-change detection and review-state tracking;
-- durable local SQLite audit storage with schema identity, migration harness,
-  corruption diagnostics, restart-safe recovery, and explicit purge;
-- a real `iced` desktop shell: window/chrome/content/modal layer composition, a
-  keyboard-driven focus and input-routing model with a visible, non-colour-only focus
-  indicator, i18n-backed text and a compiled theme, and a Project Board surface
-  rendering live `ApplicationShell` state with untrusted project names and paths
-  escaped, never trusted;
-- multiple projects open at once, with a real project tab strip (RFC-039, M12): click
-  a tab or press `Ctrl+Alt+N` to switch, click `×` to close (naming a live-work count
-  and the canonical path when there is something to lose, closing directly when there
-  is not), a permanent tab back to the Project Board;
-- Content ↔ Terminal mode switching for an active project, with a real,
-  user-reachable terminal (`Ctrl+Alt+T`): a security-filtered PTY session
-  rendering real output, with a bounded terminal-count limit and exit
-  detection so the session bar reflects what is actually running rather than
-  what was last launched. As of `0.8.0` the terminal wakes on PTY readiness
-  rather than a fixed 50 ms timer: output throughput rose from roughly
-  374 KB/s to 17-18 MB/s, and the concurrent-terminal limit from 3 to 6.
-  As of `0.10.0` the terminal is sized to the window rather than fixed at
-  24×80: it follows a live window drag, and a pane launched before you ever
-  resize the window gets the real size immediately. Input latency is still
-  **not** verified against its target — see below.
-- A real file explorer and text editor in Content mode (RFC-019, closed as
-  of `0.6.0`): a keyboard-navigable explorer tree over the project's
-  directory scan (Enter on a directory rescans, Enter on a file opens it;
-  read-only — no rename, delete, or create), and a cursor-aware editor —
-  open a file, move the cursor with the arrow keys, insert and delete at
-  the cursor position across multiple lines, save with `Ctrl+S`. Saving
-  never silently overwrites a file that changed on disk: a dialog offers
-  to reload, every dismissal leaves the disk file untouched, and the
-  dialog only claims local changes will be lost when there are some. File
-  **names** shown in the explorer and the editor's header are escaped
-  (untrusted, attacker-influenced text); file **contents** in the editor
-  are deliberately not — the editor shows a file as it is, which means
-  source containing a bidi-override character still *reads* differently
-  from how it compiles.
-- Real clipboard paste into a focused terminal (`Ctrl+Shift+V`, RFC-018),
-  routed through the same RFC-009 policy as everything else that reaches a
-  PTY: single-line and empty pastes go through and control-containing pastes
-  are blocked outright, both without a dialog. A multi-line paste opens a
-  real, rendered confirmation dialog — the first trusted dialog this product
-  has — showing an escaped preview of the pasted content; accepting is the
-  only thing that writes it, and every other way to leave the dialog
-  (Escape, or activating Cancel) leaves the terminal untouched. As of
-  `0.7.0` the rest of the window dims behind the dialog while it is open,
-  including chrome the terminal's own pane cannot draw into.
-- **Workspace trust, grantable for the first time (`0.10.0`, RFC-032).** Every
-  project before this release was permanently **Restricted** — there was no
-  code path anywhere in the shipped application that could grant trust, so
-  the nine restricted features, AgentRun launch among them, were blocked for
-  everyone forever. `Ctrl+Alt+U` opens a Workspace Trust surface showing the
-  project's real state. Granting opens a confirmation dialog whose focus
-  defaults to **Cancel**, so granting takes two deliberate acts; the path
-  shown is the **canonical** path (what trust actually binds to), escaped,
-  and a symlinked project also shows the path you opened it by. The dialog
-  states that the grant covers files not yet written — including anything an
-  AI agent run writes there — for this session and every session after, and
-  that revoking stops future loading but does **not** undo what already ran.
-  Revoking is one action, with no confirmation, because it is the safe
-  direction. Trust persists across sessions, and the **audit store**, not the
-  user-writable recent-projects cache, is what restores it.
-- **AgentRun launch, reachable for the first time (`0.10.0`).** With trust
-  granted, `Ctrl+Alt+A` launches a real Claude Code session in a
-  project-owned terminal. This is the product's premise, reachable at last —
-  with one honest caveat: **the real Claude Code CLI has never been exercised
-  by this project's tests.** Every automated proof uses a controlled test
-  executable, because the live product needs interactive authentication and
-  makes real network calls. The launch pathway is proven end to end against
-  production code; the specific behaviour of the real binary under it is not.
-  As of `0.11.0` the change set itself is real, and as of `0.13.0` it is
-  reachable: `Ctrl+Alt+D` (or the "Change Review" button on Workspace Trust)
-  opens the **Change Review** surface, showing the files a run touched, a
-  count, detection status, and review state. As of `0.14.0` (RFC-041) you can
-  click through to a file's own content: whole content for a newly added
-  file, and **current content, explicitly labelled not a diff**, for a
-  modified one — this surface still cannot show a before/after comparison,
-  only what the file looks like now, because the before-bytes for a modified
-  file were never captured and are gone by request time. A stale preview (the
-  file changed again after you opened it) refuses and says so, rather than
-  silently showing the newer content as though it still matched what you
-  selected. Reading **what the
-  run said** is a separate surface: see the AgentRun report entry below. What
-  it said and what it changed remain two different, separately-reachable
-  things.
-- **The adapter-spawn pathway and the command-approval dialog** (`0.10.0`,
-  RFC-022) — built, audited, and proven end to end. Reachable only by this
-  project's own reference adapter, for the reason given under *Command
-  approval* below. As of `0.11.0` its **approval-history surface** opens with
-  `Ctrl+Alt+H`; see the caveat below about what that does and does not reach.
-- **Real change detection for agent runs (`0.11.0`).** Launching a run captures
-  a filesystem baseline of the project **before the agent's process starts**,
-  and when that run's terminal exits the two are compared, producing a real
-  change set naming the files the run actually touched. `target/` and
-  `node_modules/` are excluded by design — build output and package caches
-  would drown the result — which means **a change an agent makes inside those
-  directories is not reported**. `.git/` is mostly excluded too, for the same
-  reason (`refs/`, `objects/`, and `index` churn on every ordinary git
-  operation), **except `.git/hooks/` and `.git/config` (`0.14.0`, RFC-035)** —
-  the two places a change could install or redirect code that runs on this
-  machine are watched like any other changed path, precisely because that is
-  a supervision hole a coverage exclusion should not create. `core.hooksPath`
-  redirects are not followed to wherever they point; watching `.git/config`
-  itself already reports that the hook location changed, which is the fact
-  that matters — see the RFC for why chasing the redirect is deferred, not
-  built. A scan that hits its entry
-  limit is recorded as *truncated*, never as "nothing changed": those are
-  different facts and the product does not collapse them. Two further limits
-  are deliberate and disclosed: detection runs only at exit, so a long-lived
-  interactive session reports nothing until it ends, and the baseline lives in
-  memory, so it does not survive the application closing mid-run.
-- **A WCAG contrast gate over the theme (`0.11.0`)**, with the failures it
-  caught. Unfocused pane borders measured **2.63:1** against the background,
-  below the 3:1 that WCAG 2.1 SC 1.4.11 requires for UI component boundaries;
-  the border is now 3.85:1. Text contrast was never the problem — it sits above
-  14:1 — and focus indication was unaffected. The pair list this gate checks is
-  **derived** from an exhaustive destructure of the theme, not hand-written: a
-  future colour role cannot be added to the theme without also being classified
-  here, or the crate fails to compile. That derivation caught a second,
-  separate defect no fixed pair could have: the modal dialog's real backdrop is
-  the scrim composited over whatever was behind it, including terminal
-  content, which is arbitrary. Sampling "scrim over the background" and "scrim
-  over white" both pass — the failure lives strictly between them, at content
-  around 78% grey, where neither the border nor the fill alone clears 3:1
-  (worst case measured **2.40:1**). The scrim is now more opaque (`0.55` →
-  `0.75`, in `0.12.0`) so that no content value fails; this is a visible appearance change,
-  not only a number. The check itself is swept continuously across that range
-  rather than sampled at a few points, since sampling is exactly what let this
-  one hide.
-- **The AgentRun report surface (`0.12.0`)** (`Ctrl+Alt+R`) — real transcript content for
-  the most recently launched run in the active project, escaped at render
-  (a Unicode directionality override in what an AI CLI printed shows as a
-  visible marker, never as an invisible reordering — the same policy every
-  other untrusted-text surface in this project uses). Unlike change
-  detection, this is reachable **while a run is still active**, not only
-  after it exits — the surface says so, distinctly from a finished run's
-  transcript. It shows what the run **said**, not what it **changed**; there
-  is still no way to see the latter (above). The window is a bounded tail
-  (1 MiB) of the real transcript, not the whole thing, and RFC-011's own
-  writer-side truncation (if a transcript hit its own retention limit) is a
-  separate, independently-shown fact from "this is only a partial view" —
-  conflating the two was the specific failure this surface was built not to
-  repeat.
+- **Several projects at once**, each with root-bound file access, a read-only explorer, a text
+  editor that will not silently overwrite a file changed on disk, and its own tab.
+- **Real terminals per project**, behind a conservative output-security policy, with a confirmation
+  dialog for any multi-line paste.
+- **AI CLI runs under workspace trust.** A project starts Restricted, and launching an AI CLI takes a
+  deliberate grant. Each run's output is captured to a bounded local transcript.
+- **Review what a run changed**: the files it touched, and their content as it is now.
+- **A durable local audit trail** of trust decisions, terminal sessions, refused pastes, and more.
 
-It is not yet the full AI CLI workbench. The editor has no undo (a mid-buffer
-edit is unrecoverable within the session past what Backspace can still
-reach), no syntax highlighting, language server, multi-cursor, or search,
-and files above 4 MiB are not editable. The **Change Review surface**
-(`Ctrl+Alt+D`, `0.13.0`) shows the files a run changed, and as of `0.14.0`
-(RFC-041) you can click through to a file's own content — but **still no
-two-sided diff**: whole content for an added file, current content
-explicitly labelled not a diff for a modified one, never a before/after
-comparison, because the before-bytes for a modified file were never
-captured and are gone by request time. That comparison is blocked on a real
-before-source, which only RFC-030 (Git integration, unauthored) could
-provide. The **AgentRun report surface** (`Ctrl+Alt+R`) does now
-exist — real, escaped transcript content for the most recently launched run,
-what it *said*, not what it *changed*; see the caveat below about what that
-does and does not reach. There
-is also no Git-based change detection, file watcher, or overwrite-confirmation
-UI, and no cross-platform evidence beyond Linux. RFC-039 (M12) built a real
-close-confirmation dialog — `×` on a project tab, naming live-work counts and
-the canonical path when there is something to lose, closing directly when
-there is not. The **approval-history surface** built in `0.10.0` now opens
-(`Ctrl+Alt+H`), but that makes only the *surface* reachable, not command
-approval itself: no shipping AI CLI speaks RFC-021's protocol, so
-`Managed` command approval is still exercisable only by this project's own
-reference adapter, and a real user opening this surface today will see it
-empty — correctly, not as a bug. **Terminal input latency is not verified against its
-16 ms p95 target.** `0.8.0` removed the structural cause of the previous
-failure — a 50 ms polling interval that put the floor near 47.5 ms — but
-removing a known cause is not the same as measuring the result, and the
-criterion is recorded as still not met rather than assumed fixed. There is **no screen-reader support** — not limited,
-not planned, absent for the life of the `iced` substrate decision (RFC-014).
-Command approval (below) is now built end to end and still not reachable by
-a real user, for a different reason than before. RFC-018's
-trusted-UI evidence shows two checkable properties distinguishing the real
-paste dialog from terminal output imitating it. First, keystrokes typed
-while it is open never reach the terminal, verified with a positive control
-proving they were reaching the app. Second, as of `0.7.0`, the window dims
-behind the dialog, and that dimming covers chrome the terminal grid can
-never draw into. Unlike the dialog's own size — which depends on the
-pasted content and is therefore attacker-influenced — the dimmed area is
-fixed by the window, so the same tell holds for a one-byte paste and a
-large one alike. Neither property makes the dialog unspoofable; they raise
-the cost of a convincing imitation. Nothing here claims an untrained user
-would notice either property unprompted.
+## What it does not do yet
 
-Durable audit currently records trust decisions, managed AgentRun lifecycle, blocked
-root/symlink access, audit-store recovery outcomes, plain-terminal session starts and
-terminations, paste refusals, command-approval decisions, restricted-feature refusals,
-and project-added opens. As of `0.10.0` the trust family has a real user-driven
-producer for the first time: granting or revoking workspace trust writes to the store.
-RFC-031 (PR-031-A/B) added the restricted-feature producer (a real launch refused for
-lacking workspace-discovery trust) and the project-added producer (a real project
-opened from the CLI-argument path, distinct from a remembered project merely restored
-on boot, which writes nothing). RFC-039 (M12) wired the safe-close producer: closing a
-project with live terminals or an active agent run records the decision, both outcomes
-(closed and cancelled). RFC-045 (`0.18.0`) wired the configuration-change producers,
-the last two of the twelve: confirming a configuration-defined AI CLI profile's first
-use, or a reload that weakens a security-relevant setting, records that a sensitive
-setting changed and in which direction — never which setting or what value, and there
-is no field on the record that could. **All twelve audit event families now have a
-producer.**
+It is early. Read these before relying on it:
 
-### Command approval
+- **Linux only.** There is no evidence for any other platform.
+- **No screen-reader support**, for the life of the `iced` substrate decision.
+- **The real Claude Code CLI has never been exercised by this project's tests.** Every automated
+  proof uses a controlled test executable.
+- **Command approval is built but unreachable.** No shipping AI CLI speaks its protocol, and it is
+  cooperative, not enforced.
+- **No before/after diff, and no undo in the editor.** Terminal input latency is not verified
+  against its target.
 
-Tekstide implements a command-approval protocol that a cooperating AI CLI adapter can
-use: a versioned sideband channel over a per-run Unix domain socket, two-layer peer
-authentication, a structural risk classifier, and single-use decisions recorded in the
-durable audit trail.
-
-**It is not yet available to users, and `0.10.0` changed why.** The missing pieces are
-now built: RFC-022 added the adapter-spawn pathway, capability-token delivery, and a
-real rendered approval dialog, all proven end to end against production code. What is
-missing is on the other side — **no shipping AI CLI speaks this protocol.** `Managed`
-mode, and therefore command approval, can only ever be exercised by this project's own
-reference adapter, which is a test artifact. The pathway is proven; the ecosystem does
-not exist. Anyone reading "command approval shipped" into this is reading more than the
-record says.
-
-The **approval-history surface** — where past decisions and expired requests are
-disclosed — is likewise implemented and tested, and it opens with `Ctrl+Alt+H`. A real
-user opening it today sees it **empty**, correctly rather than as a bug: with no adapter
-speaking the protocol, there are no decisions to disclose.
-
-**It is cooperative, not enforced.** Approval works only if the adapter asks. Tekstide
-does not intercept process execution and has no execution path of its own to withhold,
-so an adapter that ignores a rejection — or never submits a proposal — runs its command
-regardless. Tekstide does not approve commands, and does not control what an AI CLI can
-run.
+The full list, with the reasons, is [What works today](https://nabbisen.github.io/tekstide/users/what-works-today.html). Deferred
+work is tracked in [Deferred work](https://nabbisen.github.io/tekstide/contributors/future-work.html).
 
 ## Quick Start
-
-Install from crates.io and open a project:
 
 ```sh
 cargo install tekstide
 tekstide /path/to/project
 ```
 
-**Give it a path, or run it bare.** `tekstide` with no argument opens an
-empty board with a field to type or paste a path into — press Enter to
-open it — and a "Browse..." button next to it for choosing a folder
-without typing a path at all. `Ctrl+Alt+O` opens the same field once a
-project is already open, for adding another. A project you previously
-opened and later closed is remembered on the board too: highlight its
-row with `Up`/`Down` and press `Enter` (or click its own "Open" button)
-to reopen it, no retyping. Until `0.12.1` this section said to run
-`tekstide` bare and mentioned the path second, as an option, which left
-a first-time user looking at a window with nothing to do and no way to
-change that; RFC-038 added the in-app routes this section now describes.
-
-You can open more than one:
+`tekstide` with no argument opens an empty Project Board with a field to type or paste a path into,
+and a **Browse...** button for choosing a folder. A project you opened before is remembered on the
+board. You can open several at once:
 
 ```sh
 tekstide /path/to/project /path/to/another
 ```
 
-`tekstide --help` prints usage and the full keyboard reference below;
-the running application also lists every binding on the Project Board.
+`tekstide --help` prints usage and every key binding. More in
+[Getting started](https://nabbisen.github.io/tekstide/users/getting-started.html).
 
-### Building from a checkout (contributors)
+### Building from a checkout
 
 ```sh
 cargo run -p tekstide
 cargo run -p tekstide -- /path/to/project
 ```
 
-## Working With Projects
-
-**The folder browser (`Browse...`, or `Ctrl+Alt+B`).** Opens over your home directory by
-default. Arrow keys move the highlight; `Enter` navigates into the highlighted folder (updating
-the "Current:" line at the top); `Space` — or the **Open this folder** button — chooses whatever
-folder "Current:" now shows as the project to open. `Escape` cancels without opening anything.
-
-**Multiple projects, and switching between them.** Opening more than one project shows a real
-tab strip at the top: one tab per open project — a filled dot marks the active one — plus a
-permanent **Projects** tab that returns to the board. Click a tab to switch to it, or press
-`Ctrl+Alt+N` to cycle to the next one with wraparound. A project you closed earlier is
-remembered on the board too, with its own **Open** button — no retyping its path.
-
-**Closing a project (`×` on its tab, or `Delete` with the tab highlighted — `0.16.0`).** If nothing is live in it — no terminal, no agent run —
-it closes immediately, no dialog. If something is, a confirmation dialog names exactly what
-will end (for example, "This will end: 1 running process") and shows the project's **canonical**
-path, so you know precisely what you are about to close. Focus defaults to **Cancel**; `Enter`
-activates whichever button is focused, `Escape` always cancels — closing is never one accidental
-keystroke away.
-
-Every surface-local key like that one is listed in the Help modal (`Ctrl+Alt+K`, or the `?`
-button) and in `--help`, grouped by the surface it belongs to (`0.16.0`).
-
-**Closing ends what those terminals started (`0.15.0`)**, including a job you backgrounded with
-`&` — the dialog says so before you click. A process you deliberately detached with `nohup`,
-`disown` or `setsid` survives, because those work by leaving the terminal's session and the
-session is the boundary this respects. That is the opt-out; use it if you want something to
-outlive the project you are closing.
-
-**Reviewing what an AI agent changed (`Ctrl+Alt+D`, or the "Change Review" button on Trust
-Settings).** After an AI CLI run exits, this surface lists the files it touched, a count, a
-detection-status line, and a review state — click a file (or highlight it and press `Enter`) to
-preview its content, bounded at 4 MiB and refused whole above that, never truncated. **Read its
-limits as closely as its existence**: whole content for an added file; **current content,
-explicitly labelled not a diff**, for a modified one — there is still no before/after comparison,
-because the before-bytes for a modified file were never captured and are gone by request time. A
-genuine two-sided diff is future work, blocked on a real before-source (RFC-030); this surface
-will not approximate one. **Previewed content renders with its real line structure** (`0.15.0`) —
-every character other than the line break is still escaped, and file content renders only inside
-its own visually distinct, bordered container, never mistakable for the surface's own chrome (a
-file cannot forge a line reading, say, "Review state: Accepted"). The frame around it — including
-the "not a diff" label — is pinned outside the scroll region, so it cannot be scrolled away by the
-content it qualifies. A file with more than 4,000 lines is refused whole, never truncated, the
-same shape as the byte bound. Detection is conservative and excludes `target/`, `node_modules/`, and most of `.git/`
-by design, so a change made inside those is never reported — except `.git/hooks/` and
-`.git/config` (`0.14.0`), which are watched, since those are the two places a change could
-install or redirect code that runs on this machine. The surface states both of these itself, in
-its own disclosure text; nothing here should be read as promising more than that.
-
-**You can record a decision about a change set** (`0.15.0`) — "Mark accepted" or "Mark rejected",
-offered until you decide. **Read what that is as closely as what it is not**: it changes no file,
-it cannot be taken back once recorded, and it does not survive closing Tekstide — no audit
-record, no persistence, nothing left when you reopen the project. It is a note to yourself for
-the session, not a review workflow. If the files on disk have moved since this change set was
-detected, the surface says so and still lets you decide — a decision is about what was detected,
-which a later, unrelated change does not undo.
-
-**Transcript privacy controls** — declining capture for future runs, and purging what is
-already retained, both per project — live on the same Trust Settings surface (`Ctrl+Alt+U`).
-See *Local Data and Privacy* below for exactly what is recorded and how to remove it.
-
-## Configuring It (`0.18.0`)
-
-Tekstide reads `$XDG_CONFIG_HOME/tekstide/config.toml` (or `~/.config/tekstide/config.toml`) at
-startup. **A missing file is normal**, and an invalid one still starts the application with
-built-in defaults — the Project Board then says the file was ignored and names the key that broke
-it. `Ctrl+Alt+C` re-reads the file without restarting.
-
-**Four settings take effect today**, and the file is deliberately narrow:
-
-```toml
-[agent]
-default_profile = "my-cli"          # which AI CLI the launch button runs
-transcript_retention_days = 30      # recorded on each run's policy; see the caveat below
-
-[agent.profile.my-cli]
-display_name = "My AI CLI"
-command = "/usr/local/bin/my-cli"   # absolute path, or a bare name found on the system path
-
-[resources]
-agent_run_limit = 3                 # per project; omit for no limit
-```
-
-**Every other key is refused by name, with the file reported as ignored.** RFC-023 designed a
-much larger schema — fonts, theme, keybindings, scrollback, concurrency limits — and none of those
-settings has code that reads them. A key the file accepts and the product ignores is a lie you
-read, so each is refused until the feature that honours it exists, and each returns to the file in
-the same change as that feature. A key Tekstide has simply never heard of (a typo, or one from a
-newer version) loads with a warning instead, named on the board, because then nothing is wrong
-with the file itself.
-
-**Nothing a configuration file defines runs without a deliberate act.** The first launch of a
-configuration-defined AI CLI asks first, and the confirmation names the **executable path it
-resolved to** and the file that defined it — not the `display_name`, which is text the file itself
-supplies. Once per session, not once per launch. A reload that weakens a security-relevant setting
-asks the same way; one that tightens applies immediately.
-
-**Three things configuration can never do**, and the file is refused if it asks: grant workspace
-trust (that is a per-project act, `Ctrl+Alt+U`), disable multiline-paste confirmation, or disable
-destructive-command approval.
-
-**Caveat on `transcript_retention_days`:** the value is recorded on each run's transcript policy
-and checked for validity, but **no age-based purge reads it yet** — transcripts are not kept for
-that many days and then removed. The only purge is the manual, per-project one on the Trust
-Settings surface. See *Local Data and Privacy*.
-
-## Keyboard Reference
-
-The shell is keyboard-navigable by design. These bindings exist today
-(`crates/tekstide-core/src/navigation.rs`'s `KeybindingPolicy::linux_mvp()` and
-`crates/tekstide/src/input.rs`):
+## Keys worth knowing first
 
 | Binding | Action |
 | --- | --- |
 | `Ctrl+Alt+P` | Open the Project Board |
-| `Ctrl+Alt+N` | Switch to the next open project, cycling with wraparound (RFC-039) |
-| `Ctrl+Alt+O` | Open a field to type or paste a project path (RFC-038) |
-| `Ctrl+Alt+B` | Open a folder browser to choose a project without typing a path (RFC-038) |
-| `Ctrl+Alt+M` | Toggle Content / Terminal mode for the active project |
-| `Ctrl+Alt+T` | Launch a real terminal in the active project (switches to Terminal mode) |
-| `Ctrl+Shift+V` | Paste into the focused terminal |
-| `Ctrl+S` | Save the open file |
-| `Ctrl+Alt+A` | Launch an AI CLI (Claude Code) run in the active project — refused unless the project is trusted |
-| `Ctrl+Alt+U` | Open the Workspace Trust surface for the active project (grant or revoke) |
-| `Ctrl+Alt+H` | Open the Approval History surface for the active project |
-| `Ctrl+Alt+R` | Open the AgentRun Report for the most recently launched run in the active project |
-| `Ctrl+Alt+D` | Open the Change Review surface for the active project's most recent change set (RFC-020) |
-| `Ctrl+Alt+K` | Open this keyboard reference, from anywhere (RFC-038) |
-| `Ctrl+Alt+C` | Re-read the configuration file (`0.18.0`, RFC-045) |
-| `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |
+| `Ctrl+Alt+T` | Launch a terminal in the active project |
+| `Ctrl+Alt+M` | Toggle Content / Terminal mode |
+| `Ctrl+Alt+U` | Open Workspace Trust for the active project |
+| `Ctrl+Alt+K` | Open the keyboard reference, from anywhere |
 
-`Ctrl+Shift+P` is reserved for a command palette that does not exist yet — it is
-bound in the keybinding policy but currently does nothing.
+Everything else is in `tekstide --help`, the in-app Help modal, and the
+[Keyboard reference](https://nabbisen.github.io/tekstide/users/keyboard-reference.html).
 
-With `Tab` focused on the sidebar in Content mode, `Up`/`Down` move the explorer
-highlight and `Enter` opens the highlighted file or directory. With focus on the
-main area, typing edits the open document at the real cursor position, `Up`/
-`Down`/`Left`/`Right` move the cursor without editing, `Enter` inserts a newline,
-and `Backspace` deletes the character before the cursor.
+## Local data and privacy
 
-`Esc` (dismiss) and `Enter` (activate) work on the shell's modal layer — real
-today for the paste-confirmation, file-changed-on-disk, workspace-trust,
-transcript-purge, command-approval, and project-close dialogs (RFC-018,
-RFC-019, RFC-032, RFC-033, RFC-022, RFC-039); the developer-only demo modal
-gated behind an environment variable still exists too. Of those six, only the
-approval dialog is unreachable in practice, and because no AI CLI speaks the
-protocol that would raise it — not because it is unbuilt. Every modal's own
-decision is now also reachable and completable by mouse (RFC-040 PR-040-B):
-each has a real, clickable button for every choice it offers, routed through
-the same code its own `Enter`/`Escape` handling already used, not a second,
-parallel path.
+Tekstide is local-first: **it does not send project data anywhere.** It writes under
+`$XDG_STATE_HOME/tekstide` (`~/.local/state/tekstide` if `XDG_STATE_HOME` is unset):
 
-## Local Data and Privacy
+- **`recent-projects.json`**: the projects you opened, and a display-only hint of their trust state;
+- **an audit store**, created the first time you open a terminal;
+- **transcripts of AI CLI runs**, containing whatever the AI CLI printed — **including anything it
+  quoted from your files.** Plain terminals are not recorded. Capture is bounded: 32 MiB per
+  transcript, 256 MiB per project, 1 GiB overall.
 
-Tekstide is local-first: it does not send project data anywhere. On every launch,
-the desktop application creates the **recent-projects list**, at
-`$XDG_STATE_HOME/tekstide/recent-projects.json`
-(`~/.local/state/tekstide/recent-projects.json` if `XDG_STATE_HOME` is unset) —
-the paths of projects you have opened, used to restore the Project Board across
-sessions. As of `0.10.0` it also caches each project's last-known trust state, so
-the board can label rows without opening every project. That cache is a display
-hint only: it is user-writable, so **the audit store is what actually restores
-trust**, and editing this file cannot grant a project anything. There is no in-app
-command to clear it yet; delete the file to reset it.
-The only other local state it creates is the audit store described next, and only
-once you actually open a terminal.
-
-RFC-013's durable audit store is implemented, tested, and has a real producer
-(RFC-017, wired end to end as of the terminal-launch-UX handoff):
-**pressing `Ctrl+Alt+T` to open a terminal creates this database**, the first
-time you do it. Each launch records a `plain_terminal_observation` `Started`
-event; if that session later exits (typing `exit`, or the shell dying on its
-own), a matching `Terminated` event is recorded too, naming only whether the
-process exited or was signalled — never a command, its output, or a path.
-This family's schema has no field for any of those at all, so none can ever be
-recorded in it, launch or exit. The store lives at
-`$XDG_STATE_HOME/tekstide/audit/audit.sqlite3`
-(`~/.local/state/tekstide/audit/audit.sqlite3` if `XDG_STATE_HOME` is unset).
-**This is no longer gated behind a developer-only flag** — `TEKSTIDE_TERMINAL_DEMO`
-still exists for diagnostic use, but the real `Ctrl+Alt+T` binding is what
-ordinary use reaches, and it opens the same store.
-
-Pasting into a terminal (`Ctrl+Shift+V`, RFC-018) writes to the same store when the
-paste is refused: a `paste_blocked` event, naming only that a paste was blocked and
-which project/terminal it was aimed at — never the pasted content, the clipboard
-text, or the command it would have produced. This family's schema has no field for
-any of those either. A paste the policy *allows* is not audited at all; only
-refusals are, a known and disclosed limitation of the schema rather than an
-oversight — see the RFC for why.
-
-There is no in-app command to purge the audit store yet; delete the `audit/`
-directory to reset it, or see
-[`rfcs/done/013-durable-audit-store-and-local-data-policy.md`](rfcs/done/013-durable-audit-store-and-local-data-policy.md)
-for the store's full retention and purge policy.
-
-Granting or revoking workspace trust (`Ctrl+Alt+U`, RFC-032) writes to the same
-store: a trust-change event naming the project and the canonical path the grant
-binds to. This is what makes trust survive a restart — the store is authoritative,
-and it is queried for an *applied* grant specifically, so an interrupted or
-authorized-but-not-applied attempt does not restore as trust.
-
-**Launching an AI CLI run records that session's transcript to disk.** This corrects a
-claim `0.10.0` and `0.11.0` both made — that Tekstide retains no transcripts. It does, and
-has since agent-run launch became reachable in `0.10.0`. The error was ours and is described
-under *Corrections* in the changelog; what follows is what actually happens.
-
-Pressing `Ctrl+Alt+A` in a trusted project starts a bounded transcript for that run, written
-to `$XDG_STATE_HOME/tekstide/transcripts/<project>/<agent-run>/transcript.log`
-(`~/.local/state/tekstide/…` if `XDG_STATE_HOME` is unset). It contains **the terminal output
-of that AI session as it was produced** — which means whatever the AI CLI printed, including
-anything it quoted from your files.
-
-Capture is **bounded by policy, not by chance** (RFC-011): at most **32 MiB per transcript**,
-**256 MiB per project**, **1 GiB across the application**, and **30 days**. Capture is
-best-effort: if writing fails mid-session the run marks capture failed and the terminal stays
-usable, rather than silently continuing unrecorded.
-
-**Both limitations this section used to describe as unaddressed now have an in-app route**
-(RFC-033), from the same `Ctrl+Alt+U` Trust Settings surface trust grants and revocations
-already use:
-
-- **Decline capture for future runs, per project.** Space toggles it. This is forward-only —
-  declining does not delete any transcript that already exists, and the setting persists
-  across a restart.
-- **Purge this project's transcripts — see the known defect below.** Delete opens a confirmation
-  that names the scope (this project; other projects are unaffected) and states it cannot be
-  undone. A tombstone record remains after a purge, and so does a `transcript_purge` entry in the
-  local audit store — recording that a purge happened and its scope, never a path or a byte count.
+Trust Settings (`Ctrl+Alt+U`) can decline capture for a project's future runs and purge its
+transcripts. A retention age can be configured, but **nothing removes a transcript because of its age
+yet**.
 
 **Known defect: purge and the retained figure see only transcripts from runs since the project was
 opened.** Tekstide does not yet read transcripts back from disk. After you restart Tekstide, or
@@ -542,20 +105,19 @@ purge confirmation can say it deletes *0 transcripts* while they are still there
 since the in-app purge shipped in `0.12.0`, and it is not fixed yet. **To remove every transcript,
 delete the `transcripts/` directory**, preferably with Tekstide closed.
 
-One limitation remains: **a plain terminal (`Ctrl+Alt+T`) is not recorded.** Only AI CLI runs
-are.
+What each file can contain, and how to remove it:
+[Local data and privacy](https://nabbisen.github.io/tekstide/users/local-data-and-privacy.html).
 
-See
-[`rfcs/done/011-transcript-retention-and-local-data-policy.md`](rfcs/done/011-transcript-retention-and-local-data-policy.md)
-for the full retention and purge policy.
+## Configuration
 
-For a consolidated list of what else is missing or deferred, see
-[`rfcs/future-work.md`](rfcs/future-work.md).
+`$XDG_CONFIG_HOME/tekstide/config.toml` (or `~/.config/tekstide/config.toml`) is optional and
+deliberately narrow: four settings take effect, and nothing a configuration file defines runs without
+a deliberate act. See [Configuration](https://nabbisen.github.io/tekstide/users/configuration.html).
 
-## RFCs
+## Project
 
-Implemented RFCs live under [`rfcs/done/`](rfcs/done/); RFCs that are accepted and being
-implemented live under [`rfcs/accepted/`](rfcs/accepted/). [`rfcs/README.md`](rfcs/README.md) is
-the index.
+- [Changelog](https://github.com/nabbisen/tekstide/blob/main/CHANGELOG.md): what shipped in each release, and what each release does not do.
+- [Roadmap](https://github.com/nabbisen/tekstide/blob/main/ROADMAP.md) and the [RFC index](https://github.com/nabbisen/tekstide/blob/main/rfcs/README.md).
+- [Contributing](https://github.com/nabbisen/tekstide/blob/main/CONTRIBUTING.md): the gate, the RFC lifecycle, and the evidence conventions.
 
-Release scope and deferred work are tracked in [`rfcs/done/001-product-scope-mvp-and-non-goals.md`](rfcs/done/001-product-scope-mvp-and-non-goals.md), [`CHANGELOG.md`](CHANGELOG.md), [`ROADMAP.md`](ROADMAP.md), and [`rfcs/future-work.md`](rfcs/future-work.md).
+Licensed under the terms in [LICENSE](https://github.com/nabbisen/tekstide/blob/main/LICENSE); see also [NOTICE](https://github.com/nabbisen/tekstide/blob/main/NOTICE).

@@ -263,3 +263,110 @@ all resolve, anchors included
 `fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`: clean. `mdbook build
 docs`: clean. Full workspace: **507 + 6 + 773, green** — the two new doc-invariant tests are the
 only change from PR-DOC-A's 4. One run; no compiled product code changed, only a test binary.
+
+## PR-DOC-C — trim the README
+
+**`README.md`: 561 lines → 123.** `CONTRIBUTING.md` is new, at 57 lines. Three tests were added to
+`rfc_docs_invariants`, and its relative-link resolver now lives in a helper that every link check
+shares.
+
+### What the README keeps
+
+The 3–30–3 shape the handoff asked for:
+
+- **What it is:** the one-line summary, a link to the book, and five features.
+- **What it does not do yet:** five headline limits — Linux only, no screen-reader support, the real
+  Claude Code CLI never exercised by the tests, command approval built but unreachable, and no
+  before/after diff or undo, with latency unverified. These are the disclosures a reader needs
+  **before** installing, so they stay on the landing page. The rest are linked to *What works today*.
+- **Quick Start:** install, run with a path or bare, open several, `--help`, and building from a
+  checkout.
+- **Five keys**, with the full table linked.
+- **A short local-data section** that names every file written, says transcripts contain what the
+  AI CLI quoted from your files, gives the capture bounds, and states that no age-based removal
+  exists. **The request-387 purge disclosure is carried over verbatim**, copied programmatically so it
+  cannot drift, because PR-050-B removes it in the commit that makes purge true (D8).
+- A configuration pointer, project links, and the licence.
+
+### What was cut, and where each part lives
+
+Against the claim map above. The cut sections are `Current Status` (254 lines), the pre-`0.12.1`
+Quick Start paragraph, `Working With Projects`, `Configuring It`, the full `Keyboard Reference`, the
+long `Local Data and Privacy` section, and the relative-link `RFCs` section. Every claim in them is in
+a book chapter or in the document that already owned it. **Nothing new was cut beyond the map**, and
+the one addition since it (the purge disclosure) is kept.
+
+### Every link is absolute, and the old README's were not
+
+`README.md` is the `tekstide` crate's crates.io page, and crates.io resolves no relative link. **The
+README being replaced had several**: the licence badge (`](LICENSE)`), `rfcs/done/…`, `CHANGELOG.md`,
+`ROADMAP.md`, `rfcs/future-work.md`. **So the crates.io page for every release up to `0.18.0` carried
+broken links**, found while rewriting rather than by any check. All links are now absolute: the book
+at `https://nabbisen.github.io/tekstide/`, repository files under
+`https://github.com/nabbisen/tekstide/blob/main/`.
+
+**Correction to this handoff's deviation 1:** only **one** crate publishes the root README.
+`tekstide` sets `readme = "../../README.md"`. `tekstide-core` sets `readme = "README.md"`, which
+resolves inside its own directory to `crates/tekstide-core/README.md`, a separate file this slice
+does not touch.
+
+### `CONTRIBUTING.md`
+
+It covers how work is decided (the RFC index, RFC-000 and RFC-037, handoff packs), the gate, the
+evidence conventions (linked to `ARCHITECTURE.md`, not copied), and what is not published
+(`.git-exclude/`, `docs/book/`, and why the README's links are absolute).
+
+**The gate commands had no written home before this.** `ARCHITECTURE.md` sets the evidence
+conventions but never lists the commands, so they are written here rather than copied. That includes
+`git diff --cached --check` after staging, the rule response 388 introduced.
+
+### The required test, shaped by crates.io
+
+The handoff asked to extend the relative-link resolver to `README.md` and `docs/src/`. **For
+`README.md`, resolving relative links would check nothing**, because a correct README has none. The
+properties that matter there are different, so they are separate tests:
+
+| Test | Property |
+| --- | --- |
+| `every_relative_link_in_the_book_source_and_contributing_resolves` | the resolver, extended to `docs/src/` and `CONTRIBUTING.md` |
+| `the_readme_has_no_relative_links` | crates.io can resolve every link, because none is relative |
+| `every_book_link_in_the_readme_names_a_page_that_exists` | each book URL maps to a real `docs/src/` page — **offline**, so the test needs no network |
+
+The book-link test also refuses to pass vacuously: it fails if `README.md` links to the book nowhere.
+
+### Ablations, each restored and hash-checked
+
+| | Ablation | Fails |
+| --- | --- | --- |
+| D1 | break a relative link in `docs/src/users/getting-started.md` | the book-and-contributing test **alone** |
+| D2 | break a relative link in `CONTRIBUTING.md` | the book-and-contributing test **alone** |
+| D3 | add a relative link to `README.md` | `the_readme_has_no_relative_links` **alone** |
+| D4 | point a README book link at a page that does not exist | `every_book_link_in_the_readme_names_a_page_that_exists` **alone** |
+| D5 | add a broken relative link to `rfcs/README.md` | `every_relative_link_in_the_rfc_tree_resolves` **alone** — the refactor kept the existing check intact |
+
+### Every absolute link, fetched
+
+27 distinct absolute URLs in `README.md` and `CONTRIBUTING.md`:
+
+- **All book pages, all GitHub files, and all badge images and targets: 200**, apart from the
+  exceptions below.
+- **`CONTRIBUTING.md` on GitHub: 404 before the push**, because the file did not exist there yet.
+  Re-fetched after the push; see the gate.
+- **The two `crates.io/crates/…` pages do not answer a scripted fetch with 200** — 403 without a
+  user agent, 404 with one. The crates.io API (`/api/v1/crates/tekstide`, `/tekstide-core`)
+  answers **200** for both, so both crates exist. These two badge links are **unchanged** by this
+  slice. **Fetched as a browser does — with `Accept: text/html` and a browser
+  user agent — both pages answer 200.** The earlier codes were crates.io's response to scripted
+  clients, not dead links.
+
+**Not done, and not doable here:** the handoff asks to read both crates' rendered README on crates.io
+after C. That page only changes when a release is published, which is the owner's act, so it belongs
+to the next release gate.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean.
+`rfc_docs_invariants`: **9 passed** (three new). Full workspace: **507 + 9 + 794, green**.
+**One run, not three**: this slice changes documents and a test binary that reads documents, neither
+of which can perturb timing, the same reasoning response 383 accepted for PR-DOC-A.
+`git diff --cached --check` after staging: clean.

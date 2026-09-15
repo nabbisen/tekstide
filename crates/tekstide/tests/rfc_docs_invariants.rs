@@ -336,6 +336,62 @@ fn every_accepted_or_done_rfc_has_a_delivery_plan_row() {
     );
 }
 
+/// Every link target written in `source`, in order: the text between `](`
+/// and the next `)`. A badge's image and its link are both returned.
+fn markdown_link_targets(source: &str) -> Vec<&str> {
+    let mut targets = Vec::new();
+    for (index, _) in source.match_indices("](") {
+        let tail = &source[index + 2..];
+        if let Some(end) = tail.find(')') {
+            targets.push(&tail[..end]);
+        }
+    }
+    targets
+}
+
+/// The relative links in `document` that do not resolve, one formatted
+/// line each. Shared by every relative-link check in this file, so the
+/// rules below are written once.
+///
+/// A URL (`://`), an absolute path (leading `/`), or a same-document
+/// anchor (leading `#`) is not a relative link and is skipped before its
+/// anchor is stripped, so `#foo` alone is excluded here rather than by
+/// falling out of the extension check. Only `.md` and image targets are
+/// checked.
+fn broken_relative_links_in(document: &Path) -> Vec<String> {
+    let Ok(source) = std::fs::read_to_string(document) else {
+        return Vec::new();
+    };
+    let mut broken = Vec::new();
+    for raw_target in markdown_link_targets(&source) {
+        if raw_target.contains("://") || raw_target.starts_with('/') || raw_target.starts_with('#')
+        {
+            continue;
+        }
+        let target = raw_target.split('#').next().unwrap_or(raw_target);
+        let is_checked_target = [".md", ".png", ".jpg", ".svg"]
+            .iter()
+            .any(|ext| target.ends_with(ext));
+        if !is_checked_target {
+            continue;
+        }
+        let resolved = document
+            .parent()
+            .expect("a document always has a parent")
+            .join(target);
+        if !resolved.exists() {
+            broken.push(format!(
+                "  {} -> {target}",
+                document
+                    .strip_prefix(repo_root())
+                    .unwrap_or(document)
+                    .display(),
+            ));
+        }
+    }
+    broken
+}
+
 /// Every relative link inside `rfcs/` -- to another document (`.md`) or
 /// to an image (`.png`/`.jpg`/`.svg`) -- resolves to a real file. Matches
 /// a bare relative target (`foo.png`) as well as one written with a
@@ -365,45 +421,7 @@ fn every_relative_link_in_the_rfc_tree_resolves() {
         }) {
             continue;
         }
-        let Ok(source) = std::fs::read_to_string(document) else {
-            continue;
-        };
-
-        for (index, _) in source.match_indices("](") {
-            let tail = &source[index + 2..];
-            let Some(end) = tail.find(')') else { continue };
-            let raw_target = &tail[..end];
-            // A URL, an absolute path, or a same-document anchor is not a
-            // relative link into the RFC tree -- skip before even
-            // stripping the anchor, so `#foo` alone is excluded here
-            // rather than by falling out of the extension check below.
-            if raw_target.contains("://")
-                || raw_target.starts_with('/')
-                || raw_target.starts_with('#')
-            {
-                continue;
-            }
-            let target = raw_target.split('#').next().unwrap_or(raw_target);
-            let is_checked_target = [".md", ".png", ".jpg", ".svg"]
-                .iter()
-                .any(|ext| target.ends_with(ext));
-            if !is_checked_target {
-                continue;
-            }
-            let resolved = document
-                .parent()
-                .expect("a document always has a parent")
-                .join(target);
-            if !resolved.exists() {
-                broken.push(format!(
-                    "  {} -> {target}",
-                    document
-                        .strip_prefix(repo_root())
-                        .unwrap_or(document)
-                        .display(),
-                ));
-            }
-        }
+        broken.extend(broken_relative_links_in(document));
     }
 
     assert!(
@@ -524,6 +542,110 @@ fn every_summary_entry_names_a_page_that_exists() {
     assert!(
         dangling.is_empty(),
         "SUMMARY.md entr(ies) naming a file that does not exist:\n{}",
+        dangling.join("\n")
+    );
+}
+
+/// The book's published root. `README.md` links here with absolute URLs,
+/// because crates.io resolves no relative link.
+const BOOK_URL: &str = "https://nabbisen.github.io/tekstide/";
+
+/// PR-DOC-C: the relative-link check, extended to the book's own source and
+/// to `CONTRIBUTING.md`. **Link rot in the front door should be a failing
+/// test, not a release-gate finding**, and this is the slice that created
+/// those links.
+#[test]
+fn every_relative_link_in_the_book_source_and_contributing_resolves() {
+    let Some(book_src) = book_src_dir() else {
+        eprintln!("skipped: docs/ is not packaged with the published crate");
+        return;
+    };
+    let mut documents = Vec::new();
+    markdown_files(&book_src, &mut documents);
+    documents.push(repo_root().join("CONTRIBUTING.md"));
+
+    let broken = documents
+        .iter()
+        .flat_map(|document| broken_relative_links_in(document))
+        .collect::<Vec<_>>();
+
+    assert!(
+        broken.is_empty(),
+        "broken relative link(s) in the book source or CONTRIBUTING.md:\n{}",
+        broken.join("\n")
+    );
+}
+
+/// `README.md` is the `tekstide` crate's crates.io page
+/// (`readme = "../../README.md"`), and **crates.io resolves no relative
+/// link**. A relative link there works on GitHub and is broken for every
+/// registry reader, which is why its links are all absolute. A same-document
+/// anchor (`#…`) is not a path and is allowed.
+#[test]
+fn the_readme_has_no_relative_links() {
+    let Some(_) = book_src_dir() else {
+        eprintln!("skipped: the repository layout is not packaged with the published crate");
+        return;
+    };
+    let source = std::fs::read_to_string(repo_root().join("README.md"))
+        .expect("README.md exists at the repository root");
+
+    let relative = markdown_link_targets(&source)
+        .into_iter()
+        .filter(|target| !target.contains("://") && !target.starts_with('#'))
+        .map(|target| format!("  README.md -> {target}"))
+        .collect::<Vec<_>>();
+
+    assert!(
+        relative.is_empty(),
+        "relative link(s) in README.md, which crates.io cannot resolve:\n{}\nWrite them as \
+         absolute URLs: the book at {BOOK_URL}, repository files under \
+         https://github.com/nabbisen/tekstide/blob/main/.",
+        relative.join("\n")
+    );
+}
+
+/// Every link from `README.md` into the published book names a page that
+/// exists in `docs/src/`. Checked **offline**, by mapping
+/// `{BOOK_URL}<path>.html` to `docs/src/<path>.md`, so link rot in the front
+/// door fails a test without the test needing the network.
+#[test]
+fn every_book_link_in_the_readme_names_a_page_that_exists() {
+    let Some(book_src) = book_src_dir() else {
+        eprintln!("skipped: docs/ is not packaged with the published crate");
+        return;
+    };
+    let source = std::fs::read_to_string(repo_root().join("README.md"))
+        .expect("README.md exists at the repository root");
+
+    let mut checked = 0;
+    let mut dangling = Vec::new();
+    for target in markdown_link_targets(&source) {
+        let Some(rest) = target.strip_prefix(BOOK_URL) else {
+            continue;
+        };
+        checked += 1;
+        let page = rest.split('#').next().unwrap_or(rest);
+        let source_page = if page.is_empty() {
+            "introduction.md".to_owned()
+        } else if let Some(stem) = page.strip_suffix(".html") {
+            format!("{stem}.md")
+        } else {
+            dangling.push(format!("  {target} (not a page URL)"));
+            continue;
+        };
+        if !book_src.join(&source_page).is_file() {
+            dangling.push(format!("  {target} -> docs/src/{source_page}"));
+        }
+    }
+
+    assert!(
+        checked > 0,
+        "README.md links to the book nowhere, so this check would pass vacuously"
+    );
+    assert!(
+        dangling.is_empty(),
+        "README.md link(s) into the book that name no page in docs/src/:\n{}",
         dangling.join("\n")
     );
 }
