@@ -30,6 +30,7 @@ resulting pressure, each disclosed separately and each moved past:
 | `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` | `0.16.0` release gate (2026-08-28) — **PTY read timing, not process leak or audit store.** Once in three runs. The assertion message was captured: *"the marker must be followed by a real, parseable PID"*, with the read having returned only the shell's **echo of the command line** and not yet the `descendant-pid:` line it prints. A read that outran the shell's own output, not a failure of the termination behaviour the test covers. Distinct from every row above: no socket, no audit store, no PTY exhaustion — `/dev/pts` was well below its limit throughout. |
 | `transcript::tests::a_live_writer_holds_an_exclusive_lock_until_it_is_dropped` | request 388 (2026-09-13) — **new test; fork-duplicated descriptor keeps an `flock` alive past the drop. Fixed in the test, see the dated entry.** |
 | `runtime::terminal::reader::tests::local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable` and `…required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it` | request 388 (2026-09-13) — **caused by PR-050-A, not load: the two tests share `/dev/full`'s lock. First attributed to load, wrongly; see the dated entry's correction. First masked by a test mutex; fixed at response 388 by locking regular files only, and the mutex removed.** |
+| `runtime::terminal::reader::tests::the_wake_notifier_wakes_when_real_pty_output_arrives` | review of request 391 (2026-09-15) — **new here; a race inside the test, inferred from reading it, not observed.** It writes `printf …; exit` before starting the thread that waits for the first wake, so a fast shell can finish first. See the dated entry. |
 
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
@@ -977,3 +978,22 @@ approval socket over a stale socket file, and no transcript writer is involved. 
 ablation runs in the same batch passed it, and so did all three of the reviewer's consecutive
 full-workspace runs on the restored tree, immediately afterwards. The load at the failure itself was
 not measured; the one-minute load average was 7.77 just after that gate, from the reviewer's own runs.
+
+## New intermittent, 2026-09-15 — `the_wake_notifier_wakes_when_real_pty_output_arrives` (reviewer's run)
+
+**Failed once**, in run 3 of the reviewer's three-run gate on the RFC-050 PR-050-A second-follow-up tree
+(`21e6892`). Runs 1 and 2 passed it. The message: *"the first wake from real PTY output should report
+more wakes may still come, not that the reader has already stopped"* (`reader/tests.rs:88`).
+Afterwards: **20 of 20 passed alone.** The one-minute load average was 4.91 just after the gate.
+
+**Not the change under review.** The test launches a plain shell with no transcript configuration, so
+`prepare_transcript_writer` returns at its first line, exactly as the inline block it replaced did.
+
+**Mechanism: inferred from reading the test, not observed.** The test writes
+`printf 'tekstide-wake-ok\n'` and `exit` to the shell **before** it spawns the thread that calls
+`block_until_woken`. If the shell prints, exits, and the reader reaches end of file before that thread
+first blocks, the notifier's first observable state is *stopped*. It reports that truthfully, and the
+assertion fails. The product behaviour is correct; the race is in the test's ordering.
+
+**Proposed fix, test-only:** spawn the waiting thread, and let it block, before writing the input.
+Assigned to the next commit that touches `tekstide-core` tests.
