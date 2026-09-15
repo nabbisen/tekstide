@@ -94,16 +94,10 @@ Tekstide is local-first: **it does not send project data anywhere.** It writes u
   transcript, 256 MiB per project, 1 GiB overall.
 
 Trust Settings (`Ctrl+Alt+U`) can decline capture for a project's future runs and purge its
-transcripts. A retention age can be configured, but **nothing removes a transcript because of its age
-yet**.
-
-**Known defect: purge and the retained figure see only transcripts from runs since the project was
-opened.** Tekstide does not yet read transcripts back from disk. After you restart Tekstide, or
-close and reopen a project, Trust Settings counts only the transcripts from runs launched since
-then, and purge deletes only those. **Transcripts from earlier runs stay in `transcripts/`**, and the
-purge confirmation can say it deletes *0 transcripts* while they are still there. This has been true
-since the in-app purge shipped in `0.12.0`, and it is not fixed yet. **To remove every transcript,
-delete the `transcripts/` directory**, preferably with Tekstide closed.
+transcripts, **including those from earlier runs**. Purge leaves two kinds of file in place: a
+transcript that was still being written when the project opened, and transcripts whose project is no
+longer in the recent list. **Deleting the `transcripts/` directory removes everything.** A retention
+age can be configured, but **nothing removes a transcript because of its age yet**.
 
 What each file can contain, and how to remove it:
 [Local data and privacy](https://nabbisen.github.io/tekstide/users/local-data-and-privacy.html).

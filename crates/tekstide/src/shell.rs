@@ -980,6 +980,11 @@ pub struct State {
     /// paths are opened, so D6's `agent_run_limit` applies to them, and
     /// `State` does not exist yet at that point.
     configuration: ConfigurationState,
+    /// RFC-050 D5: bytes under all of `transcripts/`, closed projects
+    /// included, and the part no open or recent project claims. Refreshed
+    /// when a project's transcripts load and after a purge — never from a
+    /// view, which runs every frame.
+    transcript_disk_usage: tekstide_core::transcript::TranscriptDiskUsage,
 }
 
 /// RFC-045 PR-045-B: what `boot()` made of the user's configuration
@@ -1159,6 +1164,8 @@ impl State {
             String::new()
         };
 
+        let transcript_disk_usage = transcript_disk_usage_for(&app_shell);
+
         let modal = modal_for_state(
             measurement.is_some(),
             std::env::var("TEKSTIDE_LAYER_DEMO").is_ok(),
@@ -1229,6 +1236,7 @@ impl State {
             tab_strip_highlight: 0,
             audit_health,
             configuration,
+            transcript_disk_usage,
         }
     }
 
@@ -4216,7 +4224,7 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
 
     match state.app_shell.add_project_from_path(&root_path) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
-            record_new_project_added(state, project_id);
+            record_new_project_added(state, project_id.clone());
             verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
             // RFC-045 PR-045-B, D6: "projects opened after load"
             // includes this one. Applied here rather than centrally
@@ -4224,6 +4232,9 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
             // there is no single point every newly-opened project
             // passes through.
             apply_configured_resource_limits(&mut state.app_shell, &state.configuration);
+            // RFC-050 PR-050-B: the transcripts earlier runs left for this
+            // project, so purge and the figures cover what exists.
+            load_earlier_transcripts_for_opened_project(state, &project_id);
         }
         // Should not normally happen -- a `Recent*`-kind row is, by
         // construction, not currently open -- but if the board's rows
@@ -4825,7 +4836,7 @@ fn attempt_open_project_from_path_field(state: &mut State) {
     let path = state.path_field.clone();
     match state.app_shell.add_project_from_path(&path) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
-            record_new_project_added(state, project_id);
+            record_new_project_added(state, project_id.clone());
             verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
             // RFC-045 PR-045-B, D6: "projects opened after load"
             // includes this one. Applied here rather than centrally
@@ -4833,6 +4844,9 @@ fn attempt_open_project_from_path_field(state: &mut State) {
             // there is no single point every newly-opened project
             // passes through.
             apply_configured_resource_limits(&mut state.app_shell, &state.configuration);
+            // RFC-050 PR-050-B: the transcripts earlier runs left for this
+            // project, so purge and the figures cover what exists.
+            load_earlier_transcripts_for_opened_project(state, &project_id);
             state.path_field.clear();
             state.path_field_requested = false;
         }
@@ -4964,7 +4978,7 @@ fn choose_current_browsed_directory(state: &mut State) {
 
     match state.app_shell.add_project_from_path(&path) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
-            record_new_project_added(state, project_id);
+            record_new_project_added(state, project_id.clone());
             verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
             // RFC-045 PR-045-B, D6: "projects opened after load"
             // includes this one. Applied here rather than centrally
@@ -4972,6 +4986,9 @@ fn choose_current_browsed_directory(state: &mut State) {
             // there is no single point every newly-opened project
             // passes through.
             apply_configured_resource_limits(&mut state.app_shell, &state.configuration);
+            // RFC-050 PR-050-B: the transcripts earlier runs left for this
+            // project, so purge and the figures cover what exists.
+            load_earlier_transcripts_for_opened_project(state, &project_id);
             state.modal = None;
         }
         Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
@@ -8907,15 +8924,78 @@ fn toggle_transcript_capture_declined(state: &mut State) {
 /// project passed in -- its own `transcripts` list is the complete,
 /// authoritative record of which transcripts exist, not a scan of
 /// anything that could be missing entries.
+/// RFC-050 PR-050-B: what every GUI project-open path does once a project is
+/// newly added — load the transcripts earlier runs left for it, then refresh
+/// the app-wide figure. Before this, a session knew only transcripts launched
+/// since it opened, so purge and the figures missed every earlier run
+/// (`0.12.0` through `0.18.0`).
+fn load_earlier_transcripts_for_opened_project(
+    state: &mut State,
+    project_id: &tekstide_core::project::ProjectId,
+) {
+    load_earlier_transcripts(&mut state.app_shell, project_id);
+    refresh_transcript_disk_usage(state);
+}
+
+/// The load alone, shared with `main.rs`'s command-line open, which runs
+/// before `State` exists. The state root comes from
+/// [`resolve_agent_run_state_dir`], the split the launch uses, so a test
+/// build cannot reach the real state root (RFC-050 §5). It is resolved, not
+/// created: a project opened before any run has nothing to load.
+pub(crate) fn load_earlier_transcripts(
+    app_shell: &mut ApplicationShell,
+    project_id: &tekstide_core::project::ProjectId,
+) {
+    let Some(state_root) = resolve_agent_run_state_dir() else {
+        return;
+    };
+    if let Some(project) = app_shell.state_mut().project_mut(project_id) {
+        let _ = project.load_transcripts_from_disk(&state_root);
+    }
+}
+
+/// Bytes under all of `transcripts/`, claimed by the open and recent projects.
+fn transcript_disk_usage_for(
+    app_shell: &ApplicationShell,
+) -> tekstide_core::transcript::TranscriptDiskUsage {
+    let Some(state_root) = resolve_agent_run_state_dir() else {
+        return tekstide_core::transcript::TranscriptDiskUsage::default();
+    };
+    let app = app_shell.state();
+    let mut claimed = app
+        .projects()
+        .iter()
+        .map(|project| project.id().clone())
+        .collect::<Vec<_>>();
+    claimed.extend(
+        app.recent_projects()
+            .iter()
+            .map(|restored| restored.recent_project.project_id.clone()),
+    );
+    tekstide_core::transcript::scan_transcript_disk_usage(&state_root, &claimed)
+}
+
+fn refresh_transcript_disk_usage(state: &mut State) {
+    state.transcript_disk_usage = transcript_disk_usage_for(&state.app_shell);
+}
+
 fn transcript_local_data_summary_for(
     state: &State,
     project: &tekstide_core::project::ProjectSession,
 ) -> tekstide_core::transcript::TranscriptLocalDataSummary {
-    let app_retained_bytes = state.app_shell.state().app_wide_retained_transcript_bytes();
+    // RFC-050: the app-wide figure covers all of `transcripts/`, closed
+    // projects included (D5), from the cache refreshed at load and purge.
+    // The count is of transcripts, not of the tombstones purge leaves (§4).
+    let app_retained_bytes = state.transcript_disk_usage.total_bytes;
+    let retained_transcripts = project
+        .transcripts()
+        .iter()
+        .filter(|transcript| !transcript.is_tombstone())
+        .count() as u64;
     tekstide_core::transcript::TranscriptLocalDataSummary::new(
         project.real_retained_transcript_bytes(),
         app_retained_bytes,
-        project.transcripts().len() as u64,
+        retained_transcripts,
         tekstide_core::transcript::TranscriptRetentionLimits::agent_run_default(),
     )
 }
@@ -8934,11 +9014,12 @@ fn open_transcript_purge_dialog(state: &mut State) {
     let Some(project) = state.app_shell.state().active_project() else {
         return;
     };
-    let summary = transcript_local_data_summary_for(state, project);
+    // RFC-050 PR-050-B: the dialog counts only what purge will delete —
+    // neither tombstones nor a found file still being written (response 388).
     state.modal = Some(ModalContent::TranscriptPurge(TranscriptPurgeModal {
         project_id: project.id().clone(),
-        transcript_count: summary.project_transcript_count,
-        retained_bytes: summary.project_retained_bytes,
+        transcript_count: project.purgeable_transcript_count(),
+        retained_bytes: project.purgeable_transcript_bytes(),
         focus: TranscriptPurgeButton::Cancel,
     }));
 }
@@ -9001,6 +9082,7 @@ fn apply_transcript_purge(state: &mut State, modal: &TranscriptPurgeModal) {
             }
         }
     }
+    refresh_transcript_disk_usage(state);
 }
 
 /// RFC-022 PR-022-E: a compile-time literal symbol for `RiskLevel`, the

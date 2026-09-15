@@ -2,19 +2,26 @@
 
 ## Unreleased
 
-### Known defect — purge does not reach transcripts from earlier runs
+### Fixed — purge did not reach transcripts from earlier runs, `0.12.0` through `0.18.0`
 
-**Since `0.12.0`, purging a project's transcripts removes only those from runs launched since the
-project was opened.** Tekstide does not read transcripts back from disk. After a restart, or after
-closing and reopening a project, Trust Settings' retained count and bytes cover only newer runs, and
-the purge confirmation can say it deletes *0 transcripts (0 bytes)* while transcripts from earlier
-runs remain in `$XDG_STATE_HOME/tekstide/transcripts/` (`~/.local/state/tekstide/transcripts/` if
-`XDG_STATE_HOME` is unset).
+**From `0.12.0` through `0.18.0`, purging a project's transcripts removed only those from runs launched
+since the project was opened.** Tekstide never read transcripts back from disk. After a restart, or
+after closing and reopening a project, Trust Settings counted only the newer runs, and the purge
+confirmation could say it would delete *0 transcripts (0 bytes)* while every transcript from an
+earlier run stayed in `$XDG_STATE_HOME/tekstide/transcripts/` (`~/.local/state/tekstide/transcripts/`
+if `XDG_STATE_HOME` is unset). **Deleting that directory was the only complete removal.** If you
+purged in any of those releases, transcripts from earlier runs may still be there.
 
-**Deleting that directory is the only complete removal**, preferably with Tekstide closed.
+**Now**, when a project opens, Tekstide loads the transcripts earlier runs left for it (RFC-050), so
+the retained count and purge cover them. The count also no longer includes transcripts already purged.
 
-This is not fixed. RFC-050 is the planned fix: it loads earlier transcripts when a project opens, so
-that purge and the retained figures cover them.
+**What purge still leaves in place:**
+
+- a transcript that was still being written when the project opened — by a second Tekstide on the same
+  state directory, for example. It is never deleted from under its writer.
+- transcripts whose project is no longer in the recent list, for example after `recent-projects.json`
+  could not be read. They belong to no project, so no project's purge reaches them. Deleting
+  `transcripts/` removes them.
 
 ## 0.18.0 - The Configuration File Does Something
 

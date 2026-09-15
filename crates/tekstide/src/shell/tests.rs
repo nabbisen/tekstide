@@ -13420,6 +13420,106 @@ fn clicking_purge_removes_the_real_file_regardless_of_current_focus() {
     );
 }
 
+/// RFC-050 PR-050-B, the acceptance criterion **through the product's own open
+/// path**: a transcript an earlier session left for a remembered project is
+/// loaded when a real `Enter` reopens that project, the purge dialog counts it,
+/// clicking Purge deletes the file on disk, and a second look counts nothing —
+/// a purged transcript's tombstone is not a transcript (§4).
+///
+/// Before this slice the reopened session knew nothing of the earlier run, so
+/// the dialog said *0 transcripts* and purge left the file (`0.12.0` through
+/// `0.18.0`). The state root is this test's own, through the same split the
+/// product uses; nothing here reaches the real one.
+///
+/// **A composition, labelled as one.** This is the end-to-end walkthrough, so
+/// it holds four properties, and each ablation fails it at its own assertion:
+/// no loading on reopen fails *"the reopened project knows…"*; a dialog that
+/// counts every record fails *"the tombstone … is not counted"*; a Trust
+/// Settings count that includes tombstones fails *"Trust Settings does not
+/// count…"*; an app-wide figure from open sessions only fails *"the app-wide
+/// figure covers a project that is not open"*. The core tests in
+/// `tekstide-core` hold each property on its own.
+#[test]
+fn reopening_a_project_loads_an_earlier_runs_transcript_and_purge_deletes_it() {
+    let (mut state, project_id, _project_dir) =
+        state_with_cached_trusted_recent_project("reopen-loads-earlier-transcript");
+    let state_root =
+        super::resolve_agent_run_state_dir().expect("a test build always has its own state root");
+    let earlier = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(tekstide_core::domain::AgentRunId::new_uuid().as_str())
+        .join("transcript.log");
+    std::fs::create_dir_all(earlier.parent().unwrap()).unwrap();
+    std::fs::write(&earlier, b"output from a run in an earlier session").unwrap();
+    // Another project's transcript, never opened here: it must count in the
+    // app-wide figure (D5) and be untouched by this project's purge.
+    let other_bytes = b"a transcript belonging to a project that is not open";
+    let other = state_root
+        .join("transcripts")
+        .join(tekstide_core::project::ProjectId::new_uuid().as_str())
+        .join(tekstide_core::domain::AgentRunId::new_uuid().as_str())
+        .join("transcript.log");
+    std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+    std::fs::write(&other, other_bytes).unwrap();
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+    let project = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .expect("Enter on the remembered row reopens the project");
+    assert_eq!(
+        project.purgeable_transcript_count(),
+        1,
+        "the reopened project knows the transcript its earlier run left"
+    );
+
+    press_transcript_purge_key(&mut state);
+    match state.modal.as_ref() {
+        Some(ModalContent::TranscriptPurge(modal)) => assert_eq!(
+            modal.transcript_count, 1,
+            "the purge dialog counts the earlier run's transcript"
+        ),
+        other => panic!("expected an open TranscriptPurge dialog, got {other:?}"),
+    }
+    let _ = super::update(&mut state, Message::TranscriptPurgePressed);
+
+    assert!(
+        !earlier.exists(),
+        "purge deletes the earlier run's file on disk, not only a record"
+    );
+
+    press_transcript_purge_key(&mut state);
+    match state.modal.as_ref() {
+        Some(ModalContent::TranscriptPurge(modal)) => assert_eq!(
+            modal.transcript_count, 0,
+            "the tombstone a purge leaves is not counted as a transcript"
+        ),
+        other => panic!("expected the purge dialog to open again, got {other:?}"),
+    }
+    let _ = super::update(&mut state, Message::ModalDismiss);
+
+    let project = state.app_shell.state().project(&project_id).unwrap();
+    let summary = transcript_local_data_summary_for(&state, project);
+    assert_eq!(
+        summary.project_transcript_count, 0,
+        "Trust Settings does not count a purged transcript's tombstone either"
+    );
+    assert_eq!(
+        summary.app_retained_bytes,
+        other_bytes.len() as u64,
+        "the app-wide figure covers a project that is not open, refreshed after the purge (D5)"
+    );
+    assert!(
+        other.exists(),
+        "this project's purge never reaches another project's transcripts"
+    );
+}
+
 /// RFC-040 PR-040-B: the real, clickable "Close" button -- same
 /// real-termination-and-two-phase-audit proof
 /// `confirming_the_close_terminates_the_real_process_and_removes_the_project`

@@ -75,17 +75,15 @@ transcript because of its age.
 - **Decline capture for future runs, per project.** `Space` toggles it. This is **forward-only**
   — declining does not delete any transcript that already exists — and the setting persists
   across a restart.
-- **Purge this project's transcripts — see the known defect below.** **Delete** opens a
+- **Purge this project's transcripts**, including those from earlier runs. **Delete** opens a
   confirmation naming the scope (this project; other projects are unaffected) and stating that it
   cannot be undone. A content-free tombstone record remains after a purge, as does the audit entry
   above.
 
-**Known defect: purge and the retained figure see only transcripts from runs since the project was
-opened.** Tekstide does not yet read transcripts back from disk. After you restart Tekstide, or close
-and reopen a project, Trust Settings counts only the transcripts from runs launched since then, and
-purge deletes only those. **Transcripts from earlier runs stay in `transcripts/`**, and the purge
-confirmation can say it deletes *0 transcripts* while they are still there. This has been true since
-the in-app purge shipped in `0.12.0`, and it is not fixed yet.
+**Purge leaves two kinds of file in place.** A transcript that was still being written when the
+project opened — by a second Tekstide on the same state directory, for example — is never deleted from
+under its writer. And transcripts whose project is no longer in the recent list, for example after
+`recent-projects.json` could not be read, belong to no project, so no project's purge reaches them.
 
 **To remove every transcript, delete the `transcripts/` directory** — the path is above — preferably
 with Tekstide closed.

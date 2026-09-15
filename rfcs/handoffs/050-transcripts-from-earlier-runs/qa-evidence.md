@@ -413,3 +413,75 @@ and the dialog switches to it in PR-050-B's second commit.
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean.
 `rfc_docs_invariants`: 9 passed. **Three consecutive full-workspace runs, output redirected to files:
 507 + 9 + 803, green every time** (+9 core tests). `git diff --cached --check` after staging: clean.
+
+## PR-050-B, part 2 — the product loads, and purge is true
+
+**This is the commit that makes purge true, so it also removes the request-387 disclosure (D8).**
+
+### Wiring
+
+- **Every project-open path loads.** The three GUI paths — reopening a remembered project, the path
+  field, and the folder browser — call `load_earlier_transcripts_for_opened_project` in their `Added`
+  arm, beside `verify_restored_trust` and `apply_configured_resource_limits`. The command-line open in
+  `main.rs`, which runs before `State` exists, calls `shell::load_earlier_transcripts`. Grepped: all
+  four call it.
+- **The state root comes from `resolve_agent_run_state_dir`**, the split the launch already uses. A
+  test build gets its own temporary directory and a guard that panics on the real one (§5). The root is
+  resolved, not created, so opening a project before any run has ever happened creates nothing.
+- **The app-wide figure is cached, not scanned per frame.** `trust_settings_view` renders every frame.
+  `State.transcript_disk_usage` is filled by `scan_transcript_disk_usage` at boot, after each load, and
+  after each purge, with the open and recent project ids as the claimed set.
+
+### Figures
+
+- **Trust Settings' retained count excludes tombstones.** Its app-wide bytes are the cached whole-
+  directory total, closed projects included (D5).
+- **The purge dialog captures `purgeable_transcript_count` and `purgeable_transcript_bytes`**, so it
+  counts only what purge will delete: no tombstones, and no found file still being written.
+
+### The disclosure leaves, and the defect entry arrives, in this commit
+
+- **`README.md`** and **the book's privacy page**: the known-defect paragraphs are gone. They now say
+  purge covers transcripts from earlier runs, name the two kinds of file it leaves in place — one still
+  being written when the project opened, and one whose project is no longer in the recent list — and
+  that deleting `transcripts/` removes everything.
+- **`CHANGELOG.md` Unreleased**: the known-defect entry is replaced by the defect entry D8 asks for.
+  It states `0.12.0` through `0.18.0`; what a user saw (a count of zero after a restart, and a purge
+  that left earlier transcripts); that deleting `transcripts/` was the only complete removal; that
+  earlier purges may have left files behind; and what purge still leaves in place.
+
+### The acceptance test, through the product's open path
+
+`reopening_a_project_loads_an_earlier_runs_transcript_and_purge_deletes_it` puts an earlier session's
+transcript at the product's path under the test's own state root, plus a transcript for a project that
+is never opened. It then:
+
+1. reopens the remembered project with a real `Enter`, and checks that the project counts the
+   transcript;
+2. opens the purge dialog through the real key, checks it counts one, and clicks **Purge**;
+3. checks the file on disk is gone;
+4. reopens the dialog and checks it counts **zero**, because the tombstone is not a transcript;
+5. checks that Trust Settings also counts zero, and that the app-wide figure equals exactly the other
+   project's bytes, refreshed after the purge;
+6. checks that the other project's transcript is untouched.
+
+### Ablations, each restored and hash-checked
+
+| | Ablation | Fails |
+| --- | --- | --- |
+| M1 | remove loading from the reopen path only | the acceptance test, at *"the reopened project knows the transcript its earlier run left"* |
+| M2 | the dialog counts every record again | the acceptance test, at *"the tombstone … is not counted"* |
+| M3 | Trust Settings counts tombstones again | the acceptance test, at *"Trust Settings does not count…"* |
+| M4 | the app-wide figure from open sessions only | the acceptance test, at *"the app-wide figure covers a project that is not open"* |
+
+**Each fails only this test, but they all fail the same test**, so it is a composition, and its doc
+comment says so and names which assertion each ablation reaches (response 367's lesson). Each
+property is also held on its own by a core test from part 1. **M1 is the checklist's *"skip loading;
+the test fails alone"***, which K1 could not satisfy at the core layer.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean.
+`rfc_docs_invariants`: 9 passed. `mdbook build docs`: clean. **Three consecutive full-workspace runs,
+output redirected to files: 508 + 9 + 803, green every time** (+1 shell test).
+`git diff --cached --check` after staging: clean.
