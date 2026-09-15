@@ -230,3 +230,36 @@ failed.**
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean. **Three consecutive
 full-workspace runs, output redirected to files: 507 + 6 + 794, green every time** (+3 core tests).
 `git diff --cached --check` after staging, per response 388: clean.
+
+## PR-050-A second follow-up (response 390)
+
+**Response 390 found my required-mode test held only one of the two launch sites.** It launches
+`/bin/sh` without an adapter, so it reaches `launch_project_shell` only. Removing the mode check from
+`launch_project_adapter` left all 794 tests green. The code there was correct, but nothing proved it.
+
+### One helper, not a second test
+
+The block that creates the writer and decides between degrading and refusing was duplicated in both
+functions, and had already needed the same fix twice. It is now **`prepare_transcript_writer`**,
+called by both sites. Nothing else moved: the rest of each launch function stays duplicated, for
+RFC-022's reason. The existing required-mode test therefore holds both sites, and no new test was
+added.
+
+```
+BoundedTranscriptWriter::create in launch_project_shell:    none
+BoundedTranscriptWriter::create in launch_project_adapter:  none
+prepare_transcript_writer called at:                        both sites
+BoundedTranscriptWriter::create called at:                  inside prepare_transcript_writer only
+```
+
+### Ablation, restored and hash-checked
+
+| | Ablation | Fails |
+| --- | --- | --- |
+| H1 | degrade every mode inside the helper | `a_required_local_bounded_launch_is_refused_when_its_transcript_file_is_locked` **alone** |
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean. **Three consecutive
+full-workspace runs, output redirected to files: 507 + 6 + 794, green every time** — no new tests, as
+the ruling asked. `git diff --cached --check` after staging: clean.

@@ -41,35 +41,8 @@ impl LinuxTerminalRuntime {
     ) -> Result<(TerminalSession, Vec<TerminalRuntimeEvent>), TerminalLaunchError> {
         validate_launch_spec(project, &spec)?;
 
-        // RFC-050 D3: for `LocalBounded`, a transcript file another handle
-        // has locked is not a reason to refuse the launch — the run is
-        // unrecorded, not more dangerous — and it is never a reason to write
-        // unlocked. The process starts without capture, and the event lets
-        // the session record why. **`RequiredLocalBounded` refuses** (response
-        // 388): RFC-011 says that mode rejects a launch whose capture cannot be
-        // prepared. Every other writer failure refuses in every mode.
         let (transcript_writer, transcript_capture_mode, transcript_lock_unavailable) =
-            match spec.transcript_writer_config() {
-                Some(config) => {
-                    let mode = config.mode;
-                    match BoundedTranscriptWriter::create(config.clone()) {
-                        Ok(writer) => (Some(writer), Some(mode), false),
-                        Err(error)
-                            if error.reason
-                                == crate::transcript::TranscriptWriteErrorReason::LockUnavailable
-                                && !mode.rejects_launch_when_unavailable() =>
-                        {
-                            (None, None, true)
-                        }
-                        Err(error) => {
-                            return Err(TerminalLaunchError::TranscriptWriterUnavailable {
-                                summary: transcript_write_error_summary(&error),
-                            });
-                        }
-                    }
-                }
-                None => (None, None, false),
-            };
+            prepare_transcript_writer(&spec)?;
         let mut pty = OpenPty::new(spec.dimensions)
             .map_err(|summary| TerminalLaunchError::PtyUnavailable { summary })?;
         let mut terminal = TerminalSession::new(
@@ -145,35 +118,8 @@ impl LinuxTerminalRuntime {
             .ok_or(TerminalLaunchError::MissingAdapterApprovalConfig)?
             .clone();
 
-        // RFC-050 D3: for `LocalBounded`, a transcript file another handle
-        // has locked is not a reason to refuse the launch — the run is
-        // unrecorded, not more dangerous — and it is never a reason to write
-        // unlocked. The process starts without capture, and the event lets
-        // the session record why. **`RequiredLocalBounded` refuses** (response
-        // 388): RFC-011 says that mode rejects a launch whose capture cannot be
-        // prepared. Every other writer failure refuses in every mode.
         let (transcript_writer, transcript_capture_mode, transcript_lock_unavailable) =
-            match spec.transcript_writer_config() {
-                Some(config) => {
-                    let mode = config.mode;
-                    match BoundedTranscriptWriter::create(config.clone()) {
-                        Ok(writer) => (Some(writer), Some(mode), false),
-                        Err(error)
-                            if error.reason
-                                == crate::transcript::TranscriptWriteErrorReason::LockUnavailable
-                                && !mode.rejects_launch_when_unavailable() =>
-                        {
-                            (None, None, true)
-                        }
-                        Err(error) => {
-                            return Err(TerminalLaunchError::TranscriptWriterUnavailable {
-                                summary: transcript_write_error_summary(&error),
-                            });
-                        }
-                    }
-                }
-                None => (None, None, false),
-            };
+            prepare_transcript_writer(&spec)?;
         let mut pty = OpenPty::new(spec.dimensions)
             .map_err(|summary| TerminalLaunchError::PtyUnavailable { summary })?;
         let mut terminal = TerminalSession::new(
@@ -956,6 +902,51 @@ fn process_stat(pid: libc::pid_t) -> Option<ProcessStat> {
 /// enumeration this function is not part of.
 pub(super) fn session_id_of(pid: libc::pid_t) -> Option<libc::pid_t> {
     process_stat(pid).map(|stat| stat.session_id)
+}
+
+/// Creates the transcript writer for a launch, or decides the launch goes
+/// ahead without one. **Shared by `launch_project_shell` and
+/// `launch_project_adapter`** (response 390): this decision needed the same
+/// fix at both sites once, and a test through only one of them left the other
+/// unguarded. The rest of each launch function stays duplicated, for
+/// RFC-022's reason.
+///
+/// Returns the writer, its capture mode, and whether capture was skipped
+/// because the file was locked — the last is what lets the session record why
+/// a run has no transcript.
+///
+/// RFC-050 D3: for `LocalBounded`, a transcript file another handle has locked
+/// is not a reason to refuse the launch — the run is unrecorded, not more
+/// dangerous — and it is never a reason to write unlocked, so the process
+/// starts without capture. **`RequiredLocalBounded` refuses** (response 388):
+/// RFC-011 says that mode rejects a launch whose capture cannot be prepared.
+/// Every other writer failure refuses in every mode.
+fn prepare_transcript_writer(
+    spec: &TerminalLaunchSpec,
+) -> Result<
+    (
+        Option<BoundedTranscriptWriter>,
+        Option<TranscriptCaptureMode>,
+        bool,
+    ),
+    TerminalLaunchError,
+> {
+    let Some(config) = spec.transcript_writer_config() else {
+        return Ok((None, None, false));
+    };
+    let mode = config.mode;
+    match BoundedTranscriptWriter::create(config.clone()) {
+        Ok(writer) => Ok((Some(writer), Some(mode), false)),
+        Err(error)
+            if error.reason == crate::transcript::TranscriptWriteErrorReason::LockUnavailable
+                && !mode.rejects_launch_when_unavailable() =>
+        {
+            Ok((None, None, true))
+        }
+        Err(error) => Err(TerminalLaunchError::TranscriptWriterUnavailable {
+            summary: transcript_write_error_summary(&error),
+        }),
+    }
 }
 
 fn transcript_write_error_summary(error: &TranscriptWriteError) -> BoundedRuntimeSummary {
