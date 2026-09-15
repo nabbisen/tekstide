@@ -3,6 +3,7 @@ use super::{ProjectId, ProjectSession};
 mod change_detection;
 mod collections;
 mod content;
+mod loading;
 mod metadata;
 mod references;
 mod retention;

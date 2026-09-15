@@ -85,6 +85,36 @@ impl Transcript {
         }
     }
 
+    /// RFC-050 PR-050-B: a transcript found on disk when its project opened.
+    ///
+    /// It names **no terminal and no run** (D2), and carries what the loader
+    /// measured: the file's mtime as `last_write_at`, and whether its lock was
+    /// held at the probe. `created_at` must be **no later than the true
+    /// creation time**, and no surface may display it as one (§4); the loader
+    /// passes the epoch, so the transcript's age comes from its mtime alone.
+    pub fn found_on_disk(
+        project_id: ProjectId,
+        storage_path: impl Into<PathBuf>,
+        created_at: DomainTimestamp,
+        last_write_at: Option<DomainTimestamp>,
+        writer_held_lock_at_load: bool,
+    ) -> Self {
+        Self {
+            id: TranscriptId::new_uuid(),
+            project_id,
+            origin: TranscriptOrigin::FoundOnDisk {
+                writer_held_lock_at_load,
+            },
+            storage_path: storage_path.into(),
+            byte_count: 0,
+            truncation_state: TruncationState::Complete,
+            lifecycle_state: TranscriptLifecycleState::Active,
+            retention_policy: "found-on-disk".to_owned(),
+            created_at,
+            last_write_at,
+        }
+    }
+
     pub fn record_active_write(&mut self, byte_count: u64) {
         self.byte_count = byte_count;
         self.truncation_state = TruncationState::Complete;

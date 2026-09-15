@@ -1,9 +1,14 @@
+mod loading;
 mod path;
 mod policy;
 mod reader;
 mod retention;
 mod writer;
 
+pub use loading::{
+    FoundTranscriptFile, ProjectTranscriptScan, TranscriptDiskUsage, is_product_run_directory_name,
+    scan_project_transcripts, scan_transcript_disk_usage,
+};
 pub use path::{
     TranscriptPathError, TranscriptPathErrorReason, TranscriptPathRequest, TranscriptPathResolver,
     TranscriptStoragePath,

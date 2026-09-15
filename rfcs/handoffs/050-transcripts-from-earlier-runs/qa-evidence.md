@@ -319,3 +319,97 @@ run.
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean.
 `rfc_docs_invariants`: 9 passed. **Three consecutive full-workspace runs, output redirected to files:
 507 + 9 + 794, green every time.** `git diff --cached --check` after staging: clean.
+
+## PR-050-B, part 1 — the loader, in the core, with no caller
+
+**Nothing new is deletable in the product yet.** No code outside tests calls the loader. PR-050-B's
+second commit wires it into the GUI's project-open paths, switches the figures, and removes the
+request-387 disclosure: that is the commit that makes purge true, as D8 requires. Splitting it keeps
+that commit's meaning exact.
+
+### What was added
+
+- **`transcript::loading`**, which reads and never deletes:
+  - `scan_project_transcripts(state_root, project_id)` enumerates `<state>/transcripts/<project_id>/`;
+  - `scan_transcript_disk_usage(state_root, claimed_project_ids)` returns all bytes under
+    `transcripts/`, and those no claimed project owns;
+  - `is_product_run_directory_name(name)` is the run-directory spelling rule.
+- **`ProjectSession::load_transcripts_from_disk(state_root)`** adds a `FoundOnDisk` record per
+  accepted file, skipping any path the session already has a record for.
+- **`purge_transcript_at` skips a found file whose lock was held at load** and reports it in the new
+  `ProjectTranscriptPurgeSummary::skipped_still_being_written`. This is the single deletion path, so
+  retention inherits it.
+- **`purgeable_transcript_count` / `purgeable_transcript_bytes`** count what purge would delete:
+  neither tombstones nor still-written found files. `transcripts_still_being_written_count` is for the
+  dialog's notice (PR-050-C).
+- `Transcript::found_on_disk` and `DomainTimestamp::from_unix_seconds`.
+
+### The rules, from the risk document's §1, as the code enforces them
+
+- **No symlink is followed at any level**: `real_directory` uses `symlink_metadata`, and the byte
+  count never follows one either.
+- Only a **regular file named `transcript.log`, two levels under `transcripts/`**, is loaded.
+  Anything else is skipped, counted, and never deleted.
+- **Run directories must be `agent-run-` plus a lowercase hyphenated UUID, checked as a round trip.**
+  `from_persisted` is not used and not changed (response 388).
+- **The lock is probed once, then released**: the probe drops its handle before returning. A file that
+  cannot be opened or locked for any reason reads as **held**, because unknown liveness is live.
+- **Age comes from the mtime, read at load.** `created_at` is the epoch, no later than the true
+  creation time. If the filesystem gives no mtime, `created_at` names no instant, so the transcript
+  has no computable age and is never expired — rather than reading as fifty-six years old.
+- The state root is **canonicalised once**, as the launch's resolver does, so a found path compares
+  equal to the path a launch in this session recorded, and nothing is loaded twice.
+
+### Tests
+
+| Test | Proves |
+| --- | --- |
+| `a_transcript_from_an_earlier_run_is_counted_and_purged_after_a_real_restart` | **the acceptance criterion, in the core**: a real launch writes a real transcript; `AppState` is dropped and a fresh one restored from its saved recent-project state; the reopened project knows nothing, then loads it, counts it, and purge deletes **the file on disk** |
+| `a_found_transcript_whose_lock_is_held_loads_as_live_and_survives_purge` | a held lock loads as live, survives purge, is reported, and is not counted as purgeable |
+| `the_load_probe_releases_the_lock_it_took` | a later `try_lock` succeeds |
+| `a_found_transcript_takes_its_age_from_its_mtime` | `last_write_at` is the mtime and `created_at` is the epoch |
+| `every_unrecognised_entry_is_skipped_and_still_present_after_purge` | a symlinked run directory pointing outside the state root, a non-UUID name, a stray file, and a `transcript.log` a level too deep all survive purge |
+| `run_directories_in_other_uuid_spellings_are_skipped_and_still_present` | uppercase, hyphen-less, braced and `urn:uuid:` survive purge; the product's own spelling is loaded and purged |
+| `an_unclaimed_project_directory_is_not_loaded_or_deleted_and_is_counted` | D6 |
+| `the_app_wide_figure_includes_a_closed_project` | D5; a stray at the root counts as unclaimed |
+| `a_transcript_this_session_already_has_is_not_loaded_twice` | a launched record is not duplicated |
+
+### Ablations, each restored and hash-checked
+
+| | Ablation | Fails |
+| --- | --- | --- |
+| K1 | load nothing | **seven tests**: every one that needs a loaded record (disclosed composition). The skipped-entries and disk-usage tests pass, because neither depends on loading |
+| K2 | the probe never reports a held lock | the held-lock test **alone** |
+| K3 | the probe leaks its handle | the probe-releases test **alone** |
+| K4 | accept every spelling `from_persisted` accepts | the spellings test **alone** |
+| K5 | follow symlinks when classifying directories | the unrecognised-entries test **alone** — the file outside the state root is deleted |
+| K6 | purge ignores a held lock | the held-lock test **alone** |
+| K7 | the purgeable count includes still-written files | the held-lock test **alone** |
+| K8 | no dedupe against known records | the already-known test **alone** |
+| K9 | disk usage treats claimed directories as unclaimed | the closed-project test **alone** |
+
+**K1 cannot fail "alone" at this layer.** The checklist's *"skip loading; the test fails alone"* is
+about the product's open path. PR-050-B's second commit wires loading into the GUI, where an ablation
+that removes that call can fail the GUI-level restart test alone.
+
+### Greps
+
+```
+remove_file reaching transcripts/:                session.rs remove_transcript_file only (the single deletion path)
+fs reads in retention.rs:                         none
+fs reads in retention candidate selection:        none
+new tests naming the real state root:             none (linux_default, .local/state, XDG_STATE_HOME)
+```
+
+### The dialog-count reading (risk document §4), verified
+
+`transcript_local_data_summary_for` passes `project.transcripts().len()`, and a purge keeps a
+tombstone record, so **the dialog's count includes tombstones**: after a purge, reopening the dialog
+counts the purged transcripts again. The reading holds. The core now has `purgeable_transcript_count`,
+and the dialog switches to it in PR-050-B's second commit.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean.
+`rfc_docs_invariants`: 9 passed. **Three consecutive full-workspace runs, output redirected to files:
+507 + 9 + 803, green every time** (+9 core tests). `git diff --cached --check` after staging: clean.

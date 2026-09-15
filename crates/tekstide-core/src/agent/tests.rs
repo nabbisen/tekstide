@@ -2,6 +2,7 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::app::{AddProjectOutcome, AppState};
 use crate::approval::{ApprovalCoordinator, DecideOutcome, ReceiveOutcome, SimpleDecision};
 use crate::content::{SaveDecision, TextDocumentState};
 use crate::domain::{
@@ -717,6 +718,98 @@ fn a_required_local_bounded_launch_is_refused_when_its_transcript_file_is_locked
     );
 
     drop(holder);
+    cleanup_root(root);
+    cleanup_root(state_root);
+}
+
+/// RFC-050 PR-050-B, the acceptance test: **a real restart.** A real launch
+/// writes a real transcript; the application's state is dropped and a fresh
+/// `AppState` is restored from the first one's saved recent-project state, as
+/// the next start of Tekstide does; the project is reopened.
+///
+/// Before loading, the reopened session knows nothing about the earlier
+/// transcript — the shipped defect, `0.12.0` through `0.18.0`. After loading,
+/// it is counted, and purge deletes **the file on disk**.
+#[test]
+fn a_transcript_from_an_earlier_run_is_counted_and_purged_after_a_real_restart() {
+    let root = test_root("agent-restart-root");
+    let state_root = test_root("agent-restart-state");
+
+    let mut first = AppState::default();
+    let AddProjectOutcome::Added(project_id) = first.add_project_from_path(&root).unwrap() else {
+        panic!("a fresh project should be added");
+    };
+    let transcript_path = {
+        let project = first.project_mut(&project_id).unwrap();
+        let profile = built_in_profile(Path::new("/bin/sh"));
+        let validation = AgentRunLaunchValidator
+            .validate(
+                project,
+                &profile,
+                &request_for(project, &profile).with_local_bounded_transcript(&state_root),
+            )
+            .expect("local bounded transcript launch should validate");
+        let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
+        let mut runtime = LinuxTerminalRuntime::new();
+        let (agent_run_id, _events, _endpoint) = project
+            .launch_agent_run_with_runtime(plan, &mut runtime)
+            .expect("the earlier run should launch");
+        let run = project
+            .agent_runs()
+            .iter()
+            .find(|run| run.id == agent_run_id)
+            .unwrap();
+        let terminal_id = run.terminal_id.clone().unwrap();
+        let transcript_id = run.transcript_ref.clone().unwrap();
+        let path = project
+            .transcripts()
+            .iter()
+            .find(|transcript| transcript.id == transcript_id)
+            .unwrap()
+            .storage_path
+            .clone();
+        let handle = TerminalRuntimeHandle::new(terminal_id, project.id().clone());
+        runtime
+            .write_input(&handle, b"printf 'from-the-earlier-run\\n'\nexit 0\n")
+            .unwrap();
+        let _ = read_until_contains(&mut runtime, &handle, b"from-the-earlier-run");
+        let _ = runtime.wait_for_exit(&handle, Duration::from_secs(5));
+        path
+    };
+    assert!(
+        transcript_path.exists(),
+        "the earlier run left a transcript on disk"
+    );
+    let saved = first.recent_project_state();
+    drop(first);
+
+    let mut second = AppState::default();
+    second.restore_recent_projects(saved);
+    let AddProjectOutcome::Added(reopened) = second.add_project_from_path(&root).unwrap() else {
+        panic!("the project should open in the restarted application");
+    };
+    assert_eq!(
+        reopened, project_id,
+        "the recent list gives the reopened project its earlier id"
+    );
+    let project = second.project_mut(&reopened).unwrap();
+    assert_eq!(
+        project.purgeable_transcript_count(),
+        0,
+        "before loading, the restarted session knows nothing of the earlier run"
+    );
+
+    let loaded = project.load_transcripts_from_disk(&state_root);
+    assert_eq!(loaded.loaded, 1);
+    assert_eq!(project.purgeable_transcript_count(), 1);
+
+    let purged = project.purge_project_transcripts().unwrap();
+    assert_eq!(purged.purged_transcripts, 1);
+    assert!(
+        !transcript_path.exists(),
+        "purge deletes the earlier run's file on disk, not only a record"
+    );
+
     cleanup_root(root);
     cleanup_root(state_root);
 }

@@ -9,6 +9,7 @@ use crate::runtime::terminal::{
 use crate::transcript::{
     TranscriptLocalDataSummary, TranscriptRetentionLimits, agent_run_may_still_be_writing,
     is_transcript_expired, mark_transcript_expired_if_due, most_recent_activity_seconds,
+    scan_project_transcripts,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -314,6 +315,103 @@ impl ProjectSession {
             .filter_map(|transcript| fs::metadata(&transcript.storage_path).ok())
             .map(|metadata| metadata.len())
             .sum()
+    }
+
+    /// RFC-050 PR-050-B: add a record for every transcript an earlier run left
+    /// in `<state_root>/transcripts/<project_id>/`, so purge, the figures and
+    /// retention act on what exists rather than on what this process
+    /// launched.
+    ///
+    /// **A file this session already has a record for is not loaded again**,
+    /// compared by path: a run launched since the project opened, or a load
+    /// that already ran. The loader never deletes, and never reads anything
+    /// the scan did not accept (`transcript::loading`).
+    ///
+    /// Age: a found file's mtime is its `last_write_at`, read here and never
+    /// inside retention selection (RFC-049 D7). `created_at` is the epoch, no
+    /// later than the true creation time. **If the filesystem gives no mtime,
+    /// `created_at` names no instant as well**, so the transcript has no
+    /// computable age and is never expired (RFC-049 §1) rather than reading as
+    /// fifty-six years old.
+    pub fn load_transcripts_from_disk(&mut self, state_root: &Path) -> TranscriptLoadSummary {
+        let scan = scan_project_transcripts(state_root, &self.id);
+        let mut summary = TranscriptLoadSummary {
+            loaded: 0,
+            already_known: 0,
+            skipped_entries: scan.skipped_entries,
+            skipped_bytes: scan.skipped_bytes,
+        };
+        for found in scan.found {
+            if self
+                .transcripts
+                .iter()
+                .any(|transcript| transcript.storage_path == found.path)
+            {
+                summary.already_known += 1;
+                continue;
+            }
+            let (created_at, last_write_at) = match found.modified_unix_seconds {
+                Some(seconds) => (
+                    DomainTimestamp::from_unix_seconds(0),
+                    Some(DomainTimestamp::from_unix_seconds(seconds)),
+                ),
+                None => (
+                    DomainTimestamp::from_utc_string("0000-01-01T00:00:00Z")
+                        .expect("a shape-valid timestamp that names no representable instant"),
+                    None,
+                ),
+            };
+            self.transcripts.push(Transcript::found_on_disk(
+                self.id.clone(),
+                found.path,
+                created_at,
+                last_write_at,
+                found.writer_held_lock,
+            ));
+            summary.loaded += 1;
+        }
+        if summary.loaded > 0 {
+            self.refresh_runtime_summary_from_collections();
+        }
+        summary
+    }
+
+    /// What purge would remove: transcripts that still have a record and are
+    /// not tombstones, excluding found files still being written. **The purge
+    /// dialog counts this**, so it never promises to delete what purge will
+    /// skip (response 388), and never counts a tombstone as a transcript (§4).
+    pub fn purgeable_transcript_count(&self) -> u64 {
+        self.transcripts
+            .iter()
+            .filter(|transcript| transcript_is_purgeable(transcript))
+            .count() as u64
+    }
+
+    /// The real on-disk bytes of [`Self::purgeable_transcript_count`]'s set,
+    /// read the way [`Self::real_retained_transcript_bytes`] reads them.
+    pub fn purgeable_transcript_bytes(&self) -> u64 {
+        self.transcripts
+            .iter()
+            .filter(|transcript| transcript_is_purgeable(transcript))
+            .filter_map(|transcript| fs::metadata(&transcript.storage_path).ok())
+            .map(|metadata| metadata.len())
+            .sum()
+    }
+
+    /// Found transcripts whose lock was held when the project opened. The
+    /// purge dialog names them; purge leaves them in place.
+    pub fn transcripts_still_being_written_count(&self) -> u64 {
+        self.transcripts
+            .iter()
+            .filter(|transcript| {
+                matches!(
+                    transcript.origin,
+                    TranscriptOrigin::FoundOnDisk {
+                        writer_held_lock_at_load: true
+                    }
+                )
+            })
+            .count() as u64
     }
 
     pub fn change_sets(&self) -> &[ChangeSet] {
@@ -1445,9 +1543,22 @@ impl ProjectSession {
         if self.transcripts[index].is_tombstone() {
             return Ok(ProjectTranscriptPurgeSummary {
                 requested_transcripts: 1,
-                purged_transcripts: 0,
-                bytes_removed: 0,
                 tombstones_preserved: 1,
+                ..ProjectTranscriptPurgeSummary::default()
+            });
+        }
+        // RFC-050 D3: purge obeys the lock. A found file some process was
+        // still writing when the project opened is never unlinked under it.
+        if matches!(
+            self.transcripts[index].origin,
+            TranscriptOrigin::FoundOnDisk {
+                writer_held_lock_at_load: true
+            }
+        ) {
+            return Ok(ProjectTranscriptPurgeSummary {
+                requested_transcripts: 1,
+                skipped_still_being_written: 1,
+                ..ProjectTranscriptPurgeSummary::default()
             });
         }
 
@@ -1468,6 +1579,7 @@ impl ProjectSession {
             purged_transcripts: 1,
             bytes_removed,
             tombstones_preserved: 1,
+            skipped_still_being_written: 0,
         })
     }
 
@@ -1904,6 +2016,9 @@ pub struct ProjectTranscriptPurgeSummary {
     pub purged_transcripts: u64,
     pub bytes_removed: u64,
     pub tombstones_preserved: u64,
+    /// RFC-050 D3: found transcripts whose lock was held at load, and so were
+    /// left in place. The dialog names these; purge never removes them.
+    pub skipped_still_being_written: u64,
 }
 
 impl ProjectTranscriptPurgeSummary {
@@ -1912,6 +2027,7 @@ impl ProjectTranscriptPurgeSummary {
         self.purged_transcripts += other.purged_transcripts;
         self.bytes_removed += other.bytes_removed;
         self.tombstones_preserved += other.tombstones_preserved;
+        self.skipped_still_being_written += other.skipped_still_being_written;
     }
 }
 
@@ -1943,6 +2059,27 @@ fn budget_exceeded(
     project_bytes > limits.max_bytes_per_project
         || retained_bytes_in_other_projects.saturating_add(project_bytes)
             > limits.max_bytes_app_wide
+}
+
+/// What [`ProjectSession::load_transcripts_from_disk`] did.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TranscriptLoadSummary {
+    pub loaded: u64,
+    pub already_known: u64,
+    /// Entries in the project's transcript directory that are not a transcript
+    /// this product wrote. Never loaded and never deleted.
+    pub skipped_entries: u64,
+    pub skipped_bytes: u64,
+}
+
+fn transcript_is_purgeable(transcript: &Transcript) -> bool {
+    !transcript.is_tombstone()
+        && !matches!(
+            transcript.origin,
+            TranscriptOrigin::FoundOnDisk {
+                writer_held_lock_at_load: true
+            }
+        )
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

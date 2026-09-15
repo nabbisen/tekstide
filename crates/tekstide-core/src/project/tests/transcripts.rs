@@ -24,6 +24,7 @@ fn transcript_purge_removes_bytes_and_preserves_path_free_tombstone_references()
             purged_transcripts: 1,
             bytes_removed: 17,
             tombstones_preserved: 1,
+            skipped_still_being_written: 0,
         }
     );
     assert!(!transcript_path.exists());

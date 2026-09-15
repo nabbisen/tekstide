@@ -73,29 +73,48 @@ implementer's to paper over.
 - [ ] **A real restart** (a fresh `AppState` restored from saved recent-project state): the earlier
       transcript is counted, and purge removes **the file on disk**. **Ablation:** skip loading; the
       test fails alone.
-- [ ] A file whose lock another handle holds loads as live, survives purge, and is reported.
+      *Core half in part 1: `a_transcript_from_an_earlier_run_is_counted_and_purged_after_a_real_restart`.
+      Left unticked until part 2 wires loading into the product's open path; K1 fails seven tests at
+      this layer, so "alone" is for the GUI-level ablation.*
+- [x] A file whose lock another handle holds loads as live, survives purge, and is reported.
       **Ablation:** remove the probe; the test fails alone.
-- [ ] The probe drops its lock at once. Assert that a later `try_lock` succeeds.
-- [ ] Skipped **and still present**: a symlinked run directory (pointing outside the state root), a
+      *Part 1: held-lock test; K2 (no probe) and K6 (purge ignores it) each fail it alone. The dialog's
+      naming of such files is PR-050-C.*
+- [x] The probe drops its lock at once. Assert that a later `try_lock` succeeds.
+      *`the_load_probe_releases_the_lock_it_took`; K3 (leak the handle) fails it alone.*
+- [x] Skipped **and still present**: a symlinked run directory (pointing outside the state root), a
       non-UUID name, a stray file, and a `transcript.log` at the wrong depth.
-- [ ] Loaded records are purged through `purge_transcript_at` only. **Grep:** no other
+      *`every_unrecognised_entry_is_skipped_and_still_present_after_purge`; K5 (follow symlinks) fails it
+      alone.*
+- [x] Loaded records are purged through `purge_transcript_at` only. **Grep:** no other
       `remove_file` reaches `transcripts/`.
-- [ ] `last_write_at` comes from mtime, read at load. **Grep:** no filesystem read inside retention
+      *Grepped: the only `remove_file` reaching `transcripts/` is `remove_transcript_file`.*
+- [x] `last_write_at` comes from mtime, read at load. **Grep:** no filesystem read inside retention
       selection (RFC-049 D7).
-- [ ] The app-wide figure includes a closed project. Unclaimed bytes are computed separately.
-- [ ] A directory whose id is not in the recent list is not loaded, not deleted, and counted as
+      *Grepped: no filesystem read in `retention.rs` or in retention candidate selection.*
+- [x] The app-wide figure includes a closed project. Unclaimed bytes are computed separately.
+      *Core: `scan_transcript_disk_usage`; K9 fails the closed-project test alone. The GUI figure
+      switches to it in part 2.*
+- [x] A directory whose id is not in the recent list is not loaded, not deleted, and counted as
       unclaimed.
+      *`an_unclaimed_project_directory_is_not_loaded_or_deleted_and_is_counted`.*
 - [ ] The dialog's count is of retained transcripts, not tombstones. Verify the reading first; if it
       was wrong, say so here.
-- [ ] **Run-directory names are the product's own spelling.** Uppercase, hyphen-less, braced and
+      *Reading verified: `transcripts().len()` includes tombstones. `purgeable_transcript_count` is added
+      in part 1; the dialog switches in part 2, so this stays unticked until then.*
+- [x] **Run-directory names are the product's own spelling.** Uppercase, hyphen-less, braced and
       `urn:uuid:` spellings are each skipped and still present. `from_persisted` is unchanged.
+      *Spellings test; K4 (accept `from_persisted`'s spellings) fails it alone.*
 - [ ] **The dialog counts only what purge will delete**: a live found file is never counted.
+      *`purgeable_transcript_count` excludes still-written files (K7 fails the held-lock test alone);
+      unticked until the dialog uses it in part 2.*
 - [ ] **In the commit that makes purge true:** the request-387 disclosure is removed from the book,
       `README.md` and the changelog, and the changelog defect entry names `0.12.0` through `0.18.0`,
       what a user saw, and that deleting `transcripts/` was the only complete removal. *(Moved from C
       at response 388.)*
-- [ ] **No test enumerates the real state root.** Every fixture is `mktemp -d`, reached through the
+- [x] **No test enumerates the real state root.** Every fixture is `mktemp -d`, reached through the
       `cfg(test)` split.
+      *Grepped the new tests; every fixture is a fresh temporary directory.*
 
 ## PR-050-C — say it, and stop saying the old thing
 

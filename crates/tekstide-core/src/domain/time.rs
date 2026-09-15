@@ -30,6 +30,14 @@ impl DomainTimestamp {
         &self.0
     }
 
+    /// RFC-050 PR-050-B: a timestamp for a known number of seconds since the
+    /// Unix epoch — a found transcript's mtime, read once when its project
+    /// opens. The inverse of [`Self::unix_seconds`] for every value the
+    /// formatter can produce.
+    pub fn from_unix_seconds(seconds: u64) -> Self {
+        Self(format_unix_seconds_utc(seconds))
+    }
+
     /// RFC-049 D9: seconds since the Unix epoch, or `None` when this
     /// value does not name a real instant.
     ///
