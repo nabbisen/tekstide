@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Known defect — purge does not reach transcripts from earlier runs
+
+**Since `0.12.0`, purging a project's transcripts removes only those from runs launched since the
+project was opened.** Tekstide does not read transcripts back from disk. After a restart, or after
+closing and reopening a project, Trust Settings' retained count and bytes cover only newer runs, and
+the purge confirmation can say it deletes *0 transcripts (0 bytes)* while transcripts from earlier
+runs remain in `$XDG_STATE_HOME/tekstide/transcripts/` (`~/.local/state/tekstide/transcripts/` if
+`XDG_STATE_HOME` is unset).
+
+**Deleting that directory is the only complete removal**, preferably with Tekstide closed.
+
+This is not fixed. RFC-050 is the planned fix: it loads earlier transcripts when a project opens, so
+that purge and the retained figures cover them.
+
 ## 0.18.0 - The Configuration File Does Something
 
 Status: released on 2026-09-12.
