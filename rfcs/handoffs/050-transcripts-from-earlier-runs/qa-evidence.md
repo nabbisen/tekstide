@@ -178,3 +178,55 @@ reads of the removed fields:              none
 clean after removing a trailing blank line my register edit left. **Three consecutive full-workspace
 runs, output redirected to files: 507 + 6 + 791, green every time** (+8 core tests). Load rose from
 6.3 to 9.2 across them, with another project's builds running.
+
+## PR-050-A follow-up (response 388)
+
+Two rulings from the PR-050-A review, both about the lock. `tekstide-core` only.
+
+### `RequiredLocalBounded` refuses on a lock failure
+
+PR-050-A degraded **every** mode: both launch sites, `launch_project_shell` and
+`launch_project_adapter`, matched on the error reason (`LockUnavailable`) and never on the mode. The
+guard now also requires `!mode.rejects_launch_when_unavailable()`, so only `LocalBounded` starts
+without capture, and `RequiredLocalBounded` refuses as RFC-011 says it must.
+
+`a_required_local_bounded_launch_is_refused_when_its_transcript_file_is_locked` asserts the refusal is
+for the transcript writer, **no process starts**, no run or transcript is recorded, and the held bytes
+are untouched. It reaches the mode through the builder and says so: no production launch requests it.
+
+### Only regular files are locked, decided by one `fstat`
+
+`create` opens without truncating, reads the handle's type once, and then:
+
+- **a regular file** is locked, and truncated only once the lock is held;
+- **anything else** (a FIFO, a device) is neither locked nor truncated;
+- **a handle whose type cannot be read is refused**, so a regular file is never written unlocked.
+
+This replaces two separate decisions the first version made, which were a lock for every file type and
+a truncate for regular files only. The `/dev/full` test mutex is **removed**, and the register entry
+that called it the fix now says it hid the problem rather than solving it.
+
+`two_writers_on_one_fifo_both_create` and `a_second_writer_on_a_regular_file_is_refused` pin both
+sides: narrowing the lock must not loosen it for regular files.
+
+### Ablations, each restored and hash-checked
+
+| | Ablation | Fails |
+| --- | --- | --- |
+| F1 | degrade regardless of mode | the `RequiredLocalBounded` refusal test **alone** |
+| F2 | lock every file type again | the FIFO test, **and** the required-mode `/dev/full` test |
+
+**F2 cannot fail "alone", and the second failure is the evidence for the ruling.** Locking a device
+makes the two `/dev/full` fixture tests contend for one inode's lock, which is the exact interference
+the narrowing removes. The checklist asks for the FIFO test alone; the property cannot give that.
+
+### The interference is gone without the mutex
+
+The two `/dev/full` reader tests were run **together, twenty times, with no mutex: 20 passed, 0
+failed.**
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean. **Three consecutive
+full-workspace runs, output redirected to files: 507 + 6 + 794, green every time** (+3 core tests).
+`git diff --cached --check` after staging, per response 388: clean.

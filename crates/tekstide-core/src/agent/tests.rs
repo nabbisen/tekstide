@@ -654,6 +654,73 @@ fn a_launch_whose_transcript_file_is_locked_starts_without_capture() {
     cleanup_root(state_root);
 }
 
+/// RFC-050 PR-050-A follow-up (response 388): **`RequiredLocalBounded`
+/// refuses** a launch whose transcript file another handle has locked. No
+/// process starts, nothing is recorded, and the held bytes are untouched.
+///
+/// **Unreachable from the product**: no production launch requests this mode
+/// (RFC-049 D4′, RFC-011 *"must not… be used by an unreviewed workflow"*), so
+/// this is reached through the builder. It is still the core's contract, and
+/// PR-050-A had broken it by degrading every mode.
+#[test]
+fn a_required_local_bounded_launch_is_refused_when_its_transcript_file_is_locked() {
+    let root = test_root("agent-transcript-required-locked-root");
+    let state_root = test_root("agent-transcript-required-locked-state");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let validation = AgentRunLaunchValidator
+        .validate(
+            &project,
+            &profile,
+            &request_for(&project, &profile).with_required_local_bounded_transcript(&state_root),
+        )
+        .expect("required local bounded transcript launch should validate");
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
+
+    let held = TranscriptPathResolver
+        .resolve_agent_run(TranscriptPathRequest::new(
+            &state_root,
+            &root,
+            project.id().clone(),
+            plan.agent_run().id.clone(),
+        ))
+        .unwrap();
+    std::fs::create_dir_all(held.transcript_dir()).unwrap();
+    std::fs::write(held.transcript_file(), b"bytes another writer owns").unwrap();
+    let holder = std::fs::File::open(held.transcript_file()).unwrap();
+    holder.try_lock().unwrap();
+
+    let mut runtime = LinuxTerminalRuntime::new();
+    let error = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect_err("a mode that requires capture must refuse when capture cannot be prepared");
+
+    assert!(
+        matches!(
+            error,
+            ProjectAgentRuntimeLaunchError::TerminalLaunch(
+                TerminalLaunchError::TranscriptWriterUnavailable { .. }
+            )
+        ),
+        "refused for the transcript writer, not for anything else: {error:?}"
+    );
+    assert_eq!(
+        project.runtime_summary().running_processes,
+        0,
+        "no process starts"
+    );
+    assert!(project.agent_runs().is_empty());
+    assert!(project.transcripts().is_empty());
+    assert_eq!(
+        std::fs::read(held.transcript_file()).unwrap(),
+        b"bytes another writer owns"
+    );
+
+    drop(holder);
+    cleanup_root(root);
+    cleanup_root(state_root);
+}
+
 #[test]
 fn local_bounded_agent_run_transcript_capture_attaches_metadata_and_writes_output() {
     let root = test_root("agent-transcript-capture-root");

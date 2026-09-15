@@ -41,14 +41,21 @@ implementer's to paper over.
 
 ## PR-050-A follow-up (response 388)
 
-- [ ] **`RequiredLocalBounded` refuses on a lock failure**, at both launch sites: no process starts,
+- [x] **`RequiredLocalBounded` refuses on a lock failure**, at both launch sites: no process starts,
       and the held bytes are untouched. **Ablation:** degrade regardless of mode; the test fails alone.
       *(Found at review: PR-050-A degraded every mode, and no test launched that mode against a locked
       file.)*
-- [ ] **Regular files only are locked**, decided with the truncate by one `fstat` on the opened
+      *`a_required_local_bounded_launch_is_refused_when_its_transcript_file_is_locked`: refused for the
+      writer, no process, no run or transcript, held bytes untouched. F1 fails it alone.*
+- [x] **Regular files only are locked**, decided with the truncate by one `fstat` on the opened
       handle. Two writers on one FIFO both create; a second writer on a locked regular file is refused.
       **Ablation:** lock every file type; the FIFO test fails alone.
-- [ ] The `/dev/full` test mutex is removed, and the register entry that called it the fix says why.
+      *One `fstat` on the handle; an unreadable type is refused. FIFO and second-writer tests added. F2
+      fails the FIFO test **and** the required-mode `/dev/full` test — "alone" cannot hold, and the
+      second failure is the very interference this ruling removes.*
+- [x] The `/dev/full` test mutex is removed, and the register entry that called it the fix says why.
+      *Removed; the register row and dated entry say it hid the problem. The two `/dev/full` tests ran
+      together 20 times without it: 20 passed.*
 
 ## PR-050-B — load, count, purge
 

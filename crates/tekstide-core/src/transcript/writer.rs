@@ -162,10 +162,9 @@ impl BoundedTranscriptWriter {
             )
         })?;
 
-        // RFC-050 D3: open **without** truncating, take the exclusive lock,
-        // and only then truncate. Truncating on open would wipe a file
-        // another writer still holds before this one discovered the lock —
-        // RFC-049 §2's deletion under a live writer, by a different route.
+        // RFC-050 D3, narrowed at response 388: open **without** truncating,
+        // then decide both the lock and the truncate from **one `fstat` on
+        // the opened handle**.
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -179,24 +178,38 @@ impl BoundedTranscriptWriter {
                 )
             })?;
 
-        // **A writer that cannot lock does not write.** Any failure, not
-        // only `WouldBlock`: a filesystem that cannot lock at all would
-        // otherwise produce a writer every other process reads as dead,
-        // and the loader would treat its file as a leftover.
-        if file.try_lock().is_err() {
-            return Err(TranscriptWriteError::new(
-                TranscriptWriteErrorReason::LockUnavailable,
-                config.storage_path.transcript_file(),
-                0,
-            ));
-        }
-        // Truncate only a **regular** file, which is exactly what
-        // `truncate(true)` on open used to affect: `O_TRUNC` is ignored for a
-        // FIFO or a character device, while `ftruncate` refuses them. So
-        // skipping those keeps the behaviour this replaced, and the three
-        // reader tests that capture into `/dev/full` or a FIFO still launch.
-        let is_regular_file = file.metadata().map(|metadata| metadata.is_file());
-        if !matches!(is_regular_file, Ok(false)) {
+        // Only a regular file is ever loaded as a transcript (D7), so only a
+        // regular file needs a lock to tell live from leftover. A FIFO or a
+        // device is neither locked nor truncated: a lock there protects
+        // nothing, and on a shared device — every test capturing into
+        // `/dev/full` — it serialises unrelated writers. `O_TRUNC` never
+        // affected those either. A handle whose type cannot be read is
+        // refused rather than guessed at, so a regular file is never written
+        // unlocked.
+        let is_regular_file = file
+            .metadata()
+            .map_err(|_| {
+                TranscriptWriteError::new(
+                    TranscriptWriteErrorReason::OpenFileFailed,
+                    config.storage_path.transcript_file(),
+                    0,
+                )
+            })?
+            .is_file();
+        if is_regular_file {
+            // **A writer that cannot lock does not write.** Any failure, not
+            // only `WouldBlock`: a filesystem that cannot lock would otherwise
+            // produce writers every other process reads as dead.
+            if file.try_lock().is_err() {
+                return Err(TranscriptWriteError::new(
+                    TranscriptWriteErrorReason::LockUnavailable,
+                    config.storage_path.transcript_file(),
+                    0,
+                ));
+            }
+            // Truncate only once the lock is held. Truncating first would wipe
+            // a file another writer still holds — RFC-049 §2's deletion under a
+            // live writer, by a different route.
             file.set_len(0).map_err(|_| {
                 TranscriptWriteError::new(
                     TranscriptWriteErrorReason::OpenFileFailed,

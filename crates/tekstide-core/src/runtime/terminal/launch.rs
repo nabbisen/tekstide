@@ -41,11 +41,13 @@ impl LinuxTerminalRuntime {
     ) -> Result<(TerminalSession, Vec<TerminalRuntimeEvent>), TerminalLaunchError> {
         validate_launch_spec(project, &spec)?;
 
-        // RFC-050 D3: a transcript file another handle has locked is not
-        // a reason to refuse the launch — the run is unrecorded, not more
-        // dangerous — and it is never a reason to write unlocked. The
-        // process starts without capture, and the event lets the session
-        // record why. Every other writer failure still refuses, as before.
+        // RFC-050 D3: for `LocalBounded`, a transcript file another handle
+        // has locked is not a reason to refuse the launch — the run is
+        // unrecorded, not more dangerous — and it is never a reason to write
+        // unlocked. The process starts without capture, and the event lets
+        // the session record why. **`RequiredLocalBounded` refuses** (response
+        // 388): RFC-011 says that mode rejects a launch whose capture cannot be
+        // prepared. Every other writer failure refuses in every mode.
         let (transcript_writer, transcript_capture_mode, transcript_lock_unavailable) =
             match spec.transcript_writer_config() {
                 Some(config) => {
@@ -54,7 +56,8 @@ impl LinuxTerminalRuntime {
                         Ok(writer) => (Some(writer), Some(mode), false),
                         Err(error)
                             if error.reason
-                                == crate::transcript::TranscriptWriteErrorReason::LockUnavailable =>
+                                == crate::transcript::TranscriptWriteErrorReason::LockUnavailable
+                                && !mode.rejects_launch_when_unavailable() =>
                         {
                             (None, None, true)
                         }
@@ -142,11 +145,13 @@ impl LinuxTerminalRuntime {
             .ok_or(TerminalLaunchError::MissingAdapterApprovalConfig)?
             .clone();
 
-        // RFC-050 D3: a transcript file another handle has locked is not
-        // a reason to refuse the launch — the run is unrecorded, not more
-        // dangerous — and it is never a reason to write unlocked. The
-        // process starts without capture, and the event lets the session
-        // record why. Every other writer failure still refuses, as before.
+        // RFC-050 D3: for `LocalBounded`, a transcript file another handle
+        // has locked is not a reason to refuse the launch — the run is
+        // unrecorded, not more dangerous — and it is never a reason to write
+        // unlocked. The process starts without capture, and the event lets
+        // the session record why. **`RequiredLocalBounded` refuses** (response
+        // 388): RFC-011 says that mode rejects a launch whose capture cannot be
+        // prepared. Every other writer failure refuses in every mode.
         let (transcript_writer, transcript_capture_mode, transcript_lock_unavailable) =
             match spec.transcript_writer_config() {
                 Some(config) => {
@@ -155,7 +160,8 @@ impl LinuxTerminalRuntime {
                         Ok(writer) => (Some(writer), Some(mode), false),
                         Err(error)
                             if error.reason
-                                == crate::transcript::TranscriptWriteErrorReason::LockUnavailable =>
+                                == crate::transcript::TranscriptWriteErrorReason::LockUnavailable
+                                && !mode.rejects_launch_when_unavailable() =>
                         {
                             (None, None, true)
                         }

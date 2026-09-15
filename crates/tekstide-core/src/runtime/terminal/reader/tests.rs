@@ -987,7 +987,6 @@ fn only_two_named_production_call_sites_ever_append_to_a_transcript_writer() {
 fn local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable()
  {
     let _real_process_slot = RealProcessLimiter::acquire();
-    let _dev_full = serialize_dev_full_users();
     let (mut runtime, handle, _storage, dirs) = launch_with_unwritable_transcript_capture(
         "local-bounded-unwritable",
         TranscriptCaptureMode::LocalBounded,
@@ -1055,7 +1054,6 @@ fn local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_g
 fn required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it()
  {
     let _real_process_slot = RealProcessLimiter::acquire();
-    let _dev_full = serialize_dev_full_users();
     let (mut runtime, handle, _storage, dirs) = launch_with_unwritable_transcript_capture(
         "required-local-bounded-unwritable",
         TranscriptCaptureMode::RequiredLocalBounded,
@@ -1177,22 +1175,6 @@ fn wait_for_summary_state(
 /// shell launch itself succeeds -- the failure genuinely happens
 /// mid-stream, inside the reader thread's first write attempt, not at
 /// preflight.
-/// RFC-050 PR-050-A: the tests that capture into `/dev/full` must not overlap.
-///
-/// They all symlink their transcript path to **the same device**, so they
-/// share one inode and therefore one `flock`. Since the writer locks its file
-/// (RFC-050 D3), two of them running at once race for that lock: the loser's
-/// launch correctly starts without capture, and its test then waits for a
-/// `CaptureFailed` that can never come. The overlap is an artifact of the
-/// fixture — a real run writes its own freshly named regular file — so the
-/// tests are serialized rather than the rule weakened.
-fn serialize_dev_full_users() -> std::sync::MutexGuard<'static, ()> {
-    static DEV_FULL: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    DEV_FULL
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
 fn launch_with_unwritable_transcript_capture(
     label: &str,
     mode: TranscriptCaptureMode,

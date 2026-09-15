@@ -29,7 +29,7 @@ resulting pressure, each disclosed separately and each moved past:
 | `shell::tests::change_review_content_view_build_cost_by_line_count_measurement` | review 338 (2026-08-26) — **not this document's own cause; see below** |
 | `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` | `0.16.0` release gate (2026-08-28) — **PTY read timing, not process leak or audit store.** Once in three runs. The assertion message was captured: *"the marker must be followed by a real, parseable PID"*, with the read having returned only the shell's **echo of the command line** and not yet the `descendant-pid:` line it prints. A read that outran the shell's own output, not a failure of the termination behaviour the test covers. Distinct from every row above: no socket, no audit store, no PTY exhaustion — `/dev/pts` was well below its limit throughout. |
 | `transcript::tests::a_live_writer_holds_an_exclusive_lock_until_it_is_dropped` | request 388 (2026-09-13) — **new test; fork-duplicated descriptor keeps an `flock` alive past the drop. Fixed in the test, see the dated entry.** |
-| `runtime::terminal::reader::tests::local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable` and `…required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it` | request 388 (2026-09-13) — **caused by PR-050-A, not load: the two tests share `/dev/full`'s lock. First attributed to load, wrongly; see the dated entry's correction. Fixed by serializing them.** |
+| `runtime::terminal::reader::tests::local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable` and `…required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it` | request 388 (2026-09-13) — **caused by PR-050-A, not load: the two tests share `/dev/full`'s lock. First attributed to load, wrongly; see the dated entry's correction. First masked by a test mutex; fixed at response 388 by locking regular files only, and the mutex removed.** |
 
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
@@ -930,9 +930,12 @@ the lock, its launch correctly starts **without capture** (RFC-050 D3), and it t
 `CaptureFailed` that cannot come. Alone, each passes every time, which is why 5 isolated runs of 5
 proved nothing about the cause.
 
-**Fixed in the tests**: both now hold a shared mutex for their whole duration. The overlap is an
-artifact of the fixture, since a real run writes its own freshly named regular file, so the fixture
-is serialized rather than the lock rule weakened.
+**First fixed with a test-only mutex, and that fix was wrong in kind.** Both tests held a shared mutex
+for their whole duration, so they could not overlap. **Response 388 removed it and narrowed D3
+instead: only regular files are locked.** The loader only ever loads regular files (D7), so a lock on
+a FIFO or a device protects nothing, and on a shared device it serialises unrelated writers — which is
+exactly what the mutex was hiding rather than fixing. One `fstat` on the opened handle now decides
+both the lock and the truncate, and the two tests run concurrently again with no mutex.
 
 **The lesson, stated so it is not repeated:** a failure that passes in isolation was treated as load
 without checking whether *my* change made concurrent tests interact. Isolation shows a test is not

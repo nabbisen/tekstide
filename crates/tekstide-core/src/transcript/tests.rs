@@ -782,6 +782,65 @@ fn a_writer_on_an_unlocked_existing_file_starts_it_empty() {
     assert_eq!(fs::read(storage_path.transcript_file()).unwrap(), b"new");
 }
 
+/// Response 388: only a regular file is locked, so two writers on **one FIFO**
+/// both create. A lock on a FIFO would protect nothing, since the loader never
+/// loads one, and would serialise unrelated writers.
+#[test]
+fn two_writers_on_one_fifo_both_create() {
+    let (_temp, storage_path) = resolved_storage_path("writer-fifo-two");
+    fs::create_dir_all(storage_path.transcript_dir()).unwrap();
+    let c_path = std::ffi::CString::new(
+        storage_path
+            .transcript_file()
+            .as_os_str()
+            .as_encoded_bytes(),
+    )
+    .expect("transcript path must not contain a NUL byte");
+    assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0, "mkfifo");
+    // Opening a FIFO read-write does not block on Linux, and holding a reader
+    // keeps each writer's own open from blocking.
+    let _both_ends = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(storage_path.transcript_file())
+        .unwrap();
+
+    let config = || {
+        TranscriptWriterConfig::new(
+            storage_path.clone(),
+            TranscriptRetentionLimits::agent_run_default(),
+            TranscriptCaptureMode::LocalBounded,
+        )
+    };
+    let first = BoundedTranscriptWriter::create(config());
+    let second = BoundedTranscriptWriter::create(config());
+
+    assert!(first.is_ok(), "first FIFO writer: {first:?}");
+    assert!(
+        second.is_ok(),
+        "a second writer on the same FIFO must not be refused for a lock: {second:?}"
+    );
+}
+
+/// Narrowing the lock to regular files must not loosen it for them: a second
+/// writer on a regular file the first still holds is refused.
+#[test]
+fn a_second_writer_on_a_regular_file_is_refused() {
+    let (_temp, storage_path) = resolved_storage_path("writer-second-regular");
+    let config = || {
+        TranscriptWriterConfig::new(
+            storage_path.clone(),
+            TranscriptRetentionLimits::agent_run_default(),
+            TranscriptCaptureMode::LocalBounded,
+        )
+    };
+    let _first = BoundedTranscriptWriter::create(config()).unwrap();
+
+    let error = BoundedTranscriptWriter::create(config())
+        .expect_err("a regular file another writer holds must refuse a second writer");
+    assert_eq!(error.reason, TranscriptWriteErrorReason::LockUnavailable);
+}
+
 fn hold_lock_on_existing_transcript(
     storage_path: &crate::transcript::TranscriptStoragePath,
     bytes: &[u8],
