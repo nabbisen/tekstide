@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 051 | [Recovering the Recent-Project List](./proposed/051-recovering-the-recent-project-list.md) | **Proposed 2026-09-16.** A `recent-projects.json` that cannot be read is replaced by an empty list **saved over it**, so a user loses their projects' ids — and with them their trust decisions (`has_applied_trust_grant` is keyed by id) and the ownership of their transcripts (RFC-050 D6′). **No previous-good copy exists**, and the audit store cannot rebuild the list because `project_added` records an id and no path. **D1**: never overwrite a file we could not read. **D2**: keep one backup and recover from it. **D3**: whole-file or nothing — a half-parsed list can re-attach trust to the wrong folder. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
