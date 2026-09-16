@@ -62,6 +62,11 @@ pub enum TranscriptAbsence {
     /// The transcript file's exclusive lock was held by another handle when
     /// the run started, so this run never wrote to it.
     WriterLockUnavailable,
+    /// RFC-049 D4′: a retained-byte budget was still over its limit after the
+    /// cleanup that ran at this launch's preflight, so the run started with
+    /// capture disabled rather than deleting a transcript a live writer holds
+    /// (§2). Distinct from the user declining capture, which is not true here.
+    BudgetExhausted,
 }
 
 impl AgentRun {

@@ -47,6 +47,15 @@ pub struct AgentRunLaunchRequest {
     /// priority and a caller can set this without transcript capture at
     /// all.
     pub approval_state_root: Option<PathBuf>,
+    /// RFC-049 D4′: whether this project's retention cleanup has just run at
+    /// launch preflight and **left a byte budget still over its limit**.
+    ///
+    /// The caller measures it; this layer decides what it means, so the two
+    /// modes cannot drift apart at a call site: `LocalBounded` starts the run
+    /// with capture disabled and says so, `RequiredLocalBounded` refuses the
+    /// launch before any process starts (RFC-011). **Never "delete something
+    /// live to make room"** — §2 of `what-deleting-a-transcript-must-not-do.md`.
+    pub transcript_budget_exhausted: bool,
 }
 
 impl AgentRunLaunchRequest {
@@ -64,6 +73,7 @@ impl AgentRunLaunchRequest {
             transcript_state_root: None,
             transcript_retention_limits: TranscriptRetentionLimits::agent_run_default(),
             approval_state_root: None,
+            transcript_budget_exhausted: false,
         }
     }
 
@@ -96,6 +106,14 @@ impl AgentRunLaunchRequest {
     ) -> Self {
         self.transcript_capture_mode = TranscriptCaptureMode::RequiredLocalBounded;
         self.transcript_state_root = Some(state_root.into());
+        self
+    }
+
+    /// RFC-049 D4′: states that preflight cleanup left a byte budget over its
+    /// limit. The caller measures; `validate_transcript_policy` and
+    /// `prepare_transcript_capture` decide what it costs this launch.
+    pub fn with_transcript_budget_exhausted(mut self, exhausted: bool) -> Self {
+        self.transcript_budget_exhausted = exhausted;
         self
     }
 
@@ -338,6 +356,25 @@ impl AgentRunLaunchPlan {
             return Ok(());
         };
 
+        // RFC-049 D4′: the budget was still exhausted after preflight cleanup,
+        // so this run starts **without capture** and the surfaces say so.
+        // `RequiredLocalBounded` never reaches here — `validate_transcript_policy`
+        // refuses it before any process starts — but the same shape is written
+        // here too, so this function is honest read on its own.
+        if self.spec.transcript_capture.budget_exhausted {
+            if self
+                .spec
+                .transcript_capture
+                .mode
+                .rejects_launch_when_unavailable()
+            {
+                return Err(AgentRunTranscriptCaptureError::BudgetExhausted);
+            }
+            self.terminal_launch_spec.set_transcript_writer_config(None);
+            self.transcript_storage_path = None;
+            return Ok(());
+        }
+
         let capture_policy = self.spec.transcript_capture.capture_policy();
         if !capture_policy.permits_transcript_byte_persistence() {
             if self
@@ -385,6 +422,13 @@ impl AgentRunLaunchPlan {
             )));
         self.transcript_storage_path = Some(storage_path);
         Ok(())
+    }
+
+    /// RFC-049 D4′: whether this plan's capture was disabled because a budget
+    /// was still exhausted at preflight — so the run can record **why** it has
+    /// no transcript, rather than leaving the absence unexplained.
+    pub(crate) fn transcript_budget_exhausted(&self) -> bool {
+        self.spec.transcript_capture.budget_exhausted
     }
 
     pub(crate) fn transcript_storage_path(&self) -> Option<&TranscriptStoragePath> {
@@ -532,6 +576,9 @@ pub struct AgentRunTranscriptCapture {
     pub mode: TranscriptCaptureMode,
     pub state_root: Option<PathBuf>,
     pub retention_limits: TranscriptRetentionLimits,
+    /// RFC-049 D4′, carried from the request: the budget was still exhausted
+    /// after preflight cleanup. See `AgentRunLaunchRequest`'s own field.
+    pub budget_exhausted: bool,
 }
 
 impl AgentRunTranscriptCapture {
@@ -553,6 +600,10 @@ impl AgentRunTranscriptCapture {
 pub enum AgentRunTranscriptCaptureError {
     StateRootMissing,
     PolicyDoesNotPermitBytes,
+    /// RFC-049 D4′: a `RequiredLocalBounded` launch whose budget is exhausted.
+    /// Validation refuses this before preparation is reached; see
+    /// `prepare_transcript_capture`.
+    BudgetExhausted,
     Path(TranscriptPathError),
 }
 
@@ -573,20 +624,39 @@ pub enum AgentAdapterApprovalError {
 pub enum AgentRunLaunchValidationError {
     CrossProject,
     WrongProfile,
-    MissingProjectRoot { summary: AgentLaunchSummary },
-    InvalidCwd { summary: AgentLaunchSummary },
-    CwdEscapesProjectRoot { summary: AgentLaunchSummary },
+    MissingProjectRoot {
+        summary: AgentLaunchSummary,
+    },
+    InvalidCwd {
+        summary: AgentLaunchSummary,
+    },
+    CwdEscapesProjectRoot {
+        summary: AgentLaunchSummary,
+    },
     WorkspaceLocalProfileBlocked,
     WorkspaceLocalPromptBlocked,
     WorkspaceLocalEnvironmentBlocked,
-    WorkspaceLocalExecutableBlocked { path: PathBuf },
-    ProjectLocalPathLookupBlocked { path: PathBuf },
-    ExecutableUnavailable { summary: AgentLaunchSummary },
-    WorkspaceDiscoveryBlocked { summary: AgentLaunchSummary },
+    WorkspaceLocalExecutableBlocked {
+        path: PathBuf,
+    },
+    ProjectLocalPathLookupBlocked {
+        path: PathBuf,
+    },
+    ExecutableUnavailable {
+        summary: AgentLaunchSummary,
+    },
+    WorkspaceDiscoveryBlocked {
+        summary: AgentLaunchSummary,
+    },
     MissingWorkspaceDiscoveryEvidence,
     ManagedCapabilityMissing,
     RequiredTranscriptStateRootMissing,
     RequiredTranscriptPolicyDoesNotPermitBytes,
+    /// RFC-049 D4′ / RFC-011: a `RequiredLocalBounded` launch whose byte budget
+    /// is still exhausted after cleanup. **No process starts.** Unreachable from
+    /// the product — nothing in it requests this mode — and deliberately kept
+    /// so: RFC-011 says such a workflow must be reviewed before it exists.
+    RequiredTranscriptBudgetExhausted,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -699,6 +769,7 @@ impl AgentRunLaunchValidator {
                 mode: request.transcript_capture_mode,
                 state_root: request.transcript_state_root.clone(),
                 retention_limits: request.transcript_retention_limits,
+                budget_exhausted: request.transcript_budget_exhausted,
             },
             approval_state_root: request.approval_state_root.clone(),
         })
@@ -794,10 +865,19 @@ fn validate_transcript_policy(
     if request.transcript_state_root.is_none() {
         return Err(AgentRunLaunchValidationError::RequiredTranscriptStateRootMissing);
     }
+    // RFC-049 D4′ / RFC-011: *"`RequiredLocalBounded` should reject launch or
+    // fail preflight before process start."* An exhausted budget is exactly
+    // that case — the transcript this mode requires cannot be written, and the
+    // alternative (freeing bytes by deleting a live writer's file) is what §2
+    // forbids at any pressure.
+    if request.transcript_budget_exhausted {
+        return Err(AgentRunLaunchValidationError::RequiredTranscriptBudgetExhausted);
+    }
     let capture = AgentRunTranscriptCapture {
         mode: request.transcript_capture_mode,
         state_root: request.transcript_state_root.clone(),
         retention_limits: request.transcript_retention_limits,
+        budget_exhausted: request.transcript_budget_exhausted,
     };
     if !capture
         .capture_policy()

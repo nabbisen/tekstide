@@ -1052,6 +1052,16 @@ actor/source pairing and the local-data summary's limits. This test exercises th
 coordinator's queue expiry and touches none of them. It passed in runs 1 and 2 of that gate and in
 **all five runs** of the gate that followed, on the same tree.
 
+## Recurrence, 2026-09-16 — RFC-049 PR-049-C's second commit, ablation B5 (my run)
+
+`approval::tests::channel::bind_recovers_from_a_stale_socket_file` failed once, inside ablation B5
+(the launch confirmation's verdict recomputed after the click). **This is row 1, the original from
+response 213.**
+
+**Not the ablation.** B5 changes which boolean one GUI launch path passes; this test binds an approval
+socket over a stale socket file and reaches no launch path at all. It passed in the other ten
+ablation runs of the same batch and in the gate on the restored tree.
+
 ## Recurrence, 2026-09-16 — RFC-049 PR-049-C's review (reviewer's run)
 
 `approval::tests::channel::bind_recovers_from_a_stale_socket_file` failed once, in the reviewer's

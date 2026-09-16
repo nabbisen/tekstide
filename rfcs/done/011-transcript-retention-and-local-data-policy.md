@@ -299,6 +299,7 @@ Recommended slices:
 - AgentRun transcript byte capture is local-only, bounded, purgeable, and opt-out capable.
 - Transcript storage paths are outside project roots and under Tekstide-managed state.
 - Retention is bounded per transcript, per project, and app-wide, with metadata-only accounting of total retained transcript bytes.
+  - **Corrected 2026-09-16 (RFC-049 D1), not reworded.** When this RFC closed, only `max_bytes_per_transcript` was enforced: the per-project and app-wide budgets were computed into `TranscriptLocalDataSummary::budget_pressure` and read by nothing, and `max_age_days` was read only by a validity check. As of RFC-049 PR-049-C the age limit and both byte budgets are enforced, at the two moments D2 names — an agent-run launch preflight and a project open — and **never on a timer**. The byte budgets are enforced **at launch**: no new capture begins while one is exhausted. They are not a hard ceiling, and this criterion should never have implied one — runs already capturing continue to their per-transcript limit, so a budget can be exceeded by up to *(capturing runs × per-transcript limit)*. Mid-stream enforcement needs byte accounting shared across writers in different terminals and is reserved in `future-work.md`.
 - Transcript metadata records byte count, retention state, timestamps, and local reference without storing content in summaries.
 - Capture integrates with AgentRun launch without weakening RFC-010 launch validation or lifecycle truth.
 - Purge works for transcript, AgentRun, and ProjectSession scopes.

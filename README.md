@@ -96,8 +96,11 @@ Tekstide is local-first: **it does not send project data anywhere.** It writes u
 Trust Settings (`Ctrl+Alt+U`) can decline capture for a project's future runs and purge its
 transcripts, **including those from earlier runs**. Purge leaves two kinds of file in place: a
 transcript that was still being written when the project opened, and transcripts whose project is no
-longer in the recent list. **Deleting the `transcripts/` directory removes everything.** A retention
-age can be configured, but **nothing removes a transcript because of its age yet**.
+longer in the recent list. **Deleting the `transcripts/` directory removes everything.**
+
+Transcripts are also removed **without being asked**: one past the configured retention age
+(`transcript_retention_days`, 30 by default) is deleted when you open its project or launch an AI CLI
+run in it. Nothing runs on a timer. The project board says what was removed.
 
 What each file can contain, and how to remove it:
 [Local data and privacy](https://nabbisen.github.io/tekstide/users/local-data-and-privacy.html).

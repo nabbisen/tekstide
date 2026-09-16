@@ -722,6 +722,118 @@ fn a_required_local_bounded_launch_is_refused_when_its_transcript_file_is_locked
     cleanup_root(state_root);
 }
 
+/// RFC-049 D4′: when preflight cleanup leaves a byte budget over its limit, a
+/// `LocalBounded` run **starts anyway, without capture** — it is not refused,
+/// and nothing live is deleted to make room (§2).
+///
+/// Both halves are asserted: the process really started, and no transcript
+/// exists for it — no file on disk, no `Transcript` record, no reference on the
+/// run. The run records **why**, which neither opt-out nor a failed write is.
+#[test]
+fn a_launch_whose_budget_is_exhausted_starts_without_capture() {
+    let root = test_root("agent-budget-exhausted-root");
+    let state_root = test_root("agent-budget-exhausted-state");
+    let mut project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(Path::new("/bin/sh"));
+    let validation = AgentRunLaunchValidator
+        .validate(
+            &project,
+            &profile,
+            &request_for(&project, &profile)
+                .with_local_bounded_transcript(&state_root)
+                .with_transcript_budget_exhausted(true),
+        )
+        .expect("D4′ disables capture for this mode rather than refusing the launch");
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
+
+    let would_be = TranscriptPathResolver
+        .resolve_agent_run(TranscriptPathRequest::new(
+            &state_root,
+            &root,
+            project.id().clone(),
+            plan.agent_run().id.clone(),
+        ))
+        .unwrap();
+
+    let mut runtime = LinuxTerminalRuntime::new();
+    let (agent_run_id, _events, _endpoint) = project
+        .launch_agent_run_with_runtime(plan, &mut runtime)
+        .expect("an exhausted budget must not refuse a LocalBounded launch (D4′)");
+
+    assert_eq!(
+        project.runtime_summary().running_processes,
+        1,
+        "the process started"
+    );
+    let run = project
+        .agent_runs()
+        .iter()
+        .find(|run| run.id == agent_run_id)
+        .expect("AgentRun should be recorded");
+    assert_eq!(run.transcript_ref, None);
+    assert!(
+        project.transcripts().is_empty(),
+        "no transcript record exists for a run that was never given one"
+    );
+    assert!(
+        !would_be.transcript_file().exists(),
+        "and no file was created at the path a captured run would have used"
+    );
+    assert_eq!(
+        run.transcript_absence,
+        Some(TranscriptAbsence::BudgetExhausted),
+        "the run says why, distinctly from the user declining capture"
+    );
+
+    let handle = TerminalRuntimeHandle::new(run.terminal_id.clone().unwrap(), project.id().clone());
+    runtime.write_input(&handle, b"exit 0\n").unwrap();
+    let _ = runtime.wait_for_exit(&handle, Duration::from_secs(5));
+    cleanup_root(root);
+    cleanup_root(state_root);
+}
+
+/// RFC-011: *"`RequiredLocalBounded` should reject launch or fail preflight
+/// before process start."* An exhausted budget is that case — the transcript
+/// this mode requires cannot be written, and freeing bytes would mean deleting
+/// one a run may still be writing (§2).
+///
+/// **Unreachable from the product**, like the locked-file refusal above: nothing
+/// in it requests this mode, and RFC-011 says such a workflow must be reviewed
+/// before it exists. Reached here through the builder, because it is still the
+/// core's contract.
+#[test]
+fn a_required_local_bounded_launch_is_refused_when_the_budget_is_exhausted() {
+    let root = test_root("agent-budget-required-root");
+    let state_root = test_root("agent-budget-required-state");
+    let project = restricted_project(ProjectId::for_test(1), &root);
+    let profile = built_in_profile(Path::new("/bin/sh"));
+
+    let error = AgentRunLaunchValidator
+        .validate(
+            &project,
+            &profile,
+            &request_for(&project, &profile)
+                .with_required_local_bounded_transcript(&state_root)
+                .with_transcript_budget_exhausted(true),
+        )
+        .expect_err("a mode that requires capture must be refused before any process starts");
+
+    assert_eq!(
+        error,
+        crate::agent::AgentRunLaunchValidationError::RequiredTranscriptBudgetExhausted
+    );
+    assert_eq!(
+        project.runtime_summary().running_processes,
+        0,
+        "no process starts"
+    );
+    assert!(project.agent_runs().is_empty());
+    assert!(project.transcripts().is_empty());
+
+    cleanup_root(root);
+    cleanup_root(state_root);
+}
+
 /// RFC-050 PR-050-B, the acceptance test: **a real restart.** A real launch
 /// writes a real transcript; the application's state is dropped and a fresh
 /// `AppState` is restored from the first one's saved recent-project state, as

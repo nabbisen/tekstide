@@ -308,6 +308,19 @@ project-board-audit-history = { $count ->
 project-board-recent-projects-reset = The recent-projects list could not be read, so this start began with an empty one.
 project-board-recent-projects-reset-transcripts = Transcripts from before this start remain on disk: { $bytes } bytes in { $path }.
 project-board-recent-projects-reset-moved = The unreadable list was moved to { $path }.
+# RFC-049, response 385: policy removals are told to the user here. The audit
+# record is not disclosure -- nobody reads the audit store -- and the cleanup
+# marks and purges in one pass, so nothing is ever visibly `Expired` either.
+# Absent when the last cleanup removed nothing.
+project-board-transcript-policy-removal = { $count ->
+    [one] Transcript retention removed { $count } transcript ({ $bytes } bytes) that was past the limits in your settings.
+   *[other] Transcript retention removed { $count } transcripts ({ $bytes } bytes) that were past the limits in your settings.
+}
+# Deliberately separate from the line above: a deletion that failed has a
+# remedy -- the file can be looked at -- and it goes on stopping the cleanup at
+# every launch and project open until it is. "Nothing could be freed" would say
+# none of that.
+project-board-transcript-policy-deletion-failed = A transcript that retention tried to remove could not be deleted. It stays on disk, and the cleanup will stop at it again until it can be removed.
 project-board-configuration-ignored = Configuration: ignored, defaults in force. The problem is at { $key }.
 
 # §6's second state, and response 376's requirement that it name the
@@ -338,6 +351,12 @@ keyboard-help-reload-configuration = Re-read the configuration file
 configured-profile-dialog-title = Launch a configured AI CLI?
 configured-profile-dialog-body = Your configuration file asks to launch { $executable }. It was defined in { $path }. Nothing from that file has run yet this session.
 configured-profile-dialog-launch = Launch it
+# RFC-049 D4′, worded under RFC-047 §5: states the fact and why it happened,
+# implies no danger, and offers no fix from here, because there is none to
+# offer -- what could not be freed belongs to runs that may still be writing.
+# Absent unless the cleanup at this launch's preflight left a budget over its
+# limit, which is the only reason the line means anything when it appears.
+configured-profile-dialog-transcript-budget-exhausted = This run's output will not be saved: the transcripts already on disk are at the limit, and nothing left could be removed without deleting a transcript that a run may still be writing.
 configured-profile-dialog-cancel = Cancel
 
 # RFC-045 PR-045-C, D4's reload half. Only *weakening* changes reach
@@ -726,6 +745,11 @@ agent-run-detail-empty = No active project.
 agent-run-detail-no-runs = No agent run in this project yet.
 agent-run-detail-heading = AgentRun Report
 agent-run-detail-no-transcript = No transcript is available for this run.
+# RFC-050 D3 and RFC-049 D4′: when the run records *why* it was never given a
+# transcript, the detail says that instead of the generic line above. Neither
+# case is the user declining capture, and neither is a failed write.
+agent-run-detail-no-transcript-writer-lock = This run has no transcript: its transcript file was already open and locked by another Tekstide when the run started, so nothing was written rather than writing over it.
+agent-run-detail-no-transcript-budget-exhausted = This run has no transcript: the transcripts already on disk were at the limit when it started, and nothing left could be removed without deleting one a run may still be writing.
 agent-run-detail-read-error = The transcript for this run could not be read.
 # D5: `Complete` vs `StillBeingWritten`, in the type -- rendered as two
 # distinct messages, never flattened into one "status" string with a

@@ -66,9 +66,19 @@ project**, and **1 GiB across the application**. Capture is best-effort — if w
 mid-session the run marks capture failed and the terminal stays usable, rather than silently
 continuing unrecorded.
 
-**A configured retention age is recorded but not yet enforced.** See the caveat in
-[Configuration](./configuration.md#caveat-on-transcript_retention_days): nothing removes a
-transcript because of its age.
+**Transcripts past the configured retention age are removed without being asked.** The age is
+`transcript_retention_days` in [Configuration](./configuration.md), 30 days by default, measured
+from a transcript's last write.
+
+This happens at exactly two moments, both of which you cause: **opening a project**, and
+**launching an AI CLI run** in it. There is no timer, no watcher, and no background sweep — if
+Tekstide is not doing one of those two things, nothing is being deleted. **The project board says
+what was removed**, and says separately when a transcript could not be deleted.
+
+A transcript a run may still be writing is **never** removed, at any pressure. When that means the
+byte budgets cannot be brought under their limits, the next run starts **without a transcript**
+rather than deleting a live one — the launch confirmation says so before you start it, and the
+run's own AgentRun Report says why it has none.
 
 ### The two controls, on Trust Settings (`Ctrl+Alt+U`)
 

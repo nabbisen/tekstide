@@ -35,6 +35,29 @@ the retained count and purge cover them. The count also no longer includes trans
   reset, how many bytes of earlier transcripts remain and where, and where the unreadable file was
   moved. It says nothing on any other start.
 
+### Added — transcripts are now removed when they pass the retention age
+
+**`transcript_retention_days` is enforced.** Until now Tekstide recorded the value, checked it for
+validity, and never acted on it; RFC-011 specified this cleanup and it had no implementation.
+
+**The first run after upgrading will delete every transcript already older than the configured age** —
+with the default of 30 days, that is every transcript from more than a month ago. Nothing warned about
+them before, because nothing was removing them.
+
+- **Two moments, both of which you cause:** opening a project, and launching an AI CLI run in it.
+  **No timer, no watcher, no background sweep.**
+- **The project board says what was removed**, and says separately when a transcript could not be
+  deleted — that one has a remedy, and the cleanup will stop at it again until it is taken.
+- **A transcript a run may still be writing is never removed**, at any pressure. When that leaves the
+  byte budgets over their limits, the next run **starts without a transcript** rather than deleting a
+  live one: the launch confirmation says so before you start it, and the run's AgentRun Report says
+  why it has none.
+- **Policy removals are audited as the product's own act** (`AppPolicy`/`ExplicitCleanup`), never as a
+  purge you clicked. A cleanup that removed nothing records nothing.
+- The per-project and app-wide byte budgets are enforced **at launch** — no new capture begins while
+  one is exhausted. They are not a hard ceiling: runs already capturing continue to their
+  per-transcript limit.
+
 ### Changed — `[agent] transcript_retention_days = 0` is now refused
 
 `0` was accepted and then ignored. It reads as *no age limit at all* inside the product, which is

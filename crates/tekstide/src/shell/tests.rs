@@ -105,7 +105,7 @@ fn open_first_use_confirmation(state: &mut State) {
         .expect("fixture: a real config file")
         .to_path_buf();
     state.modal = Some(ModalContent::ConfiguredProfileFirstUse(
-        super::configured_profile_confirmation(&profile, source_file),
+        super::configured_profile_confirmation(&profile, source_file, false),
     ));
 }
 
@@ -5393,9 +5393,15 @@ fn a_configured_transcript_retention_reaches_a_real_launch_plans_privacy_policy(
 
     let state_root = fresh_project_dir("config-retention-state-root");
     let project = app_shell.state().active_project().unwrap();
-    let plan =
-        configured_agent_run_launch_plan(project, &configuration, &profile, Some(state_root), true)
-            .expect("a resolvable profile in a fresh project should plan cleanly");
+    let plan = configured_agent_run_launch_plan(
+        project,
+        &configuration,
+        &profile,
+        Some(state_root),
+        true,
+        false,
+    )
+    .expect("a resolvable profile in a fresh project should plan cleanly");
 
     let policy = plan.spec().transcript_capture().capture_policy().privacy;
     let retention = policy
@@ -13752,6 +13758,438 @@ fn a_closed_recent_projects_transcripts_count_as_claimed() {
         state.transcript_disk_usage.unclaimed_bytes, 0,
         "a remembered project's transcripts belong to it even while it is closed"
     );
+}
+
+// --- RFC-049 PR-049-C: the triggers, D4′, and the disclosures ---------------
+
+/// Ages a transcript file by moving its mtime back, which is where a found
+/// transcript's age comes from (RFC-050 D4).
+fn age_transcript_file(path: &std::path::Path, days: u64) {
+    let file = std::fs::File::options()
+        .write(true)
+        .open(path)
+        .expect("the transcript file must be openable to age it");
+    file.set_modified(
+        std::time::SystemTime::now() - std::time::Duration::from_secs(days * 24 * 60 * 60),
+    )
+    .expect("setting an mtime must succeed on the test filesystem");
+}
+
+fn earlier_transcript_for(
+    project_id: &tekstide_core::project::ProjectId,
+    bytes: &[u8],
+) -> std::path::PathBuf {
+    let state_root =
+        super::resolve_agent_run_state_dir().expect("a test build always has its own state root");
+    let path = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(tekstide_core::domain::AgentRunId::new_uuid().as_str())
+        .join("transcript.log");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, bytes).unwrap();
+    path
+}
+
+/// RFC-049 D2, **the project-open trigger**: opening a project is one of the
+/// two moments retention runs, and it runs after the load — so a transcript an
+/// earlier run left, now past the configured age, is gone by the time the
+/// project is on screen.
+#[test]
+fn opening_a_project_removes_a_transcript_past_its_retention_age() {
+    let (mut state, project_id, _project_dir) =
+        state_with_cached_trusted_recent_project("open-trigger-expiry");
+    let expired = earlier_transcript_for(&project_id, b"output from a run two months ago");
+    age_transcript_file(&expired, 60);
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+
+    assert!(
+        !expired.exists(),
+        "the project-open trigger removes a transcript past its age, from disk"
+    );
+    let project = state.app_shell.state().project(&project_id).unwrap();
+    assert_eq!(project.purgeable_transcript_count(), 0);
+}
+
+/// The other half of D2, and the reason the age matters rather than the
+/// trigger: a transcript **within** the configured age survives the same open.
+#[test]
+fn opening_a_project_keeps_a_transcript_within_its_retention_age() {
+    let (mut state, project_id, _project_dir) =
+        state_with_cached_trusted_recent_project("open-trigger-fresh");
+    let recent = earlier_transcript_for(&project_id, b"output from a run yesterday");
+    age_transcript_file(&recent, 1);
+
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+
+    assert!(recent.exists(), "one day old, under a thirty-day limit");
+    let project = state.app_shell.state().project(&project_id).unwrap();
+    assert_eq!(project.purgeable_transcript_count(), 1);
+}
+
+/// RFC-049 D2, **the launch trigger**: the second of the two moments. The run
+/// itself is incidental here — what is asserted is that the cleanup ran before
+/// it, which is what makes the budget verdict the launch uses current.
+#[test]
+fn launching_an_agent_run_removes_a_transcript_past_its_retention_age() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("launch-trigger-expiry");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let project_id = app_shell.state().active_project().unwrap().id().clone();
+    let mut state = state_with(app_shell);
+    let expired = earlier_transcript_for(&project_id, b"output from a run two months ago");
+    age_transcript_file(&expired, 60);
+    // The load alone, which is what the project-open path does before its own
+    // cleanup runs. Calling it directly here is what isolates the launch
+    // trigger: the record exists, and no cleanup has run yet, so if the launch
+    // does not clean up, nothing does.
+    super::load_earlier_transcripts(&mut state.app_shell, &project_id);
+
+    let bin_dir = fresh_project_dir("launch-trigger-expiry-bin");
+    let executable = bin_dir.join("fake-ai-cli");
+    std::fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+    let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions).unwrap();
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "fake-ai-cli",
+        "Fake AI CLI",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: executable,
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    attempt_agent_run_launch_with_profile(&mut state, profile)
+        .expect("a resolvable, trust-compatible profile should launch for real");
+
+    assert!(
+        !expired.exists(),
+        "the launch trigger removes a transcript past its age before the run starts"
+    );
+}
+
+/// RFC-049 D2, the gap the **live walkthrough** found and no test held: a
+/// project opened from the **command line** is opened before `State` exists, so
+/// it never reaches the GUI's `Added` arm where the trigger lives. A
+/// two-month-old transcript survived that open in the real application.
+///
+/// `run_transcript_retention_for_open_projects` is what `boot()` calls once
+/// `State` is built, and this drives it against a project already open.
+#[test]
+fn a_project_already_open_when_the_state_is_built_gets_its_cleanup_too() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("boot-trigger-expiry");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let project_id = app_shell.state().active_project().unwrap().id().clone();
+    let expired = earlier_transcript_for(&project_id, b"output from a run two months ago");
+    age_transcript_file(&expired, 60);
+    // `main.rs` loads a command-line project's earlier transcripts as it opens
+    // it (RFC-050), before `State` exists; the cleanup is what had no
+    // equivalent. Loading here is that half, so this drives the half that was
+    // missing.
+    super::load_earlier_transcripts(&mut app_shell, &project_id);
+    let mut state = state_with(app_shell);
+
+    super::run_transcript_retention_for_open_projects(&mut state);
+
+    assert!(
+        !expired.exists(),
+        "a project opened before State existed still gets the open trigger"
+    );
+}
+
+/// RFC-050 response 393: **the figure a cleanup decides on is scanned, not read
+/// from the cache.** `State.transcript_disk_usage` is refreshed at boot, at each
+/// load and after each purge, so at a launch it is already behind every byte
+/// written since.
+///
+/// This asserts the difference directly: bytes written after the cache was
+/// filled are invisible to the cached figure and visible to the scan the
+/// cleanup uses. The scan takes an `ApplicationShell`, which cannot reach the
+/// cached field at all.
+#[test]
+fn the_cleanup_scans_the_app_wide_figure_rather_than_reading_the_cache() {
+    let (mut state, project_id, _project_dir) =
+        state_with_cached_trusted_recent_project("fresh-scan-not-cache");
+    super::refresh_transcript_disk_usage(&mut state);
+    let cached_at_boot = state.transcript_disk_usage.total_bytes;
+
+    let written = earlier_transcript_for(&project_id, b"bytes written after the cache was filled");
+
+    assert_eq!(
+        state.transcript_disk_usage.total_bytes, cached_at_boot,
+        "the cached figure cannot know about a file written since it was taken"
+    );
+    let scanned = super::transcript_disk_usage_for(&state.app_shell).total_bytes;
+    assert_eq!(
+        scanned,
+        cached_at_boot + std::fs::metadata(&written).unwrap().len(),
+        "the scan the cleanup uses sees it"
+    );
+}
+
+/// RFC-049 D4′: the launch confirmation says this run's output will not be
+/// kept, when that is true of the launch it is confirming.
+#[test]
+fn the_launch_confirmation_says_when_this_runs_output_will_not_be_kept() {
+    let state = state_with(ApplicationShell::new());
+    let modal = budget_confirmation_modal(true);
+
+    let notice = super::configured_profile_transcript_budget_notice(&state.catalog, &modal)
+        .expect("an exhausted budget must be disclosed before the click");
+
+    assert!(notice.contains("will not be saved"), "{notice}");
+}
+
+/// And says nothing when it is not true — which is every ordinary launch, and
+/// the reason the line means something when it appears.
+#[test]
+fn the_launch_confirmation_says_nothing_about_transcripts_when_the_budget_is_fine() {
+    let state = state_with(ApplicationShell::new());
+    let modal = budget_confirmation_modal(false);
+
+    assert_eq!(
+        super::configured_profile_transcript_budget_notice(&state.catalog, &modal),
+        None
+    );
+}
+
+fn budget_confirmation_modal(budget_exhausted: bool) -> super::ConfiguredProfileConfirmModal {
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "fake-ai-cli",
+        "Fake AI CLI",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: std::path::PathBuf::from("/bin/sh"),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+    super::configured_profile_confirmation(
+        &profile,
+        std::path::PathBuf::from("/fixture/config.toml"),
+        budget_exhausted,
+    )
+}
+
+/// RFC-049 D4′: **what the confirmation shows is what the launch applies.**
+///
+/// The dialog is opened carrying "the budget is exhausted", which is what the
+/// preflight cleanup concluded. Nothing is exhausted by the time the user
+/// clicks — this fixture has no transcripts at all — so a launch that
+/// re-measured would quietly capture a transcript for a run the user was told
+/// would have none. The captured verdict must win.
+#[test]
+fn the_launch_applies_the_budget_decision_the_confirmation_was_opened_with() {
+    let (mut state, _executable, _config_home) =
+        state_with_a_configured_profile_named("carried-decision", "Configured CLI");
+    let profile = state.configuration.default_profile().cloned().unwrap();
+    let source_file = state.configuration.config_file().unwrap().to_path_buf();
+    state.modal = Some(ModalContent::ConfiguredProfileFirstUse(
+        super::configured_profile_confirmation(&profile, source_file, true),
+    ));
+
+    let Some(ModalContent::ConfiguredProfileFirstUse(modal)) = state.modal.take() else {
+        panic!("precondition: the confirmation is open");
+    };
+    super::confirm_and_launch_configured_profile(&mut state, &modal);
+
+    let project = state
+        .app_shell
+        .state()
+        .active_project()
+        .expect("the fixture's project");
+    let run = project
+        .agent_runs()
+        .last()
+        .expect("confirming the dialog launches the run");
+    assert_eq!(run.transcript_ref, None);
+    assert!(
+        project.transcripts().is_empty(),
+        "no transcript may exist for a run the confirmation said would have none"
+    );
+    assert_eq!(
+        run.transcript_absence,
+        Some(tekstide_core::domain::TranscriptAbsence::BudgetExhausted),
+        "and the run records the same reason the user was shown"
+    );
+}
+
+/// RFC-049, response 385: the board says what the policy removed. Absent when
+/// the last cleanup removed nothing, so the line is never standing furniture.
+#[test]
+fn the_board_says_what_retention_removed() {
+    let mut state = state_with(ApplicationShell::new());
+    state.transcript_cleanup_notice = Some(super::TranscriptCleanupNotice {
+        removed_transcripts: 2,
+        removed_bytes: 4096,
+        a_deletion_failed: false,
+    });
+
+    let lines = super::project_board_transcript_cleanup_lines(&state);
+
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].contains('2') && lines[0].contains("4096"),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn the_board_says_nothing_when_retention_removed_nothing() {
+    let state = state_with(ApplicationShell::new());
+
+    assert!(super::project_board_transcript_cleanup_lines(&state).is_empty());
+}
+
+/// §4's rule at the point the notice is built, not only where it is rendered:
+/// **a cleanup that did nothing produces no notice at all.** The triggers are
+/// every project open and every launch, so a notice per trigger would be
+/// standing furniture within a session.
+///
+/// Written after an ablation exposed the gap: removing this guard failed
+/// nothing, because the rendering test above supplies the `None` itself rather
+/// than getting it from a real cleanup.
+#[test]
+fn a_cleanup_that_did_nothing_produces_no_notice() {
+    let empty = tekstide_core::project::TranscriptRetentionCleanup::default();
+
+    assert_eq!(super::TranscriptCleanupNotice::from_cleanup(&empty), None);
+}
+
+/// And one that removed something does produce one, carrying both figures.
+#[test]
+fn a_cleanup_that_removed_something_produces_a_notice_with_its_figures() {
+    let cleanup = tekstide_core::project::TranscriptRetentionCleanup {
+        expired: tekstide_core::project::ProjectTranscriptPurgeSummary {
+            purged_transcripts: 2,
+            bytes_removed: 300,
+            ..Default::default()
+        },
+        budget: tekstide_core::project::ProjectTranscriptPurgeSummary {
+            purged_transcripts: 1,
+            bytes_removed: 40,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let notice = super::TranscriptCleanupNotice::from_cleanup(&cleanup)
+        .expect("a cleanup that deleted bytes has something to say");
+
+    assert_eq!(notice.removed_transcripts, 3, "both passes are counted");
+    assert_eq!(notice.removed_bytes, 340);
+    assert!(!notice.a_deletion_failed);
+}
+
+/// Response 385's distinction, on the surface: **a deletion that failed is not
+/// "nothing could be freed"**, and gets its own line, because it has a remedy
+/// and will stop the cleanup again at every trigger until it is taken.
+#[test]
+fn the_board_reports_a_failed_deletion_separately_from_what_was_removed() {
+    let mut state = state_with(ApplicationShell::new());
+    state.transcript_cleanup_notice = Some(super::TranscriptCleanupNotice {
+        removed_transcripts: 0,
+        removed_bytes: 0,
+        a_deletion_failed: true,
+    });
+
+    let lines = super::project_board_transcript_cleanup_lines(&state);
+
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].contains("could not be deleted"),
+        "the failure is named, not folded into a removal count: {lines:?}"
+    );
+}
+
+/// RFC-049 D4′: **the run's detail says why it has no transcript**, and says
+/// something different from the generic "no transcript is available" — which
+/// describes what a reader could not find, not a run that was never given one.
+#[test]
+fn the_run_detail_says_a_budget_left_this_run_without_a_transcript() {
+    let state = state_with(ApplicationShell::new());
+    let mut run = tekstide_core::domain::AgentRun::draft(
+        tekstide_core::project::ProjectId::new_uuid(),
+        "fake-ai-cli",
+        "a run",
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+    run.transcript_absence = Some(tekstide_core::domain::TranscriptAbsence::BudgetExhausted);
+
+    let line = super::agent_run_detail_unavailable_line(
+        &state.catalog,
+        &run,
+        super::AgentRunTranscriptUnavailable::NoTranscriptRef,
+    );
+
+    assert!(line.contains("were at the limit"), "{line}");
+    assert_ne!(
+        line,
+        state.catalog.get("agent-run-detail-no-transcript"),
+        "the reason replaces the generic sentence rather than sitting beside it"
+    );
+    assert_ne!(
+        line,
+        state.catalog.get("transcript-capture-declined"),
+        "and it never reads as the user having declined capture"
+    );
+}
+
+/// RFC-050 D3's half of the same surface, which had no rendering until now.
+#[test]
+fn the_run_detail_says_a_held_lock_left_this_run_without_a_transcript() {
+    let state = state_with(ApplicationShell::new());
+    let mut run = tekstide_core::domain::AgentRun::draft(
+        tekstide_core::project::ProjectId::new_uuid(),
+        "fake-ai-cli",
+        "a run",
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+    run.transcript_absence = Some(tekstide_core::domain::TranscriptAbsence::WriterLockUnavailable);
+
+    let line = super::agent_run_detail_unavailable_line(
+        &state.catalog,
+        &run,
+        super::AgentRunTranscriptUnavailable::NoTranscriptRef,
+    );
+
+    assert!(line.contains("locked by another Tekstide"), "{line}");
+}
+
+/// A run with no recorded reason still gets the generic sentence: this slice
+/// adds reasons, it does not claim one where none was recorded.
+#[test]
+fn the_run_detail_falls_back_to_the_generic_sentence_without_a_recorded_reason() {
+    let state = state_with(ApplicationShell::new());
+    let run = tekstide_core::domain::AgentRun::draft(
+        tekstide_core::project::ProjectId::new_uuid(),
+        "fake-ai-cli",
+        "a run",
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    let line = super::agent_run_detail_unavailable_line(
+        &state.catalog,
+        &run,
+        super::AgentRunTranscriptUnavailable::NoTranscriptRef,
+    );
+
+    assert_eq!(line, state.catalog.get("agent-run-detail-no-transcript"));
 }
 
 /// RFC-040 PR-040-B: the real, clickable "Close" button -- same

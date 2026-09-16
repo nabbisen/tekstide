@@ -1489,6 +1489,45 @@ fn a_policy_cleanup_that_removed_nothing_writes_no_record() {
     );
 }
 
+/// Response 396's required addition: **a cleanup that removed nothing because
+/// every deletion failed still records `Failed`.**
+///
+/// §4's *"a cleanup that deleted nothing writes no record"* is for **nothing to
+/// do**, not for **everything failed** — and the second is the case a user most
+/// needs to find later, since a failed candidate goes on stopping the budget
+/// pass at every trigger. Before this, `removed_anything()` alone decided, and
+/// both existing tests that carry failures also carry a successful purge, so
+/// nothing held it.
+#[test]
+fn a_policy_cleanup_whose_every_deletion_failed_still_records_failed() {
+    let dirs = TestAuditDirs::new("integration-transcript-policy-cleanup-all-failed");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let project = project_for(&dirs, 1);
+    let cleanup = crate::project::TranscriptRetentionCleanup {
+        expired: crate::project::ProjectTranscriptPurgeSummary {
+            requested_transcripts: 1,
+            purged_transcripts: 0,
+            ..Default::default()
+        },
+        failures: vec![crate::project::ProjectTranscriptError::MissingTranscript],
+        ..Default::default()
+    };
+
+    let status = AuditCoordinator::new(&mut store, &mut health)
+        .record_transcript_policy_cleanup(project.id().clone(), &cleanup)
+        .expect("a cleanup that tried and failed is not a cleanup with nothing to do");
+
+    assert_eq!(status, AuditObservationStatus::Persisted);
+    let records = store.query(&AuditQuery::latest(10)).unwrap().records;
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].record.outcome, AuditOutcome::Failed);
+    assert_eq!(
+        records[0].record.actor_kind,
+        crate::audit::AuditActorKind::AppPolicy
+    );
+}
+
 /// The outcome choice this slice had to make, pinned so a later reader can
 /// disagree with it deliberately: a pass that removed some transcripts and
 /// failed on others records **`Failed`**. The record exists because bytes were

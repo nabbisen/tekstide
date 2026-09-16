@@ -83,7 +83,12 @@ now"): refusing `transcript_retention_days = 0`; the actor/source pairing and no
 empty cleanup; stale `Expired` marks re-checked and cleared; "a deletion failed" reported
 separately; and D5 as restated below. The purge-defect disclosure landed on its own at `c2f5092`.
 
-- [ ] Both triggers fire; **no timer, watcher, or idle sweep exists anywhere** (D2). Grep for one.
+- [x] Both triggers fire; **no timer, watcher, or idle sweep exists anywhere** (D2). Grep for one.
+      *Second commit. Production callers of `run_transcript_retention_cleanup`: the launch preflight
+      and the project open — and, after the live walkthrough found it missing, a project already open
+      when `State` is built (a command-line open, which never reaches the GUI's `Added` arm). Grepped
+      for timers/watchers/sweeps touching retention: none. B1 and B2 each fail their trigger's test
+      alone; the boot case has its own test.*
 - [x] A policy cleanup writes `TranscriptPurge` as **`(AppPolicy, ExplicitCleanup)`**, and a user
       purge in the same file writes `(User, TrustedUi)` — **both read back from a real store**, so
       the distinction §4 requires is visible in one place.
@@ -91,33 +96,69 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
       `a_policy_cleanup_and_a_user_purge_are_recorded_as_different_actors` writes both into one real
       store and reads them back. A4 (record as the user) fails it alone. **No production caller yet**
       — the triggers that call it are the next commit.*
-- [ ] **A cleanup that removed nothing because every deletion failed records `Failed`** (response 396).
+- [x] **A cleanup that removed nothing because every deletion failed records `Failed`** (response 396).
       Today it records nothing: the producer returns `None` whenever nothing was purged, so a policy
       deletion that tried and could not is invisible. §4's "deleted nothing writes no record" is for
       *nothing to do*. **Ablation:** drop the failure arm from the condition; the test fails alone.
+      *`removed_anything() || a_deletion_failed()`;
+      `a_policy_cleanup_whose_every_deletion_failed_still_records_failed`. B12 fails it alone.*
 - [x] A cleanup that deleted nothing writes **no record**. **Ablation:** record unconditionally.
       *`removed_anything()` counts deletions only, so a pass that merely marked or cleared writes
       nothing. A3 fails `a_policy_cleanup_that_removed_nothing_writes_no_record` alone.*
-- [ ] **The exhaustion check reads a fresh scan** (RFC-050, response 393). The GUI's app-wide figure is
+- [x] **The exhaustion check reads a fresh scan** (RFC-050, response 393). The GUI's app-wide figure is
       a cache, refreshed at boot, at each load and after each purge, so it misses bytes written since.
       The launch check scans `transcripts/` at preflight and never reads that cache.
-- [ ] **D4′: launch cleanup leaves a budget exhausted → the run starts with capture disabled.** Assert
+      *The cleanup takes its app-wide figure from `transcript_disk_usage_for(&state.app_shell)`, a
+      scan; the cached figure lives on `State`, which that function cannot reach.
+      `the_cleanup_scans_the_app_wide_figure_rather_than_reading_the_cache` asserts the difference
+      directly — bytes written after the cache was filled are invisible to it and visible to the
+      scan. **Disclosed:** no test moves the exhaustion verdict itself, because the byte budgets are
+      compiled constants (256 MiB / 1 GiB); the live walkthrough reaches it with a 300 MiB sparse
+      file instead.*
+- [x] **D4′: launch cleanup leaves a budget exhausted → the run starts with capture disabled.** Assert
       the process started **and** no transcript file or `Transcript` record exists for it.
       **Ablation:** capture anyway; the test fails alone.
-- [ ] **The launch confirmation says so — present when exhausted, absent otherwise**, each its own
+      *`a_launch_whose_budget_is_exhausted_starts_without_capture`: the process started, no record, no
+      reference, and no file at the path a captured run would have used. B7 fails it alone. The
+      decision is made in the core from a fact the caller supplies, so the two modes cannot drift
+      apart at a call site.*
+- [x] **The launch confirmation says so — present when exhausted, absent otherwise**, each its own
       assertion, ablated separately. Wording meets RFC-047 §5: states the fact and why, implies no
       danger, implies no fix available from there.
-- [ ] **What the confirmation shows is what the launch applies** — the decision is carried into the
+      *B3 and B4 each fail their own test alone; captured live. **The premise is not quite true of the
+      product, and this is for you:** `ConfiguredProfileFirstUse` exists only for a *configured*
+      profile, on its first use in a session. A launch on the compiled default profile, or a second
+      launch of a confirmed one, opens no dialog at all, so those launches have no pre-click surface —
+      the run's detail is their disclosure. Implemented as: the notice wherever the confirmation
+      exists, the detail always.*
+- [x] **What the confirmation shows is what the launch applies** — the decision is carried into the
       launch, not recomputed after the click. Test: bytes freed between the two do not produce a
       transcript the user was told would not exist.
-- [ ] **The run's detail says why it has no transcript**, distinct from opt-out. Neither
+      *The modal carries the preflight verdict and `confirm_and_launch_configured_profile` applies
+      **that** value. `the_launch_applies_the_budget_decision_the_confirmation_was_opened_with` opens
+      the dialog as exhausted in a fixture where nothing is exhausted, so a recomputing launch would
+      capture. B5 fails it (plus register row 1's socket flake, unrelated and disclosed).*
+- [x] **The run's detail says why it has no transcript**, distinct from opt-out. Neither
       `DisabledByOptOut` nor `CaptureFailed` is written for this case — neither is true of it.
-- [ ] `RequiredLocalBounded` on an unfreeable budget is still refused in core and **no process
+      *`agent_run_detail_unavailable_line` matches exhaustively on `TranscriptAbsence`, so a future
+      reason cannot inherit another's words. Three tests: the budget case, RFC-050's lock case (which
+      had no rendering at all until now), and the fall-back for a run with no recorded reason. B10
+      fails the first two — one mechanism, two renderings, disclosed as a composition.*
+- [x] `RequiredLocalBounded` on an unfreeable budget is still refused in core and **no process
       starts**, unit-tested through the builder and **labelled unreachable from the product**. No
       production caller added (RFC-011: *"must not… be used by an unreviewed workflow"*).
-- [ ] RFC-011's row states the project and app-wide budgets are enforced **at launch**, with the
+      *`validate_transcript_policy` refuses with `RequiredTranscriptBudgetExhausted`, before any
+      process starts — the same layer the mode's other refusals live in.
+      `a_required_local_bounded_launch_is_refused_when_the_budget_is_exhausted`, reached through the
+      builder and labelled unreachable. B6 fails it alone.*
+- [x] RFC-011's row states the project and app-wide budgets are enforced **at launch**, with the
       overshoot bound (capturing runs × per-transcript limit) — D1 without overstating it.
-- [ ] `tests/retention.rs`'s message *"so PR-049-C can refuse a RequiredLocalBounded launch"* says D4′.
+      *Corrected in place under RFC-011's own Acceptance Criteria, dated and marked "corrected, not
+      reworded": what was enforced when it closed, what is enforced now, at which two moments, and
+      the overshoot bound with its reason.*
+- [x] `tests/retention.rs`'s message *"so PR-049-C can refuse a RequiredLocalBounded launch"* says D4′.
+      *It already reads "so PR-049-C can start the run without capture and say so (RFC-049 D4′)" —
+      updated when D4′ replaced the refusal; verified against the file rather than assumed.*
 - [x] **RFC-045's parser refuses `transcript_retention_days = 0`**, naming the transcript
       opt-out as the way to express what the user probably meant. Required at response 381:
       `is_bounded()` already treats `0` as *unbounded* while response 378 called it the tightest
@@ -140,15 +181,21 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
       `transcripts/` until that directory is deleted.
       *`c2f5092` (request 389): README, the book's privacy page, and a `CHANGELOG.md` Unreleased
       entry. The reviewer built the book, and checked the text on the live site.*
-- [ ] **Policy removal is told to the user, on a surface they read** (response 385). B marks and
+- [x] **Policy removal is told to the user, on a surface they read** (response 385). B marks and
       purges in one pass, so nothing is ever visibly `Expired` unless its deletion fails — the
       audit record is therefore the *only* trace, and nobody reads the audit store. Absent when
       nothing was removed. **Ablation:** suppress the disclosure; its test fails alone.
-- [ ] **"A deletion failed" is reported distinctly from "nothing is deletable"** when the budget
+      *The project board, the same surface the recent-list reset notice uses and the one read at every
+      project open. B8 fails its presence test alone; B11 fails the "no notice from a cleanup that did
+      nothing" test alone. Captured live: "Transcript retention removed 2 transcripts (66 bytes)…".*
+- [x] **"A deletion failed" is reported distinctly from "nothing is deletable"** when the budget
       stays exhausted (response 385). A failed candidate stops the budget pass on every trigger,
       so one undeletable file can disable capture for every new run indefinitely (D4′); the
       disclosure must name the failure, which has a remedy the other case does not.
-      *Unticked after the first commit: the **core distinction** exists and is held both ways
+      *Second commit: the board gives the failure its own line, in its own words — it says the file
+      stays and that the cleanup will stop at it again, which "nothing could be freed" says of
+      neither. B9 fails that test alone.*
+      *After the first commit: the **core distinction** exists and is held both ways
       (`a_budget_left_exhausted_by_a_failed_deletion_says_a_deletion_failed`, and the live-writer
       case as its own test; A5 fails the first alone). The box asks for a **disclosure**, which needs
       the triggers — next commit, with the removal disclosure it belongs beside.*
@@ -165,19 +212,33 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
 
 ## Whole-RFC
 
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`,
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`,
       `rfc_docs_invariants` clean.
-- [ ] Three consecutive full-workspace runs, **output redirected to a file**, green; any recurring
+      *All clean. Clippy caught three launch wrappers the restructure left unused by production; they
+      are `#[cfg(test)]` now rather than kept alive by a call that exists to satisfy the lint.*
+- [x] Three consecutive full-workspace runs, **output redirected to a file**, green; any recurring
       flake gets a dated row in `test-process-leak.md`.
-- [ ] `cargo audit` still reconciles against `dependency-advisories.md`.
-- [ ] **The changelog says the first run after upgrading deletes every transcript already older than
+      *535 + 9 + 819, green every time. Two dated rows added this slice: a flake I wrote into an
+      RFC-050 test, and a recurrence of register row 1 under ablation B5.*
+- [x] `cargo audit` still reconciles against `dependency-advisories.md`.
+      *Three allowed warnings — `paste`, `ttf-parser`, `lru` — all three already rows in that file,
+      with no new advisory.*
+- [x] **The changelog says the first run after upgrading deletes every transcript already older than
       the configured age** (§6). This is the sentence most likely to be left out, and RFC-045's
       changelog earned a required fix for exactly this class.
-- [ ] **No text anywhere claims more than is enforced.** RFC-011's row and `crates/tekstide-core/README.md`
+      *In bold, in its own paragraph, with the default spelled out as "every transcript from more than
+      a month ago". The book's configuration caveat says it too.*
+- [x] **No text anywhere claims more than is enforced.** RFC-011's row and `crates/tekstide-core/README.md`
       both currently say retention is bounded per project and app-wide; after this slice that is true
       for the first time, and before it lands neither may be reworded to pretend it already was.
-- [ ] RFC-011's Acceptance Criteria re-read against the result, and its row corrected to say which
+      *Corrected in this commit, not before it: `crates/tekstide-core/README.md`, the root `README.md`,
+      the book's privacy and configuration pages, and RFC-011's own criterion. Each now says what is
+      enforced, at which two moments, and that the byte budgets are not a hard ceiling.*
+- [x] RFC-011's Acceptance Criteria re-read against the result, and its row corrected to say which
       budgets shipped enforced (D1).
+      *Re-read in full. The criterion that needed correcting was the retention-bounds one; the others
+      hold as written. The correction is dated, appended under the original, and says it is a
+      correction rather than a rewording.*
 
 ## Final Acceptance Decision
 

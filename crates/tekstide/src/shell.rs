@@ -205,6 +205,11 @@ pub(crate) struct ConfiguredProfileConfirmModal {
     /// The file the profile came from — §5's other half. A user who did
     /// not know they had a `config.toml` learns where it is.
     source_file: std::path::PathBuf,
+    /// RFC-049 D4′: **the verdict this dialog was opened with**, measured by the
+    /// preflight cleanup before the dialog existed. The launch on confirm uses
+    /// this value and never re-measures, so what the user reads here is what
+    /// runs — even if bytes are freed elsewhere while the dialog is open.
+    transcript_budget_exhausted: bool,
     focus: ConfiguredProfileButton,
 }
 
@@ -996,6 +1001,10 @@ pub struct State {
     /// `recent-projects.json` could not be read. Never persisted, so a later
     /// start with a readable file has `None` and shows nothing.
     recent_projects_reset: Option<RecentProjectsReset>,
+    /// RFC-049, response 385: what the last retention cleanup removed, for the
+    /// project board to say so. `None` until a cleanup removes something or
+    /// fails at something.
+    transcript_cleanup_notice: Option<TranscriptCleanupNotice>,
 }
 
 /// RFC-045 PR-045-B: what `boot()` made of the user's configuration
@@ -1249,6 +1258,7 @@ impl State {
             configuration,
             transcript_disk_usage,
             recent_projects_reset: None,
+            transcript_cleanup_notice: None,
         }
     }
 
@@ -3270,10 +3280,20 @@ thread_local! {
 ///
 /// Absent a configured default, this is exactly what it always was.
 fn attempt_agent_run_launch(state: &mut State) -> Result<(), AgentRunLaunchRefusal> {
+    // RFC-049 D2/D4′: the preflight cleanup runs **once per launch attempt**,
+    // here, before either branch below — including the branch that only opens a
+    // confirmation. The dialog has to state what this launch will do, so the
+    // work that decides it cannot wait until after the click.
+    let budget_exhausted = preflight_transcript_retention_for_active_project(state);
+    let capture_enabled = transcript_capture_enabled_for_active_project(state);
+
     let Some(profile) = state.configuration.default_profile().cloned() else {
-        return attempt_agent_run_launch_with_profile(
+        return attempt_prepared_agent_run_launch(
             state,
             tekstide_core::agent::AiCliProfile::claude_code_linux_default(),
+            open_real_agent_run_state_root(),
+            capture_enabled,
+            budget_exhausted,
         );
     };
 
@@ -3282,8 +3302,16 @@ fn attempt_agent_run_launch(state: &mut State) -> Result<(), AgentRunLaunchRefus
         .confirmed_config_profiles
         .contains(&profile.id)
     {
-        return attempt_agent_run_launch_with_profile(state, profile);
+        return attempt_prepared_agent_run_launch(
+            state,
+            profile,
+            open_real_agent_run_state_root(),
+            capture_enabled,
+            budget_exhausted,
+        );
     }
+    // Falling through to the confirmation: the cleanup above has already run,
+    // which is what the dialog needs in order to state what this launch will do.
 
     // Never replace an open modal -- the same guard every other
     // modal-opening handler in this file carries.
@@ -3294,7 +3322,7 @@ fn attempt_agent_run_launch(state: &mut State) -> Result<(), AgentRunLaunchRefus
             .map(std::path::Path::to_path_buf)
             .unwrap_or_default();
         state.modal = Some(ModalContent::ConfiguredProfileFirstUse(
-            configured_profile_confirmation(&profile, source_file),
+            configured_profile_confirmation(&profile, source_file, budget_exhausted),
         ));
     }
     Ok(())
@@ -3307,11 +3335,13 @@ fn attempt_agent_run_launch(state: &mut State) -> Result<(), AgentRunLaunchRefus
 fn configured_profile_confirmation(
     profile: &tekstide_core::agent::AiCliProfile,
     source_file: std::path::PathBuf,
+    transcript_budget_exhausted: bool,
 ) -> ConfiguredProfileConfirmModal {
     ConfiguredProfileConfirmModal {
         profile_id: profile.id.clone(),
         resolved_executable: configured_profile_resolved_executable(profile),
         source_file,
+        transcript_budget_exhausted,
         // Defaults to declining: a stray Enter must not start a process
         // the user has never been shown the path of.
         focus: ConfiguredProfileButton::Cancel,
@@ -3389,15 +3419,60 @@ fn generated_change_detection_policy() -> tekstide_core::project::GeneratedChang
 /// depending on what happens to be installed on the machine running the
 /// suite, and without ever pointing it at the real, live product this
 /// profile is modelled on.
+///
+/// **RFC-049 PR-049-C: production no longer enters here.** `attempt_agent_run_launch`
+/// runs the preflight cleanup itself, because the confirmation branch needs the
+/// verdict without launching anything, and then calls
+/// [`attempt_prepared_agent_run_launch`] directly — so the cleanup runs exactly
+/// once per launch attempt. This wrapper stays as the seam tests reach for, and
+/// runs the same preflight so that what they exercise is the same sequence.
+#[cfg(test)]
 fn attempt_agent_run_launch_with_profile(
     state: &mut State,
     profile: tekstide_core::agent::AiCliProfile,
 ) -> Result<(), AgentRunLaunchRefusal> {
-    attempt_agent_run_launch_with_profile_and_state_root(
+    let budget_exhausted = preflight_transcript_retention_for_active_project(state);
+    let capture_enabled = transcript_capture_enabled_for_active_project(state);
+    attempt_prepared_agent_run_launch(
         state,
         profile,
         open_real_agent_run_state_root(),
+        capture_enabled,
+        budget_exhausted,
     )
+}
+
+/// RFC-049 D2: **the launch trigger**, and the only place it runs for a launch.
+/// Returns D4′'s fact — whether a byte budget is *still* over its limit once
+/// everything deletable has been deleted.
+///
+/// Each wrapper below calls this exactly once and then hands the answer to
+/// [`attempt_prepared_agent_run_launch`], which never recomputes it. That is
+/// what makes "the decision shown is the decision applied" true through the
+/// confirmation: the modal carries this same boolean, and bytes freed between
+/// the dialog opening and the click cannot silently turn capture back on.
+fn preflight_transcript_retention_for_active_project(state: &mut State) -> bool {
+    let Some(project_id) = state
+        .app_shell
+        .state()
+        .active_project()
+        .map(|project| project.id().clone())
+    else {
+        return false;
+    };
+    run_transcript_retention_cleanup(state, &project_id)
+        .is_some_and(|cleanup| cleanup.budget_still_exhausted())
+}
+
+/// RFC-033 PR-033-B's per-project opt-out, read from the active project.
+/// Capture-on when there is no active project: the value is discarded before it
+/// matters, matching the launch's own early return.
+fn transcript_capture_enabled_for_active_project(state: &State) -> bool {
+    !state
+        .app_shell
+        .state()
+        .active_project()
+        .is_some_and(|project| project.transcript_capture_declined())
 }
 
 /// transcript-capture-evidence handoff: the same testability split
@@ -3418,21 +3493,20 @@ fn attempt_agent_run_launch_with_profile(
 /// (`true`) when there is no active project, matching the inner
 /// function's own early-return-on-no-project shape: the value is
 /// discarded before it matters.
+#[cfg(test)]
 fn attempt_agent_run_launch_with_profile_and_state_root(
     state: &mut State,
     profile: tekstide_core::agent::AiCliProfile,
     state_root: Option<std::path::PathBuf>,
 ) -> Result<(), AgentRunLaunchRefusal> {
-    let capture_enabled = !state
-        .app_shell
-        .state()
-        .active_project()
-        .is_some_and(|project| project.transcript_capture_declined());
-    attempt_agent_run_launch_with_profile_state_root_and_capture(
+    let budget_exhausted = preflight_transcript_retention_for_active_project(state);
+    let capture_enabled = transcript_capture_enabled_for_active_project(state);
+    attempt_prepared_agent_run_launch(
         state,
         profile,
         state_root,
         capture_enabled,
+        budget_exhausted,
     )
 }
 
@@ -3477,6 +3551,7 @@ fn configured_agent_run_launch_plan(
     profile: &tekstide_core::agent::AiCliProfile,
     state_root: Option<std::path::PathBuf>,
     capture_enabled: bool,
+    budget_exhausted: bool,
 ) -> Result<tekstide_core::agent::AgentRunLaunchPlan, AgentRunLaunchRefusal> {
     let mut request = tekstide_core::agent::AgentRunLaunchRequest::new(
         project.id().clone(),
@@ -3496,6 +3571,10 @@ fn configured_agent_run_launch_plan(
     // knows one field is how the other three would silently acquire this
     // function's opinion of them.
     request = request.with_transcript_retention_limits(configured_retention_limits(configuration));
+    // RFC-049 D4′: the fact, measured once at preflight. The core decides what
+    // it costs — `LocalBounded` starts without capture, `RequiredLocalBounded`
+    // refuses before any process starts.
+    request = request.with_transcript_budget_exhausted(budget_exhausted);
     if let Some(state_root) = state_root {
         request = if capture_enabled {
             request.with_local_bounded_transcript(state_root.clone())
@@ -3512,11 +3591,34 @@ fn configured_agent_run_launch_plan(
         .map_err(AgentRunLaunchRefusal::PlanTransition)
 }
 
+#[cfg(test)]
 fn attempt_agent_run_launch_with_profile_state_root_and_capture(
     state: &mut State,
     profile: tekstide_core::agent::AiCliProfile,
     state_root: Option<std::path::PathBuf>,
     capture_enabled: bool,
+) -> Result<(), AgentRunLaunchRefusal> {
+    let budget_exhausted = preflight_transcript_retention_for_active_project(state);
+    attempt_prepared_agent_run_launch(
+        state,
+        profile,
+        state_root,
+        capture_enabled,
+        budget_exhausted,
+    )
+}
+
+/// The launch itself, with **every decision already made**: the opt-out has been
+/// read, and RFC-049 D4′'s budget verdict has been measured once by
+/// [`preflight_transcript_retention_for_active_project`]. Nothing here consults
+/// either again, which is the property D4′ asks for — what the user was shown is
+/// what runs.
+fn attempt_prepared_agent_run_launch(
+    state: &mut State,
+    profile: tekstide_core::agent::AiCliProfile,
+    state_root: Option<std::path::PathBuf>,
+    capture_enabled: bool,
+    budget_exhausted: bool,
 ) -> Result<(), AgentRunLaunchRefusal> {
     let plan = {
         let Some(project) = state.app_shell.state().active_project() else {
@@ -3534,6 +3636,7 @@ fn attempt_agent_run_launch_with_profile_state_root_and_capture(
             &profile,
             state_root,
             capture_enabled,
+            budget_exhausted,
         )?
     };
 
@@ -7400,6 +7503,42 @@ fn project_board_recent_projects_reset_lines(state: &State) -> Vec<String> {
     lines
 }
 
+/// RFC-049, response 385: **policy removals are told to the user**, on the
+/// board they read at every project open — not left to the audit store, which
+/// nobody reads, and not to a visible `Expired` state, which the cleanup's
+/// mark-and-purge-in-one-pass means nobody ever sees.
+///
+/// Two separate lines, because they have different remedies: what was removed,
+/// and — distinctly — that a deletion **failed**. A file that cannot be deleted
+/// goes on stopping the budget pass at every trigger until someone looks at it,
+/// which is nothing like a budget relieved exactly as intended.
+///
+/// Empty when the last cleanup removed nothing and failed at nothing.
+fn project_board_transcript_cleanup_lines(state: &State) -> Vec<String> {
+    let Some(notice) = &state.transcript_cleanup_notice else {
+        return Vec::new();
+    };
+    let mut lines = Vec::new();
+    if notice.removed_transcripts > 0 {
+        lines.push(
+            state.catalog.get_with_args(
+                "project-board-transcript-policy-removal",
+                &CatalogArgs::new()
+                    .number("count", notice.removed_transcripts)
+                    .number("bytes", notice.removed_bytes),
+            ),
+        );
+    }
+    if notice.a_deletion_failed {
+        lines.push(
+            state
+                .catalog
+                .get("project-board-transcript-policy-deletion-failed"),
+        );
+    }
+    lines
+}
+
 /// RFC-050 PR-050-C (D6′): bytes of transcripts no open or recent project
 /// claims, and where they are. After a reset this is every transcript the user
 /// has, so it states the fact without implying the user did something or that
@@ -7497,6 +7636,7 @@ fn content_area(state: &State) -> Element<'_, Message> {
                 let mut board_lines = project_board_audit_lines(state);
                 board_lines.extend(project_board_configuration_lines(state));
                 board_lines.extend(project_board_recent_projects_reset_lines(state));
+                board_lines.extend(project_board_transcript_cleanup_lines(state));
                 if board_lines.is_empty() {
                     board
                 } else {
@@ -8792,7 +8932,19 @@ fn confirm_and_launch_configured_profile(state: &mut State, modal: &ConfiguredPr
     let Some(profile) = state.configuration.default_profile().cloned() else {
         return;
     };
-    let _ = attempt_agent_run_launch_with_profile(state, profile);
+    // RFC-049 D4′: **the decision shown is the decision applied.** The dialog
+    // was opened with a budget verdict measured at preflight, and that verdict
+    // launches this run — no second cleanup, no re-measurement. Anything else
+    // would let a transcript exist for a run the user was told would have none,
+    // or the reverse, between the dialog opening and this click.
+    let capture_enabled = transcript_capture_enabled_for_active_project(state);
+    let _ = attempt_prepared_agent_run_launch(
+        state,
+        profile,
+        open_real_agent_run_state_root(),
+        capture_enabled,
+        modal.transcript_budget_exhausted,
+    );
 }
 
 /// RFC-045 PR-045-C, D4 reload: applies the increases the user just
@@ -9056,6 +9208,12 @@ fn load_earlier_transcripts_for_opened_project(
 ) {
     load_earlier_transcripts(&mut state.app_shell, project_id);
     refresh_transcript_disk_usage(state);
+    // RFC-049 D2, the project-open trigger. **After the load, never before**:
+    // before it, this session knows only the transcripts it launched itself, so
+    // the cleanup would measure a project's bytes as a fraction of what it
+    // really holds — and expire nothing that an earlier run left, which is the
+    // whole point of running it here.
+    run_transcript_retention_cleanup(state, project_id);
 }
 
 /// The load alone, shared with `main.rs`'s command-line open, which runs
@@ -9098,6 +9256,104 @@ fn transcript_disk_usage_for(
 
 fn refresh_transcript_disk_usage(state: &mut State) {
     state.transcript_disk_usage = transcript_disk_usage_for(&state.app_shell);
+}
+
+/// RFC-049 D2: **one of the two moments retention runs** — this one, plus the
+/// agent-run launch preflight. There is no timer, no watcher and no idle sweep,
+/// and D2 makes that a decision rather than an omission: a user can predict
+/// both moments, and neither happens while they are not looking.
+///
+/// **The app-wide figure is scanned fresh here, never read from the cache**
+/// (RFC-050, response 393). `state.transcript_disk_usage` is refreshed at boot,
+/// at each load and after each purge, so at a launch it is already behind every
+/// byte written since — and a cleanup that decides on a stale figure either
+/// deletes what it need not or leaves a budget it was asked to relieve.
+/// `transcript_disk_usage_for` performs the scan; the cached field is only
+/// written, at the end, from that same scan.
+///
+/// Best-effort audit (§4, and RFC-047 D4's rule): a cleanup that already
+/// deleted bytes is not undone by an audit store that cannot be opened.
+fn run_transcript_retention_cleanup(
+    state: &mut State,
+    project_id: &tekstide_core::project::ProjectId,
+) -> Option<tekstide_core::project::TranscriptRetentionCleanup> {
+    let limits = configured_retention_limits(&state.configuration);
+    let now = tekstide_core::domain::DomainTimestamp::now_utc();
+    let app_wide_bytes = transcript_disk_usage_for(&state.app_shell).total_bytes;
+
+    let cleanup = {
+        let project = state.app_shell.state_mut().project_mut(project_id)?;
+        // What this project holds is subtracted from the app-wide total, so the
+        // remainder is what *other* projects hold — which is the figure
+        // `apply_transcript_retention` asks for, and the one it must not
+        // relieve by deleting another project's transcripts.
+        let other_projects_bytes =
+            app_wide_bytes.saturating_sub(project.real_retained_transcript_bytes());
+        project.apply_transcript_retention(limits, other_projects_bytes, &now)
+    };
+
+    if let Some(mut audit_store) =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+    {
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut state.audit_health)
+            .record_transcript_policy_cleanup(project_id.clone(), &cleanup);
+    }
+
+    refresh_transcript_disk_usage(state);
+    state.transcript_cleanup_notice = TranscriptCleanupNotice::from_cleanup(&cleanup);
+    Some(cleanup)
+}
+
+/// RFC-049 D2: the open trigger for every project that is **already open when
+/// `State` is built** — which is how a command-line open arrives, since
+/// `main.rs` opens it before this type exists and so never reaches the GUI's
+/// `Added` arm.
+///
+/// Found by the live walkthrough rather than by a test: a two-month-old
+/// transcript survived a command-line open, because the only trigger was in the
+/// GUI path. The same shape RFC-050 needed for loading, one layer further on.
+pub(crate) fn run_transcript_retention_for_open_projects(state: &mut State) {
+    let open_projects = state
+        .app_shell
+        .state()
+        .projects()
+        .iter()
+        .map(|project| project.id().clone())
+        .collect::<Vec<_>>();
+    for project_id in open_projects {
+        run_transcript_retention_cleanup(state, &project_id);
+    }
+}
+
+/// RFC-049, response 385: **what a policy removal tells the user.** The audit
+/// record alone is not disclosure — nobody reads the audit store — and B marks
+/// and purges in one pass, so nothing is ever visibly `Expired` either.
+///
+/// `None` whenever the last cleanup removed nothing and failed at nothing: a
+/// standing "the policy looked and did nothing" line is how a surface stops
+/// being read.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct TranscriptCleanupNotice {
+    removed_transcripts: u64,
+    removed_bytes: u64,
+    /// Reported separately, because the remedies differ (response 385): a file
+    /// that could not be deleted can be looked at, and it goes on stopping the
+    /// budget pass at every trigger until it is.
+    a_deletion_failed: bool,
+}
+
+impl TranscriptCleanupNotice {
+    fn from_cleanup(cleanup: &tekstide_core::project::TranscriptRetentionCleanup) -> Option<Self> {
+        if !cleanup.removed_anything() && !cleanup.a_deletion_failed() {
+            return None;
+        }
+        Some(Self {
+            removed_transcripts: cleanup.expired.purged_transcripts
+                + cleanup.budget.purged_transcripts,
+            removed_bytes: cleanup.expired.bytes_removed + cleanup.budget.bytes_removed,
+            a_deletion_failed: cleanup.a_deletion_failed(),
+        })
+    }
 }
 
 fn transcript_local_data_summary_for(
@@ -10812,9 +11068,13 @@ fn agent_run_detail_view(state: &State) -> Element<'_, Message> {
         }
         Err(reason) => {
             lines.push(
-                text(state.catalog.get(agent_run_detail_unavailable_key(reason)))
-                    .size(state.theme.font_size_body())
-                    .into(),
+                text(agent_run_detail_unavailable_line(
+                    &state.catalog,
+                    run,
+                    reason,
+                ))
+                .size(state.theme.font_size_body())
+                .into(),
             );
         }
     }
@@ -10840,6 +11100,31 @@ enum AgentRunTranscriptUnavailable {
     StateRootUnavailable,
     PathResolutionFailed,
     ReadFailed,
+}
+
+/// RFC-049 D4′ and RFC-050 D3: when the **run itself records why** it has no
+/// transcript, that reason is what the detail says.
+///
+/// `AgentRunTranscriptUnavailable` describes what the *reader* could not do —
+/// no reference, no record, no readable file — and none of those sentences is
+/// true of a run that was never given a transcript in the first place. Neither
+/// is `DisabledByOptOut`: the user declined nothing here. The reasons are
+/// exhaustive on `TranscriptAbsence`, so a future one cannot silently inherit
+/// another's words.
+fn agent_run_detail_unavailable_line(
+    catalog: &Catalog,
+    run: &tekstide_core::domain::AgentRun,
+    reason: AgentRunTranscriptUnavailable,
+) -> String {
+    match run.transcript_absence {
+        Some(tekstide_core::domain::TranscriptAbsence::WriterLockUnavailable) => {
+            catalog.get("agent-run-detail-no-transcript-writer-lock")
+        }
+        Some(tekstide_core::domain::TranscriptAbsence::BudgetExhausted) => {
+            catalog.get("agent-run-detail-no-transcript-budget-exhausted")
+        }
+        None => catalog.get(agent_run_detail_unavailable_key(reason)),
+    }
 }
 
 fn agent_run_detail_unavailable_key(reason: AgentRunTranscriptUnavailable) -> &'static str {
@@ -11168,13 +11453,21 @@ fn configured_profile_dialog_view<'a>(
         .on_press(on_press)
     };
 
-    let lines: Vec<Element<'_, Message>> = vec![
+    let mut lines: Vec<Element<'_, Message>> = vec![
         text(state.catalog.get("configured-profile-dialog-title"))
             .size(state.theme.font_size_heading())
             .into(),
         text(configured_profile_dialog_body(&state.catalog, modal))
             .size(state.theme.font_size_body())
             .into(),
+    ];
+    // RFC-049 D4′, worded under RFC-047 §5: states the fact and why, implies no
+    // danger, and offers no fix from here — there is none to offer, since the
+    // bytes that cannot be freed belong to runs that may still be writing.
+    if let Some(notice) = configured_profile_transcript_budget_notice(&state.catalog, modal) {
+        lines.push(text(notice).size(state.theme.font_size_body()).into());
+    }
+    lines.extend([
         button_line(
             ConfiguredProfileButton::Launch,
             "configured-profile-dialog-launch",
@@ -11187,9 +11480,21 @@ fn configured_profile_dialog_view<'a>(
             Message::ModalDismiss,
         )
         .into(),
-    ];
+    ]);
 
     modal_dialog_box(state, column(lines).spacing(10).into())
+}
+
+/// RFC-049 D4′: the launch confirmation says this run's output will not be
+/// kept. `None` when the budget is not exhausted — which is every ordinary
+/// launch, and the reason this line means something when it does appear.
+fn configured_profile_transcript_budget_notice(
+    catalog: &Catalog,
+    modal: &ConfiguredProfileConfirmModal,
+) -> Option<String> {
+    modal
+        .transcript_budget_exhausted
+        .then(|| catalog.get("configured-profile-dialog-transcript-budget-exhausted"))
 }
 
 /// RFC-045 PR-045-C, D4 reload. Names how many settings are waiting and

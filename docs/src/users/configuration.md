@@ -54,8 +54,10 @@ The file is refused if it asks for any of them:
 
 ## Caveat on `transcript_retention_days`
 
-The value is recorded on each run's transcript policy and checked for validity, but **no
-age-based purge reads it yet**. Transcripts are **not** kept for that many days and then removed.
+The value is the age at which a transcript is deleted, measured from its last write. Removal
+happens when you open the project or launch an AI CLI run in it, and at no other time — there is no
+timer. **The first run after upgrading deletes every transcript already older than this value**,
+which for a default 30-day setting can be every transcript from more than a month ago.
 
 **`0` is refused.** It is not a retention period: it would have meant *keep nothing*, and the
 product would have enforced the opposite — no age limit at all. To keep no transcripts for a

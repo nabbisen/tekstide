@@ -438,7 +438,7 @@ impl<'a> AuditCoordinator<'a> {
         project_id: ProjectId,
         cleanup: &TranscriptRetentionCleanup,
     ) -> Option<AuditObservationStatus> {
-        if !cleanup.removed_anything() {
+        if !cleanup.removed_anything() && !cleanup.a_deletion_failed() {
             return None;
         }
         let record = transcript_purge_record(

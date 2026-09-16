@@ -367,3 +367,140 @@ and comparing `777 bytes` / `12 bytes`, which a path cannot contain. Dated row i
 with `--no-fail-fast`, output redirected to files: 519 + 9 + 816, green every time** — five rather
 than three because the first gate exposed the flake above. `git diff --cached --check` after
 staging: clean.
+
+## PR-049-C, second commit — the triggers, D4′, and the disclosures
+
+**This is the commit that deletes a user's data without being asked.** Everything before it marked,
+selected or measured; nothing in production called any of it.
+
+### The two triggers, and nothing else (D2)
+
+```
+production callers of run_transcript_retention_cleanup:  shell.rs:3453 (launch preflight)
+                                                         shell.rs:9202 (project open)
+timers / watchers / idle sweeps touching retention:      none
+```
+
+The project-open trigger runs **after** the load, not before: before it, a session knows only the
+transcripts it launched itself, so the cleanup would measure a fraction of what the project holds and
+expire nothing an earlier run left — which is the case this slice exists for.
+
+### D4′, decided in the core rather than at the call site
+
+The launch request carries one new fact — `transcript_budget_exhausted` — and the core decides what
+it costs, so the two modes cannot drift apart at a call site:
+
+- **`LocalBounded`** starts the run with capture disabled (`prepare_transcript_capture`), and the run
+  records `TranscriptAbsence::BudgetExhausted`.
+- **`RequiredLocalBounded`** is refused by `validate_transcript_policy` **before any process starts**,
+  which is RFC-011's own sentence. Unreachable from the product; reached through the builder, as the
+  locked-file refusal already is.
+
+**The measurement is the caller's, the policy is the core's.** Putting the verdict in the request is
+also what makes "the decision shown is the decision applied" mechanical rather than a convention: the
+same boolean is rendered and applied.
+
+### The confirmation, and a gap in D4′'s premise
+
+`attempt_agent_run_launch` runs the preflight **once**, before either branch — including the branch
+that only opens a dialog, since the dialog must state what the launch will do. The modal carries the
+verdict; `confirm_and_launch_configured_profile` applies **that** value and never re-measures.
+
+**D4′ says "the existing launch confirmation says so", and the product does not have one at every
+launch.** `ConfiguredProfileFirstUse` appears only for a *configured* profile, only on its first use
+in a session. A `Ctrl+Alt+A` launch on the compiled default profile, or a second launch of a
+confirmed one, shows no dialog at all — so for those launches there is no pre-click surface, and the
+run's own detail is the only disclosure. Implemented as: the notice wherever the confirmation exists,
+and the run detail always. **Named here rather than papered over.**
+
+### What the user is told
+
+| Where | When |
+| --- | --- |
+| Project board | what retention removed, and — separately — that a deletion **failed** |
+| Launch confirmation | this run's output will not be kept (when the budget is exhausted) |
+| AgentRun Report | why this run has no transcript: an exhausted budget, or a lock another Tekstide held (RFC-050 D3, which had no rendering until now) |
+
+The two board lines are separate because the remedies are: a file that cannot be deleted can be
+looked at, and it stops the budget pass again at every trigger until it is.
+
+### Ablations, each restored and hash-checked, `--no-fail-fast`
+
+| | Ablation | Fails |
+| --- | --- | --- |
+| B1 | no project-open trigger | the open-trigger test **alone** |
+| B2 | no launch preflight trigger | the launch-trigger test **alone** |
+| B3 | the confirmation notice never shows | its presence test **alone** |
+| B4 | it always shows | its absence test **alone** |
+| B5 | the click recomputes the verdict | `the_launch_applies_the_budget_decision_the_confirmation_was_opened_with` (plus register row 1's socket flake, unrelated) |
+| B6 | `RequiredLocalBounded` is not refused | the refusal test **alone** |
+| B7 | capture proceeds despite the budget | the starts-without-capture test **alone** |
+| B8 | the board never says what was removed | its test **alone** |
+| B9 | a failed deletion gets no line of its own | the failure test **alone** |
+| B10 | the run detail ignores the recorded reason | **two tests** — the budget line and the lock line. One mechanism, two renderings; disclosed as a composition rather than split |
+| B11 | a notice is built when nothing happened | `a_cleanup_that_did_nothing_produces_no_notice` **alone** |
+
+### Two ablations that first reported nothing, and why that was my harness
+
+**B5 and B11 both came back "fails nothing" on the first batch, and both results were false.**
+
+- **B5 did not compile.** Substituting a call taking `&mut State` into an argument list that already
+  borrowed `state` is a borrow error. My script counted `test result: FAILED` lines, so a build that
+  never produced any read as a clean run. Re-run with the call hoisted into a local: it fails the
+  carried-decision test, as it should.
+- **B11 compiled and genuinely failed nothing**, which exposed a real gap: the only test of "absent
+  when nothing happened" supplied the `None` itself instead of getting it from a cleanup, so the
+  guard inside `TranscriptCleanupNotice::from_cleanup` was held by nothing.
+  `a_cleanup_that_did_nothing_produces_no_notice` now holds it, and B11 fails it alone.
+
+The harness lesson is the one this pack already learned once, in a different disguise: **a
+verification that can fail silently is not one.** A compile failure must be reported as "not
+evidence", never as an absence of failures. My first fix for that over-matched (`error: test failed`
+is a test result, not a build failure) and had to be narrowed to `could not compile`.
+
+### The live walkthrough found a real gap, and a grammar bug
+
+Against `target/release/tekstide`, with config, state, project and the AI CLI each in its own
+`mktemp -d`. Every image shows only those `/tmp` paths.
+
+**Reaching an exhausted budget honestly.** The byte budgets are compiled constants (256 MiB per
+project), so the walkthrough plants a **300 MiB sparse** `transcript.log` at the product's own path
+and **holds its `flock`** from another process. The loader probes the lock, reads the file as live,
+and the cleanup refuses to select it at any pressure (§2) — so the budget is genuinely unfreeable,
+which is the only honest way to reach D4′. Confirmed in the run: the file was still there, at
+314,572,800 bytes, after the open trigger.
+
+| Step | What happened | Image |
+| --- | --- | --- |
+| 1 | `Ctrl+Alt+A`: the confirmation names the resolved executable **and** says *"This run's output will not be saved: the transcripts already on disk are at the limit…"* | `evidence/pr-049-c/01-launch-confirmation-budget-exhausted.png` |
+| 2 | Confirmed the launch. **No transcript was written**: the only file under the project's directory is the planted 300 MiB one. `Ctrl+Alt+R` shows *"This run has no transcript: the transcripts already on disk were at the limit when it started…"* | `02-agent-run-report-no-transcript.png` |
+| 3 | With the lock released and two **60-day-old** transcripts planted, a fresh start removes both and the board says *"Transcript retention removed 2 transcripts (66 bytes) that were past the limits in your settings."* | `03-board-says-what-retention-removed.png` |
+
+**The gap: a command-line open had no trigger.** Step 3 failed the first time — the old transcript
+survived. `main.rs` opens a project from the command line **before `State` exists**, so it never
+reaches the GUI's `Added` arm where I had put the trigger; it loaded the earlier transcripts and
+cleaned up nothing. Fixed with `run_transcript_retention_for_open_projects`, called from `boot()`
+once `State` is built, and held by
+`a_project_already_open_when_the_state_is_built_gets_its_cleanup_too`.
+
+**No test would have caught it**, because every GUI test opens a project through the `Added` arm.
+This is what the walkthrough is for, and it is the second time in this pack that a launch/open path
+existed which nothing exercised (response 390 found the first).
+
+**A grammar bug, also from the capture**: the removal line read *"removed 1 transcript … that
+**were** past"*. The plural variant covered only the count phrase. The whole clause now varies, and
+the re-capture shows the plural form.
+
+### Clippy found what the restructure left behind
+
+Hoisting the preflight out of the wrapper chain made three launch wrappers unused by production, and
+`-D warnings` failed on it. They are now `#[cfg(test)]`, with a doc comment saying production enters
+above them — rather than kept alive by a production call that exists only to satisfy the lint.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean.
+`rfc_docs_invariants`: 9 passed. `mdbook build docs`: clean. **Three consecutive full-workspace runs
+with `--no-fail-fast`, output redirected to files: 535 + 9 + 819, green every time** (+16 shell, +3
+core). `cargo audit`: three allowed warnings, all already rows in `dependency-advisories.md`.
+`git diff --cached --check` after staging: clean.

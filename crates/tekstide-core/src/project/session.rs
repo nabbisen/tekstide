@@ -746,6 +746,7 @@ impl ProjectSession {
         runtime: &mut LinuxTerminalRuntime,
     ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
         let transcript_storage_path = plan.transcript_storage_path().cloned();
+        let transcript_budget_exhausted = plan.transcript_budget_exhausted();
         let is_adapter_launch = plan
             .terminal_launch_spec()
             .adapter_approval_config()
@@ -774,6 +775,13 @@ impl ProjectSession {
         if writer_lock_unavailable {
             self.agent_run_mut(&agent_run_id)?.transcript_absence =
                 Some(TranscriptAbsence::WriterLockUnavailable);
+        } else if transcript_budget_exhausted {
+            // RFC-049 D4′: capture was disabled before the process started,
+            // because cleanup could not bring a budget under its limit. The run
+            // says so; there is no `Transcript` record to hold a state, and
+            // `DisabledByOptOut` would blame the user for a policy decision.
+            self.agent_run_mut(&agent_run_id)?.transcript_absence =
+                Some(TranscriptAbsence::BudgetExhausted);
         } else if let Some(storage_path) = transcript_storage_path {
             self.attach_agent_run_transcript(
                 agent_run_id.clone(),
