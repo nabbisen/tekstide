@@ -99,6 +99,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 038 | [First-Run and Project Entry](./handoffs/038-first-run-and-project-entry/README.md) — **M12, first**; the product's missing door |
 | 024 | [Diff Preview Policy](./handoffs/024-diff-preview-policy/README.md) |
 | 043 | [Terminal Process Containment](./handoffs/043-terminal-process-containment/README.md) — **M12**; make closing a terminal mean what the dialog already says |
+| — | [Release 0.19.0](./handoffs/release-0.19.0.md) — **M12**; the publish that replaces a crates.io page still promising a purge that did not work |
 | — | [Documentation: README and the book](./handoffs/documentation-readme-and-book.md) — **M12**; a 554-line landing page against a 100–200 target, and a book whose only user chapter is `{{#include README.md}}` |
 | 050 | [Transcripts From Earlier Runs](./handoffs/050-transcripts-from-earlier-runs/README.md) — **M12**; load what is on disk, and never delete what something is still writing or what the loader did not recognise |
 | 049 | [Transcript Retention Enforcement](./handoffs/049-transcript-retention-enforcement/README.md) — **M12**; the first slice here that deletes a user's data, so every ambiguous rule resolves toward keeping too much |
