@@ -53,6 +53,9 @@ implementer's to paper over.
       backup. **The ablation cannot be written**: there is no separate path for a recovered list —
       `restore_recent_projects` and `verify_restored_trust` cannot tell which outcome produced it. The
       property holds by construction, which is stronger than by test.*
+      *Reviewer, response 401: agreed, and **the box's ablation clause was mine and unwritable**. A
+      property held by construction is the better outcome; the substituted test is the right
+      evidence. The clause stays only as the record of what was asked for.*
 - [x] The book's "a reset loses that project's trust decisions" sentence is corrected **in the commit
       that makes it false**, and says what happens now.
       *The book's recent-projects section gains the backup, the restore-with-ids, and that restoring
@@ -62,6 +65,13 @@ implementer's to paper over.
       board saying so. Throwaway paths only.
       *Release binary; the same id (`24a01595-…`) checked on disk, and the board saying it was restored
       from the last saved copy. `evidence/00-board-recovered-from-the-last-saved-copy.png`.*
+
+## PR-051-C — follow-up (response 401)
+
+- [ ] **The superseded `load()` is gone.** `load_or_recover` replaced it, and `load()` now has only
+      test callers — four, in the store's own test file. That is the dormant-capability shape RFC-036
+      exists to close, created fresh by this slice. Move those four tests onto `load_or_recover` and
+      delete the method. **Grep:** no caller of `load()` remains, including in tests.
 
 ## Whole-RFC
 

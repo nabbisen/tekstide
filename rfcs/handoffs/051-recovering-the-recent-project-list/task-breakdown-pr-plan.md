@@ -50,3 +50,17 @@ recovered project the audit store has no grant for is demoted**.
 **Evidence:** a live walkthrough against a `mktemp -d` state root — a real project opened, the state
 file corrupted, the app restarted, the list back with the same project, and the board saying so.
 Throwaway paths only.
+
+
+## PR-051-C — follow-up (response 401), before the release candidate
+
+- **Delete `RecentProjectStore::load`.** `load_or_recover` supersedes it, and after PR-051-A its only
+  callers are four tests in `recent/tests.rs` — a dormant capability created by this slice, which is
+  what RFC-036 closed and what this pack has now produced in a third shape.
+- **Move those four tests onto `load_or_recover`**, keeping what they prove: a missing file is not a
+  failure, a corrupt file is quarantined and reported, the quarantine does not overwrite an existing
+  `.corrupt`, and the reported path is where the file went.
+- **Grep:** no caller of `load()` remains anywhere, including tests.
+- It is a `pub fn` on a published crate, so removing it is a breaking change in the API sense. This
+  project's own rule (RFC-036) is that a capability nothing calls is deleted rather than kept for a
+  caller that may never come, and `0.x` is where that is paid for cheaply.
