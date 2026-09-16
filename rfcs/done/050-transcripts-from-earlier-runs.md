@@ -1,6 +1,9 @@
 # RFC-050: Transcripts From Earlier Runs
 
-Status: **Accepted by the human owner 2026-09-13.** **D1–D9 decided by the architect on acceptance** — see the end; **D6 is restated on a measurement**, which dissolves its open question. Proposed the same day, scoped at the owner's word after RFC-049 PR-049-C stopped on request
+Status: **Implemented and closed 2026-09-16.** Three slices: A locked the writer and gave a
+transcript its origin, B loaded what earlier runs left and made purge and the figures cover it, C
+said so on screen. RFC-033's purge, broken since `0.12.0`, now reaches transcripts from earlier
+runs. Accepted by the human owner 2026-09-13. **D1–D9 decided by the architect on acceptance** — see the end; **D6 is restated on a measurement**, which dissolves its open question. Proposed the same day, scoped at the owner's word after RFC-049 PR-049-C stopped on request
 387, which found that a project knows only the transcripts launched since it was opened in the
 current process. That makes RFC-033's purge, shipped in `0.12.0`, remove nothing from earlier runs,
 while its confirmation says it removes everything retained for the project.

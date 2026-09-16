@@ -374,7 +374,7 @@ leftovers.
 
 **Decided:** the parts of PR-049-C that act on known transcripts land as its first commit, after
 RFC-050's PR-050-C *(response 389; this first said "land now")*; the rest waits for loading
-transcripts from disk, [RFC-050](./050-transcripts-from-earlier-runs.md) (accepted 2026-09-13), because RFC-033's shipped purge has the same cause
+transcripts from disk, [RFC-050](../done/050-transcripts-from-earlier-runs.md) (accepted 2026-09-13), because RFC-033's shipped purge has the same cause
 and must be fixed whether or not retention ships. **One loading path, not a purge that walks the
 directory**: a second route to transcript files would be a second deletion path (§3) and a second
 source for the retained figure.

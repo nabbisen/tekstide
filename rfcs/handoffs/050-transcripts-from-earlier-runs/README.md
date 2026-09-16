@@ -1,15 +1,15 @@
 ---
 title: "RFC-050: Transcripts From Earlier Runs — implementation handoff"
 rfc: "RFC-050"
-rfc_file: "../../accepted/050-transcripts-from-earlier-runs.md"
-source_rfc_status: "Accepted 2026-09-13 — M12"
+rfc_file: "../../done/050-transcripts-from-earlier-runs.md"
+source_rfc_status: "Implemented and closed 2026-09-16 — M12"
 target_milestone: "M12"
 created: "2026-09-13"
 ---
 
 # Load what is on disk, and delete nothing the loader did not recognise
 
-Source RFC: [RFC-050](../../accepted/050-transcripts-from-earlier-runs.md)
+Source RFC: [RFC-050](../../done/050-transcripts-from-earlier-runs.md)
 
 ## What this is
 

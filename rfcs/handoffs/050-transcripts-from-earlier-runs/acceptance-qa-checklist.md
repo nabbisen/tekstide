@@ -1,8 +1,8 @@
 ---
 title: "RFC-050 — acceptance and QA checklist"
 rfc: "RFC-050"
-rfc_file: "../../accepted/050-transcripts-from-earlier-runs.md"
-source_rfc_status: "Accepted 2026-09-13 — M12"
+rfc_file: "../../done/050-transcripts-from-earlier-runs.md"
+source_rfc_status: "Implemented and closed 2026-09-16 — M12"
 target_milestone: "M12"
 created: "2026-09-13"
 ---
@@ -137,9 +137,10 @@ implementer's to paper over.
       computer, and both halves of the figure are named.*
 - [x] The purge dialog names files still being written; absent when none. Each case is ablated alone.
       *P1 and P2 each fail their own test alone.*
-- [x] **A run still in progress** (D3′, response 393): when a purgeable transcript belongs to a run
-      this session launched that is still running, the dialog says the run keeps running and its
-      transcript is deleted too; absent otherwise. Each case ablated alone.
+- [x] **A run still in progress** (D3′, response 393; wording settled at response 394, F3): when a
+      purgeable transcript may belong to a run still in progress, the dialog says so, that the
+      transcript is deleted either way, and that deleting it does not stop the run; absent otherwise.
+      Each case ablated alone.
       *P3 and P4 each fail their own test alone; the count's status check is held by P11.*
       *Unticked at response 394 (F3): the count uses the conservative liveness predicate, which includes
       `ReviewReady` and `Detached`, so "The run keeps running" can be false. Say what is known: the run

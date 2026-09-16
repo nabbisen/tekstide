@@ -1,8 +1,8 @@
 ---
 title: "What loading a transcript must not do"
 rfc: "RFC-050"
-rfc_file: "../../accepted/050-transcripts-from-earlier-runs.md"
-source_rfc_status: "Accepted 2026-09-13 — M12"
+rfc_file: "../../done/050-transcripts-from-earlier-runs.md"
+source_rfc_status: "Implemented and closed 2026-09-16 — M12"
 target_milestone: "M12"
 created: "2026-09-13"
 ---

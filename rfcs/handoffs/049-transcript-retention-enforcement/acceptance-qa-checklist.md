@@ -77,7 +77,7 @@ refusing `0`, not this function deleting on it. See `qa-evidence.md`.
 **Partly paused, 2026-09-13 (request 387).** A session knows only the transcripts launched in the
 current process, so the triggers, the removal disclosure, D4′'s exhaustion path and §6's changelog
 sentence would act on almost nothing. They wait for loading transcripts from disk, to be scoped as
-its own RFC — [RFC-050](../../accepted/050-transcripts-from-earlier-runs.md). **After RFC-050's
+its own RFC — [RFC-050](../../done/050-transcripts-from-earlier-runs.md). **After RFC-050's
 PR-050-C, as PR-049-C's first commit** (order set at response 389; response 387 had said "land
 now"): refusing `transcript_retention_days = 0`; the actor/source pairing and no record for an
 empty cleanup; stale `Expired` marks re-checked and cleared; "a deletion failed" reported
