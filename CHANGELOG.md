@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.19.0 - Purge Reaches What You Actually Have, And Retention Finally Acts
+
+Status: release candidate; not yet published or tagged.
+
 
 ### Fixed — purge did not reach transcripts from earlier runs, `0.12.0` through `0.18.0`
 
@@ -66,6 +69,48 @@ with built-in defaults and a diagnostic naming the key — the same handling as 
 value. **To keep no transcripts for a project, decline transcript capture for it in Trust
 Settings.** Any other positive number is unchanged, and age-based removal still reads none of them
 yet.
+
+### Added — a user guide, and a README that is no longer a manual
+
+**The documentation is published**: <https://nabbisen.github.io/tekstide/>. Six chapters written for
+someone using Tekstide rather than building it — installing and first run, the keyboard, projects
+and trust, AI CLI runs, local data and privacy, and configuration — built with mdBook and published
+by CI on every push to `main`.
+
+**`README.md` is 123 lines, down from 561.** It was a manual: keybinding tables, file layouts and
+policy explanations that went stale in place, on the page crates.io renders for the `tekstide`
+crate. What is left is what a reader needs before they install anything — what this is, what it
+does not do, how to run it, where the data lives — and every link in it is **absolute**, because
+crates.io resolves a relative link against the crate's own directory, where it 404s.
+
+**`CONTRIBUTING.md` exists**, with the gate loop this project actually runs.
+
+### What this release does not do
+
+- **The byte budgets gate new capture; they are not a hard ceiling.** No new run begins capturing
+  while a budget is exhausted, but runs already capturing continue to their own per-transcript
+  limit — so a budget can be exceeded by up to *(capturing runs × 32 MiB)* until those runs end.
+  Mid-stream enforcement needs byte accounting shared across writers in different terminals and is
+  reserved, not built.
+- **A detached run's transcript is never reclaimed.** Tekstide stops being able to tell whether such
+  a run is still writing, so retention treats it as live for good and never deletes it. Deliberate
+  under §2 of RFC-049's own rules — the alternative is deleting a file a live process may hold —
+  and the cost is that those bytes stay until you remove them yourself.
+- **Transcripts belonging to no project are shown, not deletable in-app.** After a
+  `recent-projects.json` that could not be read, every project reopens under a new id and its
+  earlier transcripts belong to nothing. Trust Settings says how many bytes and where; no purge
+  reaches them. **Deleting the `transcripts/` directory is what removes them.**
+- **A `recent-projects.json` that cannot be read loses that project's trust decisions**, not only
+  its place in the list. The file is moved aside, the project board says so and says where it went,
+  and trust must be granted again.
+- **No screen-reader support.** Unchanged and stated every release: `iced` offers no accessibility
+  bridge, so there is no partial support to describe.
+- **Command approval is exercisable only by the reference adapter.** No shipped AI CLI speaks the
+  structured-approval protocol yet.
+- **No before/after diff, and no undo.** The before-bytes were never captured; blocked on
+  Git-backed content, not on review UI.
+- **Terminal latency is unverified.** No measurement of the real interactive path exists.
+- **Plain terminals are not recorded.** Only AI CLI runs write transcripts.
 
 ## 0.18.0 - The Configuration File Does Something
 

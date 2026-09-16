@@ -9,6 +9,11 @@ authors.workspace       = true
 repository.workspace    = true
 categories.workspace    = true
 keywords.workspace      = true
+# RFC-050 PR-050-A: `File::try_lock` is stable from 1.89, and this crate's
+# transcript writer and loader both use it. Measured for 0.19.0, not assumed:
+# 1.88.0 fails to compile this crate with `error[E0658]: use of unstable
+# library feature 'file_lock'` at both call sites, and 1.89.0 builds it.
+rust-version            = "1.89"
 
 [lib]
 path = "src/lib.rs"

@@ -9,6 +9,12 @@ authors.workspace       = true
 repository.workspace    = true
 categories.workspace    = true
 keywords.workspace      = true
+# Higher than `tekstide-core`'s 1.89, and for a dependency's reason rather than
+# this crate's own: `ordered-float 5.5.0`, reached through `iced`, declares
+# `rust-version = "1.90"`, so a `--locked` build of this crate refuses 1.89
+# before compiling anything. Measured for 0.19.0: 1.89.0 refuses, 1.90.0 and
+# 1.91.0 both build the workspace.
+rust-version            = "1.90"
 
 [[bin]]
 name = "tekstide"
