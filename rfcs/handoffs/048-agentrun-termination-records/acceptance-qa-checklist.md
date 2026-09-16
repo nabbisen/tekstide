@@ -55,19 +55,30 @@ implementer's to paper over.
 
 ## PR-048-B — the documentation
 
-- [ ] `crates/tekstide-core/README.md`'s "no termination record exists" sentence is corrected **in the
+- [x] `crates/tekstide-core/README.md`'s "no termination record exists" sentence is corrected **in the
       commit that makes it false**, and says what a detached run's trail does instead.
-- [ ] The changelog says both halves in a user's words.
-- [ ] The book's audit description states the limit.
-- [ ] **No text claims the trail answers whether a run is still going.** It does not.
+      *Corrected in **PR-048-A's** commit, not this one: the commit that makes it false is the
+      producer's, and a box asking for the same commit cannot be satisfied by a later one. The
+      pack's plan puts documentation in B; this one sentence had to move.*
+- [x] The changelog says both halves in a user's words.
+      *An `Unreleased` entry: what is recorded and what it can never contain, and that a detached run
+      has no recorded ending on purpose.*
+- [x] The book's audit description states the limit.
+      *An *AI CLI runs* bullet in `local-data-and-privacy.md`, beside the other families.*
+- [x] **No text claims the trail answers whether a run is still going.** It does not.
+      *Both the crate README and the book say so explicitly; grepped for the claim and found none.*
 
 ## Whole-RFC
 
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
       staging, `rfc_docs_invariants`, and **three consecutive full-workspace runs with
       `--no-fail-fast`**, output redirected to files.
-- [ ] Every new intermittent failure has a dated row in `test-process-leak.md`.
-- [ ] Commits are pushed once the gate is green.
+      *All clean; 538 + 9 + 823, green every time. Clippy rejected three `drop(coordinator)` calls in
+      the new tests (no `Drop` impl); removed rather than silenced.*
+- [x] Every new intermittent failure has a dated row in `test-process-leak.md`.
+      *One, and I could not name it: a single failure in the `tekstide` binary whose log I destroyed by
+      re-running instead of reading. Row records what is known and the lesson.*
+- [x] Commits are pushed once the gate is green.
 
 ## Final Acceptance Decision
 

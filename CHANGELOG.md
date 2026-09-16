@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Added — the audit trail now says how an AI CLI run ended
+
+Until now the trail could say a run was **launched** and never that it **finished**. The record for
+it existed in the schema from the beginning and nothing wrote one.
+
+- **An ending is recorded** when a run's process ends: that it ended, and how — the process exited,
+  it was terminated, or the runtime failed. **Never an exit code, a signal number, or any text the
+  run produced**; the schema has no field for those, so none can reach it.
+- **A run Tekstide stopped supervising has no recorded ending, on purpose.** If it loses track of
+  the process — a detached run — nobody observed an ending, so the trail stops at the launch and
+  stays there. A record claiming an ending nobody saw would be worse than the silence, and it would
+  outlive the session that could explain it.
+- **The trail still does not say whether a run is going on right now.** It records what has already
+  happened, not what is happening, and this release does not change that.
+- A failure to write the record never stops a run from being terminated.
+
 ## 0.19.0 - Purge Reaches What You Actually Have, And Retention Finally Acts
 
 Status: **released on 2026-09-16.** Published to crates.io as `tekstide 0.19.0` and

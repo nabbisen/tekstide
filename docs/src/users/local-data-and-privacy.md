@@ -40,6 +40,13 @@ What it records, and what its schema makes impossible:
   path the grant binds to. This is what makes trust survive a restart: the store is
   authoritative, and it is queried for an *applied* grant specifically, so an interrupted or
   authorized-but-not-applied attempt does not restore as trust.
+- **AI CLI runs.** Launching one records that it was authorized and started, and a matching
+  `Terminated` event when it ends, naming only *how* it ended: the process exited, it was
+  terminated, or the runtime failed. Never an exit code, a signal number, or any runtime text.
+  **A run Tekstide stopped supervising has no recorded ending**: if it loses track of the process,
+  the trail stops at `Started` and stays there, because nobody observed an ending and a record
+  claiming one would be worse than the silence. The trail still does **not** answer whether a run is
+  currently going — only what has already happened to it.
 - **Transcript purges.** A purge records that it happened and its scope — never a path or a byte
   count.
 - **Configuration changes.** Confirming a configuration-defined AI CLI profile's first use, or a
