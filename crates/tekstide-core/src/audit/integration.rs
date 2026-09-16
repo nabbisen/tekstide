@@ -10,7 +10,7 @@ use crate::domain::{
 use crate::project::root::{FileAccessBlockedReason, FileAccessError};
 use crate::project::{
     ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectId, ProjectSession,
-    ProjectTranscriptError, ProjectTranscriptPurgeSummary,
+    ProjectTranscriptError, ProjectTranscriptPurgeSummary, TranscriptRetentionCleanup,
 };
 use crate::runtime::terminal::{LinuxTerminalRuntime, TerminalRuntimeEvent, TerminationOutcome};
 
@@ -404,12 +404,54 @@ impl<'a> AuditCoordinator<'a> {
             } else {
                 AuditOutcome::Failed
             },
+            AuditActorKind::User,
+            AuditActionSource::TrustedUi,
         );
         let audit_status = self.append_observation(&record);
         AuditActionResult {
             value: outcome,
             audit_status,
         }
+    }
+
+    /// RFC-049 D6 and §4: the policy cleanup's own record, as
+    /// **`(AppPolicy, ExplicitCleanup)`** — the pairing RFC-013 reserved for
+    /// this RFC before this RFC existed, and which had no producer until now.
+    ///
+    /// **A cleanup that deleted nothing writes nothing**, and returns `None`.
+    /// The triggers D2 names are frequent — every agent-run launch and every
+    /// project open — so a record per trigger would drown the family that
+    /// matters in "the policy looked and did nothing".
+    ///
+    /// **Outcome, where the RFC does not decide it:** `Completed` when every
+    /// deletion in the pass succeeded, `Failed` when any failed, even though
+    /// others succeeded. A partial failure recorded as `Completed` would say
+    /// the cleanup did what it set out to do, which is the false half of the
+    /// statement; the record exists at all only because bytes really were
+    /// removed. **Flagged for review** — the alternative, two records, needs a
+    /// second event the frozen schema does not have.
+    ///
+    /// Best-effort like every other producer here: a cleanup that already
+    /// deleted bytes is not undone by an audit store that cannot be written.
+    pub fn record_transcript_policy_cleanup(
+        &mut self,
+        project_id: ProjectId,
+        cleanup: &TranscriptRetentionCleanup,
+    ) -> Option<AuditObservationStatus> {
+        if !cleanup.removed_anything() {
+            return None;
+        }
+        let record = transcript_purge_record(
+            project_id,
+            if cleanup.failures.is_empty() {
+                AuditOutcome::Completed
+            } else {
+                AuditOutcome::Failed
+            },
+            AuditActorKind::AppPolicy,
+            AuditActionSource::ExplicitCleanup,
+        );
+        Some(self.append_observation(&record))
     }
 
     /// RFC-039 PR-039-C, `what-closing-a-project-must-not-lose.md` §4:
@@ -1066,13 +1108,28 @@ fn trust_record(
 /// transcript's real identity or path; see that method's own doc
 /// comment for why `subject_ref` cannot be `None` here and why
 /// `"project"` is the whole of what this slice's own purge scope is.
-fn transcript_purge_record(project_id: ProjectId, outcome: AuditOutcome) -> DurableAuditRecordV1 {
+///
+/// RFC-049 D6: **the actor/source pairing is a parameter, not a second
+/// near-identical constructor.** `valid_transcript_purge` already permits
+/// `(User, TrustedUi | AppCommand)` and `(AppPolicy, ExplicitCleanup)`, and
+/// §4 of `what-deleting-a-transcript-must-not-do.md` is why the difference
+/// matters: a trail that cannot tell the product's own cleanup from a purge
+/// the user clicked tells a later reader the user deleted their own data.
+/// Everything else about the record — the fixed `"project"` scope, the
+/// absent path and byte count — is identical for both, which is exactly why
+/// one constructor with a parameter is the honest shape.
+fn transcript_purge_record(
+    project_id: ProjectId,
+    outcome: AuditOutcome,
+    actor_kind: AuditActorKind,
+    action_source: AuditActionSource,
+) -> DurableAuditRecordV1 {
     let mut record = DurableAuditRecordV1::new(
         AuditEventFamily::TranscriptPurge,
         outcome,
         AuditActionKind::TranscriptPurge,
-        AuditActorKind::User,
-        AuditActionSource::TrustedUi,
+        actor_kind,
+        action_source,
     );
     record.project_id = Some(project_id);
     record.subject_kind = Some(AuditSubjectKind::Transcript);

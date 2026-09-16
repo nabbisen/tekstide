@@ -13672,13 +13672,17 @@ fn the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes() {
     let lines = super::project_board_recent_projects_reset_lines(&state);
 
     assert_eq!(lines.len(), 2, "no file was moved aside here: {lines:?}");
+    // Compared with the unit attached, and with Fluent's isolate marks removed:
+    // the line also carries the state-root path, whose temporary name contains
+    // digits that a bare "12" matched about one run in three.
+    let rendered = lines[1].replace(['\u{2068}', '\u{2069}'], "");
     assert!(
-        lines[1].contains("777"),
-        "the notice must render the boot figure: {lines:?}"
+        rendered.contains("777 bytes"),
+        "the notice must render the boot figure: {rendered}"
     );
     assert!(
-        !lines[1].contains("12"),
-        "the notice must not re-read the live figure: {lines:?}"
+        !rendered.contains("12 bytes"),
+        "the notice must not re-read the live figure: {rendered}"
     );
 }
 

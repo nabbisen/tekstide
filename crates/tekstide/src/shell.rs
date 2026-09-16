@@ -3495,10 +3495,7 @@ fn configured_agent_run_launch_plan(
     // rest), and building the whole limits struct from a document that
     // knows one field is how the other three would silently acquire this
     // function's opinion of them.
-    let mut retention_limits =
-        tekstide_core::transcript::TranscriptRetentionLimits::agent_run_default();
-    retention_limits.max_age_days = configuration.transcript_retention_days();
-    request = request.with_transcript_retention_limits(retention_limits);
+    request = request.with_transcript_retention_limits(configured_retention_limits(configuration));
     if let Some(state_root) = state_root {
         request = if capture_enabled {
             request.with_local_bounded_transcript(state_root.clone())
@@ -9120,8 +9117,39 @@ fn transcript_local_data_summary_for(
         project.real_retained_transcript_bytes(),
         app_retained_bytes,
         retained_transcripts,
-        tekstide_core::transcript::TranscriptRetentionLimits::agent_run_default(),
+        // RFC-049 D5: the limits in force, not the compiled defaults. See
+        // `configured_retention_limits` for why no test can observe this.
+        configured_retention_limits(&state.configuration),
     )
+}
+
+/// RFC-049 D5 and §5: the retention limits **in force for this session** —
+/// `agent_run_default()` with `max_age_days` replaced by the configured value.
+///
+/// Only `max_age_days` moves, because the file has no key for any other bound
+/// (RFC-045 D3′ withdrew `max_agent_transcript_mb_per_run` with the rest).
+/// Building the whole struct from a document that knows one field is how the
+/// other three would silently acquire this function's opinion of them.
+///
+/// **One function for both readers.** The launch already replaced this field;
+/// the local-data summary still passed the compiled defaults, so since `0.18.0`
+/// a user who configured a retention value saw pressure computed against a
+/// limit they did not set. Two call sites deriving the same limits separately
+/// is how they came to disagree.
+///
+/// **D5 is implemented and unobservable through the summary** (request 387):
+/// `TranscriptLocalDataSummary::budget_pressure` compares only the three byte
+/// budgets, none of which is configurable, so no configured value can change
+/// anything the summary reports. The fix is still correct — the summary now
+/// takes the governing limits, so it stays right when a budget does become
+/// configurable — and it is stated here rather than dressed in a test that
+/// would be asserting the compiled constants instead.
+fn configured_retention_limits(
+    configuration: &ConfigurationState,
+) -> tekstide_core::transcript::TranscriptRetentionLimits {
+    let mut limits = tekstide_core::transcript::TranscriptRetentionLimits::agent_run_default();
+    limits.max_age_days = configuration.transcript_retention_days();
+    limits
 }
 
 /// RFC-033 PR-033-C: `Message::OpenTranscriptPurgeDialog`'s handler --

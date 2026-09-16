@@ -35,6 +35,15 @@ the retained count and purge cover them. The count also no longer includes trans
   reset, how many bytes of earlier transcripts remain and where, and where the unreadable file was
   moved. It says nothing on any other start.
 
+### Changed — `[agent] transcript_retention_days = 0` is now refused
+
+`0` was accepted and then ignored. It reads as *no age limit at all* inside the product, which is
+the opposite of what someone writing it would expect, so a file containing it now starts Tekstide
+with built-in defaults and a diagnostic naming the key — the same handling as any other invalid
+value. **To keep no transcripts for a project, decline transcript capture for it in Trust
+Settings.** Any other positive number is unchanged, and age-based removal still reads none of them
+yet.
+
 ## 0.18.0 - The Configuration File Does Something
 
 Status: released on 2026-09-12.

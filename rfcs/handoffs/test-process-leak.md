@@ -1022,3 +1022,32 @@ removed afterwards, with the file's hash checked:
 
 The one old-order pass under a 500 ms head start is itself a reason to fix the order rather than tune
 a delay.
+
+## New intermittent, 2026-09-16 — one I wrote, in RFC-049 PR-049-C's first commit
+
+`shell::tests::the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes` failed in **run 3 of
+its own first three-run gate**; runs 1 and 2 passed. **Mine, and not a product fault.**
+
+The test moves the live disk figure to `12` and asserts the notice still renders the boot figure
+`777`. Its negative assertion was `!lines[1].contains("12")` — but the same line carries the state
+root, whose per-run temporary name is `/tmp/tekstide-run-<pid>-<n>/transcripts`. That run's pid was
+`554612`, which contains `12`, so the assertion matched the path and failed.
+
+**Fixed by comparing the rendered figure, not a bare digit string**: Fluent's isolate marks are
+stripped and the assertions read `777 bytes` and `!… 12 bytes`. A path cannot contain the unit.
+**Five consecutive full-workspace runs afterwards: green.**
+
+The lesson is narrow and repeatable: a substring assertion against a line that also contains a
+generated path is a test that fails on about one pid in three, and only sometimes.
+
+## Recurrence, 2026-09-16 — RFC-049 PR-049-C's first gate (my run)
+
+`approval::tests::coordinator::agent_run_queue_limit_is_enforced_and_only_counts_live_entries` failed
+once, in the same run 3 above, with *"an expired entry must not continue occupying the live budget:
+QueueLimitExceeded { scope: PerAgentRun, limit: 2 }"*. **This is the row first reported at request
+260.**
+
+**Not this slice.** The commit touches config parsing, retention marking, the audit record's
+actor/source pairing and the local-data summary's limits. This test exercises the approval
+coordinator's queue expiry and touches none of them. It passed in runs 1 and 2 of that gate and in
+**all five runs** of the gate that followed, on the same tree.

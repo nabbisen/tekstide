@@ -1,4 +1,6 @@
-use crate::domain::{AgentRunStatus, DomainTimestamp, Transcript, TranscriptLifecycleState};
+use crate::domain::{
+    AgentRunStatus, DomainTimestamp, Transcript, TranscriptLifecycleState, TruncationState,
+};
 
 use super::policy::TranscriptRetentionLimits;
 
@@ -26,13 +28,15 @@ use super::policy::TranscriptRetentionLimits;
 ///   precedes the transcript's own reference time, the elapsed span is
 ///   not negative, it is unknown.
 /// - **Limits that are not bounded expire nothing.** `is_bounded()`
-///   already treats `max_age_days == 0` as unbounded, and RFC-045's
-///   parser accepts a configured `0`. Rather than read zero as "delete
-///   everything immediately" — the most destructive available reading of
-///   a value a user could plausibly have typed by accident — this
-///   defers to the existing validity check. **Flagged for review**: it
-///   means `transcript_retention_days = 0` enforces nothing rather than
-///   everything, and §1 is why.
+///   treats `max_age_days == 0` as unbounded, rather than reading zero as
+///   "delete everything immediately" — the most destructive available
+///   reading of a value a user could plausibly have typed by accident,
+///   and §1 is why. **Since PR-049-C, no configuration can reach this
+///   case**: RFC-045's parser refuses `transcript_retention_days = 0`
+///   outright (`take_retention_days`), so a configured zero is a startup
+///   diagnostic naming the capture opt-out rather than a value the
+///   product silently ignores. The unbounded reading survives here for
+///   limits built in code, where it is still the safe direction.
 ///
 /// Age is measured from the **most recent evidence of activity**:
 /// `last_write_at` when present, `created_at` otherwise, and the later
@@ -117,6 +121,45 @@ pub fn mark_transcript_expired_if_due(
         return false;
     }
     transcript.record_lifecycle_state(TranscriptLifecycleState::Expired);
+    true
+}
+
+/// RFC-049 PR-049-C (response 385, decision 5): clear an `Expired` mark
+/// that is no longer true, and say whether this call cleared one.
+///
+/// **Nothing in production ever moved a transcript out of `Expired`.**
+/// The only way to be marked and survive is a deletion that failed; raise
+/// `transcript_retention_days` afterwards and the transcript is kept —
+/// correctly — while carrying a durable state that says it is past its
+/// limit. A state that is false is worse than no state: it is what a
+/// later reader, and any future surface listing "expired" transcripts,
+/// would believe.
+///
+/// **Restored to what the bytes say, not blindly to `Active`.** A
+/// transcript whose writer truncated it is `Truncated`, and re-reading
+/// `truncation_state` is the only way back to that without inventing a
+/// history. Both states retain bytes, so `record_lifecycle_state` keeps
+/// `byte_count` in either direction.
+///
+/// **Liveness is not consulted**, unlike marking and deletion: clearing
+/// touches no bytes and removes a claim rather than making one, so the §1
+/// direction here is to clear whenever the claim is false.
+pub fn clear_stale_expired_mark(
+    transcript: &mut Transcript,
+    limits: TranscriptRetentionLimits,
+    now: &DomainTimestamp,
+) -> bool {
+    if transcript.lifecycle_state != TranscriptLifecycleState::Expired {
+        return false;
+    }
+    if is_transcript_expired(transcript, limits, now) {
+        return false;
+    }
+    let restored = match transcript.truncation_state {
+        TruncationState::Truncated => TranscriptLifecycleState::Truncated,
+        TruncationState::Complete => TranscriptLifecycleState::Active,
+    };
+    transcript.record_lifecycle_state(restored);
     true
 }
 

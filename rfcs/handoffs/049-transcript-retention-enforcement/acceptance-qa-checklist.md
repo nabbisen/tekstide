@@ -84,10 +84,16 @@ empty cleanup; stale `Expired` marks re-checked and cleared; "a deletion failed"
 separately; and D5 as restated below. The purge-defect disclosure landed on its own at `c2f5092`.
 
 - [ ] Both triggers fire; **no timer, watcher, or idle sweep exists anywhere** (D2). Grep for one.
-- [ ] A policy cleanup writes `TranscriptPurge` as **`(AppPolicy, ExplicitCleanup)`**, and a user
+- [x] A policy cleanup writes `TranscriptPurge` as **`(AppPolicy, ExplicitCleanup)`**, and a user
       purge in the same file writes `(User, TrustedUi)` — **both read back from a real store**, so
       the distinction §4 requires is visible in one place.
-- [ ] A cleanup that deleted nothing writes **no record**. **Ablation:** record unconditionally.
+      *First commit: `record_transcript_policy_cleanup`, and
+      `a_policy_cleanup_and_a_user_purge_are_recorded_as_different_actors` writes both into one real
+      store and reads them back. A4 (record as the user) fails it alone. **No production caller yet**
+      — the triggers that call it are the next commit.*
+- [x] A cleanup that deleted nothing writes **no record**. **Ablation:** record unconditionally.
+      *`removed_anything()` counts deletions only, so a pass that merely marked or cleared writes
+      nothing. A3 fails `a_policy_cleanup_that_removed_nothing_writes_no_record` alone.*
 - [ ] **The exhaustion check reads a fresh scan** (RFC-050, response 393). The GUI's app-wide figure is
       a cache, refreshed at boot, at each load and after each purge, so it misses bytes written since.
       The launch check scans `transcripts/` at preflight and never reads that cache.
@@ -108,15 +114,22 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
 - [ ] RFC-011's row states the project and app-wide budgets are enforced **at launch**, with the
       overshoot bound (capturing runs × per-transcript limit) — D1 without overstating it.
 - [ ] `tests/retention.rs`'s message *"so PR-049-C can refuse a RequiredLocalBounded launch"* says D4′.
-- [ ] **RFC-045's parser refuses `transcript_retention_days = 0`**, naming the transcript
+- [x] **RFC-045's parser refuses `transcript_retention_days = 0`**, naming the transcript
       opt-out as the way to express what the user probably meant. Required at response 381:
       `is_bounded()` already treats `0` as *unbounded* while response 378 called it the tightest
       *reduce* — two opposite semantics for one value. PR-049-A resolved it toward keeping (§1),
       correctly; but a **value** the file accepts and the product ignores is RFC-045 D3′'s own
       failure one level down, and `transcript_capture_declined` already expresses zero retention.
-- [ ] D5: the summary uses the session's configured limits — **stated as unobservable today**:
+      *`take_retention_days` refuses it with a message naming the capture opt-out. A1 (accept 0
+      again) fails `a_zero_transcript_retention_period_is_refused_and_names_the_capture_opt_out`
+      alone, and `a_one_day_…_is_accepted` holds the boundary. The book's caveat and a changelog
+      entry say so.*
+- [x] D5: the summary uses the session's configured limits — **stated as unobservable today**:
       `budget_pressure` reads only byte budgets and none is configurable, so the original ablation
       (restore `agent_run_default()`) changes nothing a test can see (request 387).
+      *One `configured_retention_limits` helper now serves both the launch and the summary, which is
+      why they had drifted apart. **A6 ran that exact ablation and failed nothing** — 816 core tests
+      green with the compiled defaults restored. Recorded as measurement, not as a test.*
 - [x] **The purge defect is disclosed before it is fixed**: the book's privacy page, `README.md`,
       and `CHANGELOG.md` Unreleased say that after a restart or reopen, Trust Settings and purge cover
       only transcripts from runs since the project was opened, and that earlier ones stay in
@@ -131,12 +144,20 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
       stays exhausted (response 385). A failed candidate stops the budget pass on every trigger,
       so one undeletable file can disable capture for every new run indefinitely (D4′); the
       disclosure must name the failure, which has a remedy the other case does not.
-- [ ] **A stale `Expired` mark is re-checked, not trusted — and cleared**, with a test: a transcript
+      *Unticked after the first commit: the **core distinction** exists and is held both ways
+      (`a_budget_left_exhausted_by_a_failed_deletion_says_a_deletion_failed`, and the live-writer
+      case as its own test; A5 fails the first alone). The box asks for a **disclosure**, which needs
+      the triggers — next commit, with the removal disclosure it belongs beside.*
+- [x] **A stale `Expired` mark is re-checked, not trusted — and cleared**, with a test: a transcript
       whose deletion failed stays marked; raise the configured age; at the next trigger it survives
       **and is no longer `Expired`**. PR-049-B's decision 5 (survival) follows from the code and was
       stated as untested. The clearing is new: nothing in production moves a transcript out of
       `Expired` (reviewer's grep, response 385), so today a saved transcript keeps a durable state
       that is no longer true.
+      *`clear_stale_expired_mark`, called first in the expiry pass.
+      `a_stale_expired_mark_is_cleared_when_the_limit_is_raised` fails the deletion, raises the
+      limit, and asserts the transcript survives **and** is `Active` again. A2 fails it alone. The
+      mark is restored to `Truncated` rather than `Active` when the bytes were truncated.*
 
 ## Whole-RFC
 

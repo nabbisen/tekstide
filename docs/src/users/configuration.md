@@ -57,5 +57,10 @@ The file is refused if it asks for any of them:
 The value is recorded on each run's transcript policy and checked for validity, but **no
 age-based purge reads it yet**. Transcripts are **not** kept for that many days and then removed.
 
+**`0` is refused.** It is not a retention period: it would have meant *keep nothing*, and the
+product would have enforced the opposite — no age limit at all. To keep no transcripts for a
+project, decline transcript capture for it in Trust Settings. A file containing `0` starts
+Tekstide with built-in defaults and a diagnostic naming the key, like any other invalid value.
+
 The only purge is the manual, per-project one on the Trust Settings surface — see
 [Local data and privacy](./local-data-and-privacy.md).

@@ -377,6 +377,43 @@ fn take_u32(
     }
 }
 
+/// RFC-049 PR-049-C: `transcript_retention_days` is a `u32` like any other,
+/// **except that `0` is refused**.
+///
+/// The value had two opposite meanings in one product. `TranscriptRetentionLimits::is_bounded`
+/// reads `max_age_days == 0` as *unbounded*, so expiry would enforce **nothing**; response 378
+/// had called the same value the tightest possible *reduce*, and RFC-045's sensitive-change
+/// machinery still treats lowering it as a tightening. PR-049-A resolved the conflict toward
+/// keeping — §1 of `what-deleting-a-transcript-must-not-do.md`, since the other reading deletes
+/// every transcript immediately — and that resolution is correct but leaves a value the file
+/// accepts and the product ignores, which is RFC-045 D3′'s own failure one level down.
+///
+/// So the parser refuses it, and **names the control that expresses what the user meant**: a
+/// project's transcript capture can be declined, which keeps no transcripts at all. A refusal
+/// here costs a user one startup with a diagnostic; silently ignoring the value costs them the
+/// retention they believed they had configured.
+fn take_retention_days(
+    table: &mut toml::Table,
+    defaults: &AgentSettings,
+) -> Result<u32, ConfigDiagnostic> {
+    let days = take_u32(
+        table,
+        "agent",
+        "transcript_retention_days",
+        defaults.transcript_retention_days,
+    )?;
+    if days == 0 {
+        return Err(ConfigDiagnostic {
+            path: None,
+            key: "agent.transcript_retention_days".to_owned(),
+            location: None,
+            message: "0 is not a retention period; to keep no transcripts, decline transcript \
+                      capture for the project in Trust Settings",
+        });
+    }
+    Ok(days)
+}
+
 fn take_string(
     table: &mut toml::Table,
     section: &str,
@@ -440,12 +477,7 @@ fn extract_agent(
                 });
             }
         },
-        transcript_retention_days: take_u32(
-            &mut table,
-            "agent",
-            "transcript_retention_days",
-            defaults.transcript_retention_days,
-        )?,
+        transcript_retention_days: take_retention_days(&mut table, &defaults)?,
         profiles,
     };
     warn_unconsumed(table, "agent", warnings);

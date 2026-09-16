@@ -8,8 +8,8 @@ use crate::runtime::terminal::{
 };
 use crate::transcript::{
     TranscriptLocalDataSummary, TranscriptRetentionLimits, agent_run_may_still_be_writing,
-    is_transcript_expired, mark_transcript_expired_if_due, most_recent_activity_seconds,
-    scan_project_transcripts,
+    clear_stale_expired_mark, is_transcript_expired, mark_transcript_expired_if_due,
+    most_recent_activity_seconds, scan_project_transcripts,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1090,6 +1090,15 @@ impl ProjectSession {
         }
 
         for index in 0..self.transcripts.len() {
+            // RFC-049 PR-049-C (response 385, decision 5): a mark that is no
+            // longer true is cleared before anything else is decided. The only
+            // way to hold a stale one is a deletion that failed followed by a
+            // raised limit, and nothing in production has ever cleared it.
+            // Before the liveness check, because clearing removes a false claim
+            // rather than making one, and touches no bytes.
+            if clear_stale_expired_mark(&mut self.transcripts[index], limits, now) {
+                cleanup.cleared_expired_marks += 1;
+            }
             if self.transcript_may_still_be_written(index) {
                 continue;
             }
@@ -2061,11 +2070,44 @@ impl ProjectTranscriptPurgeSummary {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TranscriptRetentionCleanup {
     pub marked_expired: u64,
+    /// RFC-049 PR-049-C: `Expired` marks that were no longer true and were
+    /// cleared. Not a removal: nothing was deleted for these.
+    pub cleared_expired_marks: u64,
     pub expired: ProjectTranscriptPurgeSummary,
     pub budget: ProjectTranscriptPurgeSummary,
     pub failures: Vec<ProjectTranscriptError>,
     pub project_budget_exhausted: bool,
     pub app_budget_exhausted: bool,
+}
+
+impl TranscriptRetentionCleanup {
+    /// Whether this cleanup deleted any transcript's bytes — what RFC-049 §4's
+    /// *"a cleanup that deletes nothing writes nothing"* is measured on.
+    ///
+    /// Marking and clearing are **not** removals: a pass that only marked, or
+    /// only cleared a stale mark, deleted nothing and must write no record.
+    pub fn removed_anything(&self) -> bool {
+        self.expired.purged_transcripts > 0 || self.budget.purged_transcripts > 0
+    }
+
+    /// RFC-049 PR-049-C (response 385): **"a deletion failed" is not "nothing
+    /// is deletable"**, and a user's remedy differs between them.
+    ///
+    /// A failed candidate stops the budget pass on every trigger, so one
+    /// undeletable file can keep a budget exhausted — and therefore keep
+    /// launching runs without transcripts under D4′ — indefinitely. That has a
+    /// remedy: the file can be looked at. A budget exhausted because every
+    /// remaining transcript belongs to a live writer has none, and waiting is
+    /// the only answer. A disclosure that says "nothing could be freed" for
+    /// both tells the first user nothing they can act on.
+    pub fn a_deletion_failed(&self) -> bool {
+        !self.failures.is_empty()
+    }
+
+    /// Whether either budget is still over its limit after this pass.
+    pub fn budget_still_exhausted(&self) -> bool {
+        self.project_budget_exhausted || self.app_budget_exhausted
+    }
 }
 
 fn budget_exceeded(

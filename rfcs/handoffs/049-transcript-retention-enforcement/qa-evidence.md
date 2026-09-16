@@ -273,3 +273,97 @@ production callers of apply_transcript_retention:          none
 `fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --check`: clean. **Three
 consecutive full-workspace runs, output redirected to files: 507 + 6 + 783, green every time**
 (+10 tests). No flake.
+
+## PR-049-C, first commit — the independent list
+
+The five items response 389 placed after RFC-050, and nothing else. **No trigger is added, so
+nothing in production calls the cleanup yet**: the audit producer, the cleared marks and the two
+budget predicates are all reachable only from tests. The triggers, D4′ and the disclosures follow in
+the next commit.
+
+### `transcript_retention_days = 0` is refused
+
+The value meant two opposite things at once. `is_bounded()` reads `max_age_days == 0` as
+**unbounded**, so expiry would enforce nothing; response 378 had called the same value the tightest
+possible *reduce*, and RFC-045's sensitive-change machinery still treats lowering it as a tightening.
+PR-049-A resolved it toward keeping — §1, because the other reading deletes everything immediately —
+and that left a value the file accepts and the product ignores, which is RFC-045 D3′'s failure one
+level down.
+
+`take_retention_days` refuses it, and **the message names the control that expresses what the user
+meant**: declining transcript capture for the project. A refusal costs one startup with a
+diagnostic; silently ignoring the value costs the user the retention they believed they had set.
+The book's caveat and a changelog entry say the same thing.
+
+### A stale `Expired` mark is cleared
+
+`clear_stale_expired_mark` runs **first in the expiry pass**, before the liveness check, because
+clearing removes a false claim rather than making one and touches no bytes. The only way to hold a
+stale mark is the one the test builds: a deletion that failed, then a limit raised past the
+transcript's age.
+
+**Restored to what the bytes say**, not blindly to `Active`: a transcript whose writer truncated it
+returns to `Truncated`, read from `truncation_state`. Both states retain bytes, so `byte_count`
+survives either direction.
+
+### The audit pairing, and the record that is not written
+
+`transcript_purge_record` takes the actor/source pairing as a parameter (D6: not a second
+near-identical constructor — everything else about the record is identical, which is the argument
+for one constructor). `record_transcript_policy_cleanup` writes `(AppPolicy, ExplicitCleanup)`, the
+pairing RFC-013 reserved for this RFC and which had no producer until now.
+
+**A cleanup that removed nothing returns `None` and writes nothing** (§4). `removed_anything()`
+counts deletions only: marking and clearing are not removals.
+
+**One decision the RFC does not make, flagged for review:** a pass that removed some transcripts and
+failed on others records **`Failed`**. The record exists only because bytes were removed, and
+`Completed` would claim the cleanup did what it set out to do. A test pins it so it can be
+overturned deliberately. The alternative — two records — needs an event the frozen schema lacks.
+
+### "A deletion failed" is not "nothing is deletable"
+
+Two predicates, each with its own test: a budget left exhausted by an undeletable file, and one left
+exhausted because the only candidate is a live writer. The first has a remedy and the second does
+not, which is why one sentence for both would tell the first user nothing they can act on. **The
+user-facing disclosure is not here** — it needs the triggers — so that checklist box stays unticked.
+
+### D5, implemented and measured as unobservable
+
+Both readers now share `configured_retention_limits`; deriving the same limits at two call sites is
+how they came to disagree in the first place. **Ablation A6 restored `agent_run_default()` in the
+summary and failed nothing**, 816 core tests green — which is the checklist's own expectation, and
+is recorded as a measurement rather than dressed up as a test that would be asserting the compiled
+constants.
+
+### Ablations, each restored and hash-checked, `--no-fail-fast`
+
+| | Ablation | Fails |
+| --- | --- | --- |
+| A1 | the parser accepts `0` again | the zero-refusal test **alone** |
+| A2 | stale marks are never cleared | `a_stale_expired_mark_is_cleared_when_the_limit_is_raised` **alone** |
+| A3 | the policy cleanup records unconditionally | `a_policy_cleanup_that_removed_nothing_writes_no_record` **alone** |
+| A4 | the policy cleanup records as the user | `a_policy_cleanup_and_a_user_purge_are_recorded_as_different_actors` **alone** |
+| A5 | a failed deletion is never reported | `a_budget_left_exhausted_by_a_failed_deletion_says_a_deletion_failed` **alone** |
+| A6 | the summary reads compiled defaults again | **nothing — by design; see D5 above** |
+
+**A5 failed two tests on its first run**, because the stale-mark test used `a_deletion_failed()` as
+its precondition. That coupling is the test's, not the property's: the precondition now reads
+`failures` directly, and A5 was re-run and fails alone.
+
+### A flake I wrote, and fixed
+
+`the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes` (from the RFC-050 follow-up)
+failed in run 3 of this slice's first gate. Its negative assertion was `!lines[1].contains("12")`,
+and the same line carries the state root — that run's temporary directory was
+`/tmp/tekstide-run-554612-245/…`, whose pid contains `12`. Fixed by stripping Fluent's isolate marks
+and comparing `777 bytes` / `12 bytes`, which a path cannot contain. Dated row in
+`test-process-leak.md`, with the approval-queue recurrence from the same run.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean.
+`rfc_docs_invariants`: 9 passed. `mdbook build docs`: clean. **Five consecutive full-workspace runs
+with `--no-fail-fast`, output redirected to files: 519 + 9 + 816, green every time** — five rather
+than three because the first gate exposed the flake above. `git diff --cached --check` after
+staging: clean.

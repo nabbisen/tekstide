@@ -1393,6 +1393,133 @@ fn purge_persists_a_completed_record_naming_only_the_project_scope() {
     );
 }
 
+/// RFC-049 D6 and §4 of `what-deleting-a-transcript-must-not-do.md`: **the
+/// trail must say the product did this, not the user.** Both pairings are
+/// written here, into one real store, and read back together — the distinction
+/// is only meaningful as a comparison, and §4 asks for it in one place.
+///
+/// A deliberate composition: one test, two records, and each assertion names
+/// which pairing it is about.
+#[test]
+fn a_policy_cleanup_and_a_user_purge_are_recorded_as_different_actors() {
+    let dirs = TestAuditDirs::new("integration-transcript-policy-cleanup");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let mut project = project_for(&dirs, 1);
+    attach_real_transcript(&mut project, &dirs, b"a real transcript's real content");
+
+    let cleanup = crate::project::TranscriptRetentionCleanup {
+        expired: crate::project::ProjectTranscriptPurgeSummary {
+            requested_transcripts: 1,
+            purged_transcripts: 1,
+            bytes_removed: 31,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let policy_status = AuditCoordinator::new(&mut store, &mut health)
+        .record_transcript_policy_cleanup(project.id().clone(), &cleanup)
+        .expect("a cleanup that removed bytes writes a record");
+    assert_eq!(policy_status, AuditObservationStatus::Persisted);
+
+    let user =
+        AuditCoordinator::new(&mut store, &mut health).purge_project_transcripts(&mut project);
+    user.value.expect("the user's own purge still succeeds");
+
+    let records = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2, "one record each, and nothing else");
+
+    let policy = records
+        .iter()
+        .find(|record| record.actor_kind == crate::audit::AuditActorKind::AppPolicy)
+        .expect("the policy cleanup's record");
+    assert_eq!(
+        policy.action_source,
+        crate::audit::AuditActionSource::ExplicitCleanup,
+        "D6: the pairing RFC-013 reserved for this RFC, which had no producer until now"
+    );
+    assert_eq!(policy.family, AuditEventFamily::TranscriptPurge);
+    assert_eq!(policy.outcome, AuditOutcome::Completed);
+    assert_eq!(policy.project_id, Some(project.id().clone()));
+
+    let user_purge = records
+        .iter()
+        .find(|record| record.actor_kind == crate::audit::AuditActorKind::User)
+        .expect("the user's own purge record");
+    assert_eq!(
+        user_purge.action_source,
+        crate::audit::AuditActionSource::TrustedUi,
+        "the user's purge is unchanged by this slice"
+    );
+    assert_ne!(
+        policy.actor_kind, user_purge.actor_kind,
+        "a trail that cannot tell these apart says the user deleted their own data (§4)"
+    );
+}
+
+/// §4's second half: **a cleanup that deletes nothing writes nothing.** The
+/// triggers are every launch and every project open, so a record per trigger
+/// would drown the family that matters.
+#[test]
+fn a_policy_cleanup_that_removed_nothing_writes_no_record() {
+    let dirs = TestAuditDirs::new("integration-transcript-policy-cleanup-empty");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let project = project_for(&dirs, 1);
+
+    let status = AuditCoordinator::new(&mut store, &mut health).record_transcript_policy_cleanup(
+        project.id().clone(),
+        &crate::project::TranscriptRetentionCleanup::default(),
+    );
+
+    assert!(status.is_none(), "nothing removed, so nothing recorded");
+    assert!(
+        store
+            .query(&AuditQuery::latest(10))
+            .unwrap()
+            .records
+            .is_empty(),
+        "and nothing reached the store"
+    );
+}
+
+/// The outcome choice this slice had to make, pinned so a later reader can
+/// disagree with it deliberately: a pass that removed some transcripts and
+/// failed on others records **`Failed`**. The record exists because bytes were
+/// removed; calling it `Completed` would claim the cleanup did what it set out
+/// to do, which is the false half of the statement.
+#[test]
+fn a_policy_cleanup_that_removed_some_and_failed_on_others_records_failed() {
+    let dirs = TestAuditDirs::new("integration-transcript-policy-cleanup-partial");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let project = project_for(&dirs, 1);
+    let cleanup = crate::project::TranscriptRetentionCleanup {
+        expired: crate::project::ProjectTranscriptPurgeSummary {
+            requested_transcripts: 2,
+            purged_transcripts: 1,
+            bytes_removed: 10,
+            ..Default::default()
+        },
+        failures: vec![crate::project::ProjectTranscriptError::MissingTranscript],
+        ..Default::default()
+    };
+
+    AuditCoordinator::new(&mut store, &mut health)
+        .record_transcript_policy_cleanup(project.id().clone(), &cleanup)
+        .expect("bytes were removed, so there is a record");
+
+    let records = store.query(&AuditQuery::latest(10)).unwrap().records;
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].record.outcome, AuditOutcome::Failed);
+}
+
 /// The other outcome `valid_transcript_purge` permits: `Failed`, still
 /// recorded rather than silently dropped -- the deletion itself refused
 /// (`UnsafeProjectPath`, already tested at the model layer), and the

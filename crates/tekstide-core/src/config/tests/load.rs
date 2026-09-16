@@ -437,6 +437,33 @@ fn an_unknown_value_type_for_an_accepted_key_is_an_error_naming_the_key() {
     assert_eq!(error.key, "agent.transcript_retention_days");
 }
 
+/// RFC-049 PR-049-C: `0` had two opposite meanings — `is_bounded()` reads it as
+/// *unbounded*, so nothing would ever expire, while response 378 had called it
+/// the tightest possible reduce. PR-049-A resolved it toward keeping (§1), which
+/// leaves a value the file accepts and the product ignores. The parser refuses
+/// it instead, and the message names the control that expresses what the user
+/// meant.
+#[test]
+fn a_zero_transcript_retention_period_is_refused_and_names_the_capture_opt_out() {
+    let error = parse_and_validate("[agent]\ntranscript_retention_days = 0\n").unwrap_err();
+
+    assert_eq!(error.key, "agent.transcript_retention_days");
+    assert!(
+        error.message.contains("decline transcript"),
+        "the refusal must say how to keep no transcripts at all: {}",
+        error.message
+    );
+}
+
+/// The other half of the refusal: the smallest period that *is* a period still
+/// parses, so the check is "zero", not "small".
+#[test]
+fn a_one_day_transcript_retention_period_is_accepted() {
+    let outcome = parse_and_validate("[agent]\ntranscript_retention_days = 1\n").unwrap();
+
+    assert_eq!(outcome.document.agent.transcript_retention_days, 1);
+}
+
 #[test]
 fn a_missing_required_key_inside_a_profile_is_an_error() {
     let error =

@@ -287,6 +287,122 @@ fn a_failed_budget_deletion_stops_budget_cleanup_rather_than_deleting_something_
     assert!(cleanup.project_budget_exhausted);
 }
 
+/// RFC-049 PR-049-C (response 385, decision 5): PR-049-B established that a
+/// transcript saved by a raised limit survives. What nothing held is that it
+/// stops claiming to be expired: production never moved a transcript **out of**
+/// `Expired`, so a durable, false state survived every later trigger.
+///
+/// The only way to reach a stale mark is the one this test builds: a deletion
+/// that failed, then a limit raised past the transcript's age.
+#[test]
+fn a_stale_expired_mark_is_cleared_when_the_limit_is_raised() {
+    let dirs = TestDirs::new("stale-expired-mark");
+    let mut project = project_session(&dirs);
+    let undeletable = attach_running_run(&mut project, &dirs, "undeletable", &[b'u'; 10], LONG_AGO);
+    // A directory where the file should be: RFC-033's purge refuses it, so the
+    // mark outlives the pass that made it.
+    fs::remove_file(&undeletable.path).unwrap();
+    fs::create_dir_all(undeletable.path.join("not-a-transcript")).unwrap();
+    complete(&mut project, &undeletable);
+
+    let marked = project.apply_transcript_retention(limits(100, 1_000, 10_000, 30), 0, &at(NOW));
+
+    assert_eq!(marked.marked_expired, 1);
+    // The precondition is asserted on `failures` itself, not through
+    // `a_deletion_failed()`: that predicate has its own test, and reading it
+    // here would make an ablation of it fail this test too.
+    assert!(!marked.failures.is_empty(), "the deletion must have failed");
+    assert_eq!(
+        state_of(&project, &undeletable.transcript_id),
+        TranscriptLifecycleState::Expired,
+        "a transcript whose deletion failed stays marked"
+    );
+
+    // The user raises the limit past this transcript's age.
+    let cleared =
+        project.apply_transcript_retention(limits(100, 1_000, 10_000, 10_000), 0, &at(NOW));
+
+    assert_eq!(cleared.cleared_expired_marks, 1);
+    assert_eq!(
+        state_of(&project, &undeletable.transcript_id),
+        TranscriptLifecycleState::Active,
+        "a mark that is no longer true is cleared, not merely ignored"
+    );
+    assert!(
+        undeletable.path.exists(),
+        "clearing a mark deletes nothing (PR-049-B's decision 5: it survives)"
+    );
+    assert_eq!(
+        cleared.marked_expired, 0,
+        "and it is not marked again in the same pass"
+    );
+}
+
+/// RFC-049 PR-049-C (response 385): the budget stays exhausted in two different
+/// situations, and a user's remedy differs. This is the half with a remedy —
+/// **a deletion failed**, and the file can be looked at.
+#[test]
+fn a_budget_left_exhausted_by_a_failed_deletion_says_a_deletion_failed() {
+    let dirs = TestDirs::new("exhausted-by-failure");
+    let mut project = project_session(&dirs);
+    let undeletable = attach_running_run(
+        &mut project,
+        &dirs,
+        "undeletable",
+        &[b'u'; 100],
+        "2026-02-20T00:00:00Z",
+    );
+    fs::remove_file(&undeletable.path).unwrap();
+    fs::create_dir_all(undeletable.path.join("not-a-transcript")).unwrap();
+    complete(&mut project, &undeletable);
+
+    let cleanup = project.apply_transcript_retention(limits(1, 1, 10_000, 10_000), 0, &at(NOW));
+
+    assert!(cleanup.budget_still_exhausted());
+    assert!(
+        cleanup.a_deletion_failed(),
+        "one undeletable file keeps the budget exhausted on every trigger, and that has a remedy"
+    );
+}
+
+/// The other half: **nothing is deletable**, because the only candidate is a
+/// live writer (§2). The budget is equally exhausted, and there is nothing the
+/// user can do but wait — so the disclosure must not say a deletion failed.
+#[test]
+fn a_budget_left_exhausted_by_a_live_writer_says_no_deletion_failed() {
+    let dirs = TestDirs::new("exhausted-by-live-writer");
+    let mut project = project_session(&dirs);
+    let _running = attach_running_run(&mut project, &dirs, "running", &[b'r'; 100], YESTERDAY);
+
+    let cleanup = project.apply_transcript_retention(limits(1, 1, 10_000, 10_000), 0, &at(NOW));
+
+    assert!(cleanup.budget_still_exhausted());
+    assert!(
+        !cleanup.a_deletion_failed(),
+        "a live writer that was never selected is not a failed deletion"
+    );
+}
+
+/// RFC-049 §4's measurement: marking and clearing are not removals, so a pass
+/// that only did those writes no audit record.
+#[test]
+fn a_cleanup_that_only_marked_a_transcript_removed_nothing() {
+    let dirs = TestDirs::new("marked-only");
+    let mut project = project_session(&dirs);
+    let undeletable = attach_running_run(&mut project, &dirs, "undeletable", &[b'u'; 10], LONG_AGO);
+    fs::remove_file(&undeletable.path).unwrap();
+    fs::create_dir_all(undeletable.path.join("not-a-transcript")).unwrap();
+    complete(&mut project, &undeletable);
+
+    let cleanup = project.apply_transcript_retention(limits(100, 1_000, 10_000, 30), 0, &at(NOW));
+
+    assert_eq!(cleanup.marked_expired, 1);
+    assert!(
+        !cleanup.removed_anything(),
+        "a mark is not a removal, and §4's record must not be written for one"
+    );
+}
+
 /// RFC-050 PR-050-A: liveness matches on **origin** first. Nothing loads a
 /// found record yet (PR-050-B does); these are built the way the loader will
 /// build them, with no terminal and no run.
