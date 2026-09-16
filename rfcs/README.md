@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 051 | [Recovering the Recent-Project List](./proposed/051-recovering-the-recent-project-list.md) | **Proposed 2026-09-16.** A `recent-projects.json` that cannot be read is replaced by an empty list **saved over it**, so a user loses their projects' ids — and with them their trust decisions (`has_applied_trust_grant` is keyed by id) and the ownership of their transcripts (RFC-050 D6′). **No previous-good copy exists**, and the audit store cannot rebuild the list because `project_added` records an id and no path. **D1**: never overwrite a file we could not read. **D2**: keep one backup and recover from it. **D3**: whole-file or nothing — a half-parsed list can re-attach trust to the wrong folder. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 051 | [Recovering the Recent-Project List](./accepted/051-recovering-the-recent-project-list.md) | **Accepted 2026-09-16; D1–D6 decided on acceptance.** An unreadable `recent-projects.json` is replaced by an empty list saved over it, losing project ids — and with them trust decisions (grants are matched by id) and the ownership of transcripts (RFC-050 D6′). **D1**: never overwrite a file we could not read; if it cannot be quarantined, save nothing. **D2/D2′**: one previous-good copy, written only from a list that loaded. **D3**: whole-file recovery, never salvage — a half-parsed list re-attaches trust to the wrong folder. **D5**: a recovery says so once, as a different sentence from a reset. **D6′**: one typed outcome from the store, so the shell has no sequence to get wrong. [Handoff pack](./handoffs/051-recovering-the-recent-project-list/README.md) |
 
 
 ### Reserved numbers — check this before authoring
@@ -102,6 +102,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | — | [Release 0.19.0](./handoffs/release-0.19.0.md) — **M12**; the publish that replaces a crates.io page still promising a purge that did not work |
 | — | [Documentation: README and the book](./handoffs/documentation-readme-and-book.md) — **M12**; a 554-line landing page against a 100–200 target, and a book whose only user chapter is `{{#include README.md}}` |
 | 050 | [Transcripts From Earlier Runs](./handoffs/050-transcripts-from-earlier-runs/README.md) — **M12**; load what is on disk, and never delete what something is still writing or what the loader did not recognise |
+| 051 | [Recovering the Recent-Project List](./handoffs/051-recovering-the-recent-project-list/README.md) — **M12**; the reset that takes a user's trust decisions with it |
 | 048 | [AgentRun Termination Records](./handoffs/048-agentrun-termination-records/README.md) — **M12**; the ending the trail cannot state, in a slot the schema already reserves |
 | 049 | [Transcript Retention Enforcement](./handoffs/049-transcript-retention-enforcement/README.md) — **M12**; the first slice here that deletes a user's data, so every ambiguous rule resolves toward keeping too much |
 | 045 | [Configuration Reachability](./handoffs/045-configuration-reachability/README.md) — **M12**; a parser for a file whose values have no destination: accept four keys plus profiles, refuse the rest by name, and put one deliberate act between the file and any executable it defines |

@@ -1,6 +1,6 @@
 # RFC-051: Recovering the Recent-Project List
 
-Status: **Proposed 2026-09-16.** Scoped at the owner's word, to ship with RFC-048 in `0.20.0`. Found
+Status: **Accepted by the human owner 2026-09-16.** **D1–D6 decided by the architect on acceptance** — see the end, including D5's open question. Proposed the same day. Scoped at the owner's word, to ship with RFC-048 in `0.20.0`. Found
 by the architect at RFC-050's acceptance (D6′) and carried in `future-work.md` since, with the trigger
 *"any slice that touches `RecentProjectStore`"* — this is that slice.
 Target milestone: **M12**
@@ -107,3 +107,33 @@ and the documentation sentence in the book that currently says a reset loses tru
 - **Nothing is recovered from a partially parseable file** (D3), asserted.
 - The board says which case happened, and says nothing when the list loaded normally.
 - A backup is never written from a session that started with an empty list after a failed load.
+
+
+## Decided on acceptance (2026-09-16)
+
+**D1–D4 as recommended.** The three below settle what the RFC left open, and one adds a rule the
+proposal implied without stating.
+
+**D5 — a successful recovery says so, once, on the start it happened.** The owner's rule from RFC-050
+D6′ is that a user is told when their data stops belonging to them; a recovery means nothing did, so
+silence was defensible. It is still the wrong call. **The user's state file was damaged**, which can
+recur and which they may want to investigate, and the live file is now a restored copy rather than
+the one they had. One line, on that start only, absent otherwise — RFC-047 D3's rule that a surface
+shows only when degraded. It replaces the reset line rather than joining it: **recovered** and **reset
+with nothing to recover** are two different sentences, and a user must not have to infer which
+happened.
+
+**D2′ — a backup is written only from a list that was loaded successfully.** The proposal named this
+as a risk; it is a rule. The store carries whether the live file loaded, and a session that started
+empty after a failed load **writes no backup at all** until a real list is saved by a real user
+action. Otherwise the first save after a failed load overwrites the only good copy with the empty
+list — the same destruction this RFC exists to stop, one file further along.
+
+**D6′ — the recovery path is the store's, not the shell's.** `boot()` must not sequence
+"load, notice it failed, look for a backup, write one". The store returns **one typed outcome** —
+loaded, recovered from backup, or reset with nothing to recover — and the shell renders what it says.
+Two prior slices in this project shipped a correct decision with one call site unguarded; the way not
+to have that problem is not to have the call site.
+
+**Ordering, stated because it is the whole defect:** quarantine, then recover, then save. A save that
+happens before a recovery attempt destroys what the recovery needed.
