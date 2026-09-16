@@ -62,21 +62,12 @@ impl AppStatePathProvider {
 pub enum RecentProjectStoreError {
     PathUnavailable(String),
     Io(String),
-    /// The file could not be parsed. `moved_to` is where it was renamed, so
-    /// the board can say where it went (RFC-050 PR-050-C); `None` when the
-    /// rename itself failed.
-    CorruptState {
-        message: String,
-        moved_to: Option<PathBuf>,
-    },
 }
 
 impl fmt::Display for RecentProjectStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PathUnavailable(message)
-            | Self::Io(message)
-            | Self::CorruptState { message, .. } => formatter.write_str(message),
+            Self::PathUnavailable(message) | Self::Io(message) => formatter.write_str(message),
         }
     }
 }
@@ -236,31 +227,6 @@ impl RecentProjectStore {
 
     pub fn backup_file(&self) -> PathBuf {
         self.state_file.with_extension("json.bak")
-    }
-
-    pub fn load(&self) -> Result<RecentProjectState, RecentProjectStoreError> {
-        let content = match fs::read_to_string(&self.state_file) {
-            Ok(content) => content,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(RecentProjectState::default());
-            }
-            Err(error) => {
-                return Err(RecentProjectStoreError::Io(format!(
-                    "failed to read recent-project state: {error}"
-                )));
-            }
-        };
-
-        match RecentProjectState::from_json(&content) {
-            Ok(state) => Ok(state),
-            Err(error) => {
-                let moved_to = self.rename_corrupt_state().ok();
-                Err(RecentProjectStoreError::CorruptState {
-                    message: error,
-                    moved_to,
-                })
-            }
-        }
     }
 
     /// RFC-051 §1/§2: writes the live file, and the previous-good copy **only**

@@ -215,15 +215,21 @@ fn rejects_non_uuid_project_id() {
     assert!(error.contains("project_id must be a UUID string"));
 }
 
+// The four tests below moved from `RecentProjectStore::load` to
+// `load_or_recover` at RFC-051 PR-051-C, when `load` was deleted for having no
+// caller outside them. Each keeps what it proved.
+
+/// A first start is not a failure: no file, no recovery, nothing moved.
 #[test]
 fn missing_state_file_loads_empty_state() {
     let sandbox = TestSandbox::new("missing-state");
-    let store =
+    let mut store =
         RecentProjectStore::new(AppStatePathProvider::from_state_dir(sandbox.path("state")));
 
-    let state = store.load().expect("missing state should not fail");
+    let loaded = store.load_or_recover();
 
-    assert_eq!(state, RecentProjectState::default());
+    assert_eq!(loaded.state, RecentProjectState::default());
+    assert_eq!(loaded.outcome, RecentProjectLoadOutcome::Loaded);
 }
 
 #[test]
@@ -232,35 +238,33 @@ fn corrupt_state_file_is_renamed_and_reported() {
     let state_dir = sandbox.create_dir("state");
     let state_file = state_dir.join("recent-projects.json");
     fs::write(&state_file, b"not json").unwrap();
-    let store = RecentProjectStore::new(AppStatePathProvider::from_state_dir(&state_dir));
+    let mut store = RecentProjectStore::new(AppStatePathProvider::from_state_dir(&state_dir));
 
-    let error = store.load().expect_err("corrupt state should be reported");
+    let loaded = store.load_or_recover();
 
-    assert!(!error.to_string().is_empty());
+    match &loaded.outcome {
+        RecentProjectLoadOutcome::Reset { message, .. } => assert!(!message.is_empty()),
+        other => panic!("expected Reset with no backup to recover from, got {other:?}"),
+    }
     assert!(!state_file.exists());
     assert!(state_dir.join("recent-projects.json.corrupt").exists());
 }
 
 /// RFC-050 PR-050-C: the board says where the unreadable list went, so the
-/// error must carry the path the rename produced.
+/// outcome must carry the path the rename produced.
 #[test]
 fn a_corrupt_state_reports_where_it_was_moved() {
     let sandbox = TestSandbox::new("corrupt-state-moved-to");
     let state_dir = sandbox.create_dir("state");
     fs::write(state_dir.join("recent-projects.json"), b"not json").unwrap();
-    let store = RecentProjectStore::new(AppStatePathProvider::from_state_dir(&state_dir));
+    let mut store = RecentProjectStore::new(AppStatePathProvider::from_state_dir(&state_dir));
 
-    let error = store.load().expect_err("corrupt state should be reported");
+    let loaded = store.load_or_recover();
 
-    match error {
-        crate::project::recent::RecentProjectStoreError::CorruptState { moved_to, .. } => {
-            assert_eq!(
-                moved_to,
-                Some(state_dir.join("recent-projects.json.corrupt"))
-            )
-        }
-        other => panic!("expected CorruptState, got {other:?}"),
-    }
+    assert_eq!(
+        loaded.outcome.moved_to(),
+        Some(state_dir.join("recent-projects.json.corrupt").as_path())
+    );
 }
 
 #[test]
@@ -271,9 +275,9 @@ fn corrupt_state_rename_does_not_overwrite_existing_corrupt_file() {
     let first_corrupt = state_dir.join("recent-projects.json.corrupt");
     fs::write(&state_file, b"not json").unwrap();
     fs::write(&first_corrupt, b"older corrupt state").unwrap();
-    let store = RecentProjectStore::new(AppStatePathProvider::from_state_dir(&state_dir));
+    let mut store = RecentProjectStore::new(AppStatePathProvider::from_state_dir(&state_dir));
 
-    let _ = store.load().expect_err("corrupt state should be reported");
+    let _ = store.load_or_recover();
 
     assert_eq!(
         fs::read_to_string(first_corrupt).unwrap(),

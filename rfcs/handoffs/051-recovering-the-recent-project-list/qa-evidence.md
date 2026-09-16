@@ -111,3 +111,26 @@ the rules predict — they are the two properties everything else in this RFC st
 `rfc_docs_invariants`: 9 passed. `mdbook build docs`: clean. **Three consecutive full-workspace runs
 with `--no-fail-fast`: 541 + 9 + 829, green every time** (+3 shell, +6 core). No new intermittent.
 `git diff --cached --check` after staging: clean.
+
+## PR-051-C (response 401) — the method this slice made dormant
+
+**`RecentProjectStore::load` had only test callers** once `load_or_recover` superseded it — four, in
+the store's own test file. That is the dormant-capability shape RFC-036 closed, created fresh by the
+change that replaced it, and this project's rule is that such a capability is deleted rather than kept
+for a caller that may never come.
+
+- **`load` is gone.** Its four tests moved onto `load_or_recover`, keeping what each proved: a missing
+  file is not a failure, a corrupt file is quarantined and reported, the quarantine does not overwrite
+  an existing `.corrupt`, and the outcome names where the file went.
+- **`RecentProjectStoreError::CorruptState` is gone with it**, because `load` was its only producer.
+  Checked rather than assumed: nothing outside that function constructed it, and nothing outside the
+  one migrated test matched on it. `Io` and `PathUnavailable` remain — `save` and the path provider
+  still produce both.
+- **The changelog records the removal as breaking**, in the shape `0.16.0`'s dormant-API removal set:
+  what went, what replaces it, and what a dependent does instead.
+
+### Gate
+
+fmt, clippy and `rfc_docs_invariants` clean. **Three consecutive full-workspace runs with
+`--no-fail-fast`: 541 + 9 + 829, green every time** — the same counts as PR-051-B, because the four
+tests moved rather than multiplied.

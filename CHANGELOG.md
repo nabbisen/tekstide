@@ -25,6 +25,18 @@ overwritten with no copy kept.
 
 **What this cannot do:** a list already lost, before this release, has no copy to come back from.
 
+### Removed — `RecentProjectStore::load`, superseded the day it gained a replacement
+
+`load_or_recover` does everything `load` did and the recovery besides, so `load` was left with no
+caller outside its own tests — the dormant-capability shape RFC-036 closed, created fresh by the
+change that superseded it. Deleted rather than kept for a caller that may never come, along with the
+`RecentProjectStoreError::CorruptState` variant, which nothing produced once `load` was gone.
+
+**This is a breaking change for anything depending on `tekstide-core` directly.** Call
+`load_or_recover`, which returns a `RecentProjectLoad` — the list, plus whether it was loaded,
+recovered from the backup, or reset with nothing to recover. `load`'s four tests moved onto it
+unchanged in what they prove.
+
 ### Added — the audit trail now says how an AI CLI run ended
 
 Until now the trail could say a run was **launched** and never that it **finished**. The record for
