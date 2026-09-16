@@ -809,8 +809,23 @@ existing, is not moved, and `boot()` then saves the empty list over it with an a
 old list is gone with no copy. PR-050-C's board notice says the list was reset, which is true, but not
 that nothing was kept.
 
-**Trigger to revisit:** the first report of trust or transcripts vanishing after a crash, or any
-slice that touches `RecentProjectStore`.
+**Repaired by RFC-051 (closed 2026-09-16).** The store keeps `recent-projects.json.bak`, written on
+each save **from a list that really loaded**; an unreadable file is quarantined like an unparseable
+one, and if that rename fails **nothing is saved at all**; and the list is recovered from the backup
+with its ids intact, so trust can be re-verified and transcripts still belong to their projects. The
+board says which happened — recovered, or reset with nothing to recover.
+
+**What remains here:**
+
+- **A reset that predates RFC-051 is not repairable.** There was no backup to keep, so a list already
+  lost stays lost; RFC-050 shows those transcripts and says no purge reaches them.
+- **One previous-good copy, not a history.** A corruption that survives two saves takes the backup
+  with it.
+- **`ProjectId` is still not derivable from the canonical path** (RFC-051 D6). That would survive any
+  reset, and it changes what every existing record means, so it stays a separate decision.
+
+**Trigger to revisit:** a report of a list lost with the backup intact, or a slice that makes ids
+derivable.
 
 ### The test gate runs only on developer machines — no CI, noticed when the first workflow landed
 

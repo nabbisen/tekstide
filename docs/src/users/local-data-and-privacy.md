@@ -18,6 +18,15 @@ what actually restores trust, and editing this file cannot grant a project anyth
 
 There is no in-app command to clear it. Delete the file to reset it.
 
+**Tekstide keeps one previous-good copy of this file**, `recent-projects.json.bak`, written whenever
+it saves a list it really loaded. If the live file is ever damaged or unreadable, it is moved aside
+and the list is restored from that copy **with its project identities intact** — which is what keeps
+your trust decisions re-verifiable and your transcripts attached to their projects. The project board
+tells you which happened: restored from the last saved copy, or reset with nothing to recover.
+
+**Restoring the list never restores trust.** Every restored project is re-checked against the audit
+store, and one with no recorded grant is Restricted again.
+
 ## The audit store
 
 `$XDG_STATE_HOME/tekstide/audit/audit.sqlite3`

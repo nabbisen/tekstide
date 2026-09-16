@@ -107,7 +107,7 @@ fn boot() -> shell::State {
         tekstide_core::config::ConfigPathProvider::linux_default(),
     );
 
-    let store = match AppStatePathProvider::linux_default() {
+    let mut store = match AppStatePathProvider::linux_default() {
         Ok(path_provider) => Some(RecentProjectStore::new(path_provider)),
         Err(error) => {
             eprintln!("{error}");
@@ -115,17 +115,16 @@ fn boot() -> shell::State {
         }
     };
 
-    // RFC-050 PR-050-C: a list that could not be read starts empty and is saved
-    // empty below, so every earlier transcript loses its project. The board says
-    // so on this start (`project_board_recent_projects_reset_lines`).
-    let mut recent_projects_reset = None;
-    if let Some(store) = &store {
-        let loaded = store.load();
-        recent_projects_reset = shell::recent_projects_reset_from(&loaded);
-        match loaded {
-            Ok(recent_project_state) => app_shell.restore_recent_projects(recent_project_state),
-            Err(error) => eprintln!("{error}"),
-        }
+    // RFC-051 D6′: **the store does the whole sequence** — quarantine, recover,
+    // then allow saving — and this function renders what it says. There is no
+    // "load, notice it failed, look for a backup, write one" here to get wrong,
+    // because §6's ordering is the defect and a call site is where it would
+    // regress.
+    let mut recent_projects_repair = None;
+    if let Some(store) = store.as_mut() {
+        let loaded = store.load_or_recover();
+        recent_projects_repair = shell::recent_project_list_repair_from(&loaded.outcome);
+        app_shell.restore_recent_projects(loaded.state);
     }
 
     // No window has opened yet at this point, so exiting on an invalid
@@ -142,6 +141,8 @@ fn boot() -> shell::State {
         }
     }
 
+    // §1: a save the store withholds is not a failure — it is the store
+    // refusing to write over a file it could not read or quarantine.
     if let Some(store) = &store
         && let Err(error) = store.save(&app_shell.recent_project_state())
     {
@@ -155,7 +156,7 @@ fn boot() -> shell::State {
     // here would be a line someone can delete with no test noticing, which is
     // how the command-line open came to have no cleanup at all.
     shell::State::new(app_shell, catalog, audit_health, configuration)
-        .with_recent_projects_reset(recent_projects_reset)
+        .with_recent_project_list_repair(recent_projects_repair)
 }
 
 /// RFC-031 PR-031-B: the real, testable open-a-project-from-the-CLI

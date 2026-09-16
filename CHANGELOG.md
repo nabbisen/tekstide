@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Fixed — a damaged recent-projects list no longer takes your trust decisions with it
+
+**Before this, a `recent-projects.json` Tekstide could not read was replaced by an empty list saved
+over it.** Every project then reopened under a new identity: trust had to be granted again, and the
+transcripts of those projects belonged to nothing (they are shown, but no purge reaches them). If the
+file could not be *parsed* it was at least moved aside first; if it could not be *read*, it was
+overwritten with no copy kept.
+
+- **Tekstide now keeps one previous-good copy**, `recent-projects.json.bak`, written whenever it
+  saves — and **only** when the list it is saving really came from a file it read, so a session that
+  started empty can never overwrite the good copy with an empty one.
+- **A damaged list is restored from that copy, with its identities intact**, which is what makes
+  trust re-verifiable and keeps transcripts attached to their projects.
+- **A file that cannot be read is moved aside first**, exactly as an unparseable one already was. If
+  it cannot even be moved, **nothing is saved at all** this session: your unreadable file is worth
+  more than our empty one.
+- **The project board says which happened** — restored from the last saved copy, or reset with
+  nothing to recover. They are different sentences, and you should not have to guess.
+- **Recovery restores identities, never trust.** Every restored project is still re-checked against
+  the audit store, and one with no recorded grant is demoted to Restricted.
+
+**What this cannot do:** a list already lost, before this release, has no copy to come back from.
+
 ### Added — the audit trail now says how an AI CLI run ended
 
 Until now the trail could say a run was **launched** and never that it **finished**. The record for
@@ -121,7 +144,7 @@ crates.io resolves a relative link against the crate's own directory, where it 4
   reaches them. **Deleting the `transcripts/` directory is what removes them.**
 - **A `recent-projects.json` that cannot be read loses that project's trust decisions**, not only
   its place in the list. The file is moved aside, the project board says so and says where it went,
-  and trust must be granted again.
+  and trust must be granted again. *(Repaired in the next release: see the Unreleased entry above.)*
 - **No screen-reader support.** Unchanged and stated every release: `iced` offers no accessibility
   bridge, so there is no partial support to describe.
 - **Command approval is exercisable only by the reference adapter.** No shipped AI CLI speaks the

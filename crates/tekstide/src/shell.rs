@@ -1001,7 +1001,7 @@ pub struct State {
     /// RFC-050 PR-050-C (D6′): `Some` only on the one start whose
     /// `recent-projects.json` could not be read. Never persisted, so a later
     /// start with a readable file has `None` and shows nothing.
-    recent_projects_reset: Option<RecentProjectsReset>,
+    recent_project_list_repair: Option<RecentProjectListRepair>,
     /// RFC-049, response 385: what the last retention cleanup removed, for the
     /// project board to say so. `None` until a cleanup removes something or
     /// fails at something.
@@ -1270,7 +1270,7 @@ impl State {
             audit_health,
             configuration,
             transcript_disk_usage,
-            recent_projects_reset: None,
+            recent_project_list_repair: None,
             transcript_cleanup_notice: None,
             audited_agent_runs: std::collections::HashMap::new(),
         };
@@ -1292,8 +1292,11 @@ impl State {
     /// since, so `transcript_disk_usage.total_bytes` here is exactly "what was on
     /// disk before this start". The notice renders that number for the rest of
     /// the session, never the live one.
-    pub(crate) fn with_recent_projects_reset(mut self, reset: Option<RecentProjectsReset>) -> Self {
-        self.recent_projects_reset = reset.map(|reset| RecentProjectsReset {
+    pub(crate) fn with_recent_project_list_repair(
+        mut self,
+        reset: Option<RecentProjectListRepair>,
+    ) -> Self {
+        self.recent_project_list_repair = reset.map(|reset| RecentProjectListRepair {
             transcript_bytes_at_boot: self.transcript_disk_usage.total_bytes,
             ..reset
         });
@@ -7473,55 +7476,84 @@ fn project_board_audit_lines(state: &State) -> Vec<String> {
 /// Absent when clean, per RFC-047 §2 and D3's own precedent: a
 /// permanent "configuration: fine" line is how a surface stops being
 /// read.
-/// RFC-050 PR-050-C (D6′): the start whose `recent-projects.json` could not be
-/// read. The list starts empty and is saved empty, so every project reopens under
-/// a new id and every earlier transcript belongs to no project.
+/// RFC-051 D5: what happened to the recent-project list on **this start**, when
+/// something did. Two outcomes, and a user must not have to infer which:
+/// **recovered** from the last saved copy, or **reset** with nothing to recover.
+///
+/// Absent on a normal start, per RFC-047 D3's rule that a surface shows only
+/// when degraded.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct RecentProjectsReset {
+pub(crate) struct RecentProjectListRepair {
+    kind: RecentProjectListRepairKind,
     moved_to: Option<std::path::PathBuf>,
     /// Bytes under `transcripts/` **as they were at boot** (response 394, F1).
     /// The notice stays on the board all session, and the live figure refreshes
     /// after every load and purge, so rendering the live one would let
     /// "transcripts from before this start" count transcripts this session
-    /// wrote. Snapshotted once, in `State::with_recent_projects_reset`.
+    /// wrote. Snapshotted once, in `State::with_recent_project_list_repair`.
     transcript_bytes_at_boot: u64,
 }
 
-/// What loading the recent list means for the board. A corrupt file (renamed
-/// aside) and an unreadable one both start empty and are overwritten on save, so
-/// both are a reset. A missing file is a first start, and a path that cannot be
-/// resolved has no file to lose; neither is a reset.
-pub(crate) fn recent_projects_reset_from(
-    loaded: &Result<
-        tekstide_core::project::recent::RecentProjectState,
-        tekstide_core::project::recent::RecentProjectStoreError,
-    >,
-) -> Option<RecentProjectsReset> {
-    use tekstide_core::project::recent::RecentProjectStoreError;
-    match loaded {
-        Err(RecentProjectStoreError::CorruptState { moved_to, .. }) => Some(RecentProjectsReset {
-            moved_to: moved_to.clone(),
-            transcript_bytes_at_boot: 0,
-        }),
-        Err(RecentProjectStoreError::Io(_)) => Some(RecentProjectsReset {
-            moved_to: None,
-            transcript_bytes_at_boot: 0,
-        }),
-        Ok(_) | Err(RecentProjectStoreError::PathUnavailable(_)) => None,
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RecentProjectListRepairKind {
+    /// The list came back from `recent-projects.json.bak`, **with its ids** — so
+    /// trust can still be re-verified and transcripts still belong to their
+    /// projects. Nothing was lost, and the user is told anyway: their state file
+    /// was damaged, which can recur.
+    Recovered,
+    /// There was nothing to recover from. This is RFC-050 PR-050-C's case, and
+    /// keeps its sentence about earlier transcripts remaining on disk.
+    Reset,
+}
+
+/// RFC-051 D6′: the shell **renders** the store's outcome and sequences nothing.
+/// `Loaded` — which covers a first start with no file at all — says nothing.
+pub(crate) fn recent_project_list_repair_from(
+    outcome: &tekstide_core::project::recent::RecentProjectLoadOutcome,
+) -> Option<RecentProjectListRepair> {
+    use tekstide_core::project::recent::RecentProjectLoadOutcome;
+    let (kind, moved_to) = match outcome {
+        RecentProjectLoadOutcome::Loaded => return None,
+        RecentProjectLoadOutcome::Recovered { moved_to, .. } => {
+            (RecentProjectListRepairKind::Recovered, moved_to.clone())
+        }
+        RecentProjectLoadOutcome::Reset { moved_to, .. } => {
+            (RecentProjectListRepairKind::Reset, moved_to.clone())
+        }
+    };
+    Some(RecentProjectListRepair {
+        kind,
+        moved_to,
+        transcript_bytes_at_boot: 0,
+    })
 }
 
 /// The owner's rule (2026-09-13): whenever transcripts stop belonging to any
 /// project, say what happened and where the files are, at the next moment the
 /// user can see it. Absent on every other start.
 fn project_board_recent_projects_reset_lines(state: &State) -> Vec<String> {
-    let Some(reset) = &state.recent_projects_reset else {
+    let Some(reset) = &state.recent_project_list_repair else {
         return Vec::new();
     };
     let transcripts = resolve_agent_run_state_dir()
         .map(|state_root| state_root.join("transcripts").display().to_string())
         .unwrap_or_default();
     let transcripts = tekstide_core::text_safety::quote_untrusted(&transcripts);
+    // RFC-051 D5/§5: **recovered** and **reset with nothing to recover** are
+    // different sentences, and this line is where a user learns which happened.
+    // The recovered form replaces the reset one rather than joining it.
+    if reset.kind == RecentProjectListRepairKind::Recovered {
+        let mut lines = vec![state.catalog.get("project-board-recent-projects-recovered")];
+        if let Some(moved_to) = &reset.moved_to {
+            let moved_to =
+                tekstide_core::text_safety::quote_untrusted(&moved_to.display().to_string());
+            lines.push(state.catalog.get_with_args(
+                "project-board-recent-projects-reset-moved",
+                &CatalogArgs::new().untrusted("path", &moved_to),
+            ));
+        }
+        return lines;
+    }
     let mut lines = vec![state.catalog.get("project-board-recent-projects-reset")];
     // Response 394 (F1): the boot snapshot, not the live figure -- and no
     // sentence about transcripts at all when there were none, rather than a

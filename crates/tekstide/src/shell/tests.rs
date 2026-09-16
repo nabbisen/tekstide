@@ -13707,12 +13707,10 @@ fn trust_settings_shows_nothing_about_unclaimed_transcripts_when_there_are_none(
 #[test]
 fn the_board_says_the_recent_list_was_reset_on_the_start_it_happened() {
     let moved_to = PathBuf::from("/fixture/state/recent-projects.json.corrupt");
-    let loaded = Err(
-        tekstide_core::project::recent::RecentProjectStoreError::CorruptState {
-            message: "not json".to_owned(),
-            moved_to: Some(moved_to),
-        },
-    );
+    let loaded = tekstide_core::project::recent::RecentProjectLoadOutcome::Reset {
+        message: "not json".to_owned(),
+        moved_to: Some(moved_to),
+    };
     let mut state = state_with(ApplicationShell::new());
     // The figure must be in place before the reset is attached: that call is
     // where the boot snapshot is taken (response 394, F1).
@@ -13720,7 +13718,8 @@ fn the_board_says_the_recent_list_was_reset_on_the_start_it_happened() {
         total_bytes: 777,
         unclaimed_bytes: 777,
     };
-    let state = state.with_recent_projects_reset(super::recent_projects_reset_from(&loaded));
+    let state =
+        state.with_recent_project_list_repair(super::recent_project_list_repair_from(&loaded));
 
     let lines = super::project_board_recent_projects_reset_lines(&state);
 
@@ -13739,6 +13738,146 @@ fn the_board_says_the_recent_list_was_reset_on_the_start_it_happened() {
     );
 }
 
+/// RFC-051 §4: **recovery restores ids and paths; it never restores trust.**
+///
+/// The list really comes back from the store's own backup — ids intact, which is
+/// the whole point — and the project it restores is then re-checked against the
+/// audit store and **demoted**, exactly as a loaded list would be. A recovery
+/// that handed trust back by itself would make this RFC a vulnerability rather
+/// than a repair.
+///
+/// There is no separate code path for a recovered list, which is why this holds
+/// by construction: `restore_recent_projects` and `verify_restored_trust` do not
+/// know which outcome produced the list.
+#[test]
+fn a_recovered_project_with_no_grant_in_the_store_is_still_demoted() {
+    let project_dir = fresh_project_dir("recovered-trust-demoted");
+    let canonical = std::fs::canonicalize(&project_dir).unwrap();
+    let state_dir = temp_audit_state_dir("recovered-trust-demoted-state");
+    std::fs::create_dir_all(&state_dir).unwrap();
+    let mut store = tekstide_core::project::recent::RecentProjectStore::new(
+        tekstide_core::project::recent::AppStatePathProvider::from_state_dir(&state_dir),
+    );
+
+    // A real previous-good copy, written by a real save after a real load.
+    assert_eq!(
+        store.load_or_recover().outcome,
+        tekstide_core::project::recent::RecentProjectLoadOutcome::Loaded
+    );
+    let trusted = cached_trusted_recent_project(
+        tekstide_core::project::ProjectId::new_uuid(),
+        canonical.clone(),
+    );
+    let saved_id = trusted.projects[0].project_id.clone();
+    store.save(&trusted).expect("a real save writes the backup");
+    std::fs::write(state_dir.join("recent-projects.json"), b"not json").unwrap();
+
+    let loaded = store.load_or_recover();
+    assert!(
+        matches!(
+            loaded.outcome,
+            tekstide_core::project::recent::RecentProjectLoadOutcome::Recovered { .. }
+        ),
+        "precondition: the list must really come from the backup: {:?}",
+        loaded.outcome
+    );
+    assert_eq!(
+        loaded.state.projects[0].project_id, saved_id,
+        "and with the id it was saved with — a new id would re-attach nothing"
+    );
+
+    let mut app_shell = ApplicationShell::new();
+    app_shell.restore_recent_projects(loaded.state);
+    let outcome = app_shell
+        .add_project_from_path(&project_dir)
+        .expect("the recovered project reopens");
+    let project_id = outcome.project_id().clone();
+    assert_eq!(
+        app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "precondition: the cache restored it as Trusted, which is what must then be re-checked"
+    );
+
+    let audit_state_dir = temp_audit_state_dir("recovered-trust-demoted-audit");
+    let _ = super::open_audit_store(&audit_state_dir, Vec::new())
+        .expect("a real, empty store — no grant for this project");
+
+    verify_restored_trust_against(&mut app_shell, |_shell| {
+        super::open_audit_store(&audit_state_dir, Vec::new()).ok()
+    });
+
+    assert_eq!(
+        app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Restricted",
+        "a recovered list is re-verified like any other; recovery never restores trust (§4)"
+    );
+}
+
+/// RFC-051 D5/§5: **recovered and reset are different sentences.** A user who
+/// sees a line about their list must not have to guess whether their projects
+/// came back.
+#[test]
+fn the_board_says_the_recent_list_was_recovered_from_the_last_saved_copy() {
+    let loaded = tekstide_core::project::recent::RecentProjectLoadOutcome::Recovered {
+        message: "could not be read".to_owned(),
+        moved_to: Some(PathBuf::from("/fixture/state/recent-projects.json.corrupt")),
+    };
+    let state = state_with(ApplicationShell::new())
+        .with_recent_project_list_repair(super::recent_project_list_repair_from(&loaded));
+
+    let lines = super::project_board_recent_projects_reset_lines(&state);
+
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines[0].contains("restored from the last saved copy"),
+        "{lines:?}"
+    );
+    assert!(
+        !lines[0].contains("began with an empty one"),
+        "the recovered form replaces the reset sentence rather than joining it: {lines:?}"
+    );
+    assert!(
+        lines[1].contains("recent-projects.json.corrupt"),
+        "and still says where the unusable file went: {lines:?}"
+    );
+}
+
+/// The recovered form says nothing about transcripts remaining on disk, because
+/// nothing was orphaned: the ids came back, so the transcripts still belong to
+/// their projects. That sentence is the reset form's, and only the reset form's.
+#[test]
+fn the_recovered_line_says_nothing_about_orphaned_transcripts() {
+    let loaded = tekstide_core::project::recent::RecentProjectLoadOutcome::Recovered {
+        message: "could not be read".to_owned(),
+        moved_to: None,
+    };
+    let mut state = state_with(ApplicationShell::new());
+    state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage {
+        total_bytes: 4096,
+        unclaimed_bytes: 4096,
+    };
+    let state =
+        state.with_recent_project_list_repair(super::recent_project_list_repair_from(&loaded));
+
+    let lines = super::project_board_recent_projects_reset_lines(&state);
+
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        !lines.iter().any(|line| line.contains("remain on disk")),
+        "a recovery orphans nothing: {lines:?}"
+    );
+}
+
 /// Response 394 (F1): the notice stays on the board for the whole session, and
 /// the live figure refreshes after every load and purge. Rendering the live one
 /// would make "transcripts from before this start" count transcripts this
@@ -13748,18 +13887,17 @@ fn the_board_says_the_recent_list_was_reset_on_the_start_it_happened() {
 /// an implementation that re-read it could not accidentally agree.
 #[test]
 fn the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes() {
-    let loaded = Err(
-        tekstide_core::project::recent::RecentProjectStoreError::CorruptState {
-            message: "not json".to_owned(),
-            moved_to: None,
-        },
-    );
+    let loaded = tekstide_core::project::recent::RecentProjectLoadOutcome::Reset {
+        message: "not json".to_owned(),
+        moved_to: None,
+    };
     let mut state = state_with(ApplicationShell::new());
     state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage {
         total_bytes: 777,
         unclaimed_bytes: 777,
     };
-    let mut state = state.with_recent_projects_reset(super::recent_projects_reset_from(&loaded));
+    let mut state =
+        state.with_recent_project_list_repair(super::recent_project_list_repair_from(&loaded));
 
     state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage {
         total_bytes: 12,
@@ -13788,15 +13926,14 @@ fn the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes() {
 /// which would hand the user a path to nothing. The reset itself is still said.
 #[test]
 fn the_reset_notice_says_nothing_about_transcripts_when_there_were_none() {
-    let loaded = Err(
-        tekstide_core::project::recent::RecentProjectStoreError::CorruptState {
-            message: "not json".to_owned(),
-            moved_to: Some(PathBuf::from("/fixture/state/recent-projects.json.corrupt")),
-        },
-    );
+    let loaded = tekstide_core::project::recent::RecentProjectLoadOutcome::Reset {
+        message: "not json".to_owned(),
+        moved_to: Some(PathBuf::from("/fixture/state/recent-projects.json.corrupt")),
+    };
     let mut state = state_with(ApplicationShell::new());
     state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage::default();
-    let state = state.with_recent_projects_reset(super::recent_projects_reset_from(&loaded));
+    let state =
+        state.with_recent_project_list_repair(super::recent_project_list_repair_from(&loaded));
 
     let lines = super::project_board_recent_projects_reset_lines(&state);
 
@@ -13817,9 +13954,9 @@ fn the_reset_notice_says_nothing_about_transcripts_when_there_were_none() {
 
 #[test]
 fn the_board_says_nothing_about_a_reset_on_a_start_with_a_readable_list() {
-    let loaded = Ok(tekstide_core::project::recent::RecentProjectState::default());
+    let loaded = tekstide_core::project::recent::RecentProjectLoadOutcome::Loaded;
     let state = state_with(ApplicationShell::new())
-        .with_recent_projects_reset(super::recent_projects_reset_from(&loaded));
+        .with_recent_project_list_repair(super::recent_project_list_repair_from(&loaded));
 
     assert!(super::project_board_recent_projects_reset_lines(&state).is_empty());
 }

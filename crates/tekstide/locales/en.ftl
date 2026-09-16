@@ -306,6 +306,10 @@ project-board-audit-history = { $count ->
 # `RecentProjectsReset`, not the live one -- transcripts written later in the
 # session are not "from before".
 project-board-recent-projects-reset = The recent-projects list could not be read, so this start began with an empty one.
+# RFC-051 D5: the other outcome, and deliberately a different sentence -- a user
+# who sees the reset line must not have to guess whether their projects came
+# back. Says what was damaged and what was done, without implying the user acted.
+project-board-recent-projects-recovered = The recent-projects list could not be read, so it was restored from the last saved copy. Your projects and their settings are back.
 project-board-recent-projects-reset-transcripts = Transcripts from before this start remain on disk: { $bytes } bytes in { $path }.
 project-board-recent-projects-reset-moved = The unreadable list was moved to { $path }.
 # RFC-049, response 385: policy removals are told to the user here. The audit
