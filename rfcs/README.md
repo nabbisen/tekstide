@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 048 | [AgentRun Termination Records](./proposed/048-agentrun-termination-records.md) | **Proposed 2026-09-16.** The trail records that an AI CLI run was launched and cannot say whether it ended. **No schema change**: `valid_managed_process` already permits a `Terminated` phase, and the store already admits it only after a `started` one — the slot exists and nothing writes it. Two production call sites end a run, both beside the plain-terminal path that does record. **D2** is the decision that matters: a detached run gets no record, because Tekstide cannot observe an ending it lost supervision of. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -53,7 +54,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 028 | Cross-Platform Support | M14 |
 | 029 | Documentation, CI, and Release Automation | M14 |
 | 030 | Git Integration | M12 |
-| 048 | AgentRun Termination Records | M12 |
 
 Added 2026-08-12 after a real collision: RFC-024 was authored just-in-time as
 *Diff Preview Policy* and took a number the delivery plan had already reserved for Git
