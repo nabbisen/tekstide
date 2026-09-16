@@ -398,3 +398,24 @@ cannot fail.
   `removed_anything() || a_deletion_failed()`. Marking and clearing alone still write nothing.
 - **D5 stays unobservable, and the implementer measured that rather than asserting it.** Restoring the
   compiled defaults in the summary failed no test, which is what the checklist already says.
+
+### Decided at PR-049-C review, second commit (2026-09-16, response 397)
+
+- **D4′'s premise was wrong, and it was mine.** *"The existing launch confirmation says so"* assumed
+  every launch has one. `ConfiguredProfileFirstUse` appears only for a **configured** profile on its
+  **first use in a session**, so `Ctrl+Alt+A` on the compiled default profile has no dialog at all.
+  **The notice also goes beside the Launch button in Trust Settings**, where RFC-047 D4's own *"will
+  not be recorded"* notice already lives — that is the product's pre-click surface for a launch, and it
+  needs no new dialog. **The remaining limit, stated rather than designed away:** a launch started from
+  a keybinding outside that surface has no pre-click notice, exactly as RFC-047 leaves the unrecorded
+  case. The run's own detail carries it afterwards, always.
+- **The launch trigger acts on the records the session already holds** (the implementer's question 2),
+  accepted. A transcript another Tekstide wrote after this project opened is not seen until the next
+  open. Re-scanning at every launch would re-probe locks on files another process may be writing, for a
+  case D2's two triggers already cover on the next open. The cost is bounded and worth stating: such a
+  transcript is not age-expired until that open.
+- **Two properties had tests that did not hold them** (reviewer's U1 and U2), and both are unticked
+  rather than argued away. A test that asserts a scan differs from a cache does not hold *which of them
+  the cleanup reads*; a test that calls the trigger helper directly does not hold *that `boot()` calls
+  it*. The second is the same unexercised-call-path class the live walkthrough found, which is reason
+  to remove the call site rather than to test it: run the open trigger inside `State::new`.

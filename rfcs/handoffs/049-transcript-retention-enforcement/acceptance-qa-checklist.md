@@ -83,12 +83,17 @@ now"): refusing `transcript_retention_days = 0`; the actor/source pairing and no
 empty cleanup; stale `Expired` marks re-checked and cleared; "a deletion failed" reported
 separately; and D5 as restated below. The purge-defect disclosure landed on its own at `c2f5092`.
 
-- [x] Both triggers fire; **no timer, watcher, or idle sweep exists anywhere** (D2). Grep for one.
+- [ ] Both triggers fire; **no timer, watcher, or idle sweep exists anywhere** (D2). Grep for one.
       *Second commit. Production callers of `run_transcript_retention_cleanup`: the launch preflight
       and the project open — and, after the live walkthrough found it missing, a project already open
       when `State` is built (a command-line open, which never reaches the GUI's `Added` arm). Grepped
       for timers/watchers/sweeps touching retention: none. B1 and B2 each fail their trigger's test
       alone; the boot case has its own test.*
+      *Unticked at response 397 (U2): the project-open trigger for a project already open when
+      `State` is built is held by a test that calls `run_transcript_retention_for_open_projects`
+      directly. Deleting the call in `boot()` failed nothing. Hold the call site — best by running the
+      trigger inside `State::new`, so no call site can be forgotten (the walkthrough found this class
+      once already).*
 - [x] A policy cleanup writes `TranscriptPurge` as **`(AppPolicy, ExplicitCleanup)`**, and a user
       purge in the same file writes `(User, TrustedUi)` — **both read back from a real store**, so
       the distinction §4 requires is visible in one place.
@@ -105,7 +110,7 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
 - [x] A cleanup that deleted nothing writes **no record**. **Ablation:** record unconditionally.
       *`removed_anything()` counts deletions only, so a pass that merely marked or cleared writes
       nothing. A3 fails `a_policy_cleanup_that_removed_nothing_writes_no_record` alone.*
-- [x] **The exhaustion check reads a fresh scan** (RFC-050, response 393). The GUI's app-wide figure is
+- [ ] **The exhaustion check reads a fresh scan** (RFC-050, response 393). The GUI's app-wide figure is
       a cache, refreshed at boot, at each load and after each purge, so it misses bytes written since.
       The launch check scans `transcripts/` at preflight and never reads that cache.
       *The cleanup takes its app-wide figure from `transcript_disk_usage_for(&state.app_shell)`, a
@@ -115,6 +120,9 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
       scan. **Disclosed:** no test moves the exhaustion verdict itself, because the byte budgets are
       compiled constants (256 MiB / 1 GiB); the live walkthrough reaches it with a 300 MiB sparse
       file instead.*
+      *Unticked at response 397 (U1): the test asserts that a scan sees bytes the cache does not — it
+      never calls the cleanup. Pointing the cleanup at the cached figure failed nothing. Assert the
+      cleanup's own decision changes with the figure it reads.*
 - [x] **D4′: launch cleanup leaves a budget exhausted → the run starts with capture disabled.** Assert
       the process started **and** no transcript file or `Transcript` record exists for it.
       **Ablation:** capture anyway; the test fails alone.
@@ -122,7 +130,7 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
       reference, and no file at the path a captured run would have used. B7 fails it alone. The
       decision is made in the core from a fact the caller supplies, so the two modes cannot drift
       apart at a call site.*
-- [x] **The launch confirmation says so — present when exhausted, absent otherwise**, each its own
+- [ ] **The launch confirmation says so — present when exhausted, absent otherwise**, each its own
       assertion, ablated separately. Wording meets RFC-047 §5: states the fact and why, implies no
       danger, implies no fix available from there.
       *B3 and B4 each fail their own test alone; captured live. **The premise is not quite true of the
@@ -131,6 +139,10 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
       launch of a confirmed one, opens no dialog at all, so those launches have no pre-click surface —
       the run's detail is their disclosure. Implemented as: the notice wherever the confirmation
       exists, the detail always.*
+      *Unticked at response 397: D4′'s premise was mine and wrong. `ConfiguredProfileFirstUse` exists
+      only for a configured profile's first use, so a `Ctrl+Alt+A` launch on the compiled default has
+      no dialog. Put the line beside the Launch button in Trust Settings too, where RFC-047's
+      "will not be recorded" notice already lives, and state the remaining limit in the RFC.*
 - [x] **What the confirmation shows is what the launch applies** — the decision is carried into the
       launch, not recomputed after the click. Test: bytes freed between the two do not produce a
       transcript the user was told would not exist.

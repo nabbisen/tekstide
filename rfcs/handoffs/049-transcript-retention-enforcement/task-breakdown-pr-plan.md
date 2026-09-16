@@ -120,3 +120,14 @@ PR-045-C. Bounded-evidence rule applies: three rounds, then the store read-back 
 
 Everything the pack README lists. And **no user-facing text says transcripts are removed until C**
 (§6) — A marks, B is unreachable from production.
+
+## PR-049-C follow-up (response 397) — before the release candidate
+
+- **The budget notice beside the Launch button in Trust Settings**, next to RFC-047's degraded notice;
+  present only when the last preflight left a budget exhausted. The configured-profile dialog keeps its
+  line. **Ablation:** drop either; its own test fails alone.
+- **Hold the open trigger by construction:** run it inside `State::new` rather than from `boot()`, so
+  no call site can be forgotten. **Ablation:** remove it; the command-line-open test fails alone.
+- **A test that holds which figure the cleanup reads:** write bytes after the cache is filled, so the
+  cached figure and a fresh scan disagree about exhaustion, and assert the cleanup's own verdict.
+  **Ablation:** point the cleanup at the cache; the test fails alone.
