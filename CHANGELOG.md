@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.20.0 - The Ending Is Recorded, And The List Survives
+
+Status: release candidate; not yet published or tagged.
+
 
 ### Fixed — a damaged recent-projects list no longer takes your trust decisions with it
 
@@ -52,6 +55,27 @@ it existed in the schema from the beginning and nothing wrote one.
 - **The trail still does not say whether a run is going on right now.** It records what has already
   happened, not what is happening, and this release does not change that.
 - A failure to write the record never stops a run from being terminated.
+
+### What this release does not do
+
+Re-read against what these two RFCs changed, not copied from `0.19.0`.
+
+- **A detached run's ending is not recorded.** If Tekstide loses track of an AI CLI process, its
+  trail stops at the launch and stays there: nobody observed an ending, and a record claiming one
+  would outlive the session that could explain it. Deliberate, and the reason the rest of the trail
+  can be trusted.
+- **The trail still does not say whether a run is going on right now.** It records what has already
+  happened.
+- **A recent-projects list lost before this release cannot be recovered.** There was no previous-good
+  copy to keep, so a reset that already happened stays a reset — those transcripts are shown, and no
+  purge reaches them.
+- **One previous-good copy is not a history.** Two consecutive bad saves take the good copy with
+  them.
+- **Project ids are still not derivable from the folder.** An id that is lost with no backup cannot
+  be re-derived from the path, so such a reset still orphans that project's transcripts.
+- **Everything `0.19.0` listed still holds**: no screen-reader support; command approval exercisable
+  only by the reference adapter; no before/after diff and no undo; terminal latency unverified; plain
+  terminals unrecorded; and the byte budgets gate new capture rather than acting as a hard ceiling.
 
 ## 0.19.0 - Purge Reaches What You Actually Have, And Retention Finally Acts
 
