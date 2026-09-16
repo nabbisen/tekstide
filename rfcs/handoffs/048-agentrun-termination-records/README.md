@@ -1,15 +1,15 @@
 ---
 title: "RFC-048: AgentRun Termination Records — implementation handoff"
 rfc: "RFC-048"
-rfc_file: "../../accepted/048-agentrun-termination-records.md"
-source_rfc_status: "Accepted 2026-09-16 — M12"
+rfc_file: "../../done/048-agentrun-termination-records.md"
+source_rfc_status: "Implemented and closed 2026-09-16 — M12"
 target_milestone: "M12"
 created: "2026-09-16"
 ---
 
 # The ending the trail cannot state
 
-Source RFC: [RFC-048](../../accepted/048-agentrun-termination-records.md)
+Source RFC: [RFC-048](../../done/048-agentrun-termination-records.md)
 
 ## What this is
 

@@ -1,8 +1,8 @@
 ---
 title: "RFC-048 — acceptance and QA checklist"
 rfc: "RFC-048"
-rfc_file: "../../accepted/048-agentrun-termination-records.md"
-source_rfc_status: "Accepted 2026-09-16 — M12"
+rfc_file: "../../done/048-agentrun-termination-records.md"
+source_rfc_status: "Implemented and closed 2026-09-16 — M12"
 target_milestone: "M12"
 created: "2026-09-16"
 ---
@@ -82,12 +82,18 @@ implementer's to paper over.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted 2026-09-16 (response 400). Four reviewer ablations, each restored and
+hash-checked: a detached run recording a termination, the launch keeping no identity,
+an observed runtime failure recording nothing, and production applying the outcome
+without the coordinator. Each failed exactly one test. Gate: 538 + 9 + 823, three runs.
+
+Two of this pack's own premises were wrong and were corrected in implementation; both
+are recorded in the RFC rather than quietly fixed.
 ```
