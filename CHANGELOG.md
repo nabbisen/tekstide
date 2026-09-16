@@ -2,7 +2,8 @@
 
 ## 0.19.0 - Purge Reaches What You Actually Have, And Retention Finally Acts
 
-Status: release candidate; not yet published or tagged.
+Status: **released on 2026-09-16.** Published to crates.io as `tekstide 0.19.0` and
+`tekstide-core 0.19.0`, tagged `0.19.0` on `da66381`.
 
 
 ### Fixed — purge did not reach transcripts from earlier runs, `0.12.0` through `0.18.0`
