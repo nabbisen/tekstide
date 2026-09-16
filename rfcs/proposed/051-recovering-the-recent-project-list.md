@@ -8,7 +8,7 @@ Date: 2026-09-16
 
 Related RFCs:
 
-- [RFC-032](../done/032-workspace-trust-persistence.md) — persists the trust decision this loses.
+- [RFC-032](../done/032-workspace-trust-granting.md) — persists the trust decision this loses.
 - [RFC-047](../done/047-audit-store-corruption-recovery.md) — the precedent: quarantine by rename,
   recover, and disclose at the point of the action.
 - [RFC-050](../done/050-transcripts-from-earlier-runs.md) — **D6′** measured the consequence: a reset
