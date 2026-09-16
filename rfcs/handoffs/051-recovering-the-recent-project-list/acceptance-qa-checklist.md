@@ -1,8 +1,8 @@
 ---
 title: "RFC-051 — acceptance and QA checklist"
 rfc: "RFC-051"
-rfc_file: "../../accepted/051-recovering-the-recent-project-list.md"
-source_rfc_status: "Accepted 2026-09-16 — M12"
+rfc_file: "../../done/051-recovering-the-recent-project-list.md"
+source_rfc_status: "Implemented and closed 2026-09-16 — M12"
 target_milestone: "M12"
 created: "2026-09-16"
 ---
@@ -68,7 +68,7 @@ implementer's to paper over.
 
 ## PR-051-C — follow-up (response 401)
 
-- [ ] **The superseded `load()` is gone.** `load_or_recover` replaced it, and `load()` now has only
+- [x] **The superseded `load()` is gone.** `load_or_recover` replaced it, and `load()` now has only
       test callers — four, in the store's own test file. That is the dormant-capability shape RFC-036
       exists to close, created fresh by this slice. Move those four tests onto `load_or_recover` and
       delete the method. **Grep:** no caller of `load()` remains, including in tests.
@@ -88,12 +88,16 @@ implementer's to paper over.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted 2026-09-16 (responses 401 and 402). Four reviewer ablations, each restored and
+hash-checked: no quarantine before recovery, a backup written whatever happened at load,
+a failed quarantine still allowing saves, and no-backup reported as a recovery. Y1 and Y4
+fail three and four tests, which is what the rules predict and what the implementer
+disclosed. Gate: 541 + 9 + 829, three runs, twice — before and after PR-051-C.
 ```

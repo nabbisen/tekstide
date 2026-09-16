@@ -1,15 +1,15 @@
 ---
 title: "RFC-051: Recovering the Recent-Project List — implementation handoff"
 rfc: "RFC-051"
-rfc_file: "../../accepted/051-recovering-the-recent-project-list.md"
-source_rfc_status: "Accepted 2026-09-16 — M12"
+rfc_file: "../../done/051-recovering-the-recent-project-list.md"
+source_rfc_status: "Implemented and closed 2026-09-16 — M12"
 target_milestone: "M12"
 created: "2026-09-16"
 ---
 
 # The reset that takes a user's trust decisions with it
 
-Source RFC: [RFC-051](../../accepted/051-recovering-the-recent-project-list.md)
+Source RFC: [RFC-051](../../done/051-recovering-the-recent-project-list.md)
 
 ## What this is
 

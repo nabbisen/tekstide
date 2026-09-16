@@ -1,6 +1,9 @@
 # RFC-051: Recovering the Recent-Project List
 
-Status: **Accepted by the human owner 2026-09-16.** **D1–D6 decided by the architect on acceptance** — see the end, including D5's open question. Proposed the same day. Scoped at the owner's word, to ship with RFC-048 in `0.20.0`. Found
+Status: **Implemented and closed 2026-09-16.** A `recent-projects.json` that cannot be read is now
+quarantined rather than overwritten, recovered from a previous-good copy when there is one, and the
+board says which of the two happened. Trust is still re-verified against the audit store, so recovery
+restores identities and never grants. Accepted by the human owner 2026-09-16. **D1–D6 decided by the architect on acceptance** — see the end, including D5's open question. Proposed the same day. Scoped at the owner's word, to ship with RFC-048 in `0.20.0`. Found
 by the architect at RFC-050's acceptance (D6′) and carried in `future-work.md` since, with the trigger
 *"any slice that touches `RecentProjectStore`"* — this is that slice.
 Target milestone: **M12**
@@ -137,3 +140,18 @@ to have that problem is not to have the call site.
 
 **Ordering, stated because it is the whole defect:** quarantine, then recover, then save. A save that
 happens before a recovery attempt destroys what the recovery needed.
+
+
+## Closed (2026-09-16, responses 401 and 402)
+
+- **The unsatisfiable box was the architect's.** §4 asked for an ablation that skips
+  `verify_restored_trust` "for recovered lists"; there is no separate path for one, so the property
+  holds by construction. The substituted test — a recovered project with no grant, demoted through a
+  real backup — is the right evidence, and stronger than the ablation asked for.
+- **The slice created a dormant capability and then removed it.** `load_or_recover` superseded
+  `load`, leaving it with only its own four tests as callers — RFC-036's shape, found at review and
+  deleted in PR-051-C along with `RecentProjectStoreError::CorruptState`, which nothing produced once
+  `load` was gone. The four tests moved onto the replacement with what they prove intact, and the
+  changelog records the removal as breaking, with the replacement call.
+- **D2′ caught its own author on the first day.** The implementer's first recovery test saved before
+  loading, so no backup existed and the recovery failed — which is the rule working, not a test bug.

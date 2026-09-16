@@ -1,8 +1,8 @@
 ---
 title: "What recovering the recent-project list must not do"
 rfc: "RFC-051"
-rfc_file: "../../accepted/051-recovering-the-recent-project-list.md"
-source_rfc_status: "Accepted 2026-09-16 — M12"
+rfc_file: "../../done/051-recovering-the-recent-project-list.md"
+source_rfc_status: "Implemented and closed 2026-09-16 — M12"
 target_milestone: "M12"
 created: "2026-09-16"
 ---
