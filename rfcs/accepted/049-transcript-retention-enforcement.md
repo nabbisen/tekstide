@@ -382,3 +382,19 @@ source for the retained figure.
 **D5 is implemented and unobservable.** `budget_pressure` reads only the byte budgets, none
 configurable, so no configured value moves it; the checklist says so rather than keeping a test that
 cannot fail.
+
+### Decided at PR-049-C review (2026-09-16, response 396)
+
+- **A pass that removed some transcripts and failed on others records `Failed`.** Accepted as the
+  implementer proposed. The record carries no counts — by D6's own design it names only the project
+  scope — so `Completed` would claim the cleanup did what it set out to do. Two records would need an
+  event the frozen schema does not have.
+- **A pass that removed nothing because every deletion failed must record `Failed` too.** Today it
+  records **nothing**: `record_transcript_policy_cleanup` returns `None` whenever
+  `removed_anything()` is false, and that counts only successful purges. §4's rule — *"a cleanup that
+  deleted nothing writes no record"* — was written for **nothing to do**, not for **everything
+  failed**. A policy deletion that tried and could not is exactly the event an audit trail exists to
+  carry, and it is the case a user most needs to find later. The condition becomes
+  `removed_anything() || a_deletion_failed()`. Marking and clearing alone still write nothing.
+- **D5 stays unobservable, and the implementer measured that rather than asserting it.** Restoring the
+  compiled defaults in the summary failed no test, which is what the checklist already says.

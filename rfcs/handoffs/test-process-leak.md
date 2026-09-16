@@ -1051,3 +1051,13 @@ QueueLimitExceeded { scope: PerAgentRun, limit: 2 }"*. **This is the row first r
 actor/source pairing and the local-data summary's limits. This test exercises the approval
 coordinator's queue expiry and touches none of them. It passed in runs 1 and 2 of that gate and in
 **all five runs** of the gate that followed, on the same tree.
+
+## Recurrence, 2026-09-16 — RFC-049 PR-049-C's review (reviewer's run)
+
+`approval::tests::channel::bind_recovers_from_a_stale_socket_file` failed once, in the reviewer's
+ablation T1 (a partially failed policy cleanup records `Completed`). **Row 1**, the original from
+response 213.
+
+**Not the ablation.** T1 changes one `if` in the audit producer. This test binds an approval socket
+over a stale socket file and touches no audit record. The reviewer's other three ablations and all
+three gate runs on the restored tree passed it. The five-minute load average was 5.37 shortly after.

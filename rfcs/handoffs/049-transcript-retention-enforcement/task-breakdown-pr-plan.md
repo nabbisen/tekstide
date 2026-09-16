@@ -94,6 +94,9 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
   distinctly from opt-out. `RequiredLocalBounded`'s core refusal stays a unit test, labelled
   unreachable. **The parts that do not depend on D4′ may land first as their own commit.**
 - **D5**: `transcript_local_data_summary_for` takes the session's configured limits.
+- **A cleanup that removed nothing because every deletion failed records `Failed`** (response 396):
+  the condition becomes `removed_anything() || a_deletion_failed()`. Marking and clearing alone still
+  write nothing.
 
 **Required tests:**
 

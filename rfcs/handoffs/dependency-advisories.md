@@ -93,3 +93,27 @@ was never a wrong value but an absent key.
   the release does not go. This register is for `unmaintained` and `unsound` warnings only.
 - **A list nobody reads.** The reachability column is the point. "It is transitive" is not a reason;
   *which build, which path, and can a user reach it* is.
+
+## 2026-09-16 — snora's follow-up: the two fixes never reached us through them
+
+Letter: `.git-exclude/upstream/snora/receive/260912-0.49.0/snora-advisory-followup-2026-09-16.md`.
+**No reply needed**; their standing ask (tell them what our scan finds that their list misses) is
+unchanged. Everything below was checked here, not taken from the letter.
+
+- **We already carry both fixed versions**: `memmap2` **0.9.11** and `event-listener` **5.4.2**, from
+  the `0.18.0` dependency-currency slice, before this letter arrived. Nothing to run.
+- **Their central point holds for us, and more simply than for the teams it was written for.** Both
+  crates reach us through `iced` — `memmap2` via `fontdb` → `cosmic-text` → `cryoglyph` →
+  `iced_wgpu`, and `event-listener` via `zbus` → `mundy` → `iced_winit` — and **we do not depend on
+  snora at all** (checked every manifest). "Upgrade snora and the fixes arrive" was never a route we
+  had.
+- **`RUSTSEC-2026-0190` (`anyhow`, unsound) does not apply here.** `anyhow` is in neither our graph nor
+  our lockfile: `cargo tree -i anyhow --target all` answers *"did not match any packages"*. Recorded
+  because a reader of their letter would otherwise go looking for it.
+- **Their `paste` correction says what this register already said.** Our row reads "none on Linux;
+  the crate is in `Cargo.lock`, which records every platform, and in no Linux build" — which is the
+  distinction they are drawing between a graph scan and a lockfile scan. `paste` 1.0.15 still enters
+  only through `metal`, macOS-only.
+- **`cargo audit` today: the same three allowed warnings** — `paste` (unmaintained), `ttf-parser`
+  (unmaintained), `lru` 0.16.4 (unsound). `lru`'s retirement condition is unchanged: a `cryoglyph`
+  release that lifts its `lru ^0.16` bound.

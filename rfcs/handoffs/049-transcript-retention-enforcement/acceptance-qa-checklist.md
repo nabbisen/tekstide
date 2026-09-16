@@ -91,6 +91,10 @@ separately; and D5 as restated below. The purge-defect disclosure landed on its 
       `a_policy_cleanup_and_a_user_purge_are_recorded_as_different_actors` writes both into one real
       store and reads them back. A4 (record as the user) fails it alone. **No production caller yet**
       — the triggers that call it are the next commit.*
+- [ ] **A cleanup that removed nothing because every deletion failed records `Failed`** (response 396).
+      Today it records nothing: the producer returns `None` whenever nothing was purged, so a policy
+      deletion that tried and could not is invisible. §4's "deleted nothing writes no record" is for
+      *nothing to do*. **Ablation:** drop the failure arm from the condition; the test fails alone.
 - [x] A cleanup that deleted nothing writes **no record**. **Ablation:** record unconditionally.
       *`removed_anything()` counts deletions only, so a pass that merely marked or cleared writes
       nothing. A3 fails `a_policy_cleanup_that_removed_nothing_writes_no_record` alone.*
