@@ -16,7 +16,7 @@ Related RFCs:
   the retention figures.
 - [RFC-033](../done/033-transcript-lifecycle-controls.md) — owns the purge this makes true. Its
   record carries the correction.
-- [RFC-049](../accepted/049-transcript-retention-enforcement.md) — waits on this. Retention cannot
+- [RFC-049](../done/049-transcript-retention-enforcement.md) — waits on this. Retention cannot
   remove what the session cannot see.
 
 ## Summary

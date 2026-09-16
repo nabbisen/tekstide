@@ -1,6 +1,11 @@
 # RFC-049: Transcript Retention Enforcement
 
-Status: **Accepted by the human owner 2026-09-12.** **D1–D9 decided by the architect on acceptance** — see "Decided on acceptance" at the end, which adds **D6 (the audit record RFC-013 already reserved a slot for)**, D7 (the clock seam), D8 (what "oldest" and "inactive" mean) and D9 (age arithmetic on a string timestamp). Proposed the same day. Scoped after `0.18.0` shipped a configuration key whose value
+Status: **Implemented and closed 2026-09-16.** Three slices: **A** the age arithmetic and expiry
+marking, **B** selection and cleanup under D8′ with a live writer never selected, **C** the two
+triggers, D4′ and the disclosures. `transcript_retention_days` is enforced at project open and
+agent-run launch preflight and at no other time; the per-project and app-wide budgets gate new
+capture at launch; policy removals are audited as `(AppPolicy, ExplicitCleanup)` and told to the
+user on the project board. Accepted by the human owner 2026-09-12. **D1–D9 decided by the architect on acceptance** — see "Decided on acceptance" at the end, which adds **D6 (the audit record RFC-013 already reserved a slot for)**, D7 (the clock seam), D8 (what "oldest" and "inactive" mean) and D9 (age arithmetic on a string timestamp). Proposed the same day. Scoped after `0.18.0` shipped a configuration key whose value
 nothing enforces. Reserved by no earlier RFC — the `future-work.md` row opened at response 377 said
 "RFC-011 data-model change", and the measurement below shows it is larger than a data model.
 Target milestone: **M12**
