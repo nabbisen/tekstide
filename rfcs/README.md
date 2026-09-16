@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 048 | [AgentRun Termination Records](./proposed/048-agentrun-termination-records.md) | **Proposed 2026-09-16.** The trail records that an AI CLI run was launched and cannot say whether it ended. **No schema change**: `valid_managed_process` already permits a `Terminated` phase, and the store already admits it only after a `started` one — the slot exists and nothing writes it. Two production call sites end a run, both beside the plain-terminal path that does record. **D2** is the decision that matters: a detached run gets no record, because Tekstide cannot observe an ending it lost supervision of. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 048 | [AgentRun Termination Records](./accepted/048-agentrun-termination-records.md) | **Accepted 2026-09-16; D1–D6 decided on acceptance.** The trail records that a run was launched and cannot say whether it ended. **No schema change**: `valid_managed_process` already permits a `Terminated` phase and the store admits it only after `started`. **D1**: `ProcessExited`, `ProcessTerminated`, or `RuntimeFailure` after a start — all three codes already exist. **D2**: a **detached** run gets **no** record, because Tekstide cannot observe an ending it lost supervision of, and the limit is disclosed in the changelog and the book rather than left to be found. **D3**: no exit status, no signal, and no runtime summary text — those carry paths. **D5**: the coordinator applies *and* records, so no later call site can forget. [Handoff pack](./handoffs/048-agentrun-termination-records/README.md) |
 
 
 ### Reserved numbers — check this before authoring
@@ -102,6 +102,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | — | [Release 0.19.0](./handoffs/release-0.19.0.md) — **M12**; the publish that replaces a crates.io page still promising a purge that did not work |
 | — | [Documentation: README and the book](./handoffs/documentation-readme-and-book.md) — **M12**; a 554-line landing page against a 100–200 target, and a book whose only user chapter is `{{#include README.md}}` |
 | 050 | [Transcripts From Earlier Runs](./handoffs/050-transcripts-from-earlier-runs/README.md) — **M12**; load what is on disk, and never delete what something is still writing or what the loader did not recognise |
+| 048 | [AgentRun Termination Records](./handoffs/048-agentrun-termination-records/README.md) — **M12**; the ending the trail cannot state, in a slot the schema already reserves |
 | 049 | [Transcript Retention Enforcement](./handoffs/049-transcript-retention-enforcement/README.md) — **M12**; the first slice here that deletes a user's data, so every ambiguous rule resolves toward keeping too much |
 | 045 | [Configuration Reachability](./handoffs/045-configuration-reachability/README.md) — **M12**; a parser for a file whose values have no destination: accept four keys plus profiles, refuse the rest by name, and put one deliberate act between the file and any executable it defines |
 | 046 | [Managed AgentRun Audit Trail](./handoffs/046-managed-agentrun-audit-trail/README.md) — **M12**; the launch that trust exists to control is unrecorded, and the producer that would record it encodes three decisions this product has since made differently |

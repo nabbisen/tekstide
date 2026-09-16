@@ -1,6 +1,6 @@
 # RFC-048: AgentRun Termination Records
 
-Status: **Proposed 2026-09-16.** Scoped at the owner's word after `0.19.0` shipped. Reserved by
+Status: **Accepted by the human owner 2026-09-16.** **D1–D6 decided by the architect on acceptance** — see the end. Proposed the same day. Scoped at the owner's word after `0.19.0` shipped. Reserved by
 RFC-046 D3, which recorded a launch and deliberately declined to record how a run ends.
 Target milestone: **M12**
 Date: 2026-09-16
@@ -110,3 +110,46 @@ answer how a run ended.
   grep.
 - `crates/tekstide-core/README.md`'s "does not answer how it ended" sentence is corrected in the same
   change that makes it false.
+
+## Decided on acceptance (2026-09-16)
+
+**D1 — the mapping, and every code it uses exists today.**
+
+| Runtime outcome | Record |
+| --- | --- |
+| `Exited` | `Terminated`, reason `ProcessExited` |
+| `TerminatedBySignal`, `KilledAfterTimeout` | `Terminated`, reason `ProcessTerminated` |
+| `Failed` after the run started | `Terminated`, reason `RuntimeFailure` |
+| `OrphanedUnknown` | **no record** (D2) |
+
+A zero and a non-zero exit are the same record. **Whether the run succeeded is `AgentRunStatus`'s
+answer, not the trail's** — the trail says the process ended and how it was ended.
+
+**D2 — a detached run gets no termination record, and the silence is disclosed rather than left to be
+discovered.** Tekstide cannot observe an ending after it loses supervision, and a record claiming one
+would be the worst thing this RFC could ship. `record_plain_terminal_terminated` already returns
+`NotRequired` for the same case.
+
+**The open question, answered: the disclosure belongs in the changelog and the book's audit
+description, not in a new surface.** RFC-049 D8′'s existing sentence is about a detached run's
+*transcript*; this is about its *record*, and a reader of "what the audit trail answers" must find
+the limit there. The AgentRun Report stays out of scope.
+
+**D3 — nothing from the outcome's payload reaches the record.** No exit status, no signal number, and
+**no `BoundedRuntimeSummary` text**: `Failed` and `OrphanedUnknown` carry summaries that can contain
+paths, and RFC-013's rule is that a record says what happened, never what it contained. The reason
+code is the whole of the detail.
+
+**D4 — best-effort, never a precondition.** `append_observation`. A run must never fail to be
+terminated because the trail could not be written (RFC-046 D1, RFC-047 D4).
+
+**D5 — one path, so a later one cannot forget.** The coordinator both applies the outcome and records
+it, the shape `purge_project_transcripts` already has, and **production stops calling
+`ProjectSession::apply_agent_terminal_outcome` directly.** This project has twice shipped a correct
+decision with one call site unguarded — the adapter launch at response 390, the command-line open at
+response 397 — and both times the fix was to remove the choice. The checklist asks for that by
+construction, not by grep.
+
+**D6 — the ordering is the store's job, not the caller's.** `valid_managed_phase` admits `Terminated`
+only after a `started` phase for that operation id. The producer does not re-check it, and a test
+asserts the store refuses a termination for a run that never started.
