@@ -13902,9 +13902,13 @@ fn a_project_already_open_when_the_state_is_built_gets_its_cleanup_too() {
     // equivalent. Loading here is that half, so this drives the half that was
     // missing.
     super::load_earlier_transcripts(&mut app_shell, &project_id);
-    let mut state = state_with(app_shell);
 
-    super::run_transcript_retention_for_open_projects(&mut state);
+    // **Building `State` is the whole action** (response 397, U2). An earlier
+    // version of this test called the cleanup helper directly, so deleting the
+    // call site in `boot()` failed nothing — the helper was held and the call
+    // was not. The trigger now lives inside `State::new`, and this asserts that
+    // constructing it is enough.
+    let _state = state_with(app_shell);
 
     assert!(
         !expired.exists(),
@@ -13922,24 +13926,40 @@ fn a_project_already_open_when_the_state_is_built_gets_its_cleanup_too() {
 /// cleanup uses. The scan takes an `ApplicationShell`, which cannot reach the
 /// cached field at all.
 #[test]
-fn the_cleanup_scans_the_app_wide_figure_rather_than_reading_the_cache() {
-    let (mut state, project_id, _project_dir) =
+fn the_cleanup_decides_exhaustion_from_a_scan_not_from_the_cache() {
+    let (mut state, _project_id, _project_dir) =
         state_with_cached_trusted_recent_project("fresh-scan-not-cache");
-    super::refresh_transcript_disk_usage(&mut state);
-    let cached_at_boot = state.transcript_disk_usage.total_bytes;
-
-    let written = earlier_transcript_for(&project_id, b"bytes written after the cache was filled");
-
-    assert_eq!(
-        state.transcript_disk_usage.total_bytes, cached_at_boot,
-        "the cached figure cannot know about a file written since it was taken"
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
     );
-    let scanned = super::transcript_disk_usage_for(&state.app_shell).total_bytes;
-    assert_eq!(
-        scanned,
-        cached_at_boot + std::fs::metadata(&written).unwrap().len(),
-        "the scan the cleanup uses sees it"
+
+    // Two figures that disagree about exhaustion. The cache says the disk is
+    // empty; the disk holds more than the app-wide budget, in a directory
+    // belonging to some other project. Sparse, so it costs no blocks: the scan
+    // reads sizes, which is exactly the figure under test.
+    let state_root =
+        super::resolve_agent_run_state_dir().expect("a test build always has its own state root");
+    let other = state_root
+        .join("transcripts")
+        .join(tekstide_core::project::ProjectId::new_uuid().as_str())
+        .join(tekstide_core::domain::AgentRunId::new_uuid().as_str())
+        .join("transcript.log");
+    std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+    let big = std::fs::File::create(&other).unwrap();
+    big.set_len(2 * 1024 * 1024 * 1024).unwrap();
+    drop(big);
+    state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage::default();
+
+    // The cleanup's **own verdict**, not a comparison of two figures beside it:
+    // reading the cache here yields "nothing on disk", and so "not exhausted".
+    let exhausted = super::preflight_transcript_retention_for_active_project(&mut state);
+
+    assert!(
+        exhausted,
+        "the launch check must scan transcripts/ at preflight, not read the cached figure"
     );
+    std::fs::remove_file(&other).ok();
 }
 
 /// RFC-049 D4′: the launch confirmation says this run's output will not be
@@ -14026,6 +14046,46 @@ fn the_launch_applies_the_budget_decision_the_confirmation_was_opened_with() {
         run.transcript_absence,
         Some(tekstide_core::domain::TranscriptAbsence::BudgetExhausted),
         "and the run records the same reason the user was shown"
+    );
+}
+
+/// RFC-049 D4′ (response 397): **the pre-click surface every launch has.** The
+/// confirmation dialog exists only for a configured profile's first use, so the
+/// Trust Settings launch button — where RFC-047 D4 already puts its own line —
+/// carries this one.
+#[test]
+fn trust_settings_says_when_transcripts_are_at_their_limit_before_a_launch() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("launch-budget-notice");
+    app_shell.add_project_from_path(&project_dir).unwrap();
+    let mut state = state_with(app_shell);
+    state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage {
+        total_bytes: 2 * 1024 * 1024 * 1024,
+        unclaimed_bytes: 0,
+    };
+
+    let project = state.app_shell.state().active_project().unwrap();
+    let notice = super::agent_run_launch_transcript_budget_notice(&state, project)
+        .expect("a budget over its limit must be said before the click");
+
+    assert!(notice.contains("without saving its output"), "{notice}");
+}
+
+/// Absent when no budget is over its limit — which is every ordinary session,
+/// and the reason the line means something when it appears.
+#[test]
+fn trust_settings_says_nothing_about_limits_when_transcripts_are_under_them() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("launch-budget-notice-absent");
+    app_shell.add_project_from_path(&project_dir).unwrap();
+    let mut state = state_with(app_shell);
+    state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage::default();
+
+    let project = state.app_shell.state().active_project().unwrap();
+
+    assert_eq!(
+        super::agent_run_launch_transcript_budget_notice(&state, project),
+        None
     );
 }
 

@@ -1226,7 +1226,7 @@ impl State {
             launch_terminal_demo_panes(&mut app_shell, &mut audit_health)
         };
 
-        Self {
+        let mut state = Self {
             app_shell,
             catalog,
             theme: Theme::default(),
@@ -1259,7 +1259,15 @@ impl State {
             transcript_disk_usage,
             recent_projects_reset: None,
             transcript_cleanup_notice: None,
-        }
+        };
+        // RFC-049 D2, **inside the constructor rather than at a call site**
+        // (response 397, U2). Every project open must run the cleanup, and the
+        // command-line open reaches this type with its project already open --
+        // the gap the live walkthrough found. A `boot()` that had to remember to
+        // call it is a line someone can delete and no test would notice, which
+        // is exactly what happened; here there is no such line.
+        run_transcript_retention_for_open_projects(&mut state);
+        state
     }
 
     /// RFC-050 PR-050-C: `boot()` hands in what loading the recent list
@@ -7607,6 +7615,34 @@ fn agent_run_launch_audit_notice(state: &State) -> Option<String> {
     })
 }
 
+/// RFC-049 D4′ (response 397): **the pre-click surface a launch actually has.**
+///
+/// D4′ said "the existing launch confirmation", but a `Ctrl+Alt+A` launch on the
+/// compiled default profile opens no dialog at all. What every launch does have
+/// is this: the Trust Settings launch button, where RFC-047 D4 already puts
+/// *"This run will not be recorded…"*. The same surface, for the same reason.
+///
+/// **It states what is true now, not a promise about the click.** A launch runs
+/// the cleanup first, so a budget over its limit here may be under it by the
+/// time the run starts; the wording says so rather than claiming the run will
+/// certainly go unrecorded. `None` when no budget is over its limit.
+///
+/// A launch from a keybinding elsewhere still has no pre-click notice — exactly
+/// where RFC-047 leaves the audit one — and the run's own detail says why
+/// afterwards.
+fn agent_run_launch_transcript_budget_notice(
+    state: &State,
+    project: &tekstide_core::project::ProjectSession,
+) -> Option<String> {
+    transcript_local_data_summary_for(state, project)
+        .budget_pressure
+        .map(|_| {
+            state
+                .catalog
+                .get("trust-settings-launch-agent-run-transcript-budget-notice")
+        })
+}
+
 fn content_area(state: &State) -> Element<'_, Message> {
     let content: Element<'_, Message> = if state.is_measuring_typing() {
         typing_measurement_view(state)
@@ -9292,8 +9328,15 @@ fn run_transcript_retention_cleanup(
         project.apply_transcript_retention(limits, other_projects_bytes, &now)
     };
 
-    if let Some(mut audit_store) =
-        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+    // §4 again, one layer out: a cleanup with nothing to record does not even
+    // **open** the audit store. The triggers are every project open and every
+    // launch, and opening a store that cannot be opened degrades audit health —
+    // so an unconditional open here would make "the policy looked and did
+    // nothing" enough to mark a session degraded. Found by an existing test,
+    // once the trigger moved into `State::new`.
+    if (cleanup.removed_anything() || cleanup.a_deletion_failed())
+        && let Some(mut audit_store) =
+            open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
     {
         tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut state.audit_health)
             .record_transcript_policy_cleanup(project_id.clone(), &cleanup);
@@ -9312,7 +9355,7 @@ fn run_transcript_retention_cleanup(
 /// Found by the live walkthrough rather than by a test: a two-month-old
 /// transcript survived a command-line open, because the only trigger was in the
 /// GUI path. The same shape RFC-050 needed for loading, one layer further on.
-pub(crate) fn run_transcript_retention_for_open_projects(state: &mut State) {
+fn run_transcript_retention_for_open_projects(state: &mut State) {
     let open_projects = state
         .app_shell
         .state()
@@ -9735,6 +9778,10 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
     // the same reason `project_board_audit_lines` (D3) returns
     // `Vec<String>` instead of rendering itself.
     if let Some(notice) = agent_run_launch_audit_notice(state) {
+        lines.push(text(notice).size(state.theme.font_size_body()).into());
+    }
+    // RFC-049 D4′ (response 397): the same place, before the same click.
+    if let Some(notice) = agent_run_launch_transcript_budget_notice(state, project) {
         lines.push(text(notice).size(state.theme.font_size_body()).into());
     }
 

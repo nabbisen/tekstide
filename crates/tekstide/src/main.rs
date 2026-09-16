@@ -150,16 +150,12 @@ fn boot() -> shell::State {
     }
 
     let catalog = i18n::Catalog::resolve(i18n::LocalePreference::default(), Some(&locales_dir()));
-    let mut state = shell::State::new(app_shell, catalog, audit_health, configuration)
-        .with_recent_projects_reset(recent_projects_reset);
-    // RFC-049 D2, the project-open trigger for a project opened **here**. The
-    // command line opens a project before `State` exists, so it never reaches
-    // the GUI's `Added` arm where the cleanup runs — found by the live
-    // walkthrough, which planted a two-month-old transcript, opened the project
-    // from the command line, and watched it survive. The configuration and the
-    // audit health the cleanup needs exist only from this point on.
-    shell::run_transcript_retention_for_open_projects(&mut state);
-    state
+    // RFC-049 D2: the open trigger for a project opened here runs inside
+    // `State::new`, not from this function (response 397, U2) -- a call site
+    // here would be a line someone can delete with no test noticing, which is
+    // how the command-line open came to have no cleanup at all.
+    shell::State::new(app_shell, catalog, audit_health, configuration)
+        .with_recent_projects_reset(recent_projects_reset)
 }
 
 /// RFC-031 PR-031-B: the real, testable open-a-project-from-the-CLI

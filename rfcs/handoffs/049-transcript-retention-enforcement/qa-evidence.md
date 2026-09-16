@@ -504,3 +504,57 @@ above them — rather than kept alive by a production call that exists only to s
 with `--no-fail-fast`, output redirected to files: 535 + 9 + 819, green every time** (+16 shell, +3
 core). `cargo audit`: three allowed warnings, all already rows in `dependency-advisories.md`.
 `git diff --cached --check` after staging: clean.
+
+## PR-049-C follow-up (response 397) — two tests that held nothing, and D4′'s surface
+
+### U2 — the call site, removed rather than tested
+
+The trigger now runs **inside `State::new`**. `boot()` has no line to call it, so there is no line to
+delete: the reviewer's ablation has nothing to ablate, and the replacement — skipping the trigger in
+the constructor — fails the test alone.
+
+The old test called `run_transcript_retention_for_open_projects` directly, which held the helper and
+not the call site. It now builds a `State` and asserts the file is gone.
+
+**One consequence, found by an existing test.** With the trigger in the constructor, every `State`
+touched the audit store — and `attempt_agent_run_launch_with_profile_still_launches_and_registers_with_an_unopenable_store`
+asserts its store is untouched at that point. It was right to fail: a cleanup with nothing to record
+should not **open** the store either, or "the policy looked and did nothing" could mark a session's
+audit health degraded. The open is now behind the same condition as the record.
+
+### U1 — a verdict, not a comparison
+
+`the_cleanup_decides_exhaustion_from_a_scan_not_from_the_cache` makes the two figures disagree about
+**exhaustion**: a 2 GiB sparse file in another project's directory, against a zeroed cache. It then
+asserts the cleanup's own answer. Reading the cache yields "nothing on disk", so V1 fails it alone.
+
+Sparse is what makes this affordable — `set_len` moves the size the scan reads without writing a
+block, the same trick the live walkthrough used for 300 MiB.
+
+### D4′'s surface, corrected
+
+The line now also sits beside the **Trust Settings launch button**, one below RFC-047 D4's *"This run
+will not be recorded…"* — the pre-click surface every launch has, rather than a dialog that exists
+only for a configured profile's first use.
+
+It states what is true when rendered, not a promise about the click: a launch runs the cleanup first,
+so a limit shown here can be relieved before the run starts. **A launch from a keybinding elsewhere
+still has no pre-click notice**, exactly where RFC-047 leaves the audit one, and the run's detail says
+why afterwards.
+
+### Ablations, each restored and hash-checked, `--no-fail-fast`
+
+| | Ablation | Fails |
+| --- | --- | --- |
+| V1 | the cleanup reads the cached figure | the scan-not-cache test **alone** |
+| V2 | `State::new` does not run the trigger | the already-open-project test **alone** |
+| V3 | the Trust Settings budget notice never shows | its presence test **alone** |
+| V4 | it always shows | its absence test **alone** |
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean — clippy asked for
+the two audit-store conditions to be one `let`-chain, so they are. `rfc_docs_invariants`: 9 passed.
+`mdbook build docs`: clean. **Three consecutive full-workspace runs with `--no-fail-fast`, output
+redirected to files: 537 + 9 + 819, green every time** (+2 shell tests). `cargo audit`: three allowed
+warnings, unchanged. `git diff --cached --check` after staging: clean.

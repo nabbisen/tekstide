@@ -721,6 +721,12 @@ trust-settings-unclaimed-transcripts = { $bytes } bytes in { $path } belong to n
 # a broken audit store does not make a run more dangerous, only
 # unrecorded) and not that anything here can fix it.
 trust-settings-launch-agent-run-degraded-notice = This run will not be recorded while the audit store is degraded.
+# RFC-049 D4' (response 397): beside the launch button, where RFC-047 D4 already
+# puts its own pre-click line. States what is true now -- a launch runs the
+# cleanup first, so this can be relieved by the time the run starts -- rather
+# than promising that the next run will go unsaved. Absent when no budget is
+# over its limit.
+trust-settings-launch-agent-run-transcript-budget-notice = Transcripts on this computer are at their retention limit. If nothing can be removed when you launch, the run will start without saving its output.
 
 # RFC-040 PR-040-C, D2: "agent run where a trusted project's actions
 # live" -- always shown, not hidden while Restricted: `Ctrl+Alt+A`
