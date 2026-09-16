@@ -2,7 +2,8 @@
 
 ## 0.20.0 - The Ending Is Recorded, And The List Survives
 
-Status: release candidate; not yet published or tagged.
+Status: **released on 2026-09-16.** Published to crates.io as `tekstide 0.20.0` and
+`tekstide-core 0.20.0`, tagged `0.20.0` on `26b5c58`.
 
 
 ### Fixed — a damaged recent-projects list no longer takes your trust decisions with it
