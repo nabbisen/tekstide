@@ -1,10 +1,12 @@
 use super::{
-    AppStatePathProvider, RecentProject, RecentProjectAvailability, RecentProjectState,
-    RecentProjectStore, Timestamp, assess_recent_project_availability,
+    AppStatePathProvider, RecentProject, RecentProjectAvailability, RecentProjectLoadOutcome,
+    RecentProjectSave, RecentProjectState, RecentProjectStore, Timestamp,
+    assess_recent_project_availability,
 };
 use crate::project::{ProjectId, WorkspaceTrust};
 use std::ffi::OsString;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -278,6 +280,211 @@ fn corrupt_state_rename_does_not_overwrite_existing_corrupt_file() {
         "older corrupt state"
     );
     assert!(state_dir.join("recent-projects.json.corrupt-1").exists());
+}
+
+// --- RFC-051: recovering the recent-project list ----------------------------
+
+fn store_with_backup(name: &str) -> (TestSandbox, PathBuf, RecentProjectStore) {
+    let sandbox = TestSandbox::new(name);
+    let state_dir = sandbox.create_dir("state");
+    let store = RecentProjectStore::new(AppStatePathProvider::from_state_dir(&state_dir));
+    (sandbox, state_dir, store)
+}
+
+fn state_with_one_project() -> RecentProjectState {
+    RecentProjectState {
+        state_version: 1,
+        projects: vec![sample_project("/selected/project", "/canonical/project")],
+    }
+}
+
+/// RFC-051's whole point: **the ids come back.** A project's id is what a trust
+/// grant is matched by and what its transcript directory is named after, so a
+/// recovery that produced a list with new ids would repair nothing.
+#[test]
+fn a_corrupt_live_file_recovers_the_list_from_the_backup_with_ids_intact() {
+    let (_sandbox, state_dir, mut store) = store_with_backup("recover-from-backup");
+    // The order production uses, and the order D2′ requires: a load comes first,
+    // and only a store that loaded may write the previous-good copy. A save
+    // before any load writes no backup at all — which this test found by
+    // failing when it skipped the load.
+    assert_eq!(
+        store.load_or_recover().outcome,
+        RecentProjectLoadOutcome::Loaded
+    );
+    let saved = state_with_one_project();
+    assert_eq!(
+        store.save(&saved).expect("a real save"),
+        RecentProjectSave::Written { backup: true }
+    );
+    fs::write(state_dir.join("recent-projects.json"), b"not json").unwrap();
+
+    let loaded = store.load_or_recover();
+
+    assert_eq!(
+        loaded.state, saved,
+        "the recovered list is the one that was saved, ids and all"
+    );
+    assert_eq!(
+        loaded.state.projects[0].project_id,
+        saved.projects[0].project_id
+    );
+    match loaded.outcome {
+        RecentProjectLoadOutcome::Recovered { moved_to, .. } => assert_eq!(
+            moved_to,
+            Some(state_dir.join("recent-projects.json.corrupt")),
+            "and the outcome names where the unusable file went"
+        ),
+        other => panic!("expected Recovered, got {other:?}"),
+    }
+}
+
+/// §1, the defect this RFC exists for: an **unreadable** file was never
+/// quarantined, and `boot()` saved an empty list over it.
+#[test]
+fn an_unreadable_live_file_is_quarantined_rather_than_overwritten() {
+    let (_sandbox, state_dir, mut store) = store_with_backup("quarantine-unreadable");
+    let state_file = state_dir.join("recent-projects.json");
+    fs::write(&state_file, b"{\"state_version\":1,\"projects\":[]}").unwrap();
+    let mut permissions = fs::metadata(&state_file).unwrap().permissions();
+    permissions.set_mode(0o000);
+    fs::set_permissions(&state_file, permissions).unwrap();
+
+    let loaded = store.load_or_recover();
+
+    assert!(
+        !state_file.exists(),
+        "the unreadable file is moved aside, not left for the next save to overwrite"
+    );
+    let quarantined = state_dir.join("recent-projects.json.corrupt");
+    assert!(quarantined.exists());
+    assert!(
+        matches!(loaded.outcome, RecentProjectLoadOutcome::Reset { .. }),
+        "no backup existed, so this is the reset case: {:?}",
+        loaded.outcome
+    );
+    let mut permissions = fs::metadata(&quarantined).unwrap().permissions();
+    permissions.set_mode(0o600);
+    fs::set_permissions(&quarantined, permissions).unwrap();
+}
+
+/// §1's second half: when the quarantine rename **fails**, the file we could not
+/// read is still there — so the session persists nothing at all rather than
+/// writing over it.
+#[test]
+fn a_failed_quarantine_withholds_every_save_for_the_session() {
+    let (_sandbox, state_dir, mut store) = store_with_backup("quarantine-rename-fails");
+    let state_file = state_dir.join("recent-projects.json");
+    let original = b"the user's unreadable file";
+    fs::write(&state_file, original).unwrap();
+    let mut file_permissions = fs::metadata(&state_file).unwrap().permissions();
+    file_permissions.set_mode(0o000);
+    fs::set_permissions(&state_file, file_permissions).unwrap();
+    // A read-only directory is what makes the rename fail: the file cannot be
+    // moved out of it, so there is nowhere to quarantine it to.
+    let mut dir_permissions = fs::metadata(&state_dir).unwrap().permissions();
+    dir_permissions.set_mode(0o500);
+    fs::set_permissions(&state_dir, dir_permissions).unwrap();
+
+    let loaded = store.load_or_recover();
+    let saved = store
+        .save(&state_with_one_project())
+        .expect("no error, a refusal");
+
+    assert!(matches!(
+        loaded.outcome,
+        RecentProjectLoadOutcome::Reset { moved_to: None, .. }
+    ));
+    assert_eq!(
+        saved,
+        RecentProjectSave::Withheld,
+        "a user's unreadable file is worth more than our empty list"
+    );
+
+    let mut dir_permissions = fs::metadata(&state_dir).unwrap().permissions();
+    dir_permissions.set_mode(0o700);
+    fs::set_permissions(&state_dir, dir_permissions).unwrap();
+    let mut file_permissions = fs::metadata(&state_file).unwrap().permissions();
+    file_permissions.set_mode(0o600);
+    fs::set_permissions(&state_file, file_permissions).unwrap();
+    assert_eq!(
+        fs::read(&state_file).unwrap(),
+        original,
+        "and the file itself is untouched"
+    );
+}
+
+/// §2/D2′: a session that started empty after a failed load must not make its
+/// first save the backup — that would overwrite the only good copy with the
+/// empty list, which is this RFC's own failure one file further along.
+#[test]
+fn a_session_that_started_empty_after_a_failed_load_writes_no_backup() {
+    let (_sandbox, state_dir, mut store) = store_with_backup("no-backup-after-failed-load");
+    let good = state_with_one_project();
+    store.save(&good).expect("a first save writes both files");
+    let backup = state_dir.join("recent-projects.json.bak");
+    fs::write(state_dir.join("recent-projects.json"), b"not json").unwrap();
+    fs::write(&backup, b"not json either").unwrap();
+
+    let loaded = store.load_or_recover();
+    assert!(matches!(
+        loaded.outcome,
+        RecentProjectLoadOutcome::Reset { .. }
+    ));
+    let saved = store
+        .save(&RecentProjectState::default())
+        .expect("the live file still saves");
+
+    assert_eq!(saved, RecentProjectSave::Written { backup: false });
+    assert_eq!(
+        fs::read_to_string(&backup).unwrap(),
+        "not json either",
+        "the backup is left exactly as it was, not replaced with the empty list"
+    );
+}
+
+/// §3: whole file or nothing. A backup that cannot be parsed is a reset, and
+/// **nothing is salvaged from it** — a half-parsed list can resurrect a wrong
+/// path-to-id mapping, and a wrong id re-attaches somebody's trust grant to the
+/// wrong folder.
+#[test]
+fn a_corrupt_backup_is_a_reset_and_nothing_is_salvaged_from_it() {
+    let (_sandbox, state_dir, mut store) = store_with_backup("corrupt-backup");
+    fs::write(state_dir.join("recent-projects.json"), b"not json").unwrap();
+    // Valid JSON, one valid-looking project, and one entry that is not: the
+    // shape a salvaging implementation would half-read.
+    fs::write(
+        state_dir.join("recent-projects.json.bak"),
+        br#"{"state_version":1,"projects":[{"project_id":"not-a-uuid"}]}"#,
+    )
+    .unwrap();
+
+    let loaded = store.load_or_recover();
+
+    assert!(
+        loaded.state.projects.is_empty(),
+        "nothing is taken from a backup that did not parse whole: {:?}",
+        loaded.state
+    );
+    assert!(matches!(
+        loaded.outcome,
+        RecentProjectLoadOutcome::Reset { .. }
+    ));
+}
+
+/// A normal start is the common case, and it must stay silent: loaded, with
+/// nothing moved anywhere.
+#[test]
+fn a_readable_live_file_loads_and_reports_nothing_moved() {
+    let (_sandbox, _state_dir, mut store) = store_with_backup("normal-start");
+    let saved = state_with_one_project();
+    store.save(&saved).unwrap();
+
+    let loaded = store.load_or_recover();
+
+    assert_eq!(loaded.state, saved);
+    assert_eq!(loaded.outcome, RecentProjectLoadOutcome::Loaded);
+    assert_eq!(loaded.outcome.moved_to(), None);
 }
 
 #[test]
