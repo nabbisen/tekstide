@@ -286,6 +286,41 @@ impl AuditedAgentLaunch {
     pub fn operation_id(&self) -> &AuditOperationId {
         &self.operation_id
     }
+
+    /// RFC-048 D5/D6: the four ids a termination record needs, separated from
+    /// the launch's one-shot payload so a caller can **keep** them.
+    ///
+    /// `AuditedAgentLaunch` cannot be retained: `runtime_events` and
+    /// `approval_endpoint` are consumed at the launch, and the endpoint owns a
+    /// live listener. Production therefore dropped the whole value — including
+    /// the `operation_id` — and had nothing to write a `Terminated` phase
+    /// against, since the store admits one only after a `started` phase for the
+    /// **same** operation id.
+    pub fn identity(&self) -> AuditedAgentRunIdentity {
+        AuditedAgentRunIdentity {
+            agent_run_id: self.agent_run_id.clone(),
+            terminal_id: self.terminal_id.clone(),
+            operation_id: self.operation_id.clone(),
+            adapter_profile_ref: self.adapter_profile_ref.clone(),
+        }
+    }
+}
+
+/// RFC-048: what a launch must remember about itself in order for its **ending**
+/// to be recordable — the run, its terminal, and the operation id and profile
+/// reference the `Started` phase was written with.
+///
+/// Carries no runtime payload, deliberately: §2 of
+/// `what-a-termination-record-must-not-claim.md` keeps exit statuses, signal
+/// numbers and `BoundedRuntimeSummary` text out of the record, and a type that
+/// cannot hold them is a stronger guarantee than a producer that declines to
+/// read them.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuditedAgentRunIdentity {
+    pub agent_run_id: AgentRunId,
+    pub terminal_id: TerminalId,
+    pub operation_id: AuditOperationId,
+    pub adapter_profile_ref: AuditReference,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -646,26 +681,79 @@ impl<'a> AuditCoordinator<'a> {
         launch: &AuditedAgentLaunch,
         outcome: &TerminationOutcome,
     ) -> Result<AuditActionResult<()>, AuditIntegrationError> {
+        self.apply_agent_terminal_outcome(project, &launch.identity(), outcome)
+    }
+
+    /// RFC-048: **apply the outcome and record the ending, in one call.**
+    ///
+    /// This is the shape §4 asks for. The alternative — apply here, record
+    /// there — is the shape that has already cost this project twice, at the
+    /// adapter launch site (response 390) and the command-line project open
+    /// (response 397). A caller cannot take the first half and forget the
+    /// second, because there is no first half to take.
+    ///
+    /// **The mapping is D1's**, and the silence is §1's:
+    ///
+    /// | Outcome | Record |
+    /// | --- | --- |
+    /// | `Exited` | `Terminated` / `ProcessExited` |
+    /// | `TerminatedBySignal`, `KilledAfterTimeout` | `Terminated` / `ProcessTerminated` |
+    /// | `Failed` | `Terminated` / `RuntimeFailure` |
+    /// | `OrphanedUnknown` | **nothing**, `NotRequired` |
+    ///
+    /// A zero and a non-zero exit are the same record: whether the run
+    /// *succeeded* is `AgentRunStatus`'s answer, and the trail says only that
+    /// the process ended and how it was ended.
+    ///
+    /// **`OrphanedUnknown` writes nothing at all** — not a hedged `Terminated`,
+    /// not a `Failed` phase. The runtime lost track of the process, so there is
+    /// no ending anyone observed, and a durable record outlives the session that
+    /// could have explained it. The trail of a detached run ends at `Started`,
+    /// forever, and that is disclosed rather than left to be discovered.
+    ///
+    /// **Nothing from the outcome's payload reaches the record** (§2). The
+    /// identity carries no exit status, signal number or `BoundedRuntimeSummary`
+    /// — `Failed` and `OrphanedUnknown` carry summaries that can contain paths —
+    /// and the reason code is the whole of the detail.
+    ///
+    /// **Best-effort** (D4/§3): `append_observation`. The outcome is applied
+    /// before the write is attempted, so a store that cannot be written makes an
+    /// ending unrecorded, never a termination refused.
+    ///
+    /// **Ordering is the store's job** (D6): `valid_managed_phase` admits
+    /// `Terminated` only after a `started` phase for the same operation id, and
+    /// this producer deliberately does not re-check it.
+    pub fn apply_agent_terminal_outcome(
+        &mut self,
+        project: &mut ProjectSession,
+        identity: &AuditedAgentRunIdentity,
+        outcome: &TerminationOutcome,
+    ) -> Result<AuditActionResult<()>, AuditIntegrationError> {
         let owns_links = project.agent_runs().iter().any(|run| {
-            run.id == launch.agent_run_id
+            run.id == identity.agent_run_id
                 && run.project_id == *project.id()
-                && run.terminal_id.as_ref() == Some(&launch.terminal_id)
+                && run.terminal_id.as_ref() == Some(&identity.terminal_id)
         }) && project
-            .terminal_session(&launch.terminal_id)
+            .terminal_session(&identity.terminal_id)
             .is_some_and(|terminal| terminal.project_id == *project.id());
         if !owns_links {
             return Err(AuditIntegrationError::InvalidTypedContext);
         }
 
         project
-            .apply_agent_terminal_outcome(&launch.agent_run_id, &launch.terminal_id, outcome)
+            .apply_agent_terminal_outcome(&identity.agent_run_id, &identity.terminal_id, outcome)
             .map_err(AuditIntegrationError::AgentLaunch)?;
 
         let reason_code = match outcome {
             TerminationOutcome::Exited { .. } => AuditReasonCode::ProcessExited,
             TerminationOutcome::TerminatedBySignal { .. }
             | TerminationOutcome::KilledAfterTimeout { .. } => AuditReasonCode::ProcessTerminated,
-            TerminationOutcome::OrphanedUnknown { .. } | TerminationOutcome::Failed { .. } => {
+            // RFC-048 D1: a runtime failure **after the run started** is an
+            // ending, and one the trail can state. Before this it was grouped
+            // with `OrphanedUnknown` and recorded nothing, which said of an
+            // observed failure what §1 says only of an unobserved one.
+            TerminationOutcome::Failed { .. } => AuditReasonCode::RuntimeFailure,
+            TerminationOutcome::OrphanedUnknown { .. } => {
                 return Ok(AuditActionResult {
                     value: (),
                     audit_status: AuditObservationStatus::NotRequired,
@@ -675,12 +763,12 @@ impl<'a> AuditCoordinator<'a> {
 
         let mut terminated = managed_process_record(
             project.id().clone(),
-            launch.agent_run_id.clone(),
-            launch.operation_id.clone(),
-            launch.adapter_profile_ref.clone(),
+            identity.agent_run_id.clone(),
+            identity.operation_id.clone(),
+            identity.adapter_profile_ref.clone(),
             AuditOutcome::Terminated,
         );
-        terminated.terminal_id = Some(launch.terminal_id.clone());
+        terminated.terminal_id = Some(identity.terminal_id.clone());
         terminated.reason_code = Some(reason_code);
         let audit_status = self.append_observation(&terminated);
 

@@ -1022,6 +1022,234 @@ fn termination_truth_survives_observational_audit_failure() {
     assert_eq!(health.failure_count(), 1);
 }
 
+/// RFC-048: **the ending, read back from a real store.** A real run exits, and
+/// the trail carries `Terminated`/`ProcessExited` after its own `Started`, under
+/// the **same operation id** — which is what makes the two phases one run's
+/// story rather than two unrelated rows.
+///
+/// The record's fields are asserted **exhaustively**, and that is the proof §2
+/// asks for: there is no field left that an exit status, a signal number or a
+/// `BoundedRuntimeSummary` could have reached.
+#[test]
+fn a_run_that_exits_records_terminated_with_no_payload_from_the_outcome() {
+    let dirs = TestAuditDirs::new("integration-agent-termination-exited");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let mut project = project_for(&dirs, 1);
+    let plan = launch_plan_for(&project, Path::new("/bin/sh"));
+    let mut runtime = LinuxTerminalRuntime::new();
+
+    let identity = {
+        let mut coordinator = AuditCoordinator::new(&mut store, &mut health);
+        let launched = coordinator
+            .launch_audited_agent_run(&mut project, plan, &mut runtime)
+            .unwrap();
+        let identity = launched.value.identity();
+        let handle = TerminalRuntimeHandle::new(identity.terminal_id.clone(), project.id().clone());
+        runtime.write_input(&handle, b"exit 0\n").unwrap();
+        let outcome = runtime
+            .wait_for_exit(&handle, Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        coordinator
+            .apply_agent_terminal_outcome(&mut project, &identity, &outcome)
+            .unwrap();
+        identity
+    };
+
+    let records = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .collect::<Vec<_>>();
+    let terminated = records
+        .iter()
+        .find(|record| record.outcome == AuditOutcome::Terminated)
+        .expect("the ending must be in the store, not only in the return value");
+    let started = records
+        .iter()
+        .find(|record| record.outcome == AuditOutcome::Started)
+        .expect("its own Started phase");
+
+    assert_eq!(
+        terminated.operation_id, started.operation_id,
+        "the two phases are one run's story only if they share an operation id"
+    );
+    assert_eq!(terminated.family, AuditEventFamily::ManagedProcessLifecycle);
+    assert_eq!(
+        terminated.reason_code,
+        Some(crate::audit::AuditReasonCode::ProcessExited)
+    );
+    // Exhaustive, deliberately: every remaining field of the record is named
+    // here, so there is nowhere an exit status or a runtime summary could be
+    // hiding (§2).
+    assert_eq!(terminated.project_id, Some(project.id().clone()));
+    assert_eq!(terminated.agent_run_id, Some(identity.agent_run_id.clone()));
+    assert_eq!(terminated.terminal_id, Some(identity.terminal_id.clone()));
+    assert_eq!(
+        terminated.adapter_profile_ref,
+        Some(identity.adapter_profile_ref.clone())
+    );
+    assert_eq!(
+        terminated.action_kind,
+        crate::audit::AuditActionKind::ManagedAgentLaunch
+    );
+    // Not the user: a process ending is observed, not asked for — the same
+    // pairing `managed_process_record` gives every phase but `Authorized`.
+    assert_eq!(terminated.actor_kind, crate::audit::AuditActorKind::Runtime);
+    assert_eq!(
+        terminated.action_source,
+        crate::audit::AuditActionSource::RuntimeObserver
+    );
+    assert!(terminated.approval_id.is_none());
+    assert!(terminated.subject_kind.is_none());
+    assert!(terminated.subject_ref.is_none());
+    assert!(terminated.risk_level.is_none());
+}
+
+/// RFC-048 D1: a run **killed** — the shape a project close produces — records
+/// `ProcessTerminated`. The signal number itself never reaches the record.
+#[test]
+fn a_run_killed_by_a_signal_records_process_terminated_without_the_signal() {
+    let dirs = TestAuditDirs::new("integration-agent-termination-killed");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let mut project = project_for(&dirs, 1);
+    let plan = launch_plan_for(&project, Path::new("/bin/sh"));
+    let mut runtime = LinuxTerminalRuntime::new();
+    let mut coordinator = AuditCoordinator::new(&mut store, &mut health);
+    let launched = coordinator
+        .launch_audited_agent_run(&mut project, plan, &mut runtime)
+        .unwrap();
+    let identity = launched.value.identity();
+    let killed = TerminationOutcome::KilledAfterTimeout {
+        initial_signal: crate::runtime::terminal::TerminationSignal::Sigterm,
+        fallback_signal: crate::runtime::terminal::TerminationSignal::Sigkill,
+    };
+
+    coordinator
+        .apply_agent_terminal_outcome(&mut project, &identity, &killed)
+        .unwrap();
+
+    let terminated = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .find(|record| record.outcome == AuditOutcome::Terminated)
+        .expect("a killed run has an ending the trail can state");
+    assert_eq!(
+        terminated.reason_code,
+        Some(crate::audit::AuditReasonCode::ProcessTerminated)
+    );
+    let debug = format!("{terminated:?}");
+    assert!(
+        !debug.contains("Sigterm") && !debug.contains("Sigkill"),
+        "no signal reaches the record: {debug}"
+    );
+
+    let handle = TerminalRuntimeHandle::new(identity.terminal_id.clone(), project.id().clone());
+    runtime.write_input(&handle, b"exit 0\n").unwrap();
+    let _ = runtime.wait_for_exit(&handle, Duration::from_secs(5));
+}
+
+/// RFC-048 D1: a runtime failure **after the run started** is an ending, and the
+/// trail can state it — `RuntimeFailure`.
+///
+/// This is the one behaviour change to the existing producer: `Failed` used to be
+/// grouped with `OrphanedUnknown` and recorded nothing, which said of an observed
+/// failure what §1 says only of an unobserved one. The summary it carries — which
+/// can contain paths — still reaches no field.
+#[test]
+fn a_post_start_runtime_failure_records_runtime_failure_without_its_summary() {
+    let dirs = TestAuditDirs::new("integration-agent-termination-failed");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let mut project = project_for(&dirs, 1);
+    let plan = launch_plan_for(&project, Path::new("/bin/sh"));
+    let mut runtime = LinuxTerminalRuntime::new();
+    let mut coordinator = AuditCoordinator::new(&mut store, &mut health);
+    let launched = coordinator
+        .launch_audited_agent_run(&mut project, plan, &mut runtime)
+        .unwrap();
+    let identity = launched.value.identity();
+    let failed = TerminationOutcome::Failed {
+        summary: BoundedRuntimeSummary::new("/home/someone/private/path sentinel"),
+    };
+
+    coordinator
+        .apply_agent_terminal_outcome(&mut project, &identity, &failed)
+        .unwrap();
+
+    let terminated = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .find(|record| record.outcome == AuditOutcome::Terminated)
+        .expect("an observed failure is an ending, unlike an unobserved one");
+    assert_eq!(
+        terminated.reason_code,
+        Some(crate::audit::AuditReasonCode::RuntimeFailure)
+    );
+    let debug = format!("{terminated:?}");
+    assert!(
+        !debug.contains("sentinel") && !debug.contains("private"),
+        "no runtime summary text reaches the record (§2): {debug}"
+    );
+
+    let handle = TerminalRuntimeHandle::new(identity.terminal_id.clone(), project.id().clone());
+    runtime.write_input(&handle, b"exit 0\n").unwrap();
+    let _ = runtime.wait_for_exit(&handle, Duration::from_secs(5));
+}
+
+/// RFC-048 D6: **the ordering is the store's job.** The producer does not
+/// re-check it, so this asserts the store refuses a `Terminated` phase for an
+/// operation id that has no `started` one — the case an unaudited launch would
+/// otherwise produce.
+#[test]
+fn the_store_refuses_a_termination_for_a_run_that_never_started() {
+    let dirs = TestAuditDirs::new("integration-agent-termination-unstarted");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let mut project = project_for(&dirs, 1);
+    let plan = launch_plan_for(&project, Path::new("/bin/sh"));
+    let mut runtime = LinuxTerminalRuntime::new();
+    let mut coordinator = AuditCoordinator::new(&mut store, &mut health);
+    let launched = coordinator
+        .launch_audited_agent_run(&mut project, plan, &mut runtime)
+        .unwrap();
+    // The same run, but an operation id the store has never seen a `started`
+    // phase for: exactly what a launch that was not audited would hand over.
+    let unstarted = crate::audit::AuditedAgentRunIdentity {
+        operation_id: crate::domain::AuditOperationId::new_uuid(),
+        ..launched.value.identity()
+    };
+    let outcome = TerminationOutcome::Exited { exit_status: 0 };
+
+    let result = coordinator
+        .apply_agent_terminal_outcome(&mut project, &unstarted, &outcome)
+        .unwrap();
+
+    assert_eq!(
+        result.audit_status,
+        AuditObservationStatus::Degraded,
+        "the store refuses the phase, and the producer reports it rather than hiding it"
+    );
+    let terminated = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|record| record.record.outcome == AuditOutcome::Terminated)
+        .count();
+    assert_eq!(terminated, 0, "and nothing was written");
+}
+
 #[test]
 fn orphaned_runtime_truth_is_not_mislabeled_as_durable_termination() {
     let dirs = TestAuditDirs::new("integration-orphaned-runtime");

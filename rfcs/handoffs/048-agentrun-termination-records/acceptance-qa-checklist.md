@@ -15,20 +15,43 @@ implementer's to paper over.
 
 ## PR-048-A — the producer and its one path
 
-- [ ] A run that exits records `Terminated`/`ProcessExited` after its `Started`, **read back from a
+- [x] A run that exits records `Terminated`/`ProcessExited` after its `Started`, **read back from a
       real store**, same operation id.
-- [ ] A run killed through the close flow records `Terminated`/`ProcessTerminated`.
-- [ ] A post-start runtime failure records `Terminated`/`RuntimeFailure`.
-- [ ] **A detached run records nothing.** **Ablation:** record one anyway; the test fails alone.
-- [ ] **The record's fields are asserted exhaustively**, so no exit status, signal, or
+      *`a_run_that_exits_records_terminated_with_no_payload_from_the_outcome`, against a real
+      `AuditStore`; the two phases are asserted to share an operation id.*
+- [x] A run killed through the close flow records `Terminated`/`ProcessTerminated`.
+      *`a_run_killed_by_a_signal_records_process_terminated_without_the_signal`, with the outcome a
+      close produces (`KilledAfterTimeout`). The signal names are asserted absent from the record.*
+- [x] A post-start runtime failure records `Terminated`/`RuntimeFailure`.
+      *`a_post_start_runtime_failure_records_runtime_failure_without_its_summary`. **This is the one
+      behaviour change to the existing producer**: `Failed` was grouped with `OrphanedUnknown` and
+      recorded nothing, which said of an observed failure what §1 says only of an unobserved one.*
+- [x] **A detached run records nothing.** **Ablation:** record one anyway; the test fails alone.
+      *The existing `orphaned_runtime_truth_is_not_mislabeled_as_durable_termination` holds it; C1
+      (record an ending for a detached run) fails it alone.*
+- [x] **The record's fields are asserted exhaustively**, so no exit status, signal, or
       `BoundedRuntimeSummary` text can have reached it (§2). **Ablation:** put the exit status in a
       field; the test fails alone.
-- [ ] **A degraded store does not block termination**: the run still reaches its end status.
+      *Every field of the `Terminated` record is named in the exit test. C3 fails **three** tests, not
+      one: putting the exit status in `subject_ref` makes `valid_managed_process` reject the record
+      outright, so every test that reads one fails. Disclosed — the schema refusing the payload is a
+      stronger result than one assertion catching it.*
+- [x] **A degraded store does not block termination**: the run still reaches its end status.
       **Ablation:** `append_required`; the test fails alone.
-- [ ] **The store refuses a termination with no `started` phase** (D6), asserted against the store.
-- [ ] **One path, by construction** (§4): production calls the coordinator, never
+      *The existing `termination_truth_survives_observational_audit_failure`. C4 fails it **and** the
+      never-started test, which is the same property seen from the other side; disclosed.*
+- [x] **The store refuses a termination with no `started` phase** (D6), asserted against the store.
+      *`the_store_refuses_a_termination_for_a_run_that_never_started`: the producer reports `Degraded`
+      and no `Terminated` row exists. The producer does not re-check the ordering.*
+- [x] **One path, by construction** (§4): production calls the coordinator, never
       `ProjectSession::apply_agent_terminal_outcome`. **Grep**, and **ablation:** delete the recording
       from the coordinator; a test fails alone.
+      *Both production sites call one helper, `apply_agent_terminal_outcome_and_record`; grepped, no
+      other production call exists. C5 (production applies without the coordinator) fails
+      `a_real_agent_run_that_exits_records_its_termination_through_production` **alone**. **Disclosed:**
+      the helper still has an unaudited branch — a launch with no store or no `Started` phase must
+      still be applied, and the store would refuse its `Terminated` anyway (D6) — so "one path" is one
+      *decision point*, not one branch.*
 
 ## PR-048-B — the documentation
 

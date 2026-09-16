@@ -39,6 +39,7 @@ use iced::futures::SinkExt;
 use iced::widget::{button, center, column, container, opaque, row, scrollable, stack, text};
 use iced::{Background, Border, Element, Length, Subscription, Task, keyboard};
 
+use tekstide_core::audit::AuditedAgentRunIdentity;
 use tekstide_core::command::AppCommand;
 use tekstide_core::domain::{TerminalId, TerminalStatus};
 use tekstide_core::navigation::{KeybindingPolicy, NavigationAction};
@@ -1005,6 +1006,18 @@ pub struct State {
     /// project board to say so. `None` until a cleanup removes something or
     /// fails at something.
     transcript_cleanup_notice: Option<TranscriptCleanupNotice>,
+    /// RFC-048 D6: what each audited launch this session needs in order for its
+    /// **ending** to be recordable — chiefly the operation id its `Started`
+    /// phase was written with, since the store admits a `Terminated` phase only
+    /// after a `started` one for that same id.
+    ///
+    /// Session-scoped, and that is the honest bound: the two terminations this
+    /// product observes (a terminal exiting, and a project close) both happen in
+    /// the session that launched the run. A run whose process outlives the
+    /// application is a detached run, which RFC-048 D2 records nothing for
+    /// anyway.
+    audited_agent_runs:
+        std::collections::HashMap<tekstide_core::domain::AgentRunId, AuditedAgentRunIdentity>,
 }
 
 /// RFC-045 PR-045-B: what `boot()` made of the user's configuration
@@ -1259,6 +1272,7 @@ impl State {
             transcript_disk_usage,
             recent_projects_reset: None,
             transcript_cleanup_notice: None,
+            audited_agent_runs: std::collections::HashMap::new(),
         };
         // RFC-049 D2, **inside the constructor rather than at a call site**
         // (response 397, U2). Every project open must run the cleanup, and the
@@ -2752,10 +2766,13 @@ fn record_terminal_exit(
         // cannot land out of step with each other the way calling
         // `mark_terminal_exited` and a separate status transition
         // sequentially could.
-        let _ = state.app_shell.state_mut().apply_agent_terminal_outcome(
+        apply_agent_terminal_outcome_and_record(
+            state,
+            &project_id,
             &agent_run_id,
             &terminal_id,
             &outcome,
+            &mut audit_store,
         );
         attempt_generated_change_detection(state, &agent_run_id);
     } else {
@@ -3717,7 +3734,7 @@ fn attempt_prepared_agent_run_launch(
             ),
         ));
     };
-    let (agent_run_id, _events, approval_endpoint) = match &mut audit_store {
+    let (agent_run_id, _events, approval_endpoint, audited_identity) = match &mut audit_store {
         Some(store) if plan_is_auditable => {
             let launched =
                 tekstide_core::audit::AuditCoordinator::new(store, &mut state.audit_health)
@@ -3763,16 +3780,35 @@ fn attempt_prepared_agent_run_launch(
                         ),
                     })?
                     .value;
+            // RFC-048 D6: taken **before** the launch's one-shot payload is
+            // moved out below. `AuditedAgentLaunch` cannot be kept — the
+            // approval endpoint owns a live listener — so production used to
+            // drop the operation id with it and had nothing to write a
+            // `Terminated` phase against.
+            let identity = launched.identity();
             (
                 launched.agent_run_id().clone(),
                 launched.runtime_events,
                 launched.approval_endpoint,
+                Some(identity),
             )
         }
-        _ => project
-            .launch_agent_run_with_runtime(plan, &mut runtime)
-            .map_err(AgentRunLaunchRefusal::Runtime)?,
+        _ => {
+            // An unaudited launch: either no store opened, or the plan is not
+            // auditable. There is no `Started` phase, so there can be no
+            // `Terminated` one either — D6's ordering is the store's, and this
+            // is the honest way to respect it.
+            let (agent_run_id, events, endpoint) = project
+                .launch_agent_run_with_runtime(plan, &mut runtime)
+                .map_err(AgentRunLaunchRefusal::Runtime)?;
+            (agent_run_id, events, endpoint, None)
+        }
     };
+    if let Some(identity) = audited_identity {
+        state
+            .audited_agent_runs
+            .insert(identity.agent_run_id.clone(), identity);
+    }
     if let Some(mut baseline) = pre_launch_baseline {
         baseline.agent_run_id = Some(agent_run_id.clone());
         state
@@ -4831,15 +4867,14 @@ fn terminate_project_live_work(
                     .map(|run| run.id.clone())
             });
         if let Some(agent_run_id) = owning_agent_run_id {
-            let _ = state
-                .app_shell
-                .state_mut()
-                .apply_agent_terminal_outcome_for_project(
-                    project_id,
-                    &agent_run_id,
-                    &terminal_id,
-                    &outcome,
-                );
+            apply_agent_terminal_outcome_and_record(
+                state,
+                project_id,
+                &agent_run_id,
+                &terminal_id,
+                &outcome,
+                audit_store,
+            );
         } else if let Some(project) = state.app_shell.state_mut().project_mut(project_id) {
             // Mirrors `record_terminal_exit`'s own outcome mapping for a
             // plain terminal: a clean exit records the real exit code,
@@ -9345,6 +9380,43 @@ fn run_transcript_retention_cleanup(
     refresh_transcript_disk_usage(state);
     state.transcript_cleanup_notice = TranscriptCleanupNotice::from_cleanup(&cleanup);
     Some(cleanup)
+}
+
+/// RFC-048 §4 and D5: **the one place production applies an agent run's terminal
+/// outcome.** It applies the outcome and records the ending together, so a later
+/// call site cannot take the first half and forget the second — the failure this
+/// project has already shipped twice, at the adapter launch site (response 390)
+/// and the command-line project open (response 397), and fixed both times by
+/// removing the choice rather than adding a test.
+///
+/// The coordinator does both when this session has the launch's identity and a
+/// store to write to. Otherwise the outcome is still applied — a termination is
+/// never refused for want of a trail (D4/§3) — and nothing is recorded, which is
+/// correct: without a `Started` phase for that operation id the store would
+/// refuse a `Terminated` one anyway (D6).
+fn apply_agent_terminal_outcome_and_record(
+    state: &mut State,
+    project_id: &tekstide_core::project::ProjectId,
+    agent_run_id: &tekstide_core::domain::AgentRunId,
+    terminal_id: &TerminalId,
+    outcome: &tekstide_core::runtime::terminal::TerminationOutcome,
+    audit_store: &mut Option<tekstide_core::audit::AuditStore>,
+) {
+    let identity = state.audited_agent_runs.get(agent_run_id).cloned();
+    if let Some(identity) = identity
+        && let Some(store) = audit_store.as_mut()
+    {
+        let health = &mut state.audit_health;
+        if let Some(project) = state.app_shell.state_mut().project_mut(project_id) {
+            let _ = tekstide_core::audit::AuditCoordinator::new(store, health)
+                .apply_agent_terminal_outcome(project, &identity, outcome);
+            return;
+        }
+    }
+    let _ = state
+        .app_shell
+        .state_mut()
+        .apply_agent_terminal_outcome_for_project(project_id, agent_run_id, terminal_id, outcome);
 }
 
 /// RFC-049 D2: the open trigger for every project that is **already open when

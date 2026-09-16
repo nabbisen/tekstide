@@ -1071,3 +1071,23 @@ response 213.
 **Not the ablation.** T1 changes one `if` in the audit producer. This test binds an approval socket
 over a stale socket file and touches no audit record. The reviewer's other three ablations and all
 three gate runs on the restored tree passed it. The five-minute load average was 5.37 shortly after.
+
+## Unidentified single failure, 2026-09-16 — RFC-048 PR-048-A's first gate (my run)
+
+**One test failed in the `tekstide` binary and I cannot say which.** The run reported
+`537 passed; 1 failed` where the suite has 538. The core binary and the docs invariants were green in
+the same run.
+
+**The name was lost to my own mistake.** I piped that `cargo test` invocation through `grep` for the
+result lines only, then ran the suite *again* to look for the failure — so the failing log never
+existed, and the second run passed. **Read the failing log; do not re-run to inspect it.** The same
+lesson as the filtered-gate rule at the top of this file, in a new disguise.
+
+**What is known:** it was the first workspace run after the PR-048-A ablation batch restored the tree
+and `cargo fmt` rewrote two files; the only new real-process test in that binary is
+`a_real_agent_run_that_exits_records_its_termination_through_production`, which launches a real
+process and writes to a real audit store.
+
+**Not reproduced:** 6 consecutive `-p tekstide --bin tekstide` runs and 5 consecutive full-workspace
+runs afterwards, all green at 538 + 9 + 823. Recorded rather than dropped, so a later recurrence has
+something to attach to.

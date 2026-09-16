@@ -4922,6 +4922,97 @@ fn attempt_agent_run_launch_with_profile_writes_authorized_then_started_to_a_rea
     );
 }
 
+/// RFC-048 §4 and D5: **production's own path records the ending.**
+///
+/// The launch is the real one. The termination goes through `record_terminal_exit`
+/// — the function the exit-detecting wake calls — and the `Terminated` record is
+/// read back from the real store, with the same operation id as its `Started`.
+///
+/// This is the test §4 asks for: delete the recording from the coordinator, or
+/// stop the shell keeping the launch identity, and this fails while the
+/// core-level producer tests keep passing.
+#[test]
+fn a_real_agent_run_that_exits_records_its_termination_through_production() {
+    let state_dir = temp_audit_state_dir("agent-run-termination-records-project");
+    let _audit_state_dir = test_audit_state_dir(&state_dir);
+
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("agent-run-termination-records-project");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let bin_dir = fresh_project_dir("agent-run-termination-records-bin");
+    let executable = bin_dir.join("fake-ai-cli");
+    std::fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+    let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions).unwrap();
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "fake-ai-cli",
+        "Fake AI CLI",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: executable,
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+
+    attempt_agent_run_launch_with_profile(&mut state, profile)
+        .expect("a resolvable, trust-compatible profile should launch for real");
+    let project = state.app_shell.state().active_project().unwrap();
+    let agent_run_id = project.agent_runs()[0].id.clone();
+    let terminal_id = project.agent_runs()[0]
+        .terminal_id
+        .clone()
+        .expect("a launched run owns its terminal");
+
+    // The outcome production's own exit-detecting wake would carry.
+    super::record_terminal_exit(
+        &mut state,
+        terminal_id.clone(),
+        tekstide_core::runtime::terminal::TerminationOutcome::Exited { exit_status: 0 },
+    );
+
+    let store = super::open_audit_store(&state_dir, Vec::new())
+        .expect("the real store this launch just wrote to must still open");
+    let records = store
+        .query(&tekstide_core::audit::AuditQuery::latest(20))
+        .unwrap()
+        .records;
+    let mine: Vec<_> = records
+        .iter()
+        .map(|record| &record.record)
+        .filter(|record| record.agent_run_id.as_ref() == Some(&agent_run_id))
+        .collect();
+    let terminated = mine
+        .iter()
+        .find(|record| record.outcome == tekstide_core::audit::AuditOutcome::Terminated)
+        .expect("production must record the ending, not only apply it");
+    let started = mine
+        .iter()
+        .find(|record| record.outcome == tekstide_core::audit::AuditOutcome::Started)
+        .expect("its own Started phase");
+    assert_eq!(
+        terminated.operation_id, started.operation_id,
+        "the ending must carry the operation id the launch wrote, or the store would refuse it"
+    );
+    assert_eq!(
+        terminated.reason_code,
+        Some(tekstide_core::audit::AuditReasonCode::ProcessExited)
+    );
+    assert_eq!(terminated.terminal_id, Some(terminal_id));
+
+    // And the run itself really ended: the record is about something true.
+    let project = state.app_shell.state().active_project().unwrap();
+    assert_eq!(
+        project.agent_runs()[0].status,
+        tekstide_core::domain::AgentRunStatus::Completed
+    );
+}
+
 /// **The box that proves D1 reached production, not just the API**
 /// (task breakdown's own framing): the exact "unrecoverable failure"
 /// fixture EVIDENCE-2 (RFC-047 PR-047-B) used -- a corrupted
