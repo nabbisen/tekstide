@@ -117,3 +117,20 @@ unchanged. Everything below was checked here, not taken from the letter.
 - **`cargo audit` today: the same three allowed warnings** — `paste` (unmaintained), `ttf-parser`
   (unmaintained), `lru` 0.16.4 (unsound). `lru`'s retirement condition is unchanged: a `cryoglyph`
   release that lifts its `lru ^0.16` bound.
+
+
+## 2026-09-17 — snora 0.50.0: their list describes their graph, not ours
+
+Letter: `.git-exclude/upstream/snora/receive/0.50.0/snora-advisory-scope-2026-09-16.md`. **No reply
+needed**, and they are stopping advisory-by-advisory notes. The durable rule is now in their threat
+model: *anything snora publishes describes snora's graph, never a bound on an adopter's.*
+
+**Checked against our graph, as they ask:**
+
+- **`anyhow` (`RUSTSEC-2026-0190`)**: absent — `cargo tree -i anyhow --target all` matches no package,
+  and it is not in `Cargo.lock`. Their corrected advice does not change anything for us.
+- **`crossbeam-epoch`** (reached through iced's `image` feature in another team's graph): absent. We
+  enable iced's `tokio` and `advanced` features only.
+
+**The rule matches how this register already works**: every row here was judged against our own graph
+with `cargo tree`, never taken from an upstream list.

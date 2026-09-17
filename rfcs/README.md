@@ -25,6 +25,8 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 025 | [Notifications](./proposed/025-notifications.md) | **Proposed 2026-09-17**, for `0.21.0`. The requirements define a `Notification`; none exists. Four separate notice mechanisms feed the project board instead, each with its own lifetime. **D1** one model with a closed set of lifetimes; **D2** the four existing notices migrate with their tests unchanged; **D3** actionable labels, not bare counts; **D6** in-app only. |
+| 030 | [Git Integration](./proposed/030-git-integration.md) | **Proposed 2026-09-17**, shipping when its safety evidence is done. A repository names programs Git will run during an ordinary status read, and that set is not closed. `ProjectGitSummary` exists with no producer. **D1** library or hardened subprocess — measured first; **D2** the evidence is its own slice, with a repository that tries to run a program during a status read; **D5** read-only in every trust state. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -47,12 +49,10 @@ appears**, so this table exists to make a reservation visible to whoever authors
 
 | RFC | Title | Milestone |
 | --- | --- | --- |
-| 025 | Notifications | M12 |
 | 026 | File Watcher and Multi-Document Model | M13 |
 | 027 | Crash Recovery and Unsaved Buffer Persistence | M13 |
 | 028 | Cross-Platform Support | M14 |
 | 029 | Documentation, CI, and Release Automation | M14 |
-| 030 | Git Integration | M12 |
 
 Added 2026-08-12 after a real collision: RFC-024 was authored just-in-time as
 *Diff Preview Policy* and took a number the delivery plan had already reserved for Git
