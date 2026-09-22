@@ -2,7 +2,8 @@
 
 ## 0.22.0 - The Window Knows What Git Knows
 
-Status: release candidate; not yet published or tagged.
+Status: **released on 2026-09-23.** Published to crates.io as `tekstide 0.22.0` and
+`tekstide-core 0.22.0`, tagged `0.22.0` on `c6a7449`.
 
 
 ### Added — the status bar and the file explorer both read real Git state
