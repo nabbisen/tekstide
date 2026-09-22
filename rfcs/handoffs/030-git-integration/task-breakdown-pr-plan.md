@@ -1,8 +1,8 @@
 ---
 title: "RFC-030 — task breakdown and PR plan"
 rfc: "RFC-030"
-rfc_file: "../../accepted/030-git-integration.md"
-source_rfc_status: "Accepted 2026-09-22 — M12; D1′ decided 2026-09-22"
+rfc_file: "../../done/030-git-integration.md"
+source_rfc_status: "Implemented and closed 2026-09-23 — M12"
 target_milestone: "M12"
 created: "2026-09-22"
 ---
@@ -13,7 +13,7 @@ created: "2026-09-22"
 between a library and a subprocess. The measurement said **both execute a repository-named clean
 filter**, and that **a repository naming nothing causes no execution at all** — so the choice moved
 from *which mechanism* to *which repositories we read*. D1′ in
-[the RFC](../../accepted/030-git-integration.md) is the decision; this plan implements it.
+[the RFC](../../done/030-git-integration.md) is the decision; this plan implements it.
 
 ## PR-030-A — the fixture, and the gate
 

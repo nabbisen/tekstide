@@ -1,8 +1,8 @@
 ---
 title: "RFC-030 — acceptance and QA checklist"
 rfc: "RFC-030"
-rfc_file: "../../accepted/030-git-integration.md"
-source_rfc_status: "Accepted 2026-09-22 — M12; D1′ decided 2026-09-22"
+rfc_file: "../../done/030-git-integration.md"
+source_rfc_status: "Implemented and closed 2026-09-23 — M12"
 target_milestone: "M12"
 created: "2026-09-22"
 ---
@@ -366,12 +366,29 @@ ruling below is implemented, not just decided.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted 2026-09-23 (review 416). RFC-030 closed. Four slices, eight reviews, six review-found
+defects -- every one found by running the code against reality, not by reading it:
+
+  406  a repository the gate ACCEPTED still ran a program, through a submodule's own config
+  406  four fail-open paths in the attributes walk (budget, symlinks, .git-as-file, unbounded read)
+  407  the gate refused every real machine, judging the USER's global config instead of the repo's
+  411  the refresh missed plain terminal exits while the documentation claimed it did not
+  411  the project board contradicted the status bar, in the slice's own evidence image
+  415  a symlinked PATH entry walked past a lexical project-root filter (measured, not argued)
+
+Reviewer errors corrected along the way: the binary "library, subprocess, or ship nothing" rule;
+the claim that ProjectProviderState already modelled pending; a box asking for "both trust states"
+on a function that takes no trust parameter.
+
+Final verification (reviewer): fmt, clippy --workspace --all-targets -D warnings, and three
+consecutive full-workspace runs with --all-targets --no-fail-fast at 570 + 9 + 876, green every
+time. Ablation F1 (canonicalized filter removed) fails
+resolving_git_from_the_inherited_path_drops_relative_and_project_local_entries.
 ```

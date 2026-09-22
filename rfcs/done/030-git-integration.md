@@ -1,6 +1,6 @@
 # RFC-030: Git Integration
 
-Status: **Accepted by the human owner 2026-09-22.** **D2–D8 decided by the architect on acceptance; D1′ decided 2026-09-22 at slice A's measurement** — see the end. Proposed 2026-09-17. Reserved for M12 (renumbered from 024 on 2026-08-12). Scoped at the
+Status: **Implemented and closed 2026-09-23.** The status bar shows a real branch and dirty count, the explorer shows per-file badges, and neither happens for a repository that names a program — measured against an adversarial fixture rather than argued. Accepted by the human owner 2026-09-22.** **D2–D8 decided by the architect on acceptance; D1′ decided 2026-09-22 at slice A's measurement** — see the end. Proposed 2026-09-17. Reserved for M12 (renumbered from 024 on 2026-08-12). Scoped at the
 owner's word **alongside** RFC-025, shipping when its safety evidence is done rather than on
 `0.21.0`'s date.
 Target milestone: **M12**
@@ -251,3 +251,32 @@ implementer reading the code.
 4. **The four production project-add sites are held by a test, not by vigilance.** `tekstide`'s
    existing `add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else` scan already
    enumerates them; it, or its sibling, must fail when a site adds a project without the Git trigger.
+
+
+## Closed (2026-09-23)
+
+Four slices and eight reviews. **The RFC's value was in what it refused to ship**, twice: the
+mechanism comparison that found *both* candidates executing a repository-named clean filter, and the
+gate that found a repository it accepted still doing so through a submodule's own configuration.
+
+**What ships:** branch, dirty count and ahead/behind in the status bar; per-file badges in the
+explorer; the gate underneath, which reads a repository's effective configuration and withholds the
+content answer unless every key is on an allowlist of keys that cannot name a program. Refusal is
+graded — an unknown key costs the content answer, never the branch, which is read from `.git/HEAD`
+with no subprocess at all.
+
+**What it does not do, in the product's own words:** a change is reflected only once the process that
+could have made it has ended, or the project is reopened. `Deleted` has a producer but no surface that
+can render it — the file explorer walks the filesystem, and a deleted file has no node.
+
+**Review-found defects, in order:** the submodule bypass (406), four fail-open paths in the attributes
+walk (406), the gate refusing every real machine because it judged the *user's* global configuration
+(407), the refresh missing plain terminal exits while the documentation claimed otherwise (411), the
+project board contradicting the status bar in the slice's own evidence image (411), and a symlinked
+`PATH` entry walking past a lexical project-root filter (415). Every one was found by running the
+code against reality rather than by reading it.
+
+**Reviewer errors corrected here:** the acceptance rule's binary "library, subprocess, or ship
+nothing" framing, which would have thrown away a shippable product; the claim that
+`ProjectProviderState` already modelled *pending*, which it never did; and a checklist box asking for
+"both trust states" on a function that takes no trust parameter.

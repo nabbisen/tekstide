@@ -1,15 +1,15 @@
 ---
 title: "RFC-030: Git Integration — implementation handoff"
 rfc: "RFC-030"
-rfc_file: "../../accepted/030-git-integration.md"
-source_rfc_status: "Accepted 2026-09-22 — M12"
+rfc_file: "../../done/030-git-integration.md"
+source_rfc_status: "Implemented and closed 2026-09-23 — M12"
 target_milestone: "M12"
 created: "2026-09-22"
 ---
 
 # The evidence first, the feature second
 
-Source RFC: [RFC-030](../../accepted/030-git-integration.md)
+Source RFC: [RFC-030](../../done/030-git-integration.md)
 
 ## What this is
 
