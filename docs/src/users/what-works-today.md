@@ -164,18 +164,28 @@ question is what ends up on your disk.
 ## Git
 
 The active project's status bar shows its current branch and whether it has uncommitted changes,
-when it can be read safely: a repository whose configuration names anything that could run a
-program is read as branch-only or "not available" rather than guessed at (RFC-030's own safety
-gate). **A read happens when a project opens, and again whenever a process Tekstide launched for
-that project ends** — a terminal or an AI CLI run closing, not on a fixed interval and not
-continuously. **The literal rule: a change is reflected only once the process that could have made
-it has ended, or the project is reopened.** A `git commit` typed into a Tekstide terminal you leave
+and the file explorer shows each changed file's own status next to its name, when it can be read
+safely: a repository whose configuration names anything that could run a program is read as
+branch-only or "not available" rather than guessed at (RFC-030's own safety gate). **A read
+happens when a project opens, and again whenever a process Tekstide launched for that project
+ends** — a terminal or an AI CLI run closing, not on a fixed interval and not continuously.
+
+**The literal rule: a change is reflected only once the process that could have made it has
+ended, or the project is reopened.** A `git commit` typed into a Tekstide terminal you leave
 running is **not** reflected while that terminal stays open, even though it happened inside
 Tekstide — the same as a commit made in a terminal outside Tekstide entirely. This is a deliberate
 cadence, not a bug: it costs nothing when nothing is running, and needs no background timer.
 
-There is no per-file Git status in the explorer yet, and Git-based change detection does not feed
-the Change Review surface.
+The explorer marks each changed file as modified, added, renamed or copied, untracked, or in
+conflict. **A deleted file carries no badge.** It is a real status Tekstide reads and can name —
+the status bar's own changed-file count includes it — but the explorer only ever shows files that
+still exist on disk, and a deleted file has none left to show a badge on. If the status bar's count
+and the number of badges in the tree ever disagree by exactly the number of files you deleted,
+that is why.
+
+A wholly new, entirely untracked folder is marked untracked as a whole, the same as a single file
+— the files inside it are not marked individually until something inside is tracked or staged.
+Git-based change detection does not feed the Change Review surface.
 
 ## Not built
 

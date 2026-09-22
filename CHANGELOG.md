@@ -1,20 +1,58 @@
 # Changelog
 
-## Unreleased
+## 0.22.0 - The Window Knows What Git Knows
 
-Started incrementally this cycle (review 410), rather than written in one pass at release-candidate
-time the way `0.21.0`'s entry had to be — the gap that cost `0.21.0`'s candidate real effort to
-reconstruct.
+Status: release candidate; not yet published or tagged.
 
-### Added — the status bar reads real Git state, for a project it can read safely
 
-- **Branch and dirty state**, read when a project opens and again whenever a process Tekstide
-  launched for that project ends — a terminal or an AI CLI run closing.
+### Added — the status bar and the file explorer both read real Git state
+
+- **Branch and dirty state on the status bar**, read when a project opens and again whenever a
+  process Tekstide launched for that project ends — a terminal or an AI CLI run closing. Read only
+  for a repository whose configuration names nothing that could run a program; everything else
+  reads branch-only or "not available" rather than guessed at (RFC-030's own safety gate).
+- **The Project Board's own branch label now reads the same state.** It used to read "not
+  available" unconditionally, contradicting the status bar in the same frame.
+- **Per-file Git status in the file explorer** (REQ-GIT-003): each changed file is marked
+  modified, added, renamed or copied, untracked, or in conflict, next to its name. A wholly new,
+  entirely untracked folder is marked as a whole; the files inside are not marked individually
+  until something inside is tracked or staged.
 - **The literal rule, stated plainly**: a change is reflected only once the process that could
   have made it has ended, or the project is reopened. A `git commit` typed into a Tekstide
   terminal you leave running is **not** reflected while that terminal stays open — the same as a
   commit made outside Tekstide entirely. Deliberate, not a bug: it costs nothing when nothing is
   running, and needs no background timer (RFC-030 PR-030-B, reviews 410-411).
+
+### Fixed — `git` is found beyond a fixed `/usr/bin:/bin`
+
+Git detection used to search only `/usr/bin` and `/bin` for `git`, so every project silently read
+"not available" on a distribution that installs it elsewhere — NixOS and Guix put it in a per-user
+or per-system profile, not a rare setup. It now tries a small reviewed list of system directories
+first, then the user's own `PATH`, filtered so a repository can never redirect which `git` binary
+gets invoked (RFC-030 PR-030-D, reviews 414-415).
+
+### Corrected
+
+- **`0.21.0` said Git state reads "not available".** That was true when written and is no longer
+  true: the status bar and the explorer both read real branch, dirty, and per-file state now,
+  whenever the repository can be read safely. A reader who took "not available" as a standing
+  fact about this project should re-read the *Git* section of
+  [What works today](https://nabbisen.github.io/tekstide/users/what-works-today.html).
+
+### What this release does not do
+
+- **A deleted file carries no badge in the explorer.** It is a real status Tekstide reads and
+  counts — the status bar's own changed-file count includes it — but the explorer only ever shows
+  files that still exist on disk, and a deleted file has none left to show a badge on.
+- **The cadence limitation applies to the explorer's per-file badges too, not only the status
+  bar**: a change is reflected only once the process that could have made it has ended, or the
+  project is reopened.
+- **Git-based change detection still does not feed the Change Review surface.** Unrelated systems
+  today.
+- **Pending approvals can only ever read zero today.** Carried from `0.21.0`, unchanged this
+  release: the field is correct and wired to a real count; there is simply no shipping AI CLI that
+  speaks RFC-021's approval protocol.
+- **Everything else `0.21.0` listed still holds.**
 
 ## 0.21.0 - The Bar Says What Is Happening
 
