@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.21.0 - The Bar Says What Is Happening
+
+Status: release candidate; not yet published or tagged.
+
+
+### Added — the status bar now says what is happening in the active project
+
+Until now the status bar showed only its own one-line summary. It now also carries the four fields
+REQ-NOTIFY-002 asks for, on the same line, present only when a project is active.
+
+- **Trust state** — Trusted, Restricted, Revoked or Unknown — read straight from the project, not
+  inferred.
+- **Git state** — honestly *"not available"*. Nothing produces real Git state yet; RFC-030 is what
+  will, and this release does not pretend otherwise.
+- **Running, failed and pending-approval sessions**, each as an actionable label — `2 running`,
+  `1 failed`, `1 awaiting approval` — never a bare count (REQ-NOTIFY-003), and **absent entirely at
+  zero** so the bar stays readable rather than padded with zeroes.
+
+### Changed — the four board notices now share one model
+
+The Project Board's audit-health, configuration, recent-project-list-repair and transcript-retention
+notices used to be four independent string-building functions. They now project from one
+`Notification` type, ordered deterministically by kind rather than by which producer happened to
+resolve first. **No notice's rendered text changed**, and every one of their twenty pre-existing
+tests moved onto the new model unmodified — this is an internal migration, not a user-visible change,
+and the changelog says so rather than implying otherwise.
+
+### What this release does not do
+
+Re-read against what RFC-025 changed, not copied from `0.20.0`.
+
+- **Git state reads "not available".** Nothing in this release computes it; RFC-030 (already
+  accepted, still in progress) is what will, once its own safety evidence is complete. Not a bug —
+  the honest answer until something real produces the field.
+- **Pending approvals can only ever read zero today.** The field is correct and wired to a real
+  count; there is simply no shipping AI CLI that speaks RFC-021's approval protocol, and the
+  `Managed` compatibility profile it would require is unreachable from configuration. A user who
+  never sees this label move deserves to know why, rather than wonder if it is broken.
+- **Everything `0.20.0` listed still holds.**
+
 ## 0.20.0 - The Ending Is Recorded, And The List Survives
 
 Status: **released on 2026-09-16.** Published to crates.io as `tekstide 0.20.0` and
