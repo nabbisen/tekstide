@@ -272,6 +272,26 @@ ruling below is implemented, not just decided.
 - [ ] Live capture against `mktemp -d`, showing a real Git state where the status bar said "not
       available". Throwaway state only.
 
+### Required at review 413 — before the explorer wiring ships
+
+- [ ] **R-1: an awkward-path fixture.** A repository with a non-ASCII filename and a space-bearing
+      one (a newline too, if the harness tolerates it), each asserted to map to the path as it exists
+      on disk. *Measured at review 413: without `-z`, git emits `"h\303\251llo w\303\266rld.txt"`
+      and `"new\nline.txt"` — escaped keys an explorer lookup could never match, so those files would
+      silently carry no badge.* Without the test, `-z` is one "simplification" from being reverted
+      with everything still green.
+- [ ] **R-2: decide what a non-UTF-8 path does.** The whole-output `from_utf8` drops an entire
+      repository to branch-only for one odd filename. Prefer: decode per record, skip the undecodable
+      path from the map but **still count it**, so `changed_file_count` stays truthful. If the
+      whole-output decode stays, disclose it in the book beside the cadence note.
+- [ ] **The six categories are settled (review 413): do not split them.** `Unmerged` stays one —
+      which side changed what is a diff-view question. `R`/`C` collapse as a category, but the
+      **label must be true for both**; a copy labelled "renamed" is the number-adjacent-to-the-fact
+      pattern in miniature.
+- [ ] **The directory question is answered in writing**, not left to be invented: a per-node lookup is
+      exact-path, so a folder containing changes carries no badge. *Files only* is a good answer; a
+      roll-up is a per-node walk of the map, which is a cost question.
+
 ## Whole-RFC
 
 - [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
