@@ -33,6 +33,9 @@ own row, because the allowlist has to be proven against each:
 | **include-hidden** | the driver in a second file, pulled in by `include.path` — **measured: `git config --list --local` does not show it while `git status` still runs it** |
 | attributes-only | `.gitattributes` naming a filter **no config defines** — measured: executes nothing |
 | control | a repository that names nothing — measured: executes nothing |
+| **submodule** | a gitlink whose submodule gitdir names a clean filter, with the **parent config entirely allowlisted** and no worktree `.gitattributes` — measured at review 406: `git status` in the parent **runs it** |
+| **oversized tree** | more directory entries than the walk's budget — the walk must fail **closed** |
+| **symlinked directory** | a symlink out of the project — refused at every level, as RFC-050's loader does |
 
 Every named program **writes a marker file and nothing else**. Nothing destructive, nothing
 networked, nothing outside the temporary directory.
@@ -53,6 +56,12 @@ Before any worktree read, in this order:
    through a filter we did not run — every Git LFS file would read as modified, and a wrong number is
    worse than "not available".
 5. **Refusal is an outcome, not an error**: `unavailable`, with a reason.
+
+**A gate reads one repository's configuration; git may consult another's.** Submodules are the
+measured instance (review 406): the parent's configuration can be entirely allowlisted while the
+program lives in a second repository's config, in a gitdir no worktree walk sees. Detect the gitlink
+(`git ls-files -s`) or resolve the gitdir (`git rev-parse --git-dir`) — both measured to execute
+nothing — and do not give the content answer for a repository that contains one.
 
 **Required tests.** Per vector: the marker file **does not exist** after the gate runs, and the
 poisoned repository is **refused**; the control repository is **accepted** and still executes nothing.

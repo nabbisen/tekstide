@@ -21,8 +21,10 @@ named — the reviewer's error to fix, not the implementer's to paper over.
 - [x] Every vector has its own row — clean filter, `core.fsmonitor`, textconv, **include-hidden**,
       attributes-named-but-undefined, and a control that names nothing. — qa-evidence.md's vector
       table.
-- [x] After the gate runs, the marker file **does not exist**, for every vector, **in both trust
-      states**. — every `*_is_refused_and_the_marker_never_runs`/`*_on_the_include_key_itself` test;
+- [x] After the gate runs, the marker file **does not exist**, for every vector. *(Reviewer, 406: the
+      box said "in both trust states" for every vector; `evaluate` takes no trust parameter, so
+      trust-independence is structural and one vector proves it. The implementer's reading was right
+      and the box was mechanical.)* — every `*_is_refused_and_the_marker_never_runs`/`*_on_the_include_key_itself` test;
       trust-state coverage is structural (`evaluate` takes no trust parameter), exercised explicitly
       for one vector in `the_gate_does_not_depend_on_trust_state` — see qa-evidence.md for why
       re-running all four was judged redundant rather than skipped.
@@ -52,6 +54,29 @@ named — the reviewer's error to fix, not the implementer's to paper over.
       naming nothing executes nothing, which is what the whole decision rests on. —
       `control_repository_is_accepted_and_executes_nothing`.
 
+### Required at review 406 — a repository the gate accepted still ran a program
+
+- [ ] **R1, the submodule bypass.** A repository whose **parent config is entirely allowlisted** and
+      whose worktree holds no `.gitattributes`, containing a gitlink whose submodule gitdir names a
+      clean filter, **must not be `Accepted`** — measured: `git status` in the parent runs that
+      filter. Detect the gitlink (`git ls-files -s`, mode `160000`) or resolve the gitdir
+      (`git rev-parse --git-dir`); both execute nothing, measured. **Fixture row required, hostility
+      ablation first**: with the check removed, the marker appears.
+      *The principle, for the risk document: the gate assumes the configuration it reads is the
+      configuration git will use, and that is false wherever git consults **another repository's**
+      config.*
+- [ ] **R2, the attributes walk fails closed.** Budget exhaustion must answer `AcceptedBranchOnly`,
+      never the permissive outcome. *Measured: this working tree is 183,736 entries against a 20,000
+      cap, so the walk stops early on the project's own repository.*
+- [ ] **R3, the walk refuses symlinks at every level** (`symlink_metadata`), as RFC-050's loader does
+      — `is_dir()` follows one out of the project today.
+- [ ] **R4, `.git` as a pointer file** (linked worktree, submodule checkout) does not silently lose
+      `info/attributes` and fall back to the permissive answer.
+- [ ] **R5, the attributes read is bounded.** `read_to_string` on an attacker-controlled
+      `.gitattributes`, for up to the walk's whole budget, is unbounded today; over-bound must read as
+      `AcceptedBranchOnly`, not as "nothing found". The `FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT`
+      entry must name every read in the file it exempts.
+
 ## PR-030-B — branch, dirty state, ahead/behind
 
 - [ ] `set_git_summary` has a production caller; an accepted repository shows branch, dirty state and
@@ -65,6 +90,15 @@ named — the reviewer's error to fix, not the implementer's to paper over.
       grant.
 - [ ] Input is never blocked by a refresh (NFR-PERF-006); the marker is still absent after the
       production path runs.
+- [ ] The gate's filesystem walk runs **off the UI thread** with the rest of the read (D4).
+- [ ] **`--ignore-submodules=all` on the status read** — defence in depth behind R1's refusal, never
+      instead of it (measured: it suppresses the submodule filter).
+- [ ] Decided and disclosed: **how `git` is located**. `PATH` is fixed to `/usr/bin:/bin` today, so on
+      a distribution that does not put `git` there every project reads "not available". A reviewed
+      absolute-path list, or the inherited `PATH` with relative and project-local entries removed —
+      either is fine, but say which and why.
+- [ ] `git --version` is not re-run on every refresh (two spawns per evaluation today), and "not a
+      repository" is its own outcome rather than `SpawnFailed`.
 - [ ] **Carried from RFC-025 (review 404):** the status bar's project fields **reach the rendered
       row**, re-proved by this slice — by a live capture showing all of REQ-NOTIFY-002's fields
       together, at minimum.
