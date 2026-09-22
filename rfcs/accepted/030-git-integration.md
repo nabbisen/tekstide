@@ -1,6 +1,6 @@
 # RFC-030: Git Integration
 
-Status: **Proposed 2026-09-17.** Reserved for M12 (renumbered from 024 on 2026-08-12). Scoped at the
+Status: **Accepted by the human owner 2026-09-22.** **D2–D8 decided by the architect on acceptance; D1 stays open by design and slice A decides it.** Proposed 2026-09-17. Reserved for M12 (renumbered from 024 on 2026-08-12). Scoped at the
 owner's word **alongside** RFC-025, shipping when its safety evidence is done rather than on
 `0.21.0`'s date.
 Target milestone: **M12**
@@ -94,3 +94,38 @@ safely, and it is its own RFC.
   project is not one, or when D1's guarantee does not hold.
 - No write operation exists anywhere in the Git path — held by the API, not by grep.
 - Input is never blocked by a refresh.
+
+
+## Decided on acceptance (2026-09-22)
+
+**D1 stays open, and that is the decision.** Choosing the mechanism now would be choosing it from the
+shape of the two options rather than from what either one does against a hostile repository — the
+exact error this project has made before. **Slice A decides it, and slice A is evidence.** The rule it
+decides by, fixed now so the measurement cannot be argued backwards into a preference:
+
+- **The library wins if, and only if, it executes nothing the repository names** while computing
+  branch, dirty state and per-file status — no filter, no hook, no config-named helper.
+- **Otherwise the hardened subprocess**, with RFC-012's *Git Detector Safety* gate met **item by
+  item, each with its own evidence**, not as a summary claim.
+- **If neither can be shown safe, the RFC stops there.** Git state keeps reading *"not available"* —
+  which is what it says today, and what RFC-025's status bar will say. **Shipping nothing is an
+  acceptable outcome of slice A**, and a better one than shipping a boundary we could not prove.
+
+The decision is recorded in this RFC as **D1′** at slice A's review, with the measurement behind it.
+
+**D2–D6 as recommended.**
+
+**D7 — the adversarial fixture is built by the test, and is itself harmless.** The repository is
+constructed under a temporary directory; the program it names **writes a marker file and nothing
+else**, so "it ran" is observable without anything happening. The fixture **must not depend on the
+developer's own Git configuration**: global and system config are pointed inside the fixture and the
+environment sanitized, or a green run on one machine means nothing on another. It runs in **both
+trust states**.
+
+**D8 — a new dependency arrives with its advisory row.** If slice A chooses the library, the **same
+commit** adds a dated row to `rfcs/handoffs/dependency-advisories.md` naming it, its version and its
+own dependency load. Its advisories become ours; the register is where we find that out on time.
+
+**Ship boundary.** RFC-025 renders the Git field as *"not available"*; this RFC fills it. It adds no
+new surface of its own, and it ships when its evidence is done — `0.22.0` if that is where it lands,
+not on `0.21.0`'s date.
