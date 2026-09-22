@@ -158,6 +158,31 @@ layer (not started — see review 410 for the architectural fork it opens before
       `Unavailable`). *Pending* while a read is in flight — **not started**: no representation of
       "in flight" exists yet: `ProjectProviderState` has no `Pending`-shaped variant, and none of this
       slice's computation functions are asynchronous. Part of the wiring layer's fork.
+      *Decided at review 410: **`Unknown`** is "not computed yet" — it exists and means that, and it
+      renders as the same "not available" wording `0.21.0` ships, so nothing new is claimed on screen.
+      A Git-specific in-flight flag on `ProjectSession` only as far as it takes to stop two triggers
+      starting two evaluations. **No fifth variant on the shared enum.** The RFC's claim that the
+      provider state already modelled pending was the reviewer's error. **Ablation:** drop the
+      in-flight guard so a second evaluation changes the displayed summary mid-flight; that test fails
+      alone.*
+
+### Decided at review 410 — the wiring layer's remaining questions
+
+- [ ] **Refresh is event-driven**: at project open, and again when a **managed process belonging to
+      that project ends** — the moment the application itself knows something may have changed. **No
+      periodic poll.** If the process-end hook is more than a small wiring job, ship open-only and say
+      so rather than building around it.
+- [ ] **The cadence is disclosed** in the book and the changelog: changes made outside Tekstide while
+      a project stays open are not detected until the next in-app process ends or the project is
+      reopened. Silently stale state is what §6 of the risk document forbids.
+- [ ] **All four production project-add sites trigger it, held by a test** — extend
+      `add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else`, or add its
+      sibling, so a site that adds a project without the Git trigger fails. (`shell.rs:4400`, `5011`,
+      `5153`; `main.rs:185`, grepped at review 410.) RFC-050's adapter launch site is what happens
+      when four sites are held by review vigilance instead.
+- [ ] **`runtime::git` is `pub` again, narrowed**: `compute_summary` and what it returns. `evaluate`
+      and the gate's own types stay crate-internal — a caller that can ask "is this repository
+      accepted" can act on it, and then the gate's contract has two consumers instead of one.
 - [x] **No write operation exists in the Git path — held by the API, not by grep** (REQ-GIT-007). —
       every subcommand this module ever calls is read-only (`config`, `--version`, `ls-files`,
       `rev-parse`, `status`); nothing in `runtime::git` accepts or constructs a write argument, so
