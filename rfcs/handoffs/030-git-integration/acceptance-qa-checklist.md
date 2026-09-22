@@ -130,11 +130,16 @@ named — the reviewer's error to fix, not the implementer's to paper over.
       explains why this is not `main.rs`'s "prefer `pub` over `#[allow(dead_code)]`" precedent
       (response 122): that ruling was free for a binary crate's own module visibility; here `pub(crate)`
       is required for a real, different reason (an unpublished contract, not a lint-suppression
-      shortcut), so the two cases are not actually in tension despite looking alike. Flagged for
-      confirmation in review 408 rather than assumed settled.
+      shortcut), so the two cases are not actually in tension despite looking alike. **Confirmed at
+      review 408, time-boxed**: the allow is not permanent — its comment now names PR-030-B as the
+      commit that removes it (box below), which is what keeps the lint honest for whatever in this
+      module becomes genuinely unused later, per response 122's own reasoning.
 
 ## PR-030-B — branch, dirty state, ahead/behind
 
+- [ ] **The module-level `#[allow(dead_code)]` in `runtime/git.rs` is removed in this same commit** —
+      `evaluate` gains its real caller here, so the module is reachable again and the allow has served
+      its purpose (review 408).
 - [ ] `set_git_summary` has a production caller; an accepted repository shows branch, dirty state and
       ahead/behind (REQ-GIT-001, 002).
 - [ ] A **refused** repository shows its branch and `unavailable` for dirty state — **with the branch

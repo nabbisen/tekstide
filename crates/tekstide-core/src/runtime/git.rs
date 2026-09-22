@@ -29,7 +29,12 @@
 //! build, which every real call site inside it would otherwise need its
 //! own `#[allow(dead_code)]` to silence one at a time. This one
 //! module-level line, with this comment naming why, is more honest than
-//! that noise; it comes off the moment PR-030-B adds the real caller.
+//! that noise. **Time-boxed, not permanent (review 408): remove this line
+//! in the same commit PR-030-B adds `evaluate`'s real caller** -- at that
+//! point the module is genuinely reachable again, and this allow would
+//! otherwise start silently covering for whatever in this module becomes
+//! actually unused later, which is exactly what response 122's precedent
+//! warns against.
 //!
 //! **Review 406 found a repository this gate accepted that still ran a
 //! program the repository named.** The general defect: the gate assumed
