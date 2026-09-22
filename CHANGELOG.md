@@ -23,7 +23,7 @@ REQ-NOTIFY-002 asks for, on the same line, present only when a project is active
 The Project Board's audit-health, configuration, recent-project-list-repair and transcript-retention
 notices used to be four independent string-building functions. They now project from one
 `Notification` type, ordered deterministically by kind rather than by which producer happened to
-resolve first. **No notice's rendered text changed**, and every one of their twenty pre-existing
+resolve first. **No notice's rendered text changed**, and every one of their twenty-one pre-existing
 tests moved onto the new model unmodified — this is an internal migration, not a user-visible change,
 and the changelog says so rather than implying otherwise.
 
