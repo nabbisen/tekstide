@@ -312,8 +312,11 @@ fn control_repository_is_accepted_and_executes_nothing() {
     assert!(control.markers.read_dir().unwrap().next().is_none());
 }
 
+/// R7 (review 407, D1' amendment): a repository naming a program in its
+/// configuration withholds the content answer -- `AcceptedBranchOnly`,
+/// never `Refused` -- and, unconditionally, never runs that program.
 #[test]
-fn clean_filter_repository_is_refused_and_the_marker_never_runs() {
+fn clean_filter_repository_is_accepted_branch_only_and_the_marker_never_runs() {
     let fixture = Fixture::new("gate-clean-filter");
     let script = fixture.marker_script("marker-filter-clean", "cat");
     fixture.set_config("filter.evil.clean", script.to_str().unwrap());
@@ -322,62 +325,43 @@ fn clean_filter_repository_is_refused_and_the_marker_never_runs() {
     fixture.commit_then_modify_same_length();
     fixture.clear_markers();
 
-    let outcome = fixture.evaluate();
-    assert!(
-        matches!(
-            outcome,
-            GitGateOutcome::Refused(GitGateRefusal::UnknownConfigKey { .. })
-        ),
-        "expected refusal on the unrecognised filter.evil.clean key, got {outcome:?}"
-    );
+    assert_eq!(fixture.evaluate(), GitGateOutcome::AcceptedBranchOnly);
     assert!(!fixture.marker_exists("marker-filter-clean"));
 }
 
 #[test]
-fn fsmonitor_repository_is_refused_and_the_marker_never_runs() {
+fn fsmonitor_repository_is_accepted_branch_only_and_the_marker_never_runs() {
     let fixture = Fixture::new("gate-fsmonitor");
     let script = fixture.marker_script("marker-fsmonitor", "exit 0");
     fixture.set_config("core.fsmonitor", script.to_str().unwrap());
     fixture.commit_then_modify_same_length();
     fixture.clear_markers();
 
-    let outcome = fixture.evaluate();
-    assert!(
-        matches!(
-            outcome,
-            GitGateOutcome::Refused(GitGateRefusal::UnknownConfigKey { .. })
-        ),
-        "expected refusal on the unrecognised core.fsmonitor key, got {outcome:?}"
-    );
+    assert_eq!(fixture.evaluate(), GitGateOutcome::AcceptedBranchOnly);
     assert!(!fixture.marker_exists("marker-fsmonitor"));
 }
 
 #[test]
-fn textconv_repository_is_refused_and_the_marker_never_runs() {
+fn textconv_repository_is_accepted_branch_only_and_the_marker_never_runs() {
     let fixture = Fixture::new("gate-textconv");
     let script = fixture.marker_script("marker-textconv", "cat \"$1\"");
     fixture.set_config("diff.evil.textconv", script.to_str().unwrap());
     fixture.write(".gitattributes", "* diff=evil\n");
     fixture.commit_then_modify_same_length();
 
-    let outcome = fixture.evaluate();
-    assert!(
-        matches!(
-            outcome,
-            GitGateOutcome::Refused(GitGateRefusal::UnknownConfigKey { .. })
-        ),
-        "expected refusal on the unrecognised diff.evil.textconv key, got {outcome:?}"
-    );
+    assert_eq!(fixture.evaluate(), GitGateOutcome::AcceptedBranchOnly);
     assert!(!fixture.marker_exists("marker-textconv"));
 }
 
 /// The measured bypass (review 405): `git config --list --local` hides a
 /// driver defined through `include.path`, while an unprotected `git
-/// status` still runs it. This is why [`evaluate`] reads with the default
-/// (non-`--local`) listing and refuses on the `include.path` key itself,
-/// not only on whatever it turns out to pull in.
+/// status` still runs it. `evaluate` reads with the default
+/// (non-`--local`) listing, and withholds the content answer on the
+/// `include.path` key itself (R7: `AcceptedBranchOnly`, not `Refused` --
+/// but still never `Accepted`), not only on whatever it turns out to pull
+/// in.
 #[test]
-fn include_hidden_repository_is_refused_on_the_include_key_itself() {
+fn include_hidden_repository_is_accepted_branch_only() {
     let fixture = Fixture::new("gate-include-hidden");
     let script = fixture.marker_script("marker-filter-clean", "cat");
     let included_config = fixture.root.join("included.gitconfig");
@@ -394,18 +378,12 @@ fn include_hidden_repository_is_refused_on_the_include_key_itself() {
     fixture.commit_then_modify_same_length();
     fixture.clear_markers();
 
-    let outcome = fixture.evaluate();
-    assert_eq!(
-        outcome,
-        GitGateOutcome::Refused(GitGateRefusal::ConfigInclude {
-            key: "include.path".to_string(),
-        })
-    );
+    assert_eq!(fixture.evaluate(), GitGateOutcome::AcceptedBranchOnly);
     assert!(!fixture.marker_exists("marker-filter-clean"));
 }
 
 #[test]
-fn includeif_repository_is_refused_on_the_includeif_key_itself() {
+fn includeif_repository_is_accepted_branch_only() {
     let fixture = Fixture::new("gate-includeif");
     let included_config = fixture.root.join("conditional.gitconfig");
     fs::write(&included_config, "[core]\n\tfilemode = true\n").unwrap();
@@ -414,14 +392,7 @@ fn includeif_repository_is_refused_on_the_includeif_key_itself() {
         included_config.to_str().unwrap(),
     );
 
-    let outcome = fixture.evaluate();
-    assert!(
-        matches!(
-            outcome,
-            GitGateOutcome::Refused(GitGateRefusal::ConfigInclude { .. })
-        ),
-        "expected refusal on the includeIf key, got {outcome:?}"
-    );
+    assert_eq!(fixture.evaluate(), GitGateOutcome::AcceptedBranchOnly);
 }
 
 /// D1' item 6: attributes naming a driver refuse the *content* answer even
@@ -448,19 +419,16 @@ fn attributes_naming_an_undefined_diff_driver_is_accepted_branch_only() {
 
 /// A benign, common key that simply is not on the allowlist -- proving
 /// the allowlist is default-deny, not merely a denylist of the vectors
-/// this fixture happens to name.
+/// this fixture happens to name. R7: withholds the content answer
+/// (`AcceptedBranchOnly`) rather than refusing the repository outright --
+/// `core.editor` never gets a chance to run either way, since nothing
+/// this gate calls invokes it, and the branch stays readable.
 #[test]
-fn an_unrecognised_but_harmless_key_is_still_refused() {
+fn an_unrecognised_but_harmless_key_is_accepted_branch_only() {
     let fixture = Fixture::new("gate-unknown-key");
     fixture.set_config("core.editor", "true");
 
-    let outcome = fixture.evaluate();
-    assert_eq!(
-        outcome,
-        GitGateOutcome::Refused(GitGateRefusal::UnknownConfigKey {
-            key: "core.editor".to_string(),
-        })
-    );
+    assert_eq!(fixture.evaluate(), GitGateOutcome::AcceptedBranchOnly);
 }
 
 #[test]
@@ -502,14 +470,14 @@ fn the_gate_does_not_depend_on_trust_state() {
     let script = poisoned_restricted.marker_script("marker-fsmonitor", "exit 0");
     poisoned_restricted.set_config("core.fsmonitor", script.to_str().unwrap());
 
-    assert!(matches!(
+    assert_eq!(
         poisoned_trusted.evaluate(),
-        GitGateOutcome::Refused(_)
-    ));
-    assert!(matches!(
+        GitGateOutcome::AcceptedBranchOnly
+    );
+    assert_eq!(
         poisoned_restricted.evaluate(),
-        GitGateOutcome::Refused(_)
-    ));
+        GitGateOutcome::AcceptedBranchOnly
+    );
     assert!(!poisoned_trusted.marker_exists("marker-fsmonitor"));
     assert!(!poisoned_restricted.marker_exists("marker-fsmonitor"));
 }
@@ -524,7 +492,7 @@ fn git_not_found_reports_unavailable_not_a_panic() {
     );
     assert_eq!(
         outcome,
-        GitGateOutcome::Refused(GitGateRefusal::Unavailable(GitUnavailableReason::NotFound))
+        GitGateOutcome::Refused(GitUnavailableReason::NotFound)
     );
 }
 
@@ -688,4 +656,51 @@ fn an_oversized_attributes_file_fails_closed() {
     fs::write(fixture.repo.join(".gitattributes"), oversized).unwrap();
 
     assert_eq!(fixture.evaluate(), GitGateOutcome::AcceptedBranchOnly);
+}
+
+// ---------------------------------------------------------------------
+// Review 407: R6-R7, the gate answering "not available" for reasons that
+// had nothing to do with the repository being read.
+// ---------------------------------------------------------------------
+
+/// R6: measured directly against a real developer's machine, forwarding
+/// the developer's own global/system git configuration meant `evaluate`
+/// refused this project's own repository on `user.signingkey` -- a
+/// personal key, not the repository's. `GIT_CONFIG_GLOBAL` is hardcoded to
+/// `/dev/null` in production regardless of what `HOME` points to or what a
+/// caller's `forwarded_env` supplies (the fixture's own D7-era
+/// `GIT_CONFIG_GLOBAL` entry points at exactly this file, and even that is
+/// overridden). This repopulates the fixture's `HOME/.gitconfig` -- what
+/// git would read as the global config if the override were not in place
+/// -- with an unrecognised key and confirms it changes nothing.
+#[test]
+fn the_users_own_global_configuration_does_not_affect_the_outcome() {
+    let fixture = Fixture::new("gate-global-config-neutralised");
+    fixture.commit_then_modify_same_length();
+
+    let home_gitconfig = fixture.root.join("home").join(".gitconfig");
+    fs::write(
+        &home_gitconfig,
+        "[user]\n\tsigningkey = deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n",
+    )
+    .unwrap();
+
+    assert_eq!(fixture.evaluate(), GitGateOutcome::Accepted);
+}
+
+/// R7: the allowlist grows by pattern for ordinary tool-written data keys
+/// -- each added as its own reviewed safety judgment (module doc comment),
+/// not a blanket loosening. A repository carrying exactly these, and
+/// nothing else unrecognised, is fully `Accepted` -- none of them affect
+/// what any command this gate or a status/dirty read performs.
+#[test]
+fn tool_written_data_keys_are_allowed() {
+    let fixture = Fixture::new("gate-tool-written-keys");
+    fixture.commit_then_modify_same_length();
+    fixture.set_config("branch.main.vscode-merge-base", "origin/main");
+    fixture.set_config("remote.origin.gh-resolved", "base");
+    fixture.set_config("submodule.sub.active", "true");
+    fixture.set_config("lfs.url", "https://example.invalid/lfs");
+
+    assert_eq!(fixture.evaluate(), GitGateOutcome::Accepted);
 }

@@ -15,6 +15,22 @@
 //! [`evaluate`] into `ProjectSession::set_git_summary`; PR-030-A is the
 //! gate and its adversarial fixture only.
 //!
+//! **`#![allow(dead_code)]`, and why this is not `main.rs`'s "prefer
+//! `pub`" precedent (response 122 Required 3).** That ruling was for
+//! `tekstide` -- a binary crate, where making an unwired module `pub`
+//! costs nothing (there is no published public API for it to join) and
+//! keeping the dead-code lint honest was the only thing actually at
+//! stake. `tekstide-core` is a *published* library crate: review 407
+//! required this module become `pub(crate)`, not `pub`, specifically so
+//! that `evaluate` and its still-being-reshaped types (R6/R7 already
+//! changed them twice) do not enter the crate's public API before their
+//! contract has settled. `pub(crate)` with no production caller yet is
+//! exactly what makes the whole module read as dead to a plain (non-test)
+//! build, which every real call site inside it would otherwise need its
+//! own `#[allow(dead_code)]` to silence one at a time. This one
+//! module-level line, with this comment naming why, is more honest than
+//! that noise; it comes off the moment PR-030-B adds the real caller.
+//!
 //! **Review 406 found a repository this gate accepted that still ran a
 //! program the repository named.** The general defect: the gate assumed
 //! the configuration it read was the configuration `git` would use, which
@@ -25,6 +41,22 @@
 //! alongside it in the attributes walk (R2 budget exhaustion, R3 symlink
 //! following, R4 `.git`-as-pointer-file) and the attributes read (R5,
 //! unbounded).
+//!
+//! **Review 407 found the opposite defect: the gate answered "not
+//! available" for reasons that had nothing to do with the repository
+//! being read.** R6 -- the developer's own global/system git
+//! configuration was being forwarded into every read, so a personal
+//! `user.signingkey` or `commit.gpgsign` refused *every* repository on
+//! that machine, forever; [`spawn_git_command`] now hardcodes
+//! `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` to `/dev/null` instead of
+//! forwarding them, so only the repository's own effective configuration
+//! is ever read. R7 -- an unrecognised key (including `include`/
+//! `includeIf`) used to refuse the repository outright; it now withholds
+//! only the content answer ([`GitGateOutcome::AcceptedBranchOnly`]), since
+//! nothing a repository names is ever executed by the scan itself either
+//! way, and real repositories accumulate ordinary tool-written keys
+//! (an editor's `branch.*.vscode-merge-base`, the GitHub CLI's
+//! `remote.*.gh-resolved`) that have nothing to do with D1's threat.
 //!
 //! RFC-012's *Git Detector Safety* gate, item by item:
 //!
@@ -43,20 +75,26 @@
 //!    after `.env_clear()`, never the inherited or repository-influenced
 //!    value.
 //! 5. **Sanitised environment** -- `.env_clear()` first; only `PATH` and
-//!    the locale pair are fixed, plus `HOME`/`GIT_CONFIG_GLOBAL`/
-//!    `GIT_CONFIG_SYSTEM`/`XDG_CONFIG_HOME` forwarded *from Tekstide's own
-//!    process environment*, never from anything the project could set --
-//!    this is also what lets the D7 fixture point "global" and "system"
-//!    config at itself, by setting those same variables before calling
-//!    this module, without the gate needing to know it is under test.
+//!    the locale pair are fixed, `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM`
+//!    hardcoded to `/dev/null` (R6, never forwarded), plus `HOME`/
+//!    `XDG_CONFIG_HOME` forwarded *from Tekstide's own process
+//!    environment*, never from anything the project could set -- this is
+//!    also what lets the D7 fixture point "global" config at itself for
+//!    its own setup commands, by setting `HOME` before calling this
+//!    module, without the gate needing to know it is under test.
 //! 6. **No workspace hooks or config-driven automation** -- this is the
-//!    gate's entire purpose: an unknown configuration key refuses the
-//!    repository outright, before any command that could act on it runs.
+//!    gate's entire purpose: an unrecognised configuration key withholds
+//!    the content answer (R7), before any command that could act on it
+//!    runs.
 //! 7. **Bounded execution time and output** -- [`run_bounded`] enforces
 //!    [`SUBPROCESS_TIMEOUT`] and [`MAX_OUTPUT_BYTES`] on every call.
-//! 8. **Bounded diagnostics** -- refusal reasons carry only a
-//!    configuration *key* name (a fixed git vocabulary word) or a version
-//!    string, never file contents, diff output, or captured stderr text.
+//! 8. **Bounded diagnostics** -- `Refused`'s reason carries only a
+//!    `git --version` string or a fixed enum tag, never a configuration
+//!    key, file contents, diff output, or captured stderr text (R7:
+//!    `AcceptedBranchOnly` no longer names the key that triggered it, at
+//!    all -- there is nothing left for this item to bound).
+
+#![allow(dead_code)]
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -93,30 +131,25 @@ pub enum GitGateOutcome {
     /// allowlist, and its attributes name no content-filter driver: branch,
     /// dirty state and per-file status may all be read.
     Accepted,
-    /// Configuration is safe, but attributes name a `filter=`/`diff=`
-    /// driver (D1' item 6). Branch is still safe (D1' item 8); dirty state
-    /// and per-file status are not -- they would compare worktree bytes
-    /// against an index written through a filter this gate never ran.
+    /// The content answer (dirty state, per-file status) is withheld;
+    /// branch is still safe (D1' item 8). Review 407's D1' amendment: this
+    /// is now the outcome for *every* reason content can't be vouched for
+    /// -- an unknown configuration key, an `include`/`includeIf` key
+    /// (D1' item 3), a `filter=`/`diff=` driver named in attributes
+    /// (D1' item 6), a gitlinked submodule (R1), or an attributes walk
+    /// that could not be fully vetted (R2/R5). None of these say the
+    /// *repository* is unsafe to read at all -- only that comparing
+    /// worktree content against the index is not something this gate can
+    /// vouch for. `Refused` used to cover the first two as well; that
+    /// meant a repository accumulating ordinary tool-written config keys
+    /// (an editor's `branch.*.vscode-merge-base`, the GitHub CLI's
+    /// `remote.*.gh-resolved`) read as fully unavailable rather than
+    /// "branch only", which is a correctness cost with no matching safety
+    /// gain -- nothing a repository names is executed either way.
     AcceptedBranchOnly,
-    /// Refused before any worktree read.
-    Refused(GitGateRefusal),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum GitGateRefusal {
-    Unavailable(GitUnavailableReason),
-    /// A configuration key exists that is not on the allowlist of keys
-    /// known to be unable to name a program.
-    UnknownConfigKey {
-        key: String,
-    },
-    /// `include.path` or an `includeIf.<condition>.path` key -- refused
-    /// unconditionally (D1' item 3): what it pulls in is itself
-    /// unreviewed, and `--local` hiding an include's *contents* while
-    /// `git status` still runs them is exactly the bypass this measured.
-    ConfigInclude {
-        key: String,
-    },
+    /// Refused before any worktree read: this gate cannot answer at all,
+    /// not that it chose not to.
+    Refused(GitUnavailableReason),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -136,12 +169,17 @@ pub enum GitUnavailableReason {
 /// substitute without mutating the real process environment --
 /// `std::env::set_var` is process-global and races other tests running in
 /// the same binary.
-const FORWARDED_ENV_VARS: &[&str] = &[
-    "HOME",
-    "GIT_CONFIG_GLOBAL",
-    "GIT_CONFIG_SYSTEM",
-    "XDG_CONFIG_HOME",
-];
+///
+/// Deliberately **not** `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` (R6,
+/// review 407): those are hardcoded to `/dev/null` in
+/// [`spawn_git_command`] instead of being forwarded from wherever
+/// Tekstide happens to run. D1' names *repository-supplied* configuration
+/// as the threat; the developer's own global config is not the attacker
+/// and must not be the judge either -- measured against a real
+/// developer's machine, forwarding it meant `evaluate` refused this
+/// project's own repository on `user.signingkey`, a key with nothing to
+/// do with the repository being read at all.
+const FORWARDED_ENV_VARS: &[&str] = &["HOME", "XDG_CONFIG_HOME"];
 
 fn forwarded_environment() -> Vec<(String, String)> {
     FORWARDED_ENV_VARS
@@ -189,7 +227,7 @@ fn evaluate_with_environment_and_walk_budget(
     walk_budget: usize,
 ) -> GitGateOutcome {
     if let Err(reason) = check_git_available(git_executable, forwarded_env) {
-        return GitGateOutcome::Refused(GitGateRefusal::Unavailable(reason));
+        return GitGateOutcome::Refused(reason);
     }
 
     let config_output = match run_bounded_git(
@@ -199,26 +237,25 @@ fn evaluate_with_environment_and_walk_budget(
         forwarded_env,
     ) {
         Ok(output) if output.status.success() => output,
-        Ok(_) => {
-            return GitGateOutcome::Refused(GitGateRefusal::Unavailable(
-                GitUnavailableReason::SpawnFailed,
-            ));
-        }
-        Err(reason) => return GitGateOutcome::Refused(GitGateRefusal::Unavailable(reason)),
+        Ok(_) => return GitGateOutcome::Refused(GitUnavailableReason::SpawnFailed),
+        Err(reason) => return GitGateOutcome::Refused(reason),
     };
     let Some(entries) = parse_null_separated_config(&config_output.stdout) else {
-        return GitGateOutcome::Refused(GitGateRefusal::Unavailable(
-            GitUnavailableReason::OutputNotUtf8,
-        ));
+        return GitGateOutcome::Refused(GitUnavailableReason::OutputNotUtf8);
     };
 
+    // R7 (review 407, amending D1'): an unrecognised key -- including
+    // `include`/`includeIf` -- withholds the *content* answer rather than
+    // refusing the repository outright. Nothing a repository names is
+    // executed either way (the allowlist scan itself never runs anything);
+    // this only decides whether the branch, which is always safe (D1' item
+    // 8), gets thrown away along with the content it genuinely can't
+    // vouch for.
     for (key, _value) in &entries {
         let lower = key.to_ascii_lowercase();
-        if lower == "include.path" || lower.starts_with("includeif.") {
-            return GitGateOutcome::Refused(GitGateRefusal::ConfigInclude { key: key.clone() });
-        }
-        if !config_key_is_allowed(key) {
-            return GitGateOutcome::Refused(GitGateRefusal::UnknownConfigKey { key: key.clone() });
+        let is_include = lower == "include.path" || lower.starts_with("includeif.");
+        if is_include || !config_key_is_allowed(key) {
+            return GitGateOutcome::AcceptedBranchOnly;
         }
     }
 
@@ -233,7 +270,8 @@ fn evaluate_with_environment_and_walk_budget(
 /// Keys known to be pure data -- a string, a boolean, a reference name --
 /// never a program name, and never used by `config --list`, `--version`,
 /// or (PR-030-B) a branch/dirty read. Deliberately small: an unrecognised
-/// key refuses the repository rather than being guessed safe.
+/// key withholds the content answer (`AcceptedBranchOnly`, R7) rather than
+/// being guessed safe.
 const EXACT_ALLOWED_CONFIG_KEYS: &[&str] = &[
     "core.repositoryformatversion",
     "core.filemode",
@@ -293,11 +331,34 @@ const SUBSECTION_ALLOWED_PATTERNS: &[(&str, &str)] = &[
     ("branch.", ".merge"),
     ("branch.", ".rebase"),
     ("branch.", ".description"),
+    // R7 (review 407): tool-written data keys real repositories
+    // accumulate, each added as its own reviewed safety judgment rather
+    // than widening the walk-in-not-out grouping above.
+    ("branch.", ".vscode-merge-base"), // VS Code's own per-branch bookkeeping
+    ("remote.", ".gh-resolved"),       // the GitHub CLI's own bookkeeping
+    ("submodule.", ".active"), // written by `git submodule add`; R1 already refuses content for any gitlinked repository regardless
 ];
+
+/// Prefix-only patterns (no fixed suffix): review 407's fourth addition,
+/// `lfs.*`. Git LFS's *content* mechanism is `filter.lfs.clean`/`.smudge`
+/// (a `filter.*` key, never on this allowlist, so LFS content is never
+/// silently trusted); everything under the `lfs.` section itself is LFS's
+/// own bookkeeping (endpoint URLs, cache settings) that no command this
+/// gate or a status/dirty read (`config --list`, `--version`,
+/// `ls-files -s`, `rev-parse`, `status`) ever acts on -- LFS's transfer
+/// agents run only for fetch/push/checkout, none of which this project's
+/// read-only Git integration performs (D5).
+const PREFIX_ONLY_ALLOWED_PATTERNS: &[&str] = &["lfs."];
 
 fn config_key_is_allowed(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
     if EXACT_ALLOWED_CONFIG_KEYS.contains(&lower.as_str()) {
+        return true;
+    }
+    if PREFIX_ONLY_ALLOWED_PATTERNS
+        .iter()
+        .any(|prefix| lower.starts_with(prefix) && lower.len() > prefix.len())
+    {
         return true;
     }
     SUBSECTION_ALLOWED_PATTERNS.iter().any(|(prefix, suffix)| {
@@ -478,7 +539,12 @@ fn collect_nested_gitattributes(dir: &Path, out: &mut Vec<PathBuf>, budget: &mut
 /// followed either (R3), matching `collect_nested_gitattributes`'s own
 /// discipline for the two fixed candidates this function also receives
 /// (`.gitattributes` at the root, `info/attributes` in the resolved
-/// gitdir) which are never passed through that walk.
+/// gitdir) which are never passed through that walk. Review 407 checked
+/// this specifically (`git check-attr filter -- f.txt` against a
+/// symlinked root `.gitattributes` reports `unspecified`): git itself
+/// does not follow a symlinked attributes file either, so skipping it
+/// here matches git's own behaviour rather than being merely a
+/// conservative guess.
 ///
 /// Disclosed together with `read_bounded`'s subprocess-pipe read under
 /// `runtime/git.rs` in `FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT`
@@ -569,12 +635,13 @@ fn run_bounded_git(
 /// Item 1, 2, 3, 4 and 5 of RFC-012's gate (see the module doc comment):
 /// a bare non-project-local executable name against a fixed `PATH`, a
 /// deterministic argv, no shell, and a cleared environment carrying
-/// forward only the locale pair plus whichever of
-/// `HOME`/`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM`/`XDG_CONFIG_HOME`
-/// Tekstide's own process environment set -- the mechanism D7's fixture
-/// uses to point "global" and "system" config at itself, passed in by the
-/// caller rather than read here so tests never mutate the real process
-/// environment.
+/// forward only the locale pair, `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM`
+/// hardcoded to `/dev/null` (R6 -- never forwarded, so nothing on the
+/// developer's own machine can affect the outcome; everything `git
+/// config --list` then reports is the repository's own effective
+/// configuration), and whichever of `HOME`/`XDG_CONFIG_HOME` Tekstide's
+/// own process environment set, passed in by the caller rather than read
+/// here so tests never mutate the real process environment.
 fn spawn_git_command(
     git_executable: &str,
     args: &[&str],
@@ -590,6 +657,12 @@ fn spawn_git_command(
     for (var, value) in forwarded_env {
         command.env(var, value);
     }
+    // Applied last, so nothing in `forwarded_env` -- including a test
+    // fixture's own D7-era entries for these same two keys, kept for
+    // fixture *setup* commands elsewhere -- can override the R6
+    // guarantee by accident.
+    command.env("GIT_CONFIG_GLOBAL", "/dev/null");
+    command.env("GIT_CONFIG_SYSTEM", "/dev/null");
     if let Some(dir) = cwd {
         command.current_dir(dir);
     }

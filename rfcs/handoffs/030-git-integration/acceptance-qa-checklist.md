@@ -94,23 +94,44 @@ named — the reviewer's error to fix, not the implementer's to paper over.
 
 ### Required at review 407 — the gate answers "not available" for the wrong reasons
 
-- [ ] **R6, the user's own configuration is neutralised, not judged.** `GIT_CONFIG_GLOBAL` and
+- [x] **R6, the user's own configuration is neutralised, not judged.** `GIT_CONFIG_GLOBAL` and
       `GIT_CONFIG_SYSTEM` are pointed at `/dev/null` for the gate's reads and for PR-030-B's status
       read. *Measured: `evaluate` on this repository, on the owner's machine, refuses on
       `user.signingkey` — a global key. The fixture's empty global config is why this was invisible.*
       **Test:** an ordinary unknown key in the fixture's "global" config, over a clean repository,
-      yields `Accepted`.
-- [ ] **R7, an unknown key withholds the content answer, not the branch** (D1′ amendment).
+      yields `Accepted`. — `spawn_git_command` hardcodes both, applied after `forwarded_env` so a
+      caller cannot override them by accident.
+      `the_users_own_global_configuration_does_not_affect_the_outcome`.
+- [x] **R7, an unknown key withholds the content answer, not the branch** (D1′ amendment).
       `AcceptedBranchOnly`, not `Refused`. *Measured: with global config neutralised this repository
       still refuses, on `branch.main.vscode-merge-base` — written by an editor.* **Tests:** an unknown
       key yields `AcceptedBranchOnly` and executes nothing; a program-naming key yields the same
       withheld content answer with the marker absent; the content answer is given only for a fully
-      allowlisted repository.
-- [ ] **The allowlist carries tool-written data keys by pattern** — `branch.*.vscode-merge-base`,
+      allowlisted repository. — the config-key loop returns `AcceptedBranchOnly` directly instead of a
+      typed refusal; every `*_is_accepted_branch_only`/`*_and_the_marker_never_runs` test (renamed from
+      "refused" to match) plus `control_repository_is_accepted_and_executes_nothing` for the fully
+      allowlisted case.
+- [x] **The allowlist carries tool-written data keys by pattern** — `branch.*.vscode-merge-base`,
       `remote.*.gh-resolved`, `submodule.*.active`, `lfs.*` — each addition reviewed as a safety
-      judgment.
-- [ ] `Refused` now means only *cannot answer at all*: `git` missing, too old, timed out, unreadable
-      output.
+      judgment. — `SUBSECTION_ALLOWED_PATTERNS`/`PREFIX_ONLY_ALLOWED_PATTERNS`.
+      `tool_written_data_keys_are_allowed`.
+- [x] `Refused` now means only *cannot answer at all*: `git` missing, too old, timed out, unreadable
+      output. — `GitGateOutcome::Refused(GitUnavailableReason)` directly; `GitGateRefusal` (which used
+      to also wrap `UnknownConfigKey`/`ConfigInclude`) removed as now-redundant.
+      `git_not_found_reports_unavailable_not_a_panic`.
+
+### Also done at review 407 — the release blocker
+
+- [x] `runtime::git` made `pub(crate)` (was `pub`): `evaluate` and its types have no production caller
+      yet and their contract was reshaped twice in this review alone (R6/R7); publishing `0.21.0`
+      before that settles would put an in-flux gate into `tekstide-core`'s public API. A disclosed
+      module-level `#[allow(dead_code)]` follows from that — with `pub(crate)` and no caller anywhere
+      outside `#[cfg(test)]`, the whole module reads as dead to a plain build. The comment next to it
+      explains why this is not `main.rs`'s "prefer `pub` over `#[allow(dead_code)]`" precedent
+      (response 122): that ruling was free for a binary crate's own module visibility; here `pub(crate)`
+      is required for a real, different reason (an unpublished contract, not a lint-suppression
+      shortcut), so the two cases are not actually in tension despite looking alike. Flagged for
+      confirmation in review 408 rather than assumed settled.
 
 ## PR-030-B — branch, dirty state, ahead/behind
 

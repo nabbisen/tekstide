@@ -315,3 +315,71 @@ written to `.gitattributes`; `evaluate` reports `AcceptedBranchOnly`.
 each for R2, R3, R4, R5; the submodule row also added to `hostile_fixtures_are_provably_hostile`),
 0 failed. `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings` both
 clean. `git diff --cached --check` after staging clean.
+
+## Review 407 — R6-R7: the gate answering "not available" for the wrong reasons
+
+### R6 — the developer's own global/system config no longer affects the outcome
+
+`spawn_git_command` hardcodes `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` to `/dev/null`, applied **after**
+iterating `forwarded_env` — so nothing a caller passes for those two keys (including a test fixture's
+own D7-era entries for them, kept for the fixture's *setup* commands) can override the guarantee by
+accident. `FORWARDED_ENV_VARS` dropped to just `HOME`/`XDG_CONFIG_HOME`.
+
+**Test**: `the_users_own_global_configuration_does_not_affect_the_outcome` — writes an unrecognised
+key (`user.signingkey`) into the fixture's `HOME/.gitconfig` (what git would read as the global config
+if the hardcoded override were not in place, and the same path the fixture's own `GIT_CONFIG_GLOBAL`
+entry points at) and confirms `evaluate` on an otherwise-clean repository still reports `Accepted`.
+
+### R7 — an unrecognised key withholds content, not the whole answer (D1' amendment)
+
+`GitGateOutcome::Refused` now carries `GitUnavailableReason` directly — `GitGateRefusal` (which used
+to also wrap `UnknownConfigKey { key }`/`ConfigInclude { key }`) is gone, since both of those are no
+longer refusal reasons at all. The config-key scan returns `AcceptedBranchOnly` the moment it finds an
+unrecognised key or an `include`/`includeIf` key, rather than a typed `Refused` variant naming it.
+`Refused` now means exactly "cannot answer at all" — `git` missing, too old, timed out, or output that
+could not be parsed.
+
+Every test whose name said "is refused" for a config-key reason was renamed to "is accepted branch
+only" (`clean_filter_repository_is_accepted_branch_only_and_the_marker_never_runs`,
+`fsmonitor_repository_is_accepted_branch_only_and_the_marker_never_runs`,
+`textconv_repository_is_accepted_branch_only_and_the_marker_never_runs`,
+`include_hidden_repository_is_accepted_branch_only`, `includeif_repository_is_accepted_branch_only`,
+`an_unrecognised_but_harmless_key_is_accepted_branch_only`) — the marker-absence assertions are
+unchanged; only the expected `GitGateOutcome` and the name describing it changed.
+`the_gate_does_not_depend_on_trust_state`'s poisoned-repository assertions updated the same way.
+
+The allowlist grows by four patterns, each its own reviewed judgment (module doc comment,
+`SUBSECTION_ALLOWED_PATTERNS`/new `PREFIX_ONLY_ALLOWED_PATTERNS`): `branch.*.vscode-merge-base`
+(VS Code), `remote.*.gh-resolved` (GitHub CLI), `submodule.*.active` (written by `git submodule add`;
+R1 already withholds content for any gitlinked repository regardless of this pattern), `lfs.*` (Git
+LFS's own bookkeeping — its content mechanism is `filter.lfs.clean`/`.smudge`, a `filter.*` key, never
+on this allowlist).
+
+**Test**: `tool_written_data_keys_are_allowed` — all four patterns set on an otherwise-clean
+repository; `evaluate` reports `Accepted`.
+
+**A confirmed-safe finding, not a fix**: review 407 checked whether skipping a symlinked
+`.gitattributes` (R3) was itself a fail-open gap — measured `git check-attr filter -- f.txt` against a
+symlinked root `.gitattributes` reports `unspecified`, i.e. git does not follow one either. Added as a
+line to `file_declares_content_driver`'s doc comment; no code change.
+
+### The release blocker: `runtime::git` made `pub(crate)`, and the dead-code tension that follows
+
+`runtime.rs`: `pub mod git` → `pub(crate) mod git`, per review 407 — `evaluate` and its types have no
+production caller yet and were reshaped twice in this review alone; publishing `0.21.0` before the
+contract settles would put an in-flux gate into `tekstide-core`'s public API. No external references
+existed (`grep -rn "runtime::git"` outside `runtime/git.rs` itself: none), so the change is mechanical.
+
+This makes the entire module read as dead code to a plain (non-test) build — with `pub(crate)` and
+zero non-test callers, nothing is reachable from any root. A prior, on-point ruling in this project
+(`crates/tekstide/src/main.rs`'s own comment, "response 122 Required 3 precedent") says to prefer `pub`
+over `#[allow(dead_code)]` for exactly this "written but not yet wired" shape — but that ruling was
+for `tekstide`, a **binary** crate, where making an unwired module `pub` costs nothing (there is no
+published API for it to join) and "keep the lint honest" was the only real consideration.
+`tekstide-core` is a **published library crate**; here `pub(crate)` is not a free stylistic choice but
+the thing review 407 explicitly required, for a reason `pub` would directly defeat. Added a single
+module-level `#[allow(dead_code)]` with a comment naming both the reason and why it is not the
+main.rs precedent's case, rather than either silently suppressing the lint or leaving `cargo clippy
+--workspace --all-targets -D warnings` broken. Comes off the moment PR-030-B adds the real caller.
+Flagged explicitly in the review request rather than assumed settled, since it turns on a judgment
+call about how the two precedents relate that is genuinely arguable either way.
