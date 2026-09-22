@@ -270,21 +270,28 @@ fn add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else() 
     }
 }
 
-/// RFC-030 PR-030-B, review 410 ruling 4: the counts a production call to
-/// `trigger_git_summary_refresh` is allowed at -- **not** the same map as
+/// RFC-030 PR-030-B, review 410 ruling 4 (extended at review 411 R-a): the
+/// counts a production call to `trigger_git_summary_refresh` is allowed
+/// at -- **not** the same map as
 /// [`files_with_one_allowed_call_to_add_project_from_path`]: `shell.rs`
-/// has one more call than it does, for `apply_agent_terminal_outcome_and_record`
-/// (review 410 ruling 2's "a managed process belonging to this project
-/// ends" trigger), which has nothing to do with opening a project.
+/// has more calls than it does, for every site where a managed process
+/// belonging to a project ends, which has nothing to do with opening one.
 fn files_with_one_allowed_call_to_trigger_git_summary_refresh()
 -> std::collections::HashMap<&'static str, usize> {
     // main.rs: open_cli_project_path_and_record (project-open).
-    // shell.rs: the three project-open sites
-    //           (attempt_open_project_from_path_field,
-    //           choose_current_browsed_directory, reopen_recent_project)
-    //           plus apply_agent_terminal_outcome_and_record
-    //           (a managed process ending).
-    std::collections::HashMap::from([("main.rs", 1), ("shell.rs", 4)])
+    // shell.rs, six source occurrences:
+    //   1-3. the three project-open sites (attempt_open_project_from_path_field,
+    //        choose_current_browsed_directory, reopen_recent_project).
+    //   4. apply_agent_terminal_outcome_and_record's own one call (an
+    //      audited agent run's terminal ends) -- counted once here no
+    //      matter how many places call that function, since this scan
+    //      counts source occurrences of the trigger, not runtime
+    //      invocations.
+    //   5. record_terminal_exit's own plain-terminal `else` branch
+    //      (review 411 R-a: a plain terminal is a managed process too).
+    //   6. the project-close termination loop's own plain-terminal
+    //      `else if` branch (R-a again, the same shape).
+    std::collections::HashMap::from([("main.rs", 1), ("shell.rs", 6)])
 }
 
 /// RFC-030 PR-030-B, review 410 ruling 4: the sibling of

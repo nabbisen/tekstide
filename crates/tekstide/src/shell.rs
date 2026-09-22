@@ -2817,6 +2817,15 @@ fn record_terminal_exit(
                 tekstide_core::domain::TerminalStatus::Failed,
             ),
         };
+        // RFC-030 PR-030-B, review 411 R-a: a plain terminal is still a
+        // managed process the application launched, with its own audit
+        // record (`record_plain_terminal_terminated`, below) -- review
+        // 410's ruling was "a managed process belonging to that project
+        // ends", not "an agent run ends", and the book already claims
+        // this trigger for *any* process Tekstide launched. The agent-run
+        // branch above triggers via `apply_agent_terminal_outcome_and_record`;
+        // this was the gap.
+        trigger_git_summary_refresh(&mut state.app_shell, &project_id);
     }
 
     let _ = state
@@ -4911,6 +4920,15 @@ fn terminate_project_live_work(
                 }
                 _ => project.transition_terminal_status(&terminal_id, TerminalStatus::Failed),
             };
+            // RFC-030 PR-030-B, review 411 R-a: the same trigger
+            // `record_terminal_exit`'s own plain-terminal branch now has,
+            // for consistency across every site where a managed process
+            // belonging to this project ends -- even though this project
+            // is itself closing and the result will very likely land on
+            // a `project_mut` that no longer finds anything (a silent
+            // no-op, the same shape `Message::GitSummaryComputed`'s
+            // handler already tolerates).
+            trigger_git_summary_refresh(&mut state.app_shell, project_id);
         }
 
         if let Some(store) = audit_store.as_mut() {

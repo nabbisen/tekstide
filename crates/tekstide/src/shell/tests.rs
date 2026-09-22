@@ -12512,6 +12512,70 @@ fn state_with_a_real_terminal_on_its_own_project(
     (state, project_id, terminal_id)
 }
 
+/// RFC-030 PR-030-B, review 411 R-a: `record_terminal_exit`'s
+/// plain-terminal branch (a real shell, not an agent run's own terminal)
+/// must trigger a Git refresh the same way the agent-run branch already
+/// does -- proved by the in-flight flag actually being set, not only by
+/// the enforcement scan finding the call in the source.
+#[test]
+fn a_plain_terminals_exit_triggers_a_git_summary_refresh() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("git-refresh-plain-exit"));
+    let (mut state, project_id, terminal_id) =
+        state_with_a_real_terminal_on_its_own_project("git-refresh-plain-exit");
+    assert!(
+        !state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .git_summary_refresh_in_flight(),
+        "test precondition: no refresh in flight before the exit"
+    );
+
+    super::record_terminal_exit(
+        &mut state,
+        terminal_id,
+        tekstide_core::runtime::terminal::TerminationOutcome::Exited { exit_status: 0 },
+    );
+
+    assert!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .git_summary_refresh_in_flight(),
+        "a plain terminal's exit must trigger a Git refresh the same as an agent run's does"
+    );
+}
+
+/// The same trigger, in the project-close termination loop's own
+/// plain-terminal branch (`terminate_project_live_work`) -- a distinct
+/// call site from `record_terminal_exit`, review 411 R-a names both.
+/// Called directly, before the project session itself is removed by the
+/// rest of the close sequence, since the flag would otherwise be gone
+/// along with the project by the time a full `ProjectCloseClosePressed`
+/// round trip could be inspected.
+#[test]
+fn project_close_terminating_a_plain_terminal_triggers_a_git_summary_refresh() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("git-refresh-project-close"));
+    let (mut state, project_id, _terminal_id) =
+        state_with_a_real_terminal_on_its_own_project("git-refresh-project-close");
+    let mut audit_store = None;
+
+    super::terminate_project_live_work(&mut state, &project_id, &mut audit_store);
+
+    assert!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .git_summary_refresh_in_flight(),
+        "terminating a plain terminal during project close must trigger a Git refresh too"
+    );
+}
+
 /// §1's required split, the idle half: a project with no running
 /// terminal and no active agent run closes directly -- no modal, ever.
 #[test]

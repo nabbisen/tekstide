@@ -599,3 +599,50 @@ not merely reapplied and trusted. No data was lost that this document does not a
 describe, but the near-miss is worth naming rather than quietly fixing: the standing rule ("`git
 status` before any command that could discard uncommitted work") exists for exactly this shape of
 mistake, and this is the session it was skipped.
+
+## Review 411 — R-a, R-b (R-c deferred to PR-030-C, per the response)
+
+### R-a: plain terminal exits now trigger a refresh too
+
+Two more call sites, both named in review 411 by line number: `record_terminal_exit`'s own
+`else` branch (a plain terminal, distinct from the agent-run branch above it that already triggered
+via `apply_agent_terminal_outcome_and_record`), and `terminate_project_live_work`'s own `else if`
+branch (the project-close termination loop's plain-terminal case). Added identically to both --
+`trigger_git_summary_refresh(&mut state.app_shell, ...)` right after each branch's existing
+exit-status handling.
+
+The project-close site is added for consistency with the other, even though the project it targets
+is itself about to be removed and the eventual `Message::GitSummaryComputed` will very likely find
+`project_mut` returning `None` -- the same silent-no-op shape that message's handler already
+tolerates for a project that closed mid-flight. Not worth special-casing away: review 411 named both
+sites as having "the same shape."
+
+`files_with_one_allowed_call_to_trigger_git_summary_refresh` raised from `shell.rs: 4` to `shell.rs:
+6`, each of the six source occurrences named in the function's own comment (three project-open sites,
+`apply_agent_terminal_outcome_and_record`'s one call regardless of how many places call that
+function, and the two new plain-terminal branches). Re-ran the enforcement test before and after the
+change to confirm it: failed at `6` vs `4` before updating the allowlist, passed after.
+
+**Behavioural tests, not only the source-text scan**: `a_plain_terminals_exit_triggers_a_git_summary_refresh`
+(via `state_with_a_real_terminal_on_its_own_project` + `record_terminal_exit`, asserting
+`git_summary_refresh_in_flight()` becomes `true`) and
+`project_close_terminating_a_plain_terminal_triggers_a_git_summary_refresh` (calling
+`terminate_project_live_work` directly, before the rest of the close sequence removes the project, so
+the flag is still inspectable). Both are new; the trigger mechanism itself had no direct behavioural
+test before this response, only the enforcement scan's source-count check.
+
+### R-b: the disclosure now states the literal rule
+
+Both the book (`docs/src/users/what-works-today.md`'s "Git" section) and the changelog's
+`## Unreleased` entry reworded from *"a change made outside Tekstide... is not reflected"* (which
+reads as "outside is stale, inside is live", the exact wrong implication review 411 named) to the
+literal rule: *"a change is reflected only once the process that could have made it has ended, or the
+project is reopened"* -- with the in-Tekstide-terminal case named explicitly (*"A `git commit` typed
+into a Tekstide terminal you leave running is **not** reflected while that terminal stays open"*)
+rather than only the outside-Tekstide example the old wording led with.
+
+### Gate
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`rfc_docs_invariants` (9/9), `cargo test --all-targets`: 563 (`tekstide`, +2 new behavioural tests) +
+9 + 864, clean.

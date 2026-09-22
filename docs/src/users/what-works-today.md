@@ -167,11 +167,12 @@ The active project's status bar shows its current branch and whether it has unco
 when it can be read safely: a repository whose configuration names anything that could run a
 program is read as branch-only or "not available" rather than guessed at (RFC-030's own safety
 gate). **A read happens when a project opens, and again whenever a process Tekstide launched for
-that project ends** — not on a fixed interval, and not continuously. **A change made outside
-Tekstide while a project stays open — an external `git commit`, a branch switch in another
-terminal — is not reflected until the next in-app process ends or the project is reopened.** This
-is a deliberate cadence, not a bug: it costs nothing when nothing is running, and needs no
-background timer.
+that project ends** — a terminal or an AI CLI run closing, not on a fixed interval and not
+continuously. **The literal rule: a change is reflected only once the process that could have made
+it has ended, or the project is reopened.** A `git commit` typed into a Tekstide terminal you leave
+running is **not** reflected while that terminal stays open, even though it happened inside
+Tekstide — the same as a commit made in a terminal outside Tekstide entirely. This is a deliberate
+cadence, not a bug: it costs nothing when nothing is running, and needs no background timer.
 
 There is no per-file Git status in the explorer yet, and Git-based change detection does not feed
 the Change Review surface.

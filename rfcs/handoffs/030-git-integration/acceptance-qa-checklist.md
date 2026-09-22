@@ -228,14 +228,22 @@ ruling below is implemented, not just decided.
 
 ### Required at review 411
 
-- [ ] **R-a: plain terminal exits trigger a refresh too.** Only the audited agent-run branch does
+- [x] **R-a: plain terminal exits trigger a refresh too.** Only the audited agent-run branch does
       today; the `else` branch at `shell.rs:2787`/`4895` marks the terminal exited and records
       `record_plain_terminal_terminated` while triggering nothing. A plain terminal is a managed
       process the application launched — review 410's ruling covers it. The enforcement scan's counts
-      must hold the new sites.
-- [ ] **R-b: the disclosure says exactly what "ends" means.** A commit typed in a Tekstide terminal
+      must hold the new sites. — `trigger_git_summary_refresh` added to both `else`/`else if` branches
+      (`record_terminal_exit`, `terminate_project_live_work`); `files_with_one_allowed_call_to_trigger_git_summary_refresh`
+      raised `shell.rs` from 4 to 6, each of the six sites named in its own comment.
+      **Behavioural, not just source-scan**: `a_plain_terminals_exit_triggers_a_git_summary_refresh`
+      and `project_close_terminating_a_plain_terminal_triggers_a_git_summary_refresh` assert the
+      in-flight flag is actually set after a real plain terminal exits, through each call site
+      directly.
+- [x] **R-b: the disclosure says exactly what "ends" means.** A commit typed in a Tekstide terminal
       that stays open is not reflected either; the current wording's example implies in-app activity
-      is live. Book and changelog both.
+      is live. Book and changelog both. — both reworded to the literal rule: *"a change is reflected
+      only once the process that could have made it has ended, or the project is reopened"*, with the
+      in-Tekstide-terminal case named explicitly rather than only the outside-Tekstide one.
 - [ ] **R-c: the project board must not contradict the status bar.** `ProjectBoardRow::branch_status`
       is hardcoded `CountDisplay::Unavailable` (`project_board.rs:202`, `:282`), so the board reads
       "branch: not available" in the same frame where the bar reads "Git: main" — visible in

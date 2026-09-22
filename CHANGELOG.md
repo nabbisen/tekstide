@@ -9,11 +9,12 @@ reconstruct.
 ### Added — the status bar reads real Git state, for a project it can read safely
 
 - **Branch and dirty state**, read when a project opens and again whenever a process Tekstide
-  launched for that project ends.
-- **A limitation, stated plainly**: a change made outside Tekstide while a project stays
-  open — an external `git commit`, a branch switch in another terminal — is not reflected until
-  the next in-app process ends or the project is reopened. Deliberate, not a bug: it costs nothing
-  when nothing is running, and needs no background timer (RFC-030 PR-030-B, review 410).
+  launched for that project ends — a terminal or an AI CLI run closing.
+- **The literal rule, stated plainly**: a change is reflected only once the process that could
+  have made it has ended, or the project is reopened. A `git commit` typed into a Tekstide
+  terminal you leave running is **not** reflected while that terminal stays open — the same as a
+  commit made outside Tekstide entirely. Deliberate, not a bug: it costs nothing when nothing is
+  running, and needs no background timer (RFC-030 PR-030-B, reviews 410-411).
 
 ## 0.21.0 - The Bar Says What Is Happening
 
