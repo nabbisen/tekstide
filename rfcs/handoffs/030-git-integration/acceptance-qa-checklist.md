@@ -226,6 +226,25 @@ ruling below is implemented, not just decided.
       trust ("Restricted") and Git ("main", "1 changed") both present on the rendered row, the
       release binary, a real repository.
 
+### Required at review 411
+
+- [ ] **R-a: plain terminal exits trigger a refresh too.** Only the audited agent-run branch does
+      today; the `else` branch at `shell.rs:2787`/`4895` marks the terminal exited and records
+      `record_plain_terminal_terminated` while triggering nothing. A plain terminal is a managed
+      process the application launched — review 410's ruling covers it. The enforcement scan's counts
+      must hold the new sites.
+- [ ] **R-b: the disclosure says exactly what "ends" means.** A commit typed in a Tekstide terminal
+      that stays open is not reflected either; the current wording's example implies in-app activity
+      is live. Book and changelog both.
+- [ ] **R-c: the project board must not contradict the status bar.** `ProjectBoardRow::branch_status`
+      is hardcoded `CountDisplay::Unavailable` (`project_board.rs:202`, `:282`), so the board reads
+      "branch: not available" in the same frame where the bar reads "Git: main" — visible in
+      PR-030-B's own evidence capture. Feed the **active-session** row from `project.git_summary()`
+      (a branch label, since `CountDisplay` cannot carry a name); the recent-but-unopened row stays
+      as it is. **May land with PR-030-C; must not ship before it.**
+      *Checked and not a finding: the board's "0 dirty files" beside the bar's "1 changed" is a
+      different fact — `runtime_summary.dirty_files` counts open editor buffers.*
+
 ## PR-030-C — per-file status
 
 - [ ] Per-file status from an accepted repository (REQ-GIT-003); a file outside it carries none; a
