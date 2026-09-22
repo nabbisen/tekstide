@@ -56,7 +56,7 @@ named — the reviewer's error to fix, not the implementer's to paper over.
 
 ### Required at review 406 — a repository the gate accepted still ran a program
 
-- [ ] **R1, the submodule bypass.** A repository whose **parent config is entirely allowlisted** and
+- [x] **R1, the submodule bypass.** A repository whose **parent config is entirely allowlisted** and
       whose worktree holds no `.gitattributes`, containing a gitlink whose submodule gitdir names a
       clean filter, **must not be `Accepted`** — measured: `git status` in the parent runs that
       filter. Detect the gitlink (`git ls-files -s`, mode `160000`) or resolve the gitdir
@@ -64,18 +64,33 @@ named — the reviewer's error to fix, not the implementer's to paper over.
       ablation first**: with the check removed, the marker appears.
       *The principle, for the risk document: the gate assumes the configuration it reads is the
       configuration git will use, and that is false wherever git consults **another repository's**
-      config.*
-- [ ] **R2, the attributes walk fails closed.** Budget exhaustion must answer `AcceptedBranchOnly`,
+      config.* — `repository_contains_a_gitlink`, `a_repository_with_a_poisoned_submodule_is_accepted_branch_only`,
+      submodule row in `hostile_fixtures_are_provably_hostile`. Chose the simpler "refuse outright"
+      answer (`AcceptedBranchOnly`) over vetting each submodule's own gitdir with the allowlist.
+- [x] **R2, the attributes walk fails closed.** Budget exhaustion must answer `AcceptedBranchOnly`,
       never the permissive outcome. *Measured: this working tree is 183,736 entries against a 20,000
-      cap, so the walk stops early on the project's own repository.*
-- [ ] **R3, the walk refuses symlinks at every level** (`symlink_metadata`), as RFC-050's loader does
-      — `is_dir()` follows one out of the project today.
-- [ ] **R4, `.git` as a pointer file** (linked worktree, submodule checkout) does not silently lose
-      `info/attributes` and fall back to the permissive answer.
-- [ ] **R5, the attributes read is bounded.** `read_to_string` on an attacker-controlled
+      cap, so the walk stops early on the project's own repository.* —
+      `collect_nested_gitattributes` now returns whether it finished; exhaustion fails closed.
+      `attributes_walk_budget_exhaustion_fails_closed`. Also raised `MAX_ATTRIBUTE_WALK_ENTRIES` to
+      1,000,000 (own judgment call, disclosed in qa-evidence.md) so this project's own repository does
+      not hit the fail-closed path on every real read; exhaustion still fails closed above that.
+- [x] **R3, the walk refuses symlinks at every level** (`symlink_metadata`), as RFC-050's loader does
+      — `is_dir()` follows one out of the project today. — `DirEntry::file_type()` (symlink-unfollowing)
+      replaces `Path::is_dir()`; `file_declares_content_driver` also uses `symlink_metadata` so a
+      symlinked `.gitattributes` file itself is skipped. `attributes_walk_does_not_follow_symlinks`.
+- [x] **R4, `.git` as a pointer file** (linked worktree, submodule checkout) does not silently lose
+      `info/attributes` and fall back to the permissive answer. — `resolve_git_common_dir`.
+      `a_linked_worktrees_pointer_file_git_dir_is_still_resolved`: building this test found that
+      `--git-dir` (what the review's own wording suggested) resolves to a linked worktree's *private*
+      per-worktree dir, which has no `info/` of its own — `info/attributes` is shared under
+      `--git-common-dir`. Switched to that; qa-evidence.md has the measurement.
+- [x] **R5, the attributes read is bounded.** `read_to_string` on an attacker-controlled
       `.gitattributes`, for up to the walk's whole budget, is unbounded today; over-bound must read as
       `AcceptedBranchOnly`, not as "nothing found". The `FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT`
-      entry must name every read in the file it exempts.
+      entry must name every read in the file it exempts. — `metadata.len()` checked
+      (`MAX_ATTRIBUTES_FILE_BYTES`) before any read; over-bound fails closed.
+      `an_oversized_attributes_file_fails_closed`. `project/diff/tests.rs`'s entry now names both
+      reads `runtime/git.rs` makes.
 
 ## PR-030-B — branch, dirty state, ahead/behind
 

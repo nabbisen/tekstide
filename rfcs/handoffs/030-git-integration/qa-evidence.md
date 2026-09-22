@@ -204,3 +204,114 @@ silently. This is a real, deterministic consequence of this slice's own new code
 intermittent — fixed by adding `runtime/git.rs` to `FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT` with a
 disclosed reason (`project/diff/tests.rs`), matching the two pre-existing non-project-content entries'
 own pattern. No row added to `test-process-leak.md`, since this was not a flake.
+
+## Review 406 — R1-R5: a repository the gate accepted still ran a program
+
+Commit `5a44d0c`'s gate assumed the configuration it read was the configuration `git` would use.
+False wherever `git` consults *another* repository's configuration — a submodule's gitdir, entirely
+outside anything the parent-repository read touches.
+
+### R1 — the submodule bypass
+
+`repository_contains_a_gitlink` runs `git ls-files -s` and checks for any `160000`-mode entry
+(measured, review 406: executes nothing even in a poisoned repository) before deciding anything
+about content. `worktree_names_a_content_driver` checks it first, unconditionally, and fails closed
+(`true` → `AcceptedBranchOnly`) both on a real gitlink and on any failure to run/parse the listing —
+"cannot determine" is not "assume clean".
+
+Chose the simpler of review 406's two acceptable answers: refuse the content answer outright rather
+than resolve and vet each submodule's own gitdir against the same allowlist. The more generous answer
+is available later if a real need for submodule dirty-state shows up; nothing here forecloses it.
+
+**Fixture** (`Fixture::add_poisoned_submodule`): a real `git submodule add` (not a hand-built
+approximation — the gitlink and the nested checkout are exactly what real git produces), then every
+`submodule.*` key stripped from the parent's config and `.gitmodules` deleted, so the parent's own
+configuration is entirely allowlist-clean — reproducing review 406's own repro exactly, rather than a
+weaker version that would only prove the unrelated fact that an unrecognised `submodule.*` key gets
+refused. The submodule's own `filter.evil.clean` is poisoned and its tracked file modified in place
+at the same byte length (same discipline as every other vector).
+
+**Tests**: the submodule row in `hostile_fixtures_are_provably_hostile` (ablation first, per the
+response's explicit instruction — unprotected `git status` in the parent runs the submodule's clean
+filter) and `a_repository_with_a_poisoned_submodule_is_accepted_branch_only` (`evaluate` on the same
+repository returns `AcceptedBranchOnly`, marker absent).
+
+### R2 — the attributes walk now fails closed on budget exhaustion
+
+`collect_nested_gitattributes` now returns `bool` (`true` = the walk finished; `false` = the budget
+ran out mid-walk). `worktree_names_a_content_driver` treats `false` the same as "a driver was found"
+— `AcceptedBranchOnly` — rather than silently reporting "nothing found" on a scan that never finished.
+
+Also raised `MAX_ATTRIBUTE_WALK_ENTRIES` from 20,000 to 1,000,000 — **my own judgment call, not
+something review 406 asked for directly**. Reasoning: this project's own working tree is 183,736
+entries; without raising the cap, the fail-closed fix alone would mean this repository (and any
+comparably sized one) *always* answers `AcceptedBranchOnly`, never `Accepted`, which is safe but
+would make PR-030-B's dirty-state feature never actually work here. 1,000,000 gives generous headroom
+while staying bounded (a pathological fixture with more entries than that still fails closed, per the
+R2 fix, rather than hanging). Flagging this explicitly in the review request in case the number itself
+warrants a second opinion — the fail-closed behavior is what R2 required; the specific cap value is
+mine.
+
+**Test**: `attributes_walk_budget_exhaustion_fails_closed`, via
+`evaluate_with_environment_and_walk_budget` (a test-only entry point taking an explicit budget,
+since actually creating a million-entry fixture in a test would be impractical) — a generous budget
+over a few real directories finds `Accepted`; a budget of `1` over the same repository finds
+`AcceptedBranchOnly`.
+
+### R3 — the walk no longer follows symlinks
+
+`collect_nested_gitattributes` now reads `DirEntry::file_type()` (which reports the entry's own type
+without following a symlink, unlike the `Path::is_dir()` the previous version used, which does follow
+one) and skips any entry whose type is a symlink outright — directory or file. `file_declares_content_driver`
+separately uses `std::fs::symlink_metadata` (not `metadata`) on every candidate path, so a
+`.gitattributes` that is itself a symlink is never followed either, including the two fixed candidates
+(`.gitattributes` at the root, `info/attributes` in the resolved common dir) that never pass through
+the recursive walk at all.
+
+**Test**: `attributes_walk_does_not_follow_symlinks` — a symlinked directory pointing outside the
+repository (containing a `.gitattributes` naming a driver) and a symlinked `.gitattributes` file
+itself (pointing at a real file naming a driver) are both present; `evaluate` still reports `Accepted`.
+
+### R4 — `.git` as a pointer file, and a second gap found while testing it
+
+`resolve_git_common_dir` (renamed from `resolve_git_dir`) runs `git rev-parse --git-common-dir`
+instead of joining `repository_root.join(".git")` directly, so a linked worktree or submodule
+checkout's pointer-file `.git` no longer silently loses `info/attributes` and falls back to the
+permissive answer.
+
+While writing `a_linked_worktrees_pointer_file_git_dir_is_still_resolved`, the first version of this
+fix (matching the review's own wording, `git rev-parse --git-dir`) turned out to have exactly the bug
+it was meant to close, one level deeper: for a linked worktree, `--git-dir` resolves to that
+worktree's own *private* metadata directory under the primary checkout's `.git/worktrees/<name>/`,
+which has no `info/` subdirectory of its own — `info/attributes` is shared across every worktree and
+lives only under the *common* dir. Measured directly (scratch probe, not committed): `git
+rev-parse --git-dir` in a linked worktree gives `<primary>/.git/worktrees/<name>`; `git rev-parse
+--git-common-dir` gives `<primary>/.git`, where `info/` actually exists. For a repository that is not
+a linked worktree the two agree (`.git`). Switched to `--git-common-dir`; same safety class as
+`--git-dir` (both are pure path resolution, no content read) so no separate hostility measurement was
+needed for the substitution itself.
+
+**Test**: `a_linked_worktrees_pointer_file_git_dir_is_still_resolved` — a real `git worktree add`
+(not a hand-written pointer file), confirms `.git` is a file there, confirms `Accepted` before
+poisoning, then poisons `info/attributes` under the *resolved* common dir and confirms
+`AcceptedBranchOnly` after.
+
+### R5 — the attributes read is now bounded, and the disclosure names both reads
+
+`file_declares_content_driver` checks `metadata.len()` against `MAX_ATTRIBUTES_FILE_BYTES` (1 MiB)
+before reading anything; an oversized file fails closed (`true`) rather than being read into memory
+in full. `project/diff/tests.rs`'s `FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT` entry for
+`runtime/git.rs` now names both reads it exempts — `read_bounded`'s subprocess-pipe read (the one the
+scan's pattern actually matches) and `file_declares_content_driver`'s now-bounded attributes read
+(which the scan's pattern does not match, but which review 406 asked to be disclosed anyway, since
+listing a file exempts every read in it, not only the one that happens to trip the regex).
+
+**Test**: `an_oversized_attributes_file_fails_closed` — a real file just over `MAX_ATTRIBUTES_FILE_BYTES`
+written to `.gitattributes`; `evaluate` reports `AcceptedBranchOnly`.
+
+### Full test count and gate re-run
+
+`cargo test -p tekstide-core runtime::git::` — 19 tests (5 new: the submodule refusal test plus one
+each for R2, R3, R4, R5; the submodule row also added to `hostile_fixtures_are_provably_hostile`),
+0 failed. `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings` both
+clean. `git diff --cached --check` after staging clean.

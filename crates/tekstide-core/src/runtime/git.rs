@@ -15,6 +15,17 @@
 //! [`evaluate`] into `ProjectSession::set_git_summary`; PR-030-A is the
 //! gate and its adversarial fixture only.
 //!
+//! **Review 406 found a repository this gate accepted that still ran a
+//! program the repository named.** The general defect: the gate assumed
+//! the configuration it read was the configuration `git` would use, which
+//! is false wherever `git` consults *another* repository's configuration
+//! -- a submodule's gitdir is untouched by anything read here, yet
+//! `git status` in the parent consults it. [`worktree_names_a_content_driver`]'s
+//! doc comment covers the fix (R1) and three narrower fail-open bugs found
+//! alongside it in the attributes walk (R2 budget exhaustion, R3 symlink
+//! following, R4 `.git`-as-pointer-file) and the attributes read (R5,
+//! unbounded).
+//!
 //! RFC-012's *Git Detector Safety* gate, item by item:
 //!
 //! 1. **Reviewed non-project-local executable** -- [`GIT_EXECUTABLE`] is a
@@ -60,9 +71,20 @@ const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(5);
 /// real use.
 const MAX_OUTPUT_BYTES: usize = 1 << 20;
 const MIN_GIT_VERSION: (u32, u32, u32) = (2, 30, 0);
-/// Guards the recursive `.gitattributes` walk against a repository with an
-/// enormous directory tree; real repositories never come close.
-const MAX_ATTRIBUTE_WALK_ENTRIES: usize = 20_000;
+/// Guards the recursive `.gitattributes` walk against a pathologically
+/// large or deep repository. Review 406 measured this crate's own
+/// workspace at 183,736 entries against the previous 20,000 cap -- this
+/// project's own repository would always have hit R2's fail-closed path.
+/// Raised with headroom over that; still bounded, and exhaustion still
+/// fails closed (see `worktree_names_a_content_driver`) rather than
+/// silently reporting "no driver found" on a truncated scan.
+const MAX_ATTRIBUTE_WALK_ENTRIES: usize = 1_000_000;
+/// A real `.gitattributes` file is a handful of lines. Anything past this
+/// is either not a real attributes file or is deliberately trying to make
+/// this gate spend unbounded time/memory on it -- either way, R5's answer
+/// is "cannot fully vet it", which fails closed the same as an oversized
+/// walk.
+const MAX_ATTRIBUTES_FILE_BYTES: u64 = 1 << 20;
 
 /// The result of the gate, for one repository root.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -148,6 +170,24 @@ fn evaluate_with_environment(
     git_executable: &str,
     forwarded_env: &[(String, String)],
 ) -> GitGateOutcome {
+    evaluate_with_environment_and_walk_budget(
+        repository_root,
+        git_executable,
+        forwarded_env,
+        MAX_ATTRIBUTE_WALK_ENTRIES,
+    )
+}
+
+/// `walk_budget` is [`MAX_ATTRIBUTE_WALK_ENTRIES`] in production; R2's
+/// test substitutes a small one, since actually creating a
+/// million-entry fixture to prove exhaustion fails closed would be
+/// impractical.
+fn evaluate_with_environment_and_walk_budget(
+    repository_root: &Path,
+    git_executable: &str,
+    forwarded_env: &[(String, String)],
+    walk_budget: usize,
+) -> GitGateOutcome {
     if let Err(reason) = check_git_available(git_executable, forwarded_env) {
         return GitGateOutcome::Refused(GitGateRefusal::Unavailable(reason));
     }
@@ -182,7 +222,8 @@ fn evaluate_with_environment(
         }
     }
 
-    if worktree_names_a_content_driver(repository_root) {
+    if worktree_names_a_content_driver(repository_root, git_executable, forwarded_env, walk_budget)
+    {
         GitGateOutcome::AcceptedBranchOnly
     } else {
         GitGateOutcome::Accepted
@@ -281,45 +322,178 @@ fn parse_null_separated_config(bytes: &[u8]) -> Option<Vec<(String, String)>> {
     Some(entries)
 }
 
-/// D1' item 6: a repository whose attributes name a `filter=`/`diff=`
-/// driver gets `AcceptedBranchOnly` even when the driver itself is
-/// undefined (measured: undefined-driver attributes execute nothing, but
-/// the comparison would still be against an index written through a
-/// filter this gate never ran).
-fn worktree_names_a_content_driver(repository_root: &Path) -> bool {
-    let mut candidates = vec![
-        repository_root.join(".gitattributes"),
-        repository_root.join(".git").join("info").join("attributes"),
-    ];
-    let mut budget = MAX_ATTRIBUTE_WALK_ENTRIES;
-    collect_nested_gitattributes(repository_root, &mut candidates, &mut budget);
+/// Whether the *content* answer (dirty state, per-file status) must be
+/// withheld for this repository, folding together every reason review 406
+/// found one of: D1' item 6 (attributes name a filter/diff driver, defined
+/// or not), R1 (a gitlink -- the linked submodule has its **own**
+/// configuration this gate never reads, and `git status` in the parent
+/// consults it), R2 (the attributes walk could not finish within budget --
+/// on an incompletely-scanned repository, "no driver found" is a guess,
+/// not a fact), and R4 (the real gitdir could not be resolved, so
+/// `info/attributes` cannot be located reliably). Every one of these
+/// collapses to the same outcome because none of them says the
+/// *repository* is unsafe -- only that comparing worktree content against
+/// the index is not something this gate can vouch for. Branch remains
+/// separable (D1' item 8; PR-030-B measures it).
+fn worktree_names_a_content_driver(
+    repository_root: &Path,
+    git_executable: &str,
+    forwarded_env: &[(String, String)],
+    walk_budget: usize,
+) -> bool {
+    if repository_contains_a_gitlink(repository_root, git_executable, forwarded_env) {
+        return true;
+    }
+
+    let mut candidates = vec![repository_root.join(".gitattributes")];
+    match resolve_git_common_dir(repository_root, git_executable, forwarded_env) {
+        Some(git_dir) => candidates.push(git_dir.join("info").join("attributes")),
+        None => return true,
+    }
+
+    let mut budget = walk_budget;
+    let walk_completed =
+        collect_nested_gitattributes(repository_root, &mut candidates, &mut budget);
+    if !walk_completed {
+        return true;
+    }
+
     candidates
         .iter()
         .any(|path| file_declares_content_driver(path))
 }
 
-fn collect_nested_gitattributes(dir: &Path, out: &mut Vec<PathBuf>, budget: &mut usize) {
+/// R1: a `160000`-mode index entry is a gitlink -- a submodule, whose own
+/// `.git`/config and attributes this gate has not read at all. Measured
+/// (review 406) to execute nothing even in a poisoned repository, safe to
+/// run unconditionally before deciding anything about content.
+fn repository_contains_a_gitlink(
+    repository_root: &Path,
+    git_executable: &str,
+    forwarded_env: &[(String, String)],
+) -> bool {
+    match run_bounded_git(
+        git_executable,
+        &["ls-files", "-s"],
+        Some(repository_root),
+        forwarded_env,
+    ) {
+        Ok(output) if output.status.success() => match std::str::from_utf8(&output.stdout) {
+            Ok(text) => text.lines().any(|line| line.starts_with("160000 ")),
+            // Cannot parse the listing: fail closed rather than assume clean.
+            Err(_) => true,
+        },
+        // Cannot determine one way or the other: fail closed.
+        _ => true,
+    }
+}
+
+/// R4: `.git` is not always a directory -- a linked worktree or a
+/// submodule checkout leaves a *pointer file* there instead, and
+/// `repository_root.join(".git").join("info").join("attributes")` then
+/// resolves to nothing, silently falling back to the permissive answer.
+///
+/// `--git-common-dir`, not `--git-dir`: for a linked worktree, `--git-dir`
+/// resolves to that worktree's own *private* metadata directory (under the
+/// primary checkout's `.git/worktrees/<name>/`), which has no `info/` of
+/// its own -- `info/attributes` is shared across every worktree and lives
+/// only under the common dir. Using `--git-dir` here would look in the
+/// wrong place and silently fall back to the permissive answer for the
+/// exact repository shape R4 exists to cover, found while building this
+/// slice's own linked-worktree test. For a repository that is not a
+/// linked worktree, `--git-common-dir` and `--git-dir` agree (`.git`).
+/// Same safety class as `--git-dir` (measured, review 406: executes
+/// nothing even in a poisoned repository) -- both are pure path
+/// resolution, no content read.
+fn resolve_git_common_dir(
+    repository_root: &Path,
+    git_executable: &str,
+    forwarded_env: &[(String, String)],
+) -> Option<PathBuf> {
+    let output = run_bounded_git(
+        git_executable,
+        &["rev-parse", "--git-common-dir"],
+        Some(repository_root),
+        forwarded_env,
+    )
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = std::str::from_utf8(&output.stdout).ok()?;
+    let raw = text.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let resolved = Path::new(raw);
+    Some(if resolved.is_absolute() {
+        resolved.to_path_buf()
+    } else {
+        repository_root.join(resolved)
+    })
+}
+
+/// Returns `false` (R2) if the walk's budget ran out before it could
+/// finish -- the caller must then treat the scan as inconclusive, not as
+/// "found nothing". R3: `DirEntry::file_type()` reports the entry's own
+/// type without following a symlink (unlike `Path::is_dir()`, which the
+/// previous version of this function used and which does follow one), and
+/// a symlink of either kind is skipped outright -- the same discipline
+/// RFC-050's loader uses, for the same reason: a symlink can point outside
+/// the repository entirely.
+fn collect_nested_gitattributes(dir: &Path, out: &mut Vec<PathBuf>, budget: &mut usize) -> bool {
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
+        return true;
     };
     for entry in entries.flatten() {
         if *budget == 0 {
-            return;
+            return false;
         }
         *budget -= 1;
         if entry.file_name() == ".git" {
             continue;
         }
-        let path = entry.path();
-        if path.is_dir() {
-            collect_nested_gitattributes(&path, out, budget);
-        } else if entry.file_name() == ".gitattributes" {
-            out.push(path);
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            if !collect_nested_gitattributes(&entry.path(), out, budget) {
+                return false;
+            }
+        } else if file_type.is_file() && entry.file_name() == ".gitattributes" {
+            out.push(entry.path());
         }
     }
+    true
 }
 
+/// R5: `metadata.len()` is checked before any read. An oversized file
+/// fails closed (`true`, "cannot fully vet it") rather than being read in
+/// full -- unbounded, on a file a hostile repository controls, for up to
+/// the walk's whole budget of candidates. `symlink_metadata` (not
+/// `metadata`) so a `.gitattributes` that is itself a symlink is never
+/// followed either (R3), matching `collect_nested_gitattributes`'s own
+/// discipline for the two fixed candidates this function also receives
+/// (`.gitattributes` at the root, `info/attributes` in the resolved
+/// gitdir) which are never passed through that walk.
+///
+/// Disclosed together with `read_bounded`'s subprocess-pipe read under
+/// `runtime/git.rs` in `FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT`
+/// (`project/diff/tests.rs`) -- naming both reads that entry exempts,
+/// not only the one RFC-024's scan happens to pattern-match.
 fn file_declares_content_driver(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    if metadata.len() > MAX_ATTRIBUTES_FILE_BYTES {
+        return true;
+    }
     let Ok(contents) = std::fs::read_to_string(path) else {
         return false;
     };

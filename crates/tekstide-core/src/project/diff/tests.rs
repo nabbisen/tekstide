@@ -798,12 +798,25 @@ fn the_bounded_read_refuses_rather_than_truncates_when_called_directly() {
 /// re-prove exclusivity a second time.
 ///
 /// `runtime/git.rs` (RFC-030 PR-030-A) reads a fourth kind of content this
-/// scan's name is broad enough to catch: `read_bounded`'s
-/// `Take::read_to_end` there reads a *subprocess's* stdout/stderr pipe --
-/// `git config --list`/`git --version` diagnostic output -- not a project
-/// or generated-change file, and already length-bounded by the `.take(...)`
-/// wrapping the read. Listed here rather than widened out of the scan, the
-/// same discipline the two pre-RFC-024 entries above follow.
+/// scan's name is broad enough to catch, at **two** call sites -- both
+/// disclosed here even though the scan's own pattern only matches one, per
+/// review 406's correction that listing a file exempts every read in it,
+/// not only the one that happened to trip the regex:
+///
+/// 1. `read_bounded`'s `Take::read_to_end` reads a *subprocess's*
+///    stdout/stderr pipe -- `git config --list`/`git --version` diagnostic
+///    output -- not a project or generated-change file, and
+///    length-bounded by the `.take(...)` wrapping the read. This is the
+///    call the scan's pattern matches.
+/// 2. `file_declares_content_driver` reads a `.gitattributes` file's
+///    content to look for a `filter=`/`diff=` assignment. Not a project or
+///    generated-change file either, and bounded by a `metadata.len()`
+///    check (`MAX_ATTRIBUTES_FILE_BYTES`) before the read, added at review
+///    406 after the first version of this call read an attacker-controlled
+///    file with no bound at all.
+///
+/// Listed here rather than widened out of the scan, the same discipline
+/// the two pre-RFC-024 entries above follow.
 const FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT: &[&str] = &[
     "project/diff.rs",
     "content/open.rs",
