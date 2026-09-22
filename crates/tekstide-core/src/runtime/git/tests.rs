@@ -157,6 +157,10 @@ impl Fixture {
         evaluate_with_environment(&self.repo, GIT_EXECUTABLE, &self.forwarded_env)
     }
 
+    fn compute_summary(&self) -> ProjectGitSummary {
+        compute_summary_with_environment(&self.repo, GIT_EXECUTABLE, &self.forwarded_env)
+    }
+
     /// Runs a real, unprotected git subcommand against the fixture,
     /// bypassing [`evaluate`] entirely -- used only to prove a poisoned
     /// repository is genuinely hostile (the ablation), never to test this
@@ -703,4 +707,202 @@ fn tool_written_data_keys_are_allowed() {
     fixture.set_config("lfs.url", "https://example.invalid/lfs");
 
     assert_eq!(fixture.evaluate(), GitGateOutcome::Accepted);
+}
+
+// ---------------------------------------------------------------------
+// PR-030-B: `compute_summary` -- turning the gate's decision into a
+// `ProjectGitSummary`. No production caller yet; these test the
+// computation layer directly.
+// ---------------------------------------------------------------------
+
+#[test]
+fn a_clean_control_repository_is_complete_with_zero_changes_and_no_upstream() {
+    let fixture = Fixture::new("summary-clean-control");
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.write("tracked.txt", "hello world\n");
+    fixture.setup_git(&["add", "-A"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial"]);
+
+    let summary = fixture.compute_summary();
+    assert_eq!(
+        summary,
+        ProjectGitSummary {
+            provider_state: ProjectProviderState::Complete,
+            branch_name: Some("main".to_string()),
+            changed_file_count: Some(0),
+            ahead_count: None,
+            behind_count: None,
+        }
+    );
+}
+
+#[test]
+fn a_dirty_control_repository_counts_its_changed_files() {
+    let fixture = Fixture::new("summary-dirty-control");
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.write("tracked.txt", "hello world\n");
+    fixture.setup_git(&["add", "-A"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial"]);
+    fixture.write("tracked.txt", "modified\n");
+    fixture.write("untracked.txt", "new\n");
+
+    let summary = fixture.compute_summary();
+    assert_eq!(summary.provider_state, ProjectProviderState::Complete);
+    assert_eq!(summary.branch_name, Some("main".to_string()));
+    assert_eq!(summary.changed_file_count, Some(2));
+}
+
+#[test]
+fn ahead_and_behind_are_read_against_a_real_local_upstream() {
+    let fixture = Fixture::new("summary-ahead-behind");
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.write("tracked.txt", "one\n");
+    fixture.setup_git(&["add", "-A"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial"]);
+
+    // A local "upstream": a second branch two commits ahead, tracked by main.
+    fixture.setup_git(&["checkout", "-q", "-b", "upstream"]);
+    fixture.write("tracked.txt", "two\n");
+    fixture.setup_git(&["commit", "-q", "-am", "second"]);
+    fixture.write("tracked.txt", "three\n");
+    fixture.setup_git(&["commit", "-q", "-am", "third"]);
+    fixture.setup_git(&["checkout", "-q", "main"]);
+    fixture.setup_git(&["branch", "-q", "--set-upstream-to=upstream"]);
+    fixture.write("tracked.txt", "one-b\n");
+    fixture.setup_git(&["commit", "-q", "-am", "local-only"]);
+
+    let summary = fixture.compute_summary();
+    assert_eq!(summary.branch_name, Some("main".to_string()));
+    assert_eq!(summary.ahead_count, Some(1));
+    assert_eq!(summary.behind_count, Some(2));
+}
+
+#[test]
+fn a_poisoned_repository_is_branch_only_and_the_marker_never_runs() {
+    let fixture = Fixture::new("summary-poisoned");
+    let script = fixture.marker_script("marker-fsmonitor", "exit 0");
+    fixture.set_config("core.fsmonitor", script.to_str().unwrap());
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.commit_then_modify_same_length();
+    fixture.clear_markers();
+
+    let summary = fixture.compute_summary();
+    assert_eq!(summary.provider_state, ProjectProviderState::Complete);
+    assert_eq!(summary.branch_name, Some("main".to_string()));
+    assert_eq!(summary.changed_file_count, None);
+    assert_eq!(summary.ahead_count, None);
+    assert_eq!(summary.behind_count, None);
+    assert!(!fixture.marker_exists("marker-fsmonitor"));
+}
+
+#[test]
+fn a_non_repository_is_unavailable() {
+    let root = std::env::temp_dir().join(format!(
+        "tekstide-git-gate-summary-non-repo-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let summary = compute_summary_with_environment(&root, GIT_EXECUTABLE, &[]);
+    assert_eq!(
+        summary,
+        ProjectGitSummary {
+            provider_state: ProjectProviderState::Unavailable,
+            branch_name: None,
+            changed_file_count: None,
+            ahead_count: None,
+            behind_count: None,
+        }
+    );
+
+    // A non-repository never spawns `git` at all -- a bogus executable
+    // name must still answer `Unavailable`, not `Refused(NotFound)`,
+    // proving the short-circuit never reaches `run_bounded_git`.
+    let summary_with_no_real_git = compute_summary_with_environment(
+        &root,
+        "definitely-not-a-real-git-binary-tekstide-test",
+        &[],
+    );
+    assert_eq!(
+        summary_with_no_real_git.provider_state,
+        ProjectProviderState::Unavailable
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_detached_head_has_no_branch_name_but_is_still_complete() {
+    let fixture = Fixture::new("summary-detached-head");
+    fixture.write("tracked.txt", "one\n");
+    fixture.setup_git(&["add", "-A"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial"]);
+    fixture.setup_git(&["checkout", "-q", "--detach", "HEAD"]);
+
+    let summary = fixture.compute_summary();
+    assert_eq!(summary.provider_state, ProjectProviderState::Complete);
+    assert_eq!(summary.branch_name, None);
+}
+
+/// D1' item 8: branch is readable even when `git` itself is `Refused` as
+/// missing, since `.git/HEAD` never depends on the `git` binary at all.
+#[test]
+fn branch_is_still_read_when_git_itself_is_unavailable() {
+    let fixture = Fixture::new("summary-git-unavailable");
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.write("tracked.txt", "one\n");
+    fixture.setup_git(&["add", "-A"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial"]);
+
+    let summary = compute_summary_with_environment(
+        &fixture.repo,
+        "definitely-not-a-real-git-binary-tekstide-test",
+        &fixture.forwarded_env,
+    );
+    assert_eq!(summary.provider_state, ProjectProviderState::Complete);
+    assert_eq!(summary.branch_name, Some("main".to_string()));
+    assert_eq!(summary.changed_file_count, None);
+}
+
+/// R4's distinction, from the branch side: a linked worktree's branch is
+/// its *own*, read from the private per-worktree gitdir -- not the
+/// primary checkout's, which would be wrong for every worktree but the
+/// first.
+#[test]
+fn a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts() {
+    let fixture = Fixture::new("summary-linked-worktree-branch");
+    fixture.write("tracked.txt", "one\n");
+    fixture.setup_git(&["add", "-A"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial"]);
+    fixture.setup_git(&["branch", "other"]);
+
+    let worktree_path = fixture.root.join("linked-worktree");
+    fixture.setup_git(&["worktree", "add", worktree_path.to_str().unwrap(), "other"]);
+
+    let primary_summary = fixture.compute_summary();
+    let worktree_summary =
+        compute_summary_with_environment(&worktree_path, GIT_EXECUTABLE, &fixture.forwarded_env);
+
+    assert_eq!(primary_summary.branch_name, Some("master".to_string()));
+    assert_eq!(worktree_summary.branch_name, Some("other".to_string()));
+}
+
+/// Defence in depth (review 407/408): `--ignore-submodules=all` suppresses
+/// the submodule filter even called directly against a poisoned submodule
+/// -- never a substitute for R1's refusal (which already keeps
+/// `read_status_summary` from ever being reached for a real gitlinked
+/// repository through `compute_summary`), but its own protection holds
+/// independently.
+#[test]
+fn ignore_submodules_all_suppresses_the_submodule_filter_on_its_own() {
+    let fixture = Fixture::new("summary-ignore-submodules");
+    let marker_name = fixture.add_poisoned_submodule();
+    fixture.clear_markers();
+
+    let _ = read_status_summary(&fixture.repo, GIT_EXECUTABLE, &fixture.forwarded_env);
+    assert!(!fixture.marker_exists(marker_name));
 }

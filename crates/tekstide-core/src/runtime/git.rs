@@ -103,6 +103,8 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
+
+use crate::project::{ProjectGitSummary, ProjectProviderState};
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -270,6 +272,199 @@ fn evaluate_with_environment_and_walk_budget(
     } else {
         GitGateOutcome::Accepted
     }
+}
+
+/// PR-030-B: the gate decides what is safe; this turns that decision into
+/// the `ProjectGitSummary` REQ-GIT-001/002 actually ask for. Branch is
+/// read from the filesystem directly (D1' item 8 -- "reading `.git/HEAD`
+/// directly executes nothing by construction") in every outcome but
+/// `Accepted`, including when `git` itself is missing or too old
+/// (`Refused`): a repository's own `.git/HEAD` never depends on the `git`
+/// binary being present. Dirty state, changed-file count and ahead/behind
+/// are read only when `Accepted` -- the one outcome where content
+/// comparison was actually vetted.
+pub fn compute_summary(repository_root: &Path) -> ProjectGitSummary {
+    compute_summary_with_environment(repository_root, GIT_EXECUTABLE, &forwarded_environment())
+}
+
+fn compute_summary_with_environment(
+    repository_root: &Path,
+    git_executable: &str,
+    forwarded_env: &[(String, String)],
+) -> ProjectGitSummary {
+    // "Not a repository" is its own outcome, not a `git` subprocess
+    // failure dressed up as one -- checked first, and for free: this is
+    // the same filesystem-only resolution `branch_only_summary` would
+    // reach anyway, just without first spending three subprocess calls
+    // (`--version`, `config --list`, `status`) discovering the same
+    // thing. The common case of opening an ordinary, non-repository
+    // folder never touches `git` at all.
+    if resolve_git_dir_from_filesystem(repository_root).is_none() {
+        return ProjectGitSummary {
+            provider_state: ProjectProviderState::Unavailable,
+            branch_name: None,
+            changed_file_count: None,
+            ahead_count: None,
+            behind_count: None,
+        };
+    }
+
+    match evaluate_with_environment(repository_root, git_executable, forwarded_env) {
+        GitGateOutcome::Accepted => {
+            match read_status_summary(repository_root, git_executable, forwarded_env) {
+                Some(summary) => summary,
+                // The gate itself just proved this repository safe to read
+                // via the very same argv this call reuses; a failure here
+                // is `git` misbehaving between the two calls (race, disk
+                // error), not a configuration finding -- fall back to the
+                // filesystem-only answer rather than claim more than was
+                // actually read.
+                None => branch_only_summary(repository_root),
+            }
+        }
+        GitGateOutcome::AcceptedBranchOnly | GitGateOutcome::Refused(_) => {
+            branch_only_summary(repository_root)
+        }
+    }
+}
+
+/// `git status --porcelain=v2 --branch --ignore-submodules=all`: one call
+/// for branch, ahead/behind and the changed-file count together.
+/// `--ignore-submodules=all` is defence in depth behind R1's refusal
+/// (review 407/408), never a substitute for it -- `read_status_summary`
+/// only ever runs once `evaluate` has already confirmed this repository
+/// contains no gitlink at all.
+fn read_status_summary(
+    repository_root: &Path,
+    git_executable: &str,
+    forwarded_env: &[(String, String)],
+) -> Option<ProjectGitSummary> {
+    let output = run_bounded_git(
+        git_executable,
+        &[
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--ignore-submodules=all",
+        ],
+        Some(repository_root),
+        forwarded_env,
+    )
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = std::str::from_utf8(&output.stdout).ok()?;
+
+    let mut branch_name = None;
+    let mut ahead_count = None;
+    let mut behind_count = None;
+    let mut changed_file_count = 0u32;
+
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("# branch.head ") {
+            branch_name = (rest != "(detached)").then(|| rest.to_string());
+        } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
+            if let Some((ahead, behind)) = parse_ahead_behind(rest) {
+                ahead_count = Some(ahead);
+                behind_count = Some(behind);
+            }
+        } else if line.starts_with('#') || line.is_empty() {
+            continue;
+        } else {
+            changed_file_count += 1;
+        }
+    }
+
+    Some(ProjectGitSummary {
+        provider_state: ProjectProviderState::Complete,
+        branch_name,
+        changed_file_count: Some(changed_file_count),
+        ahead_count,
+        behind_count,
+    })
+}
+
+/// Parses porcelain v2's `branch.ab` line body, `"+<ahead> -<behind>"`.
+fn parse_ahead_behind(body: &str) -> Option<(u32, u32)> {
+    let mut parts = body.split_whitespace();
+    let ahead = parts.next()?.strip_prefix('+')?.parse().ok()?;
+    let behind = parts.next()?.strip_prefix('-')?.parse().ok()?;
+    Some((ahead, behind))
+}
+
+/// Branch only, read straight from the filesystem -- no subprocess, no
+/// dependency on `git` being installed at all (D1' item 8). A repository
+/// with no readable branch (detached `HEAD`, or a `HEAD` this process
+/// cannot read) is still `Complete` with `branch_name: None`: the
+/// repository itself was found, there is simply no name to show.
+/// `resolve_git_dir_from_filesystem` returning nothing at all means this
+/// is not a git repository -- `Unavailable`, not a guess.
+fn branch_only_summary(repository_root: &Path) -> ProjectGitSummary {
+    match resolve_git_dir_from_filesystem(repository_root) {
+        Some(git_dir) => ProjectGitSummary {
+            provider_state: ProjectProviderState::Complete,
+            branch_name: read_branch_from_head_file(&git_dir),
+            changed_file_count: None,
+            ahead_count: None,
+            behind_count: None,
+        },
+        None => ProjectGitSummary {
+            provider_state: ProjectProviderState::Unavailable,
+            branch_name: None,
+            changed_file_count: None,
+            ahead_count: None,
+            behind_count: None,
+        },
+    }
+}
+
+/// Resolves `.git` entirely from the filesystem: a directory (the common
+/// case), or a pointer file (`gitdir: <path>`, a linked worktree or a
+/// submodule checkout) parsed directly. Unlike [`resolve_git_common_dir`],
+/// this never spawns `git` -- it is what makes [`branch_only_summary`]
+/// usable even when `git` itself is `Refused` as missing or too old.
+/// **Deliberately the *private* per-worktree dir, not the common dir**:
+/// `HEAD` is one of the files that differs per linked worktree (each
+/// worktree has its own current branch), the opposite of `info/attributes`
+/// (shared, R4) -- using the common dir here would show every linked
+/// worktree the *primary* checkout's branch. R3: `symlink_metadata`, never
+/// following a symlink at `.git` itself.
+fn resolve_git_dir_from_filesystem(repository_root: &Path) -> Option<PathBuf> {
+    let dot_git = repository_root.join(".git");
+    let metadata = std::fs::symlink_metadata(&dot_git).ok()?;
+    if metadata.is_dir() {
+        return Some(dot_git);
+    }
+    if !metadata.is_file() {
+        return None;
+    }
+    let contents = std::fs::read_to_string(&dot_git).ok()?;
+    let raw = contents.trim().strip_prefix("gitdir:")?.trim();
+    let resolved = Path::new(raw);
+    Some(if resolved.is_absolute() {
+        resolved.to_path_buf()
+    } else {
+        repository_root.join(resolved)
+    })
+}
+
+/// `git_dir` is already resolved (see [`resolve_git_dir_from_filesystem`]).
+/// R3: `symlink_metadata` on `HEAD` itself, never following a symlink
+/// there either. Returns `None` for a detached `HEAD` (a raw object id,
+/// no `ref:` prefix) as well as for anything unreadable or malformed --
+/// all three mean "no branch name to show", not "this failed".
+fn read_branch_from_head_file(git_dir: &Path) -> Option<String> {
+    let head_path = git_dir.join("HEAD");
+    let metadata = std::fs::symlink_metadata(&head_path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    let contents = std::fs::read_to_string(&head_path).ok()?;
+    contents
+        .trim()
+        .strip_prefix("ref: refs/heads/")
+        .map(|name| name.to_string())
 }
 
 /// Keys known to be pure data -- a string, a boolean, a reference name --

@@ -797,11 +797,11 @@ fn the_bounded_read_refuses_rather_than_truncates_when_called_directly() {
 /// only needs to know that its one call site exists and is reviewed, not
 /// re-prove exclusivity a second time.
 ///
-/// `runtime/git.rs` (RFC-030 PR-030-A) reads a fourth kind of content this
-/// scan's name is broad enough to catch, at **two** call sites -- both
-/// disclosed here even though the scan's own pattern only matches one, per
-/// review 406's correction that listing a file exempts every read in it,
-/// not only the one that happened to trip the regex:
+/// `runtime/git.rs` (RFC-030 PR-030-A/B) reads a fourth kind of content
+/// this scan's name is broad enough to catch, at **four** call sites --
+/// all disclosed here even though the scan's own pattern only matches one,
+/// per review 406's correction that listing a file exempts every read in
+/// it, not only the one that happened to trip the regex:
 ///
 /// 1. `read_bounded`'s `Take::read_to_end` reads a *subprocess's*
 ///    stdout/stderr pipe -- `git config --list`/`git --version` diagnostic
@@ -814,6 +814,13 @@ fn the_bounded_read_refuses_rather_than_truncates_when_called_directly() {
 ///    check (`MAX_ATTRIBUTES_FILE_BYTES`) before the read, added at review
 ///    406 after the first version of this call read an attacker-controlled
 ///    file with no bound at all.
+/// 3. `resolve_git_dir_from_filesystem` (PR-030-B) reads `.git` itself when
+///    it is a pointer file (a linked worktree or submodule checkout), to
+///    parse its one `gitdir: <path>` line. A few bytes, not project
+///    content.
+/// 4. `read_branch_from_head_file` (PR-030-B) reads `.git/HEAD` to parse
+///    the current branch name. Also a few bytes; every git repository's
+///    `HEAD` is a single short line by construction.
 ///
 /// Listed here rather than widened out of the scan, the same discipline
 /// the two pre-RFC-024 entries above follow.
