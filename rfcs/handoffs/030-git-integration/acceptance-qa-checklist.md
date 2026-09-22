@@ -38,6 +38,10 @@ implementer's to paper over.
 - [ ] Restricted Mode follows D3, and the reason is §1's guarantee, not the trust state.
 - [ ] Input is never blocked by a refresh (NFR-PERF-006); the marker is still absent after the
       production path runs.
+- [ ] **Carried from RFC-025 (review 404):** the status bar's project fields **reach the rendered
+      row**, not merely the producer. Measured there: computing them and never pushing them onto the
+      `row!` fails no test. This slice edits that row when it replaces the Git field, so it re-proves
+      the wiring — by a live capture showing all of REQ-NOTIFY-002's fields together, at minimum.
 
 ## PR-030-C — per-file status
 

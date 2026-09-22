@@ -1,8 +1,8 @@
 ---
 title: "RFC-025 — acceptance and QA checklist"
 rfc: "RFC-025"
-rfc_file: "../../accepted/025-notifications.md"
-source_rfc_status: "Accepted 2026-09-22 — M12"
+rfc_file: "../../done/025-notifications.md"
+source_rfc_status: "Implemented and closed 2026-09-22 — M12"
 target_milestone: "M12"
 created: "2026-09-22"
 ---
@@ -55,32 +55,54 @@ implementer's to paper over.
       *By construction: plain `text()` widgets, one uniform bar colour, no new focusable control (D1:
       nothing yet needs acknowledging). Noted in `qa-evidence.md` rather than exercised by a dedicated
       test, since there is no colour channel or new keybinding for a test to catch drifting.*
-- [ ] Live capture with a running session and a pending approval, throwaway state only.
-      *The running-session half is captured live against the release binary
-      (`evidence/01-status-bar-restricted-git-not-available-1-running.png`). **The pending-approval
-      half cannot be satisfied as written**: reaching a real command-approval dialog needs a
-      `Managed`-compatibility profile, and `Managed` is not reachable through `config.toml` (grepped,
-      `compatibility_level` is not a parsed key) or through any built-in profile. This is an existing
-      property of the product, not a gap this slice introduces. The field's correctness is proven
-      instead by a unit test attaching a real `ApprovalRequest` through production's own
-      `add_approval_request`. Left unticked with the contradiction named, per the preamble.*
+- [x] Live capture with a running session, throwaway state only.
+      *`evidence/01-status-bar-restricted-git-not-available-1-running.png`, the release binary against
+      a `mktemp -d` config, state and project: "Restricted　Git: not available　1 running". No path
+      under a home directory appears in the image.*
+- [ ] ~~…and a pending approval.~~ **Struck at review 2026-09-22 — the reviewer's error.** The shipped
+      product has no path to a command-approval dialog: `to_ai_cli_profile` sets
+      `compatibility_level: Supervised` unconditionally, held by
+      `managed_compatibility_level_without_structured_action_approval_is_still_rejected`, and the
+      delivery plan already records command approval as exercisable only by the reference adapter.
+      Demo machinery to force a `Managed` profile was offered and **refused**: a way around the
+      translator that refuses it is a second door into what RFC-021's validation keeps shut. The
+      field's correctness is held by a real `ApprovalRequest` through production's own
+      `add_approval_request`; the live capture comes with the adapter pathway.
 
 ## Whole-RFC
 
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
       staging, `rfc_docs_invariants`, and **three consecutive full-workspace runs with
       `--no-fail-fast`**, output redirected to files.
-- [ ] Every new intermittent failure has a dated row in `test-process-leak.md`.
-- [ ] Commits are pushed once the gate is green.
+      *Re-run by the reviewer over both commits: 556 + 9 + 829, green three times; fmt and clippy
+      clean; `git diff --check` clean.*
+- [x] Every new intermittent failure has a dated row in `test-process-leak.md`.
+      *None new. One already-registered intermittent (review 338's row) recurred once, unrelated.*
+- [x] Commits are pushed once the gate is green.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted 2026-09-22 (review 404). Both slices, no review-found defects; RFC-025 closed.
+
+Verified independently, four ablations restored and hash-checked:
+  X1 ordered_by_kind no longer sorts        -> the hand-scrambled kind-order test, alone.
+     (This is the ablation the implementer reported as untestable at the call site: the
+      property is falsifiable one level in, at its own implementation.)
+  X2 the pending-approval label renders at zero -> the "nothing else" test, alone.
+  X3 the fields are computed and never pushed onto the row -> NOTHING. The wiring into the
+     visible bar is held only by the live capture; a box is carried into RFC-030 PR-030-B,
+     which edits this same row when it fills the Git field.
+  X4 restore the old four-*_lines call site -> does not compile, 4x E0425. "The board renders
+     the model" is compiler-enforced, stronger than the grep the plan asked for.
+
+Zero deleted lines in shell/tests.rs across both commits, checked against the diff, not the
+claim. lifetime and scope have no production consumer -- read only by tests -- so the tag
+documents and pins, it does not enforce. Gate re-run: 556 + 9 + 829, green three times.
 ```

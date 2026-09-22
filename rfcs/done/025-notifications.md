@@ -1,6 +1,6 @@
 # RFC-025: Notifications
 
-Status: **Accepted by the human owner 2026-09-22.** **D1–D7 decided by the architect on acceptance** — see the end, including D4's open question. Proposed 2026-09-17. Reserved for M12 since the roadmap was written; scoped at the owner's
+Status: **Implemented and closed 2026-09-22.** Four RFCs' board notices now share one `Notification` model with a closed set of two lifetimes, and their own absent-when-false tests passed the migration **unmodified** — zero deleted lines in the shell test file across both slices. The status bar shows REQ-NOTIFY-002's fields, with Git state reading "not available" until RFC-030 produces it. Accepted by the human owner 2026-09-22.** **D1–D7 decided by the architect on acceptance** — see the end, including D4's open question. Proposed 2026-09-17. Reserved for M12 since the roadmap was written; scoped at the owner's
 word as the headline of `0.21.0`, with RFC-030 scoped alongside and shipping separately.
 Target milestone: **M12**
 Date: 2026-09-17
@@ -116,3 +116,23 @@ between frames. No cap is needed: D1's lifetimes bound the set.
 
 **Slices:** A, the model and the migration of the four existing notices, with their absent-when-false
 tests passing unchanged; B, the status bar fields and the actionable labels.
+
+
+## Closed (2026-09-22)
+
+Two slices, no review-found defects. **The migration's acceptance held literally**: production cannot
+call the four string-returning projections at all — they are `#[cfg(test)]`, so restoring the old call
+site does not compile, which is a stronger guarantee than the grep the plan asked for.
+
+**Two things the next author should know.** `lifetime` and `scope` have **no production consumer**:
+they are read only by tests, so the lifetime tag documents and pins how a notice is computed without
+enforcing it. And the fields' **arrival in the visible status-bar row is held only by a live capture**
+— removing the push and keeping the computation fails no test. A box carried into RFC-030 PR-030-B
+re-proves it in the slice that next edits that row.
+
+**One box stayed unticked, and it was the reviewer's error.** It asked for a live capture with a
+pending approval; `to_ai_cli_profile` sets `Supervised` unconditionally, so the shipped product has no
+path to a command-approval dialog at all (delivery plan, Command approval: "exercisable only by the
+reference adapter"). Demo machinery to force one was offered and refused: a way to reach the managed
+launch shape **around** the translator that refuses it is a second door into what RFC-021's validation
+exists to keep shut.

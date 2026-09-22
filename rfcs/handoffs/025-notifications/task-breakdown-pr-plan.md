@@ -1,8 +1,8 @@
 ---
 title: "RFC-025 — task breakdown and PR plan"
 rfc: "RFC-025"
-rfc_file: "../../accepted/025-notifications.md"
-source_rfc_status: "Accepted 2026-09-22 — M12"
+rfc_file: "../../done/025-notifications.md"
+source_rfc_status: "Implemented and closed 2026-09-22 — M12"
 target_milestone: "M12"
 created: "2026-09-22"
 ---
