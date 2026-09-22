@@ -146,7 +146,13 @@ named — the reviewer's error to fix, not the implementer's to paper over.
       grant.
 - [ ] Input is never blocked by a refresh (NFR-PERF-006); the marker is still absent after the
       production path runs.
-- [ ] The gate's filesystem walk runs **off the UI thread** with the rest of the read (D4).
+- [ ] The gate's filesystem walk runs **off the UI thread** with the rest of the read (D4), and the
+      outcome is cached per project open rather than recomputed per refresh. *Measured at review 408
+      on this machine, warm: ~20 ms of subprocess time plus **~80 ms of walk** across 183,736
+      entries. Measure it again here rather than quoting that.*
+- [ ] **`runtime::git`'s module-level `#![allow(dead_code)]` is gone**, because this slice gives the
+      module its production caller. Confirmed at review 408: the allow is a dated suppression, not a
+      blanket one, and this is its named expiry.
 - [ ] **`--ignore-submodules=all` on the status read** — defence in depth behind R1's refusal, never
       instead of it (measured: it suppresses the submodule filter).
 - [ ] Decided and disclosed: **how `git` is located**. `PATH` is fixed to `/usr/bin:/bin` today, so on
