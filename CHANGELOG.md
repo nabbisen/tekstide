@@ -2,7 +2,8 @@
 
 ## 0.21.0 - The Bar Says What Is Happening
 
-Status: release candidate; not yet published or tagged.
+Status: **released on 2026-09-22.** Published to crates.io as `tekstide 0.21.0` and
+`tekstide-core 0.21.0`, tagged `0.21.0` on `f4c608f`.
 
 
 ### Added — the status bar now says what is happening in the active project
