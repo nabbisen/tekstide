@@ -37,7 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 030 | [Git Integration](./accepted/030-git-integration.md) | **Accepted 2026-09-22; D2–D8 decided on acceptance, D1 deliberately left open.** The board says "branch: not available" because `set_git_summary` has no production caller, and filling it means reading a directory that can **name programs Git runs during an ordinary status read**. **Slice A ships no feature**: it builds a repository that tries to run something, measures a read-only library against a hardened subprocess, and decides the mechanism from that. **If neither can be shown safe, the RFC stops and the field keeps saying "not available"** — a permitted outcome. Read-only always; no graph, no diff. [Handoff pack](./handoffs/030-git-integration/README.md) |
+| 030 | [Git Integration](./accepted/030-git-integration.md) | **Accepted 2026-09-22; D1′ decided 2026-09-22 from slice A's measurement.** Both candidate mechanisms — `gix` and `git` itself — **execute a program a repository names** during an ordinary status read, measured on two independent adversarial fixtures. But a repository that names nothing executes nothing, so the decision moved from *which mechanism* to **which repositories we read**: a hardened subprocess behind a gate that refuses any repository whose configuration is not entirely on an allowlist of keys that cannot name a program, read with `git config --list` because `--local` hides an `include.path`-supplied driver. Refusal renders as "not available". No new dependency. [Handoff pack](./handoffs/030-git-integration/README.md) |
 
 
 ### Reserved numbers — check this before authoring

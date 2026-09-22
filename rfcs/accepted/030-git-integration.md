@@ -1,6 +1,6 @@
 # RFC-030: Git Integration
 
-Status: **Accepted by the human owner 2026-09-22.** **D2–D8 decided by the architect on acceptance; D1 stays open by design and slice A decides it.** Proposed 2026-09-17. Reserved for M12 (renumbered from 024 on 2026-08-12). Scoped at the
+Status: **Accepted by the human owner 2026-09-22.** **D2–D8 decided by the architect on acceptance; D1′ decided 2026-09-22 at slice A's measurement** — see the end. Proposed 2026-09-17. Reserved for M12 (renumbered from 024 on 2026-08-12). Scoped at the
 owner's word **alongside** RFC-025, shipping when its safety evidence is done rather than on
 `0.21.0`'s date.
 Target milestone: **M12**
@@ -129,3 +129,70 @@ own dependency load. Its advisories become ours; the register is where we find t
 **Ship boundary.** RFC-025 renders the Git field as *"not available"*; this RFC fills it. It adds no
 new surface of its own, and it ships when its evidence is done — `0.22.0` if that is where it lands,
 not on `0.21.0`'s date.
+
+
+## D1′ — decided 2026-09-22, from slice A's measurement (review 405)
+
+**A hardened subprocess, behind a gate that refuses any repository that asks anything of us.** D1's
+own rule said to stop if neither mechanism was safe. Neither is, as used by default — and stopping
+would still have been wrong, because the question was wrong.
+
+### What was measured
+
+Two independent fixtures — the implementer's (`gix`, and the false negative it corrected) and mine
+(`git` 2.55.0) — against a repository configuring `filter.<name>.clean` (`required = true`, named by
+`.gitattributes`), `core.fsmonitor` and `diff.<name>.textconv`, each pointing at a harmless marker
+script, with a committed file modified **in place at the same byte length** so no stat shortcut can
+answer.
+
+| | Measured | Result |
+| --- | --- | --- |
+| 1 | `gix`'s ergonomic `status(...)` entry point | the clean filter **ran** |
+| 2 | `git status --porcelain=v2 --branch` | the clean filter **and** fsmonitor **ran** |
+| 3 | **a repository that names nothing**, same command | **nothing ran** |
+| 4 | `git config --list` in the poisoned repository | **nothing ran** |
+| 5 | `git rev-parse --abbrev-ref HEAD`, poisoned | **nothing ran** |
+| 6 | `.gitattributes` naming a filter **no config defines** | **nothing ran**, exit 0 |
+| 7 | `-c filter.<name>.clean=` with `required = true` | nothing ran, but **exit 128** |
+
+**Row 3 carries the decision.** Execution is not inherent to reading a repository; it is conditional
+on the repository naming a program. The choice was never *which mechanism* — it is **which
+repositories we agree to read**.
+
+### The decision
+
+1. **Neither mechanism ships as used by default.** `gix`'s own default comparator streams worktree
+   bytes through the filter machinery (its `FastEq` only short-circuits on a size mismatch, which is
+   what made the first probe a false negative); `git` additionally honours `core.fsmonitor`.
+2. **The gate is the feature.** Sanitized environment, reviewed non-project-local `git`, no shell,
+   deterministic argv, bounded time and output — RFC-012's gate item by item — then read the effective
+   configuration and **refuse unless every key is on a small allowlist of keys that cannot name a
+   program**. An unknown key is a refusal. Refusal renders as *"not available"*, which RFC-025 D5
+   already puts on screen.
+3. **Read the configuration with `git config --list`, includes expanded — never `--local`.**
+   Measured: with the driver in a second file pulled in by `include.path`, `--local` shows only
+   `include.path=…` while `git status` still runs the filter. Any `include`/`includeIf` key is itself
+   a refusal; nested includes resolve at any depth.
+4. **The subprocess wins the tiebreak, not the safety argument.** Under the gate both are equally
+   safe, so cost decides: `gix` is a large dependency whose internals we would have to re-audit at
+   every upgrade to keep a claim the gate already makes. **No new dependency, so D8's advisory row is
+   not needed.**
+5. **The stat-only custom comparator is rejected.** It reports a touched-but-unchanged file as
+   modified — a number describing something adjacent to what was measured, on a count users act on —
+   and it makes a safety-critical component ours to prove forever.
+6. **Attributes that name a driver refuse the dirty answer.** Nothing would execute once the allowlist
+   has refused every filter definition, but the comparison would run against an index written through
+   a filter we did not run: every Git LFS file would read as modified. "Not available" instead.
+7. **Trust state is not the boundary, which simplifies D3.** The rule is absolute: **Tekstide never
+   runs a program a repository names, in any trust state.** Detection runs in Restricted projects
+   because the gate makes it safe, not because a grant permits it.
+8. **The branch is separable.** Rows 5 and 6 say a branch read executes nothing even in a poisoned
+   repository, and reading `.git/HEAD` directly executes nothing by construction — so a refused
+   repository may still show its branch. Slice B measures that rather than inheriting it from here.
+
+### The reviewer's error this corrects
+
+The acceptance rule was binary — library, subprocess, or ship nothing — while D3 already described a
+graded outcome ("otherwise report unavailable in Restricted"). Those contradicted each other, and the
+binary framing would have thrown away a shippable, safer product. The outcome space is graded by
+**which repositories** and **which facts**, not by mechanism.

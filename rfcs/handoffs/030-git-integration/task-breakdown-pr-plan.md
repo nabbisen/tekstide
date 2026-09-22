@@ -2,64 +2,96 @@
 title: "RFC-030 — task breakdown and PR plan"
 rfc: "RFC-030"
 rfc_file: "../../accepted/030-git-integration.md"
-source_rfc_status: "Accepted 2026-09-22 — M12"
+source_rfc_status: "Accepted 2026-09-22 — M12; D1′ decided 2026-09-22"
 target_milestone: "M12"
 created: "2026-09-22"
 ---
 
 # Task breakdown and PR plan
 
-**A decides whether B and C happen at all.**
+**Rewritten 2026-09-22, at review 405, once D1′ was decided.** The original plan had slice A choose
+between a library and a subprocess. The measurement said **both execute a repository-named clean
+filter**, and that **a repository naming nothing causes no execution at all** — so the choice moved
+from *which mechanism* to *which repositories we read*. D1′ in
+[the RFC](../../accepted/030-git-integration.md) is the decision; this plan implements it.
 
-## PR-030-A — the adversarial fixture, the measurement, the decision
+## PR-030-A — the fixture, and the gate
 
-**No user-visible change. Nothing renders Git state at the end of this slice.**
+**No user-visible change.** Nothing renders Git state at the end of this slice.
 
-- **Build the fixture** (D7): a repository under a temporary directory configured to run a program
-  during an ordinary status read — by as many of the mechanisms as apply (filter, hook, config-named
-  helper, alias, and any the library documents). The program **writes a marker file**. Global and
-  system config point inside the fixture; the environment is sanitized.
-- **Measure both mechanisms** against it: the candidate read-only library, and `git` invoked as
-  RFC-012's gate requires. Compute branch, dirty state and per-file status with each.
-- **Decide D1 by the rule in the RFC**: the library only if it executes nothing repository-configured;
-  otherwise the subprocess with the gate met **item by item, each with its own evidence**;
-  **otherwise stop**, and say so in the request.
-- **Record the decision as D1′ in the RFC**, with the measurement, in the same commit.
-- **If the library is chosen: a dated row in `dependency-advisories.md`** in that same commit (D8).
+### The committed fixture (D7)
 
-**Required tests:** the marker file does not exist after a status read, **in both trust states**, per
-mechanism measured. **Ablation:** neutralise whatever suppresses execution (or, for the library,
-assert against a deliberately unsafe invocation) and the marker appears — this is the ablation that
-proves the fixture is actually hostile. **A fixture that cannot be made to fail proves nothing**, so
-run that ablation first and report it.
+One repository builder, under a temporary directory, with its own config pinned inside it and the
+environment sanitized, so the result cannot depend on the developer's machine. Each vector is its
+own row, because the allowlist has to be proven against each:
 
-**Report the gate item by item** if the subprocess is chosen: reviewed non-project-local executable,
-no shell, deterministic argv, no project-local `PATH`, sanitized environment, no workspace hooks or
-config-driven automation, bounded time and output, bounded diagnostics.
+| Vector | Shape |
+| --- | --- |
+| clean filter | `filter.<name>.clean`, `required = true`, named by `.gitattributes` |
+| fsmonitor | `core.fsmonitor` — a **fixed** key, the easy case |
+| textconv | `diff.<name>.textconv` |
+| **include-hidden** | the driver in a second file, pulled in by `include.path` — **measured: `git config --list --local` does not show it while `git status` still runs it** |
+| attributes-only | `.gitattributes` naming a filter **no config defines** — measured: executes nothing |
+| control | a repository that names nothing — measured: executes nothing |
 
-## PR-030-B — branch and dirty state, behind D1′
+Every named program **writes a marker file and nothing else**. Nothing destructive, nothing
+networked, nothing outside the temporary directory.
 
-- Produce `ProjectGitSummary` through the chosen mechanism and **call `set_git_summary`**, which has
-  no production caller today. Branch name and changed-file count (REQ-GIT-002).
-- **Off the UI thread, debounced** (D4). *Pending* while a read is in flight; *unavailable* when the
-  project is not a repository, or when D1′'s guarantee does not hold.
-- **No write exists in the API** (D5, §4).
-- **Restricted projects** follow D3: detection runs only under §1's guarantee, otherwise
-  `unavailable`.
+### The gate
 
-**Required tests:** a real repository shows its branch and dirty state; a non-repository directory
-shows *unavailable*, not an error; a read in flight shows *pending*, never the previous value; the
-fixture's marker is still absent after the production path runs. **Ablation:** render the previous
-summary while a read is in flight; the pending test fails alone.
+Before any worktree read, in this order:
+
+1. **Sanitized environment and argv** — external configuration neutralized, a reviewed
+   non-project-local `git`, no shell, deterministic argv, no project-local `PATH`, bounded time and
+   output, bounded diagnostics. RFC-012's *Git Detector Safety* gate, **reported item by item**.
+2. **Read the effective configuration with `git config --list`** — **not `--local`, and not
+   `--no-includes`**: the include-hidden row above is exactly that bypass.
+3. **Refuse unless every key is on a small allowlist** of keys that cannot name a program. **An
+   unknown key is a refusal, not a warning**, and any `include`/`includeIf` key is a refusal.
+4. **Refuse the dirty and per-file answer** for a repository whose attributes name a `filter=` or
+   `diff=` driver. Nothing would execute, but the comparison would be against an index written
+   through a filter we did not run — every Git LFS file would read as modified, and a wrong number is
+   worse than "not available".
+5. **Refusal is an outcome, not an error**: `unavailable`, with a reason.
+
+**Required tests.** Per vector: the marker file **does not exist** after the gate runs, and the
+poisoned repository is **refused**; the control repository is **accepted** and still executes nothing.
+**In both trust states.**
+
+**Run the falsifying ablation first**: with the gate removed, the poisoned repository's marker
+**appears**. A fixture that cannot be made to fail proves nothing, so report that before anything else.
+
+Also: `git` absent, or too old to answer, is `unavailable` — never a panic and never a guess.
+
+## PR-030-B — branch, dirty state, ahead/behind
+
+- Produce `ProjectGitSummary` for **accepted** repositories and **call `set_git_summary`**, which has
+  no production caller today: branch name, changed-file count, ahead/behind (REQ-GIT-001, 002).
+- **A refused repository may still show its branch** — measured, a branch read executes nothing even
+  in a poisoned repository, and reading `.git/HEAD` directly executes nothing by construction — with
+  dirty state `unavailable`. **Measure it in this slice; do not assume it from this sentence.**
+- **Off the UI thread, debounced** (D4). *Pending* while a read is in flight; never the previous value
+  shown as current.
+- **No write exists in the API** (D5).
+- **Restricted projects are not treated differently**: the gate is what makes this safe, not the trust
+  grant (D1′ item 5).
+- **Carried from RFC-025 (review 404):** this slice edits the status-bar row when it replaces the Git
+  field, so it re-proves that the bar's project fields **reach the rendered row** — measured there:
+  computing them and never pushing them fails no test.
+
+**Required tests:** a control repository shows branch and dirty state; a poisoned one shows the branch
+and `unavailable`, with the marker still absent; a non-repository shows `unavailable`, not an error; a
+read in flight shows *pending*. **Ablation:** render the previous summary while pending; that test
+fails alone.
 
 ## PR-030-C — per-file status
 
-- Per-file status for the files the review surfaces already list (REQ-GIT-003), through the same
-  mechanism, under the same debounce.
+- Per-file status for accepted repositories only (REQ-GIT-003), same gate, same debounce.
 
 **Required tests:** each status a file can carry, from a real repository; a file outside the
-repository carries none. **Evidence:** a live capture against a `mktemp -d` repository and state
-root, with RFC-025's status bar showing a real Git state where it said "not available".
+repository carries none; a refused repository offers none. **Evidence:** a live capture against a
+`mktemp -d` repository and state root, with the status bar showing a real Git state where it said
+"not available".
 
 ## After this
 
