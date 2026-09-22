@@ -36,13 +36,34 @@ implementer's to paper over.
 
 ## PR-025-B — the status bar
 
-- [ ] Trust state, Git state, running sessions, failed sessions and pending approvals appear
+- [x] Trust state, Git state, running sessions, failed sessions and pending approvals appear
       (REQ-NOTIFY-002), each present when true and **absent when not**, ablated separately.
-- [ ] **Git state reads "not available"**, and nothing pretends otherwise, until RFC-030 lands.
-- [ ] Labels are states, not bare counts (REQ-NOTIFY-003), read from `ProjectRuntimeSummary`.
-- [ ] Every state reads as a word without colour (REQ-NOTIFY-005), and is reachable by keyboard
+      *`active_project_status_fields`. Six tests, one per field's presence plus the "nothing else"
+      absence case. G1 (trust) fails its own test alone; G2 (running/failed/pending unconditional)
+      fails two tests as one disclosed composition -- the same "absent at zero" guard removed for
+      all three at once.*
+- [x] **Git state reads "not available"**, and nothing pretends otherwise, until RFC-030 lands.
+      *A fixed catalog key, no `ProjectGitSummary` read -- nothing in production populates that type
+      yet, so reading it would still say "not available" today but this is the more literal, D5-exact
+      reading. Captured live: "Git: not available" in the shipping binary.*
+- [x] Labels are states, not bare counts (REQ-NOTIFY-003), read from `ProjectRuntimeSummary`.
+      *`active_project_status_fields_reads_the_summary_it_is_given_not_a_recount` source-scans the
+      function's own body for `.len()`/`.count()`/`.filter(` and finds none. Every count assertion in
+      the other tests checks for the word and the digit together.*
+- [x] Every state reads as a word without colour (REQ-NOTIFY-005), and is reachable by keyboard
       (004).
+      *By construction: plain `text()` widgets, one uniform bar colour, no new focusable control (D1:
+      nothing yet needs acknowledging). Noted in `qa-evidence.md` rather than exercised by a dedicated
+      test, since there is no colour channel or new keybinding for a test to catch drifting.*
 - [ ] Live capture with a running session and a pending approval, throwaway state only.
+      *The running-session half is captured live against the release binary
+      (`evidence/01-status-bar-restricted-git-not-available-1-running.png`). **The pending-approval
+      half cannot be satisfied as written**: reaching a real command-approval dialog needs a
+      `Managed`-compatibility profile, and `Managed` is not reachable through `config.toml` (grepped,
+      `compatibility_level` is not a parsed key) or through any built-in profile. This is an existing
+      property of the product, not a gap this slice introduces. The field's correctness is proven
+      instead by a unit test attaching a real `ApprovalRequest` through production's own
+      `add_approval_request`. Left unticked with the contradiction named, per the preamble.*
 
 ## Whole-RFC
 

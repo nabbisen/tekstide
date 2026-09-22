@@ -1097,3 +1097,31 @@ help-dialog-close = Close
 # because that is where the full keyboard list lives when nothing is
 # open; it is deliberately not a claim that Ctrl+Alt+P opens "help".
 status-bar-key-hint = Ctrl+Alt+P Project Board
+
+# RFC-025 PR-025-B, REQ-NOTIFY-002: the active project's own status-bar
+# fields, on the same line as `status-bar-summary` for the height reason
+# `status-bar-key-hint`'s own comment states. Absent entirely when there is
+# no active project (the Project Board route shows the migrated board
+# notifications instead, not this).
+#
+# Trust state and Git state are unconditional once a project is active -- a
+# project always has some trust state, and "not available" is Git state's own
+# honest answer today (D5), not an absence. `$state` is a compile-time symbol
+# (`trust_symbol`), the same select-on-a-literal-variant shape
+# `project-board-branch-status` already uses.
+status-bar-trust-state = { $state ->
+    [trusted] Trusted
+    [restricted] Restricted
+    [revoked] Revoked
+   *[unknown] Unknown
+}
+# D5: truthfully "not available" until RFC-030 produces real Git state --
+# nothing calls `set_git_summary` in production yet, and this slice does not
+# fake a value nothing computed.
+status-bar-git-not-available = Git: not available
+
+# REQ-NOTIFY-003: actionable labels, never a bare number, read straight from
+# `ProjectRuntimeSummary` and absent at zero so the bar stays readable.
+status-bar-running-sessions = { $count } running
+status-bar-failed-sessions = { $count } failed
+status-bar-pending-approvals = { $count } awaiting approval

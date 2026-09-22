@@ -17201,3 +17201,169 @@ fn the_retention_notice_reflects_the_most_recent_cleanup_not_the_first() {
          ForTheStartItHappened snapshot would leave the first notice stuck on screen"
     );
 }
+
+// --- RFC-025 PR-025-B: the status bar's REQ-NOTIFY-002 fields ---------------
+
+/// D5: nothing here is about a project, so nothing here appears.
+#[test]
+fn active_project_status_fields_is_empty_without_an_active_project() {
+    let state = state_with(ApplicationShell::new());
+
+    assert!(super::active_project_status_fields(&state).is_empty());
+}
+
+/// The ordinary case: an active, freshly opened (`Restricted`) project with
+/// no running processes and no pending approvals. Trust state and Git state
+/// are unconditional and appear; the three actionable labels are all absent
+/// at zero -- exactly two fields, not five with three reading "0".
+#[test]
+fn active_project_status_fields_shows_restricted_trust_and_git_not_available_with_nothing_else() {
+    let (state, _project_id) = state_with_a_real_project("status-fields-restricted");
+
+    let fields = super::active_project_status_fields(&state);
+
+    assert_eq!(fields.len(), 2, "{fields:?}");
+    assert!(
+        fields[0].contains("Restricted"),
+        "a freshly opened project is Restricted by default: {fields:?}"
+    );
+    assert_eq!(fields[1], state.catalog.get("status-bar-git-not-available"));
+}
+
+/// REQ-NOTIFY-002's trust field, ablated by its own value: a real grant
+/// through the real route (`press_trust_settings_action` +
+/// `ModalFocusNext` + `ModalActivate`, the same sequence
+/// `granting_trust_through_the_real_route_records_both_audit_records` uses)
+/// must change what this field says, not merely that it is present.
+#[test]
+fn active_project_status_fields_names_trusted_differently_from_restricted() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("status-fields-trust-grant"));
+    let (mut state, _project_id) = state_with_a_real_project("status-fields-trusted");
+    let restricted_fields = super::active_project_status_fields(&state);
+
+    press_trust_settings_action(&mut state);
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    let trusted_fields = super::active_project_status_fields(&state);
+
+    assert_ne!(
+        restricted_fields[0], trusted_fields[0],
+        "granting trust for real must change the status bar's own trust word: \
+         {restricted_fields:?} vs {trusted_fields:?}"
+    );
+    assert!(
+        !trusted_fields[0].to_lowercase().contains("restricted"),
+        "a trusted project must not still read Restricted: {trusted_fields:?}"
+    );
+}
+
+/// REQ-NOTIFY-003, the running-sessions label: absent at zero (asserted
+/// above), present and actionable (not a bare digit) once a real process is
+/// running. Reuses the same real-shell fixture RFC-040's close-flow tests
+/// already establish, so this is a real terminal, not a fabricated count.
+#[test]
+fn active_project_status_fields_shows_a_real_running_session_as_an_actionable_label() {
+    let (state, _project_id, _terminal_id) =
+        state_with_a_real_terminal_on_its_own_project("status-fields-running");
+
+    let fields = super::active_project_status_fields(&state);
+
+    let running = fields
+        .iter()
+        .find(|field| field.contains("running"))
+        .unwrap_or_else(|| panic!("a real running terminal must show a running label: {fields:?}"));
+    assert!(
+        running.contains('1'),
+        "actionable, not a bare state: the count must appear too: {running:?}"
+    );
+}
+
+/// REQ-NOTIFY-003, the pending-approvals label: a real `ApprovalRequest`
+/// attached through the same production method the approval pipeline uses
+/// (`ProjectSession::add_approval_request`), not a hand-set summary field.
+#[test]
+fn active_project_status_fields_shows_a_real_pending_approval_as_an_actionable_label() {
+    let (mut state, project_id) = state_with_a_real_project("status-fields-pending-approval");
+    let project = state
+        .app_shell
+        .state_mut()
+        .project_mut(&project_id)
+        .unwrap();
+    project
+        .add_approval_request(tekstide_core::domain::ApprovalRequest::pending(
+            project_id.clone(),
+            None,
+            "shell_command",
+            "rm -rf /tmp/example",
+            tekstide_core::domain::RiskLevel::Medium,
+            Vec::new(),
+            project.root_path().to_path_buf(),
+        ))
+        .expect("attaching a real, pending approval request must succeed");
+
+    let fields = super::active_project_status_fields(&state);
+
+    let pending = fields
+        .iter()
+        .find(|field| field.contains("awaiting approval"))
+        .unwrap_or_else(|| {
+            panic!("a real pending approval must show an awaiting-approval label: {fields:?}")
+        });
+    assert!(
+        pending.contains('1'),
+        "actionable, not a bare state: {pending:?}"
+    );
+}
+
+/// REQ-NOTIFY-003, the failed-sessions label: a terminal transitioned to
+/// `Failed` through the same real API `record_terminal_exit`'s own fallback
+/// branch uses, not a hand-set summary field.
+#[test]
+fn active_project_status_fields_shows_a_real_failed_session_as_an_actionable_label() {
+    let (mut state, project_id, terminal_id) =
+        state_with_a_real_terminal_on_its_own_project("status-fields-failed");
+    state
+        .app_shell
+        .state_mut()
+        .project_mut(&project_id)
+        .unwrap()
+        .transition_terminal_status(&terminal_id, tekstide_core::domain::TerminalStatus::Failed)
+        .expect("a real running terminal can transition to Failed");
+
+    let fields = super::active_project_status_fields(&state);
+
+    let failed = fields
+        .iter()
+        .find(|field| field.contains("failed"))
+        .unwrap_or_else(|| panic!("a real failed terminal must show a failed label: {fields:?}"));
+    assert!(
+        failed.contains('1'),
+        "actionable, not a bare state: {failed:?}"
+    );
+    assert!(
+        !fields.iter().any(|field| field.contains("running")),
+        "a failed terminal is not also counted as running: {fields:?}"
+    );
+}
+
+/// The migration's own guarantee restated at the status-bar surface: this
+/// function reads `ProjectRuntimeSummary`'s fields directly and never
+/// recomputes a count of its own -- grepped, there is no `.len()`, `.count()`
+/// or `.filter(` inside `active_project_status_fields` itself.
+#[test]
+fn active_project_status_fields_reads_the_summary_it_is_given_not_a_recount() {
+    let source = include_str!("../shell.rs");
+    let start = source
+        .find("fn active_project_status_fields(state: &State) -> Vec<String> {")
+        .expect("the function must exist under this exact name");
+    let body_end = source[start..]
+        .find("\nfn trust_symbol(")
+        .expect("the next function must follow it directly");
+    let body = &source[start..start + body_end];
+
+    assert!(
+        !body.contains(".len()") && !body.contains(".count()") && !body.contains(".filter("),
+        "the producer must read ProjectRuntimeSummary's own fields, never recount: {body}"
+    );
+}

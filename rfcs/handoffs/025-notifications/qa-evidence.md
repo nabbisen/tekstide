@@ -137,3 +137,89 @@ board call site:                                  project_board_notifications(st
 `rfc_docs_invariants`: 9 passed. **Three consecutive full-workspace runs with `--no-fail-fast`,
 output redirected to files: 549 + 9 + 829, green every time** (+8 shell tests; every other binary
 unchanged). `git diff --cached --check` after staging: clean.
+
+## PR-025-B — the status bar
+
+### Design: two functions, not one growing string
+
+`status_bar_summary` (route, project count, key hint) is **completely unchanged** — its own
+exact-equality tests (`status_bar_summary_reflects_the_default_route_and_zero_projects`,
+`status_bar_summary_pluralizes_a_single_project_correctly`, and the parity test) still pass, because
+nothing about it changed. REQ-NOTIFY-002's fields live in a new sibling,
+`active_project_status_fields(state) -> Vec<String>`, pushed onto the **same `row!`** `status_bar`
+already builds — the doc comment on `status_bar` restates the constraint this shares with
+`status_bar_summary`/the key hint: one line only, since `content_area_height` subtracts this bar's
+height to size real terminal panes.
+
+### The fields, and why each is unconditional or not
+
+- **Trust state and Git state are unconditional** once a project is active: a project always has
+  some trust state, and "not available" is Git state's own honest, current answer (D5) — nothing
+  faked, nothing read from `ProjectGitSummary` (which nothing in production populates yet).
+- **Running, failed and pending-approval labels are each absent at zero** (REQ-NOTIFY-003), read
+  directly from `ProjectRuntimeSummary` — `active_project_status_fields`'s own body contains no
+  `.len()`, `.count()` or `.filter(`, asserted by
+  `active_project_status_fields_reads_the_summary_it_is_given_not_a_recount` via a source-text scan
+  of the function's own body.
+- **`None` entirely without an active project** — the Project Board route's own surface is the
+  migrated notifications from PR-025-A, not this.
+
+### Tests, each against a real fixture, not a hand-set summary field
+
+| Test | Proves |
+| --- | --- |
+| `active_project_status_fields_is_empty_without_an_active_project` | D5's gate |
+| `active_project_status_fields_shows_restricted_trust_and_git_not_available_with_nothing_else` | the unconditional pair, and that all three actionable labels are absent together at zero — two fields, not five with three reading "0" |
+| `active_project_status_fields_names_trusted_differently_from_restricted` | a **real** grant, through the real route (`press_trust_settings_action` + `ModalFocusNext` + `ModalActivate`), changes the trust word |
+| `active_project_status_fields_shows_a_real_running_session_as_an_actionable_label` | a real terminal (`state_with_a_real_terminal_on_its_own_project`) produces `"1 running"` |
+| `active_project_status_fields_shows_a_real_failed_session_as_an_actionable_label` | a real `transition_terminal_status(.., Failed)` produces `"1 failed"`, and the same terminal is no longer counted running |
+| `active_project_status_fields_shows_a_real_pending_approval_as_an_actionable_label` | a real `ApprovalRequest` attached through production's own `add_approval_request` produces `"1 awaiting approval"` |
+
+Every count-bearing assertion checks for the digit **and** the word together (`"1 running"`, not
+just `"1"` or just `"running"`) — REQ-NOTIFY-003's "never a bare number."
+
+### Ablations, each restored and hash-checked
+
+| | Ablation | Fails |
+| --- | --- | --- |
+| G1 | `trust_symbol` collapses every `WorkspaceTrust` variant to `"restricted"` | `active_project_status_fields_names_trusted_differently_from_restricted` **alone** |
+| G2 | the running/failed/pending-approval fields render unconditionally, even at zero | the nothing-else test **and** the failed-session test — the same "absent at zero" property removed for all three fields at once, disclosed as one ablation rather than trimmed to look like three |
+
+### REQ-NOTIFY-004/005, by construction rather than by a dedicated test
+
+**004, keyboard-reachable**: the status bar is the existing, always-visible chrome surface — no new
+control is added (D1's ruling: nothing yet needs acknowledging), so nothing new needs a keybinding.
+**005, no colour alone**: every field is a plain `text()` widget in the bar's one uniform colour;
+nothing here introduces per-state colour coding to fail into conflicting with the text, so there is
+no colour channel for a test to catch drifting from the word.
+
+### Evidence: the live capture, and the one gap named rather than papered over
+
+`evidence/01-status-bar-restricted-git-not-available-1-running.png` — the **release binary**, a
+throwaway `mktemp -d` config/state/project, a configured demo AI CLI launched for real through
+`Ctrl+Alt+A`. The bottom bar reads exactly: *"Project Workspace | 1 project　Restricted　Git: not
+available　1 running　Ctrl+Alt+P Project Board"* — all of REQ-NOTIFY-002's unconditional fields and
+one real actionable label, in the shipping artifact. Only `/tmp` paths appear.
+
+**The checklist's "and a pending approval" half of this box cannot be produced as a live capture
+against the shipped product today, and that is named here rather than faked or silently dropped.**
+A real command-approval dialog requires a `Managed`-compatibility profile, and `Managed` is **not
+reachable through `config.toml`** — grepped, `compatibility_level` is not a parsed key anywhere in
+`config/load.rs` — nor through any built-in profile (`claude_code_linux_default` is `Supervised`,
+which never binds an approval endpoint). This is not a gap this slice introduces; it is an existing
+property of the product, matching the same "unreachable from the product" finding this project has
+recorded for `RequiredLocalBounded` and for the adapter launch site before it was wired up. The
+pending-approval field's correctness is instead proven by
+`active_project_status_fields_shows_a_real_pending_approval_as_an_actionable_label`, which attaches
+a real `ApprovalRequest` through production's own `ProjectSession::add_approval_request` — the same
+method the real approval pipeline calls, not a hand-set summary field, only reached through the test
+harness because the GUI has no live path to it yet.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`: clean.
+`rfc_docs_invariants`: 9 passed. **Three consecutive full-workspace runs with `--no-fail-fast`,
+output redirected to files: 556 + 9 + 829, green every time** (+7 shell tests over PR-025-A's 549).
+One known, already-registered intermittent recurred in an earlier run
+(`change_review_content_view_build_cost_by_line_count_measurement`, register row from review 338) —
+unrelated to this slice, no new row needed. `git diff --cached --check` after staging: clean.

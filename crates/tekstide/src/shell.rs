@@ -7354,25 +7354,90 @@ pub(crate) fn status_bar_summary(state: &State) -> String {
     )
 }
 
-/// The summary and the keyboard hint share one line on purpose:
-/// [`content_area_height`] subtracts this bar's height to size real
-/// terminal panes, so a second line would silently shrink every PTY.
+/// RFC-025 D5, PR-025-B, REQ-NOTIFY-002: the active project's own
+/// status-bar fields -- trust state, Git state, and REQ-NOTIFY-003's
+/// actionable labels for running, failed and awaiting-approval sessions.
+/// `Vec::new()` when there is no active project: every one of these is a
+/// fact about one project, and the migrated board notifications
+/// (`project_board_notifications`) are the Project Board route's own
+/// surface, not this one.
+///
+/// **Trust state and Git state are unconditional** once a project is
+/// active -- a project always has some trust state, and "not available"
+/// is Git state's own honest, unfaked answer today (D5), not an absence.
+/// **Running, failed and pending-approval labels are each absent at
+/// zero** (REQ-NOTIFY-003), read straight from `ProjectRuntimeSummary`
+/// -- never recounted, and never a bare number.
+fn active_project_status_fields(state: &State) -> Vec<String> {
+    let Some(project) = state.app_shell.state().active_project() else {
+        return Vec::new();
+    };
+    let summary = project.runtime_summary();
+    let mut fields = vec![
+        state.catalog.get_with_args(
+            "status-bar-trust-state",
+            &CatalogArgs::new().trusted_symbol("state", trust_symbol(project.trust_state())),
+        ),
+        state.catalog.get("status-bar-git-not-available"),
+    ];
+    if summary.running_processes > 0 {
+        fields.push(state.catalog.get_with_args(
+            "status-bar-running-sessions",
+            &CatalogArgs::new().number("count", summary.running_processes),
+        ));
+    }
+    if summary.failed_processes > 0 {
+        fields.push(state.catalog.get_with_args(
+            "status-bar-failed-sessions",
+            &CatalogArgs::new().number("count", summary.failed_processes),
+        ));
+    }
+    if summary.pending_approvals > 0 {
+        fields.push(state.catalog.get_with_args(
+            "status-bar-pending-approvals",
+            &CatalogArgs::new().number("count", summary.pending_approvals),
+        ));
+    }
+    fields
+}
+
+/// The symbolic literal-variant name `status-bar-trust-state` selects on --
+/// the same "compile-time symbol, not runtime-derived text" shape
+/// [`route_symbol`] and `attention_symbol` (`surface/board.rs`) already use,
+/// rather than `WorkspaceTrust::label()`'s raw English (`project_board.rs`'s
+/// own `trust_label` field), which bypasses the catalog entirely.
+fn trust_symbol(trust: tekstide_core::project::WorkspaceTrust) -> &'static str {
+    match trust {
+        tekstide_core::project::WorkspaceTrust::Unknown => "unknown",
+        tekstide_core::project::WorkspaceTrust::Restricted => "restricted",
+        tekstide_core::project::WorkspaceTrust::Trusted => "trusted",
+        tekstide_core::project::WorkspaceTrust::Revoked => "revoked",
+    }
+}
+
+/// The summary, the active project's own fields, and the keyboard hint
+/// all share one line on purpose: [`content_area_height`] subtracts this
+/// bar's height to size real terminal panes, so a second line would
+/// silently shrink every PTY -- RFC-025 PR-025-B's fields are pushed onto
+/// the same `row!`, not a new one.
 fn status_bar(state: &State) -> Element<'_, Message> {
-    container(
-        row![
-            text(status_bar_summary(state)).size(state.theme.font_size_status()),
-            text(state.catalog.get("status-bar-key-hint")).size(state.theme.font_size_status()),
-        ]
-        .spacing(16),
-    )
-    .width(Length::Fill)
-    .padding(6)
-    .style(chrome_style(
-        state.theme.surface_elevated(),
-        state.theme.foreground(),
-        state.theme.border_default(),
-    ))
-    .into()
+    let mut items =
+        row![text(status_bar_summary(state)).size(state.theme.font_size_status())].spacing(16);
+    for field in active_project_status_fields(state) {
+        items = items.push(text(field).size(state.theme.font_size_status()));
+    }
+    items = items
+        .push(text(state.catalog.get("status-bar-key-hint")).size(state.theme.font_size_status()));
+
+    container(items)
+        .width(Length::Fill)
+        .padding(6)
+        .style(chrome_style(
+            state.theme.surface_elevated(),
+            state.theme.foreground(),
+            state.theme.border_default(),
+        ))
+        .into()
 }
 
 // --- RFC-025: one model for every board notification -----------------------
