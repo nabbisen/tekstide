@@ -337,6 +337,14 @@ ruling below is implemented, not just decided.
       holding every distinct successful string rather than only the first. Production is unaffected
       (one resolved executable for the whole process either way); only this module's own concurrent
       test suite needed the difference. See `qa-evidence.md`'s own account of the bug.
+- [ ] **Required at review 415: canonicalize both sides of the project-root filter.**
+      `Path::starts_with` is lexical, so a `PATH` entry reaching into the project through a symlink is
+      not filtered — *measured at review 415: `link/bin`.starts_with(`project`) is **false** while the
+      canonicalized comparison is **true**, and the `git` it offers is the repository's own.* Keep the
+      lexical check as a cheap pre-filter, then compare canonicalized paths; a directory that cannot
+      be canonicalized is skipped, not trusted. **Test:** extend
+      `resolving_git_from_the_inherited_path_drops_relative_and_project_local_entries` with a
+      symlinked entry pointing into the project.
 - [x] RFC-030 closes when these land; the `0.22.0` candidate is scheduled on top of them.
 
 ## Whole-RFC
