@@ -8287,18 +8287,15 @@ fn sidebar_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message
     let focused = state.focus == FocusZone::Sidebar;
     let content: Element<'_, Message> = match mode {
         Some(ProjectMode::Content) => {
-            let workspace = state
-                .app_shell
-                .state()
-                .active_project()
-                .map(tekstide_core::project::ProjectSession::content_workspace);
-            match workspace {
-                Some(workspace) => crate::surface::explorer::view(
-                    workspace.explorer_scan(),
-                    workspace.explorer_status(),
+            let active_project = state.app_shell.state().active_project();
+            match active_project {
+                Some(project) => crate::surface::explorer::view(
+                    project.content_workspace().explorer_scan(),
+                    project.content_workspace().explorer_status(),
                     state.explorer_highlight,
                     &state.catalog,
                     &state.theme,
+                    Some(project.git_summary()),
                 ),
                 None => text(sidebar_label(state)).into(),
             }

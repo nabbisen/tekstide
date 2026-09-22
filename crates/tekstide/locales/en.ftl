@@ -455,6 +455,16 @@ terminal-paste-refused = { $reason ->
 # exactly what this one message replaces. One lookup, four selectors,
 # matching `session-bar-entry`'s own shape rather than concatenating
 # separately-resolved strings.
+#
+# RFC-030 PR-030-C, REQ-GIT-003: `$git`, a fifth selector, from
+# `FileGitStatus` by way of `explorer.rs`'s own `git_status_symbol` --
+# `*[none]` covers "no project Git summary", "outside any repository",
+# "a refused/branch-only repository", and "no entry for this exact path"
+# alike, all the same absent-badge rendering. `[renamed]`'s own wording
+# covers a real rename *and* a copy (porcelain v2's `R`/`C` collapse to
+# one `FileGitStatus::Renamed` upstream in `runtime::git`) -- reviewed at
+# review 413: the word must stay true for both, not just the more common
+# case.
 explorer-node-entry = { $kind ->
     [directory] [DIR]
     [other] [OTHER]
@@ -468,6 +478,14 @@ explorer-node-entry = { $kind ->
     [in-root] {" [symlink]"}
     [unresolved] {" [broken symlink]"}
     [escapes-root] {" [symlink escapes root]"}
+   *[none] {""}
+}{ $git ->
+    [modified] {" [modified]"}
+    [added] {" [added]"}
+    [deleted] {" [deleted]"}
+    [renamed] {" [renamed or copied]"}
+    [untracked] {" [untracked]"}
+    [unmerged] {" [conflict]"}
    *[none] {""}
 }
 

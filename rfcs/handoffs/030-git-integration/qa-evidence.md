@@ -795,3 +795,126 @@ already-registered row 8 in `test-process-leak.md`, same PTY-read-timing shape, 
 isolation. Dated recurrence note added there (this document's own standing rule); the three-run gate
 was then re-run from a clean start and came back identical (`566 + 9 + 868`) all three times, the set
 quoted above.
+
+## PR-030-C: review 413's required fixes, and the explorer wiring
+
+### R-1: `-z` locked in with a fixture, matching the reviewer's own evidence
+
+`non_ascii_space_bearing_and_newline_bearing_filenames_map_to_their_real_on_disk_path` reproduces the
+exact case the reviewer measured and reported back (a non-ASCII filename, a space-bearing one, and a
+literal-newline-bearing one -- all three in one fixture, all asserted to map to their real on-disk
+path, not an octal-escaped key).
+
+### R-2: decoding moved to per-record, path-only
+
+`read_status_summary` now operates on `output.stdout` as raw bytes throughout (`output.stdout.split(|byte| *byte == 0)`
+in place of one whole-output `std::str::from_utf8`), and calls `std::str::from_utf8` only on each
+record's own trailing path slice -- the fixed fields before it (`XY`, mode, hash fields) are always
+ASCII by porcelain v2's own format and are matched as raw bytes, never decoded. `changed_file_count`
+is now incremented once per file-record encountered, independent of whether that record's path
+decoded -- taking the reviewer's preferred direction over the disclosed alternative, since a truthful
+count costs nothing extra here. `split_fixed_fields` was rewritten from `&str` to `&[u8]` to match
+(`body.iter().position(|byte| *byte == b' ')` in place of `str::split_once`).
+
+New test, exercising the exact failure mode described (`std::ffi::OsStr::from_bytes` builds a
+filename with one invalid UTF-8 byte, legal on Linux): `a_non_utf8_path_is_skipped_from_the_map_but_still_counted`
+asserts the undecodable path carries no map entry while `changed_file_count` still reports the true
+total.
+
+Four `if let` chains needed collapsing (`clippy::collapsible_if`, `-D warnings`) once the byte-level
+rewrite nested a `from_utf8` check inside an existing `split_fixed_fields` check -- fixed with `&&
+let` chains, not `#[allow]`.
+
+### The category question and the directory question, both settled and both written down
+
+Six categories, unsplit, per the reviewer's ruling. The one wording obligation that came with it --
+`[renamed]`'s label must stay true for a copy, not only a rename -- is `" [renamed or copied]"` in
+`en.ftl`, and `the_renamed_badge_names_both_rename_and_copy` checks the rendered string contains both
+words, not only that the parser's own `R`/`C` collapse is correct (already covered at the data layer).
+
+The directory question: **files only, no synthetic rollup**, written into `surface/explorer.rs`'s own
+module doc comment, not left implicit. One case reads as a rollup without being one and is called out
+explicitly there: a directory that is *entirely* untracked is exactly what `git status` collapses into
+a single `?? dir/` record under its own default (unchanged) `--untracked-files` mode -- the same mode
+PR-030-B's status bar count already depends on, deliberately left alone so that count's meaning does
+not silently shift as a side effect of this slice. `PathBuf::from("dir/")` compares equal to
+`PathBuf::from("dir")`, so that directory's own explorer row gets an `Untracked` badge for free, with
+no extra code. `a_wholly_untracked_directory_is_reported_at_its_own_collapsed_path`
+(`runtime::git::tests`) proves the property directly: the directory gets the badge, the files inside
+do not (git never enumerated them).
+
+**A genuine, inherent property found while capturing the live evidence, disclosed rather than left
+implicit**: `FileGitStatus::Deleted` can never actually render as an explorer badge. A deleted file
+has no filesystem entry left to scan, so `FileExplorerScanner` never produces an `ExplorerNode` for it
+at all -- there is no row for the per-node lookup to attach a badge to. The computation layer's own
+`Deleted` category is real and tested (`a_dirty_repositorys_file_statuses_map_the_real_change_each_file_carries`),
+and stays in the enum since a future surface (a change-review list, not the file-tree explorer) could
+still read it from the same `ProjectGitSummary`; the file-explorer badge for it is simply unreachable
+by construction, not a bug in this slice.
+
+### The wiring itself
+
+`node_line` gained a `git_summary: Option<&ProjectGitSummary>` parameter, threaded through `row_line`,
+`tree_lines`, and `view` down to `shell.rs`'s one call site (`sidebar_view`, now binding
+`active_project` once and reading `Some(project.git_summary())` instead of only its
+`content_workspace()`). The lookup itself, `git_summary.and_then(|summary| summary.file_status(&node.relative_path))`,
+degrades the same way for every "nothing to show" case -- no active project, no summary computed yet,
+a refused/branch-only repository, or simply no entry for this exact path -- all render identically to
+each other, checked directly (`a_repository_with_no_file_statuses_computed_renders_no_badges`,
+`a_file_outside_the_summarys_map_renders_identically_to_no_summary_at_all`, both asserting string
+equality against the `None`-summary baseline rather than checking for the absence of specific
+substrings).
+
+`explorer-node-entry` gained a fifth Fluent selector, `$git`, appended after `$symlink` the same shape
+the existing four already use; `generic_args()` in `enforcement.rs` registered `.trusted_symbol("git", "none")`.
+16 call sites across `explorer/tests.rs` needed the new parameter (11 existing, updated to `None`; the
+remaining new tests supply a real summary) -- found the same way as the `ProjectGitSummary` literal
+sites earlier in this response, by compiling and fixing every `E0061` the compiler listed.
+
+### Tests
+
+`surface::explorer::tests::`: 15 passed, 0 failed (11 pre-existing + 4 new:
+`every_git_status_category_renders_a_distinct_badge`, `the_renamed_badge_names_both_rename_and_copy`,
+`a_file_outside_the_summarys_map_renders_identically_to_no_summary_at_all`,
+`a_repository_with_no_file_statuses_computed_renders_no_badges`). `runtime::git::tests::`: 40 passed
+(37 after R-1/R-2 + 3 new: the untracked-directory test above, plus R-1/R-2's own two). Direct-grepped
+from each run's own output, not carried from an earlier count.
+
+### The live capture, real Git state, the release binary
+
+`rfcs/handoffs/030-git-integration/evidence/02-explorer-per-file-git-status-badges.png`: a real
+`mktemp -d` repository built in the exact order needed to keep every category distinct (commit the
+merge-conflict base and every to-be-modified file first; produce the actual conflict via a real
+two-branch `git merge`; only then make the uncommitted modified/added/deleted/renamed/untracked
+changes, so no later `git commit` sweeps them into a commit by accident -- a mistake made and caught
+twice while building the fixture, described below), opened with `./target/release/tekstide <path>`
+under a throwaway `XDG_STATE_HOME`, `Ctrl+Alt+M` pressed twice to reach Content mode (`wtype` sending
+the real key chord to the real focused window; the app's own default lands on Terminal/Agent
+Immersion mode first, one further toggle away from Content). The explorer tree reads, verbatim:
+`[FILE] added.txt [added]`, `[FILE] contested.txt [conflict]`, `[DIR] docs [untracked]`,
+`[FILE] renamed.txt [renamed or copied]`, `[FILE] tracked.txt [modified]`,
+`[FILE] untracked.txt [untracked]` -- five of the six categories visible at once (`deleted.txt` does
+not appear at all, the inherent property described above), against real Git state in the shipping
+artifact, not only in unit tests. No path under `$HOME` in the image; the fixture and `XDG_STATE_HOME`
+were both under `/tmp`, and the process and fixture directories were cleaned up after capture (the
+fixture directories could not be `rm -rf`'d by this session's own sandbox policy -- left under `/tmp`
+for the OS's own cleanup rather than fought around, since they hold no secret and nothing under them
+was committed).
+
+**Disclosed build-time mistake, twice, while constructing the fixture**: the first two attempts staged
+a file (`git add added.txt`, then later `git add contested.txt`) and then ran a plain `git commit -m
+"..."` believing it would commit only the named file -- it commits the whole index, so earlier staged
+work (`added.txt`'s staging, then the `old.txt`→`renamed.txt` rename) got silently folded into commits
+it was never meant to be part of, twice, each caught only by re-running `git status --porcelain=v2`
+after the commit and finding fewer categories than expected. Rebuilt a third time with every commit
+made *before* any of the demonstration mutations existed at all, so no later commit could sweep
+anything up by accident.
+
+### Gate
+
+`cargo fmt --all --check` (clean after one earlier diff, described above, was applied),
+`cargo clippy --workspace --all-targets -- -D warnings` (clean after the four collapsible-if fixes),
+`rfc_docs_invariants` (9/9), `cargo test -p tekstide i18n::enforcement::` (6/6), three consecutive
+full-workspace `cargo test --workspace --all-targets --no-fail-fast` runs, output redirected to files
+and greeped directly: `570 + 9 + 871` across all three, zero `error`/`FAILED`/`error[` lines. No new
+intermittent failures observed; nothing new for `test-process-leak.md`.

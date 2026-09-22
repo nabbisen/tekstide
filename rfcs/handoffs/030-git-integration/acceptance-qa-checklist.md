@@ -260,44 +260,67 @@ ruling below is implemented, not just decided.
 
 ## PR-030-C — per-file status
 
-- [ ] Per-file status from an accepted repository (REQ-GIT-003); a file outside it carries none; a
+- [x] Per-file status from an accepted repository (REQ-GIT-003); a file outside it carries none; a
       refused repository offers none.
-      — **computation layer done, not yet wired to the explorer, so left unticked**: a new
-      `FileGitStatus` enum and `ProjectGitSummary.file_statuses: Option<BTreeMap<PathBuf,
-      FileGitStatus>>`, populated by `read_status_summary`'s existing single `git status` call
-      (rewritten to use `-z` for robust path handling); `None` for `Unavailable`/`AcceptedBranchOnly`/
-      `NotImplemented`/`Unknown`, `Some(map)` only for `Complete`. See `qa-evidence.md`'s "REQ-GIT-003's
-      computation layer" section for the full account. Still owed: explorer-surface wiring (the actual
-      REQ-GIT-003 requirement — "in the file explorer") and this box's own live capture.
-- [ ] Live capture against `mktemp -d`, showing a real Git state where the status bar said "not
+      — `FileGitStatus` (`Modified|Added|Deleted|Renamed|Untracked|Unmerged`) and
+      `ProjectGitSummary.file_statuses: Option<BTreeMap<PathBuf, FileGitStatus>>`, populated by
+      `read_status_summary`'s existing single `git status -z` call (review 413 R-1/R-2: per-record,
+      path-only UTF-8 decoding, a non-UTF-8 path skipped from the map but still counted). Wired into
+      `surface/explorer.rs`'s `node_line` via a new `$git` Fluent selector, threaded down from
+      `shell.rs`'s one call site through `project.git_summary()`. A path outside the map, no active
+      project, no summary yet, and a refused/branch-only repository all render identically -- no
+      badge, checked directly, not only by omission. Directory rollup decided and written down: files
+      only, no synthetic aggregate; a wholly-untracked directory gets a badge anyway, for free, only
+      because `git status` itself collapses it into one record under its own unchanged default mode.
+      One inherent limitation disclosed: `Deleted` can never render as a badge (no filesystem node
+      exists for a deleted file to attach one to) -- real, tested at the data layer, structurally
+      unreachable at the explorer layer. See `qa-evidence.md`'s "review 413's required fixes, and the
+      explorer wiring" section for the full account.
+- [x] Live capture against `mktemp -d`, showing a real Git state where the status bar said "not
       available". Throwaway state only.
+      — `evidence/02-explorer-per-file-git-status-badges.png`: five of the six categories visible at
+      once (modified/added/renamed/untracked-file/untracked-directory-collapsed/conflict) against the
+      real release binary. (The box's own "said 'not available'" phrasing predates PR-030-B, which
+      already made that no longer literally true of the status bar; the live-capture requirement
+      itself -- real `mktemp -d` state, the shipping binary, throwaway only -- is what this satisfies.)
 
 ### Required at review 413 — before the explorer wiring ships
 
-- [ ] **R-1: an awkward-path fixture.** A repository with a non-ASCII filename and a space-bearing
+- [x] **R-1: an awkward-path fixture.** A repository with a non-ASCII filename and a space-bearing
       one (a newline too, if the harness tolerates it), each asserted to map to the path as it exists
       on disk. *Measured at review 413: without `-z`, git emits `"h\303\251llo w\303\266rld.txt"`
       and `"new\nline.txt"` — escaped keys an explorer lookup could never match, so those files would
       silently carry no badge.* Without the test, `-z` is one "simplification" from being reverted
       with everything still green.
-- [ ] **R-2: decide what a non-UTF-8 path does.** The whole-output `from_utf8` drops an entire
+      — `non_ascii_space_bearing_and_newline_bearing_filenames_map_to_their_real_on_disk_path`, all
+      three cases in one fixture.
+- [x] **R-2: decide what a non-UTF-8 path does.** The whole-output `from_utf8` drops an entire
       repository to branch-only for one odd filename. Prefer: decode per record, skip the undecodable
       path from the map but **still count it**, so `changed_file_count` stays truthful. If the
       whole-output decode stays, disclose it in the book beside the cadence note.
-- [ ] **The six categories are settled (review 413): do not split them.** `Unmerged` stays one —
+      — took the preferred direction: `read_status_summary` now decodes per record, path only;
+      `a_non_utf8_path_is_skipped_from_the_map_but_still_counted` proves it.
+- [x] **The six categories are settled (review 413): do not split them.** `Unmerged` stays one —
       which side changed what is a diff-view question. `R`/`C` collapse as a category, but the
       **label must be true for both**; a copy labelled "renamed" is the number-adjacent-to-the-fact
       pattern in miniature.
-- [ ] **The directory question is answered in writing**, not left to be invented: a per-node lookup is
+      — `en.ftl`'s `[renamed]` arm reads `" [renamed or copied]"`;
+      `the_renamed_badge_names_both_rename_and_copy` checks both words render.
+- [x] **The directory question is answered in writing**, not left to be invented: a per-node lookup is
       exact-path, so a folder containing changes carries no badge. *Files only* is a good answer; a
       roll-up is a per-node walk of the map, which is a cost question.
+      — written into `surface/explorer.rs`'s own module doc comment; files only, no synthetic rollup,
+      with the one incidental exception (a wholly-untracked directory) named and tested.
 
 ## Whole-RFC
 
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
       staging, `rfc_docs_invariants`, and **three consecutive full-workspace runs with
       `--no-fail-fast`**, output redirected to files.
-- [ ] Every new intermittent failure has a dated row in `test-process-leak.md`.
+      — `570 + 9 + 871`, clean across all three, this response's own gate.
+- [x] Every new intermittent failure has a dated row in `test-process-leak.md`.
+      — one recurrence of an already-registered row (row 8) during this RFC's own gate runs; dated,
+      not a new row (see `qa-evidence.md`).
 - [ ] Commits are pushed once the gate is green.
 
 ## Final Acceptance Decision

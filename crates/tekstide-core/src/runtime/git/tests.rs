@@ -1004,6 +1004,38 @@ fn a_dirty_repositorys_file_statuses_map_the_real_change_each_file_carries() {
     assert_eq!(summary.changed_file_count, Some(4));
 }
 
+/// Documents a real, deliberate property of the explorer-wiring slice
+/// (review 413's directory question, `surface/explorer.rs`'s own doc
+/// comment): a directory that is *entirely* untracked is exactly what
+/// `git status` collapses into one `?? dir/` record -- no per-node
+/// rollup logic is written anywhere for this; the directory's own row
+/// gets an `Untracked` badge only because git's own default
+/// `--untracked-files` mode (left unchanged here, the same mode
+/// PR-030-B's status bar count already depends on) reports it that way,
+/// and `PathBuf::from("dir/")` compares equal to `PathBuf::from("dir")`.
+#[test]
+fn a_wholly_untracked_directory_is_reported_at_its_own_collapsed_path() {
+    let fixture = Fixture::new("per-file-untracked-directory");
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial", "--allow-empty"]);
+
+    fs::create_dir(fixture.repo.join("newdir")).unwrap();
+    fixture.write("newdir/one.txt", "one\n");
+    fixture.write("newdir/two.txt", "two\n");
+
+    let summary = fixture.compute_summary();
+    assert_eq!(
+        summary.file_status(Path::new("newdir")),
+        Some(FileGitStatus::Untracked)
+    );
+    assert_eq!(
+        summary.file_status(Path::new("newdir/one.txt")),
+        None,
+        "git collapsed the directory into one record; the files inside are not enumerated"
+    );
+    assert_eq!(summary.changed_file_count, Some(1));
+}
+
 /// A staged rename lands under its *new* path only -- the one an explorer
 /// node's `relative_path` can actually match against -- with the old
 /// path carrying no entry. `git mv` moves identical content, so real
@@ -1087,4 +1119,81 @@ fn a_branch_only_repository_offers_no_file_statuses() {
     let summary = fixture.compute_summary();
     assert_eq!(summary.file_statuses, None);
     assert!(!fixture.marker_exists("marker-fsmonitor-per-file"));
+}
+
+/// Review 413, R-1: locks in the `-z` decision with the actual evidence
+/// the reviewer measured -- without `-z`, a non-ASCII filename comes back
+/// octal-escaped (`"h\303\251llo..."`), which never matches an explorer
+/// node's real `relative_path`, silently dropping the badge. A literal
+/// space and a literal newline byte (both legal in a Linux filename) are
+/// exercised the same way, so this is one fixture proving `-z` handles
+/// every character class `core.quotePath` would otherwise escape, not
+/// only the one the reviewer happened to name first.
+#[test]
+fn non_ascii_space_bearing_and_newline_bearing_filenames_map_to_their_real_on_disk_path() {
+    let fixture = Fixture::new("per-file-unusual-names");
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial", "--allow-empty"]);
+
+    fixture.write("héllo wörld.txt", "non-ascii\n");
+    fixture.write("plain space.txt", "space\n");
+    fixture.write("new\nline.txt", "newline\n");
+
+    let summary = fixture.compute_summary();
+    assert_eq!(
+        summary.file_status(Path::new("héllo wörld.txt")),
+        Some(FileGitStatus::Untracked)
+    );
+    assert_eq!(
+        summary.file_status(Path::new("plain space.txt")),
+        Some(FileGitStatus::Untracked)
+    );
+    assert_eq!(
+        summary.file_status(Path::new("new\nline.txt")),
+        Some(FileGitStatus::Untracked),
+        "a literal newline byte is legal in a Linux filename and must not split the record"
+    );
+    assert_eq!(summary.changed_file_count, Some(3));
+}
+
+/// Review 413, R-2: a path that is not valid UTF-8 (legal on Linux; only
+/// `/` and NUL are forbidden in a filename) is skipped from the map --
+/// no badge for that one file -- but still counted, so
+/// `changed_file_count` stays the true number of real changes rather than
+/// silently dropping by one. Before this fix, decoding the *whole*
+/// `git status` output in one call meant one odd filename turned the
+/// entire read into `None`, dropping the whole repository to
+/// branch-only -- the blast radius R-2 named.
+#[test]
+fn a_non_utf8_path_is_skipped_from_the_map_but_still_counted() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let fixture = Fixture::new("per-file-non-utf8");
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.write("valid.txt", "one\n");
+    fixture.setup_git(&["add", "-A"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial"]);
+    fixture.write("valid.txt", "two\n");
+
+    // A lone invalid UTF-8 byte in an otherwise-ordinary filename --
+    // legal as a path component on Linux, invalid as text.
+    let invalid_name = OsStr::from_bytes(b"bad-\xffname.txt");
+    fs::write(fixture.repo.join(invalid_name), b"new\n").unwrap();
+
+    let summary = fixture.compute_summary();
+    assert_eq!(
+        summary.file_status(Path::new("valid.txt")),
+        Some(FileGitStatus::Modified)
+    );
+    assert_eq!(
+        summary.changed_file_count,
+        Some(2),
+        "the undecodable path is still counted even though it carries no map entry"
+    );
+    assert_eq!(
+        summary.file_statuses.as_ref().unwrap().len(),
+        1,
+        "only the decodable file gets a map entry"
+    );
 }

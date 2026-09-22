@@ -15,6 +15,29 @@
 //! No filesystem walking happens here. `ExplorerDirectoryScan` is
 //! `tekstide-core`'s, already bounded by `FileExplorerScanPolicy`; this
 //! module only renders what it is given.
+//!
+//! **RFC-030 PR-030-C, REQ-GIT-003: per-file Git status, one exact-path
+//! lookup per node, no rollup.** `node_line` looks up
+//! `ProjectGitSummary::file_status(&node.relative_path)` for its own row
+//! only -- a directory node's badge (if any) is exactly what `git status`
+//! itself reported *for that literal path*, never an aggregate computed
+//! by walking the map for every descendant. Decided explicitly, not left
+//! implicit: a per-node lookup is the same shape `git_state_fields`
+//! (PR-030-B's status bar) already uses, and walking the whole map for
+//! every directory row on every render is a real cost this slice does
+//! not need to pay. One case reads as a rollup without being one: a
+//! directory that is *entirely* untracked is exactly what `git status`
+//! collapses into a single `?? dir/` record (its default, unchanged
+//! `--untracked-files` mode -- the same mode PR-030-B's status bar count
+//! already depends on, deliberately left alone here so that count's
+//! meaning does not silently shift), and a `PathBuf` built from
+//! `"dir/"` compares equal to one built from `"dir"`, so that directory's
+//! own row gets an `Untracked` badge for free. Once anything inside such
+//! a directory is tracked or staged, `git` stops collapsing it and
+//! enumerates its contents individually -- at that point the directory
+//! row itself carries no badge again, and each file inside carries its
+//! own, exactly as a plain per-node lookup would produce with no special
+//! casing at all.
 
 use iced::widget::{button, column, container, text};
 use iced::{Element, Length};
@@ -24,6 +47,7 @@ use tekstide_core::project::root::{
     BrowseNode, BrowseNodeState, DirectoryBrowseScan, ExplorerDirectoryScan, ExplorerNode,
     ExplorerNodeKind, ExplorerNodeState, FileAccessSymlinkStatus,
 };
+use tekstide_core::project::{FileGitStatus, ProjectGitSummary};
 use tekstide_core::text_safety;
 
 use crate::i18n::{Catalog, CatalogArgs};
@@ -78,29 +102,61 @@ fn symlink_status_symbol(status: FileAccessSymlinkStatus) -> &'static str {
     }
 }
 
+/// `None` (no project Git summary, a project outside any repository, a
+/// refused/branch-only repository, or simply no entry for this exact
+/// path) all read as `"none"` -- the same "absent means nothing to
+/// report" convention `git_state_fields` already uses for the status
+/// bar's own fields.
+fn git_status_symbol(status: Option<FileGitStatus>) -> &'static str {
+    match status {
+        Some(FileGitStatus::Modified) => "modified",
+        Some(FileGitStatus::Added) => "added",
+        Some(FileGitStatus::Deleted) => "deleted",
+        Some(FileGitStatus::Renamed) => "renamed",
+        Some(FileGitStatus::Untracked) => "untracked",
+        Some(FileGitStatus::Unmerged) => "unmerged",
+        None => "none",
+    }
+}
+
 /// The one line a node renders as, factored out from [`view`] so the
 /// escaping and catalog routing are directly testable without `iced` --
 /// the same split `board.rs::row_lines` and `session_bar.rs::entry_text`
 /// use. `node.name` is untrusted (a repository can name a file anything,
 /// including a bidi-override sequence); escaped before it reaches the
 /// catalog, never passed to `trusted_symbol` (which is `&'static str`
-/// only, so a runtime name would not even compile there).
-pub(crate) fn node_line(catalog: &Catalog, node: &ExplorerNode) -> String {
+/// only, so a runtime name would not even compile there). `git_summary`
+/// is the active project's own (`None` when there is no active project,
+/// or -- same value, same rendering -- when a project simply has none
+/// computed yet); the per-node lookup itself is
+/// [`ProjectGitSummary::file_status`], this module's own doc comment
+/// covers why it is exact-path with no rollup.
+pub(crate) fn node_line(
+    catalog: &Catalog,
+    node: &ExplorerNode,
+    git_summary: Option<&ProjectGitSummary>,
+) -> String {
     let name = text_safety::quote_untrusted(&node.name);
+    let git_status = git_summary.and_then(|summary| summary.file_status(&node.relative_path));
     catalog.get_with_args(
         "explorer-node-entry",
         &CatalogArgs::new()
             .trusted_symbol("kind", node_kind_symbol(node.kind))
             .untrusted("name", &name)
             .trusted_symbol("state", node_state_symbol(&node.state))
-            .trusted_symbol("symlink", symlink_status_symbol(node.symlink_status)),
+            .trusted_symbol("symlink", symlink_status_symbol(node.symlink_status))
+            .trusted_symbol("git", git_status_symbol(git_status)),
     )
 }
 
-pub(crate) fn row_line(catalog: &Catalog, row: ExplorerRow<'_>) -> String {
+pub(crate) fn row_line(
+    catalog: &Catalog,
+    row: ExplorerRow<'_>,
+    git_summary: Option<&ProjectGitSummary>,
+) -> String {
     match row {
         ExplorerRow::Parent => catalog.get("explorer-parent-entry"),
-        ExplorerRow::Node(node) => node_line(catalog, node),
+        ExplorerRow::Node(node) => node_line(catalog, node, git_summary),
     }
 }
 
@@ -132,6 +188,7 @@ pub(crate) fn tree_lines(
     scan: Option<&ExplorerDirectoryScan>,
     status: &ProjectExplorerStatus,
     highlight: usize,
+    git_summary: Option<&ProjectGitSummary>,
 ) -> Vec<String> {
     let mut lines = Vec::new();
     if let Some(message) = status_line(catalog, status) {
@@ -146,7 +203,7 @@ pub(crate) fn tree_lines(
             }
             for (index, row) in rows.into_iter().enumerate() {
                 let marker = if index == highlight { "> " } else { "  " };
-                lines.push(format!("{marker}{}", row_line(catalog, row)));
+                lines.push(format!("{marker}{}", row_line(catalog, row, git_summary)));
             }
             if scan.truncated {
                 lines.push(catalog.get("explorer-truncated-notice"));
@@ -166,8 +223,9 @@ pub fn view<'a, Message: 'a>(
     highlight: usize,
     catalog: &'a Catalog,
     theme: &'a Theme,
+    git_summary: Option<&ProjectGitSummary>,
 ) -> Element<'a, Message> {
-    let lines = tree_lines(catalog, scan, status, highlight);
+    let lines = tree_lines(catalog, scan, status, highlight, git_summary);
     let rows: Vec<Element<'a, Message>> = lines
         .into_iter()
         .map(|line| text(line).size(theme.font_size_body()).into())

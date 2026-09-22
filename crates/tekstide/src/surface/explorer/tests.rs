@@ -6,6 +6,7 @@ use tekstide_core::project::root::{
     ExplorerDirectoryScan, ExplorerNode, ExplorerNodeKind, ExplorerNodeState,
     FileAccessContainmentStatus, FileAccessSymlinkStatus, FileAccessTarget,
 };
+use tekstide_core::project::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
 
 use super::{ExplorerRow, node_line, row_line, tree_lines, visible_rows};
 use crate::i18n::{Catalog, LocalePreference};
@@ -58,7 +59,7 @@ fn a_bidi_override_node_name_renders_escaped_and_the_raw_character_is_absent() {
     let catalog = real_catalog();
     let node = plain_node("proj\u{202E}gpj.exe", ExplorerNodeKind::File);
 
-    let line = node_line(&catalog, &node);
+    let line = node_line(&catalog, &node, None);
 
     assert!(
         line.contains("<U+202E>"),
@@ -82,7 +83,7 @@ fn a_plain_node_name_renders_without_any_escape_marker() {
     let catalog = real_catalog();
     let node = plain_node("readme.md", ExplorerNodeKind::File);
 
-    let line = node_line(&catalog, &node);
+    let line = node_line(&catalog, &node, None);
 
     assert!(line.contains("readme.md"));
     assert!(!line.contains("<U+"));
@@ -121,7 +122,7 @@ fn every_state_and_symlink_combination_renders_a_distinct_line() {
                 state: state.clone(),
                 symlink_status: *symlink,
             };
-            let line = node_line(&catalog, &node);
+            let line = node_line(&catalog, &node, None);
             assert!(
                 rendered.insert(line.clone()),
                 "state {state:?} + symlink {symlink:?} rendered a line already produced by \
@@ -138,9 +139,13 @@ fn every_state_and_symlink_combination_renders_a_distinct_line() {
 #[test]
 fn every_kind_renders_a_distinct_marker() {
     let catalog = real_catalog();
-    let file = node_line(&catalog, &plain_node("x", ExplorerNodeKind::File));
-    let dir = node_line(&catalog, &plain_node("x", ExplorerNodeKind::Directory));
-    let other = node_line(&catalog, &plain_node("x", ExplorerNodeKind::Other));
+    let file = node_line(&catalog, &plain_node("x", ExplorerNodeKind::File), None);
+    let dir = node_line(
+        &catalog,
+        &plain_node("x", ExplorerNodeKind::Directory),
+        None,
+    );
+    let other = node_line(&catalog, &plain_node("x", ExplorerNodeKind::Other), None);
 
     assert_ne!(file, dir);
     assert_ne!(file, other);
@@ -191,7 +196,7 @@ fn visible_rows_never_exceeds_the_scans_own_node_count_plus_the_parent_entry() {
 #[test]
 fn the_parent_row_resolves_through_the_catalog() {
     let catalog = real_catalog();
-    let line = row_line(&catalog, ExplorerRow::Parent);
+    let line = row_line(&catalog, ExplorerRow::Parent, None);
     assert_eq!(line, catalog.get("explorer-parent-entry"));
 }
 
@@ -206,7 +211,13 @@ fn the_highlight_marker_is_present_on_exactly_the_highlighted_row() {
         plain_node("a.txt", ExplorerNodeKind::File),
         plain_node("b.txt", ExplorerNodeKind::File),
     ]);
-    let lines = tree_lines(&catalog, Some(&scan), &ProjectExplorerStatus::Ready, 1);
+    let lines = tree_lines(
+        &catalog,
+        Some(&scan),
+        &ProjectExplorerStatus::Ready,
+        1,
+        None,
+    );
 
     assert!(lines[0].starts_with("  "));
     assert!(lines[1].starts_with("> "));
@@ -222,7 +233,7 @@ fn the_error_status_message_is_escaped() {
     let status = ProjectExplorerStatus::Error {
         message: "could not read directory: proj\u{202E}gpj.exe".to_string(),
     };
-    let lines = tree_lines(&catalog, None, &status, 0);
+    let lines = tree_lines(&catalog, None, &status, 0, None);
 
     let status_line = lines
         .iter()
@@ -239,7 +250,13 @@ fn the_error_status_message_is_escaped() {
 fn an_empty_scan_renders_the_empty_notice_not_a_blank_view() {
     let catalog = real_catalog();
     let scan = scan_at_root(Vec::new());
-    let lines = tree_lines(&catalog, Some(&scan), &ProjectExplorerStatus::Ready, 0);
+    let lines = tree_lines(
+        &catalog,
+        Some(&scan),
+        &ProjectExplorerStatus::Ready,
+        0,
+        None,
+    );
     assert_eq!(lines, vec![catalog.get("explorer-empty")]);
 }
 
@@ -253,7 +270,13 @@ fn a_truncated_scan_renders_the_truncation_notice() {
         nodes: vec![plain_node("a.txt", ExplorerNodeKind::File)],
         truncated: true,
     };
-    let lines = tree_lines(&catalog, Some(&scan), &ProjectExplorerStatus::Ready, 0);
+    let lines = tree_lines(
+        &catalog,
+        Some(&scan),
+        &ProjectExplorerStatus::Ready,
+        0,
+        None,
+    );
     assert!(
         lines
             .last()
@@ -285,4 +308,116 @@ fn no_hardcoded_english_label_function_is_called_in_this_module() {
             "{forbidden} must not be called in surface/explorer.rs -- route through Catalog instead"
         );
     }
+}
+
+// ---------------------------------------------------------------------
+// RFC-030 PR-030-C, REQ-GIT-003: per-file Git status badges.
+// ---------------------------------------------------------------------
+
+fn git_summary_with(entries: &[(&str, FileGitStatus)]) -> ProjectGitSummary {
+    ProjectGitSummary {
+        provider_state: ProjectProviderState::Complete,
+        branch_name: Some("main".to_string()),
+        changed_file_count: Some(entries.len() as u32),
+        ahead_count: None,
+        behind_count: None,
+        file_statuses: Some(
+            entries
+                .iter()
+                .map(|(path, status)| (PathBuf::from(path), *status))
+                .collect(),
+        ),
+    }
+}
+
+/// Each of `FileGitStatus`'s six categories renders its own, distinct
+/// `[...]` badge -- `NFR-UX-002`'s distinguishability requirement, the
+/// same property `every_state_and_symlink_combination_renders_a_distinct_line`
+/// already proves for state/symlink.
+#[test]
+fn every_git_status_category_renders_a_distinct_badge() {
+    let catalog = real_catalog();
+    let categories = [
+        FileGitStatus::Modified,
+        FileGitStatus::Added,
+        FileGitStatus::Deleted,
+        FileGitStatus::Renamed,
+        FileGitStatus::Untracked,
+        FileGitStatus::Unmerged,
+    ];
+
+    let mut rendered = std::collections::HashSet::new();
+    for status in categories {
+        let summary = git_summary_with(&[("x", status)]);
+        let line = node_line(
+            &catalog,
+            &plain_node("x", ExplorerNodeKind::File),
+            Some(&summary),
+        );
+        assert!(
+            rendered.insert(line.clone()),
+            "{status:?} rendered a line already produced by another category: {line:?}"
+        );
+    }
+    assert_eq!(rendered.len(), categories.len());
+}
+
+/// `[renamed]`'s own wording review 413 required to stay true for both
+/// a real rename and a copy (porcelain v2's `R`/`C` both collapse to
+/// `FileGitStatus::Renamed` upstream) -- checked here at the string a
+/// user actually sees, not only that the enum variant collapses
+/// correctly in `runtime::git`'s own tests.
+#[test]
+fn the_renamed_badge_names_both_rename_and_copy() {
+    let catalog = real_catalog();
+    let summary = git_summary_with(&[("x", FileGitStatus::Renamed)]);
+    let line = node_line(
+        &catalog,
+        &plain_node("x", ExplorerNodeKind::File),
+        Some(&summary),
+    );
+    assert!(line.contains("renamed"));
+    assert!(line.contains("copied"));
+}
+
+/// A path absent from the summary's map renders exactly like no summary
+/// at all -- absence is not itself a status, the same property
+/// `ProjectGitSummary::file_status` documents at the data layer, checked
+/// here at the rendered string.
+#[test]
+fn a_file_outside_the_summarys_map_renders_identically_to_no_summary_at_all() {
+    let catalog = real_catalog();
+    let summary = git_summary_with(&[("other.txt", FileGitStatus::Modified)]);
+    let node = plain_node("untouched.txt", ExplorerNodeKind::File);
+
+    let with_summary = node_line(&catalog, &node, Some(&summary));
+    let without_summary = node_line(&catalog, &node, None);
+
+    assert_eq!(
+        with_summary, without_summary,
+        "a path absent from the map must render exactly like no summary at all"
+    );
+}
+
+/// `AcceptedBranchOnly`/`Refused` never reach `read_status_summary`, so
+/// `file_statuses` is `None` there (`runtime::git`'s own doc comment) --
+/// every node in that project must render exactly like no summary at
+/// all, not a guessed badge.
+#[test]
+fn a_repository_with_no_file_statuses_computed_renders_no_badges() {
+    let catalog = real_catalog();
+    let branch_only = ProjectGitSummary {
+        provider_state: ProjectProviderState::Complete,
+        branch_name: Some("main".to_string()),
+        changed_file_count: None,
+        ahead_count: None,
+        behind_count: None,
+        file_statuses: None,
+    };
+    let node = plain_node("anything.txt", ExplorerNodeKind::File);
+
+    let with_branch_only = node_line(&catalog, &node, Some(&branch_only));
+    let without_summary = node_line(&catalog, &node, None);
+
+    assert_eq!(with_branch_only, without_summary);
 }

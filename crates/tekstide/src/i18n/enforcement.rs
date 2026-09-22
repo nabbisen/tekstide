@@ -530,6 +530,9 @@ fn generic_args() -> CatalogArgs<'static> {
         )
         .trusted_symbol("state", "available")
         .trusted_symbol("symlink", "none")
+        // RFC-030 PR-030-C, REQ-GIT-003: `explorer-node-entry`'s fifth
+        // selector, `$git`.
+        .trusted_symbol("git", "none")
         .untrusted(
             "message",
             &tekstide_core::text_safety::quote_untrusted("fixture error"),

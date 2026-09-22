@@ -329,14 +329,26 @@ fn compute_summary_with_environment(
 /// `-z` (NUL-terminated records, raw unescaped paths) rather than the
 /// newline-terminated default: without it, a path containing a literal
 /// newline byte (legal in a Linux filename; only `/` and NUL are
-/// forbidden) or other characters `core.quotePath` treats as special gets
-/// C-style-quoted and escaped, and correctly un-escaping that quoting is
-/// exactly the kind of hand-rolled parsing this RFC's own threat model
-/// argues against trusting. `-z` sidesteps the whole question: a path is
-/// never anything but raw bytes up to the next NUL, and a renamed/copied
-/// entry's `path` and `origPath` become two separate NUL-terminated
-/// fields (no tab) -- both read as valid UTF-8, same as every other
-/// invariant this module already relies on for `git`'s own output.
+/// forbidden), a non-ASCII byte, or anything else `core.quotePath` treats
+/// as special gets C-style-quoted and escaped -- measured directly
+/// (review 413): a repository with a non-ASCII filename produced
+/// octal-escaped keys under the old newline-terminated parsing, which
+/// would never match an explorer node's real `relative_path` at all,
+/// silently dropping the badge. `-z` sidesteps the whole question: a path
+/// is raw bytes up to the next NUL, and a renamed/copied entry's `path`
+/// and `origPath` become two separate NUL-terminated fields (no tab).
+///
+/// Decoded **per record, path only** (review 413, R-2) -- the fixed
+/// fields before a path (`XY`, mode, object-hash fields) are always ASCII
+/// by porcelain v2's own format, so this operates on the raw byte stream
+/// throughout and only calls [`std::str::from_utf8`] on the trailing path
+/// slice each record carries. A path that is not valid UTF-8 (legal on
+/// Linux) is skipped from `file_statuses` -- no badge for that one file
+/// -- but still counted, so `changed_file_count` stays the truthful
+/// number of real changes; it is not the whole repository's read that
+/// fails just because one filename is unusual. `changed_file_count` is
+/// therefore counted independently of `file_statuses.len()`, not derived
+/// from it.
 fn read_status_summary(
     repository_root: &Path,
     git_executable: &str,
@@ -358,32 +370,40 @@ fn read_status_summary(
     if !output.status.success() {
         return None;
     }
-    let text = std::str::from_utf8(&output.stdout).ok()?;
 
     let mut branch_name = None;
     let mut ahead_count = None;
     let mut behind_count = None;
     let mut file_statuses = BTreeMap::new();
+    let mut changed_file_count = 0u32;
 
-    let mut tokens = text.split('\0');
+    let mut tokens = output.stdout.split(|byte| *byte == 0);
     while let Some(token) = tokens.next() {
         if token.is_empty() {
             continue;
         }
-        if let Some(rest) = token.strip_prefix("# branch.head ") {
-            branch_name = (rest != "(detached)").then(|| rest.to_string());
-        } else if let Some(rest) = token.strip_prefix("# branch.ab ") {
-            if let Some((ahead, behind)) = parse_ahead_behind(rest) {
+        if let Some(rest) = token.strip_prefix(b"# branch.head ") {
+            if let Ok(rest) = std::str::from_utf8(rest) {
+                branch_name = (rest != "(detached)").then(|| rest.to_string());
+            }
+        } else if let Some(rest) = token.strip_prefix(b"# branch.ab ") {
+            if let Ok(rest) = std::str::from_utf8(rest)
+                && let Some((ahead, behind)) = parse_ahead_behind(rest)
+            {
                 ahead_count = Some(ahead);
                 behind_count = Some(behind);
             }
-        } else if token.starts_with('#') {
+        } else if token.starts_with(b"#") {
             continue;
-        } else if let Some(rest) = token.strip_prefix("1 ") {
-            if let Some((fields, path)) = split_fixed_fields(rest, 7) {
-                file_statuses.insert(PathBuf::from(path), classify_ordinary_xy(fields[0]));
+        } else if let Some(rest) = token.strip_prefix(b"1 ") {
+            changed_file_count += 1;
+            if let Some((fields, path)) = split_fixed_fields(rest, 7)
+                && let (Ok(xy), Ok(path)) =
+                    (std::str::from_utf8(fields[0]), std::str::from_utf8(path))
+            {
+                file_statuses.insert(PathBuf::from(path), classify_ordinary_xy(xy));
             }
-        } else if let Some(rest) = token.strip_prefix("2 ") {
+        } else if let Some(rest) = token.strip_prefix(b"2 ") {
             // Renamed/copied: this record's own trailing field is the
             // *new* path -- the one an explorer node's `relative_path`
             // can actually match. `origPath` follows as its own
@@ -391,20 +411,28 @@ fn read_status_summary(
             // discarded, since nothing here needs the old path. R and C
             // both collapse to `Renamed` -- see [`FileGitStatus`]'s own
             // doc comment for why a copy is not modelled separately.
-            if let Some((_fields, path)) = split_fixed_fields(rest, 8) {
+            changed_file_count += 1;
+            if let Some((_fields, path)) = split_fixed_fields(rest, 8)
+                && let Ok(path) = std::str::from_utf8(path)
+            {
                 file_statuses.insert(PathBuf::from(path), FileGitStatus::Renamed);
             }
             let _ = tokens.next();
-        } else if let Some(rest) = token.strip_prefix("u ") {
-            if let Some((_fields, path)) = split_fixed_fields(rest, 9) {
+        } else if let Some(rest) = token.strip_prefix(b"u ") {
+            changed_file_count += 1;
+            if let Some((_fields, path)) = split_fixed_fields(rest, 9)
+                && let Ok(path) = std::str::from_utf8(path)
+            {
                 file_statuses.insert(PathBuf::from(path), FileGitStatus::Unmerged);
             }
-        } else if let Some(path) = token.strip_prefix("? ") {
-            file_statuses.insert(PathBuf::from(path), FileGitStatus::Untracked);
+        } else if let Some(path) = token.strip_prefix(b"? ") {
+            changed_file_count += 1;
+            if let Ok(path) = std::str::from_utf8(path) {
+                file_statuses.insert(PathBuf::from(path), FileGitStatus::Untracked);
+            }
         }
     }
 
-    let changed_file_count = file_statuses.len() as u32;
     Some(ProjectGitSummary {
         provider_state: ProjectProviderState::Complete,
         branch_name,
@@ -426,14 +454,17 @@ fn parse_ahead_behind(body: &str) -> Option<(u32, u32)> {
 /// Splits a record body into its first `field_count` space-separated
 /// fixed fields and the raw remainder (the path, or `path` before its
 /// separate `origPath` field for a `2` record) -- a path is never split
-/// further, since under `-z` it may itself contain spaces.
-fn split_fixed_fields(body: &str, field_count: usize) -> Option<(Vec<&str>, &str)> {
+/// further, since under `-z` it may itself contain spaces. Operates on
+/// raw bytes: the fixed fields this splits off are always ASCII by
+/// porcelain v2's own format, so no decode is needed (or attempted) until
+/// a caller looks at the trailing path slice.
+fn split_fixed_fields(body: &[u8], field_count: usize) -> Option<(Vec<&[u8]>, &[u8])> {
     let mut rest = body;
     let mut fields = Vec::with_capacity(field_count);
     for _ in 0..field_count {
-        let (field, remainder) = rest.split_once(' ')?;
-        fields.push(field);
-        rest = remainder;
+        let space = rest.iter().position(|byte| *byte == b' ')?;
+        fields.push(&rest[..space]);
+        rest = &rest[space + 1..];
     }
     Some((fields, rest))
 }
