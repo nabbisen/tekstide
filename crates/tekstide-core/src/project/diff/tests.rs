@@ -796,12 +796,21 @@ fn the_bounded_read_refuses_rather_than_truncates_when_called_directly() {
 /// proving it is the *only* transcript reader in the crate; this list
 /// only needs to know that its one call site exists and is reviewed, not
 /// re-prove exclusivity a second time.
+///
+/// `runtime/git.rs` (RFC-030 PR-030-A) reads a fourth kind of content this
+/// scan's name is broad enough to catch: `read_bounded`'s
+/// `Take::read_to_end` there reads a *subprocess's* stdout/stderr pipe --
+/// `git config --list`/`git --version` diagnostic output -- not a project
+/// or generated-change file, and already length-bounded by the `.take(...)`
+/// wrapping the read. Listed here rather than widened out of the scan, the
+/// same discipline the two pre-RFC-024 entries above follow.
 const FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT: &[&str] = &[
     "project/diff.rs",
     "content/open.rs",
     "project/recent/store.rs",
     "audit/recovery.rs",
     "transcript/reader.rs",
+    "runtime/git.rs",
 ];
 
 fn tekstide_core_src_dir() -> PathBuf {
