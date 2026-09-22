@@ -7375,6 +7375,93 @@ fn status_bar(state: &State) -> Element<'_, Message> {
     .into()
 }
 
+// --- RFC-025: one model for every board notification -----------------------
+//
+// Four RFCs (047, 045, 050/051, 049) each added their own notice to the
+// project board, concatenated at one call site in a fixed order, each
+// deciding locally how long its notice lives. This slice gives them one type.
+
+/// RFC-025 D1, §3: the closed set of two lifetimes a notification may carry,
+/// and no third. `until acknowledged` is deliberately absent (D1, acceptance):
+/// nothing in this slice produces it, and a lifetime with no producer is the
+/// dormant-capability shape RFC-036 closed. It returns with the first notice
+/// that needs it, together with the acknowledging action.
+///
+/// **Not a label chosen after the fact — a property of how the notice is
+/// computed.** A `WhileConditionHolds` notice is read fresh from live,
+/// continuously-updated state at every render, so it disappears the instant
+/// its condition is no longer true. A `ForTheStartItHappened` notice is
+/// computed once, at the moment it names, and held fixed on `State`
+/// regardless of what live state does afterward. Migrating a notice under the
+/// wrong lifetime means implementing it with the wrong one of those two
+/// patterns, and for the one notice here where the patterns produce different
+/// answers, an existing test already catches it:
+/// `the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NotificationLifetime {
+    WhileConditionHolds,
+    ForTheStartItHappened,
+}
+
+/// RFC-025 D7: the four kinds this slice migrates, **ranked by declaration
+/// order** — `derive(Ord)` on a fieldless enum orders variants by the order
+/// they are written below, which is deliberately the same fixed order the
+/// four producers already concatenated in at their one call site. A notice's
+/// position on the board is therefore a property of its kind, not of which
+/// producer's condition happened to be true first this render — proven by
+/// `notifications_render_in_kind_order_regardless_of_insertion_order`, which
+/// builds a `Vec<Notification>` in a scrambled order and checks the sort
+/// recovers this one.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub(crate) enum NotificationKind {
+    AuditHealth,
+    Configuration,
+    RecentProjectListRepair,
+    TranscriptRetention,
+}
+
+/// RFC-025 D1: one model for every board notification — scope, kind, the text
+/// it renders, and a lifetime from [`NotificationLifetime`]'s closed set of
+/// two. The type makes a third lifetime, and a kind out of its declared
+/// order, both impossible to construct.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Notification {
+    /// D1: the project this notice is about, or `None` for a global one.
+    /// Every notice this slice migrates is global; REQ-PROJ-006's per-project
+    /// notice is a later producer's to add, the same "returns when something
+    /// needs it" discipline D1 already applies to the third lifetime.
+    scope: Option<tekstide_core::project::ProjectId>,
+    kind: NotificationKind,
+    text: String,
+    lifetime: NotificationLifetime,
+}
+
+/// RFC-025 D7: notifications render in **kind order**, never insertion order.
+/// A stable sort, so within one kind (today, at most one notification per
+/// kind reaches this point) nothing about call order matters; the property
+/// this exists for is *between* kinds, so a notice cannot move under the
+/// reader between frames just because a different combination of conditions
+/// happened to be true.
+fn ordered_by_kind(mut notifications: Vec<Notification>) -> Vec<Notification> {
+    notifications.sort_by_key(|notification| notification.kind);
+    notifications
+}
+
+/// RFC-025 D2/D7: **the one place notifications reach the board.** Collects
+/// all four migrated producers, in whatever order their own conditions
+/// happened to resolve, and hands back the deterministic, kind-ordered
+/// result. This is what `content_area`'s `ProjectBoard` arm renders; it never
+/// calls a `*_lines` function directly (grepped — the only remaining callers
+/// of those four are the tests each notice's own RFC already wrote, which
+/// this migration's whole acceptance is that it does not have to touch).
+fn project_board_notifications(state: &State) -> Vec<Notification> {
+    let mut notifications = project_board_audit_notifications(state);
+    notifications.extend(project_board_configuration_notifications(state));
+    notifications.extend(project_board_recent_projects_reset_notifications(state));
+    notifications.extend(project_board_transcript_cleanup_notifications(state));
+    ordered_by_kind(notifications)
+}
+
 /// RFC-047 PR-047-B, D3: the project board's own extra line(s), on top
 /// of the per-project runtime summary `surface::board::row_lines`
 /// already renders -- kept out of that function deliberately (its own
@@ -7388,10 +7475,23 @@ fn status_bar(state: &State) -> Element<'_, Message> {
 /// session** -- §2 of the risk document's own rule, checked by
 /// `project_board_audit_lines_is_empty_when_healthy_and_never_recovered`
 /// with its own ablation, not merely intended.
-fn project_board_audit_lines(state: &State) -> Vec<String> {
-    let mut lines = Vec::new();
+///
+/// RFC-025 PR-025-A: **the real producer**, read fresh from `state.audit_health`
+/// every call — nothing here is ever snapshotted, which is what makes
+/// `NotificationLifetime::WhileConditionHolds` the honest tag for all three
+/// lines it can emit. `project_board_audit_lines` below is a thin projection
+/// kept only so this notice's own existing tests keep calling it, unmodified,
+/// exactly as §1 requires.
+fn project_board_audit_notifications(state: &State) -> Vec<Notification> {
+    let mut notifications = Vec::new();
     let degraded = state.audit_health.status() == tekstide_core::audit::AuditHealthStatus::Degraded;
     let recovered_this_session = state.audit_health.last_recovery().is_some();
+    let notify = |text: String| Notification {
+        scope: None,
+        kind: NotificationKind::AuditHealth,
+        text,
+        lifetime: NotificationLifetime::WhileConditionHolds,
+    };
 
     // RFC-047 PR-047-B response 358 R1, §3.1: "not recording" is false
     // whenever a recovery already returned a working store -- what
@@ -7403,26 +7503,28 @@ fn project_board_audit_lines(state: &State) -> Vec<String> {
     // "recovered" line sitting right next to it.
     if degraded {
         if recovered_this_session {
-            lines.push(
+            notifications.push(notify(
                 state
                     .catalog
                     .get("project-board-audit-recovery-not-confirmed"),
-            );
+            ));
         } else {
-            lines.push(state.catalog.get("project-board-audit-degraded"));
+            notifications.push(notify(state.catalog.get("project-board-audit-degraded")));
         }
     }
     match state.audit_health.last_recovery() {
         Some(tekstide_core::audit::AuditRecoveryDisclosure::Resumed) => {
-            lines.push(state.catalog.get("project-board-audit-recovered-resumed"));
+            notifications.push(notify(
+                state.catalog.get("project-board-audit-recovered-resumed"),
+            ));
         }
         Some(tekstide_core::audit::AuditRecoveryDisclosure::Recovered { quarantine_dir }) => {
             let path =
                 tekstide_core::text_safety::quote_untrusted(&quarantine_dir.display().to_string());
-            lines.push(state.catalog.get_with_args(
+            notifications.push(notify(state.catalog.get_with_args(
                 "project-board-audit-recovered-quarantined",
                 &CatalogArgs::new().untrusted("path", &path),
-            ));
+            )));
         }
         None => {}
     }
@@ -7443,13 +7545,21 @@ fn project_board_audit_lines(state: &State) -> Vec<String> {
     // actually counts, not "actions".
     let failure_count = state.audit_health.failure_count();
     if failure_count > 0 {
-        lines.push(state.catalog.get_with_args(
+        notifications.push(notify(state.catalog.get_with_args(
             "project-board-audit-history",
             &CatalogArgs::new().number("count", failure_count),
-        ));
+        )));
     }
 
-    lines
+    notifications
+}
+
+#[cfg(test)]
+fn project_board_audit_lines(state: &State) -> Vec<String> {
+    project_board_audit_notifications(state)
+        .into_iter()
+        .map(|notification| notification.text)
+        .collect()
 }
 
 /// RFC-045 PR-045-B, D1 and §6 of the risk document: **which of three
@@ -7531,7 +7641,18 @@ pub(crate) fn recent_project_list_repair_from(
 /// The owner's rule (2026-09-13): whenever transcripts stop belonging to any
 /// project, say what happened and where the files are, at the next moment the
 /// user can see it. Absent on every other start.
-fn project_board_recent_projects_reset_lines(state: &State) -> Vec<String> {
+///
+/// RFC-025 PR-025-A: the real producer. `state.recent_project_list_repair` is
+/// computed **exactly once**, at boot (`State::with_recent_project_list_repair`),
+/// and never recomputed during the session — the one notice among the four
+/// where `NotificationLifetime::ForTheStartItHappened` names a real,
+/// observable difference from the other three's `WhileConditionHolds`. Reading
+/// this from anything live instead (the disk figure, in particular) is exactly
+/// the ablation `the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes`
+/// exists to catch. `project_board_recent_projects_reset_lines` below is a
+/// thin projection, kept only so this notice's own existing tests keep calling
+/// it, unmodified.
+fn project_board_recent_projects_reset_notifications(state: &State) -> Vec<Notification> {
     let Some(reset) = &state.recent_project_list_repair else {
         return Vec::new();
     };
@@ -7539,43 +7660,61 @@ fn project_board_recent_projects_reset_lines(state: &State) -> Vec<String> {
         .map(|state_root| state_root.join("transcripts").display().to_string())
         .unwrap_or_default();
     let transcripts = tekstide_core::text_safety::quote_untrusted(&transcripts);
+    let notify = |text: String| Notification {
+        scope: None,
+        kind: NotificationKind::RecentProjectListRepair,
+        text,
+        lifetime: NotificationLifetime::ForTheStartItHappened,
+    };
     // RFC-051 D5/§5: **recovered** and **reset with nothing to recover** are
     // different sentences, and this line is where a user learns which happened.
     // The recovered form replaces the reset one rather than joining it.
     if reset.kind == RecentProjectListRepairKind::Recovered {
-        let mut lines = vec![state.catalog.get("project-board-recent-projects-recovered")];
+        let mut notifications = vec![notify(
+            state.catalog.get("project-board-recent-projects-recovered"),
+        )];
         if let Some(moved_to) = &reset.moved_to {
             let moved_to =
                 tekstide_core::text_safety::quote_untrusted(&moved_to.display().to_string());
-            lines.push(state.catalog.get_with_args(
+            notifications.push(notify(state.catalog.get_with_args(
                 "project-board-recent-projects-reset-moved",
                 &CatalogArgs::new().untrusted("path", &moved_to),
-            ));
+            )));
         }
-        return lines;
+        return notifications;
     }
-    let mut lines = vec![state.catalog.get("project-board-recent-projects-reset")];
+    let mut notifications = vec![notify(
+        state.catalog.get("project-board-recent-projects-reset"),
+    )];
     // Response 394 (F1): the boot snapshot, not the live figure -- and no
     // sentence about transcripts at all when there were none, rather than a
     // "0 bytes in ..." line that gives the user a path to nothing.
     if reset.transcript_bytes_at_boot > 0 {
-        lines.push(
+        notifications.push(notify(
             state.catalog.get_with_args(
                 "project-board-recent-projects-reset-transcripts",
                 &CatalogArgs::new()
                     .number("bytes", reset.transcript_bytes_at_boot)
                     .untrusted("path", &transcripts),
             ),
-        );
+        ));
     }
     if let Some(moved_to) = &reset.moved_to {
         let moved_to = tekstide_core::text_safety::quote_untrusted(&moved_to.display().to_string());
-        lines.push(state.catalog.get_with_args(
+        notifications.push(notify(state.catalog.get_with_args(
             "project-board-recent-projects-reset-moved",
             &CatalogArgs::new().untrusted("path", &moved_to),
-        ));
+        )));
     }
-    lines
+    notifications
+}
+
+#[cfg(test)]
+fn project_board_recent_projects_reset_lines(state: &State) -> Vec<String> {
+    project_board_recent_projects_reset_notifications(state)
+        .into_iter()
+        .map(|notification| notification.text)
+        .collect()
 }
 
 /// RFC-049, response 385: **policy removals are told to the user**, on the
@@ -7589,29 +7728,52 @@ fn project_board_recent_projects_reset_lines(state: &State) -> Vec<String> {
 /// which is nothing like a budget relieved exactly as intended.
 ///
 /// Empty when the last cleanup removed nothing and failed at nothing.
-fn project_board_transcript_cleanup_lines(state: &State) -> Vec<String> {
+///
+/// RFC-025 PR-025-A: the real producer. `state.transcript_cleanup_notice` is
+/// overwritten at **every** cleanup trigger (`run_transcript_retention_cleanup`,
+/// called at project open and at launch preflight) — read fresh here, never
+/// snapshotted once, which is what makes `WhileConditionHolds` the honest tag:
+/// the board reflects the most recent cleanup, not the first one this session,
+/// proven by `the_retention_notice_reflects_the_most_recent_cleanup_not_the_first`.
+/// `project_board_transcript_cleanup_lines` below is a thin projection, kept
+/// only so this notice's own existing tests keep calling it, unmodified.
+fn project_board_transcript_cleanup_notifications(state: &State) -> Vec<Notification> {
     let Some(notice) = &state.transcript_cleanup_notice else {
         return Vec::new();
     };
-    let mut lines = Vec::new();
+    let notify = |text: String| Notification {
+        scope: None,
+        kind: NotificationKind::TranscriptRetention,
+        text,
+        lifetime: NotificationLifetime::WhileConditionHolds,
+    };
+    let mut notifications = Vec::new();
     if notice.removed_transcripts > 0 {
-        lines.push(
+        notifications.push(notify(
             state.catalog.get_with_args(
                 "project-board-transcript-policy-removal",
                 &CatalogArgs::new()
                     .number("count", notice.removed_transcripts)
                     .number("bytes", notice.removed_bytes),
             ),
-        );
+        ));
     }
     if notice.a_deletion_failed {
-        lines.push(
+        notifications.push(notify(
             state
                 .catalog
                 .get("project-board-transcript-policy-deletion-failed"),
-        );
+        ));
     }
-    lines
+    notifications
+}
+
+#[cfg(test)]
+fn project_board_transcript_cleanup_lines(state: &State) -> Vec<String> {
+    project_board_transcript_cleanup_notifications(state)
+        .into_iter()
+        .map(|notification| notification.text)
+        .collect()
 }
 
 /// RFC-050 PR-050-C (D6′): bytes of transcripts no open or recent project
@@ -7636,15 +7798,26 @@ fn trust_settings_unclaimed_transcripts_line(state: &State) -> Option<String> {
     )
 }
 
-fn project_board_configuration_lines(state: &State) -> Vec<String> {
-    let mut lines = Vec::new();
+/// RFC-025 PR-025-A: the real producer, read fresh from `state.configuration`
+/// every call — which a `Ctrl+Alt+C` reload can replace mid-session, so
+/// `WhileConditionHolds` is the honest tag. `project_board_configuration_lines`
+/// below is a thin projection, kept only so this notice's own existing tests
+/// keep calling it, unmodified.
+fn project_board_configuration_notifications(state: &State) -> Vec<Notification> {
+    let mut notifications = Vec::new();
+    let notify = |text: String| Notification {
+        scope: None,
+        kind: NotificationKind::Configuration,
+        text,
+        lifetime: NotificationLifetime::WhileConditionHolds,
+    };
 
     if let Some(diagnostic) = &state.configuration.diagnostic {
         let key = tekstide_core::text_safety::quote_untrusted(&diagnostic.key);
-        lines.push(state.catalog.get_with_args(
+        notifications.push(notify(state.catalog.get_with_args(
             "project-board-configuration-ignored",
             &CatalogArgs::new().untrusted("key", &key),
-        ));
+        )));
     }
 
     // Each warned key gets its own line. A file with several unknown
@@ -7655,13 +7828,21 @@ fn project_board_configuration_lines(state: &State) -> Vec<String> {
     // this can render file-derived text at all.
     for warning in &state.configuration.warnings {
         let key = tekstide_core::text_safety::quote_untrusted(&warning.key);
-        lines.push(state.catalog.get_with_args(
+        notifications.push(notify(state.catalog.get_with_args(
             "project-board-configuration-unknown-key",
             &CatalogArgs::new().untrusted("key", &key),
-        ));
+        )));
     }
 
-    lines
+    notifications
+}
+
+#[cfg(test)]
+fn project_board_configuration_lines(state: &State) -> Vec<String> {
+    project_board_configuration_notifications(state)
+        .into_iter()
+        .map(|notification| notification.text)
+        .collect()
 }
 
 /// RFC-047 PR-047-C, D4: the agent-launch half of "say it before the
@@ -7736,10 +7917,13 @@ fn content_area(state: &State) -> Element<'_, Message> {
                     state.project_board_row_highlight,
                     Message::ReopenRecentProjectRowPressed,
                 );
-                let mut board_lines = project_board_audit_lines(state);
-                board_lines.extend(project_board_configuration_lines(state));
-                board_lines.extend(project_board_recent_projects_reset_lines(state));
-                board_lines.extend(project_board_transcript_cleanup_lines(state));
+                // RFC-025 D2/D7: the model, not four functions' strings --
+                // `project_board_notifications` is the one place that builds
+                // and orders the `Vec<Notification>`; this extracts the text.
+                let board_lines: Vec<String> = project_board_notifications(state)
+                    .into_iter()
+                    .map(|notification| notification.text)
+                    .collect();
                 if board_lines.is_empty() {
                     board
                 } else {

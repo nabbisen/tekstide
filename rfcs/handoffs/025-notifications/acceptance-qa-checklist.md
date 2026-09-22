@@ -15,12 +15,24 @@ implementer's to paper over.
 
 ## PR-025-A — the model and the migration
 
-- [ ] **Every existing absent-when-false test passes unmodified.** Name them in the evidence.
+- [x] **Every existing absent-when-false test passes unmodified.** Name them in the evidence.
       **Ablation:** give a migrated notice the other lifetime; its own test fails.
-- [ ] A notification cannot carry a lifetime outside the two (§3) — by the type, not by review.
-- [ ] The four producers construct notifications; **no notice text changed**. **Grep:** the board
+      *All 16 existing tests named in `qa-evidence.md`, diffed against the pre-migration tree — no
+      test file line changed. E1 (recent-list notice reads the live disk figure instead of the boot
+      snapshot) fails the pre-existing, unmodified `the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes`.*
+- [x] A notification cannot carry a lifetime outside the two (§3) — by the type, not by review.
+      *`NotificationLifetime` is a two-variant enum; `until acknowledged` was not added, per D1's
+      acceptance ruling.*
+- [x] The four producers construct notifications; **no notice text changed**. **Grep:** the board
       renders the model, not strings from four functions.
-- [ ] Order is deterministic and defined by kind, not arrival (D7).
+      *Each `*_notifications` function holds the unchanged conditional logic; each `*_lines` function
+      is now a one-line projection over it, `#[cfg(test)]`. Grepped: the four `*_lines` names each
+      appear exactly once — their own definitions — nowhere else.*
+- [x] Order is deterministic and defined by kind, not arrival (D7).
+      *`ordered_by_kind`, `derive(Ord)` on `NotificationKind`.
+      `notifications_render_in_kind_order_regardless_of_insertion_order` proves it against a
+      hand-scrambled `Vec<Notification>`; `project_board_notifications_from_a_real_mixed_state_are_kind_ordered`
+      proves it against real, mixed state.*
 
 ## PR-025-B — the status bar
 

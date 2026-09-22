@@ -16961,3 +16961,243 @@ fn seed_change_review_demo_change_set_is_a_no_op_without_an_active_project() {
 
     assert!(app_shell.state().active_project().is_none());
 }
+
+// --- RFC-025 PR-025-A: one model for every board notification ---------------
+//
+// PR-025-A's whole acceptance, restated as a test rather than left implicit:
+// every one of the four notices' own pre-migration tests above still calls
+// its `*_lines` function directly and still passes. Nothing here duplicates
+// them -- this section only adds what the migration itself introduces: the
+// model's ordering, and the one lifetime distinction (RecentProjectListRepair
+// vs. everything else) an ablation can actually falsify.
+
+/// RFC-025 D7: kind order survives a scrambled insertion order. Built by hand
+/// rather than through `state`, so the property under test is `ordered_by_kind`
+/// itself, not incidentally reproduced by the one call site that happens to
+/// already insert in kind order.
+#[test]
+fn notifications_render_in_kind_order_regardless_of_insertion_order() {
+    let scrambled = vec![
+        super::Notification {
+            scope: None,
+            kind: super::NotificationKind::TranscriptRetention,
+            text: "retention".to_owned(),
+            lifetime: super::NotificationLifetime::WhileConditionHolds,
+        },
+        super::Notification {
+            scope: None,
+            kind: super::NotificationKind::RecentProjectListRepair,
+            text: "recent-list".to_owned(),
+            lifetime: super::NotificationLifetime::ForTheStartItHappened,
+        },
+        super::Notification {
+            scope: None,
+            kind: super::NotificationKind::AuditHealth,
+            text: "audit".to_owned(),
+            lifetime: super::NotificationLifetime::WhileConditionHolds,
+        },
+        super::Notification {
+            scope: None,
+            kind: super::NotificationKind::Configuration,
+            text: "configuration".to_owned(),
+            lifetime: super::NotificationLifetime::WhileConditionHolds,
+        },
+    ];
+
+    let ordered: Vec<String> = super::ordered_by_kind(scrambled)
+        .into_iter()
+        .map(|notification| notification.text)
+        .collect();
+
+    assert_eq!(
+        ordered,
+        vec!["audit", "configuration", "recent-list", "retention"],
+        "kind order (audit, configuration, recent-list, retention), not insertion order"
+    );
+}
+
+/// `project_board_notifications` is the one function `content_area` calls; if
+/// it stopped calling `ordered_by_kind`, or a producer's own condition changed
+/// which kinds were present, this proves the board-level result is still in
+/// kind order for a real, mixed state -- not only for the hand-built case
+/// above.
+#[test]
+fn project_board_notifications_from_a_real_mixed_state_are_kind_ordered() {
+    let mut state = state_with(ApplicationShell::new());
+    state
+        .audit_health
+        .record_open_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
+    state.transcript_cleanup_notice = Some(super::TranscriptCleanupNotice {
+        removed_transcripts: 2,
+        removed_bytes: 4096,
+        a_deletion_failed: false,
+    });
+    let loaded = tekstide_core::project::recent::RecentProjectLoadOutcome::Reset {
+        message: "not json".to_owned(),
+        moved_to: None,
+    };
+    let state =
+        state.with_recent_project_list_repair(super::recent_project_list_repair_from(&loaded));
+
+    let kinds: Vec<super::NotificationKind> = super::project_board_notifications(&state)
+        .iter()
+        .map(|notification| notification.kind)
+        .collect();
+
+    let mut sorted = kinds.clone();
+    sorted.sort();
+    assert_eq!(kinds, sorted, "already in kind order: {kinds:?}");
+    assert!(
+        kinds.contains(&super::NotificationKind::AuditHealth)
+            && kinds.contains(&super::NotificationKind::RecentProjectListRepair)
+            && kinds.contains(&super::NotificationKind::TranscriptRetention),
+        "precondition: three of the four kinds are really present here: {kinds:?}"
+    );
+}
+
+/// One test per producer, naming the kind and lifetime it constructs --
+/// direct evidence for "the four producers construct notifications" beyond
+/// what the string-returning `*_lines` wrappers can show.
+#[test]
+fn project_board_audit_notifications_carry_audit_health_while_condition_holds() {
+    let mut state = state_with(ApplicationShell::new());
+    state
+        .audit_health
+        .record_open_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
+
+    let notifications = super::project_board_audit_notifications(&state);
+
+    assert!(!notifications.is_empty());
+    assert!(notifications.iter().all(|notification| {
+        notification.kind == super::NotificationKind::AuditHealth
+            && notification.lifetime == super::NotificationLifetime::WhileConditionHolds
+            && notification.scope.is_none()
+    }));
+}
+
+#[test]
+fn project_board_configuration_notifications_carry_configuration_while_condition_holds() {
+    let mut state = state_with(ApplicationShell::new());
+    state
+        .configuration
+        .warnings
+        .push(tekstide_core::config::ConfigWarning {
+            key: "agent.unknown_key".to_owned(),
+        });
+
+    let notifications = super::project_board_configuration_notifications(&state);
+
+    assert!(!notifications.is_empty());
+    assert!(notifications.iter().all(|notification| {
+        notification.kind == super::NotificationKind::Configuration
+            && notification.lifetime == super::NotificationLifetime::WhileConditionHolds
+    }));
+}
+
+#[test]
+fn project_board_recent_projects_reset_notifications_carry_for_the_start_it_happened() {
+    let loaded = tekstide_core::project::recent::RecentProjectLoadOutcome::Reset {
+        message: "not json".to_owned(),
+        moved_to: None,
+    };
+    let state = state_with(ApplicationShell::new())
+        .with_recent_project_list_repair(super::recent_project_list_repair_from(&loaded));
+
+    let notifications = super::project_board_recent_projects_reset_notifications(&state);
+
+    assert!(!notifications.is_empty());
+    assert!(notifications.iter().all(|notification| {
+        notification.kind == super::NotificationKind::RecentProjectListRepair
+            && notification.lifetime == super::NotificationLifetime::ForTheStartItHappened
+    }));
+}
+
+#[test]
+fn project_board_transcript_cleanup_notifications_carry_transcript_retention_while_condition_holds()
+{
+    let mut state = state_with(ApplicationShell::new());
+    state.transcript_cleanup_notice = Some(super::TranscriptCleanupNotice {
+        removed_transcripts: 1,
+        removed_bytes: 10,
+        a_deletion_failed: false,
+    });
+
+    let notifications = super::project_board_transcript_cleanup_notifications(&state);
+
+    assert!(!notifications.is_empty());
+    assert!(notifications.iter().all(|notification| {
+        notification.kind == super::NotificationKind::TranscriptRetention
+            && notification.lifetime == super::NotificationLifetime::WhileConditionHolds
+    }));
+}
+
+/// RFC-025 §1's real ablation target: of the four, this is the one notice
+/// where `ForTheStartItHappened` names an actually different implementation
+/// from `WhileConditionHolds` -- a boot-time snapshot versus a live re-read --
+/// and `the_reset_notice_keeps_the_boot_figure_after_the_live_one_changes`
+/// (above, unmodified) is the existing test an ablation that gave this notice
+/// the other lifetime would fail. Restated here as the direct claim the
+/// migration makes about it.
+#[test]
+fn the_recent_projects_reset_notice_is_fixed_at_boot_not_recomputed_live() {
+    let loaded = tekstide_core::project::recent::RecentProjectLoadOutcome::Reset {
+        message: "not json".to_owned(),
+        moved_to: None,
+    };
+    let mut state = state_with(ApplicationShell::new());
+    state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage {
+        total_bytes: 500,
+        unclaimed_bytes: 500,
+    };
+    let mut state =
+        state.with_recent_project_list_repair(super::recent_project_list_repair_from(&loaded));
+
+    let before = super::project_board_recent_projects_reset_notifications(&state);
+    state.transcript_disk_usage = tekstide_core::transcript::TranscriptDiskUsage {
+        total_bytes: 999,
+        unclaimed_bytes: 999,
+    };
+    let after = super::project_board_recent_projects_reset_notifications(&state);
+
+    assert_eq!(
+        before, after,
+        "a ForTheStartItHappened notice must not change when live state changes afterward"
+    );
+}
+
+/// The retention notice's own live-recompute property, the mirror image of
+/// the test above: it is `WhileConditionHolds`, so a cleanup that later finds
+/// nothing to remove must **clear** the board, not leave the first cleanup's
+/// notice stuck on screen for the rest of the session.
+#[test]
+fn the_retention_notice_reflects_the_most_recent_cleanup_not_the_first() {
+    let (mut state, project_id, _project_dir) =
+        state_with_cached_trusted_recent_project("retention-notice-live");
+    let expired = earlier_transcript_for(&project_id, b"output from a run two months ago");
+    age_transcript_file(&expired, 60);
+
+    // The project-open trigger runs the first cleanup, which removes the aged
+    // transcript and leaves a notice.
+    send_main_area_key(
+        &mut state,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+    );
+    assert!(
+        !super::project_board_transcript_cleanup_lines(&state).is_empty(),
+        "precondition: the board says something after the first cleanup removed something"
+    );
+
+    // A second cleanup, with nothing left to remove.
+    let second = super::run_transcript_retention_cleanup(&mut state, &project_id)
+        .expect("the project is open, so the cleanup can run again");
+    assert!(
+        !second.removed_anything() && !second.a_deletion_failed(),
+        "precondition: nothing is left to remove the second time: {second:?}"
+    );
+
+    assert!(
+        super::project_board_transcript_cleanup_lines(&state).is_empty(),
+        "the notice reflects the most recent cleanup, not the first one this session -- a fixed \
+         ForTheStartItHappened snapshot would leave the first notice stuck on screen"
+    );
+}
