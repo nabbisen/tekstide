@@ -1,6 +1,6 @@
 # RFC-025: Notifications
 
-Status: **Proposed 2026-09-17.** Reserved for M12 since the roadmap was written; scoped at the owner's
+Status: **Accepted by the human owner 2026-09-22.** **D1–D7 decided by the architect on acceptance** — see the end, including D4's open question. Proposed 2026-09-17. Reserved for M12 since the roadmap was written; scoped at the owner's
 word as the headline of `0.21.0`, with RFC-030 scoped alongside and shipping separately.
 Target milestone: **M12**
 Date: 2026-09-17
@@ -87,3 +87,32 @@ notification that leaves the window is a different privacy and consent question.
 - Status bar and board render actionable labels; no bare counts.
 - Every notification is reachable by keyboard and readable without colour.
 - Git state reads "not available", truthfully, until RFC-030 lands.
+
+
+## Decided on acceptance (2026-09-22)
+
+**D1 — two lifetimes, not three, and that answers D4.** *While the condition holds* and *for the
+start it happened* are the two the four existing notices use. **`until acknowledged` is not in this
+RFC**, because nothing would produce it: a lifetime with no producer is the dormant-capability shape
+RFC-036 closed and this project has now created four times in six slices. It returns with the first
+notice that needs it, together with the acknowledging action.
+
+**So D4 is smaller and honest**: notifications are text on surfaces the keyboard already reaches, and
+every state reads as a word before it is a colour. **No new focusable control**, because there is
+nothing yet to press.
+
+**D2, D3, D5, D6 as recommended.** D3's counts already exist — `ProjectRuntimeSummary` carries
+`running_processes`, `failed_processes`, `pending_approvals`, `review_ready_changes` and
+`dirty_files` — so the work is rendering them as states, not measuring anything.
+
+**D5, measured: the status bar shows none of REQ-NOTIFY-002 today.** `status_bar_summary` renders the
+route, a project count and a key hint. Trust state, Git state, running and failed sessions and
+pending approvals all have to be added, and **Git state reads "not available" until RFC-030 produces
+it** — truthfully, which is what it says today on the board.
+
+**D7 — order is deterministic and defined by kind, not by arrival.** Four producers already
+concatenate in a fixed order; the model keeps a fixed order so a notice cannot move under the reader
+between frames. No cap is needed: D1's lifetimes bound the set.
+
+**Slices:** A, the model and the migration of the four existing notices, with their absent-when-false
+tests passing unchanged; B, the status bar fields and the actionable labels.

@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 025 | [Notifications](./proposed/025-notifications.md) | **Proposed 2026-09-17**, for `0.21.0`. The requirements define a `Notification`; none exists. Four separate notice mechanisms feed the project board instead, each with its own lifetime. **D1** one model with a closed set of lifetimes; **D2** the four existing notices migrate with their tests unchanged; **D3** actionable labels, not bare counts; **D6** in-app only. |
 | 030 | [Git Integration](./proposed/030-git-integration.md) | **Proposed 2026-09-17**, shipping when its safety evidence is done. A repository names programs Git will run during an ordinary status read, and that set is not closed. `ProjectGitSummary` exists with no producer. **D1** library or hardened subprocess — measured first; **D2** the evidence is its own slice, with a repository that tries to run a program during a status read; **D5** read-only in every trust state. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
@@ -39,6 +38,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 025 | [Notifications](./accepted/025-notifications.md) | **Accepted 2026-09-22; D1–D7 decided on acceptance.** The requirements define a `Notification`; none exists, and four RFCs each added their own board notice with its own lifetime. **D1**: two lifetimes only — *while the condition holds* and *for the start it happened*; **`until acknowledged` is refused** because nothing would produce it, which is the dormant shape this project has created four times in six slices. **D2**: the four migrate, with their absent-when-false tests passing **unmodified**. **D3/D5**: actionable labels from `ProjectRuntimeSummary`, and a status bar that today shows only a route and a count. Git state reads "not available" until RFC-030. [Handoff pack](./handoffs/025-notifications/README.md) |
 
 
 ### Reserved numbers — check this before authoring
@@ -101,6 +101,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | — | [Release 0.19.0](./handoffs/release-0.19.0.md) — **M12**; the publish that replaces a crates.io page still promising a purge that did not work |
 | — | [Documentation: README and the book](./handoffs/documentation-readme-and-book.md) — **M12**; a 554-line landing page against a 100–200 target, and a book whose only user chapter is `{{#include README.md}}` |
 | 050 | [Transcripts From Earlier Runs](./handoffs/050-transcripts-from-earlier-runs/README.md) — **M12**; load what is on disk, and never delete what something is still writing or what the loader did not recognise |
+| 025 | [Notifications](./handoffs/025-notifications/README.md) — **M12**; one model, before a fifth notice mechanism arrives |
 | 051 | [Recovering the Recent-Project List](./handoffs/051-recovering-the-recent-project-list/README.md) — **M12**; the reset that takes a user's trust decisions with it |
 | — | [Release 0.20.0](./handoffs/release-0.20.0.md) — **M12**; the record that survives, and the trust state that survives with it |
 | 048 | [AgentRun Termination Records](./handoffs/048-agentrun-termination-records/README.md) — **M12**; the ending the trail cannot state, in a slot the schema already reserves |
