@@ -171,16 +171,40 @@ fn resolve_git_executable(repository_root: &Path) -> Option<PathBuf> {
 /// ever resolves a bare name against the current directory), and an
 /// entry that names the project root itself, or anything inside it, is
 /// skipped too -- the repository being read must never be able to
-/// redirect which `git` binary evaluates it.
+/// redirect which `git` binary evaluates it. Checked two ways (review
+/// 415): a cheap lexical `starts_with` first, then
+/// [`directories_are_the_same_or_nested`], which canonicalizes both
+/// sides -- the lexical check alone missed a `PATH` entry that reaches
+/// into the project root through a symlink, measured directly (a
+/// `link/bin -> project/bin` entry walked straight past the lexical
+/// filter while still being the project's own directory).
 fn resolve_git_from_inherited_path(
     repository_root: &Path,
     inherited_path: &str,
 ) -> Option<PathBuf> {
+    // Review 415: the cheap lexical `starts_with` check alone is not
+    // enough -- it compares path *components*, never the filesystem, so
+    // a `PATH` entry that reaches into the project root through a
+    // symlink (measured: `/tmp/.../link/bin -> .../project/bin`) walks
+    // straight past it while still being the project's own directory.
+    // Kept first anyway, as a cheap reject for the common case (no
+    // `fs::canonicalize` call at all for a directory that is lexically
+    // outside the root already); `directories_are_the_same_or_nested`
+    // does the filesystem-aware check for everything the lexical one
+    // lets through. A directory that cannot be canonicalized is skipped,
+    // not trusted -- the same fail-closed choice this module makes
+    // everywhere else a filesystem read might fail.
+    let canonical_repository_root = std::fs::canonicalize(repository_root).ok();
     for directory in std::env::split_paths(inherited_path) {
         if !directory.is_absolute() {
             continue;
         }
         if directory.starts_with(repository_root) {
+            continue;
+        }
+        if let Some(canonical_root) = &canonical_repository_root
+            && directories_are_the_same_or_nested(&directory, canonical_root)
+        {
             continue;
         }
         let candidate = directory.join("git");
@@ -189,6 +213,21 @@ fn resolve_git_from_inherited_path(
         }
     }
     None
+}
+
+/// Review 415: is `directory` (or a symlinked path to it) the same as, or
+/// nested inside, `canonical_root`? `directory` is canonicalized here --
+/// a directory that does not exist, or cannot be resolved for any other
+/// reason, is treated as *not* matching (`false`), which means the
+/// caller's own "skip it" branch is never reached for it here; that is
+/// correct, since a directory `fs::canonicalize` cannot resolve also has
+/// no `git` file inside it for `candidate.is_file()` to find a moment
+/// later -- the fail-closed choice is `resolve_git_from_inherited_path`'s
+/// own filesystem check quietly finding nothing, not a special case in
+/// this function.
+fn directories_are_the_same_or_nested(directory: &Path, canonical_root: &Path) -> bool {
+    std::fs::canonicalize(directory)
+        .is_ok_and(|canonical_directory| canonical_directory.starts_with(canonical_root))
 }
 const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(5);
 /// Config listings and `--version` output are small; this bounds a

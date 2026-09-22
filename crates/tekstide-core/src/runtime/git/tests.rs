@@ -1209,7 +1209,10 @@ fn a_non_utf8_path_is_skipped_from_the_map_but_still_counted() {
 /// directly, not the full [`resolve_git_executable`] composition, which
 /// would always resolve through `REVIEWED_GIT_DIRECTORIES` first on
 /// every machine this test suite actually runs on and never reach this
-/// fallback at all.
+/// fallback at all. Review 415's required extension: a `PATH` entry that
+/// reaches into the project root through a symlink -- lexically outside
+/// it, filesystem-identical to being inside it -- must be dropped too,
+/// the exact bypass the reviewer measured directly.
 #[test]
 fn resolving_git_from_the_inherited_path_drops_relative_and_project_local_entries() {
     let fixture = Fixture::new("git-executable-resolution");
@@ -1222,6 +1225,25 @@ fn resolving_git_from_the_inherited_path_drops_relative_and_project_local_entrie
     )
     .unwrap();
 
+    // A `PATH` entry that lexically names a directory *outside* the
+    // project root, but resolves through a symlink to one *inside* it --
+    // `link` symlinks to the project root itself, so `link/symlinked-bin`
+    // is filesystem-identical to `fixture.repo/symlinked-bin`.
+    let symlinked_project_bin = fixture.repo.join("symlinked-bin");
+    fs::create_dir_all(&symlinked_project_bin).unwrap();
+    fs::write(
+        symlinked_project_bin.join("git"),
+        "must never be resolved -- project-local via a symlink",
+    )
+    .unwrap();
+    let link = fixture.root.join("link");
+    std::os::unix::fs::symlink(&fixture.repo, &link).unwrap();
+    let symlinked_entry = link.join("symlinked-bin");
+    assert!(
+        !symlinked_entry.starts_with(&fixture.repo),
+        "the entry must be lexically outside the root -- otherwise the symlink adds nothing to this test"
+    );
+
     let legitimate_dir = fixture.root.join("legitimate-bin");
     fs::create_dir_all(&legitimate_dir).unwrap();
     fs::write(
@@ -1231,8 +1253,9 @@ fn resolving_git_from_the_inherited_path_drops_relative_and_project_local_entrie
     .unwrap();
 
     let inherited_path = format!(
-        "relative-entry:{}:{}",
+        "relative-entry:{}:{}:{}",
         project_local_bin.display(),
+        symlinked_entry.display(),
         legitimate_dir.display()
     );
 
@@ -1261,6 +1284,33 @@ fn resolving_git_from_the_inherited_path_skips_a_directory_with_no_git_in_it() {
     let resolved = resolve_git_from_inherited_path(&fixture.repo, &inherited_path);
 
     assert_eq!(resolved, Some(real_dir.join("git")));
+}
+
+/// [`directories_are_the_same_or_nested`] directly: the same directory,
+/// a nested one, a genuinely unrelated one, and -- the fail-closed case
+/// review 415's fix depends on -- a directory that does not exist at
+/// all, which must read as "not the same, not nested" (`false`) rather
+/// than trusted by default. `resolve_git_from_inherited_path`'s own
+/// filesystem check (`candidate.is_file()`) is what actually keeps a
+/// nonexistent directory from ever being resolved; this test only
+/// proves the helper itself never claims a match it cannot back up.
+#[test]
+fn directories_are_the_same_or_nested_is_filesystem_aware_and_fails_closed() {
+    let fixture = Fixture::new("directories-same-or-nested");
+    let root = fixture.repo.canonicalize().unwrap();
+
+    assert!(directories_are_the_same_or_nested(&root, &root));
+
+    let nested = root.join("nested");
+    fs::create_dir_all(&nested).unwrap();
+    assert!(directories_are_the_same_or_nested(&nested, &root));
+
+    let unrelated = fixture.root.join("unrelated");
+    fs::create_dir_all(&unrelated).unwrap();
+    assert!(!directories_are_the_same_or_nested(&unrelated, &root));
+
+    let does_not_exist = fixture.root.join("does-not-exist-at-all");
+    assert!(!directories_are_the_same_or_nested(&does_not_exist, &root));
 }
 
 /// `pub fn compute_summary` is the one production entry point --

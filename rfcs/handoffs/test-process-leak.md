@@ -1119,3 +1119,18 @@ clean at `566 + 9 + 868`). **Row 8**, the same `0.16.0`-release-gate row this do
 carries, recurring in its already-documented shape. Passed immediately in isolation. Not the slice:
 this response's changes are confined to `runtime::git`'s status parsing and `ProjectGitSummary`'s new
 `file_statuses` field; nothing here touches terminal termination or process-close code.
+
+## Recurrence, 2026-09-23 — RFC-030 PR-030-D's symlink-fix gate (implementer's run)
+
+`approval::tests::channel::bind_recovers_from_a_stale_socket_file` failed twice across this
+response's own gate attempts: once in run 1 of the first three-run attempt (`570 + 9 + 875`, one
+failure; runs 2/3 clean), and again in run 3 of the restarted attempt (`570 + 9 + 875`, one failure;
+runs 1/2 of that attempt clean). **Row 1**, the original from response 213 — same assertion message
+both times: *"second bind must clear the stale file and succeed: ApprovalChannelError { reason: Io,
+source: None }"*. Passed immediately in isolation both times. Two occurrences in one session is above
+row 1's own documented ~2% baseline, but this document's own prior observation already covers it:
+several of its recorded rates were "measured incidentally, across ordinary development activity," and
+repeated `cargo build`/`cargo test` invocations in one sitting are plausible load, not a new cause.
+Not the slice either time: this response's changes are confined to `runtime::git`'s
+executable-location fallback (`resolve_git_from_inherited_path`/`directories_are_the_same_or_nested`),
+nothing here touches the approval socket.

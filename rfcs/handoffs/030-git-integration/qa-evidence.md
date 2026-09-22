@@ -1008,3 +1008,56 @@ runs (not the usual three, per the concurrency bug above): `570 + 9 + 875` acros
 A one-paragraph entry added to `rfcs/future-work.md`, naming the reviewer's own observation from
 the live capture (`[DIR] .git (collapsed)`) and why Git integration specifically makes it worth a
 future distinct rendering, without scoping an RFC for it.
+
+## PR-030-D, required fix (review 415): a symlinked `PATH` entry walked past the project-root filter
+
+`resolve_git_from_inherited_path`'s `directory.starts_with(repository_root)` check is purely
+lexical -- it compares path components, never the filesystem. The reviewer measured a real bypass:
+a `PATH` entry reaching into the project root through a symlink (`link/bin -> project`, so
+`link/bin` is filesystem-identical to `project/bin`) is lexically outside the root and sails past
+the filter, resolving to the repository's own `git` -- the exact thing D1' item 4 exists to
+prevent.
+
+**Fix**: keep the cheap lexical check first (no `fs::canonicalize` call at all for the common case
+of a directory already lexically outside the root), then a new `directories_are_the_same_or_nested`
+canonicalizes both the candidate directory and the repository root and compares those. A directory
+that cannot be canonicalized is skipped, not trusted -- the same fail-closed choice this module
+makes everywhere else a filesystem read might fail; `resolve_git_from_inherited_path`'s own
+`candidate.is_file()` check is what actually keeps a nonexistent directory from ever being resolved,
+so the helper itself needs no special case for that -- it just needs to never claim a match it
+cannot back up.
+
+**Ablation, before trusting the fix**: reverted the canonicalization check, re-ran the required test
+(the symlink case, added below) against the unfixed code, and it failed exactly as expected --
+`resolving_git_from_the_inherited_path_drops_relative_and_project_local_entries` resolved to the
+symlinked project-local `git` rather than the legitimate one, output captured:
+```
+left: Some(".../link/symlinked-bin/git")
+right: Some(".../legitimate-bin/git")
+```
+Restored the fix and confirmed the same test passes again before continuing -- the same
+"fixture that cannot fail proves nothing" discipline `hostile_fixtures_are_provably_hostile`
+established for the original gate, applied here to a fix rather than a fixture.
+
+### Tests
+
+`resolving_git_from_the_inherited_path_drops_relative_and_project_local_entries` (the existing
+required test from PR-030-D's first response) extended with the reviewer's own measured scenario: a
+`link` directory symlinked to the project root, with the `PATH` entry `link/symlinked-bin` --
+filesystem-identical to `project/symlinked-bin`, lexically outside it (asserted directly, so the
+test cannot silently stop proving anything if the fixture's own paths change shape later). New:
+`directories_are_the_same_or_nested_is_filesystem_aware_and_fails_closed` exercises the helper
+directly -- same directory, a nested one, a genuinely unrelated one, and a directory that does not
+exist at all (the fail-closed case), rather than relying on the composed function's own behaviour to
+imply the helper's.
+
+### Gate
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`rfc_docs_invariants` (9/9). Three consecutive full-workspace
+`cargo test --workspace --all-targets --no-fail-fast` runs needed **two restarts**, not because of
+this response's own code: `approval::tests::channel::bind_recovers_from_a_stale_socket_file` (row 1,
+already registered, ~2% baseline) recurred twice across the two failed attempts, passed immediately
+in isolation both times, dated note added to `test-process-leak.md` covering both occurrences in one
+entry. The third attempt came back clean, `570 + 9 + 876` across all three runs, zero
+`error`/`FAILED`/`error[` lines from anything this response actually touched.
