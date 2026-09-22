@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Started incrementally this cycle (review 410), rather than written in one pass at release-candidate
+time the way `0.21.0`'s entry had to be — the gap that cost `0.21.0`'s candidate real effort to
+reconstruct.
+
+### Added — the status bar reads real Git state, for a project it can read safely
+
+- **Branch and dirty state**, read when a project opens and again whenever a process Tekstide
+  launched for that project ends.
+- **A limitation, stated plainly**: a change made outside Tekstide while a project stays
+  open — an external `git commit`, a branch switch in another terminal — is not reflected until
+  the next in-app process ends or the project is reopened. Deliberate, not a bug: it costs nothing
+  when nothing is running, and needs no background timer (RFC-030 PR-030-B, review 410).
+
 ## 0.21.0 - The Bar Says What Is Happening
 
 Status: **released on 2026-09-22.** Published to crates.io as `tekstide 0.21.0` and

@@ -187,6 +187,9 @@ fn open_cli_project_path_and_record(
             // RFC-050 PR-050-B: a project named on the command line gets the
             // transcripts earlier runs left, like every other open path.
             shell::load_earlier_transcripts(app_shell, &project_id);
+            // RFC-030 PR-030-B: the Git-evaluation trigger, same as every
+            // GUI project-open path (`shell::trigger_git_summary_refresh`).
+            shell::trigger_git_summary_refresh(app_shell, &project_id);
             record_project_added_if_possible(app_shell, project_id, audit_health);
         }
         tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => {}

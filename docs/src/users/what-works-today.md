@@ -161,9 +161,24 @@ What each family can and cannot contain is in
 [Local data and privacy](./local-data-and-privacy.md), which is the chapter to read if the
 question is what ends up on your disk.
 
+## Git
+
+The active project's status bar shows its current branch and whether it has uncommitted changes,
+when it can be read safely: a repository whose configuration names anything that could run a
+program is read as branch-only or "not available" rather than guessed at (RFC-030's own safety
+gate). **A read happens when a project opens, and again whenever a process Tekstide launched for
+that project ends** — not on a fixed interval, and not continuously. **A change made outside
+Tekstide while a project stays open — an external `git commit`, a branch switch in another
+terminal — is not reflected until the next in-app process ends or the project is reopened.** This
+is a deliberate cadence, not a bug: it costs nothing when nothing is running, and needs no
+background timer.
+
+There is no per-file Git status in the explorer yet, and Git-based change detection does not feed
+the Change Review surface.
+
 ## Not built
 
-There is no Git integration, Git-based change detection, file watcher, or command palette
-(`Ctrl+Shift+P` is reserved and currently does nothing). For a consolidated list of what else is
-missing or deferred, see [Deferred work](../contributors/future-work.md), which is a live index
-rather than a wish list — items leave it only when they are done or explicitly rejected.
+There is no file watcher or command palette (`Ctrl+Shift+P` is reserved and currently does
+nothing). For a consolidated list of what else is missing or deferred, see
+[Deferred work](../contributors/future-work.md), which is a live index rather than a wish list —
+items leave it only when they are done or explicitly rejected.

@@ -149,6 +149,84 @@ fn project_session_surface_mode_and_deferred_summaries_are_owned_per_project() {
     assert!(project.runtime_summary().risk_warning);
 }
 
+/// RFC-030 PR-030-B, review 410 ruling 3.
+#[test]
+fn the_first_git_summary_refresh_moves_the_default_from_not_implemented_to_unknown() {
+    let mut project = project_session(1);
+    assert_eq!(
+        project.git_summary().provider_state,
+        ProjectProviderState::NotImplemented
+    );
+    assert!(!project.git_summary_refresh_in_flight());
+
+    let started = project.begin_git_summary_refresh();
+
+    assert!(started);
+    assert!(project.git_summary_refresh_in_flight());
+    assert_eq!(
+        project.git_summary().provider_state,
+        ProjectProviderState::Unknown
+    );
+}
+
+/// The in-flight guard's whole job: a second trigger while one refresh is
+/// already running must not start another.
+#[test]
+fn a_second_refresh_trigger_while_one_is_in_flight_is_a_no_op() {
+    let mut project = project_session(1);
+    assert!(project.begin_git_summary_refresh());
+
+    let started_again = project.begin_git_summary_refresh();
+
+    assert!(!started_again);
+}
+
+/// The ablation review 410 names: a *re*-evaluation must not reset the
+/// last known-good summary to `Unknown` -- the guard exists to stop a
+/// second evaluation from starting, not to blank the display while a
+/// fresher read runs. Only `NotImplemented` (never yet evaluated) resets;
+/// `Complete` does not.
+#[test]
+fn a_re_evaluation_trigger_leaves_the_previous_complete_summary_on_screen() {
+    let mut project = project_session(1);
+    let known_good = ProjectGitSummary {
+        provider_state: ProjectProviderState::Complete,
+        branch_name: Some("main".to_string()),
+        changed_file_count: Some(0),
+        ahead_count: None,
+        behind_count: None,
+    };
+    project.set_git_summary(known_good.clone());
+    assert!(!project.git_summary_refresh_in_flight());
+
+    let started = project.begin_git_summary_refresh();
+
+    assert!(started);
+    assert!(project.git_summary_refresh_in_flight());
+    assert_eq!(project.git_summary(), &known_good);
+}
+
+/// `set_git_summary` is the completion side of `begin_git_summary_refresh`
+/// -- it must clear the in-flight flag, or every project's second-ever
+/// refresh would be permanently blocked.
+#[test]
+fn set_git_summary_clears_the_in_flight_flag() {
+    let mut project = project_session(1);
+    assert!(project.begin_git_summary_refresh());
+    assert!(project.git_summary_refresh_in_flight());
+
+    project.set_git_summary(ProjectGitSummary {
+        provider_state: ProjectProviderState::Complete,
+        branch_name: Some("main".to_string()),
+        changed_file_count: Some(0),
+        ahead_count: None,
+        behind_count: None,
+    });
+
+    assert!(!project.git_summary_refresh_in_flight());
+    assert!(project.begin_git_summary_refresh());
+}
+
 #[test]
 fn incomplete_file_provider_dirty_count_does_not_make_close_resources_authoritative() {
     let mut project = project_session(1);

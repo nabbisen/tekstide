@@ -1115,13 +1115,33 @@ status-bar-trust-state = { $state ->
     [revoked] Revoked
    *[unknown] Unknown
 }
-# D5: truthfully "not available" until RFC-030 produces real Git state --
-# nothing calls `set_git_summary` in production yet, and this slice does not
-# fake a value nothing computed.
+# RFC-030 PR-030-B: `Unavailable` (not a repository, or `git` itself
+# missing/too old), `NotImplemented` (should not render in production once
+# PR-030-B's trigger runs, but is the pre-first-evaluation default the type
+# still allows) and `Unknown` (a read is in flight, or has not started yet)
+# all share this one honest answer -- none of them says the *repository* is
+# broken, only that this gate does not have a fact to show yet.
 status-bar-git-not-available = Git: not available
+# The gate accepted this repository's configuration (or, R1/R4-style, could
+# only vouch for the branch) and a real branch name was read from `.git/HEAD`
+# directly (D1' item 8) -- untrusted text (`$branch` is a branch name inside
+# the repository being read, not something this application chose).
+status-bar-git-branch = Git: { $branch }
+# A real repository, `HEAD` read successfully, but detached -- no branch
+# name exists to show, which is different from "not available" (the
+# repository and its current commit are both known).
+status-bar-git-detached = Git: detached
 
 # REQ-NOTIFY-003: actionable labels, never a bare number, read straight from
 # `ProjectRuntimeSummary` and absent at zero so the bar stays readable.
 status-bar-running-sessions = { $count } running
 status-bar-failed-sessions = { $count } failed
 status-bar-pending-approvals = { $count } awaiting approval
+# RFC-030 PR-030-B, REQ-GIT-002: only present once the gate is `Accepted`
+# (never for `AcceptedBranchOnly`/`Refused` -- those never reach
+# `read_status_summary`, so these three fields are always `None` there) and,
+# same "absent at zero" convention as the session labels above, only shown
+# when actually non-zero.
+status-bar-git-changed-files = { $count } changed
+status-bar-git-ahead = { $count } ahead
+status-bar-git-behind = { $count } behind

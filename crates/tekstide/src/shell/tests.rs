@@ -17230,6 +17230,133 @@ fn active_project_status_fields_shows_restricted_trust_and_git_not_available_wit
     assert_eq!(fields[1], state.catalog.get("status-bar-git-not-available"));
 }
 
+/// RFC-030 PR-030-B: a real, `Complete` Git summary -- clean, no upstream
+/// -- renders as branch alone, still exactly two fields (trust + branch),
+/// no "0 changed"/"0 ahead"/"0 behind" padding, the same "absent at zero"
+/// shape the session labels below already use.
+#[test]
+fn active_project_status_fields_shows_a_clean_branch_with_nothing_else() {
+    let (mut state, project_id) = state_with_a_real_project("status-fields-git-clean");
+    let project = state
+        .app_shell
+        .state_mut()
+        .project_mut(&project_id)
+        .expect("project must exist");
+    project.set_git_summary(tekstide_core::project::ProjectGitSummary {
+        provider_state: tekstide_core::project::ProjectProviderState::Complete,
+        branch_name: Some("main".to_string()),
+        changed_file_count: Some(0),
+        ahead_count: None,
+        behind_count: None,
+    });
+
+    let fields = super::active_project_status_fields(&state);
+
+    assert_eq!(fields.len(), 2, "{fields:?}");
+    assert!(fields[1].contains("main"), "{fields:?}");
+}
+
+/// A dirty repository, ahead and behind its upstream: every non-zero field
+/// appears as its own actionable label.
+#[test]
+fn active_project_status_fields_shows_dirty_ahead_and_behind_as_separate_labels() {
+    let (mut state, project_id) = state_with_a_real_project("status-fields-git-dirty");
+    let project = state
+        .app_shell
+        .state_mut()
+        .project_mut(&project_id)
+        .expect("project must exist");
+    project.set_git_summary(tekstide_core::project::ProjectGitSummary {
+        provider_state: tekstide_core::project::ProjectProviderState::Complete,
+        branch_name: Some("feature".to_string()),
+        changed_file_count: Some(3),
+        ahead_count: Some(1),
+        behind_count: Some(2),
+    });
+
+    let fields = super::active_project_status_fields(&state);
+
+    assert!(
+        fields.iter().any(|field| field.contains("feature")),
+        "{fields:?}"
+    );
+    assert!(
+        fields
+            .iter()
+            .any(|field| field.contains("3") && field.contains("changed")),
+        "{fields:?}"
+    );
+    assert!(
+        fields
+            .iter()
+            .any(|field| field.contains("1") && field.contains("ahead")),
+        "{fields:?}"
+    );
+    assert!(
+        fields
+            .iter()
+            .any(|field| field.contains("2") && field.contains("behind")),
+        "{fields:?}"
+    );
+}
+
+/// A detached `HEAD`: a real repository, a real commit, but no branch name
+/// -- distinct from "not available" (`Unavailable`/`Unknown`), which means
+/// no repository was even found or read yet.
+#[test]
+fn active_project_status_fields_shows_detached_head_distinctly() {
+    let (mut state, project_id) = state_with_a_real_project("status-fields-git-detached");
+    let project = state
+        .app_shell
+        .state_mut()
+        .project_mut(&project_id)
+        .expect("project must exist");
+    project.set_git_summary(tekstide_core::project::ProjectGitSummary {
+        provider_state: tekstide_core::project::ProjectProviderState::Complete,
+        branch_name: None,
+        changed_file_count: Some(0),
+        ahead_count: None,
+        behind_count: None,
+    });
+
+    let fields = super::active_project_status_fields(&state);
+
+    assert_ne!(
+        fields[1],
+        state.catalog.get("status-bar-git-not-available"),
+        "{fields:?}"
+    );
+    assert_eq!(fields[1], state.catalog.get("status-bar-git-detached"));
+}
+
+/// `AcceptedBranchOnly`'s shape (D1' item 6/R1/R2/R5): a branch is known,
+/// but nothing else -- no content-derived field is shown, since none was
+/// ever computed for a repository this gate could only vouch for the
+/// branch of. Constructed directly (not through `evaluate`/`compute_summary`,
+/// which are `runtime::git`-internal) since this is a rendering test, not a
+/// gate test -- the gate's own module has its own extensive coverage.
+#[test]
+fn active_project_status_fields_shows_branch_only_with_no_content_fields() {
+    let (mut state, project_id) = state_with_a_real_project("status-fields-git-branch-only");
+    let project = state
+        .app_shell
+        .state_mut()
+        .project_mut(&project_id)
+        .expect("project must exist");
+    project.set_git_summary(tekstide_core::project::ProjectGitSummary {
+        provider_state: tekstide_core::project::ProjectProviderState::Complete,
+        branch_name: Some("main".to_string()),
+        changed_file_count: None,
+        ahead_count: None,
+        behind_count: None,
+    });
+
+    let fields = super::active_project_status_fields(&state);
+
+    assert_eq!(fields.len(), 2, "{fields:?}");
+    assert!(fields[1].contains("main"), "{fields:?}");
+}
+
 /// REQ-NOTIFY-002's trust field, ablated by its own value: a real grant
 /// through the real route (`press_trust_settings_action` +
 /// `ModalFocusNext` + `ModalActivate`, the same sequence

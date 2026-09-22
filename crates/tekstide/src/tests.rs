@@ -269,3 +269,65 @@ fn add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else() 
         );
     }
 }
+
+/// RFC-030 PR-030-B, review 410 ruling 4: the counts a production call to
+/// `trigger_git_summary_refresh` is allowed at -- **not** the same map as
+/// [`files_with_one_allowed_call_to_add_project_from_path`]: `shell.rs`
+/// has one more call than it does, for `apply_agent_terminal_outcome_and_record`
+/// (review 410 ruling 2's "a managed process belonging to this project
+/// ends" trigger), which has nothing to do with opening a project.
+fn files_with_one_allowed_call_to_trigger_git_summary_refresh()
+-> std::collections::HashMap<&'static str, usize> {
+    // main.rs: open_cli_project_path_and_record (project-open).
+    // shell.rs: the three project-open sites
+    //           (attempt_open_project_from_path_field,
+    //           choose_current_browsed_directory, reopen_recent_project)
+    //           plus apply_agent_terminal_outcome_and_record
+    //           (a managed process ending).
+    std::collections::HashMap::from([("main.rs", 1), ("shell.rs", 4)])
+}
+
+/// RFC-030 PR-030-B, review 410 ruling 4: the sibling of
+/// [`add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else`],
+/// for the same reason and against the same three project-open call sites
+/// (plus the one process-termination site, per the allowlist above) -- "a
+/// shared helper called from each site" only holds if a *new*
+/// project-open site cannot add a project without also wiring the Git
+/// trigger and have this pass anyway.
+#[test]
+fn trigger_git_summary_refresh_is_called_from_every_expected_site() {
+    let mut files = Vec::new();
+    collect_rs_files(&crate_src_dir(), &mut files);
+    let allowed = files_with_one_allowed_call_to_trigger_git_summary_refresh();
+
+    for path in files {
+        let relative = path
+            .strip_prefix(crate_src_dir())
+            .expect("file must be under src/")
+            .to_str()
+            .expect("path must be valid UTF-8")
+            .to_string();
+
+        if relative.contains("/tests/") || relative.ends_with("tests.rs") {
+            continue;
+        }
+
+        let source = std::fs::read_to_string(&path).expect("scannable file must be readable");
+        // A free function, not a method -- no leading `.`, and the
+        // definition itself (`(pub(crate) )?fn trigger_git_summary_refresh(`,
+        // once, in `shell.rs`) must not count as a call.
+        let call_count = source
+            .matches("trigger_git_summary_refresh(")
+            .count()
+            .saturating_sub(source.matches("fn trigger_git_summary_refresh(").count());
+        let expected_call_count = allowed.get(relative.as_str()).copied().unwrap_or(0);
+
+        assert_eq!(
+            call_count, expected_call_count,
+            "{relative} calls trigger_git_summary_refresh {call_count} time(s), expected \
+             {expected_call_count} -- every add_project_from_path call site must also trigger \
+             a Git evaluation for the newly-opened project, not leave it reading its default \
+             (RFC-030 PR-030-B, review 410)"
+        );
+    }
+}

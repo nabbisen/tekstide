@@ -1,6 +1,6 @@
-// crate-private: `evaluate` and its types are still being reshaped (R6/R7,
-// review 407) and have no production caller yet (PR-030-B). Publishing
-// `tekstide-core` before that settles would put an in-flux gate into the
-// crate's public API.
-pub(crate) mod git;
+// PR-030-B (review 410): `pub`, now that `compute_summary` is its real
+// caller-facing entry point. `evaluate` and its supporting types stay
+// `pub(crate)` inside the module -- only the summary itself crosses the
+// crate boundary.
+pub mod git;
 pub mod terminal;

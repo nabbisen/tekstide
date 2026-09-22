@@ -11,30 +11,18 @@
 //! index written through a filter we did not run produces a wrong count
 //! (every Git LFS file reading as modified), not a safety problem.
 //!
-//! Nothing in this module has a production caller yet. PR-030-B wires
-//! [`evaluate`] into `ProjectSession::set_git_summary`; PR-030-A is the
-//! gate and its adversarial fixture only.
-//!
-//! **`#![allow(dead_code)]`, and why this is not `main.rs`'s "prefer
-//! `pub`" precedent (response 122 Required 3).** That ruling was for
-//! `tekstide` -- a binary crate, where making an unwired module `pub`
-//! costs nothing (there is no published public API for it to join) and
-//! keeping the dead-code lint honest was the only thing actually at
-//! stake. `tekstide-core` is a *published* library crate: review 407
-//! required this module become `pub(crate)`, not `pub`, specifically so
-//! that `evaluate` and its still-being-reshaped types (R6/R7 already
-//! changed them twice) do not enter the crate's public API before their
-//! contract has settled. `pub(crate)` with no production caller yet is
-//! exactly what makes the whole module read as dead to a plain (non-test)
-//! build, which every real call site inside it would otherwise need its
-//! own `#[allow(dead_code)]` to silence one at a time. This one
-//! module-level line, with this comment naming why, is more honest than
-//! that noise. **Time-boxed, not permanent (review 408): remove this line
-//! in the same commit PR-030-B adds `evaluate`'s real caller** -- at that
-//! point the module is genuinely reachable again, and this allow would
-//! otherwise start silently covering for whatever in this module becomes
-//! actually unused later, which is exactly what response 122's precedent
-//! warns against.
+//! **PR-030-B gives this module its production caller** (`pub fn`
+//! [`compute_summary`], called from `tekstide`'s own status-bar refresh
+//! trigger). Until then it was `pub(crate)` with a time-boxed
+//! `#[allow(dead_code)]` (review 407/408) precisely so `evaluate` and its
+//! still-being-reshaped types would not enter this published crate's
+//! public API before their contract settled -- see review 405-408 for
+//! that history. **Review 410 narrows what actually goes public**: only
+//! [`compute_summary`] and the `ProjectGitSummary` it returns. `evaluate`,
+//! `GitGateOutcome` and `GitUnavailableReason` stay `pub(crate)` --
+//! the GUI asks *"what is this project's Git summary"*, never *"is this
+//! repository accepted"*, so the gate's contract keeps exactly one
+//! consumer.
 //!
 //! **Review 406 found a repository this gate accepted that still ran a
 //! program the repository named.** The general defect: the gate assumed
@@ -99,8 +87,6 @@
 //!    `AcceptedBranchOnly` no longer names the key that triggered it, at
 //!    all -- there is nothing left for this item to bound).
 
-#![allow(dead_code)]
-
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -133,7 +119,7 @@ const MAX_ATTRIBUTES_FILE_BYTES: u64 = 1 << 20;
 
 /// The result of the gate, for one repository root.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum GitGateOutcome {
+pub(crate) enum GitGateOutcome {
     /// The repository's effective configuration named nothing outside the
     /// allowlist, and its attributes name no content-filter driver: branch,
     /// dirty state and per-file status may all be read.
@@ -160,7 +146,7 @@ pub enum GitGateOutcome {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum GitUnavailableReason {
+pub(crate) enum GitUnavailableReason {
     NotFound,
     VersionTooOld { found: String },
     VersionUnparseable { found: String },
@@ -202,14 +188,16 @@ fn forwarded_environment() -> Vec<(String, String)> {
 /// The gate. Trust state is deliberately not a parameter: D1' item 7 is
 /// that Tekstide never runs a program a repository names, in any trust
 /// state -- detection is safe in Restricted projects because this
-/// guarantee holds, not because a grant permits it.
-pub fn evaluate(repository_root: &Path) -> GitGateOutcome {
-    evaluate_with_environment(repository_root, GIT_EXECUTABLE, &forwarded_environment())
-}
-
+/// guarantee holds, not because a grant permits it. Called only from
+/// [`compute_summary_with_environment`] and directly by tests (RFC-036:
+/// no bare `evaluate(repository_root)` wrapper exists, since nothing but
+/// a test ever called one with the production `git_executable`/
+/// `forwarded_environment()` defaults and not also the walk budget --
+/// keeping it would have been a dormant capability with no caller).
 /// `git_executable` is a plain constant in production
-/// ([`evaluate`]); tests substitute a name that cannot resolve, to exercise
-/// [`GitUnavailableReason::NotFound`] without touching the real `PATH`.
+/// ([`compute_summary`]); tests substitute a name that cannot resolve, to
+/// exercise [`GitUnavailableReason::NotFound`] without touching the real
+/// `PATH`.
 fn evaluate_with_environment(
     repository_root: &Path,
     git_executable: &str,

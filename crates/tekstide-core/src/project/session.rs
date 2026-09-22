@@ -51,6 +51,15 @@ pub struct ProjectSession {
     content_workspace: ProjectContentWorkspace,
     file_state: ProjectFileState,
     git_summary: ProjectGitSummary,
+    /// RFC-030 PR-030-B: true from the moment a background Git evaluation
+    /// is triggered (project open, or a managed process belonging to this
+    /// project ending) until `set_git_summary` lands its result. Its only
+    /// job is stopping a second trigger from starting a second evaluation
+    /// while one is already running -- `git_summary` itself is left
+    /// exactly as it was (D1' §6: never show stale state as current is
+    /// about not claiming a *new* answer, not about clearing the old one
+    /// while a fresher one is pending).
+    git_summary_refresh_in_flight: bool,
     warning_state: ProjectWarningState,
     runtime_summary: ProjectRuntimeSummary,
     terminal_sessions: Vec<TerminalSession>,
@@ -115,6 +124,7 @@ impl ProjectSession {
             content_workspace: ProjectContentWorkspace::default(),
             file_state: ProjectFileState::default(),
             git_summary: ProjectGitSummary::default(),
+            git_summary_refresh_in_flight: false,
             warning_state: ProjectWarningState::default(),
             runtime_summary: ProjectRuntimeSummary::default(),
             terminal_sessions: Vec::new(),
@@ -193,6 +203,10 @@ impl ProjectSession {
 
     pub fn git_summary(&self) -> &ProjectGitSummary {
         &self.git_summary
+    }
+
+    pub fn git_summary_refresh_in_flight(&self) -> bool {
+        self.git_summary_refresh_in_flight
     }
 
     pub fn warning_state(&self) -> &ProjectWarningState {
@@ -1506,7 +1520,43 @@ impl ProjectSession {
 
     pub fn set_git_summary(&mut self, git_summary: ProjectGitSummary) {
         self.git_summary = git_summary;
+        self.git_summary_refresh_in_flight = false;
         self.record_activity();
+    }
+
+    /// RFC-030 PR-030-B, review 410 ruling 3: the trigger point for a
+    /// background Git evaluation (project open, or a managed process
+    /// belonging to this project ending). Returns `false`, doing nothing
+    /// else, if a refresh is already running -- the caller must not spawn
+    /// a second background evaluation, which is this flag's entire job.
+    ///
+    /// On the *first* evaluation this project will ever have (the
+    /// `NotImplemented` default is still in place, meaning `set_git_summary`
+    /// has never once been called), `git_summary` is reset to `Unknown`
+    /// -- "not computed yet" is a more accurate claim than "not
+    /// implemented" now that something really does compute it. A
+    /// *re*-evaluation leaves `git_summary` exactly as it was: the last
+    /// known value stays on screen while a fresher one is read, which is
+    /// not "stale state shown as current" (D1' §6) -- the ablation this
+    /// guards is a real one, that a second overlapping evaluation could
+    /// finish out of order and overwrite a fresher result with a staler
+    /// one, not that the field ever visibly flickers to "not available"
+    /// mid-refresh.
+    pub fn begin_git_summary_refresh(&mut self) -> bool {
+        if self.git_summary_refresh_in_flight {
+            return false;
+        }
+        self.git_summary_refresh_in_flight = true;
+        if self.git_summary.provider_state == ProjectProviderState::NotImplemented {
+            self.git_summary = ProjectGitSummary {
+                provider_state: ProjectProviderState::Unknown,
+                branch_name: None,
+                changed_file_count: None,
+                ahead_count: None,
+                behind_count: None,
+            };
+        }
+        true
     }
 
     pub fn set_warning_state(&mut self, warning_state: ProjectWarningState) {

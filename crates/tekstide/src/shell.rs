@@ -1505,6 +1505,18 @@ pub enum Message {
     /// way the old tick's handler did; a pane not named by this message
     /// is not touched.
     TerminalWoke(tekstide_core::domain::TerminalId),
+    /// RFC-030 PR-030-B, review 410: a background Git evaluation
+    /// (`tekstide_core::runtime::git::compute_summary`) has finished for
+    /// one project, triggered by [`git_summary_subscription`]. Applied by
+    /// `ProjectSession::set_git_summary`, which also clears that
+    /// project's in-flight flag -- if the project has since closed,
+    /// `project_mut` finds nothing and the result is simply dropped, not
+    /// an error (the same shape `apply_agent_terminal_outcome_and_record`
+    /// already tolerates for a project that closed mid-flight).
+    GitSummaryComputed {
+        project_id: tekstide_core::project::ProjectId,
+        summary: tekstide_core::project::ProjectGitSummary,
+    },
     /// RFC-018 PR-018-B: a real clipboard read, triggered by
     /// `Ctrl+Shift+V`, has resolved. `target` is the terminal that was
     /// keyboard-focused when the key was pressed, captured then rather
@@ -1792,6 +1804,7 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::MeasuredModeSwitch(_)
         | Message::MeasuredTerminalInput(_)
         | Message::TerminalWoke(_)
+        | Message::GitSummaryComputed { .. }
         | Message::TerminalPasteResolved { .. }
         | Message::ApprovalPollTick
         | Message::WindowResized(_)
@@ -2526,6 +2539,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::TerminalWoke(terminal_id) => {
             handle_terminal_woke(state, &terminal_id);
+        }
+        Message::GitSummaryComputed {
+            project_id,
+            summary,
+        } => {
+            if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
+                project.set_git_summary(summary);
+            }
         }
         Message::ApprovalPollTick => {
             poll_approval_channels(state);
@@ -4410,6 +4431,7 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
             // RFC-050 PR-050-B: the transcripts earlier runs left for this
             // project, so purge and the figures cover what exists.
             load_earlier_transcripts_for_opened_project(state, &project_id);
+            trigger_git_summary_refresh(&mut state.app_shell, &project_id);
         }
         // Should not normally happen -- a `Recent*`-kind row is, by
         // construction, not currently open -- but if the board's rows
@@ -5021,6 +5043,7 @@ fn attempt_open_project_from_path_field(state: &mut State) {
             // RFC-050 PR-050-B: the transcripts earlier runs left for this
             // project, so purge and the figures cover what exists.
             load_earlier_transcripts_for_opened_project(state, &project_id);
+            trigger_git_summary_refresh(&mut state.app_shell, &project_id);
             state.path_field.clear();
             state.path_field_requested = false;
         }
@@ -5163,6 +5186,7 @@ fn choose_current_browsed_directory(state: &mut State) {
             // RFC-050 PR-050-B: the transcripts earlier runs left for this
             // project, so purge and the figures cover what exists.
             load_earlier_transcripts_for_opened_project(state, &project_id);
+            trigger_git_summary_refresh(&mut state.app_shell, &project_id);
             state.modal = None;
         }
         Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
@@ -6532,6 +6556,64 @@ fn terminal_wake_stream(
     })
 }
 
+/// RFC-030 PR-030-B, review 410: one project's background Git evaluation
+/// (`compute_summary`), same shape as [`terminal_wake_subscription`] --
+/// a dedicated OS thread does the real (blocking: subprocess spawns,
+/// filesystem reads) work; the async block only keeps the stream alive.
+/// **One-shot, not a loop**: unlike a terminal pane's wake stream, this
+/// thread sends exactly one message and returns. `subscription()` only
+/// includes this for a project whose `git_summary_refresh_in_flight()` is
+/// `true`; once `Message::GitSummaryComputed` clears that flag, the next
+/// rebuild stops offering it and `iced` lets the (already-finished)
+/// subscription drop.
+fn git_summary_subscription(
+    project_id: tekstide_core::project::ProjectId,
+    repository_root: std::path::PathBuf,
+) -> Subscription<Message> {
+    Subscription::run_with(
+        GitSummarySource {
+            project_id,
+            repository_root,
+        },
+        git_summary_stream,
+    )
+}
+
+/// `Subscription::run_with`'s identity data, hashed on `project_id` alone
+/// (not `repository_root`, which cannot meaningfully change for a live
+/// project session) -- the same "hand-written `Hash`, only the identity
+/// that must dedup across rebuilds" shape [`TerminalWakeSource`] uses,
+/// and for the same reason: only the *first* `GitSummarySource` for a
+/// given project, across repeated `subscription()` rebuilds while the
+/// evaluation is still in flight, should ever reach [`git_summary_stream`].
+struct GitSummarySource {
+    project_id: tekstide_core::project::ProjectId,
+    repository_root: std::path::PathBuf,
+}
+
+impl std::hash::Hash for GitSummarySource {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.project_id.hash(state);
+    }
+}
+
+fn git_summary_stream(
+    source: &GitSummarySource,
+) -> impl iced::futures::Stream<Item = Message> + use<> {
+    let project_id = source.project_id.clone();
+    let repository_root = source.repository_root.clone();
+    iced::stream::channel(1, async move |mut output| {
+        std::thread::spawn(move || {
+            let summary = tekstide_core::runtime::git::compute_summary(&repository_root);
+            let _ = iced::futures::executor::block_on(output.send(Message::GitSummaryComputed {
+                project_id,
+                summary,
+            }));
+        });
+        std::future::pending::<()>().await;
+    })
+}
+
 /// `OpenProjectBoard` and, since PR-015-E, `ToggleProjectMode` map to
 /// existing `AppCommand`s. `LaunchTerminal` is the terminal-launch-UX
 /// handoff's addition -- its `AppCommand` arm only handles the
@@ -6824,6 +6906,20 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     if !state.approval_channels.is_empty() {
         subscriptions
             .push(iced::time::every(APPROVAL_POLL_INTERVAL).map(|_| Message::ApprovalPollTick));
+    }
+    // RFC-030 PR-030-B, review 410: one subscription per project with a
+    // Git evaluation in flight -- `begin_git_summary_refresh` sets the
+    // flag; this is what actually spawns the background read for it, and
+    // stops offering it once `Message::GitSummaryComputed` clears the
+    // flag back to `false`. The same "checked but usually absent" shape
+    // as the branches above: most rebuilds have nothing in flight.
+    for project in state.app_shell.state().projects() {
+        if project.git_summary_refresh_in_flight() {
+            subscriptions.push(git_summary_subscription(
+                project.id().clone(),
+                project.canonical_root_path().clone(),
+            ));
+        }
     }
     if subscriptions.is_empty() {
         routing
@@ -7363,8 +7459,9 @@ pub(crate) fn status_bar_summary(state: &State) -> String {
 /// surface, not this one.
 ///
 /// **Trust state and Git state are unconditional** once a project is
-/// active -- a project always has some trust state, and "not available"
-/// is Git state's own honest, unfaked answer today (D5), not an absence.
+/// active -- a project always has some trust state, and Git state
+/// ([`git_state_fields`]) always renders *something*, real data or the
+/// honest "not available" (D5), never a silent absence.
 /// **Running, failed and pending-approval labels are each absent at
 /// zero** (REQ-NOTIFY-003), read straight from `ProjectRuntimeSummary`
 /// -- never recounted, and never a bare number.
@@ -7373,13 +7470,11 @@ fn active_project_status_fields(state: &State) -> Vec<String> {
         return Vec::new();
     };
     let summary = project.runtime_summary();
-    let mut fields = vec![
-        state.catalog.get_with_args(
-            "status-bar-trust-state",
-            &CatalogArgs::new().trusted_symbol("state", trust_symbol(project.trust_state())),
-        ),
-        state.catalog.get("status-bar-git-not-available"),
-    ];
+    let mut fields = vec![state.catalog.get_with_args(
+        "status-bar-trust-state",
+        &CatalogArgs::new().trusted_symbol("state", trust_symbol(project.trust_state())),
+    )];
+    fields.extend(git_state_fields(&state.catalog, project.git_summary()));
     if summary.running_processes > 0 {
         fields.push(state.catalog.get_with_args(
             "status-bar-running-sessions",
@@ -7396,6 +7491,68 @@ fn active_project_status_fields(state: &State) -> Vec<String> {
         fields.push(state.catalog.get_with_args(
             "status-bar-pending-approvals",
             &CatalogArgs::new().number("count", summary.pending_approvals),
+        ));
+    }
+    fields
+}
+
+/// RFC-030 PR-030-B, REQ-GIT-002: turns one project's `ProjectGitSummary`
+/// into the status bar's Git field(s). `Known` is the only branch that can
+/// produce more than one field, matching the running/failed/pending
+/// labels' own "one fact, one field, absent when it has nothing to add"
+/// shape above -- `changed_file_count`/`ahead_count`/`behind_count` are
+/// each `None` for a gate outcome that only vouched for the branch
+/// (`AcceptedBranchOnly`), so they are simply not pushed, the same as a
+/// zero session count is not pushed. `Unavailable`/`NotImplemented`/
+/// `Unknown` render identically -- an implementation detail of *why*
+/// nothing is known yet, never surfaced as three different user-facing
+/// claims.
+fn git_state_fields(
+    catalog: &Catalog,
+    summary: &tekstide_core::project::ProjectGitSummary,
+) -> Vec<String> {
+    let tekstide_core::project::ProjectGitDisplayStatus::Known {
+        branch_name,
+        changed_file_count,
+        ahead_count,
+        behind_count,
+    } = summary.display_status()
+    else {
+        return vec![catalog.get("status-bar-git-not-available")];
+    };
+
+    let mut fields = vec![match branch_name {
+        Some(name) => catalog.get_with_args(
+            "status-bar-git-branch",
+            &CatalogArgs::new().untrusted(
+                "branch",
+                &tekstide_core::text_safety::quote_untrusted(&name),
+            ),
+        ),
+        None => catalog.get("status-bar-git-detached"),
+    }];
+    if let Some(count) = changed_file_count
+        && count > 0
+    {
+        fields.push(catalog.get_with_args(
+            "status-bar-git-changed-files",
+            &CatalogArgs::new().number("count", count),
+        ));
+    }
+    if let Some(count) = ahead_count
+        && count > 0
+    {
+        fields.push(catalog.get_with_args(
+            "status-bar-git-ahead",
+            &CatalogArgs::new().number("count", count),
+        ));
+    }
+    if let Some(count) = behind_count
+        && count > 0
+    {
+        fields.push(catalog.get_with_args(
+            "status-bar-git-behind",
+            &CatalogArgs::new().number("count", count),
         ));
     }
     fields
@@ -9549,6 +9706,31 @@ fn toggle_transcript_capture_declined(state: &mut State) {
 /// project passed in -- its own `transcripts` list is the complete,
 /// authoritative record of which transcripts exist, not a scan of
 /// anything that could be missing entries.
+/// RFC-030 PR-030-B, review 410 ruling 2 and 4: the Git-evaluation
+/// trigger, called from every project-open call site (alongside
+/// `verify_restored_trust`/`apply_configured_resource_limits`/
+/// `load_earlier_transcripts_for_opened_project` -- there is still no
+/// single point every newly-opened project passes through, the same
+/// reason those three are each their own call at every site) and again
+/// from [`apply_agent_terminal_outcome_and_record`] whenever a managed
+/// process belonging to the project ends. Only sets the project's own
+/// in-flight flag (`ProjectSession::begin_git_summary_refresh`); the
+/// actual background read is spawned by `subscription()`
+/// (`git_summary_subscription`) on the next rebuild, for every project
+/// the flag is true on. A project that has already closed by the time
+/// this runs (should not happen at any of today's call sites, but no
+/// call site here can prove it never will) is a silent no-op, not an
+/// error -- `project_mut` returning `None` is exactly what "nothing to
+/// refresh" looks like.
+pub(crate) fn trigger_git_summary_refresh(
+    app_shell: &mut ApplicationShell,
+    project_id: &tekstide_core::project::ProjectId,
+) {
+    if let Some(project) = app_shell.state_mut().project_mut(project_id) {
+        project.begin_git_summary_refresh();
+    }
+}
+
 /// RFC-050 PR-050-B: what every GUI project-open path does once a project is
 /// newly added — load the transcripts earlier runs left for it, then refresh
 /// the app-wide figure. Before this, a session knew only transcripts launched
@@ -9683,6 +9865,15 @@ fn apply_agent_terminal_outcome_and_record(
     outcome: &tekstide_core::runtime::terminal::TerminationOutcome,
     audit_store: &mut Option<tekstide_core::audit::AuditStore>,
 ) {
+    // RFC-030 PR-030-B, review 410 ruling 2: a managed process belonging
+    // to this project has just ended -- the moment the application
+    // itself knows Git state may have changed since the last read.
+    // Unconditional, ahead of either branch below: it applies regardless
+    // of whether an audit record could be written, the same "a
+    // termination is never refused for want of a trail" reasoning RFC-048
+    // already applies to the outcome itself.
+    trigger_git_summary_refresh(&mut state.app_shell, project_id);
+
     let identity = state.audited_agent_runs.get(agent_run_id).cloned();
     if let Some(identity) = identity
         && let Some(store) = audit_store.as_mut()

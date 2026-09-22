@@ -137,52 +137,56 @@ named — the reviewer's error to fix, not the implementer's to paper over.
 
 ## PR-030-B — branch, dirty state, ahead/behind
 
-**Split into a computation layer (done, `00bbbe0`, no production caller) and a UI/threading wiring
-layer (not started — see review 410 for the architectural fork it opens before it can be built).**
+**Computation layer (`00bbbe0`) and UI/threading wiring layer (`<pending commit>`, this response)
+both done.** Review 410 answered all four architectural questions the wiring layer opened; every
+ruling below is implemented, not just decided.
 
-- [ ] **The module-level `#[allow(dead_code)]` in `runtime/git.rs` is removed in this same commit** —
-      `evaluate` gains its real caller here, so the module is reachable again and the allow has served
-      its purpose (review 408). Deferred to the wiring layer — no caller exists yet.
-- [ ] `set_git_summary` has a production caller; an accepted repository shows branch, dirty state and
-      ahead/behind (REQ-GIT-001, 002). `compute_summary` produces the value (`read_status_summary`,
-      tested for a clean repo, a dirty one, and real ahead/behind against a real local upstream); the
-      call into `set_git_summary` itself is the wiring layer's job.
+- [x] **The module-level `#[allow(dead_code)]` in `runtime/git.rs` is removed** — `compute_summary`
+      is a real `pub` entry point now, called from `subscription()`'s `git_summary_stream`.
+- [x] `set_git_summary` has a production caller; an accepted repository shows branch, dirty state and
+      ahead/behind (REQ-GIT-001, 002). — `Message::GitSummaryComputed`'s handler in `update()`.
+      Live-captured against a real dirty repository:
+      `rfcs/handoffs/030-git-integration/evidence/01-status-bar-real-branch-and-dirty-count.png`
+      (`Git: main    1 changed`, the release binary, throwaway `/tmp` fixture).
 - [x] A repository the gate cannot fully vouch for (`AcceptedBranchOnly` or `Refused`) shows its
       branch and `unavailable` (`None`) for dirty state — **with the branch read measured to execute
       nothing**, not assumed. — `resolve_git_dir_from_filesystem`/`read_branch_from_head_file` read
       only the filesystem, never spawn `git`; `branch_is_still_read_when_git_itself_is_unavailable`
       proves it directly (branch still read when the `git` binary itself does not exist).
-- [ ] *Unavailable* for a non-repository — [x] **done, and cheaper than required**: checked before
-      `evaluate` runs at all, so a non-repository never spawns `git`
-      (`a_non_repository_is_unavailable`'s second assertion, a bogus executable name still answers
-      `Unavailable`). *Pending* while a read is in flight — **not started**: no representation of
-      "in flight" exists yet: `ProjectProviderState` has no `Pending`-shaped variant, and none of this
-      slice's computation functions are asynchronous. Part of the wiring layer's fork.
-      *Decided at review 410: **`Unknown`** is "not computed yet" — it exists and means that, and it
-      renders as the same "not available" wording `0.21.0` ships, so nothing new is claimed on screen.
-      A Git-specific in-flight flag on `ProjectSession` only as far as it takes to stop two triggers
-      starting two evaluations. **No fifth variant on the shared enum.** The RFC's claim that the
-      provider state already modelled pending was the reviewer's error. **Ablation:** drop the
-      in-flight guard so a second evaluation changes the displayed summary mid-flight; that test fails
-      alone.*
+- [x] *Unavailable* for a non-repository — checked before `evaluate` runs at all, so a non-repository
+      never spawns `git` (`a_non_repository_is_unavailable`). *Pending* while a read is in flight —
+      **decided at review 410 and implemented**: `Unknown` for "not computed yet"
+      (`ProjectSession::begin_git_summary_refresh` resets `NotImplemented` → `Unknown` on a project's
+      *first* evaluation only), rendering as the same "not available" text `0.21.0` ships — no fifth
+      variant added to the shared `ProjectProviderState` enum. A Git-specific
+      `git_summary_refresh_in_flight: bool` on `ProjectSession` stops a second trigger from starting a
+      second evaluation. **Ablation, per review 410's exact wording**:
+      `a_second_refresh_trigger_while_one_is_in_flight_is_a_no_op` proves the guard blocks a second
+      start; `a_re_evaluation_trigger_leaves_the_previous_complete_summary_on_screen` proves the guard
+      does *not* blank a known-good summary while a refresh runs (the actual property the ablation
+      protects: an overlapping second evaluation could finish out of order and overwrite a fresher
+      result with a staler one — not that the field visibly flickers).
 
-### Decided at review 410 — the wiring layer's remaining questions
+### Decided at review 410 — the wiring layer's remaining questions, now implemented
 
-- [ ] **Refresh is event-driven**: at project open, and again when a **managed process belonging to
-      that project ends** — the moment the application itself knows something may have changed. **No
-      periodic poll.** If the process-end hook is more than a small wiring job, ship open-only and say
-      so rather than building around it.
-- [ ] **The cadence is disclosed** in the book and the changelog: changes made outside Tekstide while
-      a project stays open are not detected until the next in-app process ends or the project is
-      reopened. Silently stale state is what §6 of the risk document forbids.
-- [ ] **All four production project-add sites trigger it, held by a test** — extend
-      `add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else`, or add its
-      sibling, so a site that adds a project without the Git trigger fails. (`shell.rs:4400`, `5011`,
-      `5153`; `main.rs:185`, grepped at review 410.) RFC-050's adapter launch site is what happens
-      when four sites are held by review vigilance instead.
-- [ ] **`runtime::git` is `pub` again, narrowed**: `compute_summary` and what it returns. `evaluate`
-      and the gate's own types stay crate-internal — a caller that can ask "is this repository
-      accepted" can act on it, and then the gate's contract has two consumers instead of one.
+- [x] **Refresh is event-driven**: at project open (`trigger_git_summary_refresh`, called from all
+      four project-add sites) and again when a managed process belonging to that project ends
+      (`apply_agent_terminal_outcome_and_record`, unconditional, ahead of either of its own branches).
+      **No periodic poll** — none added.
+- [x] **The cadence is disclosed** in the book (`docs/src/users/what-works-today.md`'s new "Git"
+      section) and the changelog (a new `## Unreleased` section — started incrementally this time,
+      rather than reconstructed in one pass at release-candidate time the way `0.21.0`'s had to be).
+- [x] **All four production project-add sites trigger it, held by a test** —
+      `trigger_git_summary_refresh_is_called_from_every_expected_site`
+      (`crates/tekstide/src/tests.rs`), the sibling
+      `add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else` already has.
+      Ablation-verified: removed one call site's trigger, the test failed naming the exact count
+      mismatch; reverted, checksum-confirmed clean.
+- [x] **`runtime::git` is `pub` again, narrowed**: only `compute_summary` and `ProjectGitSummary`
+      cross the crate boundary. `evaluate`, `GitGateOutcome`, `GitUnavailableReason` are `pub(crate)`.
+      The old bare `evaluate(repository_root)` wrapper (distinct from `evaluate_with_environment`) had
+      no caller left anywhere, test or production, once `compute_summary` called
+      `evaluate_with_environment` directly — deleted (RFC-036) rather than kept.
 - [x] **No write operation exists in the Git path — held by the API, not by grep** (REQ-GIT-007). —
       every subcommand this module ever calls is read-only (`config`, `--version`, `ls-files`,
       `rev-parse`, `status`); nothing in `runtime::git` accepts or constructs a write argument, so
@@ -191,17 +195,16 @@ layer (not started — see review 410 for the architectural fork it opens before
       grant. — `compute_summary` takes no trust parameter, same as `evaluate`;
       `compute_summary_does_not_depend_on_trust_state` exercises it as its own entry point rather than
       assuming the property from `evaluate`'s own test.
-- [ ] Input is never blocked by a refresh (NFR-PERF-006); the marker is still absent after the
-      production path runs. Depends on the off-thread wiring not yet built; the marker-absence half is
-      already proven at the computation layer (every poisoned-repository test in this file).
-- [ ] The gate's filesystem walk runs **off the UI thread** with the rest of the read (D4), and the
-      outcome is cached per project open rather than recomputed per refresh. *Measured at review 408
-      on this machine, warm: ~20 ms of subprocess time plus **~80 ms of walk** across 183,736
-      entries. Measure it again here rather than quoting that.* Not started — the wiring layer's fork.
-- [ ] **`runtime::git`'s module-level `#![allow(dead_code)]` is gone**, because this slice gives the
-      module its production caller. Confirmed at review 408: the allow is a dated suppression, not a
-      blanket one, and this is its named expiry. Same box as above; duplicated in the original text,
-      left as-is rather than silently merged.
+- [x] Input is never blocked by a refresh (NFR-PERF-006); the marker is still absent after the
+      production path runs. — the blocking work (`compute_summary`) runs on a dedicated
+      `std::thread::spawn`'d OS thread inside `git_summary_stream`, the exact
+      `Subscription::run_with` + `iced::stream::channel` shape `terminal_wake_subscription` already
+      uses to keep blocking I/O off the executor; the async block itself only
+      `std::future::pending()`s.
+- [x] The gate's filesystem walk runs **off the UI thread** with the rest of the read (D4), and the
+      outcome is cached per project open rather than recomputed per refresh. — same background thread
+      as above; `active_project_status_fields` reads the already-computed `project.git_summary()`
+      field on every render, never calls `compute_summary` itself.
 - [x] **`--ignore-submodules=all` on the status read** — defence in depth behind R1's refusal, never
       instead of it (measured: it suppresses the submodule filter). —
       `ignore_submodules_all_suppresses_the_submodule_filter_on_its_own` calls `read_status_summary`
@@ -216,9 +219,12 @@ layer (not started — see review 410 for the architectural fork it opens before
       `--version` is not run at all (the filesystem check short-circuits first). The "not re-run on
       every refresh" half is a caching question the wiring layer owns; unticked as a whole since the
       box asks for both.
-- [ ] **Carried from RFC-025 (review 404):** the status bar's project fields **reach the rendered
+- [x] **Carried from RFC-025 (review 404):** the status bar's project fields **reach the rendered
       row**, re-proved by this slice — by a live capture showing all of REQ-NOTIFY-002's fields
-      together, at minimum. Needs the wiring layer to exist first.
+      together, at minimum. —
+      `rfcs/handoffs/030-git-integration/evidence/01-status-bar-real-branch-and-dirty-count.png`:
+      trust ("Restricted") and Git ("main", "1 changed") both present on the rendered row, the
+      release binary, a real repository.
 
 ## PR-030-C — per-file status
 

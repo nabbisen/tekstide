@@ -616,6 +616,16 @@ fn generic_args() -> CatalogArgs<'static> {
             "executable",
             &tekstide_core::text_safety::quote_untrusted("/fixture/bin/ai-cli"),
         )
+        // RFC-030 PR-030-B: `status-bar-git-branch`'s `$branch` -- a
+        // branch name read out of the repository being shown, so
+        // untrusted and routed through `quote_untrusted` the same way
+        // `name`/`message`/`path`/`key`/`executable` above are.
+        // `status-bar-git-changed-files`/`-ahead`/`-behind` all use
+        // `$count`, already covered above.
+        .untrusted(
+            "branch",
+            &tekstide_core::text_safety::quote_untrusted("fixture-branch"),
+        )
 }
 
 fn shipped_additional_locales() -> Vec<String> {

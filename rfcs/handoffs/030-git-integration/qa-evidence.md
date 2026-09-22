@@ -454,3 +454,148 @@ with its own call graph, not provably a thin wrapper by inspection alone.
 `cargo clippy --workspace --all-targets -- -D warnings`, `git diff --cached --check`,
 `rfc_docs_invariants` (9/9), three consecutive `cargo test --workspace --no-fail-fast` runs -- 860
 passed in `tekstide-core`'s lib target, 556 + 9 elsewhere, all clean, all three runs.
+
+## PR-030-B (the wiring layer) -- review 410's four rulings, implemented
+
+### 1. `runtime::git` narrowed back to `pub`
+
+`runtime.rs`: `pub(crate) mod git` -> `pub mod git`. Inside the module, only `compute_summary` is
+`pub`; `evaluate`, `GitGateOutcome`, `GitUnavailableReason` became `pub(crate)` (were `pub`) -- the
+GUI asks "what is this project's Git summary", never "is this repository accepted". The
+`#![allow(dead_code)]` is gone: `compute_summary` has a real caller
+(`git_summary_stream`), so nothing in the module reads as dead any more.
+
+**A second dormant-capability finding, RFC-036, while narrowing this**: the bare
+`evaluate(repository_root: &Path) -> GitGateOutcome` wrapper (distinct from
+`evaluate_with_environment`, which every real caller -- `compute_summary_with_environment` and every
+test -- actually calls) had no caller anywhere, production or test, once checked. Deleted rather than
+kept `pub(crate)` for a caller that was never going to arrive; `forwarded_environment()` itself is
+still real (called from `compute_summary`).
+
+### 2. Refresh is event-driven: project open, and a managed process ending
+
+`ProjectSession::begin_git_summary_refresh` / `set_git_summary` (now clearing the in-flight flag) --
+full behaviour and its four tests already described under "Restricted projects" and the `Unknown`
+ruling above; this section is the *trigger sites*, not the flag itself.
+
+- **Project open**: `trigger_git_summary_refresh`, called from all four production
+  `add_project_from_path` call sites (`shell.rs:4400`, `5011`, `5153` via one shared `Edit`;
+  `main.rs:185` directly) -- the same "no single point every newly-opened project passes through, so
+  each site calls its own helper" shape `verify_restored_trust`/`apply_configured_resource_limits`/
+  `load_earlier_transcripts_for_opened_project` already established.
+- **A managed process ending**: the same call, added unconditionally at the top of
+  `apply_agent_terminal_outcome_and_record` -- RFC-048's own "the one place production applies an
+  agent run's terminal outcome" -- ahead of either of its two branches (identity-and-store-available,
+  or the bare fallback), so it fires regardless of whether an audit record could be written, matching
+  "a termination is never refused for want of a trail".
+- **No periodic poll added.** Checked directly against the requirement: nothing in `subscription()`
+  re-triggers a Git evaluation on a timer.
+
+**Enforcement, per review 410's own instruction** ("extend the existing guard, or add its sibling"):
+added the sibling, `trigger_git_summary_refresh_is_called_from_every_expected_site`
+(`crates/tekstide/src/tests.rs`), scanning for `trigger_git_summary_refresh(` the same way the
+existing test scans for `.add_project_from_path(` -- with its own allowlist
+(`files_with_one_allowed_call_to_trigger_git_summary_refresh`: `main.rs` 1, `shell.rs` 4 -- one more
+than the add-project scan's 3, for the process-termination site, which has nothing to do with opening
+a project) rather than reusing the add-project scan's map, which would have under-counted by one.
+**Ablation, run and reverted**: removed one project-open site's trigger call, the test failed naming
+the exact mismatch (`shell.rs calls trigger_git_summary_refresh 3 time(s), expected 4`); reverted,
+`sha256sum` before/after `shell.rs` identical.
+
+### 3. The subscription/threading mechanism
+
+`git_summary_subscription`/`GitSummarySource`/`git_summary_stream` in `crates/tekstide/src/shell.rs`,
+modelled directly on `terminal_wake_subscription`/`TerminalWakeSource`/`terminal_wake_stream` (the
+only precedent for "background thread's result reaches `update()` as a `Message`" this codebase has --
+confirmed by research: zero uses of `iced::Task::perform` anywhere). Differs from the terminal-wake
+shape in exactly one way, deliberately: **one-shot, not a loop** -- the spawned thread calls
+`compute_summary` once, sends exactly one `Message::GitSummaryComputed`, and returns, rather than
+looping on a wake notifier. `subscription()` includes a project's `git_summary_subscription` only
+while `git_summary_refresh_in_flight()` is true, so a completed evaluation stops being offered on the
+next rebuild rather than needing to be explicitly torn down.
+
+`Message::GitSummaryComputed { project_id, summary }` carries `ProjectGitSummary` directly (unlike
+`TerminalWoke`'s deliberately bare `TerminalId` -- that restriction is about raw PTY bytes never
+becoming `Debug`/`Clone`-able through `Message`, per response 205; Git summary metadata carries no
+project file content, a different sensitivity class). Handled in `update()`: `project_mut` returning
+`None` (project closed mid-flight) is a silent no-op, the same shape
+`apply_agent_terminal_outcome_and_record` already tolerates.
+
+### 4. Rendering: `git_state_fields`
+
+New function in `crates/tekstide/src/shell.rs`, replacing the hardcoded
+`state.catalog.get("status-bar-git-not-available")` `active_project_status_fields` used before this
+slice. Maps `ProjectGitSummary::display_status()`:
+
+- `Known { branch_name: Some(name), .. }` -> `status-bar-git-branch` (`Git: { $branch }`), `$branch`
+  routed through `text_safety::quote_untrusted` -- a branch name is read out of the repository being
+  shown, untrusted the same way a file name or path already is elsewhere in this catalog.
+- `Known { branch_name: None, .. }` -> `status-bar-git-detached` (`Git: detached`) -- a real
+  repository, `HEAD` read successfully, just not on a named branch; distinct from "not available".
+- `changed_file_count`/`ahead_count`/`behind_count`, each `Some(n)` with `n > 0` -> its own field
+  (`status-bar-git-changed-files`/`-ahead`/`-behind`), the same "absent at zero" convention the
+  running/failed/pending-approval labels already use -- `None` (an `AcceptedBranchOnly` repository)
+  and `Some(0)` both correctly produce no field.
+- `Unavailable`/`NotImplemented`/`Unknown` -> `status-bar-git-not-available`, identically -- an
+  implementation detail of *why* nothing is known, never three different user-facing claims.
+
+New catalog keys added to `en.ftl` and registered in `i18n::enforcement::generic_args()`'s `$branch`
+fixture (`every_source_locale_key_resolves_in_every_shipped_locale` failed once, correctly, before
+that registration -- caught by the gate on the first full-workspace run, not found by inspection).
+
+**Tests** (`shell/tests.rs`): a clean branch with nothing else (exactly two fields, no zero-padding);
+dirty + ahead + behind as three separate labels; detached `HEAD` rendered distinctly from "not
+available"; `AcceptedBranchOnly`'s shape (branch only, no content fields) constructed directly via
+`set_git_summary` rather than through the gate (a rendering test, not a second copy of the gate's own
+coverage).
+
+### The live capture, real Git state, the release binary
+
+`rfcs/handoffs/030-git-integration/evidence/01-status-bar-real-branch-and-dirty-count.png`: a real
+`mktemp -d` repository (`git init`, a branch named `main`, one committed file, then modified in place
+so `git status` reports it dirty), opened with `./target/release/tekstide <path>` under a throwaway
+`XDG_STATE_HOME`. The bottom status bar reads *"Project Board | 1 project Restricted Git: main
+1 changed Ctrl+Alt+P Project Board"* -- the subscription/thread/message round trip verified working
+end to end in the shipping artifact, not only in unit tests. No path under `$HOME` in the image.
+
+### The disclosure (review 410's explicit requirement)
+
+- **Book**: `docs/src/users/what-works-today.md` gained a "Git" section stating the branch/dirty
+  capability and, in the same paragraph, the cadence limitation verbatim from the ruling: *"a change
+  made outside Tekstide while a project stays open... is not reflected until the next in-app process
+  ends or the project is reopened."* The old "Not built" section's Git-related claim was trimmed
+  rather than left contradicting the new section.
+- **Changelog**: a new `## Unreleased` section, started now rather than reconstructed in one pass at
+  `0.22.0`'s release-candidate time -- the gap `0.21.0`'s own candidate had to absorb.
+
+### Test count and gate (wiring layer)
+
+`cargo test --all-targets`: 561 (`tekstide`, +5 new: four rendering tests, one enforcement sibling) +
+9 + 864 (`tekstide-core`, unchanged by this layer). Two intermittents disclosed across this slice's
+gate attempts, neither a new finding about this slice's own code:
+
+- `shell::tests::change_review_content_view_build_cost_by_line_count_measurement`, on an early
+  `cargo test --all-targets` run -- already registered (review 338, `test-process-leak.md` line 29).
+- `audit::tests::purge::purge_reports_deferred_cleanup_while_wal_reader_is_active`, on the third of
+  three consecutive full-workspace runs -- **not** previously registered; passed immediately in
+  isolation. New row added to `test-process-leak.md` (dated, named as a candidate for the same class
+  of SQLite-under-parallel-load contention the register's other rows describe, not confirmed as the
+  same cause).
+
+Both re-ran clean. `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`rfc_docs_invariants` (9/9), three consecutive `cargo test --workspace --no-fail-fast` runs -- 561 + 9
++ 864, clean, all three (the run that hit the second intermittent above was re-run in full, not
+patched over).
+
+### A mistake, corrected in-session
+
+Mid-ablation-verification for the enforcement test, `git checkout -- crates/tekstide/src/shell.rs`
+was run without first checking `git status` -- it discarded every uncommitted change to that file
+(the `Message` variant, the subscription trio, the `subscription()` wiring, all four trigger call
+sites), not only the one-line ablation it was meant to undo. Caught immediately via `git status`
+after; every edit was reconstructed from the exact same content already in this evidence file's own
+description above, then re-verified by a full compile, clippy pass, and test run before continuing --
+not merely reapplied and trusted. No data was lost that this document does not already fully
+describe, but the near-miss is worth naming rather than quietly fixing: the standing rule ("`git
+status` before any command that could discard uncommitted work") exists for exactly this shape of
+mistake, and this is the session it was skipped.
