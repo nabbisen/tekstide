@@ -1092,3 +1092,21 @@ process and writes to a real audit store.
 **Not reproduced:** 6 consecutive `-p tekstide --bin tekstide` runs and 5 consecutive full-workspace
 runs afterwards, all green at 538 + 9 + 823. Recorded rather than dropped, so a later recurrence has
 something to attach to.
+
+## Recurrence, 2026-09-22 — RFC-030 PR-030-B's R-a/R-b review (reviewer's run)
+
+`approval::tests::channel::bind_recovers_from_a_stale_socket_file` failed once, in the reviewer's
+second batch of full-workspace runs on the restored tree (`563 + 9 + 863`, one failure). **Row 1**,
+the original from response 213. Passed immediately in isolation, and the three other runs of the same
+batch were clean at `563 + 9 + 864`.
+
+**Not the slice.** R-a adds a `trigger_git_summary_refresh` call in two terminal-termination branches
+and touches no approval socket.
+
+**A reviewer's own mistake worth recording, because it looked like a flake and was not.** In the batch
+before this one, `tests::trigger_git_summary_refresh_is_called_from_every_expected_site` failed at
+"5 times, expected 6". That was not an intermittent: a gate run was still in flight when the reviewer
+started an ablation, and that test **scans the source tree**, so it read `shell.rs` with the ablated
+line removed. Source-scanning tests make the working tree a shared resource — a gate run and a tree
+mutation must never overlap, and a failure of one of these tests is worth checking against `git
+status` before it is called flaky.
