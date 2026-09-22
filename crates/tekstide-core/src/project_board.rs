@@ -1,6 +1,6 @@
 use crate::app::AppState;
 use crate::project::recent::{RecentProjectAvailability, RestoredRecentProject};
-use crate::project::{ProjectId, ProjectRuntimeSummary, ProjectSession};
+use crate::project::{ProjectGitDisplayStatus, ProjectId, ProjectRuntimeSummary, ProjectSession};
 use crate::security::RestrictedModeSummary;
 
 /// `NotImplemented` and `Unknown` answer different questions and must not
@@ -24,6 +24,33 @@ impl CountDisplay {
     pub fn label(self) -> String {
         match self {
             Self::KnownCount(count) => count.to_string(),
+            Self::Unavailable => "not available".to_owned(),
+            Self::NotImplemented => "not implemented".to_owned(),
+            Self::Unknown => "unknown".to_owned(),
+        }
+    }
+}
+
+/// RFC-030 PR-030-C, review 411 R-c: `branch_status`'s own type -- not
+/// `CountDisplay`, which has no way to carry a name (its `KnownCount`
+/// variant is a `u32`). Otherwise the same shape, plus `Detached`: a real
+/// repository, a real commit, just no branch name, distinct from
+/// `Unavailable` the same way `git_state_fields` (the status bar's own
+/// renderer, RFC-030 PR-030-B) already treats it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BranchDisplay {
+    Known(String),
+    Detached,
+    Unavailable,
+    NotImplemented,
+    Unknown,
+}
+
+impl BranchDisplay {
+    pub fn label(&self) -> String {
+        match self {
+            Self::Known(name) => name.clone(),
+            Self::Detached => "detached".to_owned(),
             Self::Unavailable => "not available".to_owned(),
             Self::NotImplemented => "not implemented".to_owned(),
             Self::Unknown => "unknown".to_owned(),
@@ -89,7 +116,7 @@ pub struct ProjectBoardRow {
     pub restricted_mode: bool,
     pub blocked_automation_count: u32,
     pub blocked_automation_labels: Vec<String>,
-    pub branch_status: CountDisplay,
+    pub branch_status: BranchDisplay,
     pub terminal_count: CountDisplay,
     pub agent_run_count: CountDisplay,
     pub approval_count: CountDisplay,
@@ -160,6 +187,29 @@ impl ProjectBoardViewModel {
     }
 }
 
+/// RFC-030 PR-030-C, review 411 R-c: the active-session row's
+/// `branch_status`, read straight from `project.git_summary()`. `Known`
+/// covers both a fully `Accepted` repository and one the gate could only
+/// vouch for the branch of (`AcceptedBranchOnly`) -- the board's
+/// `branch_status` has never shown dirty/changed counts (that is
+/// `dirty_file_count`, a different, editor-buffer fact, per review 411's
+/// own note not to conflate the two), so the distinction that matters
+/// elsewhere does not apply to this one field.
+fn branch_display(project: &ProjectSession) -> BranchDisplay {
+    match project.git_summary().display_status() {
+        ProjectGitDisplayStatus::Known {
+            branch_name: Some(name),
+            ..
+        } => BranchDisplay::Known(name),
+        ProjectGitDisplayStatus::Known {
+            branch_name: None, ..
+        } => BranchDisplay::Detached,
+        ProjectGitDisplayStatus::Unavailable => BranchDisplay::Unavailable,
+        ProjectGitDisplayStatus::NotImplemented => BranchDisplay::NotImplemented,
+        ProjectGitDisplayStatus::Unknown => BranchDisplay::Unknown,
+    }
+}
+
 pub fn calculate_attention(runtime_summary: &ProjectRuntimeSummary) -> AttentionState {
     if runtime_summary.risk_warning {
         AttentionState::Risk
@@ -199,7 +249,10 @@ fn active_project_row(project: &ProjectSession) -> ProjectBoardRow {
             .into_iter()
             .map(str::to_owned)
             .collect(),
-        branch_status: CountDisplay::Unavailable,
+        // RFC-030 PR-030-B/C, review 411 R-c: fed from the real
+        // `ProjectGitSummary` now that something produces one, instead of
+        // the hardcoded `Unavailable` that was true while nothing did.
+        branch_status: branch_display(project),
         // `Unknown`, not `NotImplemented`: `terminal_count`/`agent_run_count`
         // are `None` only until `refresh_runtime_summary_from_collections`
         // first runs (session.rs) -- a freshly opened project that has not
@@ -279,7 +332,13 @@ fn recent_project_row(restored: &RestoredRecentProject) -> ProjectBoardRow {
             .into_iter()
             .map(str::to_owned)
             .collect(),
-        branch_status: CountDisplay::Unavailable,
+        // RFC-030 PR-030-C, review 411 R-c: stays `Unavailable`,
+        // deliberately -- a recent-but-unopened project has no
+        // `ProjectSession`, hence no `ProjectGitSummary` to read a branch
+        // name from at all. Not the same case `active_project_row`'s
+        // comment below describes (a session that has not counted yet);
+        // this row has no session, full stop.
+        branch_status: BranchDisplay::Unavailable,
         // Same fix as `active_project_row`, not a disclosed limitation:
         // a recent-but-unopened project has no `ProjectSession` to count
         // from, which is "nothing has happened yet" -- the same shape as

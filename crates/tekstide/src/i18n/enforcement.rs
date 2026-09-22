@@ -218,6 +218,12 @@ const CORE_EXEMPT_LITERALS: &[CoreExemptSite] = &[
     CoreExemptSite::dormant("project_board.rs", "not available"),
     CoreExemptSite::dormant("project_board.rs", "not implemented"),
     CoreExemptSite::dormant("project_board.rs", "unknown"),
+    // project_board.rs -- BranchDisplay::label (RFC-030 PR-030-C, R-c).
+    // Dormant for the same reason: `board.rs` renders `BranchDisplay`
+    // via `branch_display_args`, matching the enum directly, never
+    // calling `.label()`; the scan above still proves no caller exists
+    // anywhere in the crate.
+    CoreExemptSite::dormant("project_board.rs", "detached"),
     // project_board.rs -- AttentionState::label. Dormant for the same
     // reason; also feeds the unused `attention_label` and
     // `global_attention_summary` fields (neither read by `board.rs`).

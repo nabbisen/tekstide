@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use tekstide_core::project::ProjectId;
-use tekstide_core::project_board::{AttentionState, BoardRowKind, CountDisplay, ProjectBoardRow};
+use tekstide_core::project_board::{
+    AttentionState, BoardRowKind, BranchDisplay, CountDisplay, ProjectBoardRow,
+};
 
 use super::{highlighted_row_lines, row_lines};
 use crate::i18n::{Catalog, LocalePreference};
@@ -28,7 +30,7 @@ fn baseline_row() -> ProjectBoardRow {
         restricted_mode: false,
         blocked_automation_count: 0,
         blocked_automation_labels: Vec::new(),
-        branch_status: CountDisplay::Unavailable,
+        branch_status: BranchDisplay::Unavailable,
         terminal_count: CountDisplay::Unavailable,
         agent_run_count: CountDisplay::Unavailable,
         approval_count: CountDisplay::Unavailable,
@@ -161,6 +163,78 @@ fn an_untrusted_root_path_with_a_bidi_override_is_escaped_not_live() {
 
     assert!(!path_line.contains('\u{202E}'));
     assert!(path_line.contains("<U+202E>"));
+}
+
+/// RFC-030 PR-030-C, review 411 R-c: `BranchDisplay::Known` renders the
+/// real branch name, via `project-board-branch-status`'s own `*[other]`
+/// fallback arm (the name is never going to equal one of the fixed
+/// symbols, so it always falls through to interpolation).
+#[test]
+fn a_known_branch_renders_its_real_name() {
+    let catalog = real_catalog();
+    let mut row = baseline_row();
+    row.branch_status = BranchDisplay::Known("main".to_string());
+
+    let rendered = row_lines(&row, &catalog);
+
+    assert!(
+        rendered.iter().any(|line| line.contains("main")),
+        "the real branch name must appear somewhere in the rendered row: {rendered:?}"
+    );
+}
+
+/// The same security-critical case as the project name/path above,
+/// applied to a branch name: it is read out of the repository being
+/// shown, not chosen by this application, so it goes through the same
+/// `text_safety` treatment.
+#[test]
+fn an_untrusted_branch_name_with_a_bidi_override_is_escaped_not_live() {
+    let catalog = real_catalog();
+    let mut row = baseline_row();
+    row.branch_status = BranchDisplay::Known("feature\u{202E}gpj.exe".to_string());
+
+    let rendered = row_lines(&row, &catalog);
+    let branch_line = rendered
+        .iter()
+        .find(|line| line.contains("branch"))
+        .expect("a rendered branch line must exist");
+
+    assert!(
+        !branch_line.contains('\u{202E}'),
+        "a live bidi override in a branch name must never survive into the rendered row: \
+         {branch_line:?}"
+    );
+    assert!(
+        branch_line.contains("<U+202E>"),
+        "the override must be escaped to its visible marker, not silently dropped: \
+         {branch_line:?}"
+    );
+}
+
+/// Detached `HEAD` -- a real repository, a real commit, no branch name --
+/// renders distinctly from both a known branch and "not available",
+/// matching the status bar's own `git_state_fields` treatment of the same
+/// case (RFC-030 PR-030-B).
+#[test]
+fn a_detached_head_renders_distinctly() {
+    let catalog = real_catalog();
+    let mut detached_row = baseline_row();
+    detached_row.branch_status = BranchDisplay::Detached;
+    let mut unavailable_row = baseline_row();
+    unavailable_row.branch_status = BranchDisplay::Unavailable;
+
+    let detached_rendered = row_lines(&detached_row, &catalog);
+    let unavailable_rendered = row_lines(&unavailable_row, &catalog);
+
+    assert_ne!(
+        detached_rendered[3], unavailable_rendered[3],
+        "detached must not read the same as not available: {detached_rendered:?} vs \
+         {unavailable_rendered:?}"
+    );
+    assert!(
+        detached_rendered[3].contains("detached"),
+        "{detached_rendered:?}"
+    );
 }
 
 /// Ordinary, non-malicious names and paths must render with no visible

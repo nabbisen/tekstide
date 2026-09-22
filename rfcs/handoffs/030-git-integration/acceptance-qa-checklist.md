@@ -244,7 +244,7 @@ ruling below is implemented, not just decided.
       is live. Book and changelog both. — both reworded to the literal rule: *"a change is reflected
       only once the process that could have made it has ended, or the project is reopened"*, with the
       in-Tekstide-terminal case named explicitly rather than only the outside-Tekstide one.
-- [ ] **R-c: the project board must not contradict the status bar.** `ProjectBoardRow::branch_status`
+- [x] **R-c: the project board must not contradict the status bar.** `ProjectBoardRow::branch_status`
       is hardcoded `CountDisplay::Unavailable` (`project_board.rs:202`, `:282`), so the board reads
       "branch: not available" in the same frame where the bar reads "Git: main" — visible in
       PR-030-B's own evidence capture. Feed the **active-session** row from `project.git_summary()`
@@ -252,6 +252,11 @@ ruling below is implemented, not just decided.
       as it is. **May land with PR-030-C; must not ship before it.**
       *Checked and not a finding: the board's "0 dirty files" beside the bar's "1 changed" is a
       different fact — `runtime_summary.dirty_files` counts open editor buffers.*
+      — fixed with a new `BranchDisplay` enum (`Known(String)|Detached|Unavailable|NotImplemented|
+      Unknown`); `active_project_row` now calls `branch_display(project)`, reading
+      `project.git_summary().display_status()`; the recent-but-unopened row stays on
+      `BranchDisplay::Unavailable` unchanged (no `ProjectSession` to read from). See
+      `qa-evidence.md` for the full test/gate account.
 
 ## PR-030-C — per-file status
 

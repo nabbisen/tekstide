@@ -1,5 +1,6 @@
 use super::{
-    AttentionState, BoardRowKind, CountDisplay, ProjectBoardViewModel, calculate_attention,
+    AttentionState, BoardRowKind, BranchDisplay, CountDisplay, ProjectBoardViewModel,
+    calculate_attention,
 };
 use crate::app::AppState;
 use crate::domain::{TerminalKind, TerminalSession, TerminalStatus};
@@ -38,7 +39,13 @@ fn project_rows_preserve_placeholder_field_shape_without_probing() {
     assert_eq!(view_model.active_project_id, Some(project_id));
     assert_eq!(view_model.rows.len(), 1);
     let row = &view_model.rows[0];
-    assert_eq!(row.branch_status, CountDisplay::Unavailable);
+    // RFC-030 PR-030-C, review 411 R-c: a freshly opened project has
+    // never had `set_git_summary` called, so its `ProjectGitSummary`
+    // is still `Default`'s `NotImplemented` -- "the feature does not
+    // exist" is wrong the moment PR-030-B ships, so this is
+    // `NotImplemented`, not `Unavailable`, matching `CountDisplay`'s own
+    // documented distinction between the two applied to this field.
+    assert_eq!(row.branch_status, BranchDisplay::NotImplemented);
     assert_eq!(row.terminal_count, CountDisplay::Unknown);
     assert_eq!(row.agent_run_count, CountDisplay::Unknown);
     assert_eq!(row.approval_count, CountDisplay::KnownCount(0));

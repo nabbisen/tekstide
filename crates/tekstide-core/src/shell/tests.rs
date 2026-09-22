@@ -154,7 +154,14 @@ fn first_run_project_board_renders_empty_state() {
 }
 
 #[test]
-fn populated_project_board_renders_placeholder_branch_status_without_process_probe() {
+fn populated_project_board_renders_not_implemented_branch_status_without_process_probe() {
+    // RFC-030 PR-030-C, R-c: `add_project_session` (unlike
+    // `add_project_from_path`) never calls `trigger_git_summary_refresh`,
+    // so the session's `ProjectGitSummary` stays at `Default`'s
+    // `NotImplemented` -- "not computed yet", distinct from `Unavailable`
+    // ("computed; genuinely absent"). `BranchDisplay::NotImplemented`'s
+    // own label is what the harness renders here, matching the same
+    // distinction already drawn in `project_board::tests`.
     let mut shell = ApplicationShell::new();
     shell
         .state_mut()
@@ -162,7 +169,7 @@ fn populated_project_board_renders_placeholder_branch_status_without_process_pro
 
     let rendered = shell.render_text();
 
-    assert!(rendered.contains("branch/status: not available"));
+    assert!(rendered.contains("branch/status: not implemented"));
     assert!(rendered.contains("trust: Restricted"));
     assert!(rendered.contains("security: Restricted Mode"));
     assert!(rendered.contains(&format!(

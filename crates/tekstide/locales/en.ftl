@@ -181,6 +181,7 @@ project-board-path-field-error = { $reason ->
 project-board-branch-status = { $status ->
     [not_implemented] branch: not implemented
     [unavailable] branch: not available
+    [detached] branch: detached
     [unknown] branch: unknown
    *[other] branch: {$status}
 }

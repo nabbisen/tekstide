@@ -15,19 +15,24 @@
 //!   would not even compile for these -- but the discipline matters
 //!   independent of what the type system happens to catch) and never
 //!   handed to `text(...)` raw.
-//! - `CountDisplay` fields (`branch_status`, `terminal_count`,
-//!   `agent_run_count`, `approval_count`, `review_count`,
-//!   `dirty_file_count`) are routed through the catalog via
-//!   [`count_display_args`], never through `CountDisplay::label()`.
-//!   This is response 130's explicit decision point: `label()` returns
-//!   hardcoded English for three of four variants, and this surface is
-//!   the one RFC-005/RFC-015 required to preserve "`Unavailable`/
-//!   `NotImplemented` never render as `0`" -- calling `label()` here
-//!   would both hardcode English at the render layer and be the
-//!   easiest way to quietly fail that requirement. `label()` keeps its
-//!   existing role in `tekstide_core::shell::render_text` (the
-//!   pre-GUI harness, kept -- see `qa-evidence.md`); this surface does
-//!   not call it at all.
+//! - `CountDisplay` fields (`terminal_count`, `agent_run_count`,
+//!   `approval_count`, `review_count`, `dirty_file_count`) are routed
+//!   through the catalog via [`count_display_args`], never through
+//!   `CountDisplay::label()`. This is response 130's explicit decision
+//!   point: `label()` returns hardcoded English for three of four
+//!   variants, and this surface is the one RFC-005/RFC-015 required to
+//!   preserve "`Unavailable`/`NotImplemented` never render as `0`" --
+//!   calling `label()` here would both hardcode English at the render
+//!   layer and be the easiest way to quietly fail that requirement.
+//!   `label()` keeps its existing role in
+//!   `tekstide_core::shell::render_text` (the pre-GUI harness, kept --
+//!   see `qa-evidence.md`); this surface does not call it at all.
+//! - `branch_status` (`BranchDisplay`, RFC-030 PR-030-C) is the same
+//!   shape as the `CountDisplay` fields above, routed through
+//!   [`branch_display_args`] instead of `count_display_args` since its
+//!   `Known` variant carries an untrusted branch name rather than a
+//!   trusted count -- `quote_untrusted` first, the same as
+//!   `display_name`/`root_path_hint` above, not `trusted_symbol`.
 //! - `attention` (an `AttentionState` enum, not just `attention_label:
 //!   String`) is also routed through the catalog, via
 //!   [`attention_symbol`], for the same reason: the enum is available,
@@ -50,7 +55,8 @@
 
 use tekstide_core::project::ProjectId;
 use tekstide_core::project_board::{
-    AttentionState, BoardRowKind, CountDisplay, ProjectBoardRow, ProjectBoardViewModel,
+    AttentionState, BoardRowKind, BranchDisplay, CountDisplay, ProjectBoardRow,
+    ProjectBoardViewModel,
 };
 use tekstide_core::text_safety;
 
@@ -355,7 +361,7 @@ pub(crate) fn row_lines(row: &ProjectBoardRow, catalog: &Catalog) -> Vec<String>
         row.trust_label.clone(),
         catalog.get_with_args(
             "project-board-branch-status",
-            &count_display_args(CatalogArgs::new(), "status", row.branch_status),
+            &branch_display_args(CatalogArgs::new(), "status", &row.branch_status),
         ),
         catalog.get_with_args(
             "project-board-terminal-count",
@@ -428,6 +434,30 @@ fn count_display_args<'a>(
         CountDisplay::Unavailable => args.trusted_symbol(name, "unavailable"),
         CountDisplay::NotImplemented => args.trusted_symbol(name, "not_implemented"),
         CountDisplay::Unknown => args.trusted_symbol(name, "unknown"),
+    }
+}
+
+/// RFC-030 PR-030-C, review 411 R-c: `branch_status`'s own args builder,
+/// not `count_display_args` -- `BranchDisplay::Known` carries an
+/// untrusted branch name, not a trusted count. `project-board-branch-status`'s
+/// own `*[other]` arm interpolates whatever `$status` resolves to when it
+/// matches none of the fixed symbols, which is exactly how a
+/// `quote_untrusted`-wrapped branch name reaches the rendered line: it is
+/// never going to equal `not_implemented`/`unavailable`/`detached`/
+/// `unknown`, so it always falls through to that arm.
+fn branch_display_args<'a>(
+    args: CatalogArgs<'a>,
+    name: &'a str,
+    value: &BranchDisplay,
+) -> CatalogArgs<'a> {
+    match value {
+        BranchDisplay::Known(branch_name) => {
+            args.untrusted(name, &text_safety::quote_untrusted(branch_name))
+        }
+        BranchDisplay::Detached => args.trusted_symbol(name, "detached"),
+        BranchDisplay::Unavailable => args.trusted_symbol(name, "unavailable"),
+        BranchDisplay::NotImplemented => args.trusted_symbol(name, "not_implemented"),
+        BranchDisplay::Unknown => args.trusted_symbol(name, "unknown"),
     }
 }
 

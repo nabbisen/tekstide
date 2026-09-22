@@ -646,3 +646,69 @@ rather than only the outside-Tekstide example the old wording led with.
 `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `rfc_docs_invariants` (9/9), `cargo test --all-targets`: 563 (`tekstide`, +2 new behavioural tests) +
 9 + 864, clean.
+
+## PR-030-C: R-c -- feeding the board's `branch_status` from real Git state
+
+Added `BranchDisplay` (`Known(String)|Detached|Unavailable|NotImplemented|Unknown`) to
+`project_board.rs`, replacing `ProjectBoardRow::branch_status`'s `CountDisplay` type.
+`branch_display(project: &ProjectSession)` reads `project.git_summary().display_status()` and maps
+each `ProjectGitDisplayStatus` variant across: `Known { branch_name: Some(name), .. }` ->
+`Known(name)`, `Known { branch_name: None, .. }` -> `Detached`, and the three placeholder variants
+straight across by name. `active_project_row` now calls `branch_display(project)`;
+`recent_project_row` stays on `BranchDisplay::Unavailable` (retyped, meaning unchanged) since it has
+no `ProjectSession` to read from -- confirmed correct, not a second gap, since review 411's own R-c
+text says exactly this ("the recent-but-unopened row stays as it is").
+
+`board.rs` (the real GUI renderer) gained `branch_display_args`, routing `Known(name)` through
+`text_safety::quote_untrusted` (a branch name is repository-controlled, same trust class as a project
+name or path) and every other variant through `CatalogArgs::trusted_symbol`. `en.ftl`'s
+`project-board-branch-status` key gained a `[detached]` arm; the pre-existing `*[other]` fallback
+arm already handles `Known(name)` by interpolating whatever doesn't match a fixed symbol, so no
+`[known]` arm was needed.
+
+**Two i18n-enforcement-adjacent facts checked, not assumed**: (1) `BranchDisplay::label()`, added for
+the pre-GUI text harness (`render_project_board` in `shell.rs`), needed a new
+`CoreExemptSite::dormant("project_board.rs", "detached")` entry in `CORE_EXEMPT_LITERALS` -- the
+existing three `CountDisplay::label()` entries' dormancy rests on
+`no_count_display_or_attention_label_is_called_anywhere_in_the_crate`, which scans for any `.label()`
+call across the whole `tekstide` crate's source, not a type-specific check, so it already proves
+`BranchDisplay::label()`'s dormancy too (confirmed by reading the scan's body directly rather than
+assuming the comment's reasoning transferred). (2) `status-bar-git-branch`'s pre-existing `$branch`
+fixture registration in `enforcement.rs`'s `generic_args()` was reused as-is; no new fixture
+registration was needed for the board's own `$status` variable since `project-board-branch-status`
+already existed pre-R-c.
+
+**A real regression, not a flake, found by the three-run gate**: `shell::tests::
+populated_project_board_renders_placeholder_branch_status_without_process_probe` asserted
+`rendered.contains("branch/status: not available")` against a project added via
+`add_project_session` (a lower-level test helper, distinct from `add_project_from_path`, which never
+calls `trigger_git_summary_refresh`). Before R-c this always read `CountDisplay::Unavailable`'s label
+regardless of git-summary state; after R-c the same project's `git_summary()` is genuinely still at
+`ProjectSession::new`'s `Default` (`NotImplemented`, "not computed yet"), not `Unavailable`
+("computed; genuinely absent") -- the identical distinction already drawn in `project_board::tests`
+for the same reason. Fixed by updating the assertion to `"branch/status: not implemented"` and
+renaming the test to `populated_project_board_renders_not_implemented_branch_status_without_process_probe`,
+with a comment stating why. No other reference to the old test name exists anywhere in the tree
+(checked by grep before renaming).
+
+### Tests
+
+`surface::board::tests::` (direct grep of the run's own output, not carried over from an earlier
+count): 20 passed, 0 failed -- includes the 4 new tests added for this response
+(`a_known_branch_renders_its_real_name`, `an_untrusted_branch_name_with_a_bidi_override_is_escaped_not_live`,
+`a_detached_head_renders_distinctly`, and the corrected `baseline_row()` fixture exercised by every
+existing test in the file). `project_board::tests::` includes the corrected
+`project_rows_preserve_placeholder_field_shape_without_probing`, now asserting
+`BranchDisplay::NotImplemented` for a freshly-opened project rather than `Unavailable`, with a comment
+explaining the distinction.
+
+### Gate
+
+`cargo fmt --all --check` (one diff found and applied, in `surface/board/tests.rs`'s new
+`a_detached_head_renders_distinctly` -- an over-length `assert!` line rustfmt wanted wrapped; not a
+substantive change), `cargo clippy --workspace --all-targets -- -D warnings` (clean),
+`rfc_docs_invariants` (9/9), three consecutive full-workspace `cargo test --workspace --all-targets
+--no-fail-fast` runs, output redirected to files and greeped directly rather than eyeballed: all three
+identical -- `566 passed; 0 failed` (`tekstide`), `9 passed; 0 failed` (`rfc_docs_invariants`), `864
+passed; 0 failed` (`tekstide-core`), zero `error`/`FAILED`/`error[` lines in any of the three logs. No
+new intermittent failures observed across the three runs; nothing new for `test-process-leak.md`.
