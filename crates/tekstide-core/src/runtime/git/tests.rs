@@ -1197,3 +1197,120 @@ fn a_non_utf8_path_is_skipped_from_the_map_but_still_counted() {
         "only the decodable file gets a map entry"
     );
 }
+
+// ---------------------------------------------------------------------
+// PR-030-D (review 414): locating `git` beyond a fixed `/usr/bin:/bin`,
+// and caching the `--version` check.
+// ---------------------------------------------------------------------
+
+/// Review 414's required test, verbatim: an inherited `PATH` carrying a
+/// relative entry and an entry under the project root must have both
+/// dropped -- checked against [`resolve_git_from_inherited_path`]
+/// directly, not the full [`resolve_git_executable`] composition, which
+/// would always resolve through `REVIEWED_GIT_DIRECTORIES` first on
+/// every machine this test suite actually runs on and never reach this
+/// fallback at all.
+#[test]
+fn resolving_git_from_the_inherited_path_drops_relative_and_project_local_entries() {
+    let fixture = Fixture::new("git-executable-resolution");
+
+    let project_local_bin = fixture.repo.join("bin");
+    fs::create_dir_all(&project_local_bin).unwrap();
+    fs::write(
+        project_local_bin.join("git"),
+        "must never be resolved -- project-local",
+    )
+    .unwrap();
+
+    let legitimate_dir = fixture.root.join("legitimate-bin");
+    fs::create_dir_all(&legitimate_dir).unwrap();
+    fs::write(
+        legitimate_dir.join("git"),
+        "a legitimate, non-project-local git",
+    )
+    .unwrap();
+
+    let inherited_path = format!(
+        "relative-entry:{}:{}",
+        project_local_bin.display(),
+        legitimate_dir.display()
+    );
+
+    let resolved = resolve_git_from_inherited_path(&fixture.repo, &inherited_path);
+
+    assert_eq!(resolved, Some(legitimate_dir.join("git")));
+}
+
+/// A `PATH` entry that is a directory but has no `git` inside it at all
+/// is skipped in favour of a later entry that does -- the filter must
+/// not stop at the first *survives-the-filter* candidate, only the
+/// first *actually-has-git* one.
+#[test]
+fn resolving_git_from_the_inherited_path_skips_a_directory_with_no_git_in_it() {
+    let fixture = Fixture::new("git-executable-resolution-empty-dir");
+
+    let empty_dir = fixture.root.join("empty-bin");
+    fs::create_dir_all(&empty_dir).unwrap();
+
+    let real_dir = fixture.root.join("real-bin");
+    fs::create_dir_all(&real_dir).unwrap();
+    fs::write(real_dir.join("git"), "present").unwrap();
+
+    let inherited_path = format!("{}:{}", empty_dir.display(), real_dir.display());
+
+    let resolved = resolve_git_from_inherited_path(&fixture.repo, &inherited_path);
+
+    assert_eq!(resolved, Some(real_dir.join("git")));
+}
+
+/// `pub fn compute_summary` is the one production entry point --
+/// `resolve_git_executable`'s two-stage resolution runs for real here,
+/// against this machine's real environment, not only a fixture-injected
+/// override. A clean, real repository is enough to prove the resolved
+/// executable is genuinely invocable end to end, and that `R6` (the
+/// developer's own global/system config forwarding nothing) still holds
+/// even though this call, unlike every other test in this file, reads
+/// the real process environment (`forwarded_environment()`) rather than
+/// a `Fixture`'s isolated one -- safe precisely because
+/// `spawn_git_command` hardcodes `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM`
+/// to `/dev/null` unconditionally, regardless of what `HOME` says.
+#[test]
+fn compute_summary_resolves_a_real_git_executable_on_this_machine() {
+    let fixture = Fixture::new("compute-summary-real-resolution");
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.write("tracked.txt", "hello\n");
+    fixture.setup_git(&["add", "-A"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial"]);
+
+    let summary = compute_summary(&fixture.repo);
+
+    assert_eq!(summary.provider_state, ProjectProviderState::Complete);
+    assert_eq!(summary.branch_name, Some("main".to_string()));
+}
+
+/// Proves the cache actually skips a second real spawn -- counting real
+/// invocations of a fake `git` rather than only asserting the returned
+/// `Result` twice, which would pass whether or not anything was actually
+/// cached.
+#[test]
+fn a_second_call_with_the_same_verified_executable_does_not_respawn_version() {
+    let fixture = Fixture::new("version-check-cache");
+    let counter = fixture.root.join("version-invocations");
+    let script = fixture.marker_script(
+        "version-cache-git",
+        &format!(
+            "echo x >> '{}'\necho 'git version 2.99.0'",
+            counter.display()
+        ),
+    );
+
+    assert!(check_git_available(script.to_str().unwrap(), &fixture.forwarded_env).is_ok());
+    assert!(check_git_available(script.to_str().unwrap(), &fixture.forwarded_env).is_ok());
+
+    let invocations = fs::read_to_string(&counter).unwrap_or_default();
+    assert_eq!(
+        invocations.lines().count(),
+        1,
+        "the second call must be served from the cache, not a second real spawn"
+    );
+}

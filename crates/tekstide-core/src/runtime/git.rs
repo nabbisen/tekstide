@@ -53,9 +53,14 @@
 //!
 //! RFC-012's *Git Detector Safety* gate, item by item:
 //!
-//! 1. **Reviewed non-project-local executable** -- [`GIT_EXECUTABLE`] is a
-//!    bare name resolved only against the fixed `PATH` set below, never a
-//!    path influenced by the repository being read.
+//! 1. **Reviewed non-project-local executable** -- [`resolve_git_executable`]
+//!    (PR-030-D) resolves an absolute path from a fixed, reviewed
+//!    directory list or a filtered inherited `PATH`, never a path
+//!    influenced by the repository being read; `POSIX exec` never
+//!    searches `PATH` again once a name already contains a `/`. Tests
+//!    still inject `GIT_EXECUTABLE`, a bare name against the child
+//!    process's own fixed `PATH` (item 4), bypassing resolution
+//!    entirely -- see that constant's own doc comment.
 //! 2. **Invoked directly, no shell** -- [`spawn_git_command`] builds a
 //!    `std::process::Command` argument vector; nothing is ever passed to
 //!    `sh -c`.
@@ -64,9 +69,15 @@
 //!    `["--version"]`); nothing here ever invokes a bare subcommand name
 //!    that a repository's `alias.*` could have redefined, and `alias.*`
 //!    keys are refused by the allowlist regardless (they are not on it).
-//! 4. **No project-local `PATH`** -- `PATH` is fixed to `/usr/bin:/bin`
-//!    after `.env_clear()`, never the inherited or repository-influenced
-//!    value.
+//! 4. **No project-local `PATH`** -- the *child process's own*
+//!    environment still gets a fixed `PATH` (`/usr/bin:/bin`) after
+//!    `.env_clear()`, never the inherited or repository-influenced
+//!    value, for whatever `git` itself might consult. Locating which
+//!    `git` binary *Tekstide* invokes is item 1's concern, not this
+//!    one -- [`resolve_git_executable`]'s inherited-`PATH` fallback
+//!    (when the reviewed directories have nothing) drops every relative
+//!    entry and every entry inside the project root, so this guarantee
+//!    holds there too.
 //! 5. **Sanitised environment** -- `.env_clear()` first; only `PATH` and
 //!    the locale pair are fixed, `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM`
 //!    hardcoded to `/dev/null` (R6, never forwarded), plus `HOME`/
@@ -86,17 +97,99 @@
 //!    key, file contents, diff output, or captured stderr text (R7:
 //!    `AcceptedBranchOnly` no longer names the key that triggered it, at
 //!    all -- there is nothing left for this item to bound).
+//!
+//! **PR-030-D (review 413/414)**: item 1's own text above covers *why* a
+//! fixed `/usr/bin:/bin`-only search (the original item 4, before this
+//! RFC) left `git` silently unreachable on a distribution that installs
+//! it elsewhere entirely -- NixOS and Guix put it in a per-user or
+//! per-system profile, not a rare setup. [`resolve_git_executable`] runs
+//! once, in [`compute_summary`], before anything else. The same slice
+//! also caches [`check_git_available`]'s `--version` spawn (success
+//! only, keyed by the exact executable string, process-wide) -- see that
+//! function's own doc comment for why a keyed cache cannot leak state
+//! between this module's own tests.
 
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use crate::project::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Test-only (PR-030-D: `pub fn compute_summary`, the one production
+/// caller, now resolves its own executable via [`resolve_git_executable`]
+/// instead of using this bare name directly). Tests inject this, or a
+/// deliberately-bogus name, straight into `compute_summary_with_environment`/
+/// `evaluate_with_environment`, bypassing resolution entirely -- exactly
+/// what lets `Fixture`'s own bare `"git"` and each failure-mode test's
+/// distinct bogus string coexist with [`check_git_available`]'s
+/// per-string cache without any of them observing each other's state.
+#[cfg(test)]
 const GIT_EXECUTABLE: &str = "git";
+
+/// Tried first, in order, before [`resolve_git_executable`] ever touches
+/// the inherited `PATH`. `/usr/bin` and `/bin` are D1' item 4's original
+/// fixed pair; `/usr/local/bin` and `/opt/homebrew/bin` (Homebrew's own
+/// prefix on Apple Silicon) are added here because neither is
+/// project-local by construction -- both are system-wide install
+/// locations no repository can redirect, the same property the original
+/// fixed pair had.
+const REVIEWED_GIT_DIRECTORIES: &[&str] =
+    &["/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin"];
+
+/// PR-030-D (review 414): locates the `git` binary [`compute_summary`]
+/// should invoke, without depending on a fixed pair of directories that
+/// leaves the feature silently dead wherever `git` lives elsewhere.
+/// [`REVIEWED_GIT_DIRECTORIES`] is tried first; only if none of them has
+/// `git` does this fall back to the process's own inherited `PATH`
+/// ([`resolve_git_from_inherited_path`]). Returns the first candidate
+/// that is an existing regular file -- `Path::is_file` follows a symlink
+/// itself, the same check every other filesystem read in this module
+/// already relies on.
+fn resolve_git_executable(repository_root: &Path) -> Option<PathBuf> {
+    for directory in REVIEWED_GIT_DIRECTORIES {
+        let candidate = Path::new(directory).join("git");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    let inherited_path = std::env::var("PATH").ok()?;
+    resolve_git_from_inherited_path(repository_root, &inherited_path)
+}
+
+/// The inherited-`PATH` fallback, factored out so a test can drive it
+/// with a fixed `PATH` string directly -- `resolve_git_executable`'s own
+/// composition always tries the reviewed directories first, which would
+/// make a fallback-specific property untestable in isolation on a real
+/// machine that happens to have `git` in one of them (every machine this
+/// project's own test suite runs on does). D1' item 4's guarantee,
+/// applied to a *variable* `PATH` rather than dropped along with the
+/// fixed one: an entry that is not absolute is skipped (nothing here
+/// ever resolves a bare name against the current directory), and an
+/// entry that names the project root itself, or anything inside it, is
+/// skipped too -- the repository being read must never be able to
+/// redirect which `git` binary evaluates it.
+fn resolve_git_from_inherited_path(
+    repository_root: &Path,
+    inherited_path: &str,
+) -> Option<PathBuf> {
+    for directory in std::env::split_paths(inherited_path) {
+        if !directory.is_absolute() {
+            continue;
+        }
+        if directory.starts_with(repository_root) {
+            continue;
+        }
+        let candidate = directory.join("git");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
 const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(5);
 /// Config listings and `--version` output are small; this bounds a
 /// hostile repository's include chain or a runaway filter's stdout, not
@@ -272,8 +365,25 @@ fn evaluate_with_environment_and_walk_budget(
 /// binary being present. Dirty state, changed-file count and ahead/behind
 /// are read only when `Accepted` -- the one outcome where content
 /// comparison was actually vetted.
+///
+/// PR-030-D: [`resolve_git_executable`] runs first. When it finds
+/// nothing -- `git` is genuinely absent from every reviewed and every
+/// inherited-`PATH` location -- this goes straight to
+/// [`branch_only_summary`] rather than calling into the gate with a name
+/// known not to resolve: `branch_only_summary` already handles both "not
+/// a repository" and "a repository with no invocable `git`" correctly on
+/// its own, using only the filesystem, so nothing here needs to invent a
+/// placeholder executable name to reach the same answer.
 pub fn compute_summary(repository_root: &Path) -> ProjectGitSummary {
-    compute_summary_with_environment(repository_root, GIT_EXECUTABLE, &forwarded_environment())
+    match resolve_git_executable(repository_root).and_then(|path| path.to_str().map(str::to_owned))
+    {
+        Some(git_executable) => compute_summary_with_environment(
+            repository_root,
+            &git_executable,
+            &forwarded_environment(),
+        ),
+        None => branch_only_summary(repository_root),
+    }
 }
 
 fn compute_summary_with_environment(
@@ -881,10 +991,48 @@ fn line_declares_content_driver(line: &str) -> bool {
     })
 }
 
+/// PR-030-D (review 414): a fixed executable's `--version` never changes
+/// within one process's lifetime, so a second, third, ... refresh
+/// trigger must not re-spawn it -- "two spawns per evaluation for a fact
+/// that does not change is a cost with no buyer". [`VERIFIED_GIT_EXECUTABLES`]
+/// caches only *success*, keyed by the exact `git_executable` string that
+/// succeeded: a later call with a *different* string -- a test's
+/// deliberately bogus name, or in principle a different resolved path --
+/// still runs the real check, so the cache can never paper over a
+/// genuine failure. A failure is never cached: `git` installed or
+/// upgraded mid-session becomes available on the very next trigger, with
+/// no restart needed.
+///
+/// A `Mutex<HashSet<_>>`, not a single-slot `OnceLock<String>` --
+/// production only ever resolves one `git_executable` string across the
+/// whole process, but this module's own tests exercise many distinct
+/// ones concurrently (each `Fixture` uses the same bare `"git"`, and
+/// every failure-mode test its own bogus name), and a single-slot cache
+/// lets whichever test's `"git"` call happens to win the race
+/// permanently occupy the one slot, silently starving every other
+/// executable string of ever being cached at all -- measured: exactly
+/// this happened under the full workspace test run, though not in
+/// isolation (a single-run pass is not proof a concurrency design is
+/// correct; the failure only appeared once every other test in the
+/// binary was racing for the same static). A `HashSet` lets every
+/// distinct successful string be remembered independently, so this
+/// module's own tests cannot starve each other's caching regardless of
+/// scheduling.
+static VERIFIED_GIT_EXECUTABLES: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    OnceLock::new();
+
 fn check_git_available(
     git_executable: &str,
     forwarded_env: &[(String, String)],
 ) -> Result<(), GitUnavailableReason> {
+    let cache = VERIFIED_GIT_EXECUTABLES.get_or_init(Default::default);
+    if cache
+        .lock()
+        .expect("git-executable cache lock is never held across a panic")
+        .contains(git_executable)
+    {
+        return Ok(());
+    }
     let output = run_bounded_git(git_executable, &["--version"], None, forwarded_env)?;
     if !output.status.success() {
         return Err(GitUnavailableReason::SpawnFailed);
@@ -900,6 +1048,10 @@ fn check_git_available(
             found: text.trim().to_string(),
         });
     }
+    cache
+        .lock()
+        .expect("git-executable cache lock is never held across a panic")
+        .insert(git_executable.to_string());
     Ok(())
 }
 

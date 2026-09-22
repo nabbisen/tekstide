@@ -918,3 +918,93 @@ anything up by accident.
 full-workspace `cargo test --workspace --all-targets --no-fail-fast` runs, output redirected to files
 and greeped directly: `570 + 9 + 871` across all three, zero `error`/`FAILED`/`error[` lines. No new
 intermittent failures observed; nothing new for `test-process-leak.md`.
+
+## PR-030-D: locating `git` beyond a fixed pair of directories, and caching the version check
+
+Response to review 413/414's two open, undecided boxes -- both decided by the architect, both
+implemented here.
+
+### Locating `git`
+
+`resolve_git_executable(repository_root)` tries a fixed, reviewed list of absolute directories
+first (`REVIEWED_GIT_DIRECTORIES`: `/usr/bin`, `/bin`, `/usr/local/bin`, `/opt/homebrew/bin`), and
+only if none of them has `git` falls back to the inherited `PATH`
+(`resolve_git_from_inherited_path`), filtered to drop every relative entry and every entry naming
+the project root or anything inside it -- D1' item 4's own "no project-local `PATH`" guarantee,
+applied to a variable `PATH` instead of abandoned. `pub fn compute_summary` calls it once, before
+doing anything else; when it finds nothing, `compute_summary` goes straight to
+`branch_only_summary` rather than inventing a placeholder executable name, since that function
+already handles both "not a repository" and "a repository with no invocable `git`" correctly on
+its own filesystem-only logic.
+
+The fallback is factored into its own function specifically so review 414's required test could
+exercise it in isolation: `resolve_git_executable`'s own composition always finds a real `git`
+under `REVIEWED_GIT_DIRECTORIES` on every machine this test suite runs on (this one included --
+`/usr/bin/git` is real here), so a test driving the full composition could never actually reach
+the inherited-`PATH` fallback at all.
+
+`GIT_EXECUTABLE` (the bare `"git"` constant tests inject directly, bypassing resolution) is now
+`#[cfg(test)]` -- it had exactly one production caller before this response, and that caller no
+longer uses it, so keeping it unconditionally `const` would have left an unused-item warning in
+the real build. Item 1 and item 4 of the module's own RFC-012 gate description (the doc comment at
+the top of `runtime/git.rs`) were rewritten to describe the current, two-stage resolution as the
+*current state* rather than adding a "PR-030-D changes this" paragraph after an unrevised item --
+matching this file's own established pattern (the numbered list describes what is true now; prose
+above it carries the history).
+
+### Caching the version check
+
+`check_git_available`'s `--version` spawn is skipped on a repeat call with the same
+`git_executable` string, via a process-wide cache populated only on success (a failure is never
+cached, so `git` installed or upgraded mid-session is picked up on the very next trigger).
+
+**A real concurrency bug found by the three-run gate, not by inspection.** The first
+implementation used a single-slot `OnceLock<String>` -- correct for production (one resolved
+executable, used for the whole process) but wrong for this module's own test suite, which
+exercises many distinct `git_executable` strings concurrently (every `Fixture` uses the same bare
+`"git"`; every failure-mode test its own bogus name). A single slot lets whichever test's `"git"`
+call wins the race across all of `cargo test`'s parallel threads permanently occupy the one slot,
+silently starving every other string -- including the new caching test's own unique fixture path
+-- of ever being cached at all. This did not fail when the new test was run alone (no other thread
+racing for the static); it failed the very first time it ran inside the full workspace suite,
+exactly the scenario the standing "three consecutive full-workspace runs" gate exists to catch.
+Root-caused from the assertion failure itself (`left: 2, right: 1` -- the second call had genuinely
+re-spawned, meaning the cache never held this test's string at all), fixed by moving to a
+`Mutex<HashSet<String>>` that remembers every distinct successful string independently, then
+re-verified with five consecutive full-workspace runs (not the usual three, given the bug's own
+shape -- intermittent under real scheduling, clean in isolation) before trusting it.
+
+### Tests
+
+`runtime::git::tests::` (direct grep of the run's own output): 42 passed, 0 failed -- 4 new:
+`resolving_git_from_the_inherited_path_drops_relative_and_project_local_entries` (review 414's own
+required test, verbatim: a relative entry and a project-root entry, both dropped),
+`resolving_git_from_the_inherited_path_skips_a_directory_with_no_git_in_it` (a `PATH` entry that
+survives the filter but has no `git` inside must not stop the search),
+`compute_summary_resolves_a_real_git_executable_on_this_machine` (the one production entry point,
+`pub fn compute_summary`, had zero test coverage before this response -- exercised for real here,
+against this machine's real environment, safe because `spawn_git_command` hardcodes
+`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` to `/dev/null` unconditionally regardless of what `HOME`
+says), and `a_second_call_with_the_same_verified_executable_does_not_respawn_version` (counts real
+invocations of a fake `git` via a counter file, not only the returned `Result` twice, which would
+pass whether or not anything was actually cached -- this is the test that caught the concurrency
+bug above).
+
+### Gate
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`rfc_docs_invariants` (9/9, including after the `future-work.md` addition below), `cargo doc -p
+tekstide-core --no-deps` (checked for genuinely unresolved intra-doc links specifically -- found
+one, `[`GIT_EXECUTABLE`]` linking to a now-`#[cfg(test)]`-gated item from a doc comment reachable
+in a non-test build; fixed to plain text. The pre-existing "links to private item" warning class,
+already present throughout this file before this response, is unaffected and not this response's
+to fix). **Five** consecutive full-workspace `cargo test --workspace --all-targets --no-fail-fast`
+runs (not the usual three, per the concurrency bug above): `570 + 9 + 875` across all five, zero
+`error`/`FAILED`/`error[` lines. No new intermittent failures; nothing new for
+`test-process-leak.md`.
+
+### One non-requirement addressed: the collapsed `.git` observation
+
+A one-paragraph entry added to `rfcs/future-work.md`, naming the reviewer's own observation from
+the live capture (`[DIR] .git (collapsed)`) and why Git integration specifically makes it worth a
+future distinct rendering, without scoping an RFC for it.

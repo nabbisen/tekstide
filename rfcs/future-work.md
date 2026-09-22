@@ -1007,6 +1007,17 @@ Status: active after `0.1.0`.
   text, so whoever next touches change review or the audit schema finds it without having to
   reread that RFC first.
 
+- **The explorer lists `.git` as an ordinary collapsed directory, and RFC-030 makes that read
+  oddly now.** Predates RFC-030 (RFC-006's own `IGNORED_DIRECTORY_NAMES` collapse, unrelated to
+  Git integration) and is not RFC-030's to fix — noted at review 414 while reviewing REQ-GIT-003's
+  live capture (`[DIR] .git (collapsed)` visible in
+  `rfcs/handoffs/030-git-integration/evidence/02-explorer-per-file-git-status-badges.png`). Now
+  that Tekstide can read a project's own Git state, the explorer also knows this specific
+  directory is the repository's own metadata store — the one folder a user is never trying to
+  browse into, as opposed to every other collapsed directory (`node_modules`, `target`), which a
+  user might genuinely want to expand. Worth a distinct rendering (or simply omitting it) the next
+  time the explorer's collapse behaviour is touched; not worth its own RFC.
+
 ## Milestone Roadmap
 
 See [`../ROADMAP.md`](../ROADMAP.md) for the milestone schedule, and [`delivery-plan.md`](./delivery-plan.md) for the ordered RFC queue, requirements gap analysis, and developer pick-up workflow.

@@ -210,15 +210,19 @@ ruling below is implemented, not just decided.
       `ignore_submodules_all_suppresses_the_submodule_filter_on_its_own` calls `read_status_summary`
       directly against a poisoned submodule, bypassing R1 entirely, and the marker still never
       appears: the flag's own protection holds independently, not only behind R1's refusal.
-- [ ] Decided and disclosed: **how `git` is located**. `PATH` is fixed to `/usr/bin:/bin` today, so on
+- [x] Decided and disclosed: **how `git` is located**. `PATH` is fixed to `/usr/bin:/bin` today, so on
       a distribution that does not put `git` there every project reads "not available". A reviewed
       absolute-path list, or the inherited `PATH` with relative and project-local entries removed —
       either is fine, but say which and why.
-- [ ] `git --version` is not re-run on every refresh (two spawns per evaluation today) — [x] **"not a
+      — PR-030-D: `resolve_git_executable` tries `REVIEWED_GIT_DIRECTORIES` first, then the inherited
+      `PATH` filtered to drop relative and project-local entries. See PR-030-D's own section below.
+- [x] `git --version` is not re-run on every refresh (two spawns per evaluation today) — [x] **"not a
       repository" half done**: it is its own outcome (`Unavailable`) and, for that case specifically,
       `--version` is not run at all (the filesystem check short-circuits first). The "not re-run on
       every refresh" half is a caching question the wiring layer owns; unticked as a whole since the
       box asks for both.
+      — PR-030-D: `check_git_available` now caches success (never failure), keyed by executable
+      string, process-wide. See PR-030-D's own section below.
 - [x] **Carried from RFC-025 (review 404):** the status bar's project fields **reach the rendered
       row**, re-proved by this slice — by a live capture showing all of REQ-NOTIFY-002's fields
       together, at minimum. —
@@ -314,15 +318,26 @@ ruling below is implemented, not just decided.
 
 ## PR-030-D — the two open decisions (decided at review 414)
 
-- [ ] **How `git` is located.** A reviewed absolute list first (`/usr/bin`, `/bin`, `/usr/local/bin`,
+- [x] **How `git` is located.** A reviewed absolute list first (`/usr/bin`, `/bin`, `/usr/local/bin`,
       `/opt/homebrew/bin`), then the **inherited `PATH` with every relative entry and every entry
       inside the project root removed**, resolving only to an existing regular file. RFC-012's rule is
       *no project-local `PATH`*; the user's own `PATH` is not the repository's. **Test:** an inherited
       `PATH` carrying a relative entry and an entry under the project root drops both.
       *Why it matters: `/usr/bin:/bin` alone makes the feature silently dead on NixOS and Guix.*
-- [ ] **`git --version` is cached for the process** (`OnceLock`) on success, and **not** cached on
+      — `resolve_git_executable`/`resolve_git_from_inherited_path`, exactly as specified;
+      `resolving_git_from_the_inherited_path_drops_relative_and_project_local_entries` is the
+      required test, verbatim.
+- [x] **`git --version` is cached for the process** (`OnceLock`) on success, and **not** cached on
       failure, so a `git` installed mid-session is picked up at the next trigger.
-- [ ] RFC-030 closes when these land; the `0.22.0` candidate is scheduled on top of them.
+      — **implemented with one deviation from the literal box text, disclosed**: a single-slot
+      `OnceLock<String>` (matching the box as written) let one test's `"git"` permanently occupy the
+      only slot and starve every other test's own executable string of ever being cached — a real
+      failure, caught by the three/five-run full-workspace gate, not in isolation. Fixed with
+      `OnceLock<Mutex<HashSet<String>>>`: still one process-wide cache, `OnceLock`-initialized, but
+      holding every distinct successful string rather than only the first. Production is unaffected
+      (one resolved executable for the whole process either way); only this module's own concurrent
+      test suite needed the difference. See `qa-evidence.md`'s own account of the bug.
+- [x] RFC-030 closes when these land; the `0.22.0` candidate is scheduled on top of them.
 
 ## Whole-RFC
 
