@@ -28,9 +28,10 @@ pub use diff::{
 pub use identity::ProjectId;
 pub use ignored_directories::IGNORED_DIRECTORY_NAMES;
 pub use metadata::{
-    ProjectFileState, ProjectGitDisplayStatus, ProjectGitSummary, ProjectMetadataCountStatus,
-    ProjectMode, ProjectOpenSurface, ProjectProviderState, ProjectResourceLimits, ProjectWarning,
-    ProjectWarningLevel, ProjectWarningState, WorkspaceTrust,
+    FileGitStatus, ProjectFileState, ProjectGitDisplayStatus, ProjectGitSummary,
+    ProjectMetadataCountStatus, ProjectMode, ProjectOpenSurface, ProjectProviderState,
+    ProjectResourceLimits, ProjectWarning, ProjectWarningLevel, ProjectWarningState,
+    WorkspaceTrust,
 };
 pub use runtime::ProjectRuntimeSummary;
 pub use session::{

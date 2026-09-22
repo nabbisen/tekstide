@@ -262,6 +262,13 @@ ruling below is implemented, not just decided.
 
 - [ ] Per-file status from an accepted repository (REQ-GIT-003); a file outside it carries none; a
       refused repository offers none.
+      — **computation layer done, not yet wired to the explorer, so left unticked**: a new
+      `FileGitStatus` enum and `ProjectGitSummary.file_statuses: Option<BTreeMap<PathBuf,
+      FileGitStatus>>`, populated by `read_status_summary`'s existing single `git status` call
+      (rewritten to use `-z` for robust path handling); `None` for `Unavailable`/`AcceptedBranchOnly`/
+      `NotImplemented`/`Unknown`, `Some(map)` only for `Complete`. See `qa-evidence.md`'s "REQ-GIT-003's
+      computation layer" section for the full account. Still owed: explorer-surface wiring (the actual
+      REQ-GIT-003 requirement — "in the file explorer") and this box's own live capture.
 - [ ] Live capture against `mktemp -d`, showing a real Git state where the status bar said "not
       available". Throwaway state only.
 

@@ -17312,6 +17312,7 @@ fn active_project_status_fields_shows_a_clean_branch_with_nothing_else() {
         changed_file_count: Some(0),
         ahead_count: None,
         behind_count: None,
+        file_statuses: Some(std::collections::BTreeMap::new()),
     });
 
     let fields = super::active_project_status_fields(&state);
@@ -17336,6 +17337,7 @@ fn active_project_status_fields_shows_dirty_ahead_and_behind_as_separate_labels(
         changed_file_count: Some(3),
         ahead_count: Some(1),
         behind_count: Some(2),
+        file_statuses: Some(std::collections::BTreeMap::new()),
     });
 
     let fields = super::active_project_status_fields(&state);
@@ -17381,6 +17383,7 @@ fn active_project_status_fields_shows_detached_head_distinctly() {
         changed_file_count: Some(0),
         ahead_count: None,
         behind_count: None,
+        file_statuses: Some(std::collections::BTreeMap::new()),
     });
 
     let fields = super::active_project_status_fields(&state);
@@ -17413,6 +17416,7 @@ fn active_project_status_fields_shows_branch_only_with_no_content_fields() {
         changed_file_count: None,
         ahead_count: None,
         behind_count: None,
+        file_statuses: None,
     });
 
     let fields = super::active_project_status_fields(&state);

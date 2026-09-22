@@ -712,3 +712,86 @@ substantive change), `cargo clippy --workspace --all-targets -- -D warnings` (cl
 identical -- `566 passed; 0 failed` (`tekstide`), `9 passed; 0 failed` (`rfc_docs_invariants`), `864
 passed; 0 failed` (`tekstide-core`), zero `error`/`FAILED`/`error[` lines in any of the three logs. No
 new intermittent failures observed across the three runs; nothing new for `test-process-leak.md`.
+
+## PR-030-C: REQ-GIT-003's computation layer -- `ProjectGitSummary.file_statuses`
+
+Per-file status is genuinely new (no prior scaffolding anywhere in the tree); this response gives it
+the same computation-layer/explorer-wiring split PR-030-B used, filed as its own slice first.
+
+**New type**: `FileGitStatus` (`Modified|Added|Deleted|Renamed|Untracked|Unmerged`), in
+`project/metadata.rs` beside `ProjectGitSummary`. `Unmerged` collapses every porcelain v2 `u`-record
+XY combination (`DD`/`AU`/`UD`/`UA`/`DU`/`AA`/`UU`) into one category -- the explorer badge only needs
+"this file has a conflict", not which side changed what. `R` and `C` (rename/copy, porcelain v2's `2`
+record type) both collapse to `Renamed` -- a copy is not modelled as its own category, same reasoning.
+
+**Where it lives**: a new `file_statuses: Option<BTreeMap<PathBuf, FileGitStatus>>` field on
+`ProjectGitSummary` itself, not a separate parallel type -- it is populated by the exact same
+`read_status_summary` call that already produces `changed_file_count`/`ahead_count`/`behind_count`,
+so a second type would only duplicate the "only computed when `Accepted`" gating `ProjectGitSummary`
+already does per-field. `Some` only alongside `changed_file_count: Some(_)`; `None` in
+`branch_only_summary` and the early `Unavailable` return, the same "not computed" convention every
+other content-derived field already uses. A new `ProjectGitSummary::file_status(&self, relative_path)`
+accessor returns `None` for both "not computed" and "no entry" without the caller needing to unwrap
+the outer `Option` itself.
+
+**Parsing**: `read_status_summary`'s `git status` invocation gained `-z` (NUL-terminated records, raw
+unescaped paths), replacing the newline-terminated default. Without `-z`, a path containing a literal
+newline byte (legal in a Linux filename -- only `/` and NUL are forbidden) or any character
+`core.quotePath` treats as special gets C-style-quoted and escaped; correctly un-escaping that
+quoting by hand is exactly the kind of parsing this RFC's threat model argues against trusting. `-z`
+removes the question entirely: a path is raw bytes up to the next NUL, and a renamed/copied entry's
+`path`/`origPath` become two separate NUL-terminated fields (no tab) instead of one line split on a
+literal tab byte that could itself appear in a filename. `changed_file_count` is now `file_statuses.len()`
+rather than a separately-maintained counter -- the two cannot drift apart by construction.
+
+Existing branch/ahead-behind/changed-count tests exercise real fixture repositories (via `Fixture`'s
+`setup_git`/`write` helpers), not fabricated porcelain text, so switching the invocation to `-z`
+required no fixture-text migration -- only the parser itself changed, and every pre-existing assertion
+(`a_clean_control_repository_...`, `a_dirty_control_repository_...`,
+`ahead_and_behind_are_read_against_a_real_local_upstream`, and the `AcceptedBranchOnly`/`Refused`
+branch-only tests) still passes unmodified, proving the rewrite preserves the exact behaviour those
+tests already pin.
+
+### A real bug found and fixed while writing the merge-conflict test
+
+The first version of `a_merge_conflict_reports_the_file_as_unmerged` set only `GIT_AUTHOR_NAME`/
+`GIT_AUTHOR_EMAIL` on the raw `git merge` invocation (unlike `Fixture::setup_git_in`, which sets all
+four identity variables). The merge command failed outright on missing committer identity before ever
+attempting the merge, leaving `contested.txt` untouched -- so the test failed with `file_status(...)
+== None` instead of the intended conflict. Fixed by adding `GIT_COMMITTER_NAME`/
+`GIT_COMMITTER_EMAIL`, matching `setup_git_in`'s own pattern; re-ran in isolation and saw the real
+`CONFLICT (content): Merge conflict in contested.txt` output before the assertion passed.
+
+### Tests (all real fixture repositories, no fabricated porcelain text)
+
+`runtime::git::tests::` (direct grep of the run's own output): 35 passed, 0 failed -- 31 pre-existing
+plus 4 new: `a_dirty_repositorys_file_statuses_map_the_real_change_each_file_carries` (modified,
+added-staged, deleted-worktree and untracked in one fixture, plus an unmodified tracked file and a
+nonexistent path both asserted to carry no status), `a_staged_rename_is_captured_at_its_new_path_only`
+(a real `git mv`, asserting the old path carries no entry), `a_merge_conflict_reports_the_file_as_unmerged`
+(a real two-branch merge conflict), and `a_branch_only_repository_offers_no_file_statuses` (extends
+the existing poisoned-repository fixture with a direct `file_statuses == None` assertion).
+
+Every `ProjectGitSummary { ... }` struct-literal call site across the tree needed the new field added
+(`cargo check`'s own `E0063` errors enumerated all of them, direct-grepped afterward to confirm the
+count rather than trusted from the error list): `runtime/git.rs` (production, 4 sites),
+`runtime/git/tests.rs` (2), `project/session.rs` (1), `project/tests/metadata.rs` (5),
+`crates/tekstide/src/shell/tests.rs` (4) -- 16 sites total, each fixed to the value that outcome
+actually produces (`None` for `Unavailable`/`AcceptedBranchOnly`/`NotImplemented`/`Unknown`, `Some(...)`
+for `Complete`-with-content states), not a blanket default.
+
+### Gate
+
+`cargo fmt --all --check` (one diff, applied -- an over-length `fixture.write(...)` call in the new
+rename test wrapped by rustfmt; not substantive), `cargo clippy --workspace --all-targets -- -D
+warnings` (clean), `rfc_docs_invariants` (9/9), three consecutive full-workspace
+`cargo test --workspace --all-targets --no-fail-fast` runs, output redirected to files and greeped
+directly: `566 + 9 + 868` (`+4` in `tekstide-core` over PR-030-C R-c's own baseline, the four new
+per-file-status tests) across all three, zero `error`/`FAILED`/`error[` lines.
+
+**One recurrence, not a new failure**: run 2 of the *first* three-run attempt hit
+`shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` --
+already-registered row 8 in `test-process-leak.md`, same PTY-read-timing shape, passed immediately in
+isolation. Dated recurrence note added there (this document's own standing rule); the three-run gate
+was then re-run from a clean start and came back identical (`566 + 9 + 868`) all three times, the set
+quoted above.

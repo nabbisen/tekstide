@@ -1110,3 +1110,12 @@ started an ablation, and that test **scans the source tree**, so it read `shell.
 line removed. Source-scanning tests make the working tree a shared resource — a gate run and a tree
 mutation must never overlap, and a failure of one of these tests is worth checking against `git
 status` before it is called flaky.
+
+## Recurrence, 2026-09-22 — RFC-030 PR-030-C's per-file-status gate (implementer's run)
+
+`shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` failed
+once, in run 2 of a three-run full-workspace gate (`565 + 9 + 868`, one failure; runs 1 and 3 both
+clean at `566 + 9 + 868`). **Row 8**, the same `0.16.0`-release-gate row this document already
+carries, recurring in its already-documented shape. Passed immediately in isolation. Not the slice:
+this response's changes are confined to `runtime::git`'s status parsing and `ProjectGitSummary`'s new
+`file_statuses` field; nothing here touches terminal termination or process-close code.

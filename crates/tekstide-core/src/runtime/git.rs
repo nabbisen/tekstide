@@ -87,10 +87,11 @@
 //!    `AcceptedBranchOnly` no longer names the key that triggered it, at
 //!    all -- there is nothing left for this item to bound).
 
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::project::{ProjectGitSummary, ProjectProviderState};
+use crate::project::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -294,6 +295,7 @@ fn compute_summary_with_environment(
             changed_file_count: None,
             ahead_count: None,
             behind_count: None,
+            file_statuses: None,
         };
     }
 
@@ -316,12 +318,25 @@ fn compute_summary_with_environment(
     }
 }
 
-/// `git status --porcelain=v2 --branch --ignore-submodules=all`: one call
-/// for branch, ahead/behind and the changed-file count together.
+/// `git status --porcelain=v2 --branch -z --ignore-submodules=all`: one
+/// call for branch, ahead/behind, the changed-file count and (REQ-GIT-003,
+/// PR-030-C) each changed file's own status together.
 /// `--ignore-submodules=all` is defence in depth behind R1's refusal
 /// (review 407/408), never a substitute for it -- `read_status_summary`
 /// only ever runs once `evaluate` has already confirmed this repository
 /// contains no gitlink at all.
+///
+/// `-z` (NUL-terminated records, raw unescaped paths) rather than the
+/// newline-terminated default: without it, a path containing a literal
+/// newline byte (legal in a Linux filename; only `/` and NUL are
+/// forbidden) or other characters `core.quotePath` treats as special gets
+/// C-style-quoted and escaped, and correctly un-escaping that quoting is
+/// exactly the kind of hand-rolled parsing this RFC's own threat model
+/// argues against trusting. `-z` sidesteps the whole question: a path is
+/// never anything but raw bytes up to the next NUL, and a renamed/copied
+/// entry's `path` and `origPath` become two separate NUL-terminated
+/// fields (no tab) -- both read as valid UTF-8, same as every other
+/// invariant this module already relies on for `git`'s own output.
 fn read_status_summary(
     repository_root: &Path,
     git_executable: &str,
@@ -333,6 +348,7 @@ fn read_status_summary(
             "status",
             "--porcelain=v2",
             "--branch",
+            "-z",
             "--ignore-submodules=all",
         ],
         Some(repository_root),
@@ -347,29 +363,55 @@ fn read_status_summary(
     let mut branch_name = None;
     let mut ahead_count = None;
     let mut behind_count = None;
-    let mut changed_file_count = 0u32;
+    let mut file_statuses = BTreeMap::new();
 
-    for line in text.lines() {
-        if let Some(rest) = line.strip_prefix("# branch.head ") {
+    let mut tokens = text.split('\0');
+    while let Some(token) = tokens.next() {
+        if token.is_empty() {
+            continue;
+        }
+        if let Some(rest) = token.strip_prefix("# branch.head ") {
             branch_name = (rest != "(detached)").then(|| rest.to_string());
-        } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
+        } else if let Some(rest) = token.strip_prefix("# branch.ab ") {
             if let Some((ahead, behind)) = parse_ahead_behind(rest) {
                 ahead_count = Some(ahead);
                 behind_count = Some(behind);
             }
-        } else if line.starts_with('#') || line.is_empty() {
+        } else if token.starts_with('#') {
             continue;
-        } else {
-            changed_file_count += 1;
+        } else if let Some(rest) = token.strip_prefix("1 ") {
+            if let Some((fields, path)) = split_fixed_fields(rest, 7) {
+                file_statuses.insert(PathBuf::from(path), classify_ordinary_xy(fields[0]));
+            }
+        } else if let Some(rest) = token.strip_prefix("2 ") {
+            // Renamed/copied: this record's own trailing field is the
+            // *new* path -- the one an explorer node's `relative_path`
+            // can actually match. `origPath` follows as its own
+            // NUL-terminated field under `-z` (no tab); consumed and
+            // discarded, since nothing here needs the old path. R and C
+            // both collapse to `Renamed` -- see [`FileGitStatus`]'s own
+            // doc comment for why a copy is not modelled separately.
+            if let Some((_fields, path)) = split_fixed_fields(rest, 8) {
+                file_statuses.insert(PathBuf::from(path), FileGitStatus::Renamed);
+            }
+            let _ = tokens.next();
+        } else if let Some(rest) = token.strip_prefix("u ") {
+            if let Some((_fields, path)) = split_fixed_fields(rest, 9) {
+                file_statuses.insert(PathBuf::from(path), FileGitStatus::Unmerged);
+            }
+        } else if let Some(path) = token.strip_prefix("? ") {
+            file_statuses.insert(PathBuf::from(path), FileGitStatus::Untracked);
         }
     }
 
+    let changed_file_count = file_statuses.len() as u32;
     Some(ProjectGitSummary {
         provider_state: ProjectProviderState::Complete,
         branch_name,
         changed_file_count: Some(changed_file_count),
         ahead_count,
         behind_count,
+        file_statuses: Some(file_statuses),
     })
 }
 
@@ -379,6 +421,43 @@ fn parse_ahead_behind(body: &str) -> Option<(u32, u32)> {
     let ahead = parts.next()?.strip_prefix('+')?.parse().ok()?;
     let behind = parts.next()?.strip_prefix('-')?.parse().ok()?;
     Some((ahead, behind))
+}
+
+/// Splits a record body into its first `field_count` space-separated
+/// fixed fields and the raw remainder (the path, or `path` before its
+/// separate `origPath` field for a `2` record) -- a path is never split
+/// further, since under `-z` it may itself contain spaces.
+fn split_fixed_fields(body: &str, field_count: usize) -> Option<(Vec<&str>, &str)> {
+    let mut rest = body;
+    let mut fields = Vec::with_capacity(field_count);
+    for _ in 0..field_count {
+        let (field, remainder) = rest.split_once(' ')?;
+        fields.push(field);
+        rest = remainder;
+    }
+    Some((fields, rest))
+}
+
+/// Classifies an ordinary (`1` record) entry's two-character `XY` code.
+/// Prefers the worktree side (`Y`) when it reports a change, falling back
+/// to the index side (`X`) when the worktree is unmodified (`.`) --
+/// "what's on disk right now" is the more useful signal for an explorer
+/// badge than "what's staged". Anything other than `A`/`D` (a plain `M`,
+/// or a type change `T`, which this module does not model separately)
+/// reads as `Modified`. `R`/`C` never appear in a `1` record -- porcelain
+/// v2 gives rename/copy their own `2` record type, handled separately.
+fn classify_ordinary_xy(xy: &str) -> FileGitStatus {
+    let bytes = xy.as_bytes();
+    let effective = match bytes {
+        [_, y] if *y != b'.' => *y,
+        [x, _] => *x,
+        _ => return FileGitStatus::Modified,
+    };
+    match effective {
+        b'A' => FileGitStatus::Added,
+        b'D' => FileGitStatus::Deleted,
+        _ => FileGitStatus::Modified,
+    }
 }
 
 /// Branch only, read straight from the filesystem -- no subprocess, no
@@ -396,6 +475,7 @@ fn branch_only_summary(repository_root: &Path) -> ProjectGitSummary {
             changed_file_count: None,
             ahead_count: None,
             behind_count: None,
+            file_statuses: None,
         },
         None => ProjectGitSummary {
             provider_state: ProjectProviderState::Unavailable,
@@ -403,6 +483,7 @@ fn branch_only_summary(repository_root: &Path) -> ProjectGitSummary {
             changed_file_count: None,
             ahead_count: None,
             behind_count: None,
+            file_statuses: None,
         },
     }
 }

@@ -292,6 +292,23 @@ impl Default for ProjectFileState {
     }
 }
 
+/// RFC-030 PR-030-C, REQ-GIT-003: a file's status as `git status`'s
+/// porcelain v2 XY code would report it, collapsed to the one category a
+/// per-file explorer badge needs. `Unmerged` covers every XY combination
+/// porcelain v2's `u` record type can report (`DD`/`AU`/`UD`/`UA`/`DU`/
+/// `AA`/`UU`) -- a merge conflict, not any one side's specific action;
+/// the explorer badge for it is "this file has a conflict", not which
+/// side changed what.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileGitStatus {
+    Modified,
+    Added,
+    Deleted,
+    Renamed,
+    Untracked,
+    Unmerged,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectGitSummary {
     pub provider_state: ProjectProviderState,
@@ -299,6 +316,18 @@ pub struct ProjectGitSummary {
     pub changed_file_count: Option<u32>,
     pub ahead_count: Option<u32>,
     pub behind_count: Option<u32>,
+    /// REQ-GIT-003: per-file status, keyed by the path relative to the
+    /// project root (the same convention `ExplorerNode::relative_path`
+    /// already uses, in `project::root::explorer`). `Some` only
+    /// alongside `changed_file_count: Some(_)`
+    /// -- the one path (`read_status_summary`'s single `git status`
+    /// call) that actually walks per-file entries; every other path
+    /// (`branch_only_summary`, `Unavailable`) leaves it `None`, the same
+    /// "not computed" convention the other `Option` fields already use.
+    /// A file with no entry in the map (present but unmodified, or not
+    /// tracked at all and not shown by a plain `git status`) carries no
+    /// status -- absence is not itself a status.
+    pub file_statuses: Option<std::collections::BTreeMap<PathBuf, FileGitStatus>>,
 }
 
 impl ProjectGitSummary {
@@ -314,6 +343,14 @@ impl ProjectGitSummary {
             ProjectProviderState::NotImplemented => ProjectGitDisplayStatus::NotImplemented,
             ProjectProviderState::Unknown => ProjectGitDisplayStatus::Unknown,
         }
+    }
+
+    /// REQ-GIT-003: the one status a specific file carries, looked up by
+    /// its project-root-relative path. `None` whenever `file_statuses`
+    /// itself is `None` (not computed) or the path has no entry (no
+    /// change to report).
+    pub fn file_status(&self, relative_path: &std::path::Path) -> Option<FileGitStatus> {
+        self.file_statuses.as_ref()?.get(relative_path).copied()
     }
 }
 
@@ -346,6 +383,7 @@ impl Default for ProjectGitSummary {
             changed_file_count: None,
             ahead_count: None,
             behind_count: None,
+            file_statuses: None,
         }
     }
 }

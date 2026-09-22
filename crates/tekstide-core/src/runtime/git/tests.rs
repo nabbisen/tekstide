@@ -732,6 +732,7 @@ fn a_clean_control_repository_is_complete_with_zero_changes_and_no_upstream() {
             changed_file_count: Some(0),
             ahead_count: None,
             behind_count: None,
+            file_statuses: Some(BTreeMap::new()),
         }
     );
 }
@@ -816,6 +817,7 @@ fn a_non_repository_is_unavailable() {
             changed_file_count: None,
             ahead_count: None,
             behind_count: None,
+            file_statuses: None,
         }
     );
 
@@ -944,4 +946,145 @@ fn compute_summary_does_not_depend_on_trust_state() {
         trusted_fixture.compute_summary(),
         restricted_fixture.compute_summary()
     );
+}
+
+// ---------------------------------------------------------------------
+// PR-030-C, REQ-GIT-003: per-file status, `ProjectGitSummary::file_statuses`.
+// ---------------------------------------------------------------------
+
+/// Modified, added (staged), deleted (worktree) and untracked, all from
+/// one ordinary `git status` pass -- no special setup needed beyond
+/// writing/removing files, since these are the four categories the
+/// default rename/copy-detection-free path already distinguishes. An
+/// unmodified tracked file and a path with no entry at all both carry no
+/// status -- absence is not itself a status.
+#[test]
+fn a_dirty_repositorys_file_statuses_map_the_real_change_each_file_carries() {
+    let fixture = Fixture::new("per-file-ordinary");
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.write("modified.txt", "one\n");
+    fixture.write("deleted.txt", "gone\n");
+    fixture.write("unchanged.txt", "never touched again\n");
+    fixture.setup_git(&["add", "-A"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial"]);
+
+    fixture.write("modified.txt", "two\n");
+    fs::remove_file(fixture.repo.join("deleted.txt")).unwrap();
+    fixture.write("added.txt", "new, staged\n");
+    fixture.setup_git(&["add", "added.txt"]);
+    fixture.write("untracked.txt", "new, never staged\n");
+
+    let summary = fixture.compute_summary();
+    assert_eq!(
+        summary.file_status(Path::new("modified.txt")),
+        Some(FileGitStatus::Modified)
+    );
+    assert_eq!(
+        summary.file_status(Path::new("deleted.txt")),
+        Some(FileGitStatus::Deleted)
+    );
+    assert_eq!(
+        summary.file_status(Path::new("added.txt")),
+        Some(FileGitStatus::Added)
+    );
+    assert_eq!(
+        summary.file_status(Path::new("untracked.txt")),
+        Some(FileGitStatus::Untracked)
+    );
+    assert_eq!(
+        summary.file_status(Path::new("unchanged.txt")),
+        None,
+        "a tracked file with no real change must carry no status"
+    );
+    assert_eq!(
+        summary.file_status(Path::new("does-not-exist.txt")),
+        None,
+        "a path with no entry at all must carry no status, not a guessed default"
+    );
+    assert_eq!(summary.changed_file_count, Some(4));
+}
+
+/// A staged rename lands under its *new* path only -- the one an explorer
+/// node's `relative_path` can actually match against -- with the old
+/// path carrying no entry. `git mv` moves identical content, so real
+/// git's own rename detection reports it at the default similarity
+/// threshold without needing a contrived near-miss.
+#[test]
+fn a_staged_rename_is_captured_at_its_new_path_only() {
+    let fixture = Fixture::new("per-file-rename");
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.write("old-name.txt", "identical content, moved to a new path\n");
+    fixture.setup_git(&["add", "-A"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial"]);
+    fixture.setup_git(&["mv", "old-name.txt", "new-name.txt"]);
+
+    let summary = fixture.compute_summary();
+    assert_eq!(
+        summary.file_status(Path::new("new-name.txt")),
+        Some(FileGitStatus::Renamed)
+    );
+    assert_eq!(summary.file_status(Path::new("old-name.txt")), None);
+    assert_eq!(summary.changed_file_count, Some(1));
+}
+
+/// A real merge conflict, from two branches that each changed the same
+/// file: the conflicted path reports `Unmerged` regardless of which side
+/// changed what -- [`FileGitStatus`]'s own doc comment states why this
+/// module does not distinguish `DD`/`AU`/`UD`/`UA`/`DU`/`AA`/`UU` from
+/// each other.
+#[test]
+fn a_merge_conflict_reports_the_file_as_unmerged() {
+    let fixture = Fixture::new("per-file-unmerged");
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.write("contested.txt", "base\n");
+    fixture.setup_git(&["add", "-A"]);
+    fixture.setup_git(&["commit", "-q", "-m", "base"]);
+
+    fixture.setup_git(&["checkout", "-q", "-b", "other"]);
+    fixture.write("contested.txt", "other side\n");
+    fixture.setup_git(&["commit", "-q", "-am", "other side"]);
+
+    fixture.setup_git(&["checkout", "-q", "main"]);
+    fixture.write("contested.txt", "main side\n");
+    fixture.setup_git(&["commit", "-q", "-am", "main side"]);
+
+    // The merge itself is *expected* to conflict and exit non-zero, so
+    // this bypasses `setup_git`'s own success assertion -- a failing
+    // merge is this test's fixture, not a setup bug.
+    let _ = Command::new("git")
+        .args(["merge", "-q", "other"])
+        .current_dir(&fixture.repo)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .envs(fixture.forwarded_env.iter().cloned())
+        .env("GIT_AUTHOR_NAME", "fixture")
+        .env("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
+        .env("GIT_COMMITTER_NAME", "fixture")
+        .env("GIT_COMMITTER_EMAIL", "fixture@example.invalid")
+        .status();
+
+    let summary = fixture.compute_summary();
+    assert_eq!(
+        summary.file_status(Path::new("contested.txt")),
+        Some(FileGitStatus::Unmerged)
+    );
+}
+
+/// `AcceptedBranchOnly` never reaches `read_status_summary` at all
+/// (`compute_summary_with_environment`'s own match falls straight to
+/// `branch_only_summary`) -- `file_statuses` must be `None`, not an empty
+/// map, the same "not computed" distinction `changed_file_count` already
+/// draws for this outcome.
+#[test]
+fn a_branch_only_repository_offers_no_file_statuses() {
+    let fixture = Fixture::new("per-file-branch-only");
+    let script = fixture.marker_script("marker-fsmonitor-per-file", "exit 0");
+    fixture.set_config("core.fsmonitor", script.to_str().unwrap());
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    fixture.commit_then_modify_same_length();
+    fixture.clear_markers();
+
+    let summary = fixture.compute_summary();
+    assert_eq!(summary.file_statuses, None);
+    assert!(!fixture.marker_exists("marker-fsmonitor-per-file"));
 }

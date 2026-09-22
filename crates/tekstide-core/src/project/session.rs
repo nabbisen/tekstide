@@ -1554,6 +1554,7 @@ impl ProjectSession {
                 changed_file_count: None,
                 ahead_count: None,
                 behind_count: None,
+                file_statuses: None,
             };
         }
         true

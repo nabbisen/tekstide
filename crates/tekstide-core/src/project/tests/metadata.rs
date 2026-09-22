@@ -127,6 +127,7 @@ fn project_session_surface_mode_and_deferred_summaries_are_owned_per_project() {
         changed_file_count: None,
         ahead_count: None,
         behind_count: None,
+        file_statuses: None,
     });
     project.set_warning_state(ProjectWarningState {
         warnings: vec![ProjectWarning {
@@ -195,6 +196,7 @@ fn a_re_evaluation_trigger_leaves_the_previous_complete_summary_on_screen() {
         changed_file_count: Some(0),
         ahead_count: None,
         behind_count: None,
+        file_statuses: Some(std::collections::BTreeMap::new()),
     };
     project.set_git_summary(known_good.clone());
     assert!(!project.git_summary_refresh_in_flight());
@@ -221,6 +223,7 @@ fn set_git_summary_clears_the_in_flight_flag() {
         changed_file_count: Some(0),
         ahead_count: None,
         behind_count: None,
+        file_statuses: Some(std::collections::BTreeMap::new()),
     });
 
     assert!(!project.git_summary_refresh_in_flight());
@@ -337,6 +340,7 @@ fn provider_backed_metadata_helpers_do_not_treat_values_as_known_when_provider_i
         changed_file_count: Some(3),
         ahead_count: Some(1),
         behind_count: Some(0),
+        file_statuses: None,
     };
     let complete_git_summary = ProjectGitSummary {
         provider_state: ProjectProviderState::Complete,
@@ -344,6 +348,7 @@ fn provider_backed_metadata_helpers_do_not_treat_values_as_known_when_provider_i
         changed_file_count: Some(3),
         ahead_count: Some(1),
         behind_count: Some(0),
+        file_statuses: Some(std::collections::BTreeMap::new()),
     };
 
     assert_eq!(
