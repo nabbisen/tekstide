@@ -92,6 +92,26 @@ named — the reviewer's error to fix, not the implementer's to paper over.
       `an_oversized_attributes_file_fails_closed`. `project/diff/tests.rs`'s entry now names both
       reads `runtime/git.rs` makes.
 
+### Required at review 407 — the gate answers "not available" for the wrong reasons
+
+- [ ] **R6, the user's own configuration is neutralised, not judged.** `GIT_CONFIG_GLOBAL` and
+      `GIT_CONFIG_SYSTEM` are pointed at `/dev/null` for the gate's reads and for PR-030-B's status
+      read. *Measured: `evaluate` on this repository, on the owner's machine, refuses on
+      `user.signingkey` — a global key. The fixture's empty global config is why this was invisible.*
+      **Test:** an ordinary unknown key in the fixture's "global" config, over a clean repository,
+      yields `Accepted`.
+- [ ] **R7, an unknown key withholds the content answer, not the branch** (D1′ amendment).
+      `AcceptedBranchOnly`, not `Refused`. *Measured: with global config neutralised this repository
+      still refuses, on `branch.main.vscode-merge-base` — written by an editor.* **Tests:** an unknown
+      key yields `AcceptedBranchOnly` and executes nothing; a program-naming key yields the same
+      withheld content answer with the marker absent; the content answer is given only for a fully
+      allowlisted repository.
+- [ ] **The allowlist carries tool-written data keys by pattern** — `branch.*.vscode-merge-base`,
+      `remote.*.gh-resolved`, `submodule.*.active`, `lfs.*` — each addition reviewed as a safety
+      judgment.
+- [ ] `Refused` now means only *cannot answer at all*: `git` missing, too old, timed out, unreadable
+      output.
+
 ## PR-030-B — branch, dirty state, ahead/behind
 
 - [ ] `set_git_summary` has a production caller; an accepted repository shows branch, dirty state and

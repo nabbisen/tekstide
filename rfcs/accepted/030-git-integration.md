@@ -196,3 +196,33 @@ The acceptance rule was binary — library, subprocess, or ship nothing — whil
 graded outcome ("otherwise report unavailable in Restricted"). Those contradicted each other, and the
 binary framing would have thrown away a shippable, safer product. The outcome space is graded by
 **which repositories** and **which facts**, not by mechanism.
+
+
+## D1′ amendment — decided 2026-09-22 at review 407: refusal is graded
+
+Running the gate against **real configurations** rather than fixtures found two ways it answers
+"not available" for reasons that have nothing to do with a repository being hostile.
+
+**Measured on the owner's machine, against this repository:**
+
+| | Measured | Result |
+| --- | --- | --- |
+| 1 | `evaluate` on the tekstide repository | `Refused(UnknownConfigKey { key: "user.signingkey" })` — the **user's own global config** |
+| 2 | the same, with global and system config neutralised | `Refused(UnknownConfigKey { key: "branch.main.vscode-merge-base" })` — a key **an editor wrote** into `.git/config` |
+
+1. **The user's own configuration is neither the attacker nor the judge.** The gate's reads — and
+   PR-030-B's status read — neutralise `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` rather than
+   forwarding this machine's, so the listing is the repository's own effective configuration,
+   includes expanded. That is what the allowlist exists to judge.
+2. **An unknown configuration key withholds the content answer, not the branch.** Reading a branch
+   executes nothing even in a fully poisoned repository (review 405, rows 5 and 6), so the protection
+   is entirely in withholding dirty state and per-file status. A strict allowlist that also threw away
+   the branch produced a feature that was off for nearly every real repository — which is not safety,
+   it is absence. `Refused` now means only *we cannot answer at all*: `git` missing, too old, timed
+   out, unreadable.
+3. **The allowlist grows by pattern for tool-written data keys** — `branch.*.vscode-merge-base`,
+   `remote.*.gh-resolved`, `submodule.*.active`, `lfs.*` — deliberately, each addition reviewed as the
+   safety judgment it is.
+
+**D1′ is unchanged where it matters**: no content read happens for a repository whose configuration is
+not fully vetted, and nothing a repository names is ever executed, in any trust state.
