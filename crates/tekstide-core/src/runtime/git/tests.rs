@@ -906,3 +906,42 @@ fn ignore_submodules_all_suppresses_the_submodule_filter_on_its_own() {
     let _ = read_status_summary(&fixture.repo, GIT_EXECUTABLE, &fixture.forwarded_env);
     assert!(!fixture.marker_exists(marker_name));
 }
+
+/// `compute_summary` takes no trust parameter, the same structural
+/// argument `the_gate_does_not_depend_on_trust_state` already makes for
+/// `evaluate` -- exercised again here since `compute_summary` is a
+/// separate entry point with its own call graph, not merely a thin
+/// wrapper whose trust-independence could be assumed from the gate's own
+/// test.
+#[test]
+fn compute_summary_does_not_depend_on_trust_state() {
+    use crate::project::{ProjectId, ProjectSession, WorkspaceTrust};
+
+    let trusted_fixture = Fixture::new("summary-trust-trusted");
+    trusted_fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    trusted_fixture.commit_then_modify_same_length();
+    let mut trusted = ProjectSession::new(
+        ProjectId::new_uuid(),
+        "trusted".to_string(),
+        trusted_fixture.repo.clone(),
+        trusted_fixture.repo.clone(),
+    );
+    trusted.grant_trust("test fixture");
+
+    let restricted_fixture = Fixture::new("summary-trust-restricted");
+    restricted_fixture.setup_git(&["checkout", "-q", "-b", "main"]);
+    restricted_fixture.commit_then_modify_same_length();
+    let restricted = ProjectSession::new(
+        ProjectId::new_uuid(),
+        "restricted".to_string(),
+        restricted_fixture.repo.clone(),
+        restricted_fixture.repo.clone(),
+    );
+
+    assert_eq!(trusted.trust_state(), WorkspaceTrust::Trusted);
+    assert_eq!(restricted.trust_state(), WorkspaceTrust::Restricted);
+    assert_eq!(
+        trusted_fixture.compute_summary(),
+        restricted_fixture.compute_summary()
+    );
+}

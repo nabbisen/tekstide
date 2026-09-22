@@ -137,38 +137,63 @@ named — the reviewer's error to fix, not the implementer's to paper over.
 
 ## PR-030-B — branch, dirty state, ahead/behind
 
+**Split into a computation layer (done, `00bbbe0`, no production caller) and a UI/threading wiring
+layer (not started — see review 410 for the architectural fork it opens before it can be built).**
+
 - [ ] **The module-level `#[allow(dead_code)]` in `runtime/git.rs` is removed in this same commit** —
       `evaluate` gains its real caller here, so the module is reachable again and the allow has served
-      its purpose (review 408).
+      its purpose (review 408). Deferred to the wiring layer — no caller exists yet.
 - [ ] `set_git_summary` has a production caller; an accepted repository shows branch, dirty state and
-      ahead/behind (REQ-GIT-001, 002).
-- [ ] A **refused** repository shows its branch and `unavailable` for dirty state — **with the branch
-      read measured to execute nothing**, not assumed.
-- [ ] *Unavailable* for a non-repository; *pending* while a read is in flight. **Ablation:** show the
-      previous summary while pending; that test fails alone.
-- [ ] **No write operation exists in the Git path — held by the API, not by grep** (REQ-GIT-007).
-- [ ] Restricted projects are not treated differently, and the reason is the gate, not the trust
-      grant.
+      ahead/behind (REQ-GIT-001, 002). `compute_summary` produces the value (`read_status_summary`,
+      tested for a clean repo, a dirty one, and real ahead/behind against a real local upstream); the
+      call into `set_git_summary` itself is the wiring layer's job.
+- [x] A repository the gate cannot fully vouch for (`AcceptedBranchOnly` or `Refused`) shows its
+      branch and `unavailable` (`None`) for dirty state — **with the branch read measured to execute
+      nothing**, not assumed. — `resolve_git_dir_from_filesystem`/`read_branch_from_head_file` read
+      only the filesystem, never spawn `git`; `branch_is_still_read_when_git_itself_is_unavailable`
+      proves it directly (branch still read when the `git` binary itself does not exist).
+- [ ] *Unavailable* for a non-repository — [x] **done, and cheaper than required**: checked before
+      `evaluate` runs at all, so a non-repository never spawns `git`
+      (`a_non_repository_is_unavailable`'s second assertion, a bogus executable name still answers
+      `Unavailable`). *Pending* while a read is in flight — **not started**: no representation of
+      "in flight" exists yet: `ProjectProviderState` has no `Pending`-shaped variant, and none of this
+      slice's computation functions are asynchronous. Part of the wiring layer's fork.
+- [x] **No write operation exists in the Git path — held by the API, not by grep** (REQ-GIT-007). —
+      every subcommand this module ever calls is read-only (`config`, `--version`, `ls-files`,
+      `rev-parse`, `status`); nothing in `runtime::git` accepts or constructs a write argument, so
+      there is no call site to grep for in the first place.
+- [x] Restricted projects are not treated differently, and the reason is the gate, not the trust
+      grant. — `compute_summary` takes no trust parameter, same as `evaluate`;
+      `compute_summary_does_not_depend_on_trust_state` exercises it as its own entry point rather than
+      assuming the property from `evaluate`'s own test.
 - [ ] Input is never blocked by a refresh (NFR-PERF-006); the marker is still absent after the
-      production path runs.
+      production path runs. Depends on the off-thread wiring not yet built; the marker-absence half is
+      already proven at the computation layer (every poisoned-repository test in this file).
 - [ ] The gate's filesystem walk runs **off the UI thread** with the rest of the read (D4), and the
       outcome is cached per project open rather than recomputed per refresh. *Measured at review 408
       on this machine, warm: ~20 ms of subprocess time plus **~80 ms of walk** across 183,736
-      entries. Measure it again here rather than quoting that.*
+      entries. Measure it again here rather than quoting that.* Not started — the wiring layer's fork.
 - [ ] **`runtime::git`'s module-level `#![allow(dead_code)]` is gone**, because this slice gives the
       module its production caller. Confirmed at review 408: the allow is a dated suppression, not a
-      blanket one, and this is its named expiry.
-- [ ] **`--ignore-submodules=all` on the status read** — defence in depth behind R1's refusal, never
-      instead of it (measured: it suppresses the submodule filter).
+      blanket one, and this is its named expiry. Same box as above; duplicated in the original text,
+      left as-is rather than silently merged.
+- [x] **`--ignore-submodules=all` on the status read** — defence in depth behind R1's refusal, never
+      instead of it (measured: it suppresses the submodule filter). —
+      `ignore_submodules_all_suppresses_the_submodule_filter_on_its_own` calls `read_status_summary`
+      directly against a poisoned submodule, bypassing R1 entirely, and the marker still never
+      appears: the flag's own protection holds independently, not only behind R1's refusal.
 - [ ] Decided and disclosed: **how `git` is located**. `PATH` is fixed to `/usr/bin:/bin` today, so on
       a distribution that does not put `git` there every project reads "not available". A reviewed
       absolute-path list, or the inherited `PATH` with relative and project-local entries removed —
       either is fine, but say which and why.
-- [ ] `git --version` is not re-run on every refresh (two spawns per evaluation today), and "not a
-      repository" is its own outcome rather than `SpawnFailed`.
+- [ ] `git --version` is not re-run on every refresh (two spawns per evaluation today) — [x] **"not a
+      repository" half done**: it is its own outcome (`Unavailable`) and, for that case specifically,
+      `--version` is not run at all (the filesystem check short-circuits first). The "not re-run on
+      every refresh" half is a caching question the wiring layer owns; unticked as a whole since the
+      box asks for both.
 - [ ] **Carried from RFC-025 (review 404):** the status bar's project fields **reach the rendered
       row**, re-proved by this slice — by a live capture showing all of REQ-NOTIFY-002's fields
-      together, at minimum.
+      together, at minimum. Needs the wiring layer to exist first.
 
 ## PR-030-C — per-file status
 

@@ -383,3 +383,74 @@ main.rs precedent's case, rather than either silently suppressing the lint or le
 --workspace --all-targets -D warnings` broken. Comes off the moment PR-030-B adds the real caller.
 Flagged explicitly in the review request rather than assumed settled, since it turns on a judgment
 call about how the two precedents relate that is genuinely arguable either way.
+
+## PR-030-B (partial) — the computation layer, no production caller yet
+
+Commit `00bbbe0`. `runtime::git` gains `pub fn compute_summary(repository_root: &Path) ->
+ProjectGitSummary` and its supporting functions. **Deliberately stops short of wiring anything into
+`ProjectSession`, `AppShell`, or the UI** -- see the review request for the architectural fork this
+runs into (thread/subscription pattern, `pub(crate)` vs `pub`, how "pending" is represented, whether
+Git state refreshes after project open at all) that needs a decision before that wiring is built, not
+guessed.
+
+### Branch, read without a subprocess (D1' item 8)
+
+`resolve_git_dir_from_filesystem` resolves `.git` entirely from the filesystem -- a directory, or (a
+linked worktree or submodule checkout) a pointer file's `gitdir: <path>` line, parsed directly, no
+`git` invocation. **Deliberately the private per-worktree dir, not the common dir R4 uses for
+attributes**: `HEAD` differs per linked worktree (each has its own current branch) where
+`info/attributes` does not. `read_branch_from_head_file` then parses `ref: refs/heads/<name>`;
+detached `HEAD` (a raw object id, no `ref:` prefix) and anything unreadable both read as "no branch
+name", not a failure.
+
+This makes branch attempted in **every** outcome but a genuine non-repository, including when `git`
+itself is `Refused` as missing entirely (`.git/HEAD` never depends on the binary being installed) --
+tested directly in `branch_is_still_read_when_git_itself_is_unavailable`, and the linked-worktree
+distinction in `a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts` (the primary checkout
+reads `master`; the linked worktree, on a different branch, reads its own).
+
+### Dirty state, changed-file count, ahead/behind (D5, REQ-GIT-001/002)
+
+One call, only when `Accepted`: `git status --porcelain=v2 --branch --ignore-submodules=all`.
+Porcelain v2's own header lines give branch (`# branch.head`), ahead/behind
+(`# branch.ab +N -M`, absent entirely when no upstream is configured -- `ahead_count`/`behind_count`
+stay `None`, not zero) and every remaining non-`#` line is one changed/untracked entry, counted.
+`--ignore-submodules=all` is defence in depth behind R1's refusal (reviews 407/408), never a
+substitute -- `read_status_summary` only runs once `evaluate` has already confirmed no gitlink exists,
+and `ignore_submodules_all_suppresses_the_submodule_filter_on_its_own` calls it directly against a
+poisoned submodule to prove the flag's own protection holds independently of R1.
+
+Tests: a clean repository (`Some(0)`, no upstream → ahead/behind `None`); a dirty one (two changes,
+one modified + one untracked, counted); a real local upstream two commits ahead and one behind (not
+faked -- a second local branch, `--set-upstream-to`, then a real divergent commit on each side).
+
+### The "not a repository" outcome, made cheap rather than merely correct
+
+`compute_summary_with_environment` checks `resolve_git_dir_from_filesystem` **before** calling
+`evaluate` at all: a non-repository resolves to `Unavailable` without ever spawning `git` --
+`a_non_repository_is_unavailable`'s second assertion passes a nonexistent executable name and still
+gets `Unavailable`, proving the short-circuit is real, not merely that the fallback path happens to
+agree. Satisfies the checklist's "not a repository is its own outcome rather than `SpawnFailed`" in
+the strongest available sense, and is free: the common case (opening an ordinary, non-Git folder)
+never touches `git` at all rather than spending three subprocess calls discovering the same thing.
+
+### `FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT`, updated to four call sites
+
+`resolve_git_dir_from_filesystem` and `read_branch_from_head_file` both read a few bytes from the
+filesystem (`.git`'s pointer-file line; `HEAD`'s one line). Added to the existing `runtime/git.rs`
+disclosure alongside the two from PR-030-A, per the same "name every read the entry exempts, not only
+the one the scan's pattern matches" discipline review 406 established.
+
+### Restricted projects are not treated differently
+
+`compute_summary_does_not_depend_on_trust_state` -- the same structural argument
+`the_gate_does_not_depend_on_trust_state` already makes for `evaluate` (no trust parameter anywhere in
+the call chain), exercised again for `compute_summary` specifically since it is a separate entry point
+with its own call graph, not provably a thin wrapper by inspection alone.
+
+### Test count and gate
+
+`cargo test -p tekstide-core runtime::git::` -- 31 tests (12 new), 0 failed. `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, `git diff --cached --check`,
+`rfc_docs_invariants` (9/9), three consecutive `cargo test --workspace --no-fail-fast` runs -- 860
+passed in `tekstide-core`'s lib target, 556 + 9 elsewhere, all clean, all three runs.
