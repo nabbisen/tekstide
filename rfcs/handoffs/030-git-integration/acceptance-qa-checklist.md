@@ -349,8 +349,8 @@ ruling below is implemented, not just decided.
       — one recurrence of an already-registered row (row 8) during this RFC's own gate runs; dated,
       not a new row (see `qa-evidence.md`).
 - [x] Commits are pushed once the gate is green.
-      — `2e79eb3` (explorer wiring, this response), on top of `75f5c99`/`e8339db` (computation layer,
-      review-413 checklist scaffolding).
+      — `541da29` (PR-030-D, this response), on top of `2e79eb3` (explorer wiring), `75f5c99`/`e8339db`
+      (computation layer, review-413 checklist scaffolding).
 
 ## Final Acceptance Decision
 
