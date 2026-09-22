@@ -312,6 +312,18 @@ ruling below is implemented, not just decided.
       — written into `surface/explorer.rs`'s own module doc comment; files only, no synthetic rollup,
       with the one incidental exception (a wholly-untracked directory) named and tested.
 
+## PR-030-D — the two open decisions (decided at review 414)
+
+- [ ] **How `git` is located.** A reviewed absolute list first (`/usr/bin`, `/bin`, `/usr/local/bin`,
+      `/opt/homebrew/bin`), then the **inherited `PATH` with every relative entry and every entry
+      inside the project root removed**, resolving only to an existing regular file. RFC-012's rule is
+      *no project-local `PATH`*; the user's own `PATH` is not the repository's. **Test:** an inherited
+      `PATH` carrying a relative entry and an entry under the project root drops both.
+      *Why it matters: `/usr/bin:/bin` alone makes the feature silently dead on NixOS and Guix.*
+- [ ] **`git --version` is cached for the process** (`OnceLock`) on success, and **not** cached on
+      failure, so a `git` installed mid-session is picked up at the next trigger.
+- [ ] RFC-030 closes when these land; the `0.22.0` candidate is scheduled on top of them.
+
 ## Whole-RFC
 
 - [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
