@@ -226,3 +226,28 @@ Running the gate against **real configurations** rather than fixtures found two 
 
 **D1′ is unchanged where it matters**: no content read happens for a repository whose configuration is
 not fully vetted, and nothing a repository names is ever executed, in any trust state.
+
+
+## Decided at review 410 (2026-09-22), and one correction to this RFC's own text
+
+**D4's parenthetical was wrong.** It says *"the provider state already models pending and
+unavailable"*. `ProjectProviderState` is `Complete`/`Unavailable`/`NotImplemented`/`Unknown` — there
+is no pending. Written from the shape of the thing rather than from the code; found by the
+implementer reading the code.
+
+1. **`runtime::git` becomes `pub` again in the slice that gives it a caller**, narrowed to
+   `compute_summary` and what it returns. `evaluate` and the gate's own types stay crate-internal: a
+   caller that can ask *"is this repository accepted"* can act on it, and the gate's contract then has
+   two consumers instead of one.
+2. **Refresh is event-driven, not periodic.** At project open, and again when a managed process
+   belonging to that project ends — the moment the application itself knows something may have
+   changed. **The cadence is disclosed**: changes made outside Tekstide while a project stays open are
+   not detected until the next in-app process ends or the project is reopened. Silently stale state is
+   what §6 of the risk document forbids; saying so is what makes an event-driven refresh honest.
+3. **"Not computed yet" is `Unknown`**, rendered as the *"not available"* wording `0.21.0` already
+   ships, plus a Git-specific in-flight flag only as far as it takes to stop two triggers starting two
+   evaluations. **No fifth variant on the shared enum** — `ProjectFileState` would gain a state it can
+   never be in and must still match on.
+4. **The four production project-add sites are held by a test, not by vigilance.** `tekstide`'s
+   existing `add_project_from_path_is_called_exactly_once_from_main_rs_and_nowhere_else` scan already
+   enumerates them; it, or its sibling, must fail when a site adds a project without the Git trigger.
