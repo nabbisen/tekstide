@@ -18084,10 +18084,10 @@ fn enter_on_a_file_opens_it_and_on_an_information_row_does_nothing() {
     let texts = explorer_texts(&state);
     let omitted = texts
         .iter()
-        .position(|row| row.contains("more entries are not shown"))
+        .position(|row| row.contains("more entries not shown"))
         .expect("a capped folder says how many entries it left out");
     assert!(
-        texts[omitted].contains("44 more entries are not shown"),
+        texts[omitted].contains("44 more entries not shown"),
         "{:?}",
         texts[omitted]
     );

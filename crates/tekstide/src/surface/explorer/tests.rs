@@ -339,7 +339,7 @@ fn a_truncated_scan_names_how_many_entries_it_left_out() {
     };
     let lines = all_lines(&catalog, &tree_with(scan), 0);
     let last = plain_words(lines.last().unwrap());
-    assert!(last.contains("44 more entries are not shown"), "{last:?}");
+    assert!(last.contains("44 more entries not shown"), "{last:?}");
 
     // One is grammatical, and a count the scanner stopped short of says so.
     let one = ExplorerDirectoryScan {
@@ -351,7 +351,7 @@ fn a_truncated_scan_names_how_many_entries_it_left_out() {
         ..one
     };
     let lines = all_lines(&catalog, &tree_with(one), 0);
-    assert!(plain_words(lines.last().unwrap()).contains("One more entry is not shown"));
+    assert!(plain_words(lines.last().unwrap()).contains("One more entry not shown"));
 
     let bounded = ExplorerDirectoryScan {
         truncated: true,
@@ -362,7 +362,7 @@ fn a_truncated_scan_names_how_many_entries_it_left_out() {
     let lines = all_lines(&catalog, &tree_with(bounded), 0);
     let last = plain_words(lines.last().unwrap());
     assert!(
-        last.contains("At least 1000001 more entries are not shown"),
+        last.contains("At least 1000001 more entries not shown"),
         "{last:?}"
     );
 }
@@ -699,8 +699,8 @@ fn passing_the_row_bound_ends_in_a_row_naming_how_many_are_not_shown() {
         ))
     };
     for (count, expected) in [
-        (bound + 1, "One more row is not shown"),
-        (bound + 5, "5 more rows are not shown"),
+        (bound + 1, "One more row not shown"),
+        (bound + 5, "5 more rows not shown"),
     ] {
         let tree = nodes(count);
         let rows = tree.rows();
@@ -934,4 +934,20 @@ fn drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame() {
         windowed * 10 < whole,
         "virtualisation must be worth it: window {windowed:?} vs whole tree {whole:?}"
     );
+}
+
+/// The two "N not shown" rows are sentences a narrow sidebar clips, and they
+/// are exactly the rows that must not lose their ending -- so they get a
+/// detail too.
+#[test]
+fn the_not_shown_rows_have_a_detail_because_they_are_sentences_that_get_clipped() {
+    let catalog = real_catalog();
+    let scan = ExplorerDirectoryScan {
+        truncated: true,
+        omitted_entries: 44,
+        ..scan_at_root(vec![plain_node("a.txt", ExplorerNodeKind::File)])
+    };
+    let tree = tree_with(scan);
+    let detail = detail_text(&catalog, &tree, 1, None).expect("the omitted row has a detail");
+    assert_eq!(plain_words(&detail), "44 more entries not shown.");
 }

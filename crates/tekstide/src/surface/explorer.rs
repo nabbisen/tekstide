@@ -342,9 +342,8 @@ fn detail_height(font_size: f32) -> f32 {
     DETAIL_LINES as f32 * font_size * LINE_HEIGHT_FACTOR + LINE_SPACING * 2.0
 }
 
-/// The highlighted row in full, or `None` when it is not a row that names
-/// something (loading, cannot-read and the like already say all they have to
-/// on one line). Leading indentation is dropped: the detail is for reading,
+/// The highlighted row in full, or `None` when it is a row short enough to read
+/// on the row itself. Leading indentation is dropped: the detail is for reading,
 /// not for showing depth.
 pub(crate) fn detail_text(
     catalog: &Catalog,
@@ -354,8 +353,16 @@ pub(crate) fn detail_text(
 ) -> Option<String> {
     let rows = tree.rows();
     let row = rows.get(highlight)?;
-    matches!(row.kind, ExplorerTreeRowKind::Node { .. })
-        .then(|| row_text(catalog, row, git_summary).trim_start().to_owned())
+    // The rows that carry a sentence -- a name and its status, or "N more
+    // entries not shown" -- can be clipped; "Loading", "cannot be read" and
+    // "empty" are short enough to read whole on the row itself.
+    matches!(
+        row.kind,
+        ExplorerTreeRowKind::Node { .. }
+            | ExplorerTreeRowKind::Omitted { .. }
+            | ExplorerTreeRowKind::RowsNotShown { .. }
+    )
+    .then(|| row_text(catalog, row, git_summary).trim_start().to_owned())
 }
 
 /// No `Message` interest of its own -- selection is driven by keyboard

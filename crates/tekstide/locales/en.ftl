@@ -530,19 +530,19 @@ explorer-row-cannot-read = This folder cannot be read.
 # not finish. `$count` is numeric, so the plural is chosen, not guessed.
 explorer-omitted-entries = { $bound ->
     [at-least] At least { $count ->
-        [one] one more entry is
-       *[other] { $count } more entries are
+        [one] one more entry
+       *[other] { $count } more entries
     } not shown.
    *[exact] { $count ->
-        [one] One more entry is
-       *[other] { $count } more entries are
+        [one] One more entry
+       *[other] { $count } more entries
     } not shown.
 }
 
 # The whole tree passed its row bound.
 explorer-rows-not-shown = { $count ->
-    [one] One more row is
-   *[other] { $count } more rows are
+    [one] One more row
+   *[other] { $count } more rows
 } not shown. Collapse a folder to see them.
 
 # The sidebar draws only the rows that fit; this says which ones.
