@@ -309,3 +309,11 @@ depth and the newline (a newline in a name must not become a second line).
   `FileExplorerScanPolicy::omitted_count_limit`, set to 10, not with a million files.
 - **The measured window is 3.0 ms in a debug build**, released ~an order lower; the assertion is half a
   frame and its failure message prints the load average, as the change-review benchmark's does.
+
+### Gate
+
+`cargo fmt --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`,
+`git diff --cached --check`, and **three consecutive full-workspace runs, `--all-targets --no-fail-fast`,
+to files, into a fresh `TMPDIR` each: 615 + 9 + 901, green all three, and `0` entries left in the temp
+directory after all three.** Against `0.23.0`'s 593 + 9 + 877: +22 in `tekstide`, +24 in
+`tekstide-core`. No intermittent this time. The gate ran **before** the push (review 422's lesson).
