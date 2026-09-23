@@ -397,4 +397,8 @@ pub fn browse_directory(
 }
 
 #[cfg(test)]
+mod hostile_fixture;
+#[cfg(test)]
+mod hostile_tests;
+#[cfg(test)]
 mod tests;
