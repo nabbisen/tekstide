@@ -1,6 +1,6 @@
 # RFC-053: What The Window Says Is True
 
-Status: **Proposed 2026-09-24.** First release in the 2026-09-24 schedule (`0.23.0`), from the GUI
+Status: **Accepted 2026-09-24, through the owner's authorisation of the release schedule** — RFC-053 is its first row, and authorising a schedule whose first release is this RFC is what accepting it means. Say otherwise and it goes back to `proposed/` at no cost. **D1–D8 decided by the architect on acceptance.** Proposed 2026-09-24. First release in the 2026-09-24 schedule (`0.23.0`), from the GUI
 audit of 2026-09-23.
 
 ## Summary
@@ -95,3 +95,23 @@ and any change to what the counts themselves mean.
   files and no agent run — captured.
 - A freshly opened project reports zero terminals and zero agent runs.
 - The colour-alone and i18n scans still pass.
+
+
+## Decided on acceptance (2026-09-24)
+
+**D1–D8 as written.** Two of them carry a consequence worth stating before anyone writes code.
+
+**D3 is a layout change underneath a live terminal.** `content_area_height` sizing every PTY from a
+*constant* bar height is the defect; deriving it from the **rendered** height is the fix, and the test
+that pins "a taller bar shrinks the content area by exactly that much" is the deliverable. Getting it
+wrong resizes every terminal a user has open, so this slice goes last and alone.
+
+**D5 changes what a producer reports, never what the shared type means.** `ProjectFileState` reads the
+same `Unknown`; the change belongs at the board row that has the counts, not in the enum.
+
+**One addition — D9.** The scan D1 asks for is the third mechanical check of this kind in the crate
+(colour-alone, i18n completeness, and now internal identifiers). **Doc comments stay legal**: `RFC-0`
+in a doc comment is correct and useful; only catalog strings are user-facing, and the scan must say so
+in its own failure message, the way `FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT` does.
+
+**Ships as `0.23.0`**, ahead of RFC-052, per the authorised schedule.
