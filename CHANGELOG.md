@@ -2,7 +2,8 @@
 
 ## 0.23.0 - What The Window Says Is True
 
-Status: release candidate; not yet published or tagged.
+Status: **released on 2026-09-24.** Published to crates.io as `tekstide 0.23.0` and
+`tekstide-core 0.23.0`, tagged `0.23.0` on `8326e07`.
 
 
 Every item below was found by running the `0.22.0` release binary, and every one is the product telling
