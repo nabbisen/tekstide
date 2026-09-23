@@ -1,14 +1,16 @@
 use std::path::{Path, PathBuf};
 
-use tekstide_core::project::ProjectExplorerStatus;
 use tekstide_core::project::ProjectId;
 use tekstide_core::project::root::{
     ExplorerDirectoryScan, ExplorerNode, ExplorerNodeKind, ExplorerNodeState,
     FileAccessContainmentStatus, FileAccessSymlinkStatus, FileAccessTarget,
 };
+use tekstide_core::project::{ExplorerTree, ExplorerTreeRowKind, ProjectExplorerStatus};
 use tekstide_core::project::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
 
-use super::{ExplorerRow, node_line, row_line, tree_lines, visible_rows};
+use super::{
+    DEFAULT_WINDOW_ROWS, RowWindow, node_line, row_text, rows_that_fit, tree_lines, window_for,
+};
 use crate::i18n::{Catalog, LocalePreference};
 
 fn real_locales_dir() -> PathBuf {
@@ -46,7 +48,31 @@ fn scan_at_root(nodes: Vec<ExplorerNode>) -> ExplorerDirectoryScan {
         directory: target_at(""),
         nodes,
         truncated: false,
+        omitted_entries: 0,
+        omitted_is_lower_bound: false,
     }
+}
+
+/// A tree whose root has been scanned into `scan`. RFC-052: the tree is
+/// what the surface draws, and a test can fabricate one through the same
+/// `set_scan` a synchronous caller uses -- no filesystem involved.
+fn tree_with(scan: ExplorerDirectoryScan) -> ExplorerTree {
+    let mut tree = ExplorerTree::default();
+    tree.set_scan(Path::new(""), Ok(scan));
+    tree
+}
+
+/// Every line of a tree, with the window wide open.
+fn all_lines(catalog: &Catalog, tree: &ExplorerTree, highlight: usize) -> Vec<String> {
+    tree_lines(
+        catalog,
+        tree,
+        &ProjectExplorerStatus::Ready,
+        highlight,
+        0,
+        1000,
+        None,
+    )
 }
 
 /// **The bidi-override case, tested specifically** (RFC-019's gate for
@@ -59,7 +85,7 @@ fn a_bidi_override_node_name_renders_escaped_and_the_raw_character_is_absent() {
     let catalog = real_catalog();
     let node = plain_node("proj\u{202E}gpj.exe", ExplorerNodeKind::File);
 
-    let line = node_line(&catalog, &node, None);
+    let line = node_line(&catalog, &node, false, None);
 
     assert!(
         line.contains("<U+202E>"),
@@ -83,7 +109,7 @@ fn a_plain_node_name_renders_without_any_escape_marker() {
     let catalog = real_catalog();
     let node = plain_node("readme.md", ExplorerNodeKind::File);
 
-    let line = node_line(&catalog, &node, None);
+    let line = node_line(&catalog, &node, false, None);
 
     assert!(line.contains("readme.md"));
     assert!(!line.contains("<U+"));
@@ -122,7 +148,7 @@ fn every_state_and_symlink_combination_renders_a_distinct_line() {
                 state: state.clone(),
                 symlink_status: *symlink,
             };
-            let line = node_line(&catalog, &node, None);
+            let line = node_line(&catalog, &node, false, None);
             assert!(
                 rendered.insert(line.clone()),
                 "state {state:?} + symlink {symlink:?} rendered a line already produced by \
@@ -139,13 +165,24 @@ fn every_state_and_symlink_combination_renders_a_distinct_line() {
 #[test]
 fn every_kind_renders_a_distinct_marker() {
     let catalog = real_catalog();
-    let file = node_line(&catalog, &plain_node("x", ExplorerNodeKind::File), None);
+    let file = node_line(
+        &catalog,
+        &plain_node("x", ExplorerNodeKind::File),
+        false,
+        None,
+    );
     let dir = node_line(
         &catalog,
         &plain_node("x", ExplorerNodeKind::Directory),
+        false,
         None,
     );
-    let other = node_line(&catalog, &plain_node("x", ExplorerNodeKind::Other), None);
+    let other = node_line(
+        &catalog,
+        &plain_node("x", ExplorerNodeKind::Other),
+        false,
+        None,
+    );
 
     assert_ne!(file, dir);
     assert_ne!(file, other);
@@ -155,49 +192,73 @@ fn every_kind_renders_a_distinct_marker() {
     assert!(other.contains("[OTHER]"));
 }
 
-/// [`visible_rows`] must never walk the filesystem -- it is built
-/// directly from `scan.nodes`, in order, plus the synthetic parent row
-/// when the scan is not at the project root. This is the "no filesystem
-/// walking in the shell" gate item, checked as a structural property:
-/// the row count is exactly `nodes.len()` (root) or `nodes.len() + 1`
-/// (non-root), never anything a directory read could have produced.
+/// The row list of a tree is built from the scans it holds and nothing
+/// else -- it never walks the filesystem -- and (RFC-052) there is **no
+/// parent row**: folders expand in place, so there is nothing to walk back
+/// out of. The row count is exactly the scan's node count, whatever
+/// directory the scan is of.
 #[test]
-fn visible_rows_never_exceeds_the_scans_own_node_count_plus_the_parent_entry() {
+fn a_trees_rows_are_exactly_its_scans_nodes_and_there_is_no_parent_row() {
     let nodes = vec![
         plain_node("a.txt", ExplorerNodeKind::File),
         plain_node("b", ExplorerNodeKind::Directory),
     ];
-
-    let root_scan = scan_at_root(nodes.clone());
-    let root_rows = visible_rows(&root_scan);
-    assert_eq!(
-        root_rows.len(),
-        nodes.len(),
-        "no parent entry at the project root"
+    let tree = tree_with(scan_at_root(nodes.clone()));
+    let rows = tree.rows();
+    assert_eq!(rows.len(), nodes.len());
+    assert!(
+        rows.iter()
+            .all(|row| matches!(row.kind, ExplorerTreeRowKind::Node { .. }))
     );
-    assert!(matches!(root_rows[0], ExplorerRow::Node(_)));
 
-    let nested_scan = ExplorerDirectoryScan {
-        directory: target_at("subdir"),
-        nodes: nodes.clone(),
-        truncated: false,
-    };
-    let nested_rows = visible_rows(&nested_scan);
-    assert_eq!(
-        nested_rows.len(),
-        nodes.len() + 1,
-        "a parent entry is added away from the project root"
+    // A scan of a nested directory is loaded, but it is not on screen
+    // until that folder is expanded -- and it adds no "up" row either way.
+    let mut tree = tree_with(scan_at_root(nodes.clone()));
+    tree.set_scan(
+        Path::new("b"),
+        Ok(ExplorerDirectoryScan {
+            directory: target_at("b"),
+            ..scan_at_root(vec![plain_node("inner.txt", ExplorerNodeKind::File)])
+        }),
     );
-    assert!(matches!(nested_rows[0], ExplorerRow::Parent));
+    assert_eq!(tree.rows().len(), nodes.len(), "collapsed: nothing added");
+    tree.toggle(Path::new("b"));
+    // toggling asks for a refresh; the cached rows show meanwhile.
+    assert_eq!(tree.rows().len(), nodes.len() + 1);
 }
 
-/// The synthetic parent row renders through the catalog too -- not a
-/// hardcoded shell-local literal.
+/// Every row of a tree says what it is through the catalog, and the words
+/// on the rows that only say something are the catalog's, not literals.
 #[test]
-fn the_parent_row_resolves_through_the_catalog() {
+fn the_rows_that_only_say_something_resolve_through_the_catalog() {
     let catalog = real_catalog();
-    let line = row_line(&catalog, ExplorerRow::Parent, None);
-    assert_eq!(line, catalog.get("explorer-parent-entry"));
+    let mut tree = tree_with(scan_at_root(vec![plain_node(
+        "d",
+        ExplorerNodeKind::Directory,
+    )]));
+    tree.toggle(Path::new("d")); // pending: a Loading row
+    let lines = all_lines(&catalog, &tree, 0);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains(&catalog.get("explorer-row-loading")))
+    );
+
+    tree.set_scan(
+        Path::new("d"),
+        Err(
+            tekstide_core::project::root::ExplorerScanError::CannotReadDirectory {
+                target: Box::new(target_at("d")),
+            },
+        ),
+    );
+    let lines = all_lines(&catalog, &tree, 0);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains(&catalog.get("explorer-row-cannot-read"))),
+        "{lines:?}"
+    );
 }
 
 /// The highlight marker moves with the index, and only the highlighted
@@ -211,13 +272,7 @@ fn the_highlight_marker_is_present_on_exactly_the_highlighted_row() {
         plain_node("a.txt", ExplorerNodeKind::File),
         plain_node("b.txt", ExplorerNodeKind::File),
     ]);
-    let lines = tree_lines(
-        &catalog,
-        Some(&scan),
-        &ProjectExplorerStatus::Ready,
-        1,
-        None,
-    );
+    let lines = all_lines(&catalog, &tree_with(scan), 1);
 
     assert!(lines[0].starts_with("  "));
     assert!(lines[1].starts_with("> "));
@@ -233,7 +288,15 @@ fn the_error_status_message_is_escaped() {
     let status = ProjectExplorerStatus::Error {
         message: "could not read directory: proj\u{202E}gpj.exe".to_string(),
     };
-    let lines = tree_lines(&catalog, None, &status, 0, None);
+    let lines = tree_lines(
+        &catalog,
+        &ExplorerTree::default(),
+        &status,
+        0,
+        0,
+        1000,
+        None,
+    );
 
     let status_line = lines
         .iter()
@@ -250,39 +313,65 @@ fn the_error_status_message_is_escaped() {
 fn an_empty_scan_renders_the_empty_notice_not_a_blank_view() {
     let catalog = real_catalog();
     let scan = scan_at_root(Vec::new());
-    let lines = tree_lines(
-        &catalog,
-        Some(&scan),
-        &ProjectExplorerStatus::Ready,
-        0,
-        None,
+    let lines = all_lines(&catalog, &tree_with(scan), 0);
+    // The empty row is indented under its folder (here the root, depth 0).
+    assert_eq!(lines.len(), 1);
+    assert!(
+        lines[0].contains(&catalog.get("explorer-empty")),
+        "{lines:?}"
     );
-    assert_eq!(lines, vec![catalog.get("explorer-empty")]);
 }
 
-/// A truncated scan says so -- `ExplorerDirectoryScan::truncated` exists
-/// specifically so a bounded listing does not silently look complete.
+/// A truncated scan says so, **and says how many** -- RFC-052: nothing is
+/// hidden silently. `ExplorerDirectoryScan::truncated` exists so a bounded
+/// listing does not look complete; the count is what makes the notice
+/// checkable.
 #[test]
-fn a_truncated_scan_renders_the_truncation_notice() {
+fn a_truncated_scan_names_how_many_entries_it_left_out() {
     let catalog = real_catalog();
     let scan = ExplorerDirectoryScan {
         directory: target_at(""),
         nodes: vec![plain_node("a.txt", ExplorerNodeKind::File)],
         truncated: true,
+        omitted_entries: 44,
+        omitted_is_lower_bound: false,
     };
-    let lines = tree_lines(
-        &catalog,
-        Some(&scan),
-        &ProjectExplorerStatus::Ready,
-        0,
-        None,
-    );
+    let lines = all_lines(&catalog, &tree_with(scan), 0);
+    let last = plain_words(lines.last().unwrap());
+    assert!(last.contains("44 more entries are not shown"), "{last:?}");
+
+    // One is grammatical, and a count the scanner stopped short of says so.
+    let one = ExplorerDirectoryScan {
+        omitted_entries: 1,
+        ..scan_at_root(vec![plain_node("a.txt", ExplorerNodeKind::File)])
+    };
+    let one = ExplorerDirectoryScan {
+        truncated: true,
+        ..one
+    };
+    let lines = all_lines(&catalog, &tree_with(one), 0);
+    assert!(plain_words(lines.last().unwrap()).contains("One more entry is not shown"));
+
+    let bounded = ExplorerDirectoryScan {
+        truncated: true,
+        omitted_entries: 1_000_001,
+        omitted_is_lower_bound: true,
+        ..scan_at_root(vec![plain_node("a.txt", ExplorerNodeKind::File)])
+    };
+    let lines = all_lines(&catalog, &tree_with(bounded), 0);
+    let last = plain_words(lines.last().unwrap());
     assert!(
-        lines
-            .last()
-            .unwrap()
-            .contains(&catalog.get("explorer-truncated-notice"))
+        last.contains("At least 1000001 more entries are not shown"),
+        "{last:?}"
     );
+}
+
+/// Fluent isolates every placeable in U+2066..U+2069 (ARCHITECTURE.md), and
+/// a number is one; a test on the words a user reads strips them first.
+fn plain_words(line: &str) -> String {
+    line.chars()
+        .filter(|c| !('\u{2066}'..='\u{2069}').contains(c))
+        .collect()
 }
 
 /// **No `*_label` free function is called anywhere in this module.**
@@ -352,6 +441,7 @@ fn every_git_status_category_renders_a_distinct_badge() {
         let line = node_line(
             &catalog,
             &plain_node("x", ExplorerNodeKind::File),
+            false,
             Some(&summary),
         );
         assert!(
@@ -374,6 +464,7 @@ fn the_renamed_badge_names_both_rename_and_copy() {
     let line = node_line(
         &catalog,
         &plain_node("x", ExplorerNodeKind::File),
+        false,
         Some(&summary),
     );
     assert!(line.contains("renamed"));
@@ -390,8 +481,8 @@ fn a_file_outside_the_summarys_map_renders_identically_to_no_summary_at_all() {
     let summary = git_summary_with(&[("other.txt", FileGitStatus::Modified)]);
     let node = plain_node("untouched.txt", ExplorerNodeKind::File);
 
-    let with_summary = node_line(&catalog, &node, Some(&summary));
-    let without_summary = node_line(&catalog, &node, None);
+    let with_summary = node_line(&catalog, &node, false, Some(&summary));
+    let without_summary = node_line(&catalog, &node, false, None);
 
     assert_eq!(
         with_summary, without_summary,
@@ -416,8 +507,204 @@ fn a_repository_with_no_file_statuses_computed_renders_no_badges() {
     };
     let node = plain_node("anything.txt", ExplorerNodeKind::File);
 
-    let with_branch_only = node_line(&catalog, &node, Some(&branch_only));
-    let without_summary = node_line(&catalog, &node, None);
+    let with_branch_only = node_line(&catalog, &node, false, Some(&branch_only));
+    let without_summary = node_line(&catalog, &node, false, None);
 
     assert_eq!(with_branch_only, without_summary);
+}
+
+// ---------------------------------------------------------------------
+// RFC-052 PR-052-B: the tree, drawn.
+// ---------------------------------------------------------------------
+
+/// Indentation and the expansion marker are part of what a row says, and
+/// they are assertable as text -- no `iced` involved (RFC-052 §7).
+#[test]
+fn a_row_is_indented_by_depth_and_marked_open_or_closed_in_characters() {
+    let catalog = real_catalog();
+    let mut tree = tree_with(scan_at_root(vec![
+        plain_node("src", ExplorerNodeKind::Directory),
+        plain_node("docs", ExplorerNodeKind::Directory),
+        plain_node("top.txt", ExplorerNodeKind::File),
+    ]));
+    tree.set_scan(
+        Path::new("src"),
+        Ok(ExplorerDirectoryScan {
+            directory: target_at("src"),
+            ..scan_at_root(vec![plain_node("lib.rs", ExplorerNodeKind::File)])
+        }),
+    );
+    tree.toggle(Path::new("src"));
+
+    let lines = all_lines(&catalog, &tree, 99);
+    let text: Vec<String> = lines.iter().map(|line| plain_words(line)).collect();
+    // `src` is open (`[-]`), `docs` closed (`[+]`), a file has neither, and
+    // `lib.rs` sits two spaces further in than the folder that holds it.
+    assert!(text[0].starts_with("  [-] [DIR] src"), "{text:?}");
+    assert!(text[1].starts_with("        [FILE] lib.rs"), "{text:?}");
+    assert!(text[2].starts_with("  [+] [DIR] docs"), "{text:?}");
+    assert!(text[3].starts_with("      [FILE] top.txt"), "{text:?}");
+    // The two-space highlight marker precedes all of it; only one row has it.
+    assert_eq!(text.iter().filter(|l| l.starts_with("> ")).count(), 0);
+}
+
+/// **§1 through the tree: every name at every depth is escaped**, not just
+/// the ones the old one-level view happened to draw. A newline in a name
+/// must not split a row in two, and a bidi override must not reach the
+/// screen.
+#[test]
+fn hostile_names_at_any_depth_never_reach_a_row_raw() {
+    let catalog = real_catalog();
+    let hostile = [
+        "evil\u{202E}gpj.exe",
+        "two\nlines.txt",
+        "bad-\u{FFFD}-name.txt",
+    ];
+    let mut tree = tree_with(scan_at_root(vec![plain_node(
+        "d",
+        ExplorerNodeKind::Directory,
+    )]));
+    tree.set_scan(
+        Path::new("d"),
+        Ok(ExplorerDirectoryScan {
+            directory: target_at("d"),
+            ..scan_at_root(
+                hostile
+                    .iter()
+                    .map(|name| ExplorerNode {
+                        relative_path: PathBuf::from("d").join(name),
+                        ..plain_node(name, ExplorerNodeKind::File)
+                    })
+                    .collect(),
+            )
+        }),
+    );
+    tree.toggle(Path::new("d"));
+
+    let lines = all_lines(&catalog, &tree, 0);
+    assert_eq!(
+        lines.len(),
+        1 + hostile.len(),
+        "one line per row: {lines:?}"
+    );
+    for line in &lines {
+        assert!(!line.contains('\u{202E}'), "raw override drawn: {line:?}");
+        assert!(!line.contains('\n'), "a name split a row: {line:?}");
+    }
+    let joined = lines.join("\n");
+    assert!(joined.contains("<U+202E>") && joined.contains("<U+000A>"));
+}
+
+/// The word `(collapsed)` is true while a folder is closed and would
+/// contradict the rows under it once it is open.
+#[test]
+fn a_collapse_list_folder_says_collapsed_only_while_it_is_closed() {
+    let catalog = real_catalog();
+    let node = ExplorerNode {
+        state: ExplorerNodeState::Collapsed,
+        ..plain_node("target", ExplorerNodeKind::Directory)
+    };
+    assert!(node_line(&catalog, &node, false, None).contains("(collapsed)"));
+    assert!(!node_line(&catalog, &node, true, None).contains("(collapsed)"));
+}
+
+/// The window rule, as a rule (RFC-052 D8: the total-row bound is
+/// virtualisation, so only the rows that fit are ever built into widgets).
+#[test]
+fn the_window_shows_the_highlight_and_moves_as_little_as_it_can() {
+    // Everything fits: no window at all.
+    assert_eq!(window_for(5, 3, 0, 10), RowWindow { top: 0, end: 5 });
+    // Moving inside the window does not scroll it.
+    assert_eq!(window_for(100, 12, 10, 5), RowWindow { top: 10, end: 15 });
+    // Past the bottom: scroll just enough to put the highlight last.
+    assert_eq!(window_for(100, 15, 10, 5), RowWindow { top: 11, end: 16 });
+    // Past the top: scroll just enough to put it first.
+    assert_eq!(window_for(100, 9, 10, 5), RowWindow { top: 9, end: 14 });
+    // A stale `top` (the tree shrank, or the window grew) is clamped so the
+    // window never runs off the end.
+    assert_eq!(window_for(20, 19, 500, 5), RowWindow { top: 15, end: 20 });
+    // A highlight past the end is clamped to the last row.
+    assert_eq!(window_for(20, 999, 0, 5), RowWindow { top: 15, end: 20 });
+    // A zero-row window still shows one row: the highlight must be drawn.
+    assert_eq!(window_for(20, 7, 0, 0), RowWindow { top: 7, end: 8 });
+}
+
+/// The capacity is measured from the sidebar's height with the numbers the
+/// drawing uses; unknown until the first layout, then it follows the size.
+#[test]
+fn how_many_rows_fit_follows_the_measured_height() {
+    assert_eq!(rows_that_fit(None, 14.0), DEFAULT_WINDOW_ROWS);
+    let small = rows_that_fit(Some(300.0), 14.0);
+    let large = rows_that_fit(Some(900.0), 14.0);
+    assert!(small >= 1 && large > small, "{small} then {large}");
+    // A larger font fits fewer rows in the same height.
+    assert!(rows_that_fit(Some(900.0), 20.0) < large);
+    // Degenerate heights still leave one row rather than none.
+    assert_eq!(rows_that_fit(Some(0.0), 14.0), 1);
+}
+
+/// **Nothing is hidden silently.** A tree longer than its window draws only
+/// the window and says which rows those are; one that fits says nothing
+/// extra.
+#[test]
+fn a_window_narrower_than_the_tree_says_which_rows_it_is_showing() {
+    let catalog = real_catalog();
+    let nodes: Vec<ExplorerNode> = (0..50)
+        .map(|index| plain_node(&format!("f{index:02}"), ExplorerNodeKind::File))
+        .collect();
+    let tree = tree_with(scan_at_root(nodes));
+
+    let lines = tree_lines(
+        &catalog,
+        &tree,
+        &ProjectExplorerStatus::Ready,
+        30,
+        0,
+        10,
+        None,
+    );
+    // 10 rows and the position line; the highlight (30) is inside them.
+    assert_eq!(lines.len(), 11);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("> ") && line.contains("f30"))
+    );
+    assert_eq!(plain_words(lines.last().unwrap()), "Rows 22–31 of 50");
+
+    let everything = tree_lines(
+        &catalog,
+        &tree,
+        &ProjectExplorerStatus::Ready,
+        0,
+        0,
+        100,
+        None,
+    );
+    assert_eq!(everything.len(), 50, "no position line when all rows fit");
+}
+
+/// The tree's own row bound ends in a row that says how many rows were not
+/// kept -- and reads correctly for one.
+#[test]
+fn passing_the_row_bound_ends_in_a_row_naming_how_many_are_not_shown() {
+    let catalog = real_catalog();
+    let bound = tekstide_core::project::MAX_TREE_ROWS;
+    let nodes = |count: usize| {
+        tree_with(scan_at_root(
+            (0..count)
+                .map(|index| plain_node(&format!("f{index}"), ExplorerNodeKind::File))
+                .collect(),
+        ))
+    };
+    for (count, expected) in [
+        (bound + 1, "One more row is not shown"),
+        (bound + 5, "5 more rows are not shown"),
+    ] {
+        let tree = nodes(count);
+        let rows = tree.rows();
+        assert_eq!(rows.len(), bound + 1);
+        let last = plain_words(&row_text(&catalog, rows.last().unwrap(), None));
+        assert!(last.contains(expected), "{last:?}");
+    }
 }

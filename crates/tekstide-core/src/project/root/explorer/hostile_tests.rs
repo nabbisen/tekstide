@@ -313,3 +313,36 @@ fn the_control_tree_scans_as_an_ordinary_project() {
             .all(|node| node.state == ExplorerNodeState::Available)
     );
 }
+
+#[test]
+fn a_capped_scan_counts_what_it_left_out_and_says_when_it_stopped_counting() {
+    let fixture = HostileFixture::build("omitted-count", SMALL_BREADTH);
+    let root = handle(&fixture);
+
+    // 300 entries, cap 256: 44 left out, counted exactly.
+    let exact = FileExplorerScanner
+        .scan_directory(&root, "breadth", &FileExplorerScanPolicy::linux_mvp())
+        .expect("scans");
+    assert!(exact.truncated);
+    assert_eq!(exact.omitted_entries, SMALL_BREADTH - 256);
+    assert!(!exact.omitted_is_lower_bound);
+
+    // A count limit below the truth stops counting and says so: the row
+    // must not state a number the scanner did not finish.
+    let policy = FileExplorerScanPolicy {
+        omitted_count_limit: 10,
+        ..FileExplorerScanPolicy::linux_mvp()
+    };
+    let stopped = FileExplorerScanner
+        .scan_directory(&root, "breadth", &policy)
+        .expect("scans");
+    assert_eq!(stopped.omitted_entries, 1 + 10);
+    assert!(stopped.omitted_is_lower_bound);
+
+    // A directory that fits is not truncated and counts nothing.
+    let fits = FileExplorerScanner
+        .scan_directory(&root, "control", &FileExplorerScanPolicy::linux_mvp())
+        .expect("scans");
+    assert!(!fits.truncated);
+    assert_eq!(fits.omitted_entries, 0);
+}

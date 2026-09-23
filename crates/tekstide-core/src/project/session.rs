@@ -1409,6 +1409,60 @@ impl ProjectSession {
         result
     }
 
+    /// RFC-052 PR-052-B: asks for the root directory's scan if it has not
+    /// been asked for (or last failed). **Marks it pending and returns; it
+    /// scans nothing.** The shell runs [`Self::explorer_scan_requests`] on a
+    /// worker thread and hands each result to [`Self::apply_explorer_scan`].
+    /// Returns whether a request was made.
+    pub fn request_explorer_root_scan_if_needed(&mut self) -> bool {
+        use super::explorer_tree::ExplorerRootState;
+        match self.content_workspace.explorer_tree().root_state() {
+            ExplorerRootState::NotRequested | ExplorerRootState::Failed => {
+                self.content_workspace
+                    .request_explorer_scan(std::path::Path::new(""));
+                true
+            }
+            ExplorerRootState::Pending | ExplorerRootState::Loaded => false,
+        }
+    }
+
+    /// Expands or collapses the folder at `path`; expanding requests a scan.
+    pub fn toggle_explorer_directory(&mut self, path: &Path) -> super::ExplorerToggle {
+        self.content_workspace.toggle_explorer_directory(path)
+    }
+
+    /// Every scan currently pending, runnable on any thread.
+    pub fn explorer_scan_requests(&self) -> Vec<super::ExplorerScanRequest> {
+        // The shell asks on every rebuild of its subscriptions; nearly always
+        // there is nothing pending, and then no root handle is built.
+        if self
+            .content_workspace
+            .explorer_tree()
+            .pending()
+            .next()
+            .is_none()
+        {
+            return Vec::new();
+        }
+        let root = ProjectRootHandle::from_project_session(self);
+        self.content_workspace.explorer_scan_requests(&root)
+    }
+
+    /// Applies a finished scan; `false` if it was stale.
+    pub fn apply_explorer_scan(&mut self, completed: super::ExplorerScanCompleted) -> bool {
+        self.content_workspace.apply_explorer_scan(completed)
+    }
+
+    /// Runs every pending scan **on the calling thread**. Tests only: the
+    /// shell never does this (a test pins it), because a scan is linear in
+    /// path length and must stay off the render thread.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn complete_explorer_scans_blocking(&mut self) {
+        for request in self.explorer_scan_requests() {
+            self.apply_explorer_scan(request.run());
+        }
+    }
+
     /// RFC-038 PR-038-F: the scan-only counterpart to
     /// [`Self::scan_content_explorer_directory`] -- that method also sets
     /// `open_surface`/`mode`, correct for a user's own explicit directory

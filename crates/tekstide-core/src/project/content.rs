@@ -6,6 +6,9 @@ use crate::content::{
     TextDocumentOpenError, TextDocumentOpenPolicy, TextDocumentRefreshError, TextDocumentSaveError,
     TextDocumentState,
 };
+use crate::project::explorer_tree::{
+    ExplorerScanCompleted, ExplorerScanRequest, ExplorerToggle, ExplorerTree,
+};
 use crate::project::root::{
     ExplorerDirectoryScan, ExplorerNodeKind, ExplorerNodeState, ExplorerScanError,
     FileAccessSymlinkStatus, FileExplorerScanPolicy, FileExplorerScanner, ProjectRootHandle,
@@ -14,7 +17,7 @@ use crate::project::root::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectContentWorkspace {
     selected_explorer_path: PathBuf,
-    explorer_scan: Option<ExplorerDirectoryScan>,
+    explorer_tree: ExplorerTree,
     explorer_status: ProjectExplorerStatus,
     active_document: Option<TextDocument>,
     status: ProjectContentStatus,
@@ -25,8 +28,50 @@ impl ProjectContentWorkspace {
         &self.selected_explorer_path
     }
 
+    /// The root directory's scan, if it has loaded. The tree beyond the
+    /// root is [`Self::explorer_tree`].
     pub fn explorer_scan(&self) -> Option<&ExplorerDirectoryScan> {
-        self.explorer_scan.as_ref()
+        self.explorer_tree.root_scan()
+    }
+
+    /// RFC-052 PR-052-B: the explorer as a tree of expandable folders.
+    pub fn explorer_tree(&self) -> &ExplorerTree {
+        &self.explorer_tree
+    }
+
+    /// Marks `path` as needing a scan; a worker runs it later (see
+    /// [`ExplorerScanRequest`]). A no-op if one is already in flight.
+    pub fn request_explorer_scan(&mut self, path: &Path) {
+        self.explorer_tree.request_scan(path);
+    }
+
+    /// Expands or collapses the folder at `path`. Expanding requests a scan.
+    pub fn toggle_explorer_directory(&mut self, path: &Path) -> ExplorerToggle {
+        self.explorer_tree.toggle(path)
+    }
+
+    /// The runnable scans for everything pending. Each is `Send + 'static`
+    /// and **blocking to run**: hand it to a worker thread.
+    pub fn explorer_scan_requests(&self, root: &ProjectRootHandle) -> Vec<ExplorerScanRequest> {
+        self.explorer_tree.scan_requests(root)
+    }
+
+    /// Applies a finished scan. Returns `false` for a stale one. The root's
+    /// outcome also sets [`Self::explorer_status`], as the one-level explorer
+    /// always did.
+    pub fn apply_explorer_scan(&mut self, completed: ExplorerScanCompleted) -> bool {
+        let is_root = completed.path.as_os_str().is_empty();
+        let status = match &completed.result {
+            Ok(_) => ProjectExplorerStatus::Ready,
+            Err(error) => ProjectExplorerStatus::Error {
+                message: error.to_string(),
+            },
+        };
+        let applied = self.explorer_tree.apply(completed);
+        if applied && is_root {
+            self.explorer_status = status;
+        }
+        applied
     }
 
     pub fn explorer_status(&self) -> &ProjectExplorerStatus {
@@ -82,15 +127,19 @@ impl ProjectContentWorkspace {
     ) -> Result<(), ProjectContentError> {
         let selected_relative_path = selected_relative_path.into();
 
-        match FileExplorerScanner.scan_directory(root, selected_relative_path, policy) {
+        let result =
+            FileExplorerScanner.scan_directory(root, selected_relative_path.clone(), policy);
+        match result {
             Ok(scan) => {
                 self.selected_explorer_path = scan.directory.selected_relative_path.clone();
-                self.explorer_scan = Some(scan);
+                self.explorer_tree
+                    .set_scan(&selected_relative_path, Ok(scan));
                 self.explorer_status = ProjectExplorerStatus::Ready;
                 Ok(())
             }
             Err(error) => {
-                self.explorer_scan = None;
+                self.explorer_tree
+                    .set_scan(&selected_relative_path, Err(error.clone()));
                 self.explorer_status = ProjectExplorerStatus::Error {
                     message: error.to_string(),
                 };
@@ -274,7 +323,7 @@ impl Default for ProjectContentWorkspace {
     fn default() -> Self {
         Self {
             selected_explorer_path: PathBuf::new(),
-            explorer_scan: None,
+            explorer_tree: ExplorerTree::default(),
             explorer_status: ProjectExplorerStatus::Empty,
             active_document: None,
             status: ProjectContentStatus::Empty,

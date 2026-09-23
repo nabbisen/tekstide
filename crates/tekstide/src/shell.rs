@@ -770,6 +770,18 @@ pub struct State {
     /// Reset to `0` every time a scan succeeds, so it can never point
     /// past the end of a freshly-replaced row list.
     explorer_highlight: usize,
+    /// RFC-052 PR-052-B: the first tree row the sidebar draws. The tree can
+    /// be longer than the sidebar and **only the rows that fit are built
+    /// into widgets** (the total-row bound, decided by measurement:
+    /// virtualisation). Kept so that moving the highlight inside the window
+    /// does not scroll it; [`crate::surface::explorer::window_for`] is the
+    /// rule.
+    explorer_top: usize,
+    /// RFC-052 PR-052-B: the size the layout engine gave the sidebar, the
+    /// same measure-don't-compute rule as `panes_region` (RFC-053 D3′).
+    /// `None` until the first layout that contains it, when the window
+    /// holds a default number of rows.
+    explorer_viewport: Option<iced::Size>,
     /// Response 234: the `ApprovalHistory` surface's own keyboard cursor
     /// -- the direct analogue of `explorer_highlight` for a second,
     /// independent list in the same `MainArea` zone. A separate field
@@ -1261,6 +1273,8 @@ impl State {
             agent_run_launch_notice: None,
             terminal_paste_notice: None,
             explorer_highlight: 0,
+            explorer_top: 0,
+            explorer_viewport: None,
             approval_history_highlight: 0,
             approval_coordinator: tekstide_core::approval::ApprovalCoordinator::new(),
             approval_channels: Vec::new(),
@@ -1569,6 +1583,20 @@ pub enum Message {
     /// same character grid until a glyph/line boundary is crossed
     /// (`TerminalPane::resize`'s own no-op-when-unchanged check).
     PanesRegionMeasured(iced::Size),
+    /// RFC-052 PR-052-B: a directory scan the explorer asked for has come
+    /// back from its worker thread ([`explorer_scan_subscription`]). Applied
+    /// by `ProjectSession::apply_explorer_scan`, which drops it if a newer
+    /// request for that directory has superseded it; if the project has
+    /// since closed there is nothing to apply it to and it is simply
+    /// dropped (the shape [`Message::GitSummaryComputed`] already has).
+    ExplorerScanFinished {
+        project_id: tekstide_core::project::ProjectId,
+        completed: tekstide_core::project::ExplorerScanCompleted,
+    },
+    /// RFC-052 PR-052-B: the size the layout engine gave the explorer's
+    /// sidebar, published by [`crate::surface::frame::MeasureSize`] when it
+    /// changes.
+    ExplorerViewportMeasured(iced::Size),
     /// RFC-032: fired by the `TrustSettings` surface's own "Grant"
     /// control -- opens the real confirmation dialog. No I/O here; the
     /// real grant only happens on `ModalActivate` with focus on `Grant`
@@ -1797,6 +1825,8 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::TerminalPasteResolved { .. }
         | Message::ApprovalPollTick
         | Message::PanesRegionMeasured(_)
+        | Message::ExplorerScanFinished { .. }
+        | Message::ExplorerViewportMeasured(_)
         | Message::PathFieldPasteResolved(_) => None,
     }
 }
@@ -2545,6 +2575,19 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::PanesRegionMeasured(size) => {
             state.panes_region = Some(size);
             apply_terminal_geometry(state);
+        }
+        Message::ExplorerScanFinished {
+            project_id,
+            completed,
+        } => {
+            if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
+                project.apply_explorer_scan(completed);
+            }
+            settle_explorer_highlight(state);
+        }
+        Message::ExplorerViewportMeasured(size) => {
+            state.explorer_viewport = Some(size);
+            settle_explorer_highlight(state);
         }
         Message::OpenTrustGrantDialog => {
             open_trust_grant_dialog(state);
@@ -3929,13 +3972,48 @@ fn ensure_explorer_scanned(state: &mut State) {
     if project.mode() != ProjectMode::Content {
         return;
     }
-    if project.content_workspace().explorer_scan().is_some() {
-        return;
-    }
-    let _ = state
+    let project_id = project.id().clone();
+    // RFC-052 PR-052-B: **asks, does not scan.** The root's scan is marked
+    // pending here and run on a worker thread by
+    // [`explorer_scan_subscription`]; `Message::ExplorerScanFinished` applies
+    // it. A scan is linear in path length (65 ms at depth 1 500), so the
+    // render thread never performs one -- pinned by
+    // `the_shell_never_scans_a_directory_on_the_render_thread`.
+    let requested = state
         .app_shell
-        .scan_active_project_explorer_directory_without_navigating(std::path::PathBuf::new());
-    state.explorer_highlight = 0;
+        .state_mut()
+        .project_mut(&project_id)
+        .is_some_and(tekstide_core::project::ProjectSession::request_explorer_root_scan_if_needed);
+    if requested {
+        state.explorer_highlight = 0;
+        state.explorer_top = 0;
+    }
+}
+
+/// How many tree rows the sidebar can draw, from the size the layout
+/// engine last gave it.
+fn explorer_window_capacity(state: &State) -> usize {
+    crate::surface::explorer::rows_that_fit(
+        state.explorer_viewport.map(|size| size.height),
+        state.theme.font_size_body(),
+    )
+}
+
+/// Keeps the highlight on a row that exists and the window on the
+/// highlight, after the tree or the viewport changed under them.
+fn settle_explorer_highlight(state: &mut State) {
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    let total = project.content_workspace().explorer_tree().rows().len();
+    state.explorer_highlight = state.explorer_highlight.min(total.saturating_sub(1));
+    state.explorer_top = crate::surface::explorer::window_for(
+        total,
+        state.explorer_highlight,
+        state.explorer_top,
+        explorer_window_capacity(state),
+    )
+    .top;
 }
 
 /// RFC-019 PR-019-B: the explorer tree's own keyboard navigation --
@@ -3954,7 +4032,7 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
     enum Action {
         MoveUp,
         MoveDown,
-        Navigate(std::path::PathBuf),
+        Toggle(std::path::PathBuf),
         Open(std::path::PathBuf),
         None,
     }
@@ -3965,10 +4043,10 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
     if project.mode() != ProjectMode::Content {
         return;
     }
-    let Some(scan) = project.content_workspace().explorer_scan() else {
-        return;
-    };
-    let row_count = crate::surface::explorer::visible_rows(scan).len();
+    let project_id = project.id().clone();
+    let tree = project.content_workspace().explorer_tree();
+    let rows = tree.rows();
+    let row_count = rows.len();
     if row_count == 0 {
         return;
     }
@@ -3977,27 +4055,24 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
         keyboard::Key::Named(keyboard::key::Named::ArrowDown) => Action::MoveDown,
         keyboard::Key::Named(keyboard::key::Named::ArrowUp) => Action::MoveUp,
         keyboard::Key::Named(keyboard::key::Named::Enter) => {
-            let rows = crate::surface::explorer::visible_rows(scan);
             match rows.get(state.explorer_highlight) {
-                Some(crate::surface::explorer::ExplorerRow::Parent) => Action::Navigate(
-                    scan.directory
-                        .selected_relative_path
-                        .parent()
-                        .map(std::path::Path::to_path_buf)
-                        .unwrap_or_default(),
-                ),
-                Some(crate::surface::explorer::ExplorerRow::Node(node))
-                    if node.kind == tekstide_core::project::root::ExplorerNodeKind::Directory =>
-                {
-                    Action::Navigate(node.relative_path.clone())
-                }
-                // RFC-019 PR-019-C: a file row's Enter now opens it --
-                // PR-019-B left this arm absent entirely (a no-op by
-                // omission from the match, not by an explicit `_`),
-                // since there was no editor yet to open it into.
-                Some(crate::surface::explorer::ExplorerRow::Node(node))
-                    if node.kind == tekstide_core::project::root::ExplorerNodeKind::File =>
-                {
+                // Enter on a folder opens or closes it in place; on a file it
+                // opens the file. A blocked, unreadable or non-directory
+                // entry, and the rows that only say something ("Loading",
+                // "N more entries not shown"), do nothing.
+                Some(tekstide_core::project::ExplorerTreeRow {
+                    kind:
+                        tekstide_core::project::ExplorerTreeRowKind::Node {
+                            node,
+                            expandable: true,
+                            ..
+                        },
+                    ..
+                }) => Action::Toggle(node.relative_path.clone()),
+                Some(tekstide_core::project::ExplorerTreeRow {
+                    kind: tekstide_core::project::ExplorerTreeRowKind::Node { node, .. },
+                    ..
+                }) if node.kind == tekstide_core::project::root::ExplorerNodeKind::File => {
                     Action::Open(node.relative_path.clone())
                 }
                 _ => Action::None,
@@ -4005,6 +4080,7 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
         }
         _ => Action::None,
     };
+    drop(rows);
 
     match action {
         Action::MoveDown => {
@@ -4013,15 +4089,17 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
         Action::MoveUp => {
             state.explorer_highlight = state.explorer_highlight.saturating_sub(1);
         }
-        Action::Navigate(path) => {
-            let _ = state.app_shell.scan_active_project_explorer_directory(path);
-            state.explorer_highlight = 0;
+        Action::Toggle(path) => {
+            if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
+                project.toggle_explorer_directory(&path);
+            }
         }
         Action::Open(path) => {
             let _ = state.app_shell.open_active_project_text_document(path);
         }
         Action::None => {}
     }
+    settle_explorer_highlight(state);
 }
 
 /// RFC-019 PR-019-D: turns a key routed to `MainArea` into an edit,
@@ -6588,6 +6666,56 @@ fn git_summary_subscription(
     )
 }
 
+/// RFC-052 PR-052-B: one directory scan on a dedicated OS thread, the shape
+/// [`git_summary_subscription`] uses: the blocking work happens on a thread
+/// the render loop never waits for, the async block only keeps the stream
+/// alive, and the subscription sends exactly one message. Its identity is
+/// (project, directory, generation): a directory re-requested after a
+/// result is a new generation and so a new worker, and a rebuild of
+/// `subscription()` while one is in flight does not start a second.
+fn explorer_scan_subscription(
+    project_id: tekstide_core::project::ProjectId,
+    request: tekstide_core::project::ExplorerScanRequest,
+) -> Subscription<Message> {
+    Subscription::run_with(
+        ExplorerScanSource {
+            project_id,
+            request,
+        },
+        explorer_scan_stream,
+    )
+}
+
+struct ExplorerScanSource {
+    project_id: tekstide_core::project::ProjectId,
+    request: tekstide_core::project::ExplorerScanRequest,
+}
+
+impl std::hash::Hash for ExplorerScanSource {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.project_id.hash(state);
+        self.request.path().hash(state);
+        self.request.generation().hash(state);
+    }
+}
+
+fn explorer_scan_stream(
+    source: &ExplorerScanSource,
+) -> impl iced::futures::Stream<Item = Message> + use<> {
+    let project_id = source.project_id.clone();
+    let request = source.request.clone();
+    iced::stream::channel(1, async move |mut output| {
+        std::thread::spawn(move || {
+            let completed = request.run();
+            let _ = iced::futures::executor::block_on(output.send(Message::ExplorerScanFinished {
+                project_id,
+                completed,
+            }));
+        });
+        std::future::pending::<()>().await;
+    })
+}
+
 /// `Subscription::run_with`'s identity data, hashed on `project_id` alone
 /// (not `repository_root`, which cannot meaningfully change for a live
 /// project session) -- the same "hand-written `Hash`, only the identity
@@ -6931,6 +7059,16 @@ pub fn subscription(state: &State) -> Subscription<Message> {
                 project.id().clone(),
                 project.canonical_root_path().clone(),
             ));
+        }
+    }
+    // RFC-052 PR-052-B: one worker per explorer scan in flight, the same
+    // "checked but usually absent" shape. `ensure_explorer_scanned` and a
+    // folder toggle only *mark* a scan pending; this is what runs it, off the
+    // render thread, and it stops being offered once
+    // `Message::ExplorerScanFinished` applies the result.
+    for project in state.app_shell.state().projects() {
+        for request in project.explorer_scan_requests() {
+            subscriptions.push(explorer_scan_subscription(project.id().clone(), request));
         }
     }
     if subscriptions.is_empty() {
@@ -8296,9 +8434,13 @@ fn sidebar_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message
             let active_project = state.app_shell.state().active_project();
             match active_project {
                 Some(project) => crate::surface::explorer::view(
-                    project.content_workspace().explorer_scan(),
+                    project.content_workspace().explorer_tree(),
                     project.content_workspace().explorer_status(),
-                    state.explorer_highlight,
+                    crate::surface::explorer::ExplorerCursor {
+                        highlight: state.explorer_highlight,
+                        top: state.explorer_top,
+                        capacity: explorer_window_capacity(state),
+                    },
                     &state.catalog,
                     &state.theme,
                     Some(project.git_summary()),
@@ -8308,12 +8450,17 @@ fn sidebar_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message
         }
         _ => text(sidebar_label(state)).into(),
     };
-    container(content)
-        .width(Length::Fixed(220.0))
-        .height(Length::Fill)
-        .padding(16)
-        .style(zone_style(state.theme, focused))
-        .into()
+    // RFC-052 PR-052-B: the sidebar's own size is measured, not computed --
+    // the window holds as many rows as the layout engine says fit.
+    crate::surface::frame::MeasureSize::new(
+        container(content)
+            .width(Length::Fixed(220.0))
+            .height(Length::Fill)
+            .padding(16)
+            .style(zone_style(state.theme, focused)),
+        Message::ExplorerViewportMeasured,
+    )
+    .into()
 }
 
 fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message> {

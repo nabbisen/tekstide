@@ -7,10 +7,13 @@ use super::{ProjectId, ProjectSession};
 
 mod explorer;
 
+/// RFC-052: the explorer tree's own tests build on the same fixture.
+#[cfg(test)]
+pub(crate) use explorer::hostile_fixture;
 pub use explorer::{
     BrowseNode, BrowseNodeState, DirectoryBrowseError, DirectoryBrowseScan, ExplorerDirectoryScan,
     ExplorerNode, ExplorerNodeKind, ExplorerNodeState, ExplorerScanError, FileExplorerScanPolicy,
-    FileExplorerScanner, browse_directory,
+    FileExplorerScanner, OMITTED_COUNT_LIMIT, browse_directory,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

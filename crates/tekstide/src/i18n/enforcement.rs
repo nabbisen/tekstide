@@ -618,6 +618,12 @@ fn generic_args() -> CatalogArgs<'static> {
         // RFC-030 PR-030-C, REQ-GIT-003: `explorer-node-entry`'s fifth
         // selector, `$git`.
         .trusted_symbol("git", "none")
+        // RFC-052 PR-052-B: `explorer-omitted-entries`'s `$bound`, and
+        // `explorer-rows-position`'s window.
+        .trusted_symbol("bound", "exact")
+        .number("first", 1u32)
+        .number("last", 1u32)
+        .number("total", 1u32)
         // RFC-053 D7: `project-board-blocked-automation-names`'s list.
         .untrusted(
             "names",

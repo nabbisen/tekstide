@@ -356,15 +356,44 @@ fn failed_explorer_scan_clears_previous_scan_result() {
         .expect("project root should scan");
     assert!(shell.render_text().contains("README.md [file | available"));
 
+    // RFC-052: the explorer is a tree, so "the previous scan" that must not
+    // survive a failure is the *root's* -- a listing of a directory that is
+    // no longer there must not be shown as current.
+    std::fs::remove_dir_all(&project_dir).expect("remove the project directory");
     shell
-        .scan_active_project_explorer_directory("file.txt")
-        .expect_err("file target is not a directory");
+        .scan_active_project_explorer_directory("")
+        .expect_err("a missing project root cannot be scanned");
     let rendered = shell.render_text();
 
     assert!(rendered.contains("explorer: error"));
     assert!(rendered.contains("explorer message:"));
     assert!(!rendered.contains("README.md [file | available"));
     assert!(!rendered.contains("explorer directory: (project root)"));
+}
+
+/// RFC-052: the other half. A failed scan of a *folder inside* the project
+/// is that folder's problem -- the root's listing is still true and stays.
+#[test]
+fn a_failed_scan_of_one_folder_does_not_erase_the_root_listing() {
+    let sandbox = TestSandbox::new("shell-content-explorer-subfolder-fails");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/file.txt", b"original\n");
+    sandbox.create_file_with_contents("project/README.md", b"# readme\n");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+    shell
+        .scan_active_project_explorer_directory("")
+        .expect("project root should scan");
+
+    shell
+        .scan_active_project_explorer_directory("file.txt")
+        .expect_err("file target is not a directory");
+    let rendered = shell.render_text();
+
+    assert!(rendered.contains("explorer: error"));
+    assert!(rendered.contains("README.md [file | available"));
 }
 
 #[test]

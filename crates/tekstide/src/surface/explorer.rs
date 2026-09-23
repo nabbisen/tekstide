@@ -39,42 +39,22 @@
 //! own, exactly as a plain per-node lookup would produce with no special
 //! casing at all.
 
+use iced::widget::text::Wrapping;
 use iced::widget::{button, column, container, text};
 use iced::{Element, Length};
 
-use tekstide_core::project::ProjectExplorerStatus;
 use tekstide_core::project::root::{
-    BrowseNode, BrowseNodeState, DirectoryBrowseScan, ExplorerDirectoryScan, ExplorerNode,
-    ExplorerNodeKind, ExplorerNodeState, FileAccessSymlinkStatus,
+    BrowseNode, BrowseNodeState, DirectoryBrowseScan, ExplorerNode, ExplorerNodeKind,
+    ExplorerNodeState, FileAccessSymlinkStatus,
+};
+use tekstide_core::project::{
+    ExplorerTree, ExplorerTreeRow, ExplorerTreeRowKind, ProjectExplorerStatus,
 };
 use tekstide_core::project::{FileGitStatus, ProjectGitSummary};
 use tekstide_core::text_safety;
 
 use crate::i18n::{Catalog, CatalogArgs};
 use crate::theme::Theme;
-
-/// One rendered row: the synthetic "go up" entry (shown whenever the
-/// current directory is not the project root), or a real node from
-/// core's scan. `rows` (below) is the one place this list is built, so
-/// a keyboard-navigation index and what the screen actually shows can
-/// never disagree about what row N means.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum ExplorerRow<'a> {
-    Parent,
-    Node(&'a ExplorerNode),
-}
-
-/// Every row currently rendered, in display order. Never walks the
-/// filesystem -- built directly from `scan.nodes`, in the order core's
-/// own scan returned them.
-pub(crate) fn visible_rows(scan: &ExplorerDirectoryScan) -> Vec<ExplorerRow<'_>> {
-    let mut rows = Vec::with_capacity(scan.nodes.len() + 1);
-    if !scan.directory.selected_relative_path.as_os_str().is_empty() {
-        rows.push(ExplorerRow::Parent);
-    }
-    rows.extend(scan.nodes.iter().map(ExplorerRow::Node));
-    rows
-}
 
 fn node_kind_symbol(kind: ExplorerNodeKind) -> &'static str {
     match kind {
@@ -131,32 +111,93 @@ fn git_status_symbol(status: Option<FileGitStatus>) -> &'static str {
 /// computed yet); the per-node lookup itself is
 /// [`ProjectGitSummary::file_status`], this module's own doc comment
 /// covers why it is exact-path with no rollup.
+///
+/// `expanded` is RFC-052's one addition: a directory on the collapse list
+/// (`.git`, `node_modules`, `target`) reads `(collapsed)` while it is
+/// closed, and stops saying so once the user has opened it -- the word
+/// would otherwise contradict the rows under it.
 pub(crate) fn node_line(
     catalog: &Catalog,
     node: &ExplorerNode,
+    expanded: bool,
     git_summary: Option<&ProjectGitSummary>,
 ) -> String {
     let name = text_safety::quote_untrusted(&node.name);
     let git_status = git_summary.and_then(|summary| summary.file_status(&node.relative_path));
+    let state = if expanded && node.state == ExplorerNodeState::Collapsed {
+        "available"
+    } else {
+        node_state_symbol(&node.state)
+    };
     catalog.get_with_args(
         "explorer-node-entry",
         &CatalogArgs::new()
             .trusted_symbol("kind", node_kind_symbol(node.kind))
             .untrusted("name", &name)
-            .trusted_symbol("state", node_state_symbol(&node.state))
+            .trusted_symbol("state", state)
             .trusted_symbol("symlink", symlink_status_symbol(node.symlink_status))
             .trusted_symbol("git", git_status_symbol(git_status)),
     )
 }
 
-pub(crate) fn row_line(
+/// Two spaces per level. Depth is also carried by where the row sits under
+/// its parent, so this is a reinforcement, not the only channel.
+const INDENT_PER_LEVEL: &str = "  ";
+
+/// What comes before a row's text: `[+]` a closed folder, `[-]` an open
+/// one, nothing for anything that cannot be toggled. **Characters, not an
+/// icon** (D4: an icon never carries meaning alone -- RFC-052 PR-052-C
+/// decides what may reinforce it), padded so names line up.
+fn expansion_marker(expandable: bool, expanded: bool) -> &'static str {
+    match (expandable, expanded) {
+        (false, _) => "    ",
+        (true, false) => "[+] ",
+        (true, true) => "[-] ",
+    }
+}
+
+/// The text of one tree row, **without** the keyboard-highlight marker:
+/// indentation, expansion marker, then the escaped, catalog-routed row.
+/// This is the one function that decides what a row says, so the
+/// escaping and i18n tests hold the same properties they held when a row
+/// was one Fluent string (RFC-052 §7): every name reaches the screen
+/// through [`node_line`]'s `quote_untrusted`, whoever calls this.
+pub(crate) fn row_text(
     catalog: &Catalog,
-    row: ExplorerRow<'_>,
+    row: &ExplorerTreeRow<'_>,
     git_summary: Option<&ProjectGitSummary>,
 ) -> String {
-    match row {
-        ExplorerRow::Parent => catalog.get("explorer-parent-entry"),
-        ExplorerRow::Node(node) => node_line(catalog, node, git_summary),
+    let indent = INDENT_PER_LEVEL.repeat(row.depth);
+    match row.kind {
+        ExplorerTreeRowKind::Node {
+            node,
+            expanded,
+            expandable,
+        } => format!(
+            "{indent}{}{}",
+            expansion_marker(expandable, expanded),
+            node_line(catalog, node, expanded, git_summary)
+        ),
+        ExplorerTreeRowKind::Loading => {
+            format!("{indent}    {}", catalog.get("explorer-row-loading"))
+        }
+        ExplorerTreeRowKind::CannotRead => {
+            format!("{indent}    {}", catalog.get("explorer-row-cannot-read"))
+        }
+        ExplorerTreeRowKind::Empty => format!("{indent}    {}", catalog.get("explorer-empty")),
+        ExplorerTreeRowKind::Omitted { count, at_least } => format!(
+            "{indent}    {}",
+            catalog.get_with_args(
+                "explorer-omitted-entries",
+                &CatalogArgs::new()
+                    .number("count", count)
+                    .trusted_symbol("bound", if at_least { "at-least" } else { "exact" }),
+            )
+        ),
+        ExplorerTreeRowKind::RowsNotShown { count } => catalog.get_with_args(
+            "explorer-rows-not-shown",
+            &CatalogArgs::new().number("count", count),
+        ),
     }
 }
 
@@ -177,62 +218,155 @@ fn status_line(catalog: &Catalog, status: &ProjectExplorerStatus) -> Option<Stri
     }
 }
 
-/// Every line the explorer tree renders, in order: the status line (if
-/// any), then every row with its focus marker, then a truncation notice
-/// if core's scan was bounded. Factored out from [`view`] for the same
-/// testability reason as [`node_line`] -- the marker/highlight logic is
-/// exactly the kind of off-by-one that deserves a plain-value test, not
-/// only an `Element` tree nobody can assert against directly.
+/// The rows of a tree that fit a window, and where the window starts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RowWindow {
+    /// Index of the first row drawn.
+    pub(crate) top: usize,
+    /// One past the last row drawn.
+    pub(crate) end: usize,
+}
+
+/// Which rows to draw so that `highlight` is on screen and the window
+/// moves as little as possible from where it was (`top`): moving the
+/// highlight inside the window does not scroll it. Pure, so the scrolling
+/// rule is asserted as a rule -- and the tree can be any length, because
+/// **only the window is ever built into widgets** (RFC-052 D8: the total
+/// row bound, decided by measurement, is virtualisation).
+pub(crate) fn window_for(total: usize, highlight: usize, top: usize, capacity: usize) -> RowWindow {
+    let capacity = capacity.max(1);
+    if total <= capacity {
+        return RowWindow { top: 0, end: total };
+    }
+    let highlight = highlight.min(total - 1);
+    let mut top = top.min(total - capacity);
+    if highlight < top {
+        top = highlight;
+    } else if highlight >= top + capacity {
+        top = highlight + 1 - capacity;
+    }
+    RowWindow {
+        top,
+        end: top + capacity,
+    }
+}
+
+/// Every line the explorer renders, in order: the status line (if any), the
+/// windowed rows with their focus marker, and -- **whenever rows are not
+/// all on screen -- a line saying which ones are** (RFC-052: nothing is
+/// hidden silently). Factored out from [`view`] for the same testability
+/// reason as [`node_line`].
 pub(crate) fn tree_lines(
     catalog: &Catalog,
-    scan: Option<&ExplorerDirectoryScan>,
+    tree: &ExplorerTree,
     status: &ProjectExplorerStatus,
     highlight: usize,
+    top: usize,
+    capacity: usize,
     git_summary: Option<&ProjectGitSummary>,
 ) -> Vec<String> {
     let mut lines = Vec::new();
     if let Some(message) = status_line(catalog, status) {
         lines.push(message);
     }
-    match scan {
-        None => lines.push(catalog.get("explorer-empty")),
-        Some(scan) => {
-            let rows = visible_rows(scan);
-            if rows.is_empty() {
-                lines.push(catalog.get("explorer-empty"));
-            }
-            for (index, row) in rows.into_iter().enumerate() {
-                let marker = if index == highlight { "> " } else { "  " };
-                lines.push(format!("{marker}{}", row_line(catalog, row, git_summary)));
-            }
-            if scan.truncated {
-                lines.push(catalog.get("explorer-truncated-notice"));
-            }
-        }
+    let rows = tree.rows();
+    if rows.is_empty() {
+        lines.push(catalog.get("explorer-empty"));
+        return lines;
+    }
+    let window = window_for(rows.len(), highlight, top, capacity);
+    for (index, row) in rows.iter().enumerate().take(window.end).skip(window.top) {
+        let marker = if index == highlight { "> " } else { "  " };
+        lines.push(format!("{marker}{}", row_text(catalog, row, git_summary)));
+    }
+    if window.end - window.top < rows.len() {
+        lines.push(
+            catalog.get_with_args(
+                "explorer-rows-position",
+                &CatalogArgs::new()
+                    .number("first", window.top + 1)
+                    .number("last", window.end)
+                    .number("total", rows.len()),
+            ),
+        );
     }
     lines
+}
+
+/// Where the keyboard highlight is and which rows fit: what `view` needs
+/// to draw the window.
+#[derive(Clone, Copy, Debug)]
+pub struct ExplorerCursor {
+    pub highlight: usize,
+    pub top: usize,
+    pub capacity: usize,
+}
+
+/// Lines the sidebar keeps for things that are not tree rows (the status
+/// line and the "rows N-M of T" line), so [`rows_that_fit`] leaves room.
+const RESERVED_LINES: usize = 2;
+/// `iced`'s `text` line height is `1.3` times its size by default, and the
+/// column below spaces lines by [`LINE_SPACING`]; the window arithmetic
+/// uses the same two numbers the drawing does, or the last row would be
+/// clipped (the RFC-053 lesson: one definition, two users).
+const LINE_HEIGHT_FACTOR: f32 = 1.3;
+const LINE_SPACING: f32 = 2.0;
+/// The sidebar container's padding, top and bottom.
+const SIDEBAR_VERTICAL_PADDING: f32 = 32.0;
+/// What the window holds before the layout has been measured.
+pub(crate) const DEFAULT_WINDOW_ROWS: usize = 20;
+
+/// How many rows fit a sidebar of `height` pixels at `font_size`.
+pub(crate) fn rows_that_fit(height: Option<f32>, font_size: f32) -> usize {
+    let Some(height) = height else {
+        return DEFAULT_WINDOW_ROWS;
+    };
+    let pitch = font_size * LINE_HEIGHT_FACTOR + LINE_SPACING;
+    let usable = (height - SIDEBAR_VERTICAL_PADDING).max(0.0);
+    ((usable / pitch).floor() as usize)
+        .saturating_sub(RESERVED_LINES)
+        .max(1)
 }
 
 /// No `Message` interest of its own -- selection is driven by keyboard
 /// input the shell already routes here via `RoutedInput::Surface`
 /// (`FocusZone::Sidebar`); this function only ever reads state, never
 /// constructs a message, matching `board::view`'s own shape.
+///
+/// Rows are drawn **unwrapped**: a wrapped row is more than one line high
+/// and [`rows_that_fit`] counts lines. A name too long for the sidebar is
+/// clipped, not reflowed; nothing is lost, because the row is still one
+/// row and the name is in the editor once opened.
 pub fn view<'a, Message: 'a>(
-    scan: Option<&ExplorerDirectoryScan>,
+    tree: &ExplorerTree,
     status: &ProjectExplorerStatus,
-    highlight: usize,
+    cursor: ExplorerCursor,
     catalog: &'a Catalog,
     theme: &'a Theme,
     git_summary: Option<&ProjectGitSummary>,
 ) -> Element<'a, Message> {
-    let lines = tree_lines(catalog, scan, status, highlight, git_summary);
+    let lines = tree_lines(
+        catalog,
+        tree,
+        status,
+        cursor.highlight,
+        cursor.top,
+        cursor.capacity,
+        git_summary,
+    );
     let rows: Vec<Element<'a, Message>> = lines
         .into_iter()
-        .map(|line| text(line).size(theme.font_size_body()).into())
+        .map(|line| {
+            text(line)
+                .size(theme.font_size_body())
+                .wrapping(Wrapping::None)
+                .into()
+        })
         .collect();
-    container(column(rows).spacing(2))
+    container(column(rows).spacing(LINE_SPACING))
         .width(Length::Fill)
         .height(Length::Fill)
+        .clip(true)
         .into()
 }
 

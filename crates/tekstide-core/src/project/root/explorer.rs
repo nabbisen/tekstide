@@ -10,6 +10,9 @@ use super::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileExplorerScanPolicy {
     pub max_children_per_directory: usize,
+    /// How many entries beyond the cap the scanner will count before it
+    /// reports "at least" (see [`OMITTED_COUNT_LIMIT`]).
+    pub omitted_count_limit: usize,
     pub collapsed_directory_names: Vec<String>,
 }
 
@@ -23,6 +26,7 @@ impl FileExplorerScanPolicy {
     pub fn linux_mvp() -> Self {
         Self {
             max_children_per_directory: 256,
+            omitted_count_limit: OMITTED_COUNT_LIMIT,
             collapsed_directory_names: super::super::IGNORED_DIRECTORY_NAMES
                 .iter()
                 .map(|name| (*name).to_owned())
@@ -77,7 +81,22 @@ pub struct ExplorerDirectoryScan {
     /// filesystem-order subset. It must not be presented as the complete
     /// alphabetically-first contents of the directory.
     pub truncated: bool,
+    /// How many entries the cap left out (RFC-052: **nothing is hidden
+    /// silently** -- a row names how many are not shown). Counted by
+    /// draining the rest of the directory *without* stat-ing anything, on
+    /// the scanning thread, so the render thread never pays for it. `0`
+    /// unless `truncated`.
+    pub omitted_entries: usize,
+    /// True when counting stopped at [`OMITTED_COUNT_LIMIT`]: the real
+    /// number is at least `omitted_entries`, and the row must say "at
+    /// least" rather than state a number it did not finish counting.
+    pub omitted_is_lower_bound: bool,
 }
+
+/// The most entries the scanner will count beyond the per-directory cap.
+/// A directory with more than this many hidden entries reports "at least
+/// this many": counting must stay bounded even for a hostile directory.
+pub const OMITTED_COUNT_LIMIT: usize = 1_000_000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExplorerScanError {
@@ -136,10 +155,22 @@ impl FileExplorerScanner {
         let base_relative_path = directory.selected_relative_path.clone();
         let mut nodes = Vec::new();
         let mut truncated = false;
+        let mut omitted_entries = 0;
+        let mut omitted_is_lower_bound = false;
+        let mut read_dir = read_dir;
 
-        for entry_result in read_dir {
+        while let Some(entry_result) = read_dir.next() {
             if nodes.len() >= policy.max_children_per_directory {
                 truncated = true;
+                // The entry just pulled is the first one left out, and
+                // every entry after it is too. Count without stat-ing.
+                let counted = read_dir
+                    .by_ref()
+                    .take(policy.omitted_count_limit + 1)
+                    .filter(|entry| entry.is_ok())
+                    .count();
+                omitted_is_lower_bound = counted > policy.omitted_count_limit;
+                omitted_entries = 1 + counted.min(policy.omitted_count_limit);
                 break;
             }
 
@@ -167,6 +198,8 @@ impl FileExplorerScanner {
             directory,
             nodes,
             truncated,
+            omitted_entries,
+            omitted_is_lower_bound,
         })
     }
 }
@@ -397,7 +430,7 @@ pub fn browse_directory(
 }
 
 #[cfg(test)]
-mod hostile_fixture;
+pub(crate) mod hostile_fixture;
 #[cfg(test)]
 mod hostile_tests;
 #[cfg(test)]

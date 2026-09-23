@@ -44,6 +44,7 @@ fn scanner_bounds_child_count_without_recursive_indexing() {
     let policy = FileExplorerScanPolicy {
         max_children_per_directory: 3,
         collapsed_directory_names: Vec::new(),
+        omitted_count_limit: super::OMITTED_COUNT_LIMIT,
     };
 
     let scan = FileExplorerScanner
@@ -52,6 +53,7 @@ fn scanner_bounds_child_count_without_recursive_indexing() {
 
     assert_eq!(scan.nodes.len(), 3);
     assert!(scan.truncated);
+    assert_eq!(scan.omitted_entries, 2, "5 entries, cap 3: two left out");
 }
 
 #[test]
@@ -63,6 +65,7 @@ fn scanner_zero_child_cap_returns_empty_truncated_nonempty_directory() {
     let policy = FileExplorerScanPolicy {
         max_children_per_directory: 0,
         collapsed_directory_names: Vec::new(),
+        omitted_count_limit: super::OMITTED_COUNT_LIMIT,
     };
 
     let scan = FileExplorerScanner
@@ -326,6 +329,7 @@ fn browse_directory_bounds_child_count() {
     let policy = FileExplorerScanPolicy {
         max_children_per_directory: 3,
         collapsed_directory_names: Vec::new(),
+        omitted_count_limit: super::OMITTED_COUNT_LIMIT,
     };
 
     let scan = browse_directory(&dir, &policy).expect("dir should scan");

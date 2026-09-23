@@ -9266,65 +9266,68 @@ fn terminal_input_policy_evaluate_has_exactly_one_production_call_site() {
     );
 }
 
-/// RFC-019 PR-019-B's own review gate: "the starting state confirmed:
-/// the content-model accessors had no production caller, shown by
-/// enumeration." Confirmed before writing any code in this slice --
-/// `grep -rn "scan_active_project_explorer_directory\|open_active_project_text_document\|
-/// replace_active_project_text\|save_active_project_text_document\|refresh_active_project_text_document"
-/// crates/tekstide crates/tekstide-core` matched only `#[cfg(test)]`
-/// call sites and the `AppState`/`ApplicationShell` definitions
-/// themselves. What this test pins is the state that confirmation left
-/// behind, the same shape
-/// [`terminal_input_policy_evaluate_has_exactly_one_production_call_site`]
-/// uses.
+/// **RFC-052 D3′, pinned: the render thread never scans a directory.** A scan
+/// is linear in path length -- 65 ms at depth 1 500, measured in PR-052-A --
+/// so it crosses a frame on a deep tree, and the tree the explorer draws is
+/// many scans. This replaces the two RFC-019/RFC-038 tests that named the
+/// (one each) production call sites of the synchronous scan entry points
+/// (`handle_explorer_key` and `ensure_explorer_scanned`): those call sites are
+/// gone, and the property they stood for is now stronger.
 ///
-/// RFC-038 PR-038-F narrowed this from two call sites to **exactly
-/// one**: [`ensure_explorer_scanned`] now calls the scan-only entry
-/// point ([`scan_active_project_explorer_directory_without_navigating_has_exactly_one_named_production_call_site`],
-/// immediately below) instead of this navigating one, closing the
-/// conflation response 233 and PR-038-B each found and separately
-/// worked around (`ensure_explorer_scanned`'s own doc comment has the
-/// full account). Only [`handle_explorer_key`] remains, where
-/// navigating on scan is genuinely correct (browsing the file tree
-/// legitimately means "show me the editor"). A second call site fails
-/// this test by name.
+/// 1. **No synchronous scan entry point has a production call site in this
+///    crate.** `ensure_explorer_scanned` and a folder toggle only *mark* a scan
+///    pending on the tree.
+/// 2. **The one place a scan runs is the worker thread** built by
+///    `explorer_scan_stream`, inside `std::thread::spawn`.
+/// 3. **`FileExplorerScanner` is not named in this crate at all**: the only
+///    thing that reads a directory is core's `ExplorerScanRequest::run`.
+///
+/// Ablation: put a `scan_active_project_explorer_directory_without_navigating`
+/// call back in `ensure_explorer_scanned` and (1) fails by name.
 #[test]
-fn scan_active_project_explorer_directory_has_exactly_one_named_production_call_site() {
+fn the_shell_never_scans_a_directory_on_the_render_thread() {
     let shell_rs_path = format!("{}/src/shell.rs", env!("CARGO_MANIFEST_DIR"));
     let source = std::fs::read_to_string(&shell_rs_path).expect("shell.rs must be readable");
-    let enclosing_functions =
-        enclosing_functions_for_call_site(&source, ".scan_active_project_explorer_directory(");
 
-    assert_eq!(
-        enclosing_functions,
-        vec!["handle_explorer_key"],
-        "scan_active_project_explorer_directory must have exactly this one named production \
-         call site: {enclosing_functions:?}"
-    );
-}
-
-/// The other half of PR-038-F's narrowing above: the scan-only entry
-/// point has exactly one named production call site,
-/// [`ensure_explorer_scanned`] -- the same "named explicitly rather
-/// than hidden" shape
-/// `write_terminal_input_has_exactly_the_three_named_production_call_sites`
-/// uses for a different property. A second call site fails this test by
-/// name, the same as its navigating counterpart above.
-#[test]
-fn scan_active_project_explorer_directory_without_navigating_has_exactly_one_named_production_call_site()
- {
-    let shell_rs_path = format!("{}/src/shell.rs", env!("CARGO_MANIFEST_DIR"));
-    let source = std::fs::read_to_string(&shell_rs_path).expect("shell.rs must be readable");
-    let enclosing_functions = enclosing_functions_for_call_site(
-        &source,
+    for synchronous in [
+        ".scan_active_project_explorer_directory(",
         ".scan_active_project_explorer_directory_without_navigating(",
-    );
+        ".scan_content_explorer_directory(",
+        ".scan_content_explorer_directory_without_navigating(",
+        ".scan_explorer_directory(",
+        ".complete_explorer_scans_blocking(",
+    ] {
+        let sites = enclosing_functions_for_call_site(&source, synchronous);
+        assert!(
+            sites.is_empty(),
+            "{synchronous} scans on the calling thread and must have no production call site in \
+             shell.rs, found in {sites:?} -- mark the scan pending and let \
+             `explorer_scan_subscription` run it"
+        );
+    }
 
     assert_eq!(
-        enclosing_functions,
-        vec!["ensure_explorer_scanned"],
-        "scan_active_project_explorer_directory_without_navigating must have exactly this one \
-         named production call site: {enclosing_functions:?}"
+        enclosing_functions_for_call_site(&source, "request.run()"),
+        vec!["explorer_scan_stream"],
+        "an explorer scan request may only be run by the worker thread's stream"
+    );
+    let stream_start = source
+        .find("fn explorer_scan_stream(")
+        .expect("the worker stream must exist under this name");
+    let spawn_at = source[stream_start..]
+        .find("std::thread::spawn(")
+        .expect("the worker stream must run the scan on its own thread");
+    let run_at = source[stream_start..]
+        .find("request.run()")
+        .expect("the worker stream must run the request");
+    assert!(
+        spawn_at < run_at,
+        "the request must be run *inside* the spawned thread, after `std::thread::spawn(`"
+    );
+
+    assert!(
+        !source.contains("FileExplorerScanner"),
+        "shell.rs must not read directories itself; only core's ExplorerScanRequest::run does"
     );
 }
 
@@ -17911,4 +17914,251 @@ fn fresh_project_dir_for_pin() -> PathBuf {
     std::fs::create_dir_all(dir.join("inner")).unwrap();
     std::fs::write(dir.join("inner/f"), b"x").unwrap();
     dir
+}
+
+// ---------------------------------------------------------------------
+// RFC-052 PR-052-B: the explorer as a tree, through real key routing.
+// ---------------------------------------------------------------------
+
+/// A project with a folder, a nested file, a top-level file and a directory
+/// bigger than the per-level cap. Removed when the test's thread ends.
+fn explorer_project_state() -> State {
+    let dir = fresh_project_dir("explorer-tree");
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src/lib.rs"), b"pub fn f() {}\n").unwrap();
+    std::fs::write(dir.join("README.md"), b"# readme\n").unwrap();
+    std::fs::create_dir_all(dir.join("wide")).unwrap();
+    for index in 0..300 {
+        std::fs::File::create(dir.join("wide").join(format!("f{index:03}"))).unwrap();
+    }
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(&dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    super::ensure_explorer_scanned(&mut state);
+    state
+}
+
+/// What the shell's worker threads do between two frames: run every pending
+/// scan and deliver each result as the message the real stream sends.
+fn finish_explorer_scans(state: &mut State) {
+    let project = state
+        .app_shell
+        .state()
+        .active_project()
+        .expect("an active project");
+    let project_id = project.id().clone();
+    for request in project.explorer_scan_requests() {
+        let _ = super::update(
+            state,
+            Message::ExplorerScanFinished {
+                project_id: project_id.clone(),
+                completed: request.run(),
+            },
+        );
+    }
+}
+
+fn send_sidebar_key(state: &mut State, key: iced::keyboard::key::Named) {
+    let routed = crate::input::RoutedInput::Surface(crate::input::surface_input_for_test(
+        FocusZone::Sidebar,
+        press(iced::keyboard::Key::Named(key)),
+    ));
+    let _ = super::update(state, Message::Input(routed));
+}
+
+/// Every row of the explorer as the sidebar's own text function draws it,
+/// without the highlight marker, isolate marks stripped.
+fn explorer_texts(state: &State) -> Vec<String> {
+    let project = state.app_shell.state().active_project().unwrap();
+    project
+        .content_workspace()
+        .explorer_tree()
+        .rows()
+        .iter()
+        .map(|row| {
+            crate::surface::explorer::row_text(&state.catalog, row, Some(project.git_summary()))
+        })
+        .map(|line| plain_words(&line))
+        .collect()
+}
+
+#[test]
+fn starting_the_explorer_marks_the_root_pending_and_scans_nothing() {
+    let state = explorer_project_state();
+    // Nothing has been scanned: the render thread only asked.
+    assert_eq!(explorer_texts(&state), ["    Loading…"]);
+    let project = state.app_shell.state().active_project().unwrap();
+    assert_eq!(
+        project.explorer_scan_requests().len(),
+        1,
+        "exactly the worker request `subscription()` will start"
+    );
+}
+
+#[test]
+fn enter_on_a_folder_expands_it_in_place_and_a_second_enter_closes_it() {
+    let mut state = explorer_project_state();
+    finish_explorer_scans(&mut state);
+    let closed = explorer_texts(&state);
+    // Directories first: src, wide, then the files.
+    let src = closed.iter().position(|row| row.contains("src")).unwrap();
+    assert!(
+        closed[src].trim_start().starts_with("[+] [DIR] src"),
+        "{closed:?}"
+    );
+    assert!(!closed.iter().any(|row| row.contains("lib.rs")));
+
+    // Highlight `src` and open it: Enter *toggles*, it does not navigate.
+    state.explorer_highlight = src;
+    send_sidebar_key(&mut state, iced::keyboard::key::Named::Enter);
+    finish_explorer_scans(&mut state);
+    let open = explorer_texts(&state);
+    assert!(
+        open[src].trim_start().starts_with("[-] [DIR] src"),
+        "{open:?}"
+    );
+    assert!(
+        open[src + 1].contains("lib.rs") && open[src + 1].starts_with("      "),
+        "a nested file is visible without stepping into `src`, one level in: {open:?}"
+    );
+    // Everything that was there is still there: a tree, not a new listing.
+    assert!(open.iter().any(|row| row.contains("README.md")));
+    assert_eq!(
+        state.explorer_highlight, src,
+        "the highlight stays on the folder"
+    );
+
+    send_sidebar_key(&mut state, iced::keyboard::key::Named::Enter);
+    assert_eq!(
+        explorer_texts(&state),
+        closed,
+        "closed again, nothing else changed"
+    );
+}
+
+#[test]
+fn a_folder_whose_scan_is_still_running_is_a_loading_row_not_a_frozen_frame() {
+    let mut state = explorer_project_state();
+    finish_explorer_scans(&mut state);
+    let src = explorer_texts(&state)
+        .iter()
+        .position(|row| row.contains("src"))
+        .unwrap();
+    state.explorer_highlight = src;
+    send_sidebar_key(&mut state, iced::keyboard::key::Named::Enter);
+
+    // The key returned without waiting for the scan; the folder is open and
+    // says it is loading.
+    let waiting = explorer_texts(&state);
+    assert!(waiting[src + 1].contains("Loading"), "{waiting:?}");
+
+    finish_explorer_scans(&mut state);
+    assert!(explorer_texts(&state)[src + 1].contains("lib.rs"));
+}
+
+#[test]
+fn enter_on_a_file_opens_it_and_on_an_information_row_does_nothing() {
+    let mut state = explorer_project_state();
+    finish_explorer_scans(&mut state);
+    let texts = explorer_texts(&state);
+    let readme = texts
+        .iter()
+        .position(|row| row.contains("README.md"))
+        .unwrap();
+    state.explorer_highlight = readme;
+    send_sidebar_key(&mut state, iced::keyboard::key::Named::Enter);
+    let project = state.app_shell.state().active_project().unwrap();
+    assert!(
+        project.content_workspace().active_document().is_some(),
+        "Enter on a file opens it"
+    );
+
+    // Open `wide` (300 entries, cap 256): its last row is the "not shown" row,
+    // and Enter on it changes nothing.
+    let wide = texts.iter().position(|row| row.contains("wide")).unwrap();
+    state.explorer_highlight = wide;
+    send_sidebar_key(&mut state, iced::keyboard::key::Named::Enter);
+    finish_explorer_scans(&mut state);
+    let texts = explorer_texts(&state);
+    let omitted = texts
+        .iter()
+        .position(|row| row.contains("more entries are not shown"))
+        .expect("a capped folder says how many entries it left out");
+    assert!(
+        texts[omitted].contains("44 more entries are not shown"),
+        "{:?}",
+        texts[omitted]
+    );
+    state.explorer_highlight = omitted;
+    let before = explorer_texts(&state);
+    send_sidebar_key(&mut state, iced::keyboard::key::Named::Enter);
+    assert_eq!(explorer_texts(&state), before);
+}
+
+#[test]
+fn the_window_follows_the_highlight_down_a_long_listing_and_never_leaves_the_last_row() {
+    let mut state = explorer_project_state();
+    finish_explorer_scans(&mut state);
+    let wide = explorer_texts(&state)
+        .iter()
+        .position(|row| row.contains("wide"))
+        .unwrap();
+    state.explorer_highlight = wide;
+    send_sidebar_key(&mut state, iced::keyboard::key::Named::Enter);
+    finish_explorer_scans(&mut state);
+
+    // A short sidebar: room for a handful of rows.
+    let _ = super::update(
+        &mut state,
+        Message::ExplorerViewportMeasured(iced::Size::new(220.0, 240.0)),
+    );
+    let capacity = super::explorer_window_capacity(&state);
+    assert!(
+        (1..30).contains(&capacity),
+        "a short sidebar holds few rows: {capacity}"
+    );
+
+    let total = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .content_workspace()
+        .explorer_tree()
+        .rows()
+        .len();
+    for _ in 0..(total + 50) {
+        send_sidebar_key(&mut state, iced::keyboard::key::Named::ArrowDown);
+        assert!(
+            state.explorer_highlight >= state.explorer_top
+                && state.explorer_highlight < state.explorer_top + capacity,
+            "the highlight {} left the window starting at {}",
+            state.explorer_highlight,
+            state.explorer_top
+        );
+    }
+    assert_eq!(
+        state.explorer_highlight,
+        total - 1,
+        "clamped at the last row"
+    );
+}
+
+#[test]
+fn a_scan_that_finishes_after_its_project_closed_is_dropped_quietly() {
+    let mut state = explorer_project_state();
+    let project = state.app_shell.state().active_project().unwrap();
+    let request = project.explorer_scan_requests().remove(0);
+    let stranger = tekstide_core::project::ProjectId::new_uuid();
+    let _ = super::update(
+        &mut state,
+        Message::ExplorerScanFinished {
+            project_id: stranger,
+            completed: request.run(),
+        },
+    );
+    // Nothing applied, nothing panicked, and the real root is still pending.
+    assert_eq!(explorer_texts(&state), ["    Loading…"]);
 }

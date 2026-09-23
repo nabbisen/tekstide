@@ -1,6 +1,7 @@
 mod change_detection;
 mod content;
 mod diff;
+mod explorer_tree;
 mod identity;
 mod ignored_directories;
 mod metadata;
@@ -24,6 +25,10 @@ pub use diff::{
     ContentLifecycle, DEFAULT_MAX_DIFF_INPUT_BYTES, DEFAULT_MAX_DIFF_LINES, DiffContent,
     DiffContentError, DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, diff_content_is_stale,
     gate_diff_content_read, read_diff_content,
+};
+pub use explorer_tree::{
+    ExplorerRootState, ExplorerScanCompleted, ExplorerScanRequest, ExplorerToggle, ExplorerTree,
+    ExplorerTreeRow, ExplorerTreeRowKind, MAX_TREE_ROWS, is_expandable,
 };
 pub use identity::ProjectId;
 pub use ignored_directories::IGNORED_DIRECTORY_NAMES;

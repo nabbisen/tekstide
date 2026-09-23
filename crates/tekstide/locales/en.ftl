@@ -506,11 +506,39 @@ explorer-node-entry = { $kind ->
    *[none] {""}
 }
 
-explorer-parent-entry = [UP] ..
-
+# RFC-052 PR-052-B: the explorer is a tree, so there is no "go up" row.
+# `explorer-empty` now labels an *expanded* empty folder too.
 explorer-empty = This directory is empty.
 
-explorer-truncated-notice = Listing truncated — not all entries are shown.
+# An expanded folder whose scan is still running on a worker thread, and one
+# that could not be read. The second carries no path or error text: both are
+# attacker-influenced, and "cannot be read" is the whole useful message.
+explorer-row-loading = Loading…
+explorer-row-cannot-read = This folder cannot be read.
+
+# **Nothing is hidden silently** (RFC-052 D8): the per-level cap left entries
+# out, and the row says how many. `$bound` is `at-least` when the scanner
+# stopped counting at its own limit, so the row never states a number it did
+# not finish. `$count` is numeric, so the plural is chosen, not guessed.
+explorer-omitted-entries = { $bound ->
+    [at-least] At least { $count ->
+        [one] one more entry is
+       *[other] { $count } more entries are
+    } not shown.
+   *[exact] { $count ->
+        [one] One more entry is
+       *[other] { $count } more entries are
+    } not shown.
+}
+
+# The whole tree passed its row bound.
+explorer-rows-not-shown = { $count ->
+    [one] One more row is
+   *[other] { $count } more rows are
+} not shown. Collapse a folder to see them.
+
+# The sidebar draws only the rows that fit; this says which ones.
+explorer-rows-position = Rows { $first }–{ $last } of { $total }
 
 # `$message` here is `ProjectExplorerStatus::Error`'s own message
 # (`ExplorerScanError`'s `Display`), which embeds the target's relative
@@ -1109,7 +1137,7 @@ keyboard-help-surface-project-board-path-field = Project Board: path field
 keyboard-help-surface-tab-strip-close-project = Close the highlighted project's tab
 keyboard-help-surface-tab-strip-go-to-project-board = With "Projects" highlighted, go to the Project Board
 keyboard-help-surface-tab-strip-switch-to-project = With a project's own tab highlighted, switch to it
-keyboard-help-surface-explorer-activate-row = Open the highlighted file, or step into the highlighted directory
+keyboard-help-surface-explorer-activate-row = Open the highlighted file, or open or close the highlighted folder
 keyboard-help-surface-approval-history-open-entry = Open the highlighted approval history entry
 keyboard-help-surface-change-review-mark-accepted = Mark the highlighted change accepted
 keyboard-help-surface-change-review-mark-rejected = Mark the highlighted change rejected
