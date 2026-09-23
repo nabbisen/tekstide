@@ -29,7 +29,8 @@ while the policy holds sixteen.
 ## Within a surface
 
 With `Tab` focused on the sidebar in Content mode, `Up`/`Down` move the explorer highlight and
-`Enter` opens the highlighted file or directory.
+`Enter` opens the highlighted file, or opens or closes the highlighted folder in place. The line under
+the tree always shows the highlighted row in full, because a narrow sidebar clips a long one.
 
 With focus on the main area, typing edits the open document at the real cursor position;
 `Up`/`Down`/`Left`/`Right` move the cursor without editing; `Enter` inserts a newline; and

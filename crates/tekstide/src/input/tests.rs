@@ -218,3 +218,48 @@ fn key_press_for_binding(binding: &str) -> KeyPress {
         modifiers,
     }
 }
+
+/// RFC-052 PR-052-B §6: the explorer's `Enter` and arrow keys reach it **only
+/// as `SurfaceInput` for the sidebar zone** -- i.e. only after the keybinding
+/// policy has declined the key, and only when the caller can produce a
+/// [`ModalAbsent`] proof (a modal has no such proof, so no key it holds can
+/// take this path). The explorer has no key handling of its own; it is
+/// `handle_explorer_key`, called from `update`'s `Surface` arm and nowhere else.
+#[test]
+fn the_explorers_keys_arrive_as_sidebar_surface_input_and_only_when_no_binding_claims_them() {
+    let policy = KeybindingPolicy::linux_mvp();
+    for named in [
+        iced::keyboard::key::Named::Enter,
+        iced::keyboard::key::Named::ArrowDown,
+        iced::keyboard::key::Named::ArrowUp,
+    ] {
+        let routed = route_non_modal_input(
+            proof(),
+            &policy,
+            FocusZone::Sidebar,
+            None,
+            KeyPress {
+                key: iced::keyboard::Key::Named(named),
+                modifiers: iced::keyboard::Modifiers::empty(),
+            },
+        );
+        match routed {
+            RoutedInput::Surface(surface) => assert_eq!(surface.target(), FocusZone::Sidebar),
+            other => panic!("{named:?} in the sidebar must be surface input, got {other:?}"),
+        }
+    }
+
+    // A global chord pressed with the sidebar focused is the shell's, not the
+    // explorer's: the policy wins.
+    let routed = route_non_modal_input(
+        proof(),
+        &policy,
+        FocusZone::Sidebar,
+        None,
+        character_press("p", true, true, false),
+    );
+    assert_eq!(
+        routed,
+        RoutedInput::Shell(super::ShellInput(NavigationAction::OpenProjectBoard))
+    );
+}

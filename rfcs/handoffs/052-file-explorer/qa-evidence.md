@@ -203,3 +203,109 @@ logs somewhere with space) and the rule that a fixture builder removes itself.
 **Gate**: fmt, clippy `-D warnings`, `git diff --cached --check`, and three consecutive full-workspace
 runs, `--no-fail-fast`, to files: **595 + 9 + 886, green all three** (+2 shell, +1 core: exactly the three
 new tests).
+
+## PR-052-B — the tree
+
+Commits `97576f3` (the residue, first, as ruled at review 422), `cda2d6e` (the tree), `5573582`, and the
+follow-ups named below. Captures: `evidence/01-…` and `evidence/02-…`, the **release binary** against a
+`mktemp -d` project under `/dev/shm`, read image by image for a path (none; the window shows only `proj`).
+
+### The residue, first
+
+Every bare-`PathBuf` fixture builder now hands its path to a per-thread scratch list
+(`scratch_for_this_test` in `tekstide`, `test_support::remove_when_this_test_ends` in `tekstide-core`) that
+removes it when the test's thread ends: no caller changes. **A full-workspace run into a fresh `TMPDIR` now
+leaves 0 entries** (it was ~498 after review 421, ~43 000 before). Pinned in both crates by a test that a
+directory *and* a bare file are gone after the thread ends; ablated (both helpers no-ops) → both fail.
+**A mistake, disclosed:** I ran `git checkout -- crates/tekstide/src/shell.rs` to restore that ablation
+while the file still held uncommitted work, and lost the helper; I had the diff in this conversation and
+re-applied it, and re-ran both pins green. The standing rule (commit before ablating) was the one I broke.
+
+### What changed
+
+| | Change | Where |
+| --- | --- | --- |
+| Model | `ExplorerTree`: the scans it holds, which folders are open, which scans are in flight; flattens to rows. Pure, no `iced`, never scans by itself. | `tekstide-core` `project/explorer_tree.rs` |
+| Count | A capped scan **counts what it left out** by draining the directory without stat-ing, on the scanning thread; says "at least" if it stopped at its own limit (1 000 000). | `project/root/explorer.rs` |
+| Off the render thread | `ensure_explorer_scanned` and a folder toggle only **mark a scan pending**; `explorer_scan_subscription` runs it on a dedicated thread (the `git_summary_subscription` shape) and `Message::ExplorerScanFinished` applies it. Stale results are dropped by generation. | `shell.rs` |
+| Rows | `row_text`: indentation (two spaces a level), `[+]`/`[-]`, then the escaped, catalog-routed row. The `Parent` row and `explorer-parent-entry` are gone. | `surface/explorer.rs` |
+| Bound | **Virtualisation**: only the rows that fit are built. A line says which (*Rows 18–60 of 272*); the model itself stops at 10 000 rows with a row naming how many were not kept. | same |
+| Order | Kind, state, symlink and Git words come **before** the name. | `en.ftl` |
+| Detail | The highlighted row, whole, under the tree. | `surface/explorer.rs` |
+| Keys | `Enter` toggles a folder, opens a file; `Up`/`Down` move; the window follows. | `shell.rs` |
+
+### The total-row bound, decided by measurement (the rule from review 421)
+
+PR-052-A measured ~4 µs a row to build and lay out. Measured again against the real view with a real
+headless renderer (`drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame`, debug build):
+
+| | Build + layout |
+| --- | --- |
+| The window of the largest tree the model allows (10 000 rows, 28 drawn) | **3.0 ms** |
+| Building all 10 000 rows | **951 ms** |
+
+**Virtualisation, not a cap**, because a cap hides rows and D8's one open property is that nothing is
+hidden silently; here nothing is dropped and a line says which rows are on screen. The model's own bound
+(10 000) stays as a safety, flattens in ~47 µs for 3 589 rows, and ends in a row that names what it did not
+keep. **D8 for the 100 000-entry folder:** the worker (scan + count) takes **25 ms**; the render thread
+(apply + flatten) takes **14.5 µs**, against a 16.7 ms frame.
+
+### Two defects the live capture found in my own first version, both fixed
+
+1. **A clipped row lost its Git word.** The sidebar draws each row on one line and clips at its edge, and
+   `[FILE] new.md [untracke` cut the status the RFC says must stay a word. Fixed by putting kind/state/
+   symlink/Git before the name (the name is the only part that can be arbitrarily long), pinned by
+   `every_status_word_comes_before_the_name_so_only_the_name_can_be_clipped`.
+2. **The escape row's own report was clipped** (`[OTHER] (blocked) [symli`). Status-before-name is not
+   enough for a nested row, so the **detail area** shows the highlighted row whole, escaped, wrapped over a
+   fixed number of lines so the window arithmetic stays exact. The two "N more not shown" rows are sentences
+   that clip too, so they have a detail and a shorter wording.
+
+### Ablations — from a committed tree, each restored with `git checkout --` of that one file
+
+| Removed | Failed |
+| --- | --- |
+| Any entry expandable (kind and state ignored) | 3 core tests (incl. the escape test) + 4 in `tekstide` |
+| **Follow the link**: any non-file entry expandable | the tree's escape test, and the detail test whose fixture is that same row |
+| Escaping off (`escape_untrusted_chars`) | 35 tests across the workspace lean on that one choke point (22 in `tekstide`, 13 in `tekstide-core`); the explorer's own are `a_bidi_override_node_name_…`, `hostile_names_at_any_depth_…`, `the_detail_shows_…`, the core hostile-names test |
+| Row bound removed | `the_tree_is_bounded_…` (core) and `passing_the_row_bound_…` (surface), nothing else |
+| Window ignores the highlight | 3: the rule, the position line, the shell test that walks down a long list |
+| Root scanned synchronously in `ensure_explorer_scanned` | `the_shell_never_scans_a_directory_on_the_render_thread`, `starting_the_explorer_…`, and one more |
+| Status words after the name | the ordering test and the detail test |
+| Stale-generation check removed | `a_stale_result_is_dropped_…`, alone |
+| Omitted count reported as 0 | 5 (scanner, tree, hostile fixture, 100 000-entry, shell) |
+
+### What replaced the tests that changed shape (RFC-052 §7)
+
+| Old | Now |
+| --- | --- |
+| `visible_rows_never_exceeds_…_plus_the_parent_entry`, `the_parent_row_resolves_through_the_catalog` | `a_trees_rows_are_exactly_its_scans_nodes_and_there_is_no_parent_row`; `the_rows_that_only_say_something_resolve_through_the_catalog` |
+| `a_truncated_scan_renders_the_truncation_notice` | `a_truncated_scan_names_how_many_entries_it_left_out` (exact, singular, "at least") |
+| Two RFC-019/RFC-038 tests naming the one production call site of each synchronous scan | **`the_shell_never_scans_a_directory_on_the_render_thread`**: none has a call site; the request runs only inside the spawned thread of `explorer_scan_stream`; `FileExplorerScanner` is not named in `shell.rs` |
+| `failed_explorer_scan_clears_previous_scan_result` (a one-view idea) | the same test now fails the **root**, plus `a_failed_scan_of_one_folder_does_not_erase_the_root_listing` |
+| every escaping / status / git-badge test | unchanged in what they assert; `node_line` gained the `expanded` argument |
+
+`node_line`'s escaping tests hold as they were; `hostile_names_at_any_depth_never_reach_a_row_raw` adds the
+depth and the newline (a newline in a name must not become a second line).
+
+### Judgment calls, disclosed
+
+- **The collapse list still opens.** D7 says the list "stays exactly as it is"; the old explorer let you
+  step into `target/` and it was labelled *(collapsed)*. I kept that: those folders are labelled while
+  closed, the word is dropped once open (it would contradict the rows under it), and the same 256 cap
+  applies. If D7 meant "cannot be opened", that is `is_expandable` returning `false` for `Collapsed`.
+- **Virtualisation needed a measured sidebar.** `MeasureSize` now wraps the sidebar
+  (`Message::ExplorerViewportMeasured`), the RFC-053 D3′ rule: measure, do not compute. Until the first
+  layout the window holds 20 rows.
+- **The scan is a subscription with a thread, not `Task::perform`.** The shell's update helpers return
+  `()`, and the same shape already runs the Git summary; the property D3′ asked for (off the render thread,
+  pinned by a test) holds either way.
+- **Rows are not clickable.** The old explorer had no mouse either; expanding is by `Enter` only. Not in
+  the plan; named so it is not mistaken for done.
+- **Ordering is unchanged** (`.git`, `README.md`, `docs`… by name, files and folders interleaved). A
+  conventional tree lists folders first; that is a one-line sort change, and it reads as PR-052-C's ("how
+  it reads"), not this slice's.
+- **The lower-bound branch of the omitted count** (1 000 000) is tested through
+  `FileExplorerScanPolicy::omitted_count_limit`, set to 10, not with a million files.
+- **The measured window is 3.0 ms in a debug build**, released ~an order lower; the assertion is half a
+  frame and its failure message prints the load average, as the change-review benchmark's does.

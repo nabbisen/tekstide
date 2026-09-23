@@ -21,6 +21,17 @@ be lost when there are some.
 
 The explorer is **read-only** — no rename, delete, or create.
 
+**The explorer is a tree.** Folders open and close in place with `Enter`, so a file inside `src/` is
+visible without stepping into `src/`; there is no "go up" row. Each folder is read **when you open it**
+(and again each time you reopen it), on a background thread, so opening a huge folder never freezes the
+window — the row says *Loading…* until it arrives. **Nothing is hidden silently:** a folder with more
+than 256 entries shows the first 256 and a row saying how many more there are; only the rows that fit
+the sidebar are drawn, and a line says which rows those are (*Rows 18–60 of 272*). Folders on the
+built-in list (`.git`, `node_modules`, `target`) are marked *(collapsed)* and can still be opened. A
+folder that cannot be read says so, and a link that points outside the project is marked *(blocked)*
+and cannot be opened. **The tree does not watch the disk**: a file created after you opened a folder
+appears when you close and reopen it.
+
 **The editor has no undo.** A mid-buffer edit is unrecoverable within the session past what
 `Backspace` can still reach. There is no syntax highlighting, language server, multi-cursor, or
 search, and files above 4 MiB are not editable.

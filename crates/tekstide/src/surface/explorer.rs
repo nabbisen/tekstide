@@ -12,9 +12,15 @@
 //! called anywhere in this module -- every word renders through
 //! `Catalog` instead.
 //!
-//! No filesystem walking happens here. `ExplorerDirectoryScan` is
-//! `tekstide-core`'s, already bounded by `FileExplorerScanPolicy`; this
-//! module only renders what it is given.
+//! No filesystem walking happens here. **RFC-052 PR-052-B: the explorer is a
+//! tree.** `tekstide_core::project::ExplorerTree` holds the scans and which
+//! folders are open; this module turns its rows into text (`row_text`,
+//! assertable without `iced`) and draws **only the window of rows that fit**
+//! (`window_for`, `rows_that_fit`) -- the total-row bound, decided by
+//! measurement in PR-052-B: virtualisation, not a cap, so nothing is dropped
+//! and a line says which rows are on screen. A row says what it *is* before
+//! its name (a clipped line must lose the name, not the status), and a detail
+//! area under the tree shows the highlighted row whole.
 //!
 //! **RFC-030 PR-030-C, REQ-GIT-003: per-file Git status, one exact-path
 //! lookup per node, no rollup.** `node_line` looks up

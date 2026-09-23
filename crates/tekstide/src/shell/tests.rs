@@ -18162,3 +18162,24 @@ fn a_scan_that_finishes_after_its_project_closed_is_dropped_quietly() {
     // Nothing applied, nothing panicked, and the real root is still pending.
     assert_eq!(explorer_texts(&state), ["    Loading…"]);
 }
+
+/// RFC-052 §6: the explorer's key handling has exactly one caller, the
+/// `update` arm that handles `RoutedInput::Surface` for the sidebar zone --
+/// so it can only run after the keybinding policy declined the key and no
+/// modal held it. A second call site would be a second way in.
+#[test]
+fn handle_explorer_key_has_exactly_one_production_call_site_and_it_is_the_sidebar_surface_arm() {
+    let shell_rs_path = format!("{}/src/shell.rs", env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(&shell_rs_path).expect("shell.rs must be readable");
+    assert_eq!(
+        enclosing_functions_for_call_site(&source, "handle_explorer_key(state,"),
+        vec!["update"]
+    );
+    let call = source.find("handle_explorer_key(state,").unwrap();
+    let arm = &source[..call];
+    assert!(
+        arm.rfind("FocusZone::Sidebar")
+            .is_some_and(|zone| call - zone < 600),
+        "the call must sit under the `FocusZone::Sidebar` arm"
+    );
+}

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Changed — the explorer is a tree
+
+- **Folders open and close in place.** `Enter` on a folder expands it under its name, indented; a change
+  inside `src/` is visible without stepping into `src/`. The "go up" row is gone.
+- **Opening a folder never freezes the window.** Each folder is read on a background thread; until it
+  arrives its row says *Loading…*. Measured on a folder of 100 000 entries: the window does about 0.02 ms
+  of work for it, and the read itself happens elsewhere.
+- **Nothing is hidden silently.** A folder over 256 entries shows the first 256 and a row naming how many
+  more there are ("44 more entries not shown."), and says "at least" if it stopped counting. The sidebar
+  draws only the rows that fit, and a line says which ones ("Rows 18–60 of 272").
+- **A row says what it is before it says its name.** `[FILE] [untracked] new.md`, not `[FILE] new.md
+  [untracked]`: the sidebar is narrow and clips the end of a row, and the end used to be where the Git and
+  link status was. The line under the tree shows the highlighted row whole.
+- **Every name is still escaped, at every depth.**
+
 ## 0.23.0 - What The Window Says Is True
 
 Status: **released on 2026-09-24.** Published to crates.io as `tekstide 0.23.0` and

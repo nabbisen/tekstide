@@ -52,27 +52,44 @@ implementer's to paper over.
       Unix socket path is limited to 108 bytes. That is "how to run the gate here", the same class as
       the `wtype` and screenshot notes.
 
-- [ ] **Residue, ruled at review 422:** the `tekstide-shell-test-*` family and the short-named
+- [x] **Residue, ruled at review 422:** the `tekstide-shell-test-*` family and the short-named
       `t`/`tsr`/`tsms` builders get the same treatment as **PR-052-B's first commit**, before B adds
       fixtures of its own. *Reviewer-measured after the first fix: 498 entries a run, none of the three
       targeted families, 1 492 after three runs.* `ARCHITECTURE.md`'s number should then read zero.
+      *(Done as B's first commit, `97576f3`: **a full run leaves 0 entries**, and `ARCHITECTURE.md` says
+      so.)*
 
 ## PR-052-B — the tree
 
-- [ ] Folders expand in place; a change inside `src/` is visible without stepping into `src/`
-      (`REQ-FILE-001`). The `Parent` row is gone.
-- [ ] Bounded **per level**: 256 children per directory; the collapse list unchanged (D7).
-- [ ] **A total render bound, decided by measurement** (review 421): ~4 µs a row means ~4 000 rows fill
+- [x] Folders expand in place; a change inside `src/` is visible without stepping into `src/`
+      (`REQ-FILE-001`). The `Parent` row is gone. *(`enter_on_a_folder_expands_it_in_place_…`;
+      `evidence/01-…`.)*
+- [x] Bounded **per level**: 256 children per directory; the collapse list unchanged (D7). *(Unchanged,
+      and still openable — the judgment call in `qa-evidence.md`, which the reviewer can reverse in one
+      line.)*
+- [ ] A root-escaping symlink is **reported, not followed**; a broken symlink says so; an unreadable
+      directory is a row. **Ablation:** follow the symlink; the escape test fails alone. *(All three
+      properties hold and are pinned. **The ablation's "alone" is not literally true**: following the link
+      fails the tree's escape test **and** `the_detail_shows_…`, whose fixture is the same escaping row and
+      which asserts the row is not marked expandable. Left unticked with the contradiction named rather
+      than ticked over it.)*
+- [x] Every name renders through `quote_untrusted` — including the non-UTF-8 one, which must not take
+      the whole tree down with it. *(Through the type system: `DisplayText` has no raw constructor. The
+      non-UTF-8 name is one of three in the core tree test and keeps its exact bytes in its path.)*
+- [x] `Enter` toggles a folder and opens a file; global keybindings still win; a modal still
+      suppresses. *(`the_explorers_keys_arrive_as_sidebar_surface_input_…` and
+      `handle_explorer_key_has_exactly_one_production_call_site_…`: the explorer has no key handling of its
+      own, and a modal cannot produce the `ModalAbsent` proof the routing takes.)*
+- [x] **A total render bound, decided by measurement** (review 421): ~4 µs a row means ~4 000 rows fill
       a frame, and twenty open directories at the per-level cap is already ~19 ms. Total bound or
       viewport virtualisation, chosen the way D3 was — and **nothing is hidden silently**: a row says
-      how many are not shown.
-- [ ] **The scan is `Task`-shaped from the first commit** — 65 ms at depth 1 500 crosses a frame.
-- [ ] A root-escaping symlink is **reported, not followed**; a broken symlink says so; an unreadable
-      directory is a row. **Ablation:** follow the symlink; the escape test fails alone.
-- [ ] Every name renders through `quote_untrusted` — including the non-UTF-8 one, which must not take
-      the whole tree down with it.
-- [ ] `Enter` toggles a folder and opens a file; global keybindings still win; a modal still
-      suppresses.
+      how many are not shown. *(Virtualisation: 3.0 ms for the window of a 10 000-row tree against 951 ms
+      to build it whole, debug build. A line says which rows are on screen; a capped folder and a tree past
+      its bound each end in a row naming how many are not shown.)*
+- [x] **The scan is `Task`-shaped from the first commit** — 65 ms at depth 1 500 crosses a frame.
+      *(A worker thread per scan, the `git_summary_subscription` shape, pinned by
+      `the_shell_never_scans_a_directory_on_the_render_thread`; disclosed as a subscription rather than a
+      `Task`.)*
 
 ## PR-052-C — how it reads
 
