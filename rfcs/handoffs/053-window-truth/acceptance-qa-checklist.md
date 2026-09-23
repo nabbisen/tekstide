@@ -42,8 +42,13 @@ implementer's to paper over.
       wordings/behaviours from a committed tree; each fails its own dedicated test. Three also trip
       the agreement test as a second detector, and D1's terminal string trips the scan as well as
       its own test — reported plainly in `qa-evidence.md` rather than called "alone".
-- [ ] **Capture**: one frame where the board, the status bar and Change Review agree about a project
-      with two changed files and no agent run. Throwaway state only.
+- [x] **Captures**: Change Review's empty state, the explorer's badges and the bar's `2 changed` in
+      **one frame** — that is where the contradiction lived — plus the board with the bar. Throwaway
+      state only.
+      *Corrected at review 418: the box asked for the board, the bar and Change Review in one frame.
+      The board is a route and Change Review is a surface inside the workspace, so no such frame can
+      exist. The reviewer's box was unsatisfiable; the two captures are better evidence than it asked
+      for.*
       — **left unticked; the box cannot be satisfied as written.** The Project Board is a *route*
       and Change Review is a surface *inside* the project workspace, so they are never on screen
       together. What exists instead: `evidence/01-…` (board: 0 terminals, 0 agent runs, 0 unsaved
@@ -59,6 +64,12 @@ implementer's to paper over.
       alone.
 - [ ] A terminal open at the narrow size is sized to the space that exists — captured, not reasoned.
 - [ ] No other change rides along in this commit.
+- [ ] **C1 (carried from review 418):** the close-project dialog says **unsaved**, like the board.
+      After PR-053-A the product calls one fact "unsaved" in one place and "dirty" in another, and
+      that inconsistency is one this RFC introduced. One string.
+- [ ] **C2 (carried from review 418):** the bidi-isolate lesson is in `ARCHITECTURE.md` — numbers
+      render inside invisible isolate marks, so `0 agent runs` is not a substring of the rendered
+      line. A comment in one test file is not where the next person will look.
 
 ## Whole-RFC
 
