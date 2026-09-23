@@ -170,3 +170,36 @@ records that a *long* `TMPDIR` fails 47 tests with `SocketPathTooLong`, which co
 
 Nothing under `crates/*/src` changed except registering two `#[cfg(test)]` modules in `explorer.rs`.
 No catalog string, no surface, no dependency, no `Cargo.lock` change in the product.
+
+## Required at review 421 — the suite stops leaving its fixtures behind
+
+Reviewer's count on this machine: **42 932 entries under `/tmp`**, of which 14 780 `tekstide-run-*`,
+3 504 `tekstide-audit-test-default-*`, 1 517 `approval-audit-*`.
+
+| Builder | Fix | Pinned by |
+| --- | --- | --- |
+| `resolve_agent_run_state_dir` (`tekstide-run-*`) and `resolve_audit_state_dir` (`tekstide-audit-test-default-*`) | The per-thread default is a `TestStateDir` that **owns** its directory and removes it when the thread ends — each `#[test]` has its own thread, so that is the end of the test. A directory a test *named* (`test_audit_state_dir`) is marked not-owned and never removed. | `a_tests_default_state_directories_are_removed_when_its_thread_ends`; `a_directory_a_test_named_is_not_removed_by_the_seam` |
+| `TestAudit` (`approval-audit-*`) | `Drop` removes the state root. | `a_test_audit_removes_its_state_root_when_it_is_dropped` |
+
+**Ablation, three.** Never remove → the thread-end test fails, alone. `TestAudit::drop` a no-op → its
+test fails, alone. `named` marked owned → the *named-directory* test fails, alone (the direction the
+first ablation cannot reach). Each restored from a committed tree.
+
+**A regression I caused and the gate caught.** `sentinel_command_text_never_reaches_the_durable_audit_store`
+drops its `TestAudit` *so the store checkpoints*, then reads every file in the directory. The new `Drop`
+removed the directory first, so the scan read nothing and the positive control failed — correctly. Fixed
+with `close_keeping_files`, which closes the store but leaves the directory for the test to remove itself;
+it now reads, removes, and *then* asserts, so a failing assertion does not leave the directory behind.
+Not a flake: it failed deterministically and I did not register it as one.
+
+**Measured.** Each full-workspace run into a fresh `TMPDIR` now leaves **≈497 entries** (498, +497, +497
+across three runs) where the same suite previously left several thousand a run; **none** of the three targeted prefixes remain. What is left, by count:
+`tekstide-shell-test-session-limit-benchmark`, short-named `t`/`tsr`/`tsms` builders, and the
+`tekstide-shell-test-*` family — **not fixed here**, named so they are not mistaken for done.
+
+`ARCHITECTURE.md` now carries the `TMPDIR` lesson (short, because the approval socket lives under it;
+logs somewhere with space) and the rule that a fixture builder removes itself.
+
+**Gate**: fmt, clippy `-D warnings`, `git diff --cached --check`, and three consecutive full-workspace
+runs, `--no-fail-fast`, to files: **595 + 9 + 886, green all three** (+2 shell, +1 core: exactly the three
+new tests).

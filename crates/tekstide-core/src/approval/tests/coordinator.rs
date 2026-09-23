@@ -41,6 +41,9 @@ struct TestAudit {
     /// Removed on drop: the suite used to leave one of these behind per
     /// test per run (1 517 `approval-audit-*` in one `/tmp`, review 421).
     state_root: std::path::PathBuf,
+    /// Set by [`TestAudit::close_keeping_files`] for the one test that must
+    /// read the files after the store has closed and checkpointed.
+    keep_files: bool,
 }
 
 impl TestAudit {
@@ -60,11 +63,19 @@ impl TestAudit {
             store,
             health: AuditHealth::default(),
             state_root: state_root_for_cleanup,
+            keep_files: false,
         }
     }
 
     fn state_root(&self) -> &std::path::Path {
         &self.state_root
+    }
+
+    /// Closes the store (so SQLite checkpoints its WAL) but **leaves the
+    /// directory**, returning it: the caller now owns removing it.
+    fn close_keeping_files(mut self) -> std::path::PathBuf {
+        self.keep_files = true;
+        self.state_root.clone()
     }
 
     fn coordinator(&mut self) -> AuditCoordinator<'_> {
@@ -76,7 +87,9 @@ impl Drop for TestAudit {
     fn drop(&mut self) {
         // The open store is unlinked with the directory; on Unix that is
         // fine, and a failed removal must not turn into a second panic.
-        let _ = std::fs::remove_dir_all(&self.state_root);
+        if !self.keep_files {
+            let _ = std::fs::remove_dir_all(&self.state_root);
+        }
     }
 }
 
@@ -1314,9 +1327,12 @@ fn sentinel_command_text_never_reaches_the_durable_audit_store() {
     // positive control so the negative assertions below can't pass
     // merely because nothing was read.
     let audit_dir = test_audit.store.storage_path().audit_dir().to_path_buf();
-    drop(test_audit);
+    let state_root = test_audit.close_keeping_files();
 
     let raw_text = read_every_file_in_dir(&audit_dir);
+    // Read first, remove, *then* assert: a failing assertion must not leave
+    // the directory behind.
+    let _ = std::fs::remove_dir_all(&state_root);
     assert!(
         raw_text.contains(run_approved.as_str()),
         "the scan must reach a real, persisted field -- otherwise the sentinel assertions \

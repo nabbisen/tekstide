@@ -207,6 +207,23 @@ and 520×400 captures and there is no other route. **Stop the app with `pkill -x
 string, kills the shell, and aborts the rest of the script with exit 144 — the screenshot you then read is
 the *previous* run's.
 
+**Running the gate when `/tmp` is full: move `TMPDIR`, and keep the new one short.** The approval
+socket is bound *under* the temp directory, and a Unix socket path is limited to 108 bytes
+(`SocketPathTooLong`). A `TMPDIR` under the repository (`…/tekstide-git/target/tmp-052`) made **47 tests
+fail deterministically** in RFC-052 PR-052-A; `TMPDIR=/dev/shm/<short>` ran clean. It is an
+environment failure, not a flake and not a regression — do not put it in the flake register as one, and
+do not "fix" it by shortening a fixture name, which
+`fresh_default_test_agent_run_state_dir`'s doc comment records was tried first. Send the *logs* somewhere
+with space too (`target/…`), since a full `/tmp` also loses them.
+
+**Why `/tmp` filled, and the rule that keeps it from recurring: a test fixture removes itself.** Until
+review 421 the suite left about 43 000 entries in `/tmp` (14 780 `tekstide-run-*`, 3 504
+`tekstide-audit-test-default-*`, 1 517 `approval-audit-*`), enough to fill a 30 GB tmpfs. The per-thread
+defaults in `shell.rs` now own their directory (`TestStateDir`, removed when the test's thread ends),
+`TestAudit` removes its state root on drop, and each has a test that the directory is gone afterwards.
+A new fixture builder gets a guard with a `Drop` and the same kind of test; a directory a test *named*
+is the test's own to remove, and the seam never touches it.
+
 **A catalog string's interpolated values are wrapped in invisible bidi-isolate marks, so a test that
 asserts on the words a user reads must strip them.** Fluent isolates every placeable — a number, a
 name, a branch — in U+2068 … U+2069 (and `text_safety::quote_untrusted` adds its own isolate on top

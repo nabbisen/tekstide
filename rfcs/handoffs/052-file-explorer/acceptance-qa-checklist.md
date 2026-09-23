@@ -39,7 +39,7 @@ implementer's to paper over.
 
 ## Required at review 421 — before PR-052-B
 
-- [ ] **The suite stops leaving its fixtures behind.** Measured by the reviewer on this machine:
+- [x] **The suite stops leaving its fixtures behind.** Measured by the reviewer on this machine:
       **42 932 entries under `/tmp`**, of which **14 780 `tekstide-run-*`**, **3 504
       `tekstide-audit-test-default-*`** and **1 517 `approval-audit-*`**. This is what filled a 30 GB
       tmpfs to 100 %, cost this slice a whole gate attempt, and then cost a second one when the
@@ -47,7 +47,7 @@ implementer's to paper over.
       `HostileFixture` and RFC-030's `Fixture` already drop theirs — and pin it with a test that a
       builder's directory is gone after its guard drops. Not RFC-052's subject; it is the thing that
       will break the next gate too.
-- [ ] **The `TMPDIR` lesson is in `ARCHITECTURE.md`**, not only the flake register: a gate that must
+- [x] **The `TMPDIR` lesson is in `ARCHITECTURE.md`**, not only the flake register: a gate that must
       move its temp directory needs a **short** one, because the approval socket lives under it and a
       Unix socket path is limited to 108 bytes. That is "how to run the gate here", the same class as
       the `wtype` and screenshot notes.
