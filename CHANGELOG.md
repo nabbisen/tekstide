@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.23.0 - What The Window Says Is True
 
-Kept incrementally, as `0.22.0`'s was (review 410), so the release candidate is a promotion and not a
-reconstruction. `0.23.0` is RFC-053: things the window said that were not true.
+Status: release candidate; not yet published or tagged.
+
+
+Every item below was found by running the `0.22.0` release binary, and every one is the product telling
+a user something that was not true, or hiding something they needed.
 
 ### Fixed — the window says what is true
 
@@ -30,6 +33,18 @@ reconstruction. `0.23.0` is RFC-053: things the window said that were not true.
 - **The status bar moves a field down whole instead of cutting a word.** At a narrow width it wraps onto
   further lines; the layout accounts for the height.
 - **The close-project confirmation says "unsaved file", not "dirty file"**, matching the board.
+
+### What this release does not do
+
+Re-read against what RFC-053 changed, not copied from `0.22.0`.
+
+- **The Project Board's row is truthful and still hard to read.** It is now eleven stacked lines for one
+  project, a bare mood word ("Calm") and a list of blocked automations that wraps. This release made it
+  say what is true; making it legible is later work that no scheduled RFC covers.
+- **A deleted file still carries no badge in the explorer**, and the cadence rule for Git state is
+  unchanged. Both are in `0.22.0`'s entry and both still hold.
+- **Everything else `0.22.0` listed still holds.** That includes there being **no screen-reader
+  support**.
 
 ## 0.22.0 - The Window Knows What Git Knows
 
