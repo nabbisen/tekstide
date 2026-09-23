@@ -922,6 +922,28 @@ fn pane_geometry_follows_the_measured_region_and_nothing_else() {
     );
 }
 
+/// D3: the status bar's fields flow onto the next line **whole**. A plain
+/// `row!` squeezes its children until a word is cut -- measured at 520px,
+/// "Ctrl+Alt+P" lost its `P` past the edge. A source scan for the same
+/// reason the modal one is: the bar is only renderable with a real
+/// renderer, and the live capture (`evidence/06-`) covers the pixels.
+#[test]
+fn the_status_bar_wraps_whole_fields_rather_than_squeezing_them() {
+    let source = include_str!("../shell.rs");
+    let start = source
+        .find("fn status_bar(state: &State)")
+        .expect("status_bar exists");
+    let body = &source[start
+        ..source[start..]
+            .find("\n}\n")
+            .map_or(source.len(), |end| start + end)];
+    assert!(
+        body.contains(".wrap()"),
+        "status_bar must lay its fields out with Row::wrap so a narrow window moves a field \
+         down whole instead of cutting a word"
+    );
+}
+
 /// D2, the modal side: no modal is built the old way, with its buttons in
 /// the body. The layout property (`surface::frame::tests`) proves a footer
 /// stays in the window; this proves no builder went back to handing

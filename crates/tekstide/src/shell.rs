@@ -7546,6 +7546,11 @@ fn status_bar(state: &State) -> Element<'_, Message> {
     items = items
         .push(text(state.catalog.get("status-bar-key-hint")).size(state.theme.font_size_status()));
 
+    // RFC-053 D3: a field that does not fit moves to the next line **whole**
+    // (`Row::wrap`), never squeezed until a word is cut. Measured at 520px:
+    // a plain `row!` left "Ctrl+Alt+P" with its `P` past the edge.
+    let items = items.wrap().vertical_spacing(2);
+
     container(items)
         .width(Length::Fill)
         .padding(6)
@@ -8680,7 +8685,14 @@ fn modal_dialog_box<'a>(
     body: Element<'a, Message>,
     footer: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    let body = scrollable(body).width(Length::Shrink);
+    // The scrollbar is embedded with spacing, not overlaid: an overlaid
+    // bar covered the last characters of the longest line ("...open
+    // projec|t)"), i.e. it hid content in the act of offering to reveal it.
+    let body = scrollable(body)
+        .width(Length::Shrink)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new().spacing(8),
+        ));
     let boxed = container(crate::surface::frame::PinnedFooter::new(
         body,
         footer,

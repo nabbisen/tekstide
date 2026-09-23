@@ -61,6 +61,21 @@ pub(super) fn columns_for_width(
     (usable / glyph_advance_px).floor() as u32
 }
 
+/// The line height a grid row is **drawn** with, and the one
+/// [`line_height_px`] **measures** with -- one definition, so the number of
+/// rows counted for a height is the number of rows that fit in it.
+///
+/// RFC-053 PR-053-B: these used to disagree. `line_height_px` measured at
+/// `LineHeight::Relative(1.0)` while `grid_colors::view` drew each row
+/// with `rich_text`'s default (`Relative(1.3)`), so every pane was given
+/// ~30% more rows than its space held -- measured against the `0.22.0`
+/// binary, `seq 1 200` ended at line 177 with the last dozen rows below
+/// the window. The value is iced's own default on purpose (the rendering
+/// is unchanged; the *count* is what was wrong).
+pub(super) fn grid_line_height() -> LineHeight {
+    LineHeight::default()
+}
+
 /// Terminal resize handoff: real measured line height, in logical
 /// pixels, at `font_size` -- the row-count analogue of
 /// [`monospace_glyph_advance_px`], not a guessed constant. Measured the
@@ -73,7 +88,7 @@ pub(crate) fn line_height_px(font_size: f32) -> f32 {
         content: "M",
         bounds: Size::new(f32::INFINITY, f32::INFINITY),
         size: Pixels(font_size),
-        line_height: LineHeight::Relative(1.0),
+        line_height: grid_line_height(),
         font: Font::MONOSPACE,
         align_x: Alignment::Default,
         align_y: iced::alignment::Vertical::Top,
@@ -141,6 +156,38 @@ mod tests {
             height > 0.0 && height < 28.0,
             "a line height at 14px should be positive and within a plausible multiple of the \
              font size, got {height}"
+        );
+    }
+
+    /// RFC-053 PR-053-B: the measured line height is the one rows are
+    /// *drawn* with -- iced's default `Relative(1.3)`, not the `1.0` this
+    /// used to measure, which gave every pane ~30% more rows than its space
+    /// held. Pinned by value so the old measurement cannot come back.
+    ///
+    /// **Ablation**: switch `line_height_px` back to `Relative(1.0)` and
+    /// this fails alone.
+    #[test]
+    fn the_measured_line_height_is_the_drawn_line_height_not_font_size() {
+        let height = line_height_px(14.0);
+        assert!(
+            (height - 14.0 * 1.3).abs() < 0.5,
+            "rows are drawn 1.3x the font size tall; measuring {height} for a 14px font \
+             means the row count will not match what fits"
+        );
+    }
+
+    /// The rendering side of the same fact: the grid view draws its rows
+    /// with [`grid_line_height`], the definition the measurement uses --
+    /// not with whatever `rich_text` defaults to today. A source scan (the
+    /// grid is only renderable with a real renderer), like the crate's
+    /// other seam scans, so a future edit cannot quietly make the two
+    /// disagree again.
+    #[test]
+    fn the_grid_draws_its_rows_with_the_line_height_it_is_measured_with() {
+        let source = include_str!("grid_colors.rs");
+        assert!(
+            source.contains(".line_height(super::font_metrics::grid_line_height())"),
+            "grid_colors::view must draw rows with font_metrics::grid_line_height()"
         );
     }
 

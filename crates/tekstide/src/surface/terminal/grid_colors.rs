@@ -81,6 +81,7 @@ pub fn view<'a, Message: 'a>(pane: &TerminalPane, font_size: f32) -> Element<'a,
                     .collect();
                 rich_text(spans)
                     .size(font_size)
+                    .line_height(super::font_metrics::grid_line_height())
                     .font(iced::Font::MONOSPACE)
                     .into()
             })
