@@ -253,19 +253,25 @@ fn active_project_row(project: &ProjectSession) -> ProjectBoardRow {
         // `ProjectGitSummary` now that something produces one, instead of
         // the hardcoded `Unavailable` that was true while nothing did.
         branch_status: branch_display(project),
-        // `Unknown`, not `NotImplemented`: `terminal_count`/`agent_run_count`
-        // are `None` only until `refresh_runtime_summary_from_collections`
-        // first runs (session.rs) -- a freshly opened project that has not
-        // yet added a terminal or agent run, not a project whose terminals
-        // do not exist. See `CountDisplay`'s own doc comment.
-        terminal_count: runtime_summary
-            .terminal_count
-            .map(CountDisplay::KnownCount)
-            .unwrap_or(CountDisplay::Unknown),
-        agent_run_count: runtime_summary
-            .agent_run_count
-            .map(CountDisplay::KnownCount)
-            .unwrap_or(CountDisplay::Unknown),
+        // RFC-053 D5: `Unknown` means unknown. `terminal_count`/
+        // `agent_run_count` are `None` only until
+        // `refresh_runtime_summary_from_collections` first runs
+        // (session.rs) -- a project whose collections have never been
+        // mutated. That project has **zero** of each, and this row can say
+        // so: it counts the collections it is looking at rather than
+        // reporting "unknown" about a fact it holds. The change is here,
+        // at the board row, not in `ProjectProviderState` or the summary
+        // type (`ProjectFileState` reads the same `Unknown`).
+        terminal_count: CountDisplay::KnownCount(
+            runtime_summary
+                .terminal_count
+                .unwrap_or_else(|| len_as_u32(project.terminal_sessions().len())),
+        ),
+        agent_run_count: CountDisplay::KnownCount(
+            runtime_summary
+                .agent_run_count
+                .unwrap_or_else(|| len_as_u32(project.agent_runs().len())),
+        ),
         approval_count: CountDisplay::KnownCount(runtime_summary.pending_approvals),
         review_count: CountDisplay::KnownCount(runtime_summary.review_ready_changes),
         dirty_file_count: CountDisplay::KnownCount(runtime_summary.dirty_files),

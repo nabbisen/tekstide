@@ -40,6 +40,11 @@ blocked-automation-count = { $count ->
    *[other] {$count} blocked automations
 }
 
+# RFC-053 D7: `project-board-blocked-automation-names` names what is
+# blocked, from the labels `RestrictedModeSummary` already carries -- a
+# bare count is not actionable (REQ-NOTIFY-003).
+project-board-blocked-automation-names = blocked: { $names }
+
 # RFC-015 PR-015-B: `status-bar-summary` covers both the two possible
 # routes (a literal-variant selector, exactly `blocked-automation-count`'s
 # non-numeric branches) and a genuine plural count in one lookup, per
@@ -50,9 +55,16 @@ blocked-automation-count = { $count ->
 # placeholders; `content-area-placeholder-title`/`-body` (PR-015-B's own
 # placeholder, shown when no surface existed at all) are retired, since
 # every route now has real scaffolding to show.
-sidebar-placeholder-title = Sidebar
-main-area-content-mode-placeholder = Content Mode. RFC-019 adds the editor and explorer here.
-main-area-terminal-mode-placeholder = Terminal / Agent Immersion Mode. RFC-017 adds the terminal here.
+#
+# RFC-053 D1: no string here names our own machinery. These three used to
+# read "Sidebar", "Content Mode. RFC-019 adds ..." and "Terminal / Agent
+# Immersion Mode. RFC-017 adds the terminal here." -- an internal RFC
+# number, in the shipping product, as the first thing a user saw before
+# launching a terminal. Now each says what the area is and what to do.
+# `mod internal_identifiers` (i18n/enforcement.rs) refuses the pattern.
+sidebar-placeholder-title = Files are listed here in Content mode.
+main-area-content-mode-placeholder = Content mode. Open a project to see its files here.
+main-area-terminal-mode-placeholder = Terminal mode. Nothing is running in this project yet. Start a terminal with the button below.
 
 # RFC-040 PR-040-C: `mode_toggle_row`'s own two labels -- each names the
 # mode a click switches *to*, not the mode currently showing.
@@ -218,12 +230,17 @@ project-board-review-count = { $count ->
    *[other] {$count} reviews
 }
 
+# RFC-053 D6: this counts open editor buffers with unsaved edits
+# (`runtime_summary.dirty_files`), a different fact from the status bar's
+# "N changed" (what Git reports). The two used to read "dirty files" and
+# "changed" on adjacent surfaces. The key name is unchanged; only the
+# words say what is counted.
 project-board-dirty-file-count = { $count ->
-    [not_implemented] dirty files: not implemented
-    [unavailable] dirty files: not available
-    [unknown] dirty files: unknown
-    [one] {$count} dirty file
-   *[other] {$count} dirty files
+    [not_implemented] unsaved files: not implemented
+    [unavailable] unsaved files: not available
+    [unknown] unsaved files: unknown
+    [one] {$count} unsaved file
+   *[other] {$count} unsaved files
 }
 
 project-board-attention = { $attention ->
@@ -232,7 +249,7 @@ project-board-attention = { $attention ->
     [review] Review
     [failed] Failed
     [running] Running
-    [dirty] Dirty
+    [dirty] Unsaved edits
    *[calm] Calm
 }
 
@@ -805,7 +822,10 @@ agent-run-detail-writer-truncated = This transcript's own storage was truncated 
 # `ChangeSet::bounded_summary`, the most recent change set for the active
 # project. Read-only -- RFC-034's own job is acting on one.
 change-review-empty = No active project.
-change-review-no-changes-yet = No changes have been detected in this project yet.
+# RFC-053 D4: an empty state says what it is empty *of*. This surface
+# holds agent-generated change sets, not the project's Git changes, which
+# the status bar and the explorer's badges already show.
+change-review-no-changes-yet = No AI CLI run has produced changes in this project yet. Changes you made yourself are shown by the status bar and the file explorer.
 change-review-heading = Change Review
 # The RFC's own required, non-optional disclosure -- stated on the
 # surface itself, not only in documentation, every time this surface

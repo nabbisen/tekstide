@@ -556,3 +556,90 @@ fn every_catalog_key_this_module_renders_is_enumerated_and_none_names_a_dead_act
          those still appear in this same textual order, inside their own function bodies."
     );
 }
+
+// --- RFC-053 PR-053-A: D5, D6, D7 ---------------------------------------
+
+/// Removes the invisible bidi-isolate marks (U+2066..=U+2069) the catalog
+/// wraps every interpolated value in, so a test can assert on the words a
+/// user reads.
+fn plain(text: &str) -> String {
+    text.chars()
+        .filter(|c| !('\u{2066}'..='\u{2069}').contains(c))
+        .collect()
+}
+
+/// D6: the board's count of open editor buffers with unsaved edits says
+/// *unsaved*, never *dirty* -- *changed* is left to mean what Git reports.
+#[test]
+fn the_editor_buffer_count_says_unsaved_and_never_dirty() {
+    let catalog = real_catalog();
+    let mut row = baseline_row();
+    row.dirty_file_count = CountDisplay::KnownCount(1);
+    let one = plain(&row_lines(&row, &catalog).join(" | "));
+    assert!(one.contains("1 unsaved file"), "{one:?}");
+    assert!(!one.contains("dirty"), "{one:?}");
+
+    row.dirty_file_count = CountDisplay::KnownCount(3);
+    let many = plain(&row_lines(&row, &catalog).join(" | "));
+    assert!(many.contains("3 unsaved files"), "{many:?}");
+
+    for state in [
+        CountDisplay::Unavailable,
+        CountDisplay::NotImplemented,
+        CountDisplay::Unknown,
+    ] {
+        row.dirty_file_count = state;
+        let text = plain(&row_lines(&row, &catalog).join(" | "));
+        assert!(text.contains("unsaved files:"), "{text:?}");
+        assert!(!text.contains("dirty"), "{text:?}");
+    }
+}
+
+/// D6, the same fact under its other name: the attention state raised by
+/// unsaved buffers said "Dirty" beside the Git "changed" count.
+#[test]
+fn the_attention_state_raised_by_unsaved_buffers_says_unsaved() {
+    let catalog = real_catalog();
+    let mut row = baseline_row();
+    row.attention = AttentionState::Dirty;
+    let text = plain(&row_lines(&row, &catalog).join(" | "));
+    assert!(text.contains("Unsaved edits"), "{text:?}");
+    assert!(!text.contains("Dirty"), "{text:?}");
+}
+
+/// D5 at the rendering end: a known zero renders as a zero, in words a
+/// user reads as "none", not as "unknown".
+#[test]
+fn a_known_zero_terminal_and_agent_run_count_render_as_zero_not_unknown() {
+    let catalog = real_catalog();
+    let mut row = baseline_row();
+    row.terminal_count = CountDisplay::KnownCount(0);
+    row.agent_run_count = CountDisplay::KnownCount(0);
+    let text = plain(&row_lines(&row, &catalog).join(" | "));
+    assert!(text.contains("0 terminals"), "{text:?}");
+    assert!(text.contains("0 agent runs"), "{text:?}");
+    assert!(!text.contains("unknown"), "{text:?}");
+}
+
+/// D7: blocked automations carry the labels the model already holds, not
+/// a bare count (REQ-NOTIFY-003).
+#[test]
+fn blocked_automations_are_named_not_only_counted() {
+    let catalog = real_catalog();
+    let mut row = baseline_row();
+    row.blocked_automation_count = 2;
+    row.blocked_automation_labels = vec![
+        "automatic LSP startup".to_string(),
+        "workspace plugin loading".to_string(),
+    ];
+    let text = plain(&row_lines(&row, &catalog).join(" | "));
+    assert!(text.contains("2 blocked automations"), "{text:?}");
+    assert!(text.contains("automatic LSP startup"), "{text:?}");
+    assert!(text.contains("workspace plugin loading"), "{text:?}");
+
+    let unblocked = plain(&row_lines(&baseline_row(), &catalog).join(" | "));
+    assert!(
+        !unblocked.contains("blocked"),
+        "nothing blocked: no line at all, {unblocked:?}"
+    );
+}

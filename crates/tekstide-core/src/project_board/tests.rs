@@ -22,12 +22,15 @@ fn empty_project_board_has_first_run_state() {
     assert_eq!(view_model.global_attention_summary, "Calm");
 }
 
-/// **status-mapping-honesty-fixes, Fix 1**: a freshly opened project has
-/// not yet had `refresh_runtime_summary_from_collections` run (no
-/// terminal or agent run has ever been added), so `terminal_count`/
-/// `agent_run_count` must read `Unknown` -- "nothing counted yet" -- not
-/// `NotImplemented`, which would falsely claim the features do not
-/// exist. See `CountDisplay`'s own doc comment.
+/// **status-mapping-honesty-fixes, Fix 1**, superseded by RFC-053 D5: a
+/// freshly opened project has not yet had
+/// `refresh_runtime_summary_from_collections` run (no terminal or agent
+/// run has ever been added). Fix 1 made `terminal_count`/`agent_run_count`
+/// read `Unknown` rather than `NotImplemented` (which falsely claimed the
+/// features do not exist). D5 goes the rest of the way: the project has
+/// **zero** of each and the row holds the collections that say so, so it
+/// reports `KnownCount(0)` -- `Unknown` about a fact the row holds is the
+/// word losing its meaning. Both old wrong answers stay excluded.
 #[test]
 fn project_rows_preserve_placeholder_field_shape_without_probing() {
     let mut state = AppState::default();
@@ -46,8 +49,8 @@ fn project_rows_preserve_placeholder_field_shape_without_probing() {
     // `NotImplemented`, not `Unavailable`, matching `CountDisplay`'s own
     // documented distinction between the two applied to this field.
     assert_eq!(row.branch_status, BranchDisplay::NotImplemented);
-    assert_eq!(row.terminal_count, CountDisplay::Unknown);
-    assert_eq!(row.agent_run_count, CountDisplay::Unknown);
+    assert_eq!(row.terminal_count, CountDisplay::KnownCount(0));
+    assert_eq!(row.agent_run_count, CountDisplay::KnownCount(0));
     assert_eq!(row.approval_count, CountDisplay::KnownCount(0));
     assert_eq!(row.review_count, CountDisplay::KnownCount(0));
     assert_eq!(row.dirty_file_count, CountDisplay::KnownCount(0));
@@ -311,7 +314,7 @@ fn view_model_uses_runtime_summary_for_known_counts_and_attention() {
 /// a real terminal actually added to a *different* project, before the
 /// empty project's own row is checked.
 #[test]
-fn a_project_with_a_terminal_reports_a_real_count_and_an_empty_one_reports_unknown() {
+fn a_project_with_a_terminal_reports_a_real_count_and_an_empty_one_reports_zero() {
     let mut state = AppState::default();
     let populated_id =
         state.add_project_session("Populated", "/workspace/populated", "/workspace/populated");
@@ -350,12 +353,13 @@ fn a_project_with_a_terminal_reports_a_real_count_and_an_empty_one_reports_unkno
         .expect("empty project must have a row");
     assert_eq!(
         empty_row.terminal_count,
-        CountDisplay::Unknown,
-        "a project that has never added a terminal must read Unknown, not NotImplemented"
+        CountDisplay::KnownCount(0),
+        "RFC-053 D5: a project that has never added a terminal has zero, not `Unknown` and \
+         not `NotImplemented`"
     );
     assert_eq!(
         empty_row.agent_run_count,
-        CountDisplay::Unknown,
+        CountDisplay::KnownCount(0),
         "agent_run_count has the identical defect on the same two lines"
     );
 }

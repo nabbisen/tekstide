@@ -695,6 +695,135 @@ fn main_area_key_falls_back_to_content_mode_for_no_active_project() {
     );
 }
 
+// --- RFC-053 PR-053-A: what the surfaces say ---------------------------
+//
+// One test per reworded string, so restoring any single old wording fails
+// exactly one test rather than passing unnoticed.
+
+/// Removes the invisible bidi-isolate marks (U+2066..=U+2069) the catalog
+/// wraps every interpolated value in, so a test asserts on the words a
+/// user reads.
+fn plain_words(text: &str) -> String {
+    text.chars()
+        .filter(|c| !('\u{2066}'..='\u{2069}').contains(c))
+        .collect()
+}
+
+/// D1: Terminal mode's empty state says what the mode is and how to start
+/// a terminal, and names no RFC.
+#[test]
+fn terminal_mode_empty_state_says_what_it_is_and_how_to_start_a_terminal() {
+    let state = state_with(ApplicationShell::new());
+    let label = main_area_label(
+        &state,
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+    );
+    assert!(label.contains("Terminal mode"), "{label:?}");
+    assert!(label.contains("Nothing is running"), "{label:?}");
+    assert!(label.contains("Start a terminal"), "{label:?}");
+    assert!(!label.contains("RFC"), "{label:?}");
+}
+
+/// D1, the other two placeholders that named an RFC or only said
+/// "Sidebar" over an empty panel.
+#[test]
+fn the_sidebar_and_content_placeholders_name_no_rfc_and_say_something_true() {
+    let state = state_with(ApplicationShell::new());
+    let sidebar = sidebar_label(&state);
+    assert!(!sidebar.contains("RFC"), "{sidebar:?}");
+    assert_ne!(sidebar.trim(), "Sidebar", "the bare word says nothing");
+    assert!(sidebar.contains("Content mode"), "{sidebar:?}");
+
+    let content = main_area_label(&state, Some(tekstide_core::project::ProjectMode::Content));
+    assert!(!content.contains("RFC"), "{content:?}");
+    assert!(content.contains("Open a project"), "{content:?}");
+}
+
+/// D4: Change Review's empty state says what it is empty *of* -- agent
+/// runs -- and points at where repository changes are shown.
+#[test]
+fn change_review_empty_state_names_agent_runs_and_points_at_where_git_changes_show() {
+    let state = state_with(ApplicationShell::new());
+    let text = state.catalog.get("change-review-no-changes-yet");
+    assert!(text.contains("AI CLI run"), "{text:?}");
+    assert!(text.contains("status bar"), "{text:?}");
+    assert!(text.contains("file explorer"), "{text:?}");
+    assert!(
+        !text.contains("in this project yet") || text.contains("No AI CLI run"),
+        "a claim about the whole project is the defect: {text:?}"
+    );
+}
+
+/// D8: caveats follow content. With no entries the surface says it is
+/// empty and shows neither caveat; with entries the caveats appear.
+#[test]
+fn approval_history_leads_with_its_empty_state_and_shows_caveats_only_with_entries() {
+    let empty = super::approval_history_leading_keys(false);
+    assert_eq!(
+        empty,
+        vec!["approval-history-heading", "approval-history-empty"]
+    );
+    assert!(!empty.contains(&"approval-history-retention-notice"));
+    assert!(!empty.contains(&"approval-history-classifier-notice"));
+
+    let populated = super::approval_history_leading_keys(true);
+    assert_eq!(
+        populated,
+        vec![
+            "approval-history-heading",
+            "approval-history-retention-notice",
+            "approval-history-classifier-notice",
+        ]
+    );
+    assert!(!populated.contains(&"approval-history-empty"));
+}
+
+/// The acceptance frame: a project with two changed files and no agent
+/// run. The status bar, the board row and Change Review must not
+/// contradict each other -- the status bar says two changed, the board
+/// says zero agent runs and calls its own count *unsaved* rather than
+/// *dirty*, and Change Review's empty state is a claim about agent runs
+/// only, so it is true beside both.
+#[test]
+fn the_board_the_status_bar_and_change_review_agree_about_two_changed_files_and_no_agent_run() {
+    let (mut state, project_id) = state_with_a_real_project("053-agreement");
+    state
+        .app_shell
+        .state_mut()
+        .project_mut(&project_id)
+        .expect("project must exist")
+        .set_git_summary(tekstide_core::project::ProjectGitSummary {
+            provider_state: tekstide_core::project::ProjectProviderState::Complete,
+            branch_name: Some("main".to_string()),
+            changed_file_count: Some(2),
+            ahead_count: None,
+            behind_count: None,
+            file_statuses: Some(std::collections::BTreeMap::new()),
+        });
+
+    let bar = plain_words(&super::active_project_status_fields(&state).join(" | "));
+    assert!(bar.contains("2 changed"), "{bar:?}");
+
+    let view_model = state.app_shell.project_board();
+    let row = view_model
+        .rows
+        .iter()
+        .find(|row| row.project_id == project_id)
+        .expect("the project must have a board row");
+    let lines = crate::surface::board::row_lines(row, &state.catalog);
+    let board = plain_words(&lines.join(" | "));
+    assert!(board.contains("0 agent runs"), "{board:?}");
+    assert!(board.contains("0 terminals"), "{board:?}");
+    assert!(board.contains("0 unsaved files"), "{board:?}");
+    assert!(!board.contains("dirty"), "{board:?}");
+    assert!(!board.contains("unknown"), "{board:?}");
+
+    let project = state.app_shell.state().project(&project_id).unwrap();
+    assert!(project.change_sets().is_empty());
+    let review = state.catalog.get("change-review-no-changes-yet");
+    assert!(review.contains("AI CLI run"), "{review:?}");
+}
+
 // --- Mechanical seam scans -------------------------------------------
 //
 // Response 128 Required: the original scans named `shell.rs` directly

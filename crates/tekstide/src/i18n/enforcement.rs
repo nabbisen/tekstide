@@ -1,4 +1,6 @@
-//! RFC-016 PR-016-E: enforcement. Four mechanical checks:
+//! RFC-016 PR-016-E: enforcement. Four mechanical checks (a fifth, RFC-053 D1's
+//! [`no_catalog_string_names_an_internal_identifier`], is documented at its own
+//! definition below):
 //!
 //! 1. [`no_raw_string_literal_is_passed_to_text_anywhere_in_the_crate`] --
 //!    the canonical home for "no user-facing string is hardcoded" in
@@ -498,6 +500,89 @@ fn message_keys(ftl_text: &str) -> Vec<String> {
         .collect()
 }
 
+/// RFC-053 D1/D9: what counts as "our own machinery" in user-facing text.
+/// `RFC-` covers every RFC number; `PR-0` covers a slice id such as
+/// `PR-045-B`. Deliberately narrow: a broad pattern (a module path, a type
+/// name) would flag legitimate words, and the defect this exists for --
+/// `"... RFC-017 adds the terminal here."` shipping as the first thing a
+/// user saw -- is exactly this shape.
+const INTERNAL_IDENTIFIER_PATTERNS: &[&str] = &["RFC-", "PR-0"];
+
+/// The `(line number, line)` of every catalog **message line** naming an
+/// internal identifier. **Fluent comment lines (`#`) are skipped, on
+/// purpose (D9):** an `RFC-053 D1: ...` comment in `en.ftl` is correct and
+/// useful to the next maintainer and is never shown to a user; only
+/// message values are user-facing. A `#` comment is only ever a whole
+/// line in Fluent, so a line-level skip is exact, not approximate.
+fn catalog_lines_naming_internal_machinery(ftl_text: &str) -> Vec<(usize, String)> {
+    ftl_text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| !line.trim_start().starts_with('#'))
+        .filter(|(_, line)| {
+            INTERNAL_IDENTIFIER_PATTERNS
+                .iter()
+                .any(|pattern| line.contains(pattern))
+        })
+        .map(|(index, line)| (index + 1, line.to_string()))
+        .collect()
+}
+
+/// RFC-053 D1: no shipped catalog string names an internal identifier.
+///
+/// **This scans catalog message values only, not doc comments and not
+/// `#` comments in the `.ftl` files (D9).** If it fails, fix the *string*
+/// a user would read; do not delete the comment that mentions the RFC --
+/// that comment is correct, and removing it would make this test pass
+/// while making the codebase worse.
+#[test]
+fn no_catalog_string_names_an_internal_identifier() {
+    let mut offenders = Vec::new();
+    for entry in std::fs::read_dir(real_locales_dir()).expect("locales dir must exist") {
+        let path = entry.expect("readable dir entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("ftl") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).expect("locale file must be readable");
+        for (line, content) in catalog_lines_naming_internal_machinery(&text) {
+            offenders.push(format!("{}:{line}: {content}", path.display()));
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "a catalog string a user reads names our own machinery (an RFC or slice id). This \
+         scan covers catalog MESSAGE VALUES only -- `#` comments in the .ftl files and doc \
+         comments in Rust are deliberately legal (RFC-053 D9); fix the string, do not delete \
+         a comment to make this pass:\n{}",
+        offenders.join("\n")
+    );
+}
+
+/// The scan fails on a planted string and passes on a comment -- the
+/// property D9 names. Without this, the real-file test above would also
+/// pass if the scanner were simply broken and matched nothing.
+#[test]
+fn the_internal_identifier_scan_fails_on_a_planted_string_and_passes_on_a_comment() {
+    let planted = "terminal-placeholder = Terminal mode. RFC-017 adds the terminal here.\n";
+    let flagged = catalog_lines_naming_internal_machinery(planted);
+    assert_eq!(flagged.len(), 1, "a planted `RFC-` value must be flagged");
+    assert_eq!(flagged[0].0, 1);
+
+    let continuation = "key = { $n ->\n    [one] PR-045-B says so\n   *[other] fine\n}\n";
+    assert_eq!(
+        catalog_lines_naming_internal_machinery(continuation).len(),
+        1,
+        "a selector arm is a message value too"
+    );
+
+    let comment_only =
+        "# RFC-053 D1: this comment is correct and stays legal.\nkey = plain words\n";
+    assert!(
+        catalog_lines_naming_internal_machinery(comment_only).is_empty(),
+        "a `#` comment naming an RFC must never be flagged (D9)"
+    );
+}
+
 /// One value for every variable any `en.ftl` message references today
 /// (`$count`, `$route`, `$status`, `$attention`, `$number`, `$slot`).
 /// Fluent ignores arguments a pattern does not reference, so passing all
@@ -533,6 +618,11 @@ fn generic_args() -> CatalogArgs<'static> {
         // RFC-030 PR-030-C, REQ-GIT-003: `explorer-node-entry`'s fifth
         // selector, `$git`.
         .trusted_symbol("git", "none")
+        // RFC-053 D7: `project-board-blocked-automation-names`'s list.
+        .untrusted(
+            "names",
+            &tekstide_core::text_safety::quote_untrusted("fixture blocked automation"),
+        )
         .untrusted(
             "message",
             &tekstide_core::text_safety::quote_untrusted("fixture error"),

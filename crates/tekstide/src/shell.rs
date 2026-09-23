@@ -10416,6 +10416,24 @@ fn trust_state_symbol(trust: tekstide_core::project::WorkspaceTrust) -> &'static
     }
 }
 
+/// RFC-053 D8: the catalog keys Approval History renders **before** its
+/// entries, in order. Caveats follow content: the retention and
+/// risk-classification notices are caveats *about entries*, so a surface
+/// with no entries says it is empty and stops -- two paragraphs of
+/// caveats above "nothing here" was the defect. Factored out so the order
+/// is directly testable rather than read off an `Element` tree.
+pub(crate) fn approval_history_leading_keys(has_entries: bool) -> Vec<&'static str> {
+    if has_entries {
+        vec![
+            "approval-history-heading",
+            "approval-history-retention-notice",
+            "approval-history-classifier-notice",
+        ]
+    } else {
+        vec!["approval-history-heading", "approval-history-empty"]
+    }
+}
+
 fn approval_history_view(state: &State) -> Element<'_, Message> {
     let Some(project) = state.app_shell.state().active_project() else {
         // Unreachable while routed to `ActiveProjectWorkspace` (core
@@ -10428,26 +10446,22 @@ fn approval_history_view(state: &State) -> Element<'_, Message> {
             .into();
     };
 
-    let mut lines: Vec<Element<'_, Message>> = vec![
-        text(state.catalog.get("approval-history-heading"))
-            .size(state.theme.font_size_heading())
-            .into(),
-        text(state.catalog.get("approval-history-retention-notice"))
-            .size(state.theme.font_size_status())
-            .into(),
-        text(state.catalog.get("approval-history-classifier-notice"))
-            .size(state.theme.font_size_status())
-            .into(),
-    ];
-
     let requests = project.approval_requests();
-    if requests.is_empty() {
-        lines.push(
-            text(state.catalog.get("approval-history-empty"))
-                .size(state.theme.font_size_body())
-                .into(),
-        );
-    } else {
+    let mut lines: Vec<Element<'_, Message>> = approval_history_leading_keys(!requests.is_empty())
+        .iter()
+        .map(|key| {
+            let size = if *key == "approval-history-heading" {
+                state.theme.font_size_heading()
+            } else if *key == "approval-history-empty" {
+                state.theme.font_size_body()
+            } else {
+                state.theme.font_size_status()
+            };
+            text(state.catalog.get(key)).size(size).into()
+        })
+        .collect();
+
+    if !requests.is_empty() {
         let highlight = state.approval_history_highlight.min(requests.len() - 1);
         for (index, request) in requests.iter().enumerate() {
             let is_expired = project.expired_approval_ids().contains(&request.id);

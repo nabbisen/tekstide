@@ -37,8 +37,10 @@
 //!   String`) is also routed through the catalog, via
 //!   [`attention_symbol`], for the same reason: the enum is available,
 //!   so there is no reason to fall back to core's pre-baked English.
-//! - `trust_label`, `security_mode_label`, `availability_label`,
-//!   `blocked_automation_labels` have **no underlying enum exposed** in
+//! - `blocked_automation_labels` are shown by name (RFC-053 D7), after the
+//!   count, through `project-board-blocked-automation-names`.
+//! - `trust_label`, `security_mode_label`, `availability_label` have **no
+//!   underlying enum exposed** in
 //!   `ProjectBoardRow` -- only a pre-rendered `String` from
 //!   `tekstide-core`. These are trusted (fixed-set, not
 //!   filesystem-derived) but rendered as-is, not yet catalog-driven.
@@ -393,6 +395,20 @@ pub(crate) fn row_lines(row: &ProjectBoardRow, catalog: &Catalog) -> Vec<String>
         lines.push(catalog.get_with_args(
             "blocked-automation-count",
             &CatalogArgs::new().number("count", row.blocked_automation_count),
+        ));
+    }
+    // RFC-053 D7: name what is blocked, from the labels the model already
+    // carries (REQ-NOTIFY-003 -- a bare count is not actionable). The
+    // labels are a fixed, trusted set, but `CatalogArgs` has no
+    // runtime-string trusted argument (`trusted_symbol` is `&'static str`
+    // only), so they go through `untrusted` -- `quote_untrusted` on plain
+    // ASCII adds only invisible isolate marks, and this keeps the string
+    // in the catalog rather than concatenated in Rust.
+    if !row.blocked_automation_labels.is_empty() {
+        let names = text_safety::quote_untrusted(&row.blocked_automation_labels.join(", "));
+        lines.push(catalog.get_with_args(
+            "project-board-blocked-automation-names",
+            &CatalogArgs::new().untrusted("names", &names),
         ));
     }
 
