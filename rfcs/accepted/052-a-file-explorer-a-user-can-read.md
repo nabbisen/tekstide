@@ -196,3 +196,34 @@ permanent facts about the widget. If `DirectoryTree` gains (a) a label hook, (b)
 slot, (c) a bounded scan and a virtualised list, and (d) a switch for its drag machinery, the
 committed harness (`rfcs/handoffs/052-file-explorer/measurement/`) is the check to re-run — with
 the ablations first, as here. Until then this decision stands.
+
+## D3′ accepted at review 421, with the argument the schedule adds
+
+**Accepted as decided: compose our own rows and expansion.** The measurement stands on its own — five
+of eight properties failed, read back from what the widget draws rather than from what its code
+intends. Two additions from the reviewer.
+
+**`ItemTree` is ruled out for a reason the implementer could not weigh: the schedule.** It holds the
+safety properties when fed by our scanner and our escaping, and the seven extra crates and the caret
+placeholder are real costs but arguable ones. What is not arguable: `item_tree.rs` draws every label
+`.size(14)` and paints selection `Color::from_rgb(0.2, 0.5, 0.8)` — **verified in the crate's source
+at review 421** — and **RFC-054 ships user-configurable theme and font size as the very next release**
+(`0.25.0`). Adopting a widget that hardcodes both, one release before telling users they can change
+them, means breaking that promise in the explorer or forking the widget immediately. That decides it
+independently of size or dependency count.
+
+**The revisit condition gains a fifth item.** If `DirectoryTree` later gains a label hook, a status
+slot, a bounded scan and a drag switch, it must **also follow the host's theme** — text size and
+selection colour from the caller, not constants — before the committed harness is worth re-running.
+
+### Two findings PR-052-B inherits, with their rule
+
+**A per-level cap is not a total cap.** Measured: ~4 µs a row, so ~4 000 rows fill a 16.7 ms frame;
+twenty directories open at the 256 cap is ~19 ms. **D2's "per level" was written without this in
+view.** B decides between a total visible-row bound and viewport virtualisation, by the same
+measure-then-decide rule D3 used — with one property that is not open: **nothing is hidden silently.**
+Whatever the tree does not render, it says, in a row that names how many are not shown.
+
+**The scan is linear in path length** — 65 ms at depth 1 500, the same for the widget and for us — so
+it crosses a frame on a deep tree. **The scan is `Task`-shaped from B's first commit**, not retrofitted
+once someone notices a stall.
