@@ -115,3 +115,42 @@ in a doc comment is correct and useful; only catalog strings are user-facing, an
 in its own failure message, the way `FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT` does.
 
 **Ships as `0.23.0`**, ahead of RFC-052, per the authorised schedule.
+
+## D3′ — decided 2026-09-24 at review 419, from measurement
+
+**The pane size is measured, not computed.** D3 said `content_area_height` should derive from the
+*rendered status-bar height*. That was one input short of the defect. Before writing code the
+implementer ran the `0.22.0` binary and counted: **`seq 1 200` ended at line 177 in a full-size
+window** — twenty-three rows and the prompt below the visible area, with no narrow bar involved.
+
+**Reproduced by the reviewer**, from a worktree build of the `0.22.0` tag: 177 on the released
+binary, **200 with the prompt visible** on this branch, same fixture, same window.
+
+Four independent causes, only one of them G3:
+
+1. `top_bar_height` counted one heading row; the top bar has been three rows since RFC-039/040.
+2. The mode-toggle row and the `+ New Terminal` row were never in the formula at all.
+3. The status bar wraps at a narrow width (G3, the one the RFC knew about).
+4. Rows were **counted** at `LineHeight::Relative(1.0)` and **drawn** at `rich_text`'s default
+   `1.3` — every pane was given about 30% more rows than its height held.
+
+So: a `MeasureSize` wrapper publishes the size the layout engine gives the pane region, and the
+terminal reads it. Seven chrome constants, `window_size`, `WindowResized`, `WindowOpened` and two
+window subscriptions are **deleted** — they existed only to feed the formula.
+
+### This reverses response 242, and here is the condition
+
+Response 242 held that **"a computed size needs no measurement"**. That was right while the
+computation was checkable where it was used. It stops being right the moment the formula depends on
+constants that *other slices* change: the top bar grew a row in RFC-039/040 and no test in that slice
+had any reason to look at a terminal's row count. **A formula whose inputs are maintained elsewhere is
+an unenforced invariant**, and this one was wrong in four independent ways, three of them invisible to
+every test in the suite.
+
+**The rule, going forward:** compute a size only when everything it depends on is visible and
+asserted at the point of use. Otherwise measure — and pin the measurement with a test that fails when
+the value stops being the real one.
+
+**The smaller alternative was offered and declined.** Keeping the formula and adding measured inputs
+for the top bar and the two workspace rows preserves exactly the failure mode that produced this
+defect, and adds partial measurement on top of it.

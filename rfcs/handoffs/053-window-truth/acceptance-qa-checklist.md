@@ -73,7 +73,11 @@ implementer's to paper over.
       (fails when a constant size replaces the measurement) are the two halves.
 - [x] A terminal open at the narrow size is sized to the space that exists — captured, not reasoned.
       — `evidence/06-`; and the same at normal size, before and after (`04-`, `05-`): 177 → 200.
-- [ ] No other change rides along in this commit.
+- [x] No other change rides along in this commit.
+      *Reviewed 419: the risky change — the measured region and `PinnedFooter` — is alone in
+      `9445666`. The three riders the capture box required (row height, status-bar wrap, embedded
+      scrollbar) are in `d89d366`, each with its own test. Commit granularity is what this box
+      protects, and it holds; disclosing them rather than ticking quietly was the right instinct.*
       — **left unticked; three changes rode along, each required by the capture box above.** (1) Rows
       were counted at line height 1.0 and drawn at 1.3 (`grid_line_height`); without it the pane
       still ends 12 lines short (`seq 1 200` ended at 188). (2) The status bar wraps whole fields
