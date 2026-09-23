@@ -126,6 +126,16 @@ For crates.io releases, use the workspace publish flow:
 
 The workspace dry-run is the release-candidate gate for same-workspace dependency pairing. Individual package checks are still useful for package contents, but they are not the final publish-order model.
 
+**Package the workspace, never `tekstide` alone, for any release that added `tekstide-core` API.**
+Added 2026-09-23, from `0.22.0`'s own reviewer's first attempt: `cargo package -p tekstide` *by
+itself* (even with `--no-verify` on the `cargo package` step for `tekstide`, if the *verification*
+step is run separately against that lone package) resolves `tekstide-core` from crates.io — the
+*previous* release, which does not have this cycle's new methods — and fails with seven `E0599`s
+naming exactly the API this cycle added. `cargo publish --workspace` (and its own `--dry-run`) pairs
+both crates locally first and passes; a single-crate `cargo package -p tekstide` run, run to double
+check something after the fact, will not. Not a defect — the same version-range arrangement the note
+above already describes, from the other end.
+
 ## Package Smoke
 
 - [ ] Inspect generated package contents for missing README, license, Cargo manifests, and
