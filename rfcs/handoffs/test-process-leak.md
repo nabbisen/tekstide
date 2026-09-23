@@ -1134,3 +1134,19 @@ repeated `cargo build`/`cargo test` invocations in one sitting are plausible loa
 Not the slice either time: this response's changes are confined to `runtime::git`'s
 executable-location fallback (`resolve_git_from_inherited_path`/`directories_are_the_same_or_nested`),
 nothing here touches the approval socket.
+
+## Recurrence, 2026-09-24 — RFC-052 PR-052-A's gate (implementer's run)
+
+`shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` failed
+once, in run 3 of a three-run full-workspace gate (`592 + 9 + 885`, one failure; runs 1 and 2 both
+clean at `593 + 9 + 885`). **Row 8**, in its already-documented shape: the marker matcher read the
+echoed command line (`(trap '' TERM; …) & echo "descendant-pid:$!"; wait`) instead of the output line.
+Passed in isolation. Not the slice: this slice adds two `#[cfg(test)]` modules under
+`project/root/explorer` and touches no terminal or process-close code.
+
+**An environment note, since it cost a run:** `/tmp` was a full tmpfs (30 GB, 100 %, other projects'
+scratch), so the gate ran with `TMPDIR` elsewhere. A `TMPDIR` under the repository made **47 tests fail
+deterministically** with `Bind(SocketPathTooLong)` — the approval socket lives under the temp directory
+and a Unix socket path is limited to 108 bytes. That is a property of the environment, not a flake and
+not a regression; `TMPDIR=/dev/shm/…` (short) ran clean. A gate that must move its temp directory needs
+a *short* one.

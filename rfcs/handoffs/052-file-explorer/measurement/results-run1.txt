@@ -1,0 +1,49 @@
+fixture: /tmp/tekstide-hostile-measure-<pid>-<nonce>
+
+== A. DirectoryTree, as shipped, against the fixture ==
+drawn text: ["▾", "📂", "project", "▸", "📁", "breadth", "▸", "📁", "control", "▸", "📁", "depth", "▾", "📂", "escaping", "📄", "bad-��-name.txt", "📄", "invoice\u{202e}fdp.exe", "📄", "two\nlines.txt", "▾", "📂", "links", "📄", "broken", "📄", "escape-dir", "📄", "escape-file", "📄", "in-root", "▾", "⚠", "unreadable"]
+links children (name, is_dir): [("broken", false), ("escape-dir", false), ("escape-file", false), ("in-root", false)]
+CHECK D3.1a escape-dir is not expandable     PASS (symlinks are not followed: swdir classifies by the entry's own type)
+CHECK D3.1b escape is *reported*, not silent FAIL the widget draws the escaping link as an ordinary row with no marker
+  (side effect: the legitimate in-root link is_dir = false; it is listed as a leaf)
+CHECK D3.2 hostile names do not reach the screen raw FAIL labels come from file_name().to_string_lossy() with no hook to substitute ours
+  raw U+202E drawn: true, raw newline drawn: true, U+FFFD drawn: true
+CHECK D3.3 per-node status is ours to draw   FAIL a row is icon + label(file_name) only; there is no slot for a badge or a word
+CHECK D3.4b unreadable directory is a row    PASS error carried on the node: Some("I/O error at /tmp/tekstide-hostile-measure-<pid>-<nonce>/project/unreadable: I/O error at /tmp/tekstide-hostile-measure-<pid>-<nonce>/project/unreadable: Permission denied (os error 13)")
+CHECK D3.5a it does not listen for keys itself PASS messages from ArrowDown+Enter: []
+  handle_key is a pure function the app must call: returned Some(Selected("/tmp/tekstide-hostile-measure-<pid>-<nonce>/project", true, Replace))
+  one click on a row emitted: [Directory(Drag(Entered("/tmp/tekstide-hostile-measure-<pid>-<nonce>/project/control"))), Directory(Drag(Pressed("/tmp/tekstide-hostile-measure-<pid>-<nonce>/project/control", true))), Directory(Drag(Released("/tmp/tekstide-hostile-measure-<pid>-<nonce>/project/control")))]
+CHECK D3.6 drag-and-drop is absent unless asked for FAIL DirectoryTree has no switch: a row press is a drag-machine event
+  words drawn that are not a file name (glyph-only strings are icons): []
+CHECK D3.7 no strings of its own are drawn   PASS (its Error Display, 'I/O error at ..', is never drawn: the row shows an icon and grey text)
+
+== B. Our composition: ItemTree + FileExplorerScanner + quote_untrusted ==
+drawn text: ["▾", "project", "▸", "\u{2068}breadth\u{2069}", "▸", "\u{2068}control\u{2069}", "▸", "\u{2068}depth\u{2069}", "▾", "\u{2068}escaping\u{2069}", " ", "\u{2068}bad-��-name.txt\u{2069}", " ", "\u{2068}invoice<U+202E>fdp.exe\u{2069}", " ", "\u{2068}two<U+000A>lines.txt\u{2069}", "▾", "\u{2068}links\u{2069}", " ", "\u{2068}broken\u{2069} (blocked)", " ", "\u{2068}escape-dir\u{2069} (blocked)", " ", "\u{2068}escape-file\u{2069} (blocked)", "▸", "\u{2068}in-root\u{2069}", "▾", "\u{2068}unreadable\u{2069}", " ", "(unreadable)"]
+CHECK D3.1a escape-dir is not expandable     PASS row drawn as "\u{2068}escape-dir\u{2069} (blocked)"
+CHECK D3.1b escape is reported, not silent   PASS the scanner's Blocked(SymlinkEscape) state is drawn as a word
+CHECK D3.1c an in-root link still opens      PASS resolve_existing keeps it inside the root, so it stays a directory
+CHECK D3.2 hostile names do not reach the screen raw PASS U+202E shown as marker: true, newline shown as marker: true
+CHECK D3.3 per-node status is ours to draw   PASS any word we put in Row's Display is drawn
+CHECK D3.4b unreadable directory is a row    PASS child row: Some("(unreadable)")
+CHECK D3.5a it does not listen for keys itself PASS handle_key is `&self` and only runs when the app calls it, after KeybindingPolicy
+  one click on a row emitted: []
+CHECK D3.6 drag-and-drop is off unless enabled PASS ItemTree::with_drag_and_drop defaults to false
+CHECK D3.7 no strings of its own are drawn   PASS every word drawn is a Row or our placeholder; unexplained: []
+
+== C. Bounded: a directory of 100000 entries (D8) ==
+fixture built in 140.45 ms
+threads in this process before/after the widget scanned 100k entries: 1 / 1 (swdir::scan_dir builds no rayon pool; its recursive walk does)
+DirectoryTree: 100000 entries; swdir::scan_dir alone 70.24 ms; scan+normalize+update 84.99 ms; view build 55.60 ms; layout 2331.04 ms; rows drawn 100000
+CHECK D3.4a 100k expansion fits a frame (DirectoryTree) FAIL widget build + layout on the render thread 2386.64 ms vs a 16.67 ms frame; all 100000 rows are built
+Composition: scan+model+set_tree 1.00 ms; view build 0.05 ms; layout 1.26 ms; rows drawn 256
+CHECK D3.4a 100k expansion fits a frame (composition) PASS scan + model + set_tree + build + layout = 2.32 ms vs a 16.67 ms frame (256 rows drawn, truncation row: true)
+
+== D. Depth: 1500 nested directories ==
+DirectoryTree: one expansion at depth N (scan+update): [(1, "0.00 ms"), (10, "0.01 ms"), (100, "0.30 ms"), (500, "7.11 ms"), (1000, "28.36 ms"), (1500, "65.75 ms")]
+DirectoryTree: 1500 levels expanded in 32745.62 ms; view build 1.36 ms; layout 34.92 ms; rows 4523; leaf drawn: true
+CHECK D3.4c 1500 levels do not overflow the stack PASS expand, view, layout and drop all completed
+
+== E. The per-level cap is not a total cap: N capped directories open at once ==
+(directories open, rows drawn, widget build + layout): [(1, 256, "1.35 ms"), (5, 1280, "4.86 ms"), (10, 2560, "9.62 ms"), (20, 5120, "19.79 ms"), (40, 10240, "41.99 ms")]
+
+5 check(s) failed

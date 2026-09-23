@@ -15,17 +15,27 @@ implementer's to paper over.
 
 ## PR-052-A — fixture and decision
 
-- [ ] **The fixture is hostile, proven by ablation, run first**: with the guard removed the symlink
-      row escapes the root and the bidi name renders raw.
-- [ ] Every row exists: bidi override, newline, non-UTF-8, root-escaping symlink, broken symlink,
+- [x] **The fixture is hostile, proven by ablation, run first**: with the guard removed the symlink
+      row escapes the root and the bidi name renders raw. *(`with_the_guards_removed_…`, then each
+      production guard removed in turn; hashes restored. See `qa-evidence.md`.)*
+- [x] Every row exists: bidi override, newline, non-UTF-8, root-escaping symlink, broken symlink,
       100 000 entries, deep nesting, unreadable directory, and an ordinary control tree.
-- [ ] **D3's eight properties answered with evidence** for the widget, and for our own composition
+      *(The unreadable row asserts its own precondition and skips under root, where mode 000 refuses
+      nothing.)*
+- [x] **D3's eight properties answered with evidence** for the widget, and for our own composition
       where they differ.
-- [ ] The 100 000-entry expansion is **timed** against D8's budget.
-- [ ] Cost measured, not assumed: `swdir`/`rayon`, `lucide-icons`' size, whether `iced`'s `svg`
-      feature becomes required, MSRV after the additions.
-- [ ] **D3′ recorded in the RFC in the same commit**, by D3's rule, with the measurement behind it.
-- [ ] Any new crate has a dated row in `dependency-advisories.md` in that same commit.
+- [x] The 100 000-entry expansion is **timed** against D8's budget. *(Widget: 2.2–2.3 s build +
+      layout. Composition: 2.1–2.3 ms.)*
+- [x] Cost measured, not assumed: `swdir`/`rayon`, `lucide-icons`' size, whether `iced`'s `svg`
+      feature becomes required, MSRV after the additions. *(Seven crates, no pool built, no
+      `lucide-icons`, no `svg`, +159 KB, 1.90 holds. Measured for `ItemTree`; `DirectoryTree` is
+      rejected first.)*
+- [x] **D3′ recorded in the RFC in the same commit**, by D3's rule, with the measurement behind it.
+      *(Own composition. `ItemTree` measured too and recommended against — named in D3′ as a judgment
+      the reviewer can overturn.)*
+- [x] Any new crate has a dated row in `dependency-advisories.md` in that same commit. *(Vacuously:
+      no crate is adopted. The cost measurement's `cargo audit` is in `qa-evidence.md`: the same three
+      carried advisories, nothing new.)*
 
 ## PR-052-B — the tree
 

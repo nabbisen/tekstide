@@ -1,6 +1,6 @@
 # RFC-052: A File Explorer A User Can Read
 
-Status: **Accepted by the human owner 2026-09-24.** **D1, D2, D4–D8 decided by the architect on acceptance; D3 stays open by design and slice A decides it.** Proposed 2026-09-23. Raised by the human owner, who said the sidebar "looks strange…
+Status: **Accepted by the human owner 2026-09-24.** **D1, D2, D4–D8 decided by the architect on acceptance; D3 stayed open by design; slice A decided it (D3′, below): compose our own.** Proposed 2026-09-23. Raised by the human owner, who said the sidebar "looks strange…
 a series of lines such as `[DIR]` and `[FILE]` seems far from helpful and friendly to users", and
 named three resources already in this ecosystem: `snora`, lucide icons, and `iced-swdir-tree`.
 
@@ -138,3 +138,61 @@ that is a D3 failure, not a performance note.
 
 **Sequenced as `0.24.0`**, after RFC-053's truth slice. RFC-052 changes how the sidebar looks; RFC-053
 stops three surfaces saying things that are not true. The second is smaller and more urgent.
+
+## D3′ — decided 2026-09-24, from measurement (PR-052-A)
+
+**Compose our own rows and add expansion ourselves. No new dependency.** By D3's rule, not by
+preference: **`DirectoryTree`, the widget as shipped, fails five of the eight properties** (1, 2, 3, 4 and 6),
+measured against the hostile fixture and read back from what the widget actually draws.
+
+| D3 property | `DirectoryTree` |
+| --- | --- |
+| 1 root is a boundary | **Fails on "reported".** A symlinked directory is not expanded, but is drawn as an ordinary file row with no marker; the legitimate in-root link is a leaf. |
+| 2 we supply the display text | **Fails.** Raw U+202E, a raw newline and U+FFFD are drawn; the label is `file_name().to_string_lossy()` and there is no hook. |
+| 3 per-node status is ours | **Fails.** A row is an icon and a name; an unreadable directory is a `⚠` and grey text — colour and an icon alone, which D4 forbids. |
+| 4 bounded | **Fails.** 100 000 entries build 100 000 rows and lay them out in **2.2–2.3 s** against a 16.7 ms frame. |
+| 5 keyboard | Holds, by absence: it does not listen; `handle_key` runs only when the app calls it. |
+| 6 no writes, no drag | Writes: none. **Drag fails**: no switch, a row press is a drag-machine event, a drop target is highlighted. |
+| 7 its own strings | Holds: nothing it wrote is drawn. |
+| 8 cost | Seven new crates; no thread pool built; no `lucide-icons`; no `svg`; +0.56 % binary; MSRV 1.90 holds; no new advisory. |
+
+Per D8, a widget that cannot expand the 100 000-entry directory without stalling is **a D3 failure,
+not a performance note**. It is one.
+
+**`ItemTree`, the widget's other type, is a mechanism this RFC did not name, and it is measured too.**
+Fed by our scanner and our escaping it holds 1–7 — because it then does none of what made the widget
+attractive: it does not scan, does not know the root, and draws whatever `Display` we give it. What it
+would still buy us is caret and selection rendering and key-to-event mapping. Against that, measured
+or read from source: a closed directory needs a **placeholder child** or it draws no caret; the
+selected-row colour (`Color::from_rgb(0.2, 0.5, 0.8)`) and the text size (14) are **fixed**, so it
+cannot follow our theme; the row's structure is visible only through `iced`, which D1's "assertable
+without `iced`" wants us not to depend on; and it costs seven crates and +159 KB for that. **My
+recommendation is our own rows. That is a judgment the rule does not cover, and the reviewer can
+overturn it** — the price of doing so is in `qa-evidence.md`, and the harness that measured it is
+committed.
+
+**What our own composition already has**, measured against the same fixture (properties 1–7 by
+construction, and pinned by `explorer/hostile_tests.rs`): the scanner reports an escaping symlink as
+`Blocked(SymlinkEscape)`, refuses to list the escaping directory, caps a level at 256 and says it was
+truncated, returns an unreadable directory as a typed error, keeps a non-UTF-8 name's exact bytes in
+its path, and takes one scan of a 100 000-entry directory in about a millisecond. Property 8: zero
+crates.
+
+### Two constraints the measurement adds for 052-B
+
+1. **The per-level cap is not a total cap.** About **4 µs a row** to build and lay out, so roughly
+   **4 000 visible rows fit a frame**. One capped expansion costs ~2 ms; twenty open at once cost
+   ~19 ms. 052-B decides, by the same rule (measure, then decide), whether it bounds the *total*
+   visible rows or windows the list. D2's "per level" was not written with this in view.
+2. **The scan must not run on the render thread.** A scan is linear in path length: 0.3 ms at depth
+   100, 28–38 ms at 1 000, ~65 ms at 1 500. Real paths are far shallower, so this is a hazard rather
+   than a defect — but it crosses a frame, so the mechanism must be `Task`-shaped from the first
+   commit, not retrofitted.
+
+### Revisit condition
+
+`iced-swdir-tree`'s manifest lists the same author as this workspace, so the failures above are not
+permanent facts about the widget. If `DirectoryTree` gains (a) a label hook, (b) a per-row status
+slot, (c) a bounded scan and a virtualised list, and (d) a switch for its drag machinery, the
+committed harness (`rfcs/handoffs/052-file-explorer/measurement/`) is the check to re-run — with
+the ablations first, as here. Until then this decision stands.

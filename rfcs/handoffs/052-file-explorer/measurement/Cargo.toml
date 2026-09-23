@@ -1,0 +1,29 @@
+# RFC-052 PR-052-A: a standalone measurement harness, NOT a workspace member.
+#
+# The empty [workspace] table below makes this its own root, so nothing in
+# here touches the product's Cargo.lock, is built by `cargo build
+# --workspace`, or is packaged into either published crate (it lives under
+# rfcs/, outside crates/). Its purpose is to point `iced-swdir-tree` at the
+# same hostile fixture the product's own tests build, and record what the
+# widget does. See ../qa-evidence.md for the results.
+[package]
+name = "explorer-measurement"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+iced = { version = "0.14", features = ["tokio", "advanced"] }
+iced-swdir-tree = "=0.9.3"
+iced_test = "0.14"
+iced_runtime = "0.14"
+swdir = "0.11"
+# Our own scanner and escaping, so the composition is measured with the
+# real thing rather than a stand-in.
+tekstide-core = { path = "../../../../crates/tekstide-core" }
+
+[[bin]]
+name = "measure"
+path = "src/main.rs"
