@@ -17835,3 +17835,52 @@ fn active_project_status_fields_reads_the_summary_it_is_given_not_a_recount() {
         "the producer must read ProjectRuntimeSummary's own fields, never recount: {body}"
     );
 }
+
+/// Review 421: the suite left one directory per test per run behind --
+/// 14 780 `tekstide-run-*` and 3 504 `tekstide-audit-test-default-*` in one
+/// `/tmp`. Each `#[test]` runs on its own thread and the default
+/// directories live in that thread's thread-local, so the directory must be
+/// gone once the thread ends. **The pin is on the thread's end**, because
+/// that is what the real tests do.
+#[test]
+fn a_tests_default_state_directories_are_removed_when_its_thread_ends() {
+    let (agent_run, audit) = std::thread::spawn(|| {
+        let agent_run = super::resolve_agent_run_state_dir().expect("a directory in a test build");
+        let audit = super::resolve_audit_state_dir().expect("a directory in a test build");
+        assert!(
+            agent_run.is_dir() && audit.is_dir(),
+            "both exist while the test is running"
+        );
+        (agent_run, audit)
+    })
+    .join()
+    .expect("the thread completes");
+
+    assert!(
+        !agent_run.exists(),
+        "agent-run state directory left behind: {agent_run:?}"
+    );
+    assert!(
+        !audit.exists(),
+        "audit state directory left behind: {audit:?}"
+    );
+}
+
+/// The other half of the same seam: a directory the *test* named is the
+/// test's to manage, so the seam must never remove it.
+#[test]
+fn a_directory_a_test_named_is_not_removed_by_the_seam() {
+    let named = temp_audit_state_dir("named-directory-survives");
+    {
+        let _guard = test_audit_state_dir(&named);
+        assert_eq!(
+            super::resolve_audit_state_dir().as_deref(),
+            Some(named.as_path())
+        );
+    }
+    assert!(
+        named.is_dir(),
+        "the seam removed a directory it did not create"
+    );
+    let _ = std::fs::remove_dir_all(&named);
+}

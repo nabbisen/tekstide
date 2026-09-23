@@ -38,6 +38,9 @@ fn proposal(proposal_id: &str, argv: &[&str], cwd: &str) -> CommandProposal {
 struct TestAudit {
     store: AuditStore,
     health: AuditHealth,
+    /// Removed on drop: the suite used to leave one of these behind per
+    /// test per run (1 517 `approval-audit-*` in one `/tmp`, review 421).
+    state_root: std::path::PathBuf,
 }
 
 impl TestAudit {
@@ -48,6 +51,7 @@ impl TestAudit {
         let state_root = state_root
             .canonicalize()
             .expect("canonicalize temp audit state root");
+        let state_root_for_cleanup = state_root.clone();
         let storage_path = AuditPathResolver
             .resolve(AuditPathRequest::new(state_root, Vec::new()))
             .expect("resolve audit storage path");
@@ -55,12 +59,40 @@ impl TestAudit {
         Self {
             store,
             health: AuditHealth::default(),
+            state_root: state_root_for_cleanup,
         }
+    }
+
+    fn state_root(&self) -> &std::path::Path {
+        &self.state_root
     }
 
     fn coordinator(&mut self) -> AuditCoordinator<'_> {
         AuditCoordinator::new(&mut self.store, &mut self.health)
     }
+}
+
+impl Drop for TestAudit {
+    fn drop(&mut self) {
+        // The open store is unlinked with the directory; on Unix that is
+        // fine, and a failed removal must not turn into a second panic.
+        let _ = std::fs::remove_dir_all(&self.state_root);
+    }
+}
+
+#[test]
+fn a_test_audit_removes_its_state_root_when_it_is_dropped() {
+    let audit = TestAudit::new("cleanup-pin");
+    let root = audit.state_root().to_path_buf();
+    assert!(
+        root.is_dir(),
+        "the state root exists while the audit is live"
+    );
+    drop(audit);
+    assert!(
+        !root.exists(),
+        "the suite must not leave its fixtures in the temp directory (review 421): {root:?}"
+    );
 }
 
 /// Builds a real, connected `AcceptedProposal` (via `UnixStream::pair()`,

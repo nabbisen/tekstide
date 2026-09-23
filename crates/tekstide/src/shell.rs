@@ -3179,13 +3179,13 @@ fn resolve_agent_run_state_dir() -> Option<std::path::PathBuf> {
     let dir = TEST_AGENT_RUN_STATE_DIR.with(|cell| {
         let mut cell = cell.borrow_mut();
         if let Some(dir) = cell.as_ref() {
-            return dir.clone();
+            return dir.path.clone();
         }
         let dir = fresh_default_test_agent_run_state_dir();
         std::fs::create_dir_all(&dir).expect(
             "a fresh temp directory for a test's own agent-run state root must be creatable",
         );
-        *cell = Some(dir.clone());
+        *cell = Some(TestStateDir::owned(dir.clone()));
         dir
     });
     assert_not_the_real_agent_run_state_dir(&dir);
@@ -3228,9 +3228,44 @@ fn assert_not_the_real_agent_run_state_dir(dir: &std::path::Path) {
     }
 }
 
+/// A test's per-thread state directory, and whether this thread made it.
+///
+/// **Owned** directories (the lazy defaults) are removed when the thread
+/// exits: `cargo test` gives every `#[test]` its own thread, so the
+/// thread-local's destructor is the end of the test. Before this, the
+/// suite left one directory behind per test per run -- 14 780
+/// `tekstide-run-*` and 3 504 `tekstide-audit-test-default-*` in one
+/// `/tmp`, enough to fill a 30 GB tmpfs (review 421). **Named**
+/// directories are the test's own to manage and are never removed here.
+#[cfg(test)]
+struct TestStateDir {
+    path: std::path::PathBuf,
+    owned: bool,
+}
+
+#[cfg(test)]
+impl TestStateDir {
+    fn owned(path: std::path::PathBuf) -> Self {
+        Self { path, owned: true }
+    }
+
+    fn named(path: std::path::PathBuf) -> Self {
+        Self { path, owned: false }
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestStateDir {
+    fn drop(&mut self) {
+        if self.owned {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
 #[cfg(test)]
 thread_local! {
-    static TEST_AGENT_RUN_STATE_DIR: std::cell::RefCell<Option<std::path::PathBuf>> =
+    static TEST_AGENT_RUN_STATE_DIR: std::cell::RefCell<Option<TestStateDir>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -6203,12 +6238,12 @@ fn resolve_audit_state_dir() -> Option<std::path::PathBuf> {
     let dir = TEST_AUDIT_STATE_DIR.with(|cell| {
         let mut cell = cell.borrow_mut();
         if let Some(dir) = cell.as_ref() {
-            return dir.clone();
+            return dir.path.clone();
         }
         let dir = fresh_default_test_audit_state_dir();
         std::fs::create_dir_all(&dir)
             .expect("a fresh temp directory for a test's own audit store must be creatable");
-        *cell = Some(dir.clone());
+        *cell = Some(TestStateDir::owned(dir.clone()));
         dir
     });
     assert_not_the_real_audit_state_dir(&dir);
@@ -6241,7 +6276,7 @@ fn assert_not_the_real_audit_state_dir(dir: &std::path::Path) {
 
 #[cfg(test)]
 thread_local! {
-    static TEST_AUDIT_STATE_DIR: std::cell::RefCell<Option<std::path::PathBuf>> =
+    static TEST_AUDIT_STATE_DIR: std::cell::RefCell<Option<TestStateDir>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -6283,7 +6318,7 @@ pub(crate) fn test_audit_state_dir(dir: &std::path::Path) -> TestAuditStateDirGu
             "test_audit_state_dir called twice on the same thread without dropping the first \
              guard -- nesting is not supported"
         );
-        *cell = Some(dir.to_path_buf());
+        *cell = Some(TestStateDir::named(dir.to_path_buf()));
     });
     TestAuditStateDirGuard { _private: () }
 }
