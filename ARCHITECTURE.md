@@ -199,6 +199,21 @@ reproduced that independently. Recorded as a fact, not a mechanism. The next sli
 capture should **try before assuming the gap**; the bounded-evidence rule still applies if it does
 not land.
 
+**A catalog string's interpolated values are wrapped in invisible bidi-isolate marks, so a test that
+asserts on the words a user reads must strip them.** Fluent isolates every placeable — a number, a
+name, a branch — in U+2068 … U+2069 (and `text_safety::quote_untrusted` adds its own isolate on top
+for untrusted values). The rendered line for a zero count is therefore `\u{2068}0\u{2069} agent runs`,
+not `0 agent runs`, and `line.contains("0 agent runs")` fails while the screen looks exactly right.
+RFC-053 PR-053-A lost an hour to it, and the fact was already written down in three places — a
+comment in `board/tests.rs`, another in `i18n::tests`, a third in `shell::tests` — none of which is
+where the next person looks. Two ways out, both in use: assert with the literal marks
+(`"\u{2068}0\u{2069} terminals"`, which also proves the value went through a placeable), or strip
+U+2066–U+2069 first and assert on words (`plain` in `surface/board/tests.rs`, `plain_words` in
+`shell/tests.rs` — two copies, not one shared helper, because each test module is private to its
+file). Prefer stripping for a wording test and the literal marks for a test whose point is that a
+value was interpolated at all. Never "fix" the failure by loosening the assertion to a substring
+that happens to skip the marks.
+
 Screenshots: `niri msg action screenshot-window --id <id>` returns rc=0 but may write no file, going
 to the clipboard instead. `wl-paste --type image/png > out.png` retrieves it. A capture taken this
 way renders the real `$HOME` in the folder browser, so it stays in `.git-exclude/` — see the
