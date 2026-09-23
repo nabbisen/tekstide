@@ -96,6 +96,57 @@ producers the confirmation surfaces they were waiting for.
 **Nothing renders the audit store.** Every row above describes what is *recorded*, not what any
 user can see; there is no view of it at all.
 
+## Release Schedule
+
+**Set 2026-09-24, from the 2026-09-23 audit.** Ordering rule: **a thing the product says that is not
+true is fixed before a thing the product does not yet do.** Version targets track actual releases and
+carry no dates — a release ships when its RFC closes and the gate is green three times.
+
+| Release | RFC | What it closes | Why here |
+| --- | --- | --- | --- |
+| `0.23.0` | **053** What The Window Says Is True | The six GUI defects: an `RFC-017` placeholder shipped in Terminal mode; modals clipping with `Close` unreachable; the status bar wrapping at narrow widths against its own one-line PTY invariant; Change Review saying "no changes" while the bar says `2 changed`; `unknown` where zero is known; `0 dirty files` beside `2 changed` | Smallest, most urgent. Every item is the product telling a user something untrue, and one of them breaks an invariant the code claims and does not hold |
+| `0.24.0` | **052** A File Explorer A User Can Read | `REQ-FILE-001` (a real tree), and the `[DIR]`/`[FILE]` rendering | Accepted. The owner raised it; the audit found the deeper half |
+| `0.25.0` | **054** User Configuration Completion | `REQ-CONFIG-006` (keybindings), `REQ-CONFIG-007` (theme, fonts, scrollback), `NFR-UX-004`, `REQ-TERM-004` — **and M12 itself** | M12's own scope names these six; three never shipped. Fourteen releases added surfaces and none added a setting |
+| `0.26.0` | **055** Ignore Rules In The Explorer | `REQ-FILE-005`, `REQ-FILE-006`, the `ignored` badge of `REQ-FILE-002` | Directly after the tree: expansion makes RFC-052 D7's fixed collapse list load-bearing, and this is what replaces it |
+| `0.27.0` | **056** AgentRun Report And Classification | `REQ-AGENT-011` (final report / handoff note), `REQ-AGENT-015` (classify a run) | Both were recorded as implemented and never existed. They are also the product's own pitch: what did this run do, and what do I hand on |
+| `0.28.0` | **057** Editor Essentials | `REQ-EDIT-002`'s line-number gutter, a visible caret, and **undo** — which no requirement names, and which `NFR-REL-005` assumes | "Multi-document editing" is a 1.0 expectation; an editor with no undo cannot carry it |
+| `0.29.0` | **026** File Watcher and Multi-Document Model | `REQ-FILE-003`, `004`; the single-document limit | M13 proper. Needs the editor to be worth having first |
+| `0.30.0` | **027** Crash Recovery and Unsaved Buffer Persistence | `REQ-RECOVER-002`, `005` | Follows the watcher; both are the file layer maturing |
+| `0.31.0` | **058** A Project Held By One Process | `REQ-PROJ-009` | Two Tekstide processes can hold one project root today and neither knows. Scheduled once multi-document writing raises the stakes |
+| `0.32.0` | **059** Seeing The Audit, And Redacting It | `REQ-SEC-023`, and the gap that **nothing renders the audit store** | Twelve producers record; no user can read any of it. The privacy claim leans on a view that does not exist |
+| `0.33.0` | **060** Command Approval A User Can Reach | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **A 1.0 blocker**: "command approval for adapter-supported workflows" is in the 1.0 minimum list, and `to_ai_cli_profile` sets `Supervised` unconditionally, so no user can reach one |
+| `0.34.0`+ | **028**, **029**, NFR verification | `NFR-PORT-001`..`003`; docs, CI, release automation; every performance budget | M14, the 1.0 candidate band |
+
+### Decisions the owner still owns
+
+- **Syntax highlighting (`REQ-EDIT-003`) is not in the 1.0 minimum list.** It is the one gap large
+  enough that shipping `1.0.0` without it is a product judgement, not a scheduling one. Say so before
+  M14, not during it.
+- **Whether `snora` replaces our own UI layer** is an application-wide decision, deliberately outside
+  RFC-052.
+- **Order.** This schedule puts truth before features and settings before file-layer work. Any row can
+  be moved; moving one is a scope decision, and it belongs in this table rather than in a commit.
+
+### Release cycle policy
+
+Stated here because it has been practice for fourteen releases and was never written down.
+
+1. **One RFC per release**, by default. A release exists to carry a closed RFC to users, not to batch.
+2. **A release ships when the gate is green three consecutive times** on the full workspace with
+   `--no-fail-fast`, `fmt` and `clippy -D warnings` clean, and every required review finding closed.
+   An open required finding blocks the release; it never becomes a known issue.
+3. **Minor bump per release while `0.x`.** Patch releases are reserved for **correcting something
+   already published that is now false** — a claim in a shipped changelog, README, or crates.io page.
+4. **Every changelog owns its own limits.** *What this release does not do* is not optional, and a
+   claim that a previous release made and this one falsifies goes in a **Corrected** section with what
+   a reader who relied on it should do now.
+5. **The candidate is the dev team's; verification is mine; publishing is the owner's authority.** I
+   re-run the gate independently, re-measure the Rust minimums, read both archives, and check the
+   rendered crates.io README after publishing. Under standing authorisation I tag and publish; without
+   it, the candidate waits.
+6. **Package the workspace, never a single crate**, between a core API addition and its publish —
+   `cargo package -p tekstide` alone resolves the published core and fails.
+
 ## RFC Queue
 
 Status values: **In progress** · **Next** · **Queued** · **Blocked**
@@ -138,7 +189,15 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | 024 | Diff Preview Policy | M10 | 012 | **yes** | **Implemented and closed 2026-08-11** (`0.7.0`). Authored out of order as RFC-020's content-access prerequisite; carried RFC-012 Amendment 1, a breaking change |
 | 030 | Git Integration | M12 | 012 | **yes** | **Implemented and closed 2026-09-23.** Moved to `done/`. Headline of `0.22.0`. Four slices: **A** the adversarial fixture and the configuration gate (both candidate mechanisms were measured executing a repository-named clean filter, so the decision became which repositories we read at all); **B** the status bar's branch and dirty count, computed off the UI thread and refreshed at project open and at each managed process's end, with the cadence disclosed; **C** per-file explorer badges, `-z` path handling and the board row fed from the same summary; **D** how `git` is located and the version check cached. Six review-found defects, every one found by running the code rather than reading it |
 | 025 | Notifications | M12 | 023 | partly | **Implemented and closed 2026-09-22.** Moved to `done/`. Headline of `0.21.0`. Two slices: **A** gave the four ad-hoc board notice mechanisms one `Notification` model with two lifetimes and a kind-ordered render, with their own tests passing unmodified — the projections left behind are `#[cfg(test)]`, so production cannot bypass the model and still compile; **B** added REQ-NOTIFY-002's status-bar fields and REQ-NOTIFY-003's actionable labels, absent at zero, read from `ProjectRuntimeSummary`, with Git state reading "not available" until RFC-030. One checklist box stayed unticked: a live pending-approval capture, which the shipped product has no path to produce (see the Command approval row) |
-| 052 | A File Explorer A User Can Read | M12 remainder | 030 | no | **Proposed 2026-09-23**, at the owner's observation that `[DIR]`/`[FILE]` rows are "far from helpful and friendly". Measured: the sidebar is a one-level browser, not a tree, so `REQ-FILE-001` is not met either. Rows stop being one Fluent string and become composed rows with icons, without moving escaping, catalog labels or testability. **Mechanism open**: `iced-swdir-tree` (the owner's own, `iced ^0.14`) versus our own composition, decided by measurement against a hostile fixture — a file explorer renders attacker-controlled names and walks attacker-controlled directories, and both are already boundaries here |
+| 052 | A File Explorer A User Can Read | M12 remainder | 030 | no | **Accepted 2026-09-24; D1, D2, D4–D8 decided on acceptance.** `0.24.0`. The sidebar is debug text *and* not a tree — one scan, a `Parent` row, nested changes invisible. **D3 stays open and slice A decides it by measurement**, RFC-030 D1′'s shape: `iced-swdir-tree` (owner's own, `iced ^0.14`, + `swdir`/`rayon`, + third-party `lucide-icons`) against our own composition, judged on a hostile fixture — bidi/newline/non-UTF-8 names, a root-escaping symlink, 100 000 entries, an unreadable directory. D7 keeps the collapse list until the ignore slice; D8 gives expansion a measured budget |
+| 053 | What The Window Says Is True | M12 remainder | — | no | **Reserved 2026-09-24**, from the audit's GUI findings. `0.23.0`. Six defects, each one the product saying something untrue: a shipped `RFC-017` placeholder, modals that clip their own `Close` away, a status bar that wraps against the one-line invariant `content_area_height` depends on to size PTYs, Change Review contradicting the Git state, `unknown` where zero is known, and two different facts both called dirty/changed |
+| 054 | User Configuration Completion | M12 | 023, 045 | no | **Reserved 2026-09-24.** `0.25.0`, and **M12 closes with it**. Keybindings, theme, font family, font size and terminal scrollback become user configuration — M12's own scope names them, RFC-023 built the mechanism, and no key exists for any of them. `NFR-UX-004` and `REQ-TERM-004` ride along |
+| 055 | Ignore Rules In The Explorer | M12 remainder | 052 | no | **Reserved 2026-09-24.** `0.26.0`. `.gitignore` and user ignore configuration (`REQ-FILE-005`), a hidden/ignored toggle (`006`), and the `ignored` badge (`002`). Replaces RFC-052 D7's fixed `[.git, node_modules, target]` collapse list, which expansion makes load-bearing |
+| 056 | AgentRun Report And Classification | agent remainder | — | partly | **Reserved 2026-09-24.** `0.27.0`. `REQ-AGENT-011` and `015`, both recorded as implemented in this plan until the audit checked: no report, no handoff note, and `AgentRun` carries no classification field at all |
+| 057 | Editor Essentials | M10 remainder | — | no | **Reserved 2026-09-24.** `0.28.0`. A line-number gutter (`REQ-EDIT-002`'s unmet half), a visible caret, and **undo** — which no requirement names and `NFR-REL-005` assumes. Syntax highlighting (`REQ-EDIT-003`) stays an owner decision, not a silent deferral |
+| 058 | A Project Held By One Process | M13 tail | 026 | partly | **Reserved 2026-09-24.** `0.31.0`. `REQ-PROJ-009`: a process-visible lock. Two Tekstide processes hold one project root today and neither knows; the requirement's own text says an in-memory guard is not enough |
+| 059 | Seeing The Audit, And Redacting It | pre-1.0 | 013 | partly | **Reserved 2026-09-24.** `0.32.0`. Twelve audit producers record and **nothing renders any of it**; `REQ-SEC-023`'s redaction has a one-variant claim type and no pattern set |
+| 060 | Command Approval A User Can Reach | pre-1.0 | 021, 022 | no | **Reserved 2026-09-24.** `0.33.0`, and a **1.0 blocker**: the 1.0 minimum list promises command approval for adapter-supported workflows, and `to_ai_cli_profile` sets `Supervised` unconditionally, so the dialog no user can reach stays unreachable |
 | 026 | File Watcher and Multi-Document Model | M13 | 019 | partly | Blocked |
 | 027 | Crash Recovery and Unsaved Buffer Persistence | M13 | — | **yes** | Queued (parallel-ready) |
 | 028 | Cross-Platform Support | M14 | most | partly | Queued |

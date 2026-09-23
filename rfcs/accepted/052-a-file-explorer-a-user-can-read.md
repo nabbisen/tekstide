@@ -1,6 +1,6 @@
 # RFC-052: A File Explorer A User Can Read
 
-Status: **Proposed 2026-09-23.** Raised by the human owner, who said the sidebar "looks strange…
+Status: **Accepted by the human owner 2026-09-24.** **D1, D2, D4–D8 decided by the architect on acceptance; D3 stays open by design and slice A decides it.** Proposed 2026-09-23. Raised by the human owner, who said the sidebar "looks strange…
 a series of lines such as `[DIR]` and `[FILE]` seems far from helpful and friendly to users", and
 named three resources already in this ecosystem: `snora`, lucide icons, and `iced-swdir-tree`.
 
@@ -105,3 +105,36 @@ multi-document model (`RFC-026`, M13); drag-and-drop; multi-select.
 - Every status a row can carry is still a word; the colour-alone scan still passes.
 - A live capture against `mktemp -d`, in the release binary, showing the tree with icons, Git badges,
   and a symlink that escapes the root reported rather than followed.
+
+
+## Decided on acceptance (2026-09-24)
+
+**D1, D2, D4, D5, D6 as written.** Rows become composed rows; escaping does not move; labels stay in
+the catalog; the row's text content stays assertable without `iced`. The explorer becomes a real tree
+and the `Parent` row goes away. An icon never carries meaning alone — a Git badge stays a word.
+
+**D3 stays open, and that is the decision.** The same shape as RFC-030 D1′: the mechanism is chosen
+by measurement, by the rule fixed here, not by preference.
+
+- **The widget wins if, and only if, every property in D3 holds against the hostile fixture** — our
+  escaped text is what renders, the project root bounds expansion, a symlink that escapes is reported
+  rather than followed, our badges draw, its keys do not outrank `KeybindingPolicy`, and its own
+  strings are ours or unused.
+- **Otherwise we compose our own rows and add expansion ourselves.** More work, no new dependency,
+  and the same acceptance criteria apply to it.
+- **Run the fixture's own falsifying ablation first.** A fixture that cannot be made to fail proves
+  nothing — RFC-030's first box, and the reason its gate survived review.
+
+**D7 — the collapse list stays until ignore rules replace it.** `[.git, node_modules, target]` are
+collapsed today, and a tree that expands in place makes that list load-bearing in a way a one-level
+browser never did: without it, the first `target/` a user opens is a hundred thousand rows. The list
+stays exactly as it is in this RFC, and `REQ-FILE-005`'s real ignore handling is the next slice after
+it (see the schedule), not a stretch goal folded in here.
+
+**D8 — expansion has a budget, measured.** Expanding a directory must not block a frame
+(`NFR-PERF-007`'s own rule for file churn, applied to the same surface). The 100 000-entry fixture is
+where that is measured, not asserted — and if the chosen mechanism cannot expand it without stalling,
+that is a D3 failure, not a performance note.
+
+**Sequenced as `0.24.0`**, after RFC-053's truth slice. RFC-052 changes how the sidebar looks; RFC-053
+stops three surfaces saying things that are not true. The second is smaller and more urgent.

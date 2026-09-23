@@ -22,6 +22,10 @@ Everything from M8 onward builds the product surface. This roadmap is milestone-
 | M13 | `0.23.x` onward | File Workflow | File watcher, multi-document model, overwrite confirmation, crash recovery. |
 | M14 | `1.0.0` candidate (after M13) | Release Readiness | Cross-platform support, documentation, CI, NFR verification, end-to-end QA, final security review. |
 
+**The ordered release schedule lives in [`rfcs/delivery-plan.md`](rfcs/delivery-plan.md#release-schedule)** — set 2026-09-24 from the requirements, roadmap and GUI audit, and it is where a schedule change belongs. Its ordering rule: **a thing the product says that is not true is fixed before a thing the product does not yet do.**
+
+**One 1.0 blocker is already known and scheduled**: the 1.0 minimum list promises *command approval for adapter-supported workflows*, and no user can reach one today (RFC-060, `0.33.0`).
+
 Versions are planning targets, not promises. A milestone can split into multiple releases if review shows the scope is too large — **M12 did, across ten releases.** **Corrected 2026-09-23**: the version column carried its original `0.8.x`/`0.9.x`/`1.0.0` guesses long after the releases themselves went past them, which made the schedule read as further behind than it is. It now records what shipped.
 
 ## Why M8 Was Split

@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 052 | [A File Explorer A User Can Read](./proposed/052-a-file-explorer-a-user-can-read.md) | **Proposed 2026-09-23**, raised by the owner. The sidebar renders `[DIR]`/`[FILE]` debug text, and — measured — **it is not a tree at all**: one directory scan, a `Parent` row to walk back out, so a change inside `src/` is invisible until you step into `src/` (`REQ-FILE-001` asks for a tree). The one-string row is not an accident: it centralises untrusted-name escaping, keeps labels in the catalog, and stays assertable without `iced`. **D3 is open**: adopt `iced-swdir-tree` (`iced ^0.14`, + `swdir`, + third-party `lucide-icons`) or compose our own, decided in slice A against a hostile fixture — a symlink escaping the root, a bidi-override name, an unreadable directory, 100 000 entries. An icon never carries meaning alone. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 052 | [A File Explorer A User Can Read](./accepted/052-a-file-explorer-a-user-can-read.md) | **Accepted 2026-09-24; D1, D2, D4–D8 decided on acceptance, D3 left open by design.** The sidebar renders `[DIR]`/`[FILE]` debug text and — measured — **is not a tree**: one directory scan and a `Parent` row, so a change inside `src/` is invisible until you step into `src/` (`REQ-FILE-001`). The one-string row carries escaping, catalog labels and testability, and all three survive the change. **D3 is decided in slice A by measurement** against a hostile fixture — bidi and non-UTF-8 names, a root-escaping symlink, 100 000 entries, an unreadable directory — between `iced-swdir-tree` and our own composition. An icon never carries meaning alone. Ships as `0.24.0`. [Handoff pack](./handoffs/052-file-explorer/README.md) |
 
 
 ### Reserved numbers — check this before authoring
@@ -52,6 +52,18 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 027 | Crash Recovery and Unsaved Buffer Persistence | M13 |
 | 028 | Cross-Platform Support | M14 |
 | 029 | Documentation, CI, and Release Automation | M14 |
+| 053 | What The Window Says Is True | M12 remainder |
+| 054 | User Configuration Completion | M12 (closes it) |
+| 055 | Ignore Rules In The Explorer | M12 remainder tail |
+| 056 | AgentRun Report And Classification | agent remainder |
+| 057 | Editor Essentials | M10 remainder |
+| 058 | A Project Held By One Process | M13 tail |
+| 059 | Seeing The Audit, And Redacting It | pre-1.0 |
+| 060 | Command Approval A User Can Reach | pre-1.0, **1.0 blocker** |
+
+Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23. Titles are the
+audit's findings, not guesses; each row's scope is in the release schedule in
+[`delivery-plan.md`](./delivery-plan.md).
 
 Added 2026-08-12 after a real collision: RFC-024 was authored just-in-time as
 *Diff Preview Policy* and took a number the delivery plan had already reserved for Git
@@ -102,6 +114,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 050 | [Transcripts From Earlier Runs](./handoffs/050-transcripts-from-earlier-runs/README.md) — **M12**; load what is on disk, and never delete what something is still writing or what the loader did not recognise |
 | 025 | [Notifications](./handoffs/025-notifications/README.md) — **M12**; **implemented and closed 2026-09-22** |
 | 030 | [Git Integration](./handoffs/030-git-integration/README.md) — **M12**; **implemented and closed 2026-09-23** |
+| 052 | [A File Explorer A User Can Read](./handoffs/052-file-explorer/README.md) — **M12 remainder**; debug text, and not a tree |
 | 051 | [Recovering the Recent-Project List](./handoffs/051-recovering-the-recent-project-list/README.md) — **M12**; the reset that takes a user's trust decisions with it |
 | — | [Release 0.20.0](./handoffs/release-0.20.0.md) — **M12**; the record that survives, and the trust state that survives with it |
 | 048 | [AgentRun Termination Records](./handoffs/048-agentrun-termination-records/README.md) — **M12**; the ending the trail cannot state, in a slot the schema already reserves |
