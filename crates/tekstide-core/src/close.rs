@@ -104,7 +104,7 @@ pub fn assess_close(summary: &CloseResourceSummary) -> CloseAssessment {
         &mut reasons,
         summary.dirty_files,
         CloseReasonCode::DirtyFile,
-        "dirty file",
+        "unsaved file",
     );
     push_reason(
         &mut reasons,

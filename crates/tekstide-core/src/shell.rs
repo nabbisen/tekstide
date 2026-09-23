@@ -253,10 +253,10 @@ fn render_active_project_workspace(state: &AppState) -> String {
         );
         output.push_str(" | document: ");
         output.push_str(text_document_state_label(document.state()));
-        output.push_str(" | dirty files: ");
+        output.push_str(" | unsaved files: ");
         output.push_str(&project.runtime_summary().dirty_files.to_string());
     } else {
-        output.push_str(" | active file: none | dirty files: ");
+        output.push_str(" | active file: none | unsaved files: ");
         output.push_str(&project.runtime_summary().dirty_files.to_string());
     }
     if let Some(message) = content_workspace.status().message() {

@@ -221,7 +221,7 @@ fn text_document_workflow_is_visible_in_active_content_workspace() {
         .expect("active document should edit");
     let rendered = shell.render_text();
     assert!(rendered.contains("document: dirty"));
-    assert!(rendered.contains("dirty files: 1"));
+    assert!(rendered.contains("unsaved files: 1"));
 
     shell
         .save_active_project_text_document()
@@ -229,7 +229,7 @@ fn text_document_workflow_is_visible_in_active_content_workspace() {
     let rendered = shell.render_text();
     assert!(rendered.contains("content status: saved"));
     assert!(rendered.contains("document: clean"));
-    assert!(rendered.contains("dirty files: 0"));
+    assert!(rendered.contains("unsaved files: 0"));
     assert_eq!(
         fs::read_to_string(project_dir.join("src/lib.rs")).unwrap(),
         "changed\n"
@@ -538,7 +538,7 @@ fn failed_open_preserves_existing_dirty_active_document_without_ambiguous_select
     assert!(rendered.contains("selected: file.txt"));
     assert!(rendered.contains("active file: file.txt"));
     assert!(rendered.contains("document: dirty"));
-    assert!(rendered.contains("dirty files: 1"));
+    assert!(rendered.contains("unsaved files: 1"));
     assert!(rendered.contains("message: file appears to be binary: binary.dat"));
 }
 
@@ -589,7 +589,7 @@ fn external_dirty_conflict_is_visible_without_overwriting_disk() {
 
     assert!(rendered.contains("content status: conflict"));
     assert!(rendered.contains("document: conflict"));
-    assert!(rendered.contains("dirty files: 1"));
+    assert!(rendered.contains("unsaved files: 1"));
     assert_eq!(
         fs::read_to_string(project_dir.join("file.txt")).unwrap(),
         "external edit\n"

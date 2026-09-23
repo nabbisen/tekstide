@@ -12479,7 +12479,7 @@ fn project_close_dialog_reasons_line_states_the_real_counts() {
             },
             tekstide_core::close::CloseReason {
                 code: tekstide_core::close::CloseReasonCode::DirtyFile,
-                message: "1 dirty file".to_owned(),
+                message: "1 unsaved file".to_owned(),
             },
         ],
         "/home/user/work/project",
@@ -12492,7 +12492,7 @@ fn project_close_dialog_reasons_line_states_the_real_counts() {
         "expected the real count, got {line:?}"
     );
     assert!(
-        line.contains("1 dirty file"),
+        line.contains("1 unsaved file"),
         "expected the second real count too, got {line:?}"
     );
     assert!(
@@ -12526,7 +12526,7 @@ fn project_close_dialog_names_running_processes_is_false_without_a_process_reaso
     let modal = project_close_modal_fixture(
         vec![tekstide_core::close::CloseReason {
             code: tekstide_core::close::CloseReasonCode::DirtyFile,
-            message: "1 dirty file".to_owned(),
+            message: "1 unsaved file".to_owned(),
         }],
         "/home/user/work/project",
     );

@@ -597,7 +597,7 @@ fn active_project_with_resources_needs_confirmation_and_stays_open() {
                 },
                 CloseReason {
                     code: CloseReasonCode::DirtyFile,
-                    message: "2 dirty files".to_owned(),
+                    message: "2 unsaved files".to_owned(),
                 },
             ]
         }

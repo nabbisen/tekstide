@@ -64,7 +64,7 @@ fn active_resources_need_confirmation() {
                 },
                 CloseReason {
                     code: CloseReasonCode::DirtyFile,
-                    message: "1 dirty file".to_owned(),
+                    message: "1 unsaved file".to_owned(),
                 },
                 CloseReason {
                     code: CloseReasonCode::PendingApproval,
@@ -104,4 +104,31 @@ fn known_resources_need_confirmation_even_when_provider_is_unavailable() {
             ],
         }
     );
+}
+
+/// RFC-053 review 418, C1: the close confirmation names the same fact the
+/// board's count names, in the same word. Open editor buffers with unsaved
+/// edits are "unsaved", never "dirty" (D6: one fact, one word). Asserted
+/// on `assess_close`'s own output -- the fixtures elsewhere in this crate
+/// pass their own message strings through and would not notice the
+/// production wording changing back.
+#[test]
+fn the_close_confirmation_calls_unsaved_buffers_unsaved_not_dirty() {
+    for (count, expected) in [(1, "1 unsaved file"), (3, "3 unsaved files")] {
+        let assessment = assess_close(&CloseResourceSummary {
+            provider_state: CloseResourceProviderState::Complete,
+            running_processes: 0,
+            dirty_files: count,
+            pending_approvals: 0,
+            review_ready_changes: 0,
+        });
+
+        let CloseAssessment::NeedsConfirmation { reasons } = assessment else {
+            panic!("unsaved buffers must need confirmation");
+        };
+        assert_eq!(reasons.len(), 1);
+        assert_eq!(reasons[0].code, CloseReasonCode::DirtyFile);
+        assert_eq!(reasons[0].message, expected);
+        assert!(!reasons[0].message.contains("dirty"));
+    }
 }
