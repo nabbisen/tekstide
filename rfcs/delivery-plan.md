@@ -26,11 +26,11 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 
 | Area | Requirements | Status |
 | --- | --- | --- |
-| Project lifecycle | `REQ-PROJ-001`..`009` | Model complete; no rendered surface |
+| Project lifecycle | `REQ-PROJ-001`..`008` | Model complete, and every one of them now has a surface. **`REQ-PROJ-009` moved out of this row 2026-09-23**: a process-visible project lock does not exist — grepped, no `ProjectLock` or equivalent anywhere — and that requirement's own text says an in-memory guard is not enough |
 | Text document | `REQ-EDIT-001`, `004`..`007` | Model complete, single active document |
-| File explorer | `REQ-FILE-001`, `005` | Bounded read model; no tree UI |
+| File explorer | `REQ-FILE-001` | Bounded read model **and a rendered tree with per-file Git badges** (RFC-030 PR-030-C). **`REQ-FILE-005` moved out 2026-09-23**: the scanner collapses a fixed `[.git, node_modules, target]` list, and reads no `.gitignore` at all |
 | Terminal sessions | `REQ-TERM-001`..`010` | Linux runtime complete; no renderer |
-| AgentRun | `REQ-AGENT-001`..`011`, `014`..`018` | Launch, lifecycle, transcript, review complete |
+| AgentRun | `REQ-AGENT-001`..`010`, `014`, `016`..`018` | Launch, lifecycle, transcript, review complete. **`011` and `015` moved out 2026-09-23**: no final report or handoff note exists (grepped: no producer, no surface), and `AgentRun` carries no run classification field at all — a user cannot mark a run as coding, review, documentation, testing, refactoring or release |
 | AI CLI profiles | `REQ-CLI-001`..`005` | Model complete; code-defined only, not user config |
 | Diff/review | `REQ-REVIEW-001`..`005` | Models complete; no rendered surface |
 | Workspace trust | `REQ-SEC-001`..`006` | Complete at model level |
@@ -40,7 +40,7 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | Filesystem safety | `REQ-SEC-040`..`043` | Complete |
 | Session recovery | `REQ-RECOVER-001`, `003`, `004` | Recent projects and run records restore |
 | i18n and text safety | Project rules, UI/UX §18 | **Complete** — catalog, locale fallback, pluralization, shared text-safety primitive, and mechanical enforcement. Translation *content* and runtime locale switching remain out of scope (RFC-016 closed 2026-08-01) |
-| Configuration system | `REQ-CONFIG-001`..`007` | **Built by RFC-023, reached by RFC-045 (2026-09-12).** The file is read at startup and four keys plus a profile definition take effect; every other key RFC-023's schema defined is refused by name until it has a consumer, so "implemented" here means the mechanism, not the whole illustrative schema. `transcript_retention_days` is recorded and not yet enforced — no age-based purge reads it (RFC-011, reserved) |
+| Configuration system | `REQ-CONFIG-001`..`007` | **Built by RFC-023, reached by RFC-045 (2026-09-12).** The file is read at startup and four keys plus a profile definition take effect; every other key RFC-023's schema defined is refused by name until it has a consumer, so "implemented" here means the mechanism, not the whole illustrative schema. `transcript_retention_days` **is enforced as of RFC-049** (2026-09-16) — the retention cleanup reads it at project open and at launch preflight; the sentence that said otherwise was stale from 2026-09-12. **`REQ-CONFIG-006` and most of `007` are not met (2026-09-23)**: keybindings are a compile-time `KeybindingPolicy` with no config key, and theme, font family, font size and terminal scrollback are all compile-time constants. Only AI CLI profiles, `default_profile`, `transcript_retention_days` and `agent_run_limit` are user-settable |
 | Command approval | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **Model complete and audited; headless and unreachable** — no adapter-spawn pathway, no dialog. Cooperative, not enforced. RFC-021 closed 2026-07-30 |
 
 ### Not implemented
@@ -48,8 +48,12 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | Area | Requirements | Milestone |
 | --- | --- | --- |
 | **Desktop GUI** — every rendered surface | External design §3, UI/UX baseline | M8-M11 |
-| **Git integration** — no module; RFC-012 detector reports Git unavailable | `REQ-GIT-001`..`007` | M12 |
-| **Notifications** — no domain type | `REQ-NOTIFY-001`..`005` | M12 |
+| **User-configurable keybindings, theme, fonts and scrollback** — M12's own scope names them; RFC-023 shipped the mechanism and RFC-045 reached it, but no key exists for any of these. `NFR-UX-004` rides on the same gap | `REQ-CONFIG-006`, `007`; `NFR-UX-004` | **M12 remainder, unscheduled (2026-09-23)** |
+| **`.gitignore` in the explorer, and an `ignored` badge** — the scanner collapses a fixed directory list; `git status` is invoked without `--ignored` | `REQ-FILE-005`, part of `002` | unscheduled (2026-09-23) |
+| **AgentRun report/handoff note, and run classification** | `REQ-AGENT-011`, `015` | unscheduled (2026-09-23) |
+| **Process-visible project lock** — two Tekstide processes can hold the same project root with no conflict signal | `REQ-PROJ-009` | unscheduled (2026-09-23) |
+| **Syntax highlighting, a line-number gutter, undo** — the editor renders plain text with a cursor readout only | `REQ-EDIT-002` (part), `003` | M10 remainder, unscheduled |
+| **Secret-like environment redaction** — `RedactionClaimScope` has one variant and no pattern set; nothing renders the audit store either | `REQ-SEC-023` | unscheduled |
 | **File watcher** | `REQ-FILE-003`, `004` | M13 |
 | **Multi-document** — one active document only | External design §3.4 | M13 |
 | **Syntax highlighting** | `REQ-EDIT-003` | M10 (optional) |

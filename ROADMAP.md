@@ -18,11 +18,11 @@ Everything from M8 onward builds the product surface. This roadmap is milestone-
 | M9 | `0.5.0` (released 2026-08-08) + `0.5.1` (release candidate) | Terminal Surface | Terminal renderer honoring the RFC-009 boundary, immersion mode, split policy, rendered paste protection, trusted-UI evidence. |
 | M10 | `0.6.x` | Content Surfaces | Editor, file explorer tree, diff/review surface, AgentRun report surface. |
 | M11 | `0.7.x` | Approval And Safety Dialogs | Command approval model and dialog, trust/safe-close/destructive dialogs, remaining security audit producers. |
-| M12 | `0.8.x` | Configuration And Integrations | Configuration system, keybindings/theme/profiles, Git integration, notifications. |
-| M13 | `0.9.x` | File Workflow | File watcher, multi-document model, overwrite confirmation, crash recovery. |
-| M14 | `1.0.0` candidate | Release Readiness | Cross-platform support, documentation, CI, NFR verification, end-to-end QA, final security review. |
+| M12 | `0.13.0`–`0.22.0` (delivered 2026-08-25 → 2026-09-23; **one remainder open**) | Configuration And Integrations | Configuration system, keybindings/theme/profiles, Git integration, notifications. **Delivered: the configuration mechanism (RFC-023/045), Git integration (RFC-030), notifications (RFC-025), and thirteen interaction/audit RFCs (039–051). Not delivered: keybindings, theme, fonts and terminal scrollback as user configuration** (`REQ-CONFIG-006`, `007`; `NFR-UX-004`). |
+| M13 | `0.23.x` onward | File Workflow | File watcher, multi-document model, overwrite confirmation, crash recovery. |
+| M14 | `1.0.0` candidate (after M13) | Release Readiness | Cross-platform support, documentation, CI, NFR verification, end-to-end QA, final security review. |
 
-Versions are planning targets, not promises. A milestone can split into multiple releases if review shows the scope is too large.
+Versions are planning targets, not promises. A milestone can split into multiple releases if review shows the scope is too large — **M12 did, across ten releases.** **Corrected 2026-09-23**: the version column carried its original `0.8.x`/`0.9.x`/`1.0.0` guesses long after the releases themselves went past them, which made the schedule read as further behind than it is. It now records what shipped.
 
 ## Why M8 Was Split
 
