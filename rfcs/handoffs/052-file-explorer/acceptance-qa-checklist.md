@@ -52,6 +52,11 @@ implementer's to paper over.
       Unix socket path is limited to 108 bytes. That is "how to run the gate here", the same class as
       the `wtype` and screenshot notes.
 
+- [ ] **Residue, ruled at review 422:** the `tekstide-shell-test-*` family and the short-named
+      `t`/`tsr`/`tsms` builders get the same treatment as **PR-052-B's first commit**, before B adds
+      fixtures of its own. *Reviewer-measured after the first fix: 498 entries a run, none of the three
+      targeted families, 1 492 after three runs.* `ARCHITECTURE.md`'s number should then read zero.
+
 ## PR-052-B — the tree
 
 - [ ] Folders expand in place; a change inside `src/` is visible without stepping into `src/`
