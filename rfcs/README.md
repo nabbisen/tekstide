@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 053 | [What The Window Says Is True](./proposed/053-what-the-window-says-is-true.md) | **Proposed 2026-09-24**, from the GUI audit. Six measured defects, each the product saying something untrue: an `RFC-017` placeholder shipped in Terminal mode; modals clipping their own `Close` away at 760×560; the status bar wrapping at 520px **against the one-line invariant `content_area_height` depends on to size PTYs**; Change Review saying "no changes" while the bar says `2 changed`; `unknown` where zero is known; and two different facts both called dirty/changed. **D3 decides to measure the bar's height rather than elide a field** — `REQ-NOTIFY-002` names five and eliding drops one silently. `0.23.0`. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
