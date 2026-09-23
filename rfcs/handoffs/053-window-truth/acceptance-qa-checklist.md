@@ -58,12 +58,30 @@ implementer's to paper over.
 
 ## PR-053-B — the layout
 
-- [ ] At **760×560**, every modal's `Close` control and dismiss hint are reachable; content scrolls.
-- [ ] At **520×400**, `content_area_height` subtracts the **rendered** bar height: the content area
+- [x] At **760×560**, every modal's `Close` control and dismiss hint are reachable; content scrolls.
+      — `PinnedFooter` (`surface/frame.rs`), proven headlessly for any body length at 560 and 400px;
+      live at 760×560 **and** 520×400 for the keyboard reference (`evidence/07-`, `08-`). **Named
+      limit:** the other nine modals are covered structurally, not by a capture each — see
+      `qa-evidence.md`.
+- [x] At **520×400**, `content_area_height` subtracts the **rendered** bar height: the content area
       shrinks by exactly the bar's extra height. **Ablation:** restore the constant; that test fails
-      alone.
-- [ ] A terminal open at the narrow size is sized to the space that exists — captured, not reasoned.
+      alone. — **satisfied by a different mechanism than the box names, and that is the point to
+      review.** There is no `content_area_height` any more: the formula was wrong for reasons beyond the
+      bar (see `qa-evidence.md`), so the PTY is sized from the region the layout gave it.
+      `a_taller_status_bar_shrinks_the_content_area_by_exactly_the_difference` (fails alone when the
+      bar is given a constant height) and `pane_geometry_follows_the_measured_region_and_nothing_else`
+      (fails when a constant size replaces the measurement) are the two halves.
+- [x] A terminal open at the narrow size is sized to the space that exists — captured, not reasoned.
+      — `evidence/06-`; and the same at normal size, before and after (`04-`, `05-`): 177 → 200.
 - [ ] No other change rides along in this commit.
+      — **left unticked; three changes rode along, each required by the capture box above.** (1) Rows
+      were counted at line height 1.0 and drawn at 1.3 (`grid_line_height`); without it the pane
+      still ends 12 lines short (`seq 1 200` ended at 188). (2) The status bar wraps whole fields
+      (`Row::wrap`) — at 520px a plain row cut `Ctrl+Alt+P` to `Ctrl+Alt+`. (3) The modal scrollbar is
+      embedded, not overlaid — the first capture showed it covering the end of the longest line. Also
+      deleted, as dead once the formula went: `window_size`, `WindowResized`, `WindowOpened`, the two
+      window subscriptions and seven chrome constants. Carried items C1/C2 are **separate commits**
+      (`5ffce5e`, `02b088f`).
 - [ ] **C1 (carried from review 418):** the close-project dialog says **unsaved**, like the board.
       After PR-053-A the product calls one fact "unsaved" in one place and "dirty" in another, and
       that inconsistency is one this RFC introduced. One string.
@@ -73,11 +91,12 @@ implementer's to paper over.
 
 ## Whole-RFC
 
-- [ ] The colour-alone scan and the i18n completeness scan still pass (§7).
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
+- [x] The colour-alone scan and the i18n completeness scan still pass (§7). — both inside every
+      full-workspace run below.
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
       staging, `rfc_docs_invariants`, and **three consecutive full-workspace runs with
-      `--no-fail-fast`**, output redirected to files.
-- [ ] Every new intermittent failure has a dated row in `test-process-leak.md`.
+      `--no-fail-fast`**, output redirected to files. — 593 + 9 + 877, all three.
+- [x] Every new intermittent failure has a dated row in `test-process-leak.md`. — none occurred.
 - [ ] Commits are pushed once the gate is green.
 
 ## Final Acceptance Decision

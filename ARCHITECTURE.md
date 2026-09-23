@@ -199,6 +199,14 @@ reproduced that independently. Recorded as a fact, not a mechanism. The next sli
 capture should **try before assuming the gap**; the bounded-evidence rule still applies if it does
 not land.
 
+**Resizing the window for evidence: `niri msg action set-window-width --id <ID> 520` and
+`set-window-height --id <ID> 400`** set the tiled window's size exactly (`niri msg windows` then reports
+`Window size: 520 x 400`; the screenshot is that times the output scale). RFC-053 PR-053-B needed 760×560
+and 520×400 captures and there is no other route. **Stop the app with `pkill -x tekstide`, never
+`pkill -f target/release/tekstide`:** `-f` matches your own shell's command line when it contains that
+string, kills the shell, and aborts the rest of the script with exit 144 — the screenshot you then read is
+the *previous* run's.
+
 **A catalog string's interpolated values are wrapped in invisible bidi-isolate marks, so a test that
 asserts on the words a user reads must strip them.** Fluent isolates every placeable — a number, a
 name, a branch — in U+2068 … U+2069 (and `text_safety::quote_untrusted` adds its own isolate on top

@@ -19,6 +19,17 @@ reconstruction. `0.23.0` is RFC-053: things the window said that were not true.
   adjacent surfaces. The attention state those buffers raise says "Unsaved edits" for the same reason.
 - **The board names the automations Restricted Mode blocks**, not only how many.
 - **Approval History says it is empty before it lists caveats about entries** that do not exist.
+- **A terminal is sized to the space it has.** In `0.22.0` a terminal's last rows fell below the visible
+  area — `seq 1 200` ended at line 177 in a full-size window — because its size was computed from
+  constants for the heights of things around it, and the top bar had grown to three rows without its
+  constant following; rows were also counted at a shorter line height than they are drawn with. The size now
+  comes from the space the layout gives the terminal.
+- **Dialogs keep their buttons on screen.** In a small window a dialog was centred at its full height and
+  clipped at both ends — the keyboard reference lost `Close` and "Escape closes this." with no scrollbar
+  and no hint. The body scrolls; the buttons and the dismiss hint stay in the window.
+- **The status bar moves a field down whole instead of cutting a word.** At a narrow width it wraps onto
+  further lines; the layout accounts for the height.
+- **The close-project confirmation says "unsaved file", not "dirty file"**, matching the board.
 
 ## 0.22.0 - The Window Knows What Git Knows
 
