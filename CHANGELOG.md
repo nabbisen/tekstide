@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+Kept incrementally, as `0.22.0`'s was (review 410), so the release candidate is a promotion and not a
+reconstruction. `0.23.0` is RFC-053: things the window said that were not true.
+
+### Fixed — the window says what is true
+
+- **Terminal mode no longer names an internal RFC.** Its empty state said "RFC-017 adds the terminal
+  here"; it now says what the mode is and how to start a terminal. A check over the shipped catalog
+  refuses any message that names an RFC or a slice id, so it cannot come back.
+- **Change Review's empty state no longer claims the whole project.** It read "No changes have been
+  detected in this project" beside a status bar saying "2 changed". It now says no AI CLI run has
+  produced changes, and where your own changes are shown.
+- **A project you have just opened reports zero terminals and zero agent runs**, not "unknown".
+- **The board's "dirty files" is now "unsaved files".** It counts open editor buffers with unsaved
+  edits; the status bar's "changed" counts what Git reports. Two facts had near-identical words on
+  adjacent surfaces. The attention state those buffers raise says "Unsaved edits" for the same reason.
+- **The board names the automations Restricted Mode blocks**, not only how many.
+- **Approval History says it is empty before it lists caveats about entries** that do not exist.
+
 ## 0.22.0 - The Window Knows What Git Knows
 
 Status: **released on 2026-09-23.** Published to crates.io as `tekstide 0.22.0` and
