@@ -824,6 +824,128 @@ fn the_board_the_status_bar_and_change_review_agree_about_two_changed_files_and_
     assert!(review.contains("AI CLI run"), "{review:?}");
 }
 
+// --- RFC-053 PR-053-B: the layout ---------------------------------------
+
+/// D3, the required test: a taller status bar shrinks the content area by
+/// **exactly** the difference. Driven through `assemble_window_layout` --
+/// the function `view` really calls -- with `iced`'s null renderer, so the
+/// number comes from the layout algorithm and not from a constant.
+///
+/// **Ablation** (reported in `qa-evidence.md`): give the content area a
+/// fixed height instead of `Fill` and this fails; that failure is the
+/// slice's whole point.
+#[test]
+fn a_taller_status_bar_shrinks_the_content_area_by_exactly_the_difference() {
+    fn band<'a>(height: f32) -> iced::Element<'a, Message, iced::Theme, ()> {
+        iced::widget::container(iced::widget::text::<iced::Theme, ()>(""))
+            .width(iced::Length::Fixed(100.0))
+            .height(iced::Length::Fixed(height))
+            .into()
+    }
+    fn content_height(bar_height: f32) -> f32 {
+        let mut page = super::assemble_window_layout(
+            band(40.0),
+            iced::widget::container(iced::widget::text::<iced::Theme, ()>(""))
+                .width(iced::Length::Fill)
+                .height(iced::Length::Fill)
+                .into(),
+            band(bar_height),
+        );
+        let mut tree = iced::advanced::widget::Tree::new(page.as_widget());
+        let node = page.as_widget_mut().layout(
+            &mut tree,
+            &(),
+            &iced::advanced::layout::Limits::new(iced::Size::ZERO, iced::Size::new(520.0, 400.0)),
+        );
+        let children = node.children();
+        assert_eq!(children.len(), 3, "top bar, content area, status bar");
+        assert!(
+            (children[2].bounds().y + children[2].bounds().height - 400.0).abs() < 0.5,
+            "the status bar must sit at the bottom of the window"
+        );
+        children[1].bounds().height
+    }
+
+    let one_line = content_height(20.0);
+    let three_lines = content_height(60.0);
+    assert!(
+        (one_line - three_lines - 40.0).abs() < 0.01,
+        "a bar 40px taller must take exactly 40px from the content area: {one_line} -> \
+         {three_lines}"
+    );
+    assert!((one_line - (400.0 - 40.0 - 20.0)).abs() < 0.01);
+}
+
+/// D3 at the PTY: the pane's grid is derived from the measured region and
+/// from nothing else. A smaller measured region gives fewer rows, computed
+/// by the same production functions; there is no chrome subtraction left to
+/// disagree with the layout.
+///
+/// **Ablation**: put a window-size-minus-constants formula back into
+/// `terminal_workspace_content_size` and `PanesRegionMeasured` stops
+/// mattering -- both assertions here fail.
+#[test]
+fn pane_geometry_follows_the_measured_region_and_nothing_else() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("053-region-geometry");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    launch_a_real_terminal(&mut state);
+
+    let font_size = state.theme.font_size_body();
+    let expected = |region: iced::Size| {
+        let per_pane = match crate::surface::terminal::layout_class_for(region.width, font_size) {
+            tekstide_core::navigation::TerminalLayoutClass::Wide => {
+                (region.width - crate::surface::terminal::PANE_GAP_PX) / 2.0
+            }
+            tekstide_core::navigation::TerminalLayoutClass::Narrow => region.width,
+        };
+        let (cols, rows) =
+            crate::surface::terminal::pane_dimensions_for_area(per_pane, region.height, font_size);
+        (rows, cols)
+    };
+
+    let tall = iced::Size::new(1200.0, 700.0);
+    let _ = super::update(&mut state, Message::PanesRegionMeasured(tall));
+    assert_eq!(state.terminal_panes[0].dimensions(), expected(tall));
+
+    // The status bar wraps: the region loses 60px. Exactly that much, and
+    // no more, comes off the terminal.
+    let shorter = iced::Size::new(1200.0, 640.0);
+    let _ = super::update(&mut state, Message::PanesRegionMeasured(shorter));
+    assert_eq!(state.terminal_panes[0].dimensions(), expected(shorter));
+    assert!(
+        state.terminal_panes[0].dimensions().0 < expected(tall).0,
+        "a region 60px shorter must give the terminal fewer rows"
+    );
+}
+
+/// D2, the modal side: no modal is built the old way, with its buttons in
+/// the body. The layout property (`surface::frame::tests`) proves a footer
+/// stays in the window; this proves no builder went back to handing
+/// `modal_dialog_box` a single undivided column, which would pass the
+/// layout test and still lose its `Close` off the bottom. A source scan,
+/// like the other seam scans in this file, and as limited: it cannot tell
+/// *which* lines a builder put in its footer -- the live captures at
+/// 760x560 cover that.
+#[test]
+fn no_modal_is_built_without_a_pinned_footer() {
+    let source = include_str!("../shell.rs");
+    assert!(
+        !source.contains("modal_dialog_box(state, column(lines)"),
+        "a modal built the old way, buttons in the body, has no pinned footer"
+    );
+    assert_eq!(
+        source
+            .matches("modal_dialog_box_split(state, lines, ")
+            .count(),
+        8,
+        "the eight Vec-built modals each name how many trailing lines are actions"
+    );
+}
+
 // --- Mechanical seam scans -------------------------------------------
 //
 // Response 128 Required: the original scans named `shell.rs` directly
@@ -3257,12 +3379,13 @@ fn launch_terminal_shell_input_switches_to_terminal_immersion_and_launches_a_rea
 // --- Terminal resize handoff, response 243's required fix -------------
 //
 // Response 242's implementation applied a computed geometry only from
-// `Message::WindowResized`'s handler, which fires only on a live drag --
+// the resize handler, which fires only on a live drag --
 // so a pane launched before the user ever resized the window (the common
 // case) stayed at the launch-time `ROWS`/`COLS` default forever, even in
 // an already-large window. These tests prove the fix: a real window size
-// arriving via `WindowResized`, then a pane launched afterward, must be
-// sized immediately, not left at the default until a second drag.
+// arriving as `PanesRegionMeasured` (RFC-053 D3: it was `WindowResized`),
+// then a pane launched afterward, must be sized immediately, not left at
+// the default until a second resize.
 
 fn launch_a_real_terminal(state: &mut State) {
     let _ = super::update(
@@ -3280,21 +3403,21 @@ const LAUNCH_DEFAULT: (u16, u16) = (
     crate::surface::terminal::COLS as u16,
 );
 
-/// Precondition check, not the regression itself: with no window size
-/// known yet (`state.window_size` starts `None`, and nothing in this
-/// test dispatches a `WindowResized`), a freshly launched pane has
+/// Precondition check, not the regression itself: with no region
+/// measured yet (`state.panes_region` starts `None`, and nothing in this
+/// test dispatches a `PanesRegionMeasured`), a freshly launched pane has
 /// nothing to compute a real size from and must stay at the documented
 /// launch-time default -- proving the default is still reachable, not
 /// that this test is exercising a no-op path by accident.
 #[test]
-fn a_pane_launched_before_any_window_size_is_known_stays_at_the_launch_default() {
+fn a_pane_launched_before_any_region_is_measured_stays_at_the_launch_default() {
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir("resize-before-window-size");
     app_shell
         .add_project_from_path(&project_dir)
         .expect("a freshly created directory is a valid project root");
     let mut state = state_with(app_shell);
-    assert!(state.window_size.is_none(), "test precondition");
+    assert!(state.panes_region.is_none(), "test precondition");
 
     launch_a_real_terminal(&mut state);
 
@@ -3302,16 +3425,16 @@ fn a_pane_launched_before_any_window_size_is_known_stays_at_the_launch_default()
     assert_eq!(
         pane.dimensions(),
         LAUNCH_DEFAULT,
-        "with no real window size known yet, the pane has nothing to compute a size from and \
+        "with no measured region yet, the pane has nothing to compute a size from and \
          must stay at the launch-time default"
     );
 }
 
-/// `Message::WindowResized` on an already-launched pane: the geometry
+/// `Message::PanesRegionMeasured` on an already-launched pane: the geometry
 /// handoff's own core behaviour, still exercised here as the baseline
 /// the launch-site fix is compared against below.
 #[test]
-fn window_resized_resizes_an_already_launched_pane_away_from_the_default() {
+fn a_measured_region_resizes_an_already_launched_pane_away_from_the_default() {
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir("resize-existing-pane");
     app_shell
@@ -3326,29 +3449,28 @@ fn window_resized_resizes_an_already_launched_pane_away_from_the_default() {
 
     let _ = super::update(
         &mut state,
-        Message::WindowResized(iced::Size::new(1600.0, 1000.0)),
+        Message::PanesRegionMeasured(iced::Size::new(1200.0, 700.0)),
     );
 
     let pane = state.terminal_panes.first().expect("still one pane");
     assert_ne!(
         pane.dimensions(),
         LAUNCH_DEFAULT,
-        "a real WindowResized event, once state.window_size is known, must resize an \
+        "a measured region must resize an \
          already-tracked pane away from the launch-time default"
     );
 }
 
-/// **The regression this response-243 fix exists for.** A real window
+/// **The regression this response-243 fix exists for.** A real region
 /// size becomes known first (as it will be in practice, moments after
-/// boot, via `Message::WindowOpened`'s handler -- simulated here the
-/// same way `TerminalPasteResolved` tests simulate an async result
-/// without exercising `iced`'s own I/O plumbing, by dispatching the
-/// message the real Task would eventually produce). A terminal launched
+/// the first layout that contains one -- simulated here the same way
+/// `TerminalPasteResolved` tests simulate an async result, by dispatching
+/// the message the real widget would eventually publish). A terminal launched
 /// *afterward* must be sized from that already-known geometry
 /// immediately, at launch -- not left at the default until a second,
 /// separate resize happens to fire.
 #[test]
-fn a_pane_launched_after_the_window_size_is_already_known_is_sized_immediately() {
+fn a_pane_launched_after_the_region_is_already_measured_is_sized_immediately() {
     let mut app_shell = ApplicationShell::new();
     let project_dir = fresh_project_dir("resize-after-window-size");
     app_shell
@@ -3358,7 +3480,7 @@ fn a_pane_launched_after_the_window_size_is_already_known_is_sized_immediately()
 
     let _ = super::update(
         &mut state,
-        Message::WindowResized(iced::Size::new(1600.0, 1000.0)),
+        Message::PanesRegionMeasured(iced::Size::new(1200.0, 700.0)),
     );
     assert!(
         state.terminal_panes.is_empty(),
@@ -3388,7 +3510,7 @@ fn a_pane_launched_after_the_window_size_is_already_known_is_sized_immediately()
 /// vector-in/vector-out shape both call sites share, proving
 /// `apply_terminal_geometry`'s own "every tracked pane" behaviour
 /// (response 242) still holds when triggered from a launch site rather
-/// than a `WindowResized` handler.
+/// than a resize handler.
 #[test]
 fn apply_terminal_geometry_resizes_every_tracked_pane_when_called_from_a_launch_site() {
     let mut app_shell = ApplicationShell::new();
@@ -3400,7 +3522,7 @@ fn apply_terminal_geometry_resizes_every_tracked_pane_when_called_from_a_launch_
 
     let _ = super::update(
         &mut state,
-        Message::WindowResized(iced::Size::new(1600.0, 1000.0)),
+        Message::PanesRegionMeasured(iced::Size::new(1200.0, 700.0)),
     );
     launch_a_real_terminal(&mut state);
     let first_dimensions = state.terminal_panes.first().unwrap().dimensions();

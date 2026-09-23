@@ -834,16 +834,25 @@ pub struct State {
         tekstide_core::domain::ApprovalId,
         tekstide_core::approval::ProposalId,
     >,
-    /// Terminal resize handoff: the window's real logical size, as of
-    /// the most recent `iced::window::resize_events()` firing --
-    /// `None` until the first one arrives (every tracked pane keeps
+    /// Terminal resize handoff: the size of the region the terminal panes
+    /// occupy -- `None` until the layout engine has produced one (every
+    /// tracked pane keeps
     /// [`crate::surface::terminal::ROWS`]/[`crate::surface::terminal::COLS`]
-    /// until then). `Message::WindowResized`'s handler is the only writer;
-    /// [`terminal_workspace_content_size`] is the only reader, and it is
-    /// the one place this becomes a real grid size -- see that
-    /// function's own doc for why a computed size, not a second live
-    /// measurement, is what response 242 chose.
-    window_size: Option<iced::Size>,
+    /// until then). `Message::PanesRegionMeasured`'s handler is the only
+    /// writer; [`terminal_workspace_content_size`] is the only reader.
+    ///
+    /// RFC-053 D3: this is the size the layout engine **produced** for the
+    /// region the panes occupy, published by
+    /// [`crate::surface::frame::MeasureSize`] -- not a window size minus
+    /// chrome constants. It replaced `window_size`, which fed a formula
+    /// that subtracted named constants for the top bar, status bar, mode
+    /// toggle, session bar and paddings, none of them enforced: measured
+    /// against the `0.22.0` release binary, `seq 1 200` in a terminal
+    /// ended at line 177 because the pane was taller than the space it
+    /// was given (the top bar had grown to three rows without its
+    /// constant following; the mode-toggle and launch-button rows were
+    /// never in the formula at all).
+    panes_region: Option<iced::Size>,
     /// change-detection-wiring handoff, Slice C: the filesystem baseline
     /// captured at agent-run launch (`attempt_agent_run_launch_with_profile`),
     /// held here until that run's terminal exits and detection can run
@@ -1256,7 +1265,7 @@ impl State {
             approval_coordinator: tekstide_core::approval::ApprovalCoordinator::new(),
             approval_channels: Vec::new(),
             approval_proposal_ids: std::collections::HashMap::new(),
-            window_size: None,
+            panes_region: None,
             agent_run_change_baselines: std::collections::HashMap::new(),
             agent_run_change_detection_status: std::collections::HashMap::new(),
             detected_changes_by_change_set: seeded_change_review_demo.into_iter().collect(),
@@ -1550,36 +1559,16 @@ pub enum Message {
     /// decision UI -- "one decision, one command, read individually"
     /// must hold regardless of how the dialog was reached.
     OpenApprovalHistoryEntry(tekstide_core::domain::ApprovalId),
-    /// Terminal resize handoff (response 242): the window's logical size
-    /// changed. `iced::window::resize_events()` is genuinely event-driven
-    /// (filters `Event::Window(Event::Resized(_))`), not a per-frame
-    /// subscription -- fires on discrete geometry changes only, which is
-    /// also why applying every one of these directly, with no further
-    /// coalescing, does not produce a syscall storm: many of them during
-    /// a drag collapse to the same computed grid size until a real
-    /// glyph/line boundary is crossed (`apply_terminal_geometry`'s own
-    /// no-op-when-unchanged check, backed by `TerminalPane::resize`'s).
-    ///
-    /// Response 243's required fix: also the message a real, queried
-    /// window size arrives as (see `Message::WindowOpened`'s handler) --
-    /// `apply_terminal_geometry` does not care whether the size it is
-    /// given came from a drag or from the one-time query that primes
-    /// `state.window_size` after boot; either way, it is a real size to
-    /// apply to every tracked pane.
-    WindowResized(iced::Size),
-    /// Response 243's required fix: `iced::window::open_events()` fired
-    /// -- a window (in practice, this application's one and only window)
-    /// now exists. `boot()` cannot know the real window size (no window
-    /// is open yet when it runs -- see its own doc comment), so
-    /// `state.window_size` starts `None` and every pane launched before
-    /// the first real `WindowResized` event used to stay at the
-    /// launch-time `ROWS`/`COLS` default until the user happened to drag
-    /// the window edge. This message's handler asks `iced` for the real
-    /// size directly (`iced::window::size`) and feeds it through the
-    /// same `Message::WindowResized` path a live resize uses -- one
-    /// formula, one application point, whether the size came from
-    /// opening or from resizing.
-    WindowOpened(iced::window::Id),
+    /// RFC-053 D3: the region the terminal panes occupy was laid out at a
+    /// new size. Published by [`crate::surface::frame::MeasureSize`] on the
+    /// redraw after a layout, and only when the size differs from the last
+    /// one it published -- a resize costs one message and a steady window
+    /// none. Replaces `WindowResized`/`WindowOpened`, which existed only to
+    /// feed a constants-based formula. `apply_terminal_geometry` applies it
+    /// to every tracked pane; many of these during a drag collapse to the
+    /// same character grid until a glyph/line boundary is crossed
+    /// (`TerminalPane::resize`'s own no-op-when-unchanged check).
+    PanesRegionMeasured(iced::Size),
     /// RFC-032: fired by the `TrustSettings` surface's own "Grant"
     /// control -- opens the real confirmation dialog. No I/O here; the
     /// real grant only happens on `ModalActivate` with focus on `Grant`
@@ -1807,8 +1796,7 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::GitSummaryComputed { .. }
         | Message::TerminalPasteResolved { .. }
         | Message::ApprovalPollTick
-        | Message::WindowResized(_)
-        | Message::WindowOpened(_)
+        | Message::PanesRegionMeasured(_)
         | Message::PathFieldPasteResolved(_) => None,
     }
 }
@@ -2554,12 +2542,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::OpenApprovalHistoryEntry(approval_id) => {
             open_approval_history_entry(state, &approval_id);
         }
-        Message::WindowResized(size) => {
-            state.window_size = Some(size);
+        Message::PanesRegionMeasured(size) => {
+            state.panes_region = Some(size);
             apply_terminal_geometry(state);
-        }
-        Message::WindowOpened(id) => {
-            return iced::window::size(id).map(Message::WindowResized);
         }
         Message::OpenTrustGrantDialog => {
             open_trust_grant_dialog(state);
@@ -2577,70 +2562,24 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
     Task::none()
 }
 
-/// Terminal resize handoff: the layout constants
-/// [`terminal_workspace_content_size`]'s chrome subtraction is built
-/// from, named rather than duplicated as bare literals -- each mirrors
-/// the real value the corresponding view function already uses
-/// ([`top_bar`]'s `padding(8)`, [`status_bar`]'s `padding(6)`,
-/// [`sidebar_view`]'s fixed `220.0`, [`main_area_view`]'s `padding(16)`,
-/// [`terminal_workspace_view`]'s own `column(...).spacing(8)`, and
-/// `session_bar::view`'s `padding(4)` around `iced`'s own default text
-/// size, `Pixels(16.0)`, since that view specifies no explicit
-/// `.size(...)`). Kept next to this comment specifically so a chrome
-/// change and this function are easy to notice out of sync -- response
-/// 242 disclosed that kind of drift as cosmetic (a gap or a clip), not a
-/// correctness risk, because every consumer of the *result* still agrees
-/// with the others; see [`crate::surface::terminal::TerminalPane::resize`].
-const TOP_BAR_PADDING_PX: f32 = 8.0;
-const STATUS_BAR_PADDING_PX: f32 = 6.0;
-const SIDEBAR_WIDTH_PX: f32 = 220.0;
-const MAIN_AREA_PADDING_PX: f32 = 16.0;
-const WORKSPACE_ROW_SPACING_PX: f32 = 8.0;
-const SESSION_BAR_PADDING_PX: f32 = 4.0;
-const SESSION_BAR_TEXT_SIZE_PX: f32 = 16.0;
-
-/// Terminal resize handoff: the width/height available to
-/// `terminal_workspace_view`'s `panes_view` row, computed from
-/// `state.window_size` and the named chrome constants above rather than
-/// read from `iced`'s own live layout measurement -- `None` until the
-/// first `Message::WindowResized` arrives (see `state.window_size`'s own
-/// doc). This is the one function both [`apply_terminal_geometry`]
-/// (`update()`, real I/O) and [`terminal_workspace_view`] (`view()`,
-/// the split decision) call -- one formula, not two that could drift
-/// apart, matching response 242's requirement.
+/// The width/height of the region `terminal_workspace_view` gives the
+/// panes, or `None` until the layout engine has produced one (see
+/// `state.panes_region`). The one function both [`apply_terminal_geometry`]
+/// (`update()`, real I/O) and [`terminal_workspace_view`] (`view()`, the
+/// split decision) call.
+///
+/// RFC-053 D3: this **reads** a size; it no longer computes one. It used to
+/// subtract seven named constants (top bar, status bar, sidebar, paddings,
+/// spacing, session bar) from the window size, and every constant was a
+/// claim about how tall or wide something renders that nothing checked. The
+/// status bar wraps to three lines at 520px, the top bar had become three
+/// rows, and two rows of the workspace were never in the formula -- so a
+/// terminal was sized for space it did not have. The layout engine already
+/// knows the answer; [`crate::surface::frame::MeasureSize`] hands it over.
 fn terminal_workspace_content_size(state: &State) -> Option<(f32, f32)> {
-    let window_size = state.window_size?;
-
-    let top_bar_height = 2.0 * TOP_BAR_PADDING_PX
-        + crate::surface::terminal::line_height_px(state.theme.font_size_heading());
-    let status_bar_height = 2.0 * STATUS_BAR_PADDING_PX
-        + crate::surface::terminal::line_height_px(state.theme.font_size_status());
-    let content_area_height = (window_size.height - top_bar_height - status_bar_height).max(0.0);
-
-    let main_area_width = (window_size.width - SIDEBAR_WIDTH_PX).max(0.0);
-    let main_area_inner_width = (main_area_width - 2.0 * MAIN_AREA_PADDING_PX).max(0.0);
-    let main_area_inner_height = (content_area_height - 2.0 * MAIN_AREA_PADDING_PX).max(0.0);
-
-    let notice_count = [
-        state.terminal_launch_notice.is_some(),
-        state.terminal_paste_notice.is_some(),
-        state.agent_run_launch_notice.is_some(),
-    ]
-    .into_iter()
-    .filter(|present| *present)
-    .count();
-    let notice_height = crate::surface::terminal::line_height_px(state.theme.font_size_body());
-    let notices_height = notice_count as f32 * (notice_height + WORKSPACE_ROW_SPACING_PX);
-
-    let session_bar_height = 2.0 * SESSION_BAR_PADDING_PX
-        + crate::surface::terminal::line_height_px(SESSION_BAR_TEXT_SIZE_PX);
-
-    let panes_width = main_area_inner_width;
-    let panes_height =
-        (main_area_inner_height - notices_height - session_bar_height - WORKSPACE_ROW_SPACING_PX)
-            .max(0.0);
-
-    Some((panes_width, panes_height))
+    state
+        .panes_region
+        .map(|region| (region.width, region.height))
 }
 
 /// Terminal resize handoff: the single point where a computed window
@@ -2650,23 +2589,16 @@ fn terminal_workspace_content_size(state: &State) -> Option<(f32, f32)> {
 /// response 242: "a computed size needs no measurement, so a hidden pane
 /// can be sized on the same basis as a visible one." `TerminalPane::resize`
 /// is itself a no-op when the clamped size is unchanged, which is the
-/// resize-storm bound this handoff's review gate asks for: many
-/// `WindowResized` events during a drag collapse to the same character
-/// grid until a real glyph/line boundary is crossed, so most calls here
-/// touch neither the PTY nor `Term`.
+/// resize-storm bound this handoff's review gate asks for.
 ///
-/// **Response 243's required fix**: called from three places, not only
-/// `Message::WindowResized`'s handler -- also from `Message::WindowOpened`'s
-/// handler (indirectly, once the real size it queried arrives as a
-/// `WindowResized`) and from both production pane-launch call sites
-/// (`attempt_terminal_launch`, `attempt_agent_run_launch_with_profile`),
-/// right after the new pane is pushed. Without the launch-site calls, a
-/// pane launched between boot and the first live resize -- the common
-/// case, since most sessions never drag the window edge -- stayed at the
-/// `ROWS`/`COLS` launch default forever; a `None` `state.window_size`
-/// (before the very first size arrives) makes this a no-op, so a pane
-/// launched in that narrow window still self-corrects the moment it
-/// does.
+/// Called from `Message::PanesRegionMeasured`'s handler and from both
+/// production pane-launch call sites (`attempt_terminal_launch`,
+/// `attempt_agent_run_launch_with_profile`), right after the new pane is
+/// pushed -- a pane launched after the region is already known is sized at
+/// launch, not left at the `ROWS`/`COLS` default until the next resize
+/// (response 243). A `None` region (before the first layout that contains
+/// one) makes this a no-op, and the pane self-corrects the moment the
+/// region is measured.
 fn apply_terminal_geometry(state: &mut State) {
     let Some((panes_width, panes_height)) = terminal_workspace_content_size(state) else {
         return;
@@ -6800,12 +6732,31 @@ fn modal_scrim_style(theme: crate::theme::Theme) -> impl Fn(&iced::Theme) -> con
     }
 }
 
+/// RFC-053 D3: the window's three bands. The bars take the height they
+/// need and the content area takes **all of what is left** -- so a status
+/// bar that wraps to three lines shrinks the content area by exactly its
+/// extra height, because the layout engine says so, not because a constant
+/// was subtracted. Generic over `Renderer` so
+/// `a_taller_status_bar_shrinks_the_content_area_by_exactly_the_difference`
+/// (`shell/tests.rs`) can drive this exact function with `iced`'s null
+/// renderer, the technique [`assemble_change_review_layout`] established.
+fn assemble_window_layout<'a, Renderer>(
+    top_bar: Element<'a, Message, iced::Theme, Renderer>,
+    content: Element<'a, Message, iced::Theme, Renderer>,
+    status_bar: Element<'a, Message, iced::Theme, Renderer>,
+) -> Element<'a, Message, iced::Theme, Renderer>
+where
+    Renderer: iced::advanced::text::Renderer + 'a,
+{
+    iced::widget::column![top_bar, content, status_bar]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
 pub fn view(state: &State) -> Element<'_, Message> {
     let base: Element<'_, Message> =
-        column![top_bar(state), content_area(state), status_bar(state)]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
+        assemble_window_layout(top_bar(state), content_area(state), status_bar(state));
 
     if let Some(modal) = &state.modal {
         let modal_view = match modal {
@@ -6888,31 +6839,15 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         input::SubscriptionMode::Modal => modal_subscription(),
     };
 
-    // Terminal resize handoff, response 243's required fix: unconditional,
-    // unlike the wake/resize-event subscriptions below -- `state.window_size`
-    // must end up populated even if no pane exists yet at boot (the demo
-    // panes `State::new` may already have launched, and whatever the user
-    // launches next, both need a real size the first time
-    // `apply_terminal_geometry` runs, not only after a live drag).
-    // `open_events()` fires once for this application's one window;
-    // `Message::WindowOpened`'s handler is what turns that into a real,
-    // queried size.
-    let mut subscriptions = vec![iced::window::open_events().map(Message::WindowOpened)];
+    let mut subscriptions: Vec<Subscription<Message>> = Vec::new();
 
     // RFC-017 PR-017-C: only added when a demo pane exists (the env var
     // was set), so this changes nothing about the routing above for any
     // normal run -- the same "checked but usually absent" shape the
     // measurement branch above already uses.
     //
-    // Terminal resize handoff: `resize_events()` is batched in alongside
-    // the wake subscriptions, gated the same way -- nothing to resize
-    // without a tracked pane. Genuinely event-driven (filters
-    // `Event::Window(Event::Resized(_))`), not a per-frame subscription
-    // like `window::frames()` -- see `Message::WindowResized`'s own doc.
     if !state.terminal_panes.is_empty() {
         subscriptions.extend(terminal_wake_subscriptions(&state.terminal_panes));
-        subscriptions
-            .push(iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size)));
     }
     // RFC-022 PR-022-E ("the arrival model"): polled regardless of modal
     // state -- a new proposal must still enter the queue while a
@@ -7590,11 +7525,18 @@ fn trust_symbol(trust: tekstide_core::project::WorkspaceTrust) -> &'static str {
     }
 }
 
-/// The summary, the active project's own fields, and the keyboard hint
-/// all share one line on purpose: [`content_area_height`] subtracts this
-/// bar's height to size real terminal panes, so a second line would
-/// silently shrink every PTY -- RFC-025 PR-025-B's fields are pushed onto
-/// the same `row!`, not a new one.
+/// The summary, the active project's own fields, and the keyboard hint,
+/// on one `row!` -- RFC-025 PR-025-B's fields are pushed onto the same
+/// row, not a new one. **The bar may wrap** (at 520px it takes three
+/// lines) and that is allowed: RFC-053 D3 chose measuring over eliding,
+/// because `REQ-NOTIFY-002` names five fields and dropping one to protect
+/// a constant is how a surface starts lying. This comment used to say a
+/// second line "would silently shrink every PTY" because a formula
+/// subtracted this bar's height as a constant; nothing subtracts it now.
+/// [`assemble_window_layout`] gives the bar the height it needs and
+/// [`terminal_workspace_content_size`] reads the size the layout engine
+/// then left the panes -- the invariant is a property of the layout, not a
+/// sentence about it.
 fn status_bar(state: &State) -> Element<'_, Message> {
     let mut items =
         row![text(status_bar_summary(state)).size(state.theme.font_size_status())].spacing(16);
@@ -8348,6 +8290,7 @@ fn main_area_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Messa
     let body: Element<'_, Message> = match mode {
         Some(current) => column![mode_toggle_row(state, current), content]
             .spacing(8)
+            .height(Length::Fill)
             .into(),
         None => content,
     };
@@ -8573,7 +8516,15 @@ fn empty_terminal_workspace_view(state: &State) -> Element<'_, Message> {
             .into(),
     );
     rows.push(launch_terminal_button(state));
-    column(rows).spacing(8).into()
+    // RFC-053 D3: the region exists before the first pane does, so the
+    // number that sizes the first terminal is already known when it is
+    // launched (it is re-measured, once, when the session bar appears).
+    rows.push(panes_region(column![].into()));
+    column(rows)
+        .spacing(8)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
@@ -8615,15 +8566,14 @@ fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
         })
         .collect();
 
-    // Terminal resize handoff (response 242): the split decision now
-    // reads the same computed width `apply_terminal_geometry` uses to
-    // drive the real resize, rather than a second, `responsive`-measured
-    // width of its own -- one formula, not two that could disagree about
-    // whether a two-pane split fits. Falls back to `Wide` (both panes
-    // shown) when `state.window_size` is still `None` (before the first
-    // `WindowResized` event) -- the launch-time default already renders
-    // this way (see `main`'s initial window request), and this only
-    // matters for the handful of frames before that first event.
+    // Terminal resize handoff (response 242): the split decision reads
+    // the same width `apply_terminal_geometry` uses to drive the real
+    // resize, rather than a second, `responsive`-measured width of its
+    // own -- one source, not two that could disagree about whether a
+    // two-pane split fits. Falls back to `Wide` (both panes shown) when
+    // `state.panes_region` is still `None` (before the first layout that
+    // contains the region) -- the launch-time default already renders this
+    // way, and this only matters for the first frame or two.
     let panes_view: Element<'_, Message> = if visible_panes.is_empty() {
         column![].into()
     } else {
@@ -8649,8 +8599,31 @@ fn terminal_workspace_view(state: &State) -> Element<'_, Message> {
     let mut rows: Vec<Element<'_, Message>> = notice_rows;
     rows.push(bar);
     rows.push(launch_terminal_button(state));
-    rows.push(panes_view);
-    column(rows).spacing(8).into()
+    rows.push(panes_region(panes_view));
+    column(rows)
+        .spacing(8)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+/// RFC-053 D3: the region the terminal panes occupy -- everything the
+/// workspace has left after its own rows -- wrapped so the size the layout
+/// engine gives it is what sizes every PTY (`Message::PanesRegionMeasured`).
+/// `Fill` in both directions on purpose: the region takes the space that
+/// *exists*, independent of how large the panes inside it currently are, so
+/// resizing a pane cannot change the number that sizes it (no feedback
+/// loop). The chain of `Fill` ancestors -- [`main_area_view`]'s body column,
+/// [`terminal_workspace_view`]'s own column -- is what makes "the space
+/// that exists" the space left after every row above it.
+fn panes_region(panes_view: Element<'_, Message>) -> Element<'_, Message> {
+    crate::surface::frame::MeasureSize::new(
+        container(panes_view)
+            .width(Length::Fill)
+            .height(Length::Fill),
+        Message::PanesRegionMeasured,
+    )
+    .into()
 }
 
 /// RFC-015 PR-015-F: renders the tail of `state.typing_doc` in a
@@ -8687,27 +8660,66 @@ pub(crate) fn tail_lines(doc: &str, count: usize) -> String {
     lines[start..].join("\n")
 }
 
-/// The trusted-chrome dialog box both modal kinds render inside --
-/// factored out (RFC-018 PR-018-C) so the paste confirmation dialog and
-/// the layer-composition placeholder share one styling definition
-/// rather than two copies that could drift apart. `NFR-UX-002`-relevant
+/// The trusted-chrome dialog box every modal renders inside -- factored
+/// out (RFC-018 PR-018-C) so the modals share one styling definition
+/// rather than copies that could drift apart. `NFR-UX-002`-relevant
 /// distinctions (focus, accept/reject) are the caller's job via the
 /// content passed in, never colour alone here.
-fn modal_dialog_box<'a>(state: &'a State, content: Element<'a, Message>) -> Element<'a, Message> {
-    container(content)
-        .padding(20)
-        .style(move |_base_theme: &iced::Theme| container::Style {
-            background: Some(Background::Color(state.theme.surface_elevated())),
-            text_color: Some(state.theme.foreground()),
-            border: Border {
-                color: state.theme.accent(),
-                width: 2.0,
-                radius: 4.0.into(),
-            },
-            ..container::Style::default()
-        })
-        .into()
+///
+/// **RFC-053 D2: content scrolls; actions never leave the viewport.**
+/// `body` scrolls, `footer` (the buttons and the dismiss hint) is laid
+/// out *first* by [`crate::surface::frame::PinnedFooter`] and so is inside
+/// the window at any size the application can be given -- a modal used to
+/// be centred at its natural height and clipped at both ends, which at
+/// 760x560 cut the keyboard reference's `Close` and "Escape closes this."
+/// off with no scrollbar and no indicator. `Esc` still worked; a pointer
+/// user was trapped. The 16px outer padding keeps a full-height dialog
+/// off the window edge.
+fn modal_dialog_box<'a>(
+    state: &'a State,
+    body: Element<'a, Message>,
+    footer: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let body = scrollable(body).width(Length::Shrink);
+    let boxed = container(crate::surface::frame::PinnedFooter::new(
+        body,
+        footer,
+        MODAL_SECTION_SPACING_PX,
+    ))
+    .padding(20)
+    .style(move |_base_theme: &iced::Theme| container::Style {
+        background: Some(Background::Color(state.theme.surface_elevated())),
+        text_color: Some(state.theme.foreground()),
+        border: Border {
+            color: state.theme.accent(),
+            width: 2.0,
+            radius: 4.0.into(),
+        },
+        ..container::Style::default()
+    });
+    container(boxed).padding(16).into()
 }
+
+/// The modal builders that assemble one `Vec` of lines whose **last
+/// `footer_len` entries are the actions** (buttons, then the dismiss
+/// hint, if any) -- every one of them but the two `column!`-built ones.
+/// Splits at that point so [`modal_dialog_box`] can pin the footer.
+fn modal_dialog_box_split<'a>(
+    state: &'a State,
+    mut lines: Vec<Element<'a, Message>>,
+    footer_len: usize,
+) -> Element<'a, Message> {
+    let footer = lines.split_off(lines.len().saturating_sub(footer_len));
+    modal_dialog_box(
+        state,
+        column(lines).spacing(MODAL_SECTION_SPACING_PX).into(),
+        column(footer).spacing(MODAL_SECTION_SPACING_PX).into(),
+    )
+}
+
+/// Spacing between a modal's title/body lines, and between its body and
+/// its pinned footer.
+const MODAL_SECTION_SPACING_PX: f32 = 10.0;
 
 /// Width of the binding column, so descriptions line up -- the same
 /// number and reasoning `board.rs`'s own `KEYBOARD_HELP_BINDING_COLUMN_PX`
@@ -8772,14 +8784,14 @@ fn help_modal_view(state: &State) -> Element<'_, Message> {
     // -- no decision to make (unlike every other modal here), so it
     // dispatches `ModalDismiss` directly, the same message `Escape`
     // already sends.
-    lines = lines.push(
+    let footer = column![
         button(text(state.catalog.get("help-dialog-close")).size(state.theme.font_size_body()))
             .on_press(Message::ModalDismiss),
-    );
-    lines = lines
-        .push(text(state.catalog.get("help-dialog-hint")).size(state.theme.font_size_status()));
+        text(state.catalog.get("help-dialog-hint")).size(state.theme.font_size_status()),
+    ]
+    .spacing(MODAL_SECTION_SPACING_PX);
 
-    modal_dialog_box(state, lines.into())
+    modal_dialog_box(state, lines.into(), footer.into())
 }
 
 /// RFC-038 PR-038-G: the folder browser's own modal chrome (title,
@@ -8827,18 +8839,17 @@ fn folder_browser_modal_view<'a>(
     // (`choose_current_browsed_directory`, `Message::
     // FolderBrowserChooseCurrentDirectory`'s own handler), not a
     // second, parallel commit path.
-    lines = lines.push(
+    let footer = column![
         button(
             text(state.catalog.get("browse-dialog-choose-button"))
                 .size(state.theme.font_size_body()),
         )
         .on_press(Message::FolderBrowserChooseCurrentDirectory),
-    );
+        text(state.catalog.get("browse-dialog-hint")).size(state.theme.font_size_status()),
+    ]
+    .spacing(MODAL_SECTION_SPACING_PX);
 
-    lines = lines
-        .push(text(state.catalog.get("browse-dialog-hint")).size(state.theme.font_size_status()));
-
-    modal_dialog_box(state, lines.into())
+    modal_dialog_box(state, lines.into(), footer.into())
 }
 
 fn layer_composition_demo_modal(state: &State, focus: ModalButton) -> Element<'_, Message> {
@@ -8863,12 +8874,16 @@ fn layer_composition_demo_modal(state: &State, focus: ModalButton) -> Element<'_
         column![
             text(state.catalog.get("layer-demo-modal-title")).size(state.theme.font_size_heading()),
             text(state.catalog.get("layer-demo-modal-body")).size(state.theme.font_size_body()),
+        ]
+        .spacing(MODAL_SECTION_SPACING_PX)
+        .into(),
+        column![
             button_line(ModalButton::Acknowledge, "layer-demo-modal-acknowledge"),
             button_line(ModalButton::Dismiss, "layer-demo-modal-dismiss"),
             text(state.catalog.get("layer-demo-modal-dismiss-hint"))
                 .size(state.theme.font_size_status()),
         ]
-        .spacing(10)
+        .spacing(MODAL_SECTION_SPACING_PX)
         .into(),
     )
 }
@@ -8959,7 +8974,7 @@ fn paste_confirmation_modal_view<'a>(
             .into(),
     );
 
-    modal_dialog_box(state, column(lines).spacing(10).into())
+    modal_dialog_box_split(state, lines, 3)
 }
 
 /// RFC-019 PR-019-D: the real external-change conflict dialog. The path
@@ -10203,7 +10218,7 @@ fn approval_dialog_view<'a>(state: &'a State, dialog: &'a ApprovalDialog) -> Ele
             .into(),
     ];
 
-    modal_dialog_box(state, column(lines).spacing(10).into())
+    modal_dialog_box_split(state, lines, 3)
 }
 
 /// Response 233: `ProjectOpenSurface::ApprovalHistory`'s real content --
@@ -12023,7 +12038,7 @@ fn trust_grant_dialog_view<'a>(
             .into(),
     ];
 
-    modal_dialog_box(state, column(lines).spacing(10).into())
+    modal_dialog_box_split(state, lines, 3)
 }
 
 /// RFC-045 PR-045-C, **§5 — this is a security control, not a
@@ -12102,7 +12117,7 @@ fn configured_profile_dialog_view<'a>(
         .into(),
     ]);
 
-    modal_dialog_box(state, column(lines).spacing(10).into())
+    modal_dialog_box_split(state, lines, 2)
 }
 
 /// RFC-049 D4′: the launch confirmation says this run's output will not be
@@ -12162,7 +12177,7 @@ fn configuration_reload_dialog_view<'a>(
         .into(),
     ];
 
-    modal_dialog_box(state, column(lines).spacing(10).into())
+    modal_dialog_box_split(state, lines, 2)
 }
 
 /// RFC-033 PR-033-C: `$count`/`$bytes` are `TranscriptPurgeModal`'s own
@@ -12268,7 +12283,7 @@ fn transcript_purge_dialog_view<'a>(
         );
     }
 
-    modal_dialog_box(state, column(lines).spacing(10).into())
+    modal_dialog_box_split(state, lines, 3)
 }
 
 /// RFC-039 PR-039-C, `what-closing-a-project-must-not-lose.md` §2:
@@ -12389,7 +12404,7 @@ fn project_close_dialog_view<'a>(
             .into(),
     ]);
 
-    modal_dialog_box(state, column(lines).spacing(10).into())
+    modal_dialog_box_split(state, lines, 3)
 }
 
 fn external_change_modal_view<'a>(
@@ -12436,7 +12451,7 @@ fn external_change_modal_view<'a>(
             .into(),
     ];
 
-    modal_dialog_box(state, column(lines).spacing(10).into())
+    modal_dialog_box_split(state, lines, 3)
 }
 
 #[cfg(test)]

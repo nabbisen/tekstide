@@ -117,7 +117,6 @@ mod grid_colors;
 mod layout;
 pub mod session_bar;
 
-pub(crate) use font_metrics::line_height_px;
 pub use grid_colors::view;
 pub(crate) use layout::{PANE_GAP_PX, layout_class_for, pane_dimensions_for_area};
 
@@ -140,9 +139,9 @@ use tekstide_core::runtime::terminal::{
 use filter::SecurityFilter;
 
 /// Terminal resize handoff: the launch-time default, used until the
-/// first real resize is computed (`state.window_size` is `None` until
-/// `iced::window::resize_events()` fires once -- see `shell.rs`'s
-/// `terminal_workspace_geometry`) and as the floor every later resize
+/// first real resize is computed (`state.panes_region` is `None` until the
+/// layout engine has produced one -- see `shell.rs`'s
+/// `terminal_workspace_content_size`) and as the floor every later resize
 /// clamps to (`MIN_ROWS`/`MIN_COLS` below are smaller; this is only the
 /// *starting* size, not a bound on where a real resize can go). 80x24
 /// matches the spike's own choice and every existing `TerminalPanePolicy`

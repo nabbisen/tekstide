@@ -31,4 +31,5 @@
 pub mod board;
 pub mod editor;
 pub mod explorer;
+pub mod frame;
 pub mod terminal;
