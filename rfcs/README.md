@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 052 | [A File Explorer A User Can Read](./proposed/052-a-file-explorer-a-user-can-read.md) | **Proposed 2026-09-23**, raised by the owner. The sidebar renders `[DIR]`/`[FILE]` debug text, and — measured — **it is not a tree at all**: one directory scan, a `Parent` row to walk back out, so a change inside `src/` is invisible until you step into `src/` (`REQ-FILE-001` asks for a tree). The one-string row is not an accident: it centralises untrusted-name escaping, keeps labels in the catalog, and stays assertable without `iced`. **D3 is open**: adopt `iced-swdir-tree` (`iced ^0.14`, + `swdir`, + third-party `lucide-icons`) or compose our own, decided in slice A against a hostile fixture — a symlink escaping the root, a bidi-override name, an unreadable directory, 100 000 entries. An icon never carries meaning alone. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
