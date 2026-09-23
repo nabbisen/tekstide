@@ -482,11 +482,19 @@ terminal-paste-refused = { $reason ->
 # one `FileGitStatus::Renamed` upstream in `runtime::git`) -- reviewed at
 # review 413: the word must stay true for both, not just the more common
 # case.
+#
+# RFC-052 PR-052-B: **the words that say what a row *is* come before the name,
+# not after it.** The sidebar is narrow and draws each row on one line, so a
+# long name is clipped at its end -- and a status word placed after the name
+# is exactly what a clipped line loses (`[FILE] new.md [untracke`). Kind,
+# state, symlink and Git status are short and fixed; the name is the only
+# part of a row that can be arbitrarily long, so it goes last and is the part
+# that gives way.
 explorer-node-entry = { $kind ->
     [directory] [DIR]
     [other] [OTHER]
    *[file] [FILE]
-} { $name }{ $state ->
+}{ $state ->
     [collapsed] {" (collapsed)"}
     [blocked] {" (blocked)"}
     [unreadable] {" (unreadable)"}
@@ -504,7 +512,7 @@ explorer-node-entry = { $kind ->
     [untracked] {" [untracked]"}
     [unmerged] {" [conflict]"}
    *[none] {""}
-}
+} { $name }
 
 # RFC-052 PR-052-B: the explorer is a tree, so there is no "go up" row.
 # `explorer-empty` now labels an *expanded* empty folder too.

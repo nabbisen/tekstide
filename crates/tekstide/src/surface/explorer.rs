@@ -305,6 +305,14 @@ pub struct ExplorerCursor {
 /// Lines the sidebar keeps for things that are not tree rows (the status
 /// line and the "rows N-M of T" line), so [`rows_that_fit`] leaves room.
 const RESERVED_LINES: usize = 2;
+/// The **detail** area under the tree: the highlighted row in full, wrapped
+/// over this many lines. A row is drawn on one line and clipped at the
+/// sidebar's edge, so a long name, or a chain of status words on a nested row
+/// (`[OTHER] (blocked) [symlink escapes root]`), can be cut off; this is
+/// where the row under the highlight is always readable whole. **Fixed
+/// height**, so the window arithmetic in [`rows_that_fit`] stays exact
+/// whatever the row says.
+pub(crate) const DETAIL_LINES: usize = 3;
 /// `iced`'s `text` line height is `1.3` times its size by default, and the
 /// column below spaces lines by [`LINE_SPACING`]; the window arithmetic
 /// uses the same two numbers the drawing does, or the last row would be
@@ -322,10 +330,32 @@ pub(crate) fn rows_that_fit(height: Option<f32>, font_size: f32) -> usize {
         return DEFAULT_WINDOW_ROWS;
     };
     let pitch = font_size * LINE_HEIGHT_FACTOR + LINE_SPACING;
-    let usable = (height - SIDEBAR_VERTICAL_PADDING).max(0.0);
+    let usable = (height - SIDEBAR_VERTICAL_PADDING - detail_height(font_size)).max(0.0);
     ((usable / pitch).floor() as usize)
         .saturating_sub(RESERVED_LINES)
         .max(1)
+}
+
+/// The detail area's height: its lines at the text line height, plus the gap
+/// above it.
+fn detail_height(font_size: f32) -> f32 {
+    DETAIL_LINES as f32 * font_size * LINE_HEIGHT_FACTOR + LINE_SPACING * 2.0
+}
+
+/// The highlighted row in full, or `None` when it is not a row that names
+/// something (loading, cannot-read and the like already say all they have to
+/// on one line). Leading indentation is dropped: the detail is for reading,
+/// not for showing depth.
+pub(crate) fn detail_text(
+    catalog: &Catalog,
+    tree: &ExplorerTree,
+    highlight: usize,
+    git_summary: Option<&ProjectGitSummary>,
+) -> Option<String> {
+    let rows = tree.rows();
+    let row = rows.get(highlight)?;
+    matches!(row.kind, ExplorerTreeRowKind::Node { .. })
+        .then(|| row_text(catalog, row, git_summary).trim_start().to_owned())
 }
 
 /// No `Message` interest of its own -- selection is driven by keyboard
@@ -363,11 +393,22 @@ pub fn view<'a, Message: 'a>(
                 .into()
         })
         .collect();
-    container(column(rows).spacing(LINE_SPACING))
+    let rows = container(column(rows).spacing(LINE_SPACING))
         .width(Length::Fill)
         .height(Length::Fill)
-        .clip(true)
-        .into()
+        .clip(true);
+    let detail = container(
+        text(detail_text(catalog, tree, cursor.highlight, git_summary).unwrap_or_default())
+            .size(theme.font_size_body()),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(detail_height(theme.font_size_body())))
+    .padding(iced::Padding {
+        top: LINE_SPACING * 2.0,
+        ..iced::Padding::ZERO
+    })
+    .clip(true);
+    column![rows, detail].height(Length::Fill).into()
 }
 
 /// RFC-038 PR-038-G: the folder browser's own rows -- the direct

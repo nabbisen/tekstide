@@ -9,7 +9,8 @@ use tekstide_core::project::{ExplorerTree, ExplorerTreeRowKind, ProjectExplorerS
 use tekstide_core::project::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
 
 use super::{
-    DEFAULT_WINDOW_ROWS, RowWindow, node_line, row_text, rows_that_fit, tree_lines, window_for,
+    DEFAULT_WINDOW_ROWS, RowWindow, detail_text, node_line, row_text, rows_that_fit, tree_lines,
+    window_for,
 };
 use crate::i18n::{Catalog, LocalePreference};
 
@@ -707,4 +708,230 @@ fn passing_the_row_bound_ends_in_a_row_naming_how_many_are_not_shown() {
         let last = plain_words(&row_text(&catalog, rows.last().unwrap(), None));
         assert!(last.contains(expected), "{last:?}");
     }
+}
+
+/// **A clipped line must lose the name, not the status.** The sidebar draws
+/// one row per line and clips at its edge; a status word after a long name is
+/// what the clip removes (RFC-052 PR-052-B's live capture showed
+/// `[FILE] new.md [untracke`). Kind, state, symlink status and Git status all
+/// come before the name, so the name is the only part that can be cut.
+#[test]
+fn every_status_word_comes_before_the_name_so_only_the_name_can_be_clipped() {
+    let catalog = real_catalog();
+    let node = ExplorerNode {
+        name: "a-very-long-file-name-that-will-be-clipped.txt".to_string(),
+        relative_path: PathBuf::from("a-very-long-file-name-that-will-be-clipped.txt"),
+        kind: ExplorerNodeKind::File,
+        state: ExplorerNodeState::Blocked(
+            tekstide_core::project::root::FileAccessBlockedReason::SymlinkEscape,
+        ),
+        symlink_status: FileAccessSymlinkStatus::EscapesRoot,
+    };
+    let summary = git_summary_with(&[(&node.name, FileGitStatus::Modified)]);
+    let line = plain_words(&node_line(&catalog, &node, false, Some(&summary)));
+
+    let name_at = line.find(&node.name).expect("the name is drawn");
+    for word in [
+        "[FILE]",
+        "(blocked)",
+        "[symlink escapes root]",
+        "[modified]",
+    ] {
+        let at = line
+            .find(word)
+            .unwrap_or_else(|| panic!("{word} missing from {line:?}"));
+        assert!(at < name_at, "{word} comes after the name in {line:?}");
+    }
+    assert!(
+        line.ends_with(&node.name),
+        "the name is the last thing on the row: {line:?}"
+    );
+}
+
+/// The detail area is where a row that the sidebar clipped is still readable
+/// whole -- and it is the *escaped* row, the same text, so it opens no new
+/// way for a hostile name to reach the screen.
+#[test]
+fn the_detail_shows_the_highlighted_row_in_full_and_escaped() {
+    let catalog = real_catalog();
+    let long = ExplorerNode {
+        name: "evil\u{202E}gpj-with-a-name-far-too-long-for-a-narrow-sidebar.exe".to_string(),
+        relative_path: PathBuf::from("evil"),
+        state: ExplorerNodeState::Blocked(
+            tekstide_core::project::root::FileAccessBlockedReason::SymlinkEscape,
+        ),
+        symlink_status: FileAccessSymlinkStatus::EscapesRoot,
+        ..plain_node("x", ExplorerNodeKind::Other)
+    };
+    let tree = tree_with(scan_at_root(vec![
+        long,
+        plain_node("ok.txt", ExplorerNodeKind::File),
+    ]));
+
+    let detail = detail_text(&catalog, &tree, 0, None).expect("a node row has detail");
+    let plain = plain_words(&detail);
+    assert!(
+        plain.starts_with("[OTHER] (blocked) [symlink escapes root]"),
+        "{plain:?}"
+    );
+    assert!(plain.contains("<U+202E>") && !detail.contains('\u{202E}'));
+    assert!(
+        plain.ends_with("too-long-for-a-narrow-sidebar.exe"),
+        "whole name: {plain:?}"
+    );
+    assert!(!detail.starts_with(' '), "no indentation in the detail");
+
+    // A row that only says something has no detail: it already says it all.
+    let mut loading = tree_with(scan_at_root(vec![plain_node(
+        "d",
+        ExplorerNodeKind::Directory,
+    )]));
+    loading.toggle(Path::new("d"));
+    assert!(detail_text(&catalog, &loading, 1, None).is_none());
+    // And a highlight past the end has none rather than panicking.
+    assert!(detail_text(&catalog, &tree, 99, None).is_none());
+}
+
+/// The window arithmetic subtracts the detail area, or the last row would sit
+/// under it.
+#[test]
+fn the_window_leaves_room_for_the_detail_area() {
+    let with_detail = rows_that_fit(Some(600.0), 14.0);
+    let pitch = 14.0 * 1.3 + 2.0;
+    let without = (((600.0f32 - 32.0) / pitch).floor() as usize) - 2;
+    assert!(
+        with_detail + 2 <= without,
+        "the detail area (about {} lines) must cost rows: {with_detail} vs {without}",
+        super::DETAIL_LINES
+    );
+}
+
+// ---------------------------------------------------------------------
+// D8, measured: what drawing a big tree costs, and why only a window is built.
+// ---------------------------------------------------------------------
+
+fn headless_renderer() -> iced::Renderer {
+    use iced::advanced::renderer::Headless;
+    use std::task::{Context, Poll, Waker};
+    let future = <iced::Renderer as Headless>::new(
+        iced::Font::DEFAULT,
+        iced::Pixels(16.0),
+        Some("tiny-skia"),
+    );
+    let mut future = std::pin::pin!(future);
+    let mut context = Context::from_waker(Waker::noop());
+    loop {
+        if let Poll::Ready(renderer) = future.as_mut().poll(&mut context) {
+            return renderer.expect("a headless tiny-skia renderer");
+        }
+        std::thread::yield_now();
+    }
+}
+
+/// Builds `element` and lays it out at the sidebar's width; returns how long
+/// that took. Real text measurement (a headless renderer), unlike the null
+/// renderer the rest of this crate's layout tests use.
+fn build_and_layout(
+    renderer: &iced::Renderer,
+    make: impl FnOnce() -> iced::Element<'static, ()>,
+) -> std::time::Duration {
+    use iced::advanced::layout::Limits;
+    use iced::advanced::widget::Tree;
+    let started = std::time::Instant::now();
+    let mut element = make();
+    let mut tree = Tree::new(element.as_widget());
+    let limits = Limits::new(iced::Size::ZERO, iced::Size::new(188.0, 700.0));
+    let _ = element.as_widget_mut().layout(&mut tree, renderer, &limits);
+    started.elapsed()
+}
+
+/// **The total-row bound, decided by measurement (RFC-052 review 421):**
+/// virtualisation. PR-052-A measured ~4 µs a row to build and lay out, so a
+/// tree of 10 000 rows built whole costs tens of milliseconds every time it
+/// changes; the sidebar builds only the window (about 30 rows) and the cost
+/// does not depend on the tree. This test prints both numbers, and pins the
+/// property that matters -- the windowed view of the *largest* tree the model
+/// allows fits well inside a frame -- with a deliberately loose bound (half a
+/// frame) rather than a machine's speed.
+#[test]
+fn drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame() {
+    let renderer = headless_renderer();
+    let catalog: &'static Catalog = Box::leak(Box::new(real_catalog()));
+    let theme: &'static crate::theme::Theme = Box::leak(Box::new(crate::theme::Theme::default()));
+    let rows = tekstide_core::project::MAX_TREE_ROWS;
+    let tree = tree_with(scan_at_root(
+        (0..rows)
+            .map(|index| plain_node(&format!("file-{index:05}.rs"), ExplorerNodeKind::File))
+            .collect(),
+    ));
+    let status = ProjectExplorerStatus::Ready;
+    let capacity = rows_that_fit(Some(700.0), theme.font_size_body());
+
+    // Warm the font system once: the first layout in a process loads fonts.
+    let _ = build_and_layout(&renderer, || {
+        super::view::<()>(
+            &tree,
+            &status,
+            super::ExplorerCursor {
+                highlight: 0,
+                top: 0,
+                capacity,
+            },
+            catalog,
+            theme,
+            None,
+        )
+    });
+
+    let mut windowed = std::time::Duration::MAX;
+    for _ in 0..5 {
+        windowed = windowed.min(build_and_layout(&renderer, || {
+            super::view::<()>(
+                &tree,
+                &status,
+                super::ExplorerCursor {
+                    highlight: 5_000,
+                    top: 4_990,
+                    capacity,
+                },
+                catalog,
+                theme,
+                None,
+            )
+        }));
+    }
+
+    // What building every row would cost: the alternative this rules out.
+    let lines = tree_lines(catalog, &tree, &status, 0, 0, rows, None);
+    let whole = build_and_layout(&renderer, || {
+        iced::widget::column(
+            lines
+                .into_iter()
+                .map(|line| {
+                    iced::widget::text(line)
+                        .size(theme.font_size_body())
+                        .wrapping(iced::widget::text::Wrapping::None)
+                        .into()
+                })
+                .collect::<Vec<iced::Element<'static, ()>>>(),
+        )
+        .spacing(2)
+        .into()
+    });
+
+    eprintln!(
+        "PR-052-B measurement: {rows} rows; window of {capacity}: build + layout {windowed:?}; \
+         building all {rows}: {whole:?}"
+    );
+    let load = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
+    assert!(
+        windowed < std::time::Duration::from_millis(8),
+        "the windowed view of a {rows}-row tree took {windowed:?} (best of 5). A number just \
+         over the bound while the machine's load average ({load:?}) is well above its core count \
+         points at load, not a regression: re-run when it is idle."
+    );
+    assert!(
+        windowed * 10 < whole,
+        "virtualisation must be worth it: window {windowed:?} vs whole tree {whole:?}"
+    );
 }
