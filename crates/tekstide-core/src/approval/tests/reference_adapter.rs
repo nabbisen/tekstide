@@ -43,6 +43,7 @@ impl TestAudit {
     fn new(name: &str) -> Self {
         let state_root = unique_temp_dir(&format!("audit-{name}"));
         std::fs::create_dir_all(&state_root).expect("create temp audit state root");
+        crate::test_support::remove_when_this_test_ends(state_root.clone());
         let state_root = state_root
             .canonicalize()
             .expect("canonicalize temp audit state root");

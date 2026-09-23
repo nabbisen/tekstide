@@ -23,7 +23,7 @@ fn scratch_locales_dir(label: &str) -> PathBuf {
             .as_nanos()
     ));
     fs::create_dir_all(&dir).unwrap();
-    dir
+    crate::shell::scratch_for_this_test(dir)
 }
 
 /// The compiled-in source catalog must parse -- if it did not, every

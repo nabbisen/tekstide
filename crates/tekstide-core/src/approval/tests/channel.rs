@@ -29,6 +29,7 @@ fn temp_state_root(name: &str) -> PathBuf {
     // because a prior run's leftover directory already occupied the path.
     let dir = std::env::temp_dir().join(format!("t{}-{}", std::process::id(), rand_seed()));
     std::fs::create_dir_all(&dir).expect("create temp state root");
+    crate::test_support::remove_when_this_test_ends(dir.clone());
     dir.canonicalize().expect("canonicalize temp state root")
 }
 
@@ -586,8 +587,13 @@ fn bind_rejects_a_state_root_deep_enough_to_exceed_sun_path() {
     // past a `sockaddr_un`'s capacity (~108 bytes on Linux) while staying
     // well under any single filesystem's per-component name limit
     // (typically 255 bytes).
-    for _ in 0..6 {
+    for index in 0..6 {
         state_root.push("a".repeat(40));
+        if index == 0 {
+            // The first component is the one that sits in the temp
+            // directory; removing it removes the whole chain.
+            crate::test_support::remove_when_this_test_ends(state_root.clone());
+        }
     }
     std::fs::create_dir_all(&state_root).expect("create the deep temp state root");
     let state_root = state_root

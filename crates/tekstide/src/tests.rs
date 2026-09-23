@@ -24,7 +24,7 @@ fn fresh_project_dir(label: &str) -> PathBuf {
             .as_nanos()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    crate::shell::scratch_for_this_test(dir)
 }
 
 /// audit-store-test-isolation handoff: the same shape
@@ -43,7 +43,7 @@ fn temp_audit_state_dir(label: &str) -> PathBuf {
             .as_nanos()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    crate::shell::scratch_for_this_test(dir)
 }
 
 fn project_added_record_count(app_shell: &ApplicationShell, project_id: &ProjectId) -> usize {

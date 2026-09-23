@@ -221,8 +221,13 @@ review 421 the suite left about 43 000 entries in `/tmp` (14 780 `tekstide-run-*
 `tekstide-audit-test-default-*`, 1 517 `approval-audit-*`), enough to fill a 30 GB tmpfs. The per-thread
 defaults in `shell.rs` now own their directory (`TestStateDir`, removed when the test's thread ends),
 `TestAudit` removes its state root on drop, and each has a test that the directory is gone afterwards.
-A new fixture builder gets a guard with a `Drop` and the same kind of test; a directory a test *named*
-is the test's own to remove, and the seam never touches it.
+A builder that returns a bare `PathBuf` (the `fresh_*_dir` family, the script builders) hands its path to
+`scratch_for_this_test` (`tekstide`) or `test_support::remove_when_this_test_ends` (`tekstide-core`), which
+remove it when the test's thread ends — no caller changes. **A full-workspace run now leaves zero
+entries in the temp directory** (review 422; it was ~43 000 a run before review 421, then ~500). A new
+fixture builder does the same, with a test; a directory a test *named* is the test's own to remove, and
+the seam never touches it. If a run leaves entries again, `ls "$TMPDIR" | sed -E 's/-[0-9]+.*$//' | sort |
+uniq -c` names the builder.
 
 **A catalog string's interpolated values are wrapped in invisible bidi-isolate marks, so a test that
 asserts on the words a user reads must strip them.** Fluent isolates every placeable — a number, a

@@ -3258,9 +3258,33 @@ impl TestStateDir {
 impl Drop for TestStateDir {
     fn drop(&mut self) {
         if self.owned {
-            let _ = std::fs::remove_dir_all(&self.path);
+            // A directory, or (for the wrapper-script builders) a file.
+            if std::fs::remove_dir_all(&self.path).is_err() {
+                let _ = std::fs::remove_file(&self.path);
+            }
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_SCRATCH: std::cell::RefCell<Vec<TestStateDir>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Hands `path` to the current test's thread to remove when the test ends,
+/// and returns it. **How a builder that returns a bare `PathBuf` stops
+/// leaking without changing its hundreds of callers**: every `#[test]` has
+/// its own thread, so the thread-local's destructor is the end of the
+/// test. Review 421/422: the `tekstide-shell-test-*` family and the
+/// short-named `tsr`/`tsms` builders were ~500 leaked entries a run.
+///
+/// Not for a directory another thread or a child process must outlive
+/// this test's thread; nothing here does.
+#[cfg(test)]
+pub(crate) fn scratch_for_this_test(path: std::path::PathBuf) -> std::path::PathBuf {
+    TEST_SCRATCH.with(|scratch| scratch.borrow_mut().push(TestStateDir::owned(path.clone())));
+    path
 }
 
 #[cfg(test)]

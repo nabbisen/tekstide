@@ -154,7 +154,7 @@ fn fresh_project_dir(label: &str) -> PathBuf {
             .as_nanos()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    super::scratch_for_this_test(dir)
 }
 
 /// transcript-capture-evidence handoff: the injectable seam
@@ -178,7 +178,7 @@ fn fresh_state_root_dir() -> PathBuf {
     let sequence = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("tsr-{}-{sequence}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    super::scratch_for_this_test(dir)
 }
 
 /// The window title comes from the catalog, not a literal -- if the key
@@ -238,6 +238,7 @@ fn status_bar_summary_pluralizes_a_single_project_correctly() {
             .as_nanos()
     ));
     std::fs::create_dir_all(&project_root).unwrap();
+    let project_root = super::scratch_for_this_test(project_root);
     app_shell
         .add_project_from_path(&project_root)
         .expect("a freshly created directory is a valid project root");
@@ -2111,7 +2112,7 @@ fn temp_audit_state_dir(label: &str) -> PathBuf {
             .as_nanos()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    super::scratch_for_this_test(dir)
 }
 
 /// Concatenates the raw bytes of every regular file under `dir`,
@@ -6566,7 +6567,7 @@ fn destructive_reference_adapter_wrapper_path() -> std::path::PathBuf {
     std::fs::write(&script_path, script).expect("writing the wrapper script should succeed");
     std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o700))
         .expect("marking the wrapper script executable should succeed");
-    script_path
+    super::scratch_for_this_test(script_path)
 }
 
 /// The real, freshly spawned adapter needs a moment to connect and send
@@ -7846,7 +7847,7 @@ fn transcript_marker_script_path() -> std::path::PathBuf {
     .expect("writing the marker script should succeed");
     std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o700))
         .expect("marking the marker script executable should succeed");
-    script_path
+    super::scratch_for_this_test(script_path)
 }
 
 /// transcript-capture-evidence handoff: `README.md`'s second claim --
@@ -17883,4 +17884,31 @@ fn a_directory_a_test_named_is_not_removed_by_the_seam() {
         "the seam removed a directory it did not create"
     );
     let _ = std::fs::remove_dir_all(&named);
+}
+
+/// Review 422: the bare-`PathBuf` builders (`fresh_project_dir`,
+/// `fresh_state_root_dir`, `temp_audit_state_dir`, the script builders)
+/// hand their path to `scratch_for_this_test`; the pin is that a path
+/// handed to it -- directory or file -- is gone once the test's thread ends.
+#[test]
+fn a_path_handed_to_the_test_scratch_is_gone_when_its_thread_ends() {
+    let (dir, file) = std::thread::spawn(|| {
+        let dir = super::scratch_for_this_test(fresh_project_dir_for_pin());
+        let file = std::env::temp_dir().join(format!("tsp-file-{}", std::process::id()));
+        std::fs::write(&file, b"x").unwrap();
+        let file = super::scratch_for_this_test(file);
+        assert!(dir.is_dir() && file.is_file());
+        (dir, file)
+    })
+    .join()
+    .expect("the thread completes");
+    assert!(!dir.exists(), "directory left behind: {dir:?}");
+    assert!(!file.exists(), "file left behind: {file:?}");
+}
+
+fn fresh_project_dir_for_pin() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("tsp-dir-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("inner")).unwrap();
+    std::fs::write(dir.join("inner/f"), b"x").unwrap();
+    dir
 }

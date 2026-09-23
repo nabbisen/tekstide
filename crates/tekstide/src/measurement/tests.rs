@@ -4,14 +4,15 @@ use std::time::{Duration, Instant};
 use super::{Criterion, Measurement, parse_meminfo_snapshot};
 
 fn scratch_log_path(label: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
+    let path = std::env::temp_dir().join(format!(
         "tekstide-measurement-test-{label}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
-    ))
+    ));
+    crate::shell::scratch_for_this_test(path)
 }
 
 /// `record_input` writes one `"input <microseconds>"` line per call, and

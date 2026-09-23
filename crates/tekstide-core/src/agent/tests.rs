@@ -2497,6 +2497,7 @@ impl RoundTripAudit {
         let state_root =
             std::env::temp_dir().join(format!("ta-audit-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&state_root).expect("create temp audit state root");
+        crate::test_support::remove_when_this_test_ends(state_root.clone());
         let state_root = state_root
             .canonicalize()
             .expect("canonicalize temp audit state root");

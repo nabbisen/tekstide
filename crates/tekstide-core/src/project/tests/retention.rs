@@ -680,6 +680,7 @@ impl TestDirs {
             .unwrap()
             .as_nanos();
         let base = std::env::temp_dir().join(format!("tekstide-retention-{name}-{nanos}"));
+        let base = crate::test_support::remove_when_this_test_ends(base);
         let project_root = base.join("project");
         let state_root = base.join("state");
         fs::create_dir_all(&project_root).unwrap();

@@ -1,5 +1,30 @@
 use std::sync::{Condvar, Mutex, OnceLock};
 
+/// Removes `path` (a directory or a file) when the current test's thread
+/// ends, and returns it.
+///
+/// **How a fixture builder that returns a bare `PathBuf` stops leaking
+/// without changing its callers.** Each `#[test]` runs on its own thread, so
+/// the thread-local's destructor is the end of the test. Before this the
+/// suite left about 43 000 entries in `/tmp` (review 421/422). Not for a
+/// path another thread or process must outlive the test's own thread.
+pub(crate) fn remove_when_this_test_ends(path: std::path::PathBuf) -> std::path::PathBuf {
+    struct Remove(std::path::PathBuf);
+    impl Drop for Remove {
+        fn drop(&mut self) {
+            if std::fs::remove_dir_all(&self.0).is_err() {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+    }
+    thread_local! {
+        static SCRATCH: std::cell::RefCell<Vec<Remove>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+    SCRATCH.with(|scratch| scratch.borrow_mut().push(Remove(path.clone())));
+    path
+}
+
 /// Caps how many real-process-spawning tests, across the whole crate,
 /// run their spawn-through-cleanup critical section at once, regardless
 /// of `--test-threads`.
@@ -186,6 +211,31 @@ pub(crate) fn process_is_alive(pid: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// Review 422: a builder that hands its path to
+    /// `remove_when_this_test_ends` leaves nothing behind once the test's
+    /// thread ends -- for a directory with contents, and for a bare file.
+    #[test]
+    fn a_path_handed_to_the_test_scratch_is_gone_when_the_thread_ends() {
+        let (dir, file) = std::thread::spawn(|| {
+            let dir = std::env::temp_dir().join(format!("ts-scratch-dir-{}", std::process::id()));
+            std::fs::create_dir_all(dir.join("inner")).unwrap();
+            std::fs::write(dir.join("inner/f"), b"x").unwrap();
+            let file = std::env::temp_dir().join(format!("ts-scratch-file-{}", std::process::id()));
+            std::fs::write(&file, b"x").unwrap();
+            super::remove_when_this_test_ends(dir.clone());
+            super::remove_when_this_test_ends(file.clone());
+            assert!(
+                dir.is_dir() && file.is_file(),
+                "both exist while the test runs"
+            );
+            (dir, file)
+        })
+        .join()
+        .unwrap();
+        assert!(!dir.exists(), "directory left behind: {dir:?}");
+        assert!(!file.exists(), "file left behind: {file:?}");
+    }
+
     use super::{KillOnDropChild, RealProcessLimiter, process_is_alive};
 
     fn spawn_real_sleep() -> std::process::Child {
