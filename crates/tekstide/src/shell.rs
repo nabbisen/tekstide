@@ -35,8 +35,9 @@
 //! (`catalog`, `theme`, `focus`, `modal`), none of which duplicate a
 //! value already inside it.
 
+use crate::theme::text;
 use iced::futures::SinkExt;
-use iced::widget::{button, center, column, container, opaque, row, scrollable, stack, text};
+use iced::widget::{button, center, column, container, opaque, row, scrollable, stack};
 use iced::{Background, Border, Element, Length, Subscription, Task, keyboard};
 
 use tekstide_core::audit::AuditedAgentRunIdentity;
@@ -1082,6 +1083,11 @@ pub struct ConfigurationState {
     /// reloaded, not per key press.** Routing, the Help modal and the
     /// subscription all read this one value.
     keybinding_policy: tekstide_core::navigation::KeybindingPolicy,
+    /// RFC-054 PR-054-B: the colours, sizes and family in force -- the shipped
+    /// look with the user's accepted settings laid over it. Computed when the
+    /// file is loaded or reloaded, like `keybinding_policy`; `State::theme` is
+    /// what the view reads, set from this.
+    theme: Theme,
     /// D8: the profile the launch button runs, when the file names one.
     /// **PR-045-C consumed this and removed the `#[allow(dead_code)]`
     /// PR-045-B carried** — an allow that names its closing slice is
@@ -1147,6 +1153,7 @@ impl ConfigurationState {
             warnings: Vec::new(),
             fallbacks: Vec::new(),
             keybinding_policy: tekstide_core::navigation::KeybindingPolicy::linux_mvp(),
+            theme: Theme::default(),
             default_profile: None,
             confirmed_config_profiles: std::collections::BTreeSet::new(),
             pending_reload: None,
@@ -1278,7 +1285,7 @@ impl State {
         let mut state = Self {
             app_shell,
             catalog,
-            theme: Theme::default(),
+            theme: configuration.theme,
             focus: FocusZone::MainArea,
             modal,
             measurement,
@@ -1313,6 +1320,8 @@ impl State {
             transcript_cleanup_notice: None,
             audited_agent_runs: std::collections::HashMap::new(),
         };
+        // RFC-054 PR-054-B: the configured family, before the first frame.
+        crate::theme::set_ui_font(state.theme.font());
         // RFC-049 D2, **inside the constructor rather than at a call site**
         // (response 397, U2). Every project open must run the cleanup, and the
         // command-line open reaches this type with its project already open --
@@ -6126,6 +6135,7 @@ pub(crate) fn load_configuration_at_boot(
                 warnings: Vec::new(),
                 fallbacks: Vec::new(),
                 keybinding_policy: tekstide_core::navigation::KeybindingPolicy::linux_mvp(),
+                theme: Theme::default(),
                 default_profile: None,
                 confirmed_config_profiles: std::collections::BTreeSet::new(),
                 pending_reload: None,
@@ -6149,16 +6159,47 @@ pub(crate) fn load_configuration_at_boot(
                 .map(|configured| tekstide_core::config::to_ai_cli_profile(id, configured))
         });
     let keybinding_policy = keybinding_policy_for(&store);
+    let mut fallbacks = report.fallbacks;
+    let theme = appearance_in_force(&store, &mut fallbacks, crate::theme::installed_family);
     ConfigurationState {
         store: Some(store),
         diagnostic: report.diagnostic,
         warnings: report.warnings,
-        fallbacks: report.fallbacks,
+        fallbacks,
         keybinding_policy,
+        theme,
         default_profile,
         confirmed_config_profiles: std::collections::BTreeSet::new(),
         pending_reload: None,
     }
+}
+
+/// **RFC-054 PR-054-B: the look a loaded configuration puts in force.**
+///
+/// Colours and sizes arrive already validated (contrast at D5, bounds at D6 --
+/// `parse_and_validate` hands over only what met them). What only this side can
+/// know is whether the configured family is **installed**: `installed_family`
+/// asks the renderer's own font database, and a name it does not answer to is a
+/// [`FallbackReason::FamilyUnavailable`] on the board with the default face
+/// standing. `lookup` is a parameter so that answer can be tested without
+/// depending on which fonts a machine has.
+fn appearance_in_force(
+    store: &tekstide_core::config::ConfigStore,
+    fallbacks: &mut Vec<tekstide_core::config::SettingFallback>,
+    lookup: impl Fn(&str) -> Option<&'static str>,
+) -> Theme {
+    let document = store.current();
+    let family = document.font.family.as_deref().and_then(|name| {
+        let found = lookup(name);
+        if found.is_none() {
+            fallbacks.push(tekstide_core::config::SettingFallback {
+                setting: "font.family".to_owned(),
+                reason: tekstide_core::config::FallbackReason::FamilyUnavailable,
+            });
+        }
+        found
+    });
+    Theme::from_settings(&document.theme, &document.font, family)
 }
 
 /// RFC-054 PR-054-A: the policy a loaded configuration puts in force. The
@@ -8299,11 +8340,20 @@ pub(crate) fn configuration_fallback_text(
     catalog: &Catalog,
     fallback: &tekstide_core::config::SettingFallback,
 ) -> String {
-    use tekstide_core::config::FallbackReason;
+    use tekstide_core::config::{ColourError, FallbackReason, FamilyError, ThemeRole};
     use tekstide_core::navigation::{ChordError, KeybindingStatus};
 
+    // What kind of value the setting takes decides which sentence a
+    // `NotAString` gets: a chord, a colour and a family are written differently.
+    let not_a_string = if fallback.setting.starts_with("theme.") {
+        "not-a-string-colour"
+    } else if fallback.setting.starts_with("font.") {
+        "not-a-string-family"
+    } else {
+        "not-a-string"
+    };
     let (reason, other): (&'static str, Option<&'static str>) = match fallback.reason {
-        FallbackReason::NotAString => ("not-a-string", None),
+        FallbackReason::NotAString => (not_a_string, None),
         FallbackReason::BadChord(error) => (
             match error {
                 ChordError::Empty => "chord-empty",
@@ -8324,6 +8374,36 @@ pub(crate) fn configuration_fallback_text(
             ("reserved-chord", Some(held_by.config_name()))
         }
         FallbackReason::Collision { with } => ("collision", Some(with.config_name())),
+        FallbackReason::BadColour(ColourError::Malformed) => ("colour-malformed", None),
+        FallbackReason::BadColour(ColourError::AlphaNotAllowed) => {
+            ("colour-alpha-not-allowed", None)
+        }
+        FallbackReason::LowContrast { against, .. } => (
+            "low-contrast",
+            Some(match against {
+                ThemeRole::Background => "theme.background",
+                ThemeRole::Foreground => "theme.foreground",
+                ThemeRole::Accent => "theme.accent",
+                ThemeRole::BorderDefault => "theme.border_default",
+                ThemeRole::BorderFocused => "theme.border_focused",
+                ThemeRole::SurfaceElevated => "theme.surface_elevated",
+                ThemeRole::Scrim => "theme.scrim",
+            }),
+        ),
+        FallbackReason::NotANumber => ("not-a-number", None),
+        FallbackReason::SizeOutOfRange => ("size-out-of-range", None),
+        FallbackReason::BadFamily(FamilyError::Empty) => ("family-empty", None),
+        FallbackReason::BadFamily(FamilyError::TooLong) => ("family-too-long", None),
+        FallbackReason::BadFamily(FamilyError::ForbiddenCharacter) => {
+            ("family-forbidden-character", None)
+        }
+        FallbackReason::FamilyUnavailable => ("family-unavailable", None),
+    };
+    // The measured ratio, as three digits (`4.49`): a number the user can act
+    // on, quoted by the catalog rather than localised by it.
+    let (whole, tenths, hundredths) = match fallback.reason {
+        FallbackReason::LowContrast { ratio, .. } => ratio.digits(),
+        _ => (0, 0, 0),
     };
     let setting = tekstide_core::text_safety::quote_untrusted(&fallback.setting);
     catalog.get_with_args(
@@ -8331,7 +8411,16 @@ pub(crate) fn configuration_fallback_text(
         &CatalogArgs::new()
             .untrusted("setting", &setting)
             .trusted_symbol("reason", reason)
-            .trusted_symbol("other", other.unwrap_or("")),
+            .trusted_symbol("other", other.unwrap_or(""))
+            .number("ratio_whole", whole)
+            .number("ratio_tenths", tenths)
+            .number("ratio_hundredths", hundredths)
+            .number("min", tekstide_core::config::MIN_FONT_SIZE_PX as u32)
+            .number("max", tekstide_core::config::MAX_FONT_SIZE_PX as u32)
+            .number(
+                "max_family_chars",
+                tekstide_core::config::MAX_FONT_FAMILY_CHARS as u32,
+            ),
     )
 }
 
@@ -9940,6 +10029,17 @@ fn reload_configuration(state: &mut State) {
     // keybindings (a safe field); the policy in force is rebuilt from them,
     // through the same resolution that keeps `Reserved` reserved.
     state.configuration.keybinding_policy = keybinding_policy_for(store);
+    // ...and so do the colours, sizes and family (PR-054-B). The view reads
+    // `state.theme` every frame, and the UI font is process-global (iced offers
+    // no way to change its default font once running), so both are set here.
+    let theme = appearance_in_force(
+        store,
+        &mut state.configuration.fallbacks,
+        crate::theme::installed_family,
+    );
+    state.configuration.theme = theme;
+    state.theme = theme;
+    crate::theme::set_ui_font(theme.font());
 
     let current = store.current().clone();
     let mut increases = Vec::new();

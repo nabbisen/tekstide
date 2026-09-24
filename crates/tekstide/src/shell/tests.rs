@@ -18672,3 +18672,343 @@ fn the_configuration_comes_from_the_resolved_user_path_and_no_other() {
         "{environment_providers:?}"
     );
 }
+
+// --- RFC-054 PR-054-B: theme, sizes and family from the user's own file ------
+
+fn config_state_lines(state: &State) -> Vec<String> {
+    project_board_configuration_lines(state)
+        .iter()
+        .map(|line| plain_words(line))
+        .collect()
+}
+
+/// Each appearance reason renders its own sentence, none falls through to the
+/// generic one, the measured ratio is spelled out to the hundredth, and a
+/// `NotAString` says what *kind* of value the setting wanted.
+#[test]
+fn every_way_an_appearance_setting_falls_back_has_its_own_sentence() {
+    use tekstide_core::config::{
+        ColourError, ContrastRatio, FallbackReason, FamilyError, SettingFallback, ThemeRole,
+    };
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let cases = [
+        ("theme.accent", FallbackReason::NotAString),
+        ("font.family", FallbackReason::NotAString),
+        (
+            "theme.accent",
+            FallbackReason::BadColour(ColourError::Malformed),
+        ),
+        (
+            "theme.accent",
+            FallbackReason::BadColour(ColourError::AlphaNotAllowed),
+        ),
+        (
+            "theme.foreground",
+            FallbackReason::LowContrast {
+                ratio: ContrastRatio::from_ratio(4.499),
+                against: ThemeRole::SurfaceElevated,
+            },
+        ),
+        ("font.body_size", FallbackReason::NotANumber),
+        ("font.body_size", FallbackReason::SizeOutOfRange),
+        ("font.family", FallbackReason::BadFamily(FamilyError::Empty)),
+        (
+            "font.family",
+            FallbackReason::BadFamily(FamilyError::TooLong),
+        ),
+        (
+            "font.family",
+            FallbackReason::BadFamily(FamilyError::ForbiddenCharacter),
+        ),
+        ("font.family", FallbackReason::FamilyUnavailable),
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    for (setting, reason) in cases {
+        let text = plain_words(&super::configuration_fallback_text(
+            &catalog,
+            &SettingFallback {
+                setting: setting.to_owned(),
+                reason,
+            },
+        ));
+        assert!(text.contains(&format!("{setting} was not used")), "{text}");
+        assert!(
+            !text.contains("It could not be used."),
+            "{reason:?} fell through: {text}"
+        );
+        assert!(seen.insert(text.clone()), "two reasons share: {text}");
+        if let FallbackReason::LowContrast { .. } = reason {
+            assert!(
+                text.contains("theme.surface_elevated is 4.49:1")
+                    && text.contains("below the 4.5:1"),
+                "the measured ratio must read 4.49, never 4.50: {text}"
+            );
+        }
+    }
+    assert!(
+        seen.iter().any(|t| t.contains("must be a colour")),
+        "{seen:?}"
+    );
+    assert!(
+        seen.iter().any(|t| t.contains("font family name")),
+        "{seen:?}"
+    );
+}
+
+/// **D8, for colours and sizes.** Edit the file, press `Ctrl+Alt+C`: the theme
+/// the view reads changes at once; a low-contrast colour is refused and the
+/// board says the measured ratio; the rest of the file applies.
+#[test]
+fn a_reload_applies_theme_and_sizes_live_and_a_low_contrast_colour_is_named() {
+    let (mut state, home) = state_from_config("appearance-reload", "");
+    let shipped = crate::theme::Theme::default();
+    assert_eq!(state.theme, shipped, "no file: the shipped look");
+    assert!(config_state_lines(&state).is_empty());
+
+    rewrite_config(
+        &home,
+        "[theme]\nbackground = \"#001020\"\nforeground = \"#FFFFFF\"\n\
+         [font]\nbody_size = 20\nheading_size = 24\n",
+    );
+    press_reload_configuration(&mut state);
+    assert_eq!(state.theme.font_size_body(), 20.0);
+    assert_eq!(state.theme.font_size_heading(), 24.0);
+    assert_eq!(state.theme.font_size_status(), shipped.font_size_status());
+    let background = state.theme.background();
+    assert!((background.b - 32.0 / 255.0).abs() < 1e-6, "{background:?}");
+    assert_eq!(state.theme.foreground().r, 1.0);
+    assert_eq!(
+        state.theme.accent(),
+        shipped.accent(),
+        "untouched roles keep"
+    );
+    assert!(config_state_lines(&state).is_empty());
+
+    // Now a colour that cannot be read, and a size that cannot be either.
+    rewrite_config(
+        &home,
+        "[theme]\nbackground = \"#FFFFFF\"\n[font]\nbody_size = 40\nstatus_size = 9\n",
+    );
+    press_reload_configuration(&mut state);
+    assert_eq!(
+        state.theme.background(),
+        shipped.background(),
+        "the unreadable colour is not in force"
+    );
+    assert_eq!(
+        state.theme.font_size_body(),
+        shipped.font_size_body(),
+        "the out-of-range size is not in force"
+    );
+    assert_eq!(state.theme.font_size_status(), 9.0, "the rest applied");
+    let lines = config_state_lines(&state);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines.iter().any(|l| l.contains("theme.background")
+            && l.contains("1.25:1")
+            && l.contains("theme.foreground")
+            && l.contains("below the 4.5:1")),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("font.body_size") && l.contains("between 8 and 32")),
+        "{lines:?}"
+    );
+}
+
+/// A family the renderer's font database has no answer to falls back and is
+/// named; an installed one is used -- decided by the lookup, injected here so
+/// the answer does not depend on which fonts this machine has.
+#[test]
+fn a_family_is_used_only_if_the_lookup_finds_it_and_is_named_when_not() {
+    let (configuration, _home) = configuration_from_file(
+        "family-lookup",
+        "[font]\nfamily = \"Fixture Sans\"\nbody_size = 15\n",
+    );
+    let store = configuration.store.as_ref().expect("a store");
+
+    let mut fallbacks = Vec::new();
+    let theme = super::appearance_in_force(store, &mut fallbacks, |name| {
+        (name == "Fixture Sans").then_some("Fixture Sans")
+    });
+    assert!(fallbacks.is_empty(), "{fallbacks:?}");
+    assert_eq!(theme.font(), iced::Font::with_name("Fixture Sans"));
+    assert_eq!(theme.font_size_body(), 15.0);
+
+    let mut fallbacks = Vec::new();
+    let theme = super::appearance_in_force(store, &mut fallbacks, |_| None);
+    assert_eq!(
+        fallbacks,
+        vec![tekstide_core::config::SettingFallback {
+            setting: "font.family".to_owned(),
+            reason: tekstide_core::config::FallbackReason::FamilyUnavailable,
+        }]
+    );
+    assert_eq!(theme.font(), iced::Font::DEFAULT, "the default face stands");
+    assert_eq!(theme.font_size_body(), 15.0, "and the size still applied");
+}
+
+/// Through the real boot and reload paths, with the real font database: a name
+/// no font answers to is named on the board, and the default face is in force.
+#[test]
+fn an_uninstalled_family_is_named_on_the_board_after_boot_and_after_reload() {
+    let absent = "font.family";
+    let (mut state, home) = state_from_config(
+        "family-absent",
+        "[font]\nfamily = \"No Such Family 9f3a1c\"\n",
+    );
+    assert_eq!(state.theme.font(), iced::Font::DEFAULT);
+    let lines = config_state_lines(&state);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].contains(absent) && lines[0].contains("No installed font family"),
+        "{lines:?}"
+    );
+    assert!(
+        !lines[0].contains("No Such Family"),
+        "the configured name must not be echoed: {lines:?}"
+    );
+
+    rewrite_config(&home, "");
+    press_reload_configuration(&mut state);
+    assert!(config_state_lines(&state).is_empty());
+
+    rewrite_config(&home, "[font]\nfamily = \"No Such Family 9f3a1c\"\n");
+    press_reload_configuration(&mut state);
+    assert_eq!(config_state_lines(&state).len(), 1);
+}
+
+/// The lookup is the renderer's own database, compared by name: a family that
+/// is in it is found whatever case the user typed, and comes back spelled the
+/// way the database spells it; a path, a hostile string and a made-up name are
+/// simply not found.
+#[test]
+fn the_real_lookup_finds_installed_families_by_name_and_nothing_else() {
+    let installed: String = {
+        let system = iced::advanced::graphics::text::font_system();
+        let mut system = system.write().unwrap();
+        system
+            .raw()
+            .db()
+            .faces()
+            .flat_map(|face| face.families.iter())
+            .map(|(name, _)| name.clone())
+            .next()
+            .expect("the renderer bundles at least its icon font")
+    };
+    assert_eq!(
+        crate::theme::installed_family(&installed.to_uppercase()),
+        crate::theme::installed_family(&installed),
+        "case does not matter"
+    );
+    assert_eq!(
+        crate::theme::installed_family(&installed.to_lowercase()),
+        Some(crate::theme::installed_family(&installed).expect("an installed family is found")),
+    );
+    assert_eq!(
+        crate::theme::installed_family(&installed),
+        Some(Box::leak(installed.clone().into_boxed_str()) as &str),
+        "spelled as the database spells it"
+    );
+    for not_a_family in [
+        "No Such Family 9f3a1c",
+        "/etc/passwd",
+        "../../etc/passwd",
+        "\u{1b}[31m",
+        "",
+    ] {
+        assert_eq!(crate::theme::installed_family(not_a_family), None);
+    }
+}
+
+/// **§3, structurally: a font is a name, never a path.** Nothing that ships
+/// loads a font -- no `font::load`, no `load_font*`, no `fontdb` source, no
+/// bundled font bytes -- so no string from the configuration can reach a font
+/// parser, whatever a future edit does with `installed_family`'s answer.
+/// Ablated by adding any of these to production source.
+#[test]
+fn no_shipped_code_loads_a_font() {
+    let forbidden = [
+        "font::load(",
+        "load_font_file",
+        "load_font_data",
+        "load_fonts_dir",
+        "load_system_fonts",
+        "Source::File",
+        "Source::Binary",
+        "Source::SharedFile",
+        ".add_font(",
+    ];
+    let mut checked = 0;
+    for (path, code) in production_sources() {
+        if path.contains("tekstide-core") && !path.contains("config") {
+            continue;
+        }
+        checked += 1;
+        for pattern in forbidden {
+            assert!(
+                !code.contains(pattern),
+                "{path} contains `{pattern}`: a font must be looked up by name, not loaded"
+            );
+        }
+    }
+    assert!(checked > 20, "the scan must read the source ({checked})");
+}
+
+/// **The family reaches every ordinary text widget through one function.** iced
+/// fixes its default font when the application is built and cannot change it, so
+/// D8's "applies live" rests on each text widget taking its font from
+/// `theme::text`. A file that imports iced's own `text` instead would silently
+/// keep the old family after a reload. Ablated by restoring that import.
+#[test]
+fn no_shipped_view_builds_text_with_the_icedcrate_text_function() {
+    let mut checked = 0;
+    for (path, code) in production_sources() {
+        if !path.contains("crates/tekstide/src") || path.ends_with("theme.rs") {
+            continue;
+        }
+        checked += 1;
+        let flat = code.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            !flat.contains("iced::widget::text(") && !flat.contains("widget::text("),
+            "{path} calls iced's text() directly"
+        );
+        for import in flat.split("use iced::widget::").skip(1) {
+            let list = import.split(';').next().unwrap_or_default();
+            let names: Vec<&str> = list
+                .trim_matches(|c| c == '{' || c == '}')
+                .split(',')
+                .map(str::trim)
+                .collect();
+            assert!(
+                !names.contains(&"text"),
+                "{path} imports iced's `text`, which ignores the configured family: {list}"
+            );
+        }
+    }
+    assert!(checked > 10, "the scan must read the shell ({checked})");
+}
+
+/// §6, through the real surfaces: hostile values in every appearance setting
+/// produce board lines that carry none of what the file said.
+#[test]
+fn a_hostile_appearance_file_is_named_on_the_board_without_being_echoed() {
+    let hostile = "\\u001b[31mEVIL\\u202e/etc/passwd";
+    let (state, _home) = state_from_config(
+        "appearance-hostile",
+        &format!(
+            "[theme]\nbackground = \"{hostile}\"\naccent = 1\n\
+             [font]\nfamily = \"{hostile}\"\nbody_size = \"{hostile}\"\n"
+        ),
+    );
+    let lines = config_state_lines(&state);
+    assert_eq!(lines.len(), 4, "{lines:?}");
+    for line in project_board_configuration_lines(&state) {
+        assert!(
+            !line.contains("EVIL") && !line.contains("passwd") && !line.contains('\u{1b}'),
+            "{line:?}"
+        );
+    }
+}

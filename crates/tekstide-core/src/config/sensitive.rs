@@ -166,5 +166,7 @@ pub fn apply_safe_fields(
         },
         resources: candidate.resources.clone(),
         keybindings: candidate.keybindings.clone(),
+        theme: candidate.theme.clone(),
+        font: candidate.font.clone(),
     }
 }

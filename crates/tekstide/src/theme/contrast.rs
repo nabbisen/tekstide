@@ -13,20 +13,16 @@ use iced::Color;
 /// ignored -- a translucent colour has no luminance of its own until
 /// composited over a backdrop; see [`composite_over`].
 pub(crate) fn relative_luminance(color: Color) -> f32 {
-    fn linearize(channel: f32) -> f32 {
-        // The formula's own linear segment for low values -- this
-        // boundary (0.03928, not 0.04045 or some other nearby constant)
-        // is the usual transcription error, which is exactly why the
-        // anchor tests below check known values rather than trusting
-        // this by inspection.
-        if channel <= 0.03928 {
-            channel / 12.92
-        } else {
-            ((channel + 0.055) / 1.055).powf(2.4)
-        }
-    }
+    // RFC-054 PR-054-B: the arithmetic moved into `tekstide_core::config`, where
+    // the configuration validator needs it, and this module now calls it -- so
+    // there is one implementation, and the anchor tests below (known values,
+    // the 0.03928 boundary) hold the *shipped* math to account rather than a
+    // copy of it.
+    tekstide_core::config::relative_luminance(to_colour(color))
+}
 
-    0.2126 * linearize(color.r) + 0.7152 * linearize(color.g) + 0.0722 * linearize(color.b)
+fn to_colour(color: Color) -> tekstide_core::config::Colour {
+    tekstide_core::config::Colour::rgba(color.r, color.g, color.b, color.a)
 }
 
 /// WCAG 2.1 contrast ratio between two opaque colours: `(lighter + 0.05)
@@ -35,14 +31,7 @@ pub(crate) fn relative_luminance(color: Color) -> f32 {
 /// ([`composite_over`]) -- this function does not know about alpha at
 /// all.
 pub(crate) fn contrast_ratio(first: Color, second: Color) -> f32 {
-    let first_luminance = relative_luminance(first);
-    let second_luminance = relative_luminance(second);
-    let (lighter, darker) = if first_luminance >= second_luminance {
-        (first_luminance, second_luminance)
-    } else {
-        (second_luminance, first_luminance)
-    };
-    (lighter + 0.05) / (darker + 0.05)
+    tekstide_core::config::contrast_ratio(to_colour(first), to_colour(second))
 }
 
 /// Composites a possibly-translucent foreground colour over an opaque

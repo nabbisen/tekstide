@@ -1,3 +1,4 @@
+mod appearance;
 mod load;
 mod model;
 mod path;

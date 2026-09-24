@@ -603,6 +603,13 @@ fn generic_args() -> CatalogArgs<'static> {
         .trusted_symbol("slot", "hidden")
         .trusted_symbol("reason", "limit")
         .number("limit", 1u32)
+        // RFC-054 PR-054-B: `project-board-configuration-fallback`.
+        .number("ratio_whole", 1u32)
+        .number("ratio_tenths", 1u32)
+        .number("ratio_hundredths", 1u32)
+        .number("min", 1u32)
+        .number("max", 1u32)
+        .number("max_family_chars", 1u32)
         .number("line_count", 1u32)
         // RFC-019 PR-019-B: `explorer-node-entry`'s four selectors and
         // `explorer-status-error`'s untrusted message. `name`/`message`

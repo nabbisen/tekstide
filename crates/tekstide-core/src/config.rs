@@ -1,9 +1,16 @@
+mod appearance;
 mod load;
 mod model;
 mod path;
 mod profile;
 mod sensitive;
 
+pub use appearance::{
+    Colour, ColourError, ContrastRatio, FamilyError, FontSettings, FontSizes,
+    MAX_FONT_FAMILY_CHARS, MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX, MIN_TEXT_CONTRAST, Palette,
+    TEXT_PAIRS, ThemeRole, ThemeSettings, contrast_ratio, enforce_text_contrast, parse_family,
+    relative_luminance,
+};
 pub use load::{
     ConfigDiagnostic, ConfigLoadOutcome, ConfigLoadReport, ConfigReloadOutcome, ConfigStore,
     ConfigWarning, parse_and_validate,

@@ -17,7 +17,8 @@
 //! producer) is not called anywhere here; `TextDocumentState` renders
 //! through `Catalog` via `editor-chrome`'s `$state` selector instead.
 
-use iced::widget::{button, column, container, text};
+use crate::theme::text;
+use iced::widget::{button, column, container};
 use iced::{Element, Length};
 
 use tekstide_core::content::{TextCursor, TextDocument, TextDocumentState};

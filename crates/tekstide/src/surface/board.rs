@@ -62,7 +62,8 @@ use tekstide_core::project_board::{
 };
 use tekstide_core::text_safety;
 
-use iced::widget::{column, container, scrollable, text};
+use crate::theme::text;
+use iced::widget::{column, container, scrollable};
 use iced::{Element, Length};
 
 use crate::i18n::{Catalog, CatalogArgs};
@@ -441,7 +442,7 @@ pub(crate) fn row_sections(
 fn bold() -> iced::Font {
     iced::Font {
         weight: iced::font::Weight::Bold,
-        ..iced::Font::DEFAULT
+        ..crate::theme::ui_font()
     }
 }
 

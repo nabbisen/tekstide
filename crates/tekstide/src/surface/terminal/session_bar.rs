@@ -25,7 +25,8 @@
 //! and its state visible" (RFC-017) means the row exists, not that it
 //! renders a grid.
 
-use iced::widget::{container, row, text};
+use crate::theme::text;
+use iced::widget::{container, row};
 use iced::{Background, Border, Element, Length};
 
 use tekstide_core::domain::{TerminalStatus, VisibleSlot};

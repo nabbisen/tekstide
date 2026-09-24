@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
 
+use super::appearance::{
+    ColourError, ContrastRatio, FamilyError, FontSettings, ThemeRole, ThemeSettings,
+};
 use crate::navigation::{Chord, ChordError, KeybindingStatus, NavigationAction};
 
 /// RFC-023 PR-023-B, narrowed by **RFC-045 D3'**: the typed configuration
@@ -24,6 +27,8 @@ pub struct ConfigurationDocument {
     pub agent: AgentSettings,
     pub resources: ResourceSettings,
     pub keybindings: KeybindingSettings,
+    pub theme: ThemeSettings,
+    pub font: FontSettings,
 }
 
 /// **RFC-054 PR-054-A.** The rebinds that survived validation: only rebinds
@@ -64,8 +69,28 @@ pub enum FallbackReason {
     NotAString,
     BadChord(ChordError),
     NotRebindable(KeybindingStatus),
-    ReservedChord { held_by: NavigationAction },
-    Collision { with: NavigationAction },
+    ReservedChord {
+        held_by: NavigationAction,
+    },
+    Collision {
+        with: NavigationAction,
+    },
+    /// RFC-054 PR-054-B. A colour that is not `#RRGGBB` (`#RRGGBBAA` on the scrim).
+    BadColour(ColourError),
+    /// **D5.** The measured ratio, floored -- a number the user can act on -- and
+    /// the role this one was measured against. The default stands.
+    LowContrast {
+        ratio: ContrastRatio,
+        against: ThemeRole,
+    },
+    NotANumber,
+    /// Outside [`super::MIN_FONT_SIZE_PX`]..=[`super::MAX_FONT_SIZE_PX`].
+    SizeOutOfRange,
+    BadFamily(FamilyError),
+    /// A well-formed name that no installed font family answers to. Decided by
+    /// the shell, which holds the renderer's font database -- the core cannot
+    /// know what is installed, and must not go and look.
+    FamilyUnavailable,
 }
 
 /// A configuration-defined AI CLI profile, as the config document itself

@@ -56,8 +56,15 @@ fn derived_contrast_pairs(theme: &Theme) -> Vec<DerivedContrastPair> {
         font_size_body,
         font_size_heading,
         font_size_status,
+        font,
     } = *theme;
-    let _ = (scrim, font_size_body, font_size_heading, font_size_status);
+    let _ = (
+        scrim,
+        font_size_body,
+        font_size_heading,
+        font_size_status,
+        font,
+    );
 
     let backdrops = [
         ("background", background),

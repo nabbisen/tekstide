@@ -75,7 +75,7 @@ impl ConfigDiagnostic {
 /// marker in half.
 const MAX_UNTRUSTED_KEY_SEGMENT_CHARS: usize = 128;
 
-fn bound_key_segment(raw: &str) -> String {
+pub(super) fn bound_key_segment(raw: &str) -> String {
     let truncated_raw: String = raw.chars().take(MAX_UNTRUSTED_KEY_SEGMENT_CHARS).collect();
     let was_truncated = raw.chars().count() > MAX_UNTRUSTED_KEY_SEGMENT_CHARS;
     let mut bounded = crate::text_safety::escape_untrusted_chars(&truncated_raw);
@@ -173,6 +173,13 @@ const PERMANENTLY_REFUSED_KEYS: &[(&str, &str, &str)] = &[
 /// The message every ordinary withdrawn key carries. Deliberately says
 /// **"no effect yet"** and names the return condition: the key is not
 /// wrong, it is early, and it comes back with the code that reads it.
+/// **RFC-054 PR-054-B.** `[ui]` was RFC-023's home for `theme` and `font_size`,
+/// and stays withdrawn: the settings it named now live in `[theme]` and
+/// `[font]`. "No effect yet, returns with the feature" would be false about a
+/// key whose feature has shipped under another name, so `[ui]` says where they
+/// went.
+const UI_MOVED_MESSAGE: &str = "this section is not read -- colours are set in [theme], and the font family and sizes in [font]";
+
 const NO_CONSUMER_MESSAGE: &str = "this key has no consumer in this build, so it would have no effect yet -- it returns to the \
      file in the same change as the feature that reads it";
 
@@ -243,7 +250,11 @@ fn refuse_withdrawn_free_form_section(
             path: None,
             key: format!("{section}.{}", bound_key_segment(field)),
             location: None,
-            message: NO_CONSUMER_MESSAGE,
+            message: if section == "ui" {
+                UI_MOVED_MESSAGE
+            } else {
+                NO_CONSUMER_MESSAGE
+            },
         }),
     }
 }
@@ -304,6 +315,8 @@ pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagn
         agent: extract_agent(&mut root, &mut warnings)?,
         resources: extract_resources(&mut root, &mut warnings)?,
         keybindings: extract_keybindings(&mut root, &mut warnings, &mut fallbacks)?,
+        theme: super::appearance::extract_theme(&mut root, &mut warnings, &mut fallbacks)?,
+        font: super::appearance::extract_font(&mut root, &mut warnings, &mut fallbacks)?,
     };
 
     validate_default_profile(&document)?;
@@ -341,7 +354,7 @@ fn validate_default_profile(document: &ConfigurationDocument) -> Result<(), Conf
     })
 }
 
-fn section_table(
+pub(super) fn section_table(
     root: &mut toml::Table,
     section: &str,
 ) -> Result<Option<toml::Table>, ConfigDiagnostic> {
@@ -357,7 +370,11 @@ fn section_table(
     }
 }
 
-fn warn_unconsumed(table: toml::Table, section: &str, warnings: &mut Vec<ConfigWarning>) {
+pub(super) fn warn_unconsumed(
+    table: toml::Table,
+    section: &str,
+    warnings: &mut Vec<ConfigWarning>,
+) {
     for key in table.keys() {
         warnings.push(ConfigWarning {
             key: format!("{section}.{}", bound_key_segment(key)),

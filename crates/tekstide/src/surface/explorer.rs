@@ -45,8 +45,9 @@
 //! own, exactly as a plain per-node lookup would produce with no special
 //! casing at all.
 
+use crate::theme::text;
 use iced::widget::text::Wrapping;
-use iced::widget::{button, column, container, text};
+use iced::widget::{button, column, container};
 use iced::{Element, Length};
 
 use tekstide_core::project::root::{

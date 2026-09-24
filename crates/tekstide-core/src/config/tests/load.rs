@@ -103,10 +103,16 @@ fn a_core_key_is_refused_because_nothing_reads_it() {
 }
 
 #[test]
-fn a_ui_key_is_refused_because_nothing_reads_it() {
+fn a_ui_key_is_refused_and_says_where_the_setting_went() {
     let error = parse_and_validate("[ui]\nfont_size = 18\n").unwrap_err();
     assert_eq!(error.key, "ui.font_size");
-    assert!(error.message.contains("no effect yet"), "{}", error.message);
+    // RFC-054 PR-054-B: "no effect yet" would be false about a setting that now
+    // exists -- as `[font] body_size`.
+    assert!(
+        error.message.contains("[theme]") && error.message.contains("[font]"),
+        "{}",
+        error.message
+    );
 }
 
 // --- RFC-054 PR-054-A: `[keybindings]` has a consumer, so it is read ---------

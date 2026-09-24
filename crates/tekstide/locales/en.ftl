@@ -380,6 +380,17 @@ project-board-configuration-fallback = Configuration: { $setting } was not used,
     [not-rebindable-dead] That action has no key at all, so there is nothing to rebind.
     [reserved-chord] That chord is reserved for { $other }.
     [collision] That chord already reaches { $other }.
+    [not-a-string-colour] It must be a colour in quotes, such as "#1E1E24".
+    [not-a-string-family] It must be a font family name in quotes, such as "Inter".
+    [colour-malformed] It is not a colour; write # and six hex digits, such as "#1E1E24".
+    [colour-alpha-not-allowed] Only the scrim can be transparent; write # and six hex digits.
+    [low-contrast] Its contrast with { $other } is { $ratio_whole }.{ $ratio_tenths }{ $ratio_hundredths }:1, below the 4.5:1 that keeps text readable.
+    [not-a-number] It must be a number, such as 14.
+    [size-out-of-range] It must be between { $min } and { $max }.
+    [family-empty] It is empty; write the name of an installed font family.
+    [family-too-long] It is longer than { $max_family_chars } characters, so it is not a family name.
+    [family-forbidden-character] A font is a family name, not a path: it cannot contain a slash, a backslash or a control character.
+    [family-unavailable] No installed font family has that name.
    *[other] It could not be used.
 }
 

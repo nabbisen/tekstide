@@ -13,7 +13,11 @@
 //! `Theme` is referenced by its full path, `crate::theme::Theme`, at
 //! every call site specifically to avoid that ambiguity.
 
-use iced::Color;
+use std::collections::HashMap;
+use std::sync::{Mutex, RwLock};
+
+use iced::{Color, Font};
+use tekstide_core::config::{Colour, FontSettings, Palette, ThemeSettings};
 
 // theme-contrast-verification handoff: exists to verify `Theme::default`'s
 // palette against real WCAG thresholds, not to be drawn with -- no
@@ -38,9 +42,51 @@ pub struct Theme {
     font_size_body: f32,
     font_size_heading: f32,
     font_size_status: f32,
+    /// **RFC-054 PR-054-B.** The family the interface's own text is set in.
+    /// `Font::DEFAULT` unless the user named an installed family. The
+    /// terminal, the file tree and the diff keep their monospace face either
+    /// way (`explorer::TREE_FONT` and friends set it explicitly): a family
+    /// chosen for reading prose must not undo what makes a column of code line
+    /// up.
+    font: Font,
+}
+
+fn colour(colour: Colour) -> Color {
+    Color::from_rgba(colour.r, colour.g, colour.b, colour.a)
 }
 
 impl Theme {
+    /// **RFC-054.** The theme a configuration puts in force. `family` is what
+    /// [`installed_family`] answered for the configured name -- already
+    /// resolved against the renderer's own font database, so a name that got
+    /// here is one the renderer will find. Nothing in `settings` is validated
+    /// again: `parse_and_validate` only hands over overrides that met D5 and D6.
+    pub fn from_settings(
+        theme: &ThemeSettings,
+        font: &FontSettings,
+        family: Option<&'static str>,
+    ) -> Self {
+        let palette = Palette::with_overrides(&theme.overrides);
+        let sizes = font.sizes();
+        Self {
+            background: colour(palette.background),
+            foreground: colour(palette.foreground),
+            accent: colour(palette.accent),
+            border_default: colour(palette.border_default),
+            border_focused: colour(palette.border_focused),
+            surface_elevated: colour(palette.surface_elevated),
+            scrim: colour(palette.scrim),
+            font_size_body: sizes.body,
+            font_size_heading: sizes.heading,
+            font_size_status: sizes.status,
+            font: family.map_or(Font::DEFAULT, Font::with_name),
+        }
+    }
+
+    pub fn font(&self) -> Font {
+        self.font
+    }
+
     pub fn background(&self) -> Color {
         self.background
     }
@@ -96,39 +142,81 @@ impl Theme {
 }
 
 impl Default for Theme {
+    /// The shipped look. Its values live in `tekstide_core::config::Palette` and
+    /// `FontSizes`, so the palette a configured pair is measured against is the
+    /// palette drawn when nothing is configured. The rationale for each border
+    /// and the scrim (the contrast each was raised to, and why) is held to its
+    /// numbers by `theme/tests.rs`, which still measures this.
     fn default() -> Self {
-        Self {
-            background: Color::from_rgb(0.08, 0.08, 0.09),
-            foreground: Color::from_rgb(0.90, 0.90, 0.90),
-            accent: Color::from_rgb(0.30, 0.60, 1.0),
-            // theme-contrast-verification handoff, Slice B: raised from
-            // 0.35 (2.63:1 on `background`, 2.37:1 on `surface_elevated`
-            // -- both fail WCAG 2.1 SC 1.4.11's 3:1 non-text threshold).
-            // 0.45 measures 3.85:1 / 3.48:1, real headroom over the
-            // minimum (~0.42, 3.44:1 / 3.11:1) so a future adjustment to
-            // `surface_elevated` does not re-break this the moment
-            // someone touches an unrelated colour.
-            border_default: Color::from_rgb(0.45, 0.45, 0.45),
-            border_focused: Color::from_rgb(0.30, 0.60, 1.0),
-            surface_elevated: Color::from_rgb(0.12, 0.12, 0.12),
-            // derived-contrast-pairs handoff, Slice B: raised from 0.55
-            // (worst case 2.40:1 against the modal card's own
-            // border/fill, at ~0.78 grey terminal content behind it --
-            // fails WCAG 2.1 SC 1.4.11's 3:1). 0.75 measures 3.62:1 at
-            // its own worst case (still at the bright end, content near
-            // white). Keeps the accent-coloured border rather than
-            // switching to the alternative grey-border lever, and moves
-            // in the same direction as RFC-018's own goal: more chrome
-            // dimming is a stronger spoofing tell, not a weaker one.
-            // Still visibly translucent -- verified against the real
-            // rendered window, not only the arithmetic; see the
-            // handoff's own evidence for what was observed.
-            scrim: Color::from_rgba(0.0, 0.0, 0.0, 0.75),
-            font_size_body: 14.0,
-            font_size_heading: 16.0,
-            font_size_status: 13.0,
-        }
+        Self::from_settings(&ThemeSettings::default(), &FontSettings::default(), None)
     }
+}
+
+/// The face the interface's own text is set in. Process-global because iced
+/// fixes the *default* font when the application is built and offers no way to
+/// change it later -- and D8 says the family applies live. So every ordinary
+/// text widget takes its font from here ([`text`]), and a reload sets it.
+static UI_FONT: RwLock<Font> = RwLock::new(Font::DEFAULT);
+
+pub(crate) fn ui_font() -> Font {
+    UI_FONT.read().map_or(Font::DEFAULT, |font| *font)
+}
+
+pub(crate) fn set_ui_font(font: Font) {
+    if let Ok(mut current) = UI_FONT.write() {
+        *current = font;
+    }
+}
+
+/// `iced::widget::text`, set in the configured family. Every ordinary text
+/// widget in the shell is built with this, not with iced's own, which is what
+/// makes [`set_ui_font`] reach the screen; a widget that wants a specific face
+/// (the terminal, the tree) sets `.font(..)` after it, as before.
+pub(crate) fn text<'a, Theme, Renderer>(
+    content: impl iced::widget::text::IntoFragment<'a>,
+) -> iced::widget::Text<'a, Theme, Renderer>
+where
+    Theme: iced::widget::text::Catalog + 'a,
+    Renderer: iced::advanced::text::Renderer<Font = Font>,
+{
+    iced::widget::text(content).font(ui_font())
+}
+
+/// The installed font family whose name is `wanted` (compared without regard to
+/// case, as the font database itself does), spelled as the database spells it --
+/// or `None` if nothing installed answers to it.
+///
+/// **This is the whole of how a configured family reaches the renderer, and it
+/// is a lookup, not a load** (RFC-054 D6, §3): `wanted` is *compared* with names
+/// the database already holds, never opened, and what comes back is one of those
+/// names, not the user's string. Nothing a user wrote is parsed as a font.
+///
+/// The renderer's own database is asked (`iced_graphics`' global font system),
+/// so a `Some` here is a family the renderer will find; a second scan of the
+/// system's fonts would answer a different question. `Font::with_name` needs a
+/// `&'static str`, so the database's spelling is interned -- bounded by the
+/// number of installed families, **not** by what anyone types.
+pub(crate) fn installed_family(wanted: &str) -> Option<&'static str> {
+    static INTERNED: Mutex<Option<HashMap<String, &'static str>>> = Mutex::new(None);
+
+    let canonical: String = {
+        let system = iced::advanced::graphics::text::font_system();
+        let mut system = system.write().ok()?;
+        system
+            .raw()
+            .db()
+            .faces()
+            .flat_map(|face| face.families.iter())
+            .map(|(name, _language)| name)
+            .find(|name| name.eq_ignore_ascii_case(wanted))?
+            .clone()
+    };
+    let mut interned = INTERNED.lock().ok()?;
+    let interned = interned.get_or_insert_with(HashMap::new);
+    let name: &'static str = interned
+        .entry(canonical)
+        .or_insert_with_key(|name| Box::leak(name.clone().into_boxed_str()));
+    Some(name)
 }
 
 #[cfg(test)]
