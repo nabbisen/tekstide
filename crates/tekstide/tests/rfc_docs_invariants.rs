@@ -715,7 +715,8 @@ fn the_configuration_page_lists_every_rebindable_action_with_its_default_chord()
             .find(|line| line.starts_with("| `") && line.contains(&format!("`{name}`")));
         match rule.status() {
             tekstide_core::navigation::KeybindingStatus::Bound => {
-                let row = row.unwrap_or_else(|| panic!("{name} is rebindable but not in the table"));
+                let row =
+                    row.unwrap_or_else(|| panic!("{name} is rebindable but not in the table"));
                 let chord = rule.default_binding().expect("a bound rule has a chord");
                 assert!(
                     row.contains(&format!("`{chord}`")),
