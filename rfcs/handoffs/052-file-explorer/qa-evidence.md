@@ -352,3 +352,15 @@ The Project Board, seen in the same captures: the last card's "Open" button was 
 ### Gate
 
 fmt, clippy `-D warnings`, `mdbook build docs`, `git diff --cached --check`, three consecutive full-workspace runs to files, fresh `TMPDIR` each: **626 + 9 + 902, green all three, 0 entries left.** An earlier attempt hit two registered intermittents under a load average of ~30 (other work on the machine); they are dated in `test-process-leak.md`, and the gate was redone when the load was under 6 rather than counted.
+
+## Review 424 follow-up — the board scroll, B1, B2
+
+**The scroll bug the reviewer measured was real, and my test could not have caught it.** `handle_project_board_row_key` set `project_board_scroll_request`; the only thing that turned it into a `snap_to` was the tail of `update()`, and the key-press arm `return`s before the tail — so every board key press set the request and nothing ran it. My test (`moving_the_board_highlight_asks_the_card_list_to_follow_it`) asserted the request was *set*, which is a producer with no consumer: I disclosed "unit-tested, not visually verified" when the honest phrase was "not tested". **Fix:** `update` is now a wrapper around `update_message` that consumes the request after *any* return path. **New test:** `a_board_down_key_through_update_returns_the_scroll_task` goes through `update` and asserts on the `Task` it returns (`units() > 0` over several cards, `0` for one card, and no request left behind). **Ablated with `ablate.sh`** (drop the request in the wrapper — the shipped bug): that test fails, alone.
+
+**Live, with content not geometry** (`evidence/04-…`, `05-…`): ten fabricated recent projects under `/dev/shm` via `XDG_STATE_HOME`, so no path under `$HOME` is on screen; the window at its natural size; seven `Down` presses through the focus-verified helper. Before: the top of the list. After: the list has scrolled and `kappa` is highlighted, in view.
+
+**B1.** A project that is not open shows the trust badge, one *"Not open: counts appear once it is opened"* badge and any count it does know — not five `…: unknown` pills, an unavailable branch or a "Calm" it has no evidence for. `a_project_that_is_not_open_says_so_once_…`, `a_not_open_card_keeps_the_counts_it_knows`; ablated (never show the badge) → both fail.
+
+**B2.** The blocked-automation names show on the highlighted card only; the count stays on every card, so what is blocked is one key press away and never absent. `the_blocked_automation_names_show_only_on_the_highlighted_card`; ablated (`|| true`) → fails, alone.
+
+**A rename this needed:** four existing "exactly N production call sites" tests named `update` as the enclosing function; the body is now `update_message`, so they say that. Nothing about what they pin changed.

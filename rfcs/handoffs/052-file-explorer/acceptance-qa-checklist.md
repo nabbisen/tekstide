@@ -111,10 +111,10 @@ implementer's to paper over.
 
 ### Required at review 424 — the Project Board work this slice also carried
 
-- [ ] **B1: no badge of ignorance.** A recent, unopened card carries five `…: unknown` pills today.
+- [x] **B1: no badge of ignorance.** A recent, unopened card carries five `…: unknown` pills today.
       Say once that the project is not open, or say nothing — `REQ-NOTIFY-003`'s rule applied to
       unknowns.
-- [ ] **B2: the nine blocked automations appear once**, not verbatim on every card.
+- [x] **B2: the nine blocked automations appear once**, not verbatim on every card.
 - [ ] **B3 (review 424 addendum): the card list does not follow the keyboard — measured, and it
       blocks `0.24.0`.** Ten recent projects, natural window size: after seven `Down` presses the
       highlight has left the first card and the viewport has not moved.
@@ -124,8 +124,12 @@ implementer's to paper over.
       set, not that anything consumes it** — a producer with no consumer, which is the shape this
       project keeps refusing. Fix it, and pin the *effect*: a board `Down` must produce the scroll,
       asserted on what `update()` returns.
-- [ ] **`0.24.0`'s changelog carries a `Corrected` entry**: `0.23.0` said the board's row was "hard to
+- [x] **`0.24.0`'s changelog carries a `Corrected` entry**: `0.23.0` said the board's row was "hard to
       read… later work that no scheduled RFC covers", which this slice made false.
+      *(B1: one "Not open" badge; B2: the names on the highlighted card only, the count on all. Capture:
+      `evidence/04-…` then `05-…`, ten fabricated projects under `/dev/shm`, window untouched. **It found
+      the scroll did not follow the key** — `update` returned early before the request was consumed — fixed
+      and pinned through `update`'s returned `Task`. The `Corrected` entry is in `CHANGELOG.md`.)*
 
 ## Whole-RFC
 

@@ -34,6 +34,16 @@
 - **A card reads who, then state, then how much.** The name is a heading; trust, branch and attention, and
   each count, are **badges** — a word in a pill, never a replacement for one — that wrap in a narrow window.
   A project that needs attention gets a heavier border *and* says so in words.
+- **A project that is not open says so once**, instead of five "unknown" badges: it has no session to count,
+  so one badge says "Not open: counts appear once it is opened" and the counts it cannot know are left out.
+- **The list of blocked automations is shown on the highlighted card**, not repeated on every card (the count
+  stays on all of them).
+
+### Corrected
+
+- **`0.23.0` said the Project Board is "hard to read" and that no scheduled RFC covers it.** That is no
+  longer true: at the owner's request the board was reworked in `0.24.0` (see above), unplanned and outside
+  any RFC. `0.23.0`'s other limitations still hold.
 
 ## 0.23.0 - What The Window Says Is True
 
