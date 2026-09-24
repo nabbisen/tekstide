@@ -91,30 +91,97 @@ pub enum NavigationAction {
     ReloadConfiguration,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// What kind of rule this is. **Derived from a [`RuleBinding`], never stored
+/// beside one**, so it cannot disagree with it.
+///
+/// RFC-054 D3′ retired the two statuses this replaces. `Candidate` meant "has
+/// a real chord" and `Configurable` was meant to mean "a user can bind this" --
+/// but two rules carried `Configurable` with **no** chord, which reads as
+/// *bindable* and meant *dead*, and two shipped surfaces were unreachable
+/// because of it (`future-work.md` records both). A status that could sit
+/// beside `None` was the trap.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum KeybindingStatus {
+    /// A chord held for a feature that does not exist yet. Never rebindable.
     Reserved,
-    Candidate,
-    Configurable,
+    /// Has a default chord and can be rebound.
+    Bound,
+    /// Has **no** chord, and says why. Rebinding it would configure nothing.
+    Dead,
+}
+
+/// How a rule relates to a chord. Exactly one of three, so **an action cannot
+/// be both bound and dead**: there is no value of this type that has a chord
+/// and a death certificate, or neither. (RFC-054 D3′; held by the type, not by
+/// review.)
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RuleBinding {
+    /// `chord` is claimed so nothing else takes it; pressing it does nothing
+    /// yet. `Ctrl+Shift+P` is held for a command palette that does not exist.
+    Reserved { chord: &'static str },
+    /// `default_chord` reaches the action unless the user rebinds it.
+    Bound { default_chord: &'static str },
+    /// No chord reaches this action, and `reachability` states how a user
+    /// reaches what it stands for -- **or that they do not.** A death
+    /// certificate is a claim, so it is written out and pinned by a test.
+    Dead { reachability: &'static str },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeybindingRule {
     pub action: NavigationAction,
-    pub default_binding: Option<&'static str>,
-    pub status: KeybindingStatus,
+    binding: RuleBinding,
 }
 
 impl KeybindingRule {
-    pub fn new(
-        action: NavigationAction,
-        default_binding: Option<&'static str>,
-        status: KeybindingStatus,
-    ) -> Self {
+    pub fn reserved(action: NavigationAction, chord: &'static str) -> Self {
         Self {
             action,
-            default_binding,
-            status,
+            binding: RuleBinding::Reserved { chord },
+        }
+    }
+
+    pub fn bound(action: NavigationAction, default_chord: &'static str) -> Self {
+        Self {
+            action,
+            binding: RuleBinding::Bound { default_chord },
+        }
+    }
+
+    pub fn dead(action: NavigationAction, reachability: &'static str) -> Self {
+        Self {
+            action,
+            binding: RuleBinding::Dead { reachability },
+        }
+    }
+
+    pub fn binding(&self) -> &RuleBinding {
+        &self.binding
+    }
+
+    pub fn status(&self) -> KeybindingStatus {
+        match self.binding {
+            RuleBinding::Reserved { .. } => KeybindingStatus::Reserved,
+            RuleBinding::Bound { .. } => KeybindingStatus::Bound,
+            RuleBinding::Dead { .. } => KeybindingStatus::Dead,
+        }
+    }
+
+    /// The chord this rule holds by default: a `Reserved` rule's held chord,
+    /// a `Bound` rule's default, and `None` only for a `Dead` rule.
+    pub fn default_binding(&self) -> Option<&'static str> {
+        match self.binding {
+            RuleBinding::Reserved { chord } => Some(chord),
+            RuleBinding::Bound { default_chord } => Some(default_chord),
+            RuleBinding::Dead { .. } => None,
+        }
+    }
+
+    /// For a `Dead` rule, how a user reaches what it stands for.
+    pub fn dead_reachability(&self) -> Option<&'static str> {
+        match self.binding {
+            RuleBinding::Dead { reachability } => Some(reachability),
+            _ => None,
         }
     }
 }
@@ -128,16 +195,8 @@ impl KeybindingPolicy {
     pub fn linux_mvp() -> Self {
         Self {
             rules: vec![
-                KeybindingRule::new(
-                    NavigationAction::OpenCommandPalette,
-                    Some("Ctrl+Shift+P"),
-                    KeybindingStatus::Reserved,
-                ),
-                KeybindingRule::new(
-                    NavigationAction::OpenProjectBoard,
-                    Some("Ctrl+Alt+P"),
-                    KeybindingStatus::Candidate,
-                ),
+                KeybindingRule::reserved(NavigationAction::OpenCommandPalette, "Ctrl+Shift+P"),
+                KeybindingRule::bound(NavigationAction::OpenProjectBoard, "Ctrl+Alt+P"),
                 // RFC-038 PR-038-B: `Ctrl+Alt+O` (Open), following the
                 // existing `Ctrl+Alt+<letter>` shape (`P`, `M`, `T`, `A`,
                 // `R`, `H`, `U` elsewhere in this list) -- unclaimed by
@@ -147,16 +206,8 @@ impl KeybindingPolicy {
                 // `open_project_entry_field_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone). RFC-038's own D2 named this
                 // letter directly.
-                KeybindingRule::new(
-                    NavigationAction::OpenProjectEntryField,
-                    Some("Ctrl+Alt+O"),
-                    KeybindingStatus::Candidate,
-                ),
-                KeybindingRule::new(
-                    NavigationAction::ToggleProjectMode,
-                    Some("Ctrl+Alt+M"),
-                    KeybindingStatus::Candidate,
-                ),
+                KeybindingRule::bound(NavigationAction::OpenProjectEntryField, "Ctrl+Alt+O"),
+                KeybindingRule::bound(NavigationAction::ToggleProjectMode, "Ctrl+Alt+M"),
                 // Terminal launch UX handoff: `Ctrl+Alt+T`, following the
                 // existing `Ctrl+Alt+<letter>` shape (`P`, `M` above) --
                 // `T` for Terminal, unused by any other rule here and not
@@ -164,11 +215,7 @@ impl KeybindingPolicy {
                 // it collides with nothing (checked mechanically by
                 // `linux_mvp_terminal_launch_binding_collides_with_nothing`,
                 // not by inspection alone).
-                KeybindingRule::new(
-                    NavigationAction::LaunchTerminal,
-                    Some("Ctrl+Alt+T"),
-                    KeybindingStatus::Candidate,
-                ),
+                KeybindingRule::bound(NavigationAction::LaunchTerminal, "Ctrl+Alt+T"),
                 // RFC-018 PR-018-B: `Ctrl+Shift+V`, the terminal-emulator
                 // convention (distinct from `Ctrl+V`, which most
                 // terminals leave to the shell's own line editing). Does
@@ -177,22 +224,14 @@ impl KeybindingPolicy {
                 // mechanically by
                 // `paste_into_terminal_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone.
-                KeybindingRule::new(
-                    NavigationAction::PasteIntoTerminal,
-                    Some("Ctrl+Shift+V"),
-                    KeybindingStatus::Candidate,
-                ),
+                KeybindingRule::bound(NavigationAction::PasteIntoTerminal, "Ctrl+Shift+V"),
                 // RFC-019 PR-019-D: `Ctrl+S`, the universal save
                 // convention across editors and terminal-adjacent tools.
                 // Does not collide with any `Ctrl+Alt+<letter>` rule or
                 // `Ctrl+Shift+<letter>` rule above -- checked mechanically
                 // by `save_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone.
-                KeybindingRule::new(
-                    NavigationAction::SaveActiveDocument,
-                    Some("Ctrl+S"),
-                    KeybindingStatus::Candidate,
-                ),
+                KeybindingRule::bound(NavigationAction::SaveActiveDocument, "Ctrl+S"),
                 // RFC-022 PR-022-D: `Ctrl+Alt+A`, following the existing
                 // `Ctrl+Alt+<letter>` shape (`P`, `M`, `T` above) -- `A`
                 // for Agent, unused by any other rule here and not
@@ -200,11 +239,7 @@ impl KeybindingPolicy {
                 // it collides with nothing (checked mechanically by
                 // `launch_agent_run_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone).
-                KeybindingRule::new(
-                    NavigationAction::LaunchAgentRun,
-                    Some("Ctrl+Alt+A"),
-                    KeybindingStatus::Candidate,
-                ),
+                KeybindingRule::bound(NavigationAction::LaunchAgentRun, "Ctrl+Alt+A"),
                 // RFC-039 PR-039-B: `Ctrl+Alt+N` (Next) -- the global
                 // accelerator alongside the real, visible controls
                 // (clicking a tab, or Left/Right + Enter across the tab
@@ -220,15 +255,13 @@ impl KeybindingPolicy {
                 // `switch_active_project_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone). Takes RFC-036's dead-action
                 // count from four to three.
-                KeybindingRule::new(
-                    NavigationAction::SwitchActiveProject,
-                    Some("Ctrl+Alt+N"),
-                    KeybindingStatus::Candidate,
-                ),
-                KeybindingRule::new(
+                KeybindingRule::bound(NavigationAction::SwitchActiveProject, "Ctrl+Alt+N"),
+                KeybindingRule::dead(
                     NavigationAction::CycleVisibleTerminalSession,
-                    None,
-                    KeybindingStatus::Configurable,
+                    "No handler exists, so no chord can be offered for it. A new launch becomes \
+                     the Primary session, the only one that receives keystrokes; there is no \
+                     way to bring an existing session back to Primary. Switching sessions is a \
+                     new action with its own design, not something configuration can supply.",
                 ),
                 // pr-020-b-report-surface.md: `Configurable` with a
                 // `None` binding reads as "a user can bind this" but
@@ -254,11 +287,7 @@ impl KeybindingPolicy {
                 // mechanically by
                 // `open_current_agent_run_detail_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone).
-                KeybindingRule::new(
-                    NavigationAction::OpenCurrentAgentRunDetail,
-                    Some("Ctrl+Alt+R"),
-                    KeybindingStatus::Candidate,
-                ),
+                KeybindingRule::bound(NavigationAction::OpenCurrentAgentRunDetail, "Ctrl+Alt+R"),
                 // approval-history-binding handoff: `Configurable` with a
                 // `None` binding reads as "a user can bind this" but
                 // actually means "unreachable until RFC-023 exists" -- the
@@ -273,11 +302,7 @@ impl KeybindingPolicy {
                 // mechanically by
                 // `open_approval_history_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone).
-                KeybindingRule::new(
-                    NavigationAction::OpenApprovalHistory,
-                    Some("Ctrl+Alt+H"),
-                    KeybindingStatus::Candidate,
-                ),
+                KeybindingRule::bound(NavigationAction::OpenApprovalHistory, "Ctrl+Alt+H"),
                 // RFC-032, response 248's required fix: `Configurable`
                 // with a `None` binding reads as "a user can bind this"
                 // but actually means "unreachable until RFC-023 exists"
@@ -295,11 +320,7 @@ impl KeybindingPolicy {
                 // with nothing (checked mechanically by
                 // `open_trust_settings_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone).
-                KeybindingRule::new(
-                    NavigationAction::OpenTrustSettings,
-                    Some("Ctrl+Alt+U"),
-                    KeybindingStatus::Candidate,
-                ),
+                KeybindingRule::bound(NavigationAction::OpenTrustSettings, "Ctrl+Alt+U"),
                 // RFC-020, the change review surface handoff: `Ctrl+Alt+D`
                 // (Diff), following the existing `Ctrl+Alt+<letter>` shape
                 // (`P`, `M`, `T`, `A`, `N`, `R`, `H`, `U`, `K`, `B` above)
@@ -309,15 +330,13 @@ impl KeybindingPolicy {
                 // `open_diff_review_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone). Takes RFC-036's dead-action
                 // count from three to two.
-                KeybindingRule::new(
-                    NavigationAction::OpenDiffReview,
-                    Some("Ctrl+Alt+D"),
-                    KeybindingStatus::Candidate,
-                ),
-                KeybindingRule::new(
+                KeybindingRule::bound(NavigationAction::OpenDiffReview, "Ctrl+Alt+D"),
+                KeybindingRule::dead(
                     NavigationAction::OpenSafeCloseDialog,
-                    None,
-                    KeybindingStatus::Configurable,
+                    "No handler exists, and none is needed: the close-project dialog is reached \
+                     from a project tab's close button and from Delete on a focused tab. A \
+                     global chord would duplicate both, so this action is retired rather than \
+                     given one.",
                 ),
                 // RFC-038 PR-038-C: `Ctrl+Alt+K`. No strong mnemonic
                 // available -- `H` (Help) is `OpenApprovalHistory`'s and
@@ -328,11 +347,7 @@ impl KeybindingPolicy {
                 // it collides with nothing (checked mechanically by
                 // `open_help_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone).
-                KeybindingRule::new(
-                    NavigationAction::OpenHelp,
-                    Some("Ctrl+Alt+K"),
-                    KeybindingStatus::Candidate,
-                ),
+                KeybindingRule::bound(NavigationAction::OpenHelp, "Ctrl+Alt+K"),
                 // RFC-038 PR-038-G: `Ctrl+Alt+B` (Browse), following the
                 // existing `Ctrl+Alt+<letter>` shape -- unclaimed by any
                 // other rule here and not `Ctrl+Shift+P`'s `Reserved`
@@ -342,22 +357,14 @@ impl KeybindingPolicy {
                 // not by inspection alone). An accelerator alongside the
                 // real button, not the only route -- RFC-038-G's own
                 // task breakdown: "a button, not only a key."
-                KeybindingRule::new(
-                    NavigationAction::OpenFolderBrowser,
-                    Some("Ctrl+Alt+B"),
-                    KeybindingStatus::Candidate,
-                ),
+                KeybindingRule::bound(NavigationAction::OpenFolderBrowser, "Ctrl+Alt+B"),
                 // RFC-045 PR-045-C, D5. `Ctrl+Alt+C` for
                 // *configuration*, in the same `Ctrl+Alt+<letter>` shape
                 // every other action here uses -- unclaimed by any other
                 // rule, checked mechanically by
                 // `reload_configuration_shortcut_is_a_candidate_that_collides_with_no_other_rule`
                 // rather than by reading the list.
-                KeybindingRule::new(
-                    NavigationAction::ReloadConfiguration,
-                    Some("Ctrl+Alt+C"),
-                    KeybindingStatus::Candidate,
-                ),
+                KeybindingRule::bound(NavigationAction::ReloadConfiguration, "Ctrl+Alt+C"),
             ],
         }
     }
@@ -369,7 +376,7 @@ impl KeybindingPolicy {
     /// Two categories are deliberately excluded, and both exclusions are
     /// the point of deriving this instead of writing a list:
     ///
-    /// - `Configurable` with no `default_binding` is **dead**, not
+    /// - A `Dead` rule (no chord, with a stated reachability) is **dead**, not
     ///   pending. `CycleVisibleTerminalSession` and `OpenSafeCloseDialog`
     ///   are in this state (RFC-039 PR-039-B moved `SwitchActiveProject`
     ///   out of it, down from four to three; the change review surface
@@ -390,8 +397,8 @@ impl KeybindingPolicy {
     pub fn advertised_bindings(&self) -> Vec<(NavigationAction, &'static str)> {
         self.rules
             .iter()
-            .filter_map(|rule| match (rule.status, rule.default_binding) {
-                (KeybindingStatus::Candidate, Some(binding)) => Some((rule.action, binding)),
+            .filter_map(|rule| match rule.binding() {
+                RuleBinding::Bound { default_chord } => Some((rule.action, *default_chord)),
                 _ => None,
             })
             .collect()
@@ -404,15 +411,15 @@ impl KeybindingPolicy {
     pub fn binding_is_reserved_for(&self, binding: &str, action: NavigationAction) -> bool {
         self.rules.iter().any(|rule| {
             rule.action == action
-                && rule.default_binding == Some(binding)
-                && rule.status == KeybindingStatus::Reserved
+                && rule.default_binding() == Some(binding)
+                && rule.status() == KeybindingStatus::Reserved
         })
     }
 
     pub fn uses_binding(&self, binding: &str) -> bool {
         self.rules
             .iter()
-            .any(|rule| rule.default_binding == Some(binding))
+            .any(|rule| rule.default_binding() == Some(binding))
     }
 }
 

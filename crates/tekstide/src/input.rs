@@ -281,7 +281,7 @@ fn matching_global_action(policy: &KeybindingPolicy, press: &KeyPress) -> Option
     policy
         .rules
         .iter()
-        .find(|rule| rule.default_binding == Some(binding.as_str()))
+        .find(|rule| rule.default_binding() == Some(binding.as_str()))
         .map(|rule| rule.action)
 }
 

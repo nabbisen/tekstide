@@ -168,7 +168,7 @@ fn tab_cycles_focus_even_with_a_terminal_focused() {
 fn every_default_binding_in_linux_mvp_round_trips_through_format_binding() {
     let policy = KeybindingPolicy::linux_mvp();
     for rule in &policy.rules {
-        let Some(binding) = rule.default_binding else {
+        let Some(binding) = rule.default_binding() else {
             continue;
         };
         let press = key_press_for_binding(binding);

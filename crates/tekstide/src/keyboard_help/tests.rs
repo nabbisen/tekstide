@@ -31,7 +31,7 @@ fn real_catalog() -> Catalog {
 fn action_catalog_key_is_some_iff_the_action_is_live() {
     let policy = KeybindingPolicy::linux_mvp();
     for rule in &policy.rules {
-        let is_live = rule.status == KeybindingStatus::Candidate && rule.default_binding.is_some();
+        let is_live = rule.status() == KeybindingStatus::Bound && rule.default_binding().is_some();
         let key = action_catalog_key(rule.action);
         assert_eq!(
             key.is_some(),
@@ -41,8 +41,8 @@ fn action_catalog_key_is_some_iff_the_action_is_live() {
              description and a dead or reserved one must not",
             rule.action,
             key,
-            rule.status,
-            rule.default_binding
+            rule.status(),
+            rule.default_binding()
         );
     }
 }
@@ -98,15 +98,15 @@ fn no_action_without_a_working_binding_is_advertised() {
 
     let policy = KeybindingPolicy::linux_mvp();
     for rule in &policy.rules {
-        let is_live = rule.status == KeybindingStatus::Candidate && rule.default_binding.is_some();
+        let is_live = rule.status() == KeybindingStatus::Bound && rule.default_binding().is_some();
         if is_live {
             continue;
         }
-        if let Some(binding) = rule.default_binding {
+        if let Some(binding) = rule.default_binding() {
             assert!(
                 !advertised.contains(&binding),
                 "{binding} is {:?}, not a live binding, and must not be offered to a user",
-                rule.status
+                rule.status()
             );
         }
     }
@@ -132,7 +132,7 @@ fn no_action_without_a_working_binding_is_advertised() {
             .rule_for(dead)
             .expect("every action has a rule in linux_mvp()");
         assert!(
-            rule.default_binding.is_none(),
+            rule.default_binding().is_none(),
             "{dead:?} gained a binding -- decide whether it is user-visible in \
              action_catalog_key() and update this test's list"
         );

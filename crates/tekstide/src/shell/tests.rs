@@ -1190,8 +1190,8 @@ fn every_live_action_has_a_visible_control_or_a_reasoned_allow_list_entry() {
         .collect();
 
     for rule in &policy.rules {
-        let is_live = rule.status == tekstide_core::navigation::KeybindingStatus::Candidate
-            && rule.default_binding.is_some();
+        let is_live = rule.status() == tekstide_core::navigation::KeybindingStatus::Bound
+            && rule.default_binding().is_some();
         if !is_live {
             continue;
         }
