@@ -1,0 +1,89 @@
+---
+title: "RFC-055 — acceptance and QA checklist"
+rfc: "RFC-055"
+rfc_file: "../../accepted/055-ignore-rules-in-the-explorer.md"
+source_rfc_status: "Accepted 2026-09-24 — M12 remainder tail"
+target_milestone: "M12 remainder"
+created: "2026-09-24"
+---
+
+# Acceptance and QA checklist
+
+Tick a box when the evidence for it is in `qa-evidence.md`, not when the code looks right. Where a
+box names a measurement, the number goes in the evidence file — **a box that says "measured" with no
+number in the evidence is not ticked.**
+
+## PR-055-A — the query, and the file that tries to silence it
+
+- [ ] A file named `:(glob)evil.log` sits in the fixture, and **every sibling of it still receives an
+      ignore answer.** The test's own comment records that removing the `./` prefix makes it fail
+      with exit 128.
+- [ ] **Ablation:** the `./` prefix is removed, the test above fails, and the evidence names the exit
+      code and the `fatal:` line. Restored with `rfcs/handoffs/ablate.sh`, which refuses a dirty tree
+      — never by hand.
+- [ ] Exit `1` (nothing ignored) and *unknown* are **different values in the returned type**, and a
+      test would fail if they collapsed.
+- [ ] A forced failure reaches unknown. Not a repository, and a gate refusal, both reach unknown
+      without running a subprocess to discover it.
+- [ ] A tracked file matching `*.log` comes back **not ignored** — no `--no-index` anywhere.
+- [ ] A project root two levels inside its repository gets the repository-root `.gitignore` applied.
+- [ ] A non-UTF-8 filename survives the round trip; nothing decodes lossily before a comparison.
+- [ ] The gate is **not cached** (D9), and the evidence says where it is paid.
+
+## PR-055-B — the scan carries it, and the floor keeps its job
+
+- [ ] `FileGitStatus::Ignored` exists and **no match arm on it is a catch-all** — grepped, with the
+      count of sites in the evidence.
+- [ ] The query is asked about **at most `max_children_per_directory` paths per directory**, and the
+      20 000-`*.log` fixture proves it: the number of paths asked about tracks the rows drawn, not
+      the number of ignored files. **This is the test that falsifies D2 if D2 is wrong.**
+- [ ] Entries beyond the cap keep **unknown** ignore state, and nothing renders or counts them as
+      ignored or as not ignored.
+- [ ] A repository whose `.gitignore` does **not** name `target/` shows `target/` as an ordinary
+      expandable directory; one that does shows it collapsed with the `ignored` badge. Both captured.
+- [ ] A project that is not a repository shows the floor list **and the scan carries that it was the
+      floor**, as a value, not as a render-time guess.
+- [ ] `IGNORED_DIRECTORY_NAMES`' doc comment states that its two consumers are no longer symmetrical.
+- [ ] **Budget, measured on RFC-052's 100 000-entry fixture:** expanding a directory pays the gate
+      plus one query and stays within the frame budget. The number in the evidence is the **whole
+      call**, not the query alone.
+- [ ] Nothing new runs on the render thread; the work stays on `explorer_scan_subscription`.
+
+## PR-055-C — the setting, the badge, the words, and one invariant
+
+- [ ] `explorer.show_ignored` defaults to `false`; `true` draws ignored rows with the `ignored`
+      badge. Both captured.
+- [ ] An unknown or refused value for it is **named on the Project Board** and the default stands, as
+      RFC-054's mechanism already does.
+- [ ] **Dotfiles are still visible** with the setting at either value — `.gitignore`, `.env` and
+      `.git-exclude` appear as ordinary rows. The captures show it.
+- [ ] The sidebar says where the ignore rule came from, and the staleness sentence is RFC-052's
+      extended, not a second vocabulary for the same fact.
+- [ ] The book's configuration page names the key, and the existing page/code invariants pass.
+- [ ] **Carried from RFC-053's closeout:** `rfc_docs_invariants` gains a check that an RFC the
+      changelog names as released lives in `done/`. The evidence shows it **failing** against a
+      planted violation and passing without it.
+- [ ] The `0.26.0` changelog section owns this release's own limitations in its own words, and
+      corrects any predecessor it contradicts by name.
+
+## Whole-RFC
+
+- [ ] `REQ-FILE-005`, `REQ-FILE-006` and the `ignored` category of `REQ-FILE-002` move to
+      implemented **with evidence they are reachable by a user**, not merely parsed.
+- [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
+- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
+      staging, `rfc_docs_invariants`, **three consecutive full-workspace runs with `--no-fail-fast`**
+      to files, **0 fixture entries left** in a fresh short `TMPDIR`.
+- [ ] Every new intermittent failure has a dated row in `test-process-leak.md`.
+- [ ] Commits are pushed once the gate is green.
+
+## Final Acceptance Decision
+
+- [ ] Accepted.
+- [ ] Accepted with required follow-up.
+- [ ] Requires re-review after changes.
+
+Reviewer notes:
+
+```text
+```

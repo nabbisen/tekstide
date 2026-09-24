@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 055 | [Ignore Rules In The Explorer](./proposed/055-ignore-rules-in-the-explorer.md) | **Proposed 2026-09-24**, awaiting the owner. `0.26.0`. The explorer collapses a three-name array and never reads a project's `.gitignore`; `FileGitStatus` has no `Ignored`. Git becomes the oracle, asked with `check-ignore` about the rows the tree is about to draw — `--ignored=matching` returned 20 000 records for a one-line `*.log` rule, and a file named `:(glob)evil.log` aborts a `check-ignore` batch with exit 128 unless every path is prefixed `./`. `REQ-FILE-005`, `006`, `002` |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 055 | [Ignore Rules In The Explorer](./accepted/055-ignore-rules-in-the-explorer.md) | **Accepted 2026-09-24; D1–D8 as written, plus D9 and a corrected budget.** `0.26.0`. The explorer collapses a three-name array and never reads a project's `.gitignore`; `FileGitStatus` has no `Ignored`. Git becomes the oracle, asked with `check-ignore` about the rows the tree is about to draw — `--ignored=matching` returned 20 000 records for a one-line `*.log` rule, and a file named `:(glob)evil.log` aborts a batch with exit 128 unless every path is prefixed `./`. **D6 corrects RFC-052 D7**: the fixed list is demoted to a floor with a stated source, not replaced. [Handoff pack](./handoffs/055-explorer-ignore-rules/README.md) |
 
 
 ### Reserved numbers — check this before authoring
@@ -113,6 +113,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 025 | [Notifications](./handoffs/025-notifications/README.md) — **M12**; **implemented and closed 2026-09-22** |
 | 030 | [Git Integration](./handoffs/030-git-integration/README.md) — **M12**; **implemented and closed 2026-09-23** |
 | 054 | [User Configuration Completion](./handoffs/054-user-configuration/README.md) — **M12**; **implemented and closed 2026-09-24, closing M12** |
+| 055 | [Ignore Rules In The Explorer](./handoffs/055-explorer-ignore-rules/README.md) — **M12 remainder tail**; the explorer stops guessing what is ignored and asks git |
 | 053 | [What The Window Says Is True](./handoffs/053-window-truth/README.md) — **M12 remainder**; six surfaces that say something untrue. **Implemented and closed 2026-09-24; released as `0.23.0`** |
 | 052 | [A File Explorer A User Can Read](./handoffs/052-file-explorer/README.md) — **M12 remainder**; **implemented and closed 2026-09-24** |
 | 051 | [Recovering the Recent-Project List](./handoffs/051-recovering-the-recent-project-list/README.md) — **M12**; the reset that takes a user's trust decisions with it |

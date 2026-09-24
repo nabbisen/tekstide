@@ -1,6 +1,6 @@
 # RFC-055: Ignore Rules In The Explorer
 
-Status: **Proposed 2026-09-24.** `0.26.0` in the authorised schedule, directly after RFC-052's tree —
+Status: **Accepted by the human owner 2026-09-24.** D1–D8 as written, plus **D9** and one budget correction — see *Decided on acceptance*. Proposed 2026-09-24. `0.26.0` in the authorised schedule, directly after RFC-052's tree —
 expansion is what makes RFC-052 D7's fixed collapse list load-bearing, and this is what the schedule
 said would replace it. Closes `REQ-FILE-005`, `REQ-FILE-006`, and the `ignored` category of
 `REQ-FILE-002` that the model has never carried.
@@ -147,3 +147,32 @@ parser already works on the raw byte stream for this reason; the new reader does
 - The colour-alone, i18n completeness and internal-identifier scans still pass.
 - Gate green three times with `--no-fail-fast`, and **0 fixture entries left in a fresh short
   `TMPDIR`**.
+
+## Decided on acceptance (2026-09-24)
+
+**D1–D8 as written.** Three consequences are worth stating before anyone writes code.
+
+**The 1 ms in D2 was the query, not the call.** `compute_summary` does not just run `status`: it
+resolves the executable, runs `--version` (cached per executable path in `VERIFIED_GIT_EXECUTABLES`),
+and runs `config --list --null` as the gate, every time. Measured on this repository, five-run
+average: `--version` 1 ms, `config --list --null` under 1 ms, `rev-parse --git-common-dir` under
+1 ms, `check-ignore` on 21 paths 1 ms. **The honest per-expansion budget is therefore a few
+milliseconds including the gate, not one** — still well inside a frame, and the number the
+100 000-entry fixture must be held against is the whole call, not the query alone.
+
+**The query runs with `cwd` set to the directory being scanned, and that is measured, not assumed.**
+A project root nested two levels inside its repository still gets the repository-root `.gitignore`
+applied: from `sub/deep`, `./a.log` came back ignored and `./b.txt` did not, exit 0. This matters
+because `ExplorerNode::relative_path` is relative to the **project** root, which need not be the
+repository root — so the paths must be made relative to whatever `cwd` the query uses, at the same
+single function D3 puts the `./` prefix in. A project root that is a subdirectory of its repository
+is a required fixture, not an edge case.
+
+**D9 — the gate is not cached across expansions, and nothing in this RFC may cache it.** The gate is
+what authorises running git against a repository whose configuration is attacker-influenced; its
+answer is a fact about the repository *now*, and a repository's config can change between two
+expansions. It costs about two milliseconds (above). Paying it every time is the cheap, correct
+option, and the RFC records this so that a later performance pass does not discover the cache and
+take it.
+
+**Ships as `0.26.0`**, after RFC-054's settings, per the authorised schedule.
