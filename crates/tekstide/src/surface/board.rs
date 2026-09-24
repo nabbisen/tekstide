@@ -295,7 +295,8 @@ fn path_field_section<'a, Message: 'a + Clone>(
     // ordinary, unproblematic path here). `Ctrl+Alt+B` is the same
     // action's keyboard accelerator, not the only route to it --
     // `shell::open_folder_browser` is what both converge on.
-    let browse_button = iced::widget::button(
+    let browse_button = crate::theme::button(
+        *theme,
         text(catalog.get("project-board-browse-button")).size(theme.font_size_body()),
     )
     .on_press(open_browser_message);
@@ -540,7 +541,8 @@ fn row_view<'a, Message: 'a + Clone>(
     // cards that have one reads as broken; it now says "Open now".
     match open_message {
         Some(message) => column_items.push(
-            iced::widget::button(
+            crate::theme::button(
+                *theme,
                 text(catalog.get("project-board-recent-open-button")).size(theme.font_size_body()),
             )
             .on_press(message)

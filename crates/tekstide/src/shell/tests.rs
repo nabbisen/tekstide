@@ -18975,13 +18975,14 @@ fn no_shipped_code_loads_a_font() {
     assert!(checked > 20, "the scan must read the source ({checked})");
 }
 
-/// **The family reaches every ordinary text widget through one function.** iced
+/// **The family reaches every ordinary text widget through one function, and
+/// every button is drawn from the theme.** iced
 /// fixes its default font when the application is built and cannot change it, so
 /// D8's "applies live" rests on each text widget taking its font from
 /// `theme::text`. A file that imports iced's own `text` instead would silently
 /// keep the old family after a reload. Ablated by restoring that import.
 #[test]
-fn no_shipped_view_builds_text_with_the_icedcrate_text_function() {
+fn no_shipped_view_builds_text_or_buttons_outside_the_theme() {
     let mut checked = 0;
     for (path, code) in production_sources() {
         if !path.contains("crates/tekstide/src") || path.ends_with("theme.rs") {
@@ -18993,6 +18994,12 @@ fn no_shipped_view_builds_text_with_the_icedcrate_text_function() {
             !flat.contains("iced::widget::text(") && !flat.contains("widget::text("),
             "{path} calls iced's text() directly"
         );
+        // ...and buttons: iced's own draws a fixed blue no configuration reaches
+        // (review 428), so every button is `theme::button`.
+        assert!(
+            !flat.contains("iced::widget::button(") && !flat.contains("widget::button("),
+            "{path} calls iced's button() directly"
+        );
         for import in flat.split("use iced::widget::").skip(1) {
             let list = import.split(';').next().unwrap_or_default();
             let names: Vec<&str> = list
@@ -19003,6 +19010,10 @@ fn no_shipped_view_builds_text_with_the_icedcrate_text_function() {
             assert!(
                 !names.contains(&"text"),
                 "{path} imports iced's `text`, which ignores the configured family: {list}"
+            );
+            assert!(
+                !names.contains(&"button"),
+                "{path} imports iced's `button`, which ignores the theme: {list}"
             );
         }
     }

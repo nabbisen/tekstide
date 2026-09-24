@@ -98,6 +98,27 @@ than a value could back up; here, a control would let a user assert something th
 no standing to assert. Before adding a button, ask what it would be claiming on the
 user's behalf, and whether the user is actually in a position to know it.
 
+## The one piece of process-global interface state
+
+`theme::UI_FONT` — the face the interface's own text is set in — is a process-global,
+and it is **the** one. Not a precedent.
+
+iced fixes its default font when the application is built and offers no way to change
+it while it runs, and RFC-054 D8 says a configured font family applies on `Ctrl+Alt+C`
+without a restart. Threading a face through every text builder would push a `&Theme`
+into helpers this project keeps `iced`-free precisely so their rows can be asserted
+without a renderer (`node_line`, `row_line`, the text builders). So each ordinary text
+widget is built with `theme::text`, which reads the global, and the global is written in
+exactly two places — when `State` is built and when a reload puts a new look in force.
+Two scans keep it that way: no view may import iced's own `text` or `button`, and both
+setters must exist.
+
+**Everything else the theme carries is a value on `Theme`, read from `State`.** Colours,
+sizes, the scrollback a pane keeps — none of them is global, and none should become one
+because this one is. A second global would need the same argument this one has: a
+property of iced itself that a value cannot cross, named, with a test that stops it
+spreading. "The font is global" is a reason about the font.
+
 ## Evidence conventions
 
 This project treats evidence as a deliverable, not a formality.

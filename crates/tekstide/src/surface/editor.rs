@@ -18,7 +18,7 @@
 //! through `Catalog` via `editor-chrome`'s `$state` selector instead.
 
 use crate::theme::text;
-use iced::widget::{button, column, container};
+use iced::widget::{column, container};
 use iced::{Element, Length};
 
 use tekstide_core::content::{TextCursor, TextDocument, TextDocumentState};
@@ -334,8 +334,11 @@ pub fn view<'a, Message: 'a + Clone>(
             column![
                 text(chrome_line(catalog, document)).size(theme.font_size_body()),
                 text(cursor_line(catalog, document)).size(theme.font_size_status()),
-                button(text(catalog.get("editor-save-button")).size(theme.font_size_body()))
-                    .on_press(on_save),
+                crate::theme::button(
+                    *theme,
+                    text(catalog.get("editor-save-button")).size(theme.font_size_body())
+                )
+                .on_press(on_save),
                 body,
             ]
             .spacing(6)

@@ -305,3 +305,48 @@ fn font_sizes_are_positive_and_heading_is_the_largest() {
     assert!(theme.font_size_status() > 0.0);
     assert!(theme.font_size_heading() > theme.font_size_body());
 }
+
+/// **Review 428.** A button is drawn from the theme's own roles, so a configured
+/// `surface_elevated`, `foreground` and border reach it: its text sits on a
+/// surface the contrast rules already measure (`foreground` on
+/// `surface_elevated`), and it raises -- a heavier border in the focus colour --
+/// when hovered or pressed. Ablated by returning iced's default style.
+#[test]
+fn a_button_is_drawn_from_the_configured_roles() {
+    use iced::widget::button::Status;
+    use tekstide_core::config::{Colour, FontSettings, ThemeRole, ThemeSettings};
+
+    let mut settings = ThemeSettings::default();
+    settings
+        .overrides
+        .insert(ThemeRole::SurfaceElevated, Colour::rgb(0.10, 0.20, 0.30));
+    settings
+        .overrides
+        .insert(ThemeRole::Foreground, Colour::rgb(1.0, 1.0, 1.0));
+    settings
+        .overrides
+        .insert(ThemeRole::BorderDefault, Colour::rgb(0.5, 0.6, 0.7));
+    settings
+        .overrides
+        .insert(ThemeRole::BorderFocused, Colour::rgb(1.0, 0.7, 0.0));
+    let theme = Theme::from_settings(&settings, &FontSettings::default(), None);
+    let style = super::button_style(theme);
+    let base = iced::Theme::Dark;
+
+    let active = style(&base, Status::Active);
+    assert_eq!(
+        active.background,
+        Some(iced::Background::Color(theme.surface_elevated()))
+    );
+    assert_eq!(active.text_color, theme.foreground());
+    assert_eq!(active.border.color, theme.border_default());
+    assert_eq!(active.border.width, 1.0);
+
+    for raised in [Status::Hovered, Status::Pressed] {
+        let style = style(&base, raised);
+        assert_eq!(style.border.color, theme.border_focused());
+        assert!(style.border.width > active.border.width);
+        assert_eq!(style.text_color, theme.foreground());
+    }
+    assert!(style(&base, Status::Disabled).text_color.a < 1.0);
+}

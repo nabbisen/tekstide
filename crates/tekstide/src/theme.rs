@@ -1,10 +1,18 @@
-//! RFC-015 PR-015-B: the theme seam. RFC-023 will supply these values
-//! from configuration; until then [`Theme::default`] is the compiled
-//! default this module owns. `NFR-UX-004` requires colours and font
-//! sizes to be configurable, which is only true if no widget hardcodes
-//! one -- every colour and every font size the shell draws comes from a
-//! `Theme` value, never a literal `Color::from_rgb(...)` or `.size(13)`
-//! written at a call site.
+//! RFC-015 PR-015-B: the theme seam; RFC-054 supplies its values from the user's
+//! configuration, and [`Theme::default`] is the shipped look when it supplies
+//! none. `NFR-UX-004` requires colours and font sizes to be configurable, which
+//! is only true if no widget hardcodes one -- every colour and every font size
+//! the shell draws comes from a `Theme` value, never a literal
+//! `Color::from_rgb(...)` or `.size(13)` written at a call site.
+//!
+//! **What "every" covers, exactly** (review 428 found it had stopped being true):
+//! ordinary text takes its face from [`text`], and every button takes its fill,
+//! text and border from [`button`] -- iced's own of each draws from
+//! `iced::Theme`, which no configuration reaches, and
+//! `no_shipped_view_builds_text_or_buttons_outside_the_theme` fails if a view
+//! imports either. **Two things are deliberately not themed:** the colours a
+//! terminal program asks for (`grid_colors` draws that data, not chrome), and
+//! `Color::TRANSPARENT` where a widget must draw *no* box.
 //!
 //! This type is unrelated to `iced::Theme` (the base theme parameter
 //! `iced`'s own style closures take, e.g. `container::Style`'s
@@ -180,6 +188,54 @@ where
     Renderer: iced::advanced::text::Renderer<Font = Font>,
 {
     iced::widget::text(content).font(ui_font())
+}
+
+/// **Every button's look**, from the theme's own roles -- `surface_elevated`
+/// fill, `foreground` text (the pair D5 already measures at 4.5:1), a
+/// `border_default` outline that becomes the `border_focused` colour and a
+/// heavier width when the pointer is over it or it is pressed. iced's default
+/// button draws its own blue from `iced::Theme`, which no configuration reaches;
+/// this is what makes a configured `background` not sit beside two fixed-colour
+/// buttons (RFC-054 review 428). A button is still a box with its words inside
+/// it: the shape and the label carry the meaning, the colour only styles it.
+pub(crate) fn button_style(
+    theme: Theme,
+) -> impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style {
+    move |_base_theme: &iced::Theme, status: iced::widget::button::Status| {
+        use iced::widget::button::Status;
+        let raised = matches!(status, Status::Hovered | Status::Pressed);
+        let disabled = matches!(status, Status::Disabled);
+        iced::widget::button::Style {
+            background: Some(iced::Background::Color(theme.surface_elevated())),
+            text_color: Color {
+                a: if disabled { 0.6 } else { 1.0 },
+                ..theme.foreground()
+            },
+            border: iced::Border {
+                color: if raised {
+                    theme.border_focused()
+                } else {
+                    theme.border_default()
+                },
+                width: if raised { 2.0 } else { 1.0 },
+                radius: 4.0.into(),
+            },
+            ..iced::widget::button::Style::default()
+        }
+    }
+}
+
+/// `iced::widget::button`, drawn from the theme ([`button_style`]). Every button
+/// in the shell is built with this, not with iced's own; one that wants another
+/// look (the tab strip's) sets `.style(..)` after it, as before.
+pub(crate) fn button<'a, Message>(
+    theme: Theme,
+    content: impl Into<iced::Element<'a, Message>>,
+) -> iced::widget::Button<'a, Message>
+where
+    Message: 'a,
+{
+    iced::widget::button(content).style(button_style(theme))
 }
 
 /// The installed font family whose name is `wanted` (compared without regard to

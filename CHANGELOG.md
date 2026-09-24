@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added — terminal scrollback is a setting, and the theme is finished (RFC-054, PR-054-C)
+
+- **`[terminal] scrollback_lines`.** The default is unchanged (2,000). **The most it can be is 12,000**, and a
+  larger number is reduced to that with a note on the Project Board — a terminal keeps its scrollback in memory
+  and one should not take more than 64 MiB. The cap is **measured** (the allocator's own count over real output),
+  not chosen; a **wider terminal keeps fewer lines** where the number asked for would pass the budget at that
+  width, and gets them back when narrowed. `Ctrl+Alt+C` applies it to terminals that are already open.
+- **The focus border cannot be made invisible.** `border_focused` is held to 3:1 against the two surfaces it is
+  drawn on, with the measured ratio on the board when it falls back.
+- **The scrim is capped at 90 % opaque**, so a dialog's backdrop can never look like a window the application did
+  not draw. Above that it is reduced, and the board says so.
+- **Buttons follow the theme.** They were the one thing in the window a configured colour did not reach.
+- The board says *reduced to* — not *its default stands* — for a value that is still in force at its limit.
+
 ### Added — colours, font and sizes are settings (RFC-054, PR-054-B)
 
 - **`[theme]` and `[font]` in `config.toml`.** Seven colours (`#RRGGBB`), a font family, and the three text

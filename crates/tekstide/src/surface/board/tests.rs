@@ -421,8 +421,9 @@ fn the_browse_button_is_a_real_clickable_widget_not_an_inert_label() {
     .expect("board.rs must be readable");
 
     assert!(
-        source.contains("iced::widget::button("),
-        "the Browse control must be a real iced::widget::button, not a marker-prefixed text()"
+        source.contains("crate::theme::button("),
+        "the Browse control must be a real button (`theme::button` wraps `iced::widget::button`), \
+         not a marker-prefixed text()"
     );
     assert!(
         source.contains(".on_press(open_browser_message)"),

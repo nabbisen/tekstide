@@ -30,6 +30,9 @@ background = "#0B1F2A"              # colours as #RRGGBB; see "Colours and text"
 [font]
 family = "DejaVu Serif"             # the name of an installed font family, never a file
 body_size = 16                      # pixels, 8 to 32
+
+[terminal]
+scrollback_lines = 5000             # lines of history a terminal keeps; at most 12,000
 ```
 
 ## Keybindings
@@ -111,17 +114,25 @@ status_size  = 13              # badges and the status bar
 A colour is `#` and six hex digits (`#RRGGBB`; eight for the scrim, `#RRGGBBAA`). Nothing else —
 no colour names, no `rgb()`.
 
-**You cannot configure the window into something you cannot read.** Text has to be readable on the
-two surfaces it sits on: `foreground` against `background`, and `foreground` against
-`surface_elevated`, each at **4.5:1** (WCAG AA). A colour that would take either below that is not
+**You cannot configure the window into something you cannot read or navigate.** Text has to be
+readable on the two surfaces it sits on: `foreground` against `background`, and `foreground` against
+`surface_elevated`, each at **4.5:1** (WCAG AA). And **the focus border has to be visible** — the
+border that shows which part of the window has the keyboard — so `border_focused` is held to **3:1**
+(WCAG's minimum for interface components) against both surfaces. A colour that would take either below that is not
 used, the default stands, and the Project Board says **the ratio it measured** — *"Its contrast with
 theme.foreground is 1.25:1, below the 4.5:1 that keeps text readable."* A colour you did not set is
 measured at its default, so changing only `background` to white is measured against the default
-`foreground`, and fails. When you set `background` and `foreground` for a light theme, set
-`surface_elevated` too, or the default dark surface behind dialogs will fail the pair — and if
-taking one colour back makes another fail, that one is taken back as well, each named.
-`accent`, the borders and the scrim are not text, so they are not measured; they are colours you
-chose.
+`foreground`, and fails. When you set `background` and `foreground` for a light theme, **set `surface_elevated` and
+`border_focused` too**, or the default dark surface and the default blue focus border will fail
+against your light colours — and if taking one colour back makes another fail, that one is taken
+back as well, each named.
+
+**What is not measured, and why.** `accent` and `border_default` are decoration: whatever they
+are, the words are still there and the focus border is measured, so you may choose them freely.
+The scrim is not measured for contrast but **is capped in opacity**: it is the dimming layer
+behind a dialog, and a fully opaque one would look like a window this application did not draw,
+so anything above 90 % opaque is reduced to 90 % and the board says so. Buttons are drawn from
+these same colours (`surface_elevated`, `foreground`, the borders), so they follow your theme.
 
 **A size outside 8–32 pixels is not used.** The three sizes fall back independently.
 
@@ -138,6 +149,33 @@ file.
 
 The word `[ui]` in an older draft of this schema is not read; its settings are `[theme]` and
 `[font]`.
+
+## Terminal scrollback
+
+`[terminal] scrollback_lines` is how many lines of history each terminal keeps above what is on
+screen. The default is 2,000 lines. `Ctrl+Alt+C` applies a change to terminals that are already
+open — history above the new number is dropped from the oldest end — as well as to ones opened
+later.
+
+The most it can be is **12,000 lines**, and a bigger number is reduced to that with a note on the
+Project Board. The reason is memory: a terminal keeps its scrollback in memory, a terminal in
+another project keeps filling while you are not looking at it, and one terminal should not be able
+to take more than **64 MiB**. The cap was measured rather than chosen:
+
+| A terminal this wide | holds this much at 12,000 lines |
+| --- | --- |
+| 80 columns | 22.6 MiB |
+| 200 columns | 55.7 MiB |
+| 400 columns | 110.8 MiB — so it keeps fewer, about 5,000 lines |
+
+Memory is per column, so a **wider terminal keeps fewer lines** whenever the number you asked for
+would pass 64 MiB at that width — and it gets them back when you narrow it. At 200 columns (a
+full-width terminal on an ordinary display) the full 12,000 fit. These are for ordinary output;
+text that puts a combining character on every cell costs about four times as much, and the 64 MiB
+is not a promise about that.
+
+A value that is not a whole number of lines (`-1`, `2000.5`, `"lots"`) is not used, and the
+default stands.
 
 ## Why the file is this narrow
 

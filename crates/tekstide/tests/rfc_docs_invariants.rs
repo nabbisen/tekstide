@@ -779,3 +779,61 @@ fn the_configuration_page_names_every_theme_role_font_key_and_bound() {
         "the page must state the {low}–{high} pixel bound"
     );
 }
+
+/// **RFC-054 PR-054-C.** The numbers the configuration page states about the
+/// scrollback cap, the focus border and the scrim are the code's own constants,
+/// formatted -- so changing a cap without the page fails here.
+#[test]
+fn the_configuration_page_states_the_scrollback_cap_and_the_other_limits() {
+    let page = repo_root().join("docs/src/users/configuration.md");
+    let Ok(source) = std::fs::read_to_string(&page) else {
+        eprintln!("skipped: docs/ is not packaged with this crate");
+        return;
+    };
+    let grouped = |number: usize| {
+        let digits = number.to_string();
+        let mut out = String::new();
+        for (index, digit) in digits.chars().enumerate() {
+            if index > 0 && (digits.len() - index) % 3 == 0 {
+                out.push(',');
+            }
+            out.push(digit);
+        }
+        out
+    };
+    let cap = grouped(tekstide_core::config::MAX_SCROLLBACK_LINES);
+    assert!(
+        source.contains(&format!("at most {cap}")) && source.contains(&format!("**{cap} lines**")),
+        "the page must state the {cap}-line cap"
+    );
+    assert!(
+        source.contains(&format!(
+            "The default is {} lines",
+            grouped(tekstide_core::config::DEFAULT_SCROLLBACK_LINES)
+        )),
+        "the page must state the default scrollback"
+    );
+    let budget_mib = tekstide_core::config::SCROLLBACK_BUDGET_BYTES / (1024 * 1024);
+    assert!(
+        source.contains(&format!("**{budget_mib} MiB**")),
+        "the page must state the {budget_mib} MiB budget"
+    );
+    assert!(
+        source.contains(&format!(
+            "held to **{}:1**",
+            tekstide_core::config::MIN_FOCUS_CONTRAST
+        )),
+        "the page must state the focus border's minimum"
+    );
+    let percent = (tekstide_core::config::MAX_SCRIM_ALPHA * 100.0).round();
+    assert!(
+        source.contains(&format!("above {percent} % opaque")),
+        "the page must state the scrim's opacity cap"
+    );
+    assert!(
+        source
+            .lines()
+            .any(|line| line.trim_start().starts_with("scrollback_lines") && line.contains('=')),
+        "the page's example has no `scrollback_lines` line"
+    );
+}

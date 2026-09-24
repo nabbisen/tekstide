@@ -37,7 +37,7 @@
 
 use crate::theme::text;
 use iced::futures::SinkExt;
-use iced::widget::{button, center, column, container, opaque, row, scrollable, stack};
+use iced::widget::{center, column, container, opaque, row, scrollable, stack};
 use iced::{Background, Border, Element, Length, Subscription, Task, keyboard};
 
 use tekstide_core::audit::AuditedAgentRunIdentity;
@@ -4385,7 +4385,7 @@ fn handle_change_review_key(state: &mut State, key: &input::KeyPress) {
 
 /// RFC-032, response 248's required fix: keyboard access for the
 /// `TrustSettings` surface -- without this, "Grant Trust…"/"Revoke
-/// Trust" were `button(...)` with no key handler at all, mouse-only
+/// Trust" were `crate::theme::button(state.theme, ...)` with no key handler at all, mouse-only
 /// exactly as `ApprovalHistory` was before response 234's fix. Worse
 /// here: this surface is the *only* route to granting trust
 /// (`app_command_for`'s mapping is `TrustSettings`'s one path in), so
@@ -7458,7 +7458,8 @@ fn top_bar_actions_row(state: &State) -> Element<'_, Message> {
     let mut actions: Vec<Element<'_, Message>> = Vec::new();
     if top_bar_offers_trust_settings(state) {
         actions.push(
-            button(
+            crate::theme::button(
+                state.theme,
                 text(state.catalog.get("top-bar-trust-settings-button"))
                     .size(state.theme.font_size_body()),
             )
@@ -7467,9 +7468,12 @@ fn top_bar_actions_row(state: &State) -> Element<'_, Message> {
         );
     }
     actions.push(
-        button(text(state.catalog.get("top-bar-help-button")).size(state.theme.font_size_body()))
-            .on_press(Message::OpenHelpButtonPressed)
-            .into(),
+        crate::theme::button(
+            state.theme,
+            text(state.catalog.get("top-bar-help-button")).size(state.theme.font_size_body()),
+        )
+        .on_press(Message::OpenHelpButtonPressed)
+        .into(),
     );
     row(actions).spacing(8).into()
 }
@@ -7507,7 +7511,8 @@ fn project_tab_strip(state: &State) -> Element<'_, Message> {
 
     let home_active = state.app_shell.route() == tekstide_core::route::AppRoute::ProjectBoard;
     let home_focused = strip_focused && highlight == 0;
-    let home_button = button(
+    let home_button = crate::theme::button(
+        state.theme,
         text(home_tab_label(&state.catalog, home_active, home_focused))
             .size(state.theme.font_size_body()),
     )
@@ -7531,13 +7536,15 @@ fn project_tab_strip(state: &State) -> Element<'_, Message> {
         // chrome, buttons draw only their own content" split
         // `surface::board::row_view`'s "Open" button already
         // establishes for its own row.
-        let switch_button = button(
+        let switch_button = crate::theme::button(
+            state.theme,
             text(project_tab_label(project, active, focused)).size(state.theme.font_size_body()),
         )
         .padding(6)
         .style(tab_inner_button_style(state.theme))
         .on_press(Message::SwitchActiveProjectTabPressed(project.id().clone()));
-        let close_button = button(
+        let close_button = crate::theme::button(
+            state.theme,
             text(state.catalog.get("project-tab-strip-close")).size(state.theme.font_size_body()),
         )
         .padding([6, 10])
@@ -8777,9 +8784,12 @@ fn mode_toggle_row(state: &State, mode: ProjectMode) -> Element<'_, Message> {
         ProjectMode::Content => "main-area-switch-to-terminal-button",
         ProjectMode::TerminalImmersion => "main-area-switch-to-content-button",
     };
-    button(text(state.catalog.get(label_key)).size(state.theme.font_size_body()))
-        .on_press(Message::ToggleProjectModeButtonPressed)
-        .into()
+    crate::theme::button(
+        state.theme,
+        text(state.catalog.get(label_key)).size(state.theme.font_size_body()),
+    )
+    .on_press(Message::ToggleProjectModeButtonPressed)
+    .into()
 }
 
 /// Response 233: `ProjectMode::Content`'s dispatch on
@@ -8920,7 +8930,8 @@ fn content_mode_editor_view(state: &State) -> Element<'_, Message> {
 /// [`empty_terminal_workspace_view`] (none do yet), so the button reads
 /// identically in both.
 fn launch_terminal_button(state: &State) -> Element<'_, Message> {
-    button(
+    crate::theme::button(
+        state.theme,
         text(state.catalog.get("terminal-workspace-launch-button"))
             .size(state.theme.font_size_body()),
     )
@@ -9260,8 +9271,11 @@ fn help_modal_view(state: &State) -> Element<'_, Message> {
     // dispatches `ModalDismiss` directly, the same message `Escape`
     // already sends.
     let footer = column![
-        button(text(state.catalog.get("help-dialog-close")).size(state.theme.font_size_body()))
-            .on_press(Message::ModalDismiss),
+        crate::theme::button(
+            state.theme,
+            text(state.catalog.get("help-dialog-close")).size(state.theme.font_size_body())
+        )
+        .on_press(Message::ModalDismiss),
         text(state.catalog.get("help-dialog-hint")).size(state.theme.font_size_status()),
     ]
     .spacing(MODAL_SECTION_SPACING_PX);
@@ -9315,7 +9329,8 @@ fn folder_browser_modal_view<'a>(
     // FolderBrowserChooseCurrentDirectory`'s own handler), not a
     // second, parallel commit path.
     let footer = column![
-        button(
+        crate::theme::button(
+            state.theme,
             text(state.catalog.get("browse-dialog-choose-button"))
                 .size(state.theme.font_size_body()),
         )
@@ -9337,7 +9352,8 @@ fn layer_composition_demo_modal(state: &State, focus: ModalButton) -> Element<'_
     // click message that would just call the same no-op.
     let button_line = |target: ModalButton, label_key: &str| {
         let marker = if focus == target { "> " } else { "  " };
-        button(
+        crate::theme::button(
+            state.theme,
             text(format!("{marker}{}", state.catalog.get(label_key)))
                 .size(state.theme.font_size_body()),
         )
@@ -9399,7 +9415,8 @@ fn paste_confirmation_modal_view<'a>(
     // dismissal.
     let button_line = |target: PasteConfirmButton, label_key: &str, on_press: Message| {
         let marker = if modal.focus == target { "> " } else { "  " };
-        button(
+        crate::theme::button(
+            state.theme,
             text(format!("{marker}{}", state.catalog.get(label_key)))
                 .size(state.theme.font_size_body()),
         )
@@ -10678,7 +10695,8 @@ fn approval_dialog_view<'a>(state: &'a State, dialog: &'a ApprovalDialog) -> Ele
     // their own click message.
     let button_line = |target: ApprovalDialogButton, label_key: &str, on_press: Message| {
         let marker = if dialog.focus == target { "> " } else { "  " };
-        button(
+        crate::theme::button(
+            state.theme,
             text(format!("{marker}{}", state.catalog.get(label_key)))
                 .size(state.theme.font_size_body()),
         )
@@ -10765,7 +10783,8 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
 
     if is_trusted {
         lines.push(
-            button(
+            crate::theme::button(
+                state.theme,
                 text(state.catalog.get("trust-settings-revoke-button"))
                     .size(state.theme.font_size_body()),
             )
@@ -10774,7 +10793,8 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
         );
     } else {
         lines.push(
-            button(
+            crate::theme::button(
+                state.theme,
                 text(state.catalog.get("trust-settings-grant-button"))
                     .size(state.theme.font_size_body()),
             )
@@ -10799,7 +10819,8 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
         .into(),
     );
     lines.push(
-        button(
+        crate::theme::button(
+            state.theme,
             text(state.catalog.get(if capture_declined {
                 "trust-settings-capture-allow-button"
             } else {
@@ -10834,7 +10855,8 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
         lines.push(text(line).size(state.theme.font_size_body()).into());
     }
     lines.push(
-        button(
+        crate::theme::button(
+            state.theme,
             text(state.catalog.get("trust-settings-purge-button"))
                 .size(state.theme.font_size_body()),
         )
@@ -10866,7 +10888,8 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
     // to gate on -- each surface's own empty state (RFC-020, RFC-022
     // PR-022-E) already handles "nothing yet" honestly.
     lines.push(
-        button(
+        crate::theme::button(
+            state.theme,
             text(state.catalog.get("trust-settings-launch-agent-run-button"))
                 .size(state.theme.font_size_body()),
         )
@@ -10874,7 +10897,8 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
         .into(),
     );
     lines.push(
-        button(
+        crate::theme::button(
+            state.theme,
             text(state.catalog.get("trust-settings-agent-run-report-button"))
                 .size(state.theme.font_size_body()),
         )
@@ -10882,7 +10906,8 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
         .into(),
     );
     lines.push(
-        button(
+        crate::theme::button(
+            state.theme,
             text(state.catalog.get("trust-settings-approval-history-button"))
                 .size(state.theme.font_size_body()),
         )
@@ -10896,7 +10921,8 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
     // `OpenCurrentAgentRunDetailButtonPressed`/`OpenApprovalHistoryButtonPressed`
     // already established, not hidden pending a real change set.
     lines.push(
-        button(
+        crate::theme::button(
+            state.theme,
             text(state.catalog.get("change-review-open-button")).size(state.theme.font_size_body()),
         )
         .on_press(Message::OpenDiffReviewButtonPressed)
@@ -11021,7 +11047,8 @@ fn approval_history_entry_view<'a>(
     let content: Element<'_, Message> = if is_live {
         column![
             body,
-            button(
+            crate::theme::button(
+                state.theme,
                 text(state.catalog.get("approval-history-entry-open"))
                     .size(state.theme.font_size_status())
             )
@@ -11221,7 +11248,7 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
             change_review_file_entry_line(&state.catalog, path)
         );
         file_row_elements.push(
-            button(text(label).size(state.theme.font_size_body()))
+            crate::theme::button(state.theme, text(label).size(state.theme.font_size_body()))
                 .on_press(Message::ChangeReviewFileRowPressed(path.clone()))
                 .into(),
         );
@@ -11285,14 +11312,16 @@ fn change_review_view(state: &State) -> Element<'_, Message> {
         }
         pinned_middle.push(
             row![
-                button(
+                crate::theme::button(
+                    state.theme,
                     text(state.catalog.get("change-review-accept-button"))
                         .size(state.theme.font_size_body())
                 )
                 .on_press(Message::ChangeReviewDecisionButtonPressed(
                     ChangeReviewDecision::Accepted
                 )),
-                button(
+                crate::theme::button(
+                    state.theme,
                     text(state.catalog.get("change-review-reject-button"))
                         .size(state.theme.font_size_body())
                 )
@@ -12501,7 +12530,8 @@ fn trust_grant_dialog_view<'a>(
     // `paste_confirmation_modal_view`'s own `button_line`.
     let button_line = |target: TrustGrantButton, label_key: &str, on_press: Message| {
         let marker = if modal.focus == target { "> " } else { "  " };
-        button(
+        crate::theme::button(
+            state.theme,
             text(format!("{marker}{}", state.catalog.get(label_key)))
                 .size(state.theme.font_size_body()),
         )
@@ -12579,7 +12609,8 @@ fn configured_profile_dialog_view<'a>(
 ) -> Element<'a, Message> {
     let button_line = |target: ConfiguredProfileButton, label_key: &str, on_press: Message| {
         let marker = if modal.focus == target { "> " } else { "  " };
-        button(
+        crate::theme::button(
+            state.theme,
             text(format!("{marker}{}", state.catalog.get(label_key)))
                 .size(state.theme.font_size_body()),
         )
@@ -12644,7 +12675,8 @@ fn configuration_reload_dialog_view<'a>(
         .map_or(0, |pending| pending.fields.len());
     let button_line = |target: ConfiguredProfileButton, label_key: &str, on_press: Message| {
         let marker = if modal.focus == target { "> " } else { "  " };
-        button(
+        crate::theme::button(
+            state.theme,
             text(format!("{marker}{}", state.catalog.get(label_key)))
                 .size(state.theme.font_size_body()),
         )
@@ -12738,7 +12770,8 @@ fn transcript_purge_dialog_view<'a>(
     // `paste_confirmation_modal_view`'s own `button_line`.
     let button_line = |target: TranscriptPurgeButton, label_key: &str, on_press: Message| {
         let marker = if modal.focus == target { "> " } else { "  " };
-        button(
+        crate::theme::button(
+            state.theme,
             text(format!("{marker}{}", state.catalog.get(label_key)))
                 .size(state.theme.font_size_body()),
         )
@@ -12851,7 +12884,8 @@ fn project_close_dialog_view<'a>(
     // key (see `Message::ProjectCloseClosePressed`'s own doc).
     let button_line = |target: ProjectCloseButton, label_key: &str, on_press: Message| {
         let marker = if modal.focus == target { "> " } else { "  " };
-        button(
+        crate::theme::button(
+            state.theme,
             text(format!("{marker}{}", state.catalog.get(label_key)))
                 .size(state.theme.font_size_body()),
         )
@@ -12914,7 +12948,8 @@ fn external_change_modal_view<'a>(
     // `paste_confirmation_modal_view`'s own `button_line`.
     let button_line = |target: ExternalChangeButton, label_key: &str, on_press: Message| {
         let marker = if modal.focus == target { "> " } else { "  " };
-        button(
+        crate::theme::button(
+            state.theme,
             text(format!("{marker}{}", state.catalog.get(label_key)))
                 .size(state.theme.font_size_body()),
         )

@@ -47,7 +47,7 @@
 
 use crate::theme::text;
 use iced::widget::text::Wrapping;
-use iced::widget::{button, column, container};
+use iced::widget::{column, container};
 use iced::{Element, Length};
 
 use tekstide_core::project::root::{
@@ -577,7 +577,7 @@ pub fn browse_view<'a, Message: 'a + Clone>(
         let marker = if index == highlight { "> " } else { "  " };
         let label = format!("{marker}{}", browse_row_line(catalog, row));
         lines.push(
-            button(text(label).size(theme.font_size_body()))
+            crate::theme::button(*theme, text(label).size(theme.font_size_body()))
                 .on_press(on_row_click(index))
                 .into(),
         );
