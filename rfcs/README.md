@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 054 | [User Configuration Completion](./proposed/054-user-configuration-completion.md) | **Proposed 2026-09-24**, `0.25.0`, and **M12 closes with it**. Sixteen releases have added surfaces and none has added a setting. Measured: the configuration document has two sections and nothing about the UI; `Theme` is already one seam; **`KeybindingRule` already carries `Reserved \| Candidate \| Configurable`**, a seam built for this. **D2 pins that no project-local file is ever read** — a repository must not be able to rebind a key or name a font. A bad value falls back per setting with the board saying why (RFC-045's own behaviour), contrast is validated, and **a font is a name, never a path** — a font file in configuration is a parser eating user-named bytes at startup. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 054 | [User Configuration Completion](./accepted/054-user-configuration-completion.md) | **Accepted 2026-09-24; D3 corrected on acceptance.** `0.25.0`, and **M12 closes with it**. Keybindings, theme, font family and size, terminal scrollback become settable. **D3′ repairs a category error the project recorded and never fixed**: `KeybindingStatus::Configurable` with a `None` binding reads as "a user can bind this" and means "dead" — two surfaces shipped unreachable because of it. Rebindable is *has a default binding and is not Reserved*; every action ends with a chord or an explicitly dead status. Contrast validated at 4.5:1, a font is a name not a path, the scrollback cap is measured against a 64 MB-per-pane budget. [Handoff pack](./handoffs/054-user-configuration/README.md) |
 | 053 | [What The Window Says Is True](./accepted/053-what-the-window-says-is-true.md) | **Accepted 2026-09-24 through the schedule's authorisation; D1–D9 decided on acceptance.** Six measured defects, each one the product saying something untrue — a shipped `RFC-017` placeholder, modals clipping their own `Close` away, a status bar wrapping against the one-line invariant every PTY's height depends on, Change Review contradicting the Git state, `unknown` where zero is known, and two different facts both called dirty/changed. **D3 measures the rendered bar height rather than eliding a field**, because `REQ-NOTIFY-002` names five and eliding drops one silently. `0.23.0`. [Handoff pack](./handoffs/053-window-truth/README.md) |
 
 
@@ -115,6 +115,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 050 | [Transcripts From Earlier Runs](./handoffs/050-transcripts-from-earlier-runs/README.md) — **M12**; load what is on disk, and never delete what something is still writing or what the loader did not recognise |
 | 025 | [Notifications](./handoffs/025-notifications/README.md) — **M12**; **implemented and closed 2026-09-22** |
 | 030 | [Git Integration](./handoffs/030-git-integration/README.md) — **M12**; **implemented and closed 2026-09-23** |
+| 054 | [User Configuration Completion](./handoffs/054-user-configuration/README.md) — **M12**; the release that adds settings |
 | 053 | [What The Window Says Is True](./handoffs/053-window-truth/README.md) — **M12 remainder**; six surfaces that say something untrue |
 | 052 | [A File Explorer A User Can Read](./handoffs/052-file-explorer/README.md) — **M12 remainder**; **implemented and closed 2026-09-24** |
 | 051 | [Recovering the Recent-Project List](./handoffs/051-recovering-the-recent-project-list/README.md) — **M12**; the reset that takes a user's trust decisions with it |

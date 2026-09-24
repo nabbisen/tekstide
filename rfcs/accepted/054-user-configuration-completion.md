@@ -1,6 +1,6 @@
 # RFC-054: User Configuration Completion
 
-Status: **Proposed 2026-09-24.** `0.25.0`, and **M12 closes with it** — M12's own scope names
+Status: **Accepted by the human owner 2026-09-24.** **D1, D2, D4, D6–D9 as written; D3 corrected on acceptance — see D3′, which repairs a category error this project recorded and never fixed.** Proposed 2026-09-24. `0.25.0`, and **M12 closes with it** — M12's own scope names
 "keybindings, theme, fonts, terminal scrollback, resource limits, and AI CLI profiles as user
 configuration", and three of those six have never shipped.
 
@@ -93,3 +93,53 @@ than how it looks or which key reaches it.
   string unescaped.
 - `REQ-CONFIG-006`, `REQ-CONFIG-007`, `NFR-UX-004` and `REQ-TERM-004` move to implemented **with the
   evidence that they are reachable**, not merely parsed.
+
+
+## Decided on acceptance (2026-09-24)
+
+**D3 was wrong, and the project had already written down why.** I wrote "only `Configurable` rules
+may be rebound" from the identifier's name. Measured:
+
+```
+Reserved      Ctrl+Shift+P   OpenCommandPalette
+Candidate     Ctrl+Alt+P …   sixteen actions with real chords
+Configurable  (none)         CycleVisibleTerminalSession, OpenSafeCloseDialog
+```
+
+`future-work.md` records the trap in its own words: **`Configurable` with a `None` binding *reads* as
+"a user can bind this" and means "dead until RFC-023 exists"**, and it instructs the keybinding pass
+to *"either give each action a default or mark it explicitly dead; the current state makes the two
+indistinguishable at a glance, which is exactly how both misses above happened."* Two surfaces
+shipped unreachable because of it (RFC-022's Approval History, RFC-032's Trust Settings).
+
+**D3′ — the rebindable set, and the repair.**
+
+1. **Rebindable = has a default binding and is not `Reserved`.** That is the set a user can see. The
+   two `Configurable`/`None` rules are *dead*, not configurable, and rebinding them would configure
+   nothing.
+2. **`Reserved` stays unrebindable** — `Ctrl+Shift+P` belongs to a command palette that does not
+   exist, and a user binding something to it would lose it the day the palette lands.
+3. **A conflict or a reserved chord refuses, with a diagnostic, and the default stands.** Never
+   last-wins, never silently unreachable.
+4. **This RFC is the keybinding pass `future-work.md` asked for**, so it carries the repair: every
+   action ends with either a real default binding or an **explicitly dead** status, and the two
+   states are distinguishable by the type rather than by reading a `None`. Whether
+   `CycleVisibleTerminalSession` and `OpenSafeCloseDialog` get a chord or a death certificate is the
+   slice's call, per action, with its reachability stated either way.
+
+**D5 — the threshold is 4.5:1**, WCAG AA for body text, computed from relative luminance. Below it,
+the pair falls back to the default and the diagnostic names the **measured ratio**, not just the
+setting — a number a user can act on.
+
+**D6 — font size 8–32 px**, outside that the default stands with a diagnostic. The family is a name
+resolved by the system font database; an unavailable family falls back and says so.
+
+**D7 — the scrollback cap is chosen by measurement against a stated budget**, not picked: the slice
+measures bytes per line at a realistic width and sets the cap so that **one pane at the cap stays
+under 64 MB**, with the number and the measurement in the book. `NFR-RES-003`/`004` are why there is
+a cap at all; a hidden pane keeps filling.
+
+**D8′ — a chord is spelled the way the product already prints it.** The Help modal and `--help` show
+`Ctrl+Alt+P`; that exact spelling is what a user types in the file, round-tripped by a test over
+every advertised binding. No second grammar to learn, and no chance of the file and the help
+disagreeing.
