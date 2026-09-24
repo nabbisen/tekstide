@@ -68,8 +68,11 @@ Re-read against what RFC-052 and the board rework changed, not copied from `0.23
 - **Two icons, not a set.** A folder and a file, as text symbols. Per-file-type icons need an icon font,
   which is an asset and a dependency decision. On a machine without a font for those symbols the icon is a
   blank box; everything the row says is still in words.
-- **A long name is clipped in the sidebar** (the detail line under the tree shows the highlighted row whole),
-  and the tree is drawn in a monospaced font at a fixed width.
+- **A row wider than the sidebar is clipped on the right** (the detail line under the tree shows the
+  highlighted row whole), and the tree is drawn in a monospaced font at a fixed width. It is not only long
+  *names*: a row whose status words are long — a blocked symlink reads
+  `[OTHER] (blocked) [symlink escapes root]` before its name — can be cut before the name appears at all.
+  Highlight the row to read it.
 - **The board's scroll follows the highlight approximately**: it moves to the highlighted card's fraction of
   the way down the list, and the highlighted card is taller than the others (it shows the blocked
   automations), so the cards below it shift as you move.
