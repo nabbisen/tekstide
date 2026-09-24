@@ -62,8 +62,9 @@ use tekstide_core::text_safety;
 use crate::i18n::{Catalog, CatalogArgs};
 use crate::theme::Theme;
 
-fn node_kind_symbol(kind: ExplorerNodeKind) -> &'static str {
+fn node_kind_symbol(kind: ExplorerNodeKind, expanded: bool) -> &'static str {
     match kind {
+        ExplorerNodeKind::Directory if expanded => "directory-open",
         ExplorerNodeKind::Directory => "directory",
         ExplorerNodeKind::Other => "other",
         ExplorerNodeKind::File => "file",
@@ -122,10 +123,27 @@ fn git_status_symbol(status: Option<FileGitStatus>) -> &'static str {
 /// (`.git`, `node_modules`, `target`) reads `(collapsed)` while it is
 /// closed, and stops saying so once the user has opened it -- the word
 /// would otherwise contradict the rows under it.
+/// The row without the open-file word: the form the escaping and status tests
+/// use. Production draws through [`node_line_with`].
+#[cfg(test)]
 pub(crate) fn node_line(
     catalog: &Catalog,
     node: &ExplorerNode,
     expanded: bool,
+    git_summary: Option<&ProjectGitSummary>,
+) -> String {
+    node_line_with(catalog, node, expanded, false, git_summary)
+}
+
+/// [`node_line`] plus whether this is the row of the file that is open in the
+/// editor. **That is the "selection", and it is a word**: `[open]`, because
+/// the keyboard highlight (`> `) and the open file are two different things a
+/// user must tell apart, and neither may rest on colour (NFR-UX-002).
+pub(crate) fn node_line_with(
+    catalog: &Catalog,
+    node: &ExplorerNode,
+    expanded: bool,
+    is_open: bool,
     git_summary: Option<&ProjectGitSummary>,
 ) -> String {
     let name = text_safety::quote_untrusted(&node.name);
@@ -138,12 +156,31 @@ pub(crate) fn node_line(
     catalog.get_with_args(
         "explorer-node-entry",
         &CatalogArgs::new()
-            .trusted_symbol("kind", node_kind_symbol(node.kind))
+            .trusted_symbol("kind", node_kind_symbol(node.kind, expanded))
             .untrusted("name", &name)
             .trusted_symbol("state", state)
             .trusted_symbol("symlink", symlink_status_symbol(node.symlink_status))
-            .trusted_symbol("git", git_status_symbol(git_status)),
+            .trusted_symbol("git", git_status_symbol(git_status))
+            .trusted_symbol("open", if is_open { "yes" } else { "no" }),
     )
+}
+
+/// What a row needs from outside the tree: the active project's Git summary
+/// (per-file status words) and the path of the file open in the editor.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RowContext<'a> {
+    pub(crate) git_summary: Option<&'a ProjectGitSummary>,
+    pub(crate) open_path: Option<&'a std::path::Path>,
+}
+
+impl<'a> RowContext<'a> {
+    #[cfg(test)]
+    pub(crate) fn git(git_summary: Option<&'a ProjectGitSummary>) -> Self {
+        Self {
+            git_summary,
+            open_path: None,
+        }
+    }
 }
 
 /// Two spaces per level. Depth is also carried by where the row sits under
@@ -171,7 +208,7 @@ fn expansion_marker(expandable: bool, expanded: bool) -> &'static str {
 pub(crate) fn row_text(
     catalog: &Catalog,
     row: &ExplorerTreeRow<'_>,
-    git_summary: Option<&ProjectGitSummary>,
+    context: RowContext<'_>,
 ) -> String {
     let indent = INDENT_PER_LEVEL.repeat(row.depth);
     match row.kind {
@@ -182,7 +219,13 @@ pub(crate) fn row_text(
         } => format!(
             "{indent}{}{}",
             expansion_marker(expandable, expanded),
-            node_line(catalog, node, expanded, git_summary)
+            node_line_with(
+                catalog,
+                node,
+                expanded,
+                context.open_path == Some(node.relative_path.as_path()),
+                context.git_summary
+            )
         ),
         ExplorerTreeRowKind::Loading => {
             format!("{indent}    {}", catalog.get("explorer-row-loading"))
@@ -269,7 +312,7 @@ pub(crate) fn tree_lines(
     highlight: usize,
     top: usize,
     capacity: usize,
-    git_summary: Option<&ProjectGitSummary>,
+    context: RowContext<'_>,
 ) -> Vec<String> {
     let mut lines = Vec::new();
     if let Some(message) = status_line(catalog, status) {
@@ -283,7 +326,7 @@ pub(crate) fn tree_lines(
     let window = window_for(rows.len(), highlight, top, capacity);
     for (index, row) in rows.iter().enumerate().take(window.end).skip(window.top) {
         let marker = if index == highlight { "> " } else { "  " };
-        lines.push(format!("{marker}{}", row_text(catalog, row, git_summary)));
+        lines.push(format!("{marker}{}", row_text(catalog, row, context)));
     }
     if window.end - window.top < rows.len() {
         lines.push(
@@ -355,7 +398,7 @@ pub(crate) fn detail_text(
     catalog: &Catalog,
     tree: &ExplorerTree,
     highlight: usize,
-    git_summary: Option<&ProjectGitSummary>,
+    context: RowContext<'_>,
 ) -> Option<String> {
     let rows = tree.rows();
     let row = rows.get(highlight)?;
@@ -368,7 +411,7 @@ pub(crate) fn detail_text(
             | ExplorerTreeRowKind::Omitted { .. }
             | ExplorerTreeRowKind::RowsNotShown { .. }
     )
-    .then(|| row_text(catalog, row, git_summary).trim_start().to_owned())
+    .then(|| row_text(catalog, row, context).trim_start().to_owned())
 }
 
 /// No `Message` interest of its own -- selection is driven by keyboard
@@ -386,7 +429,7 @@ pub fn view<'a, Message: 'a>(
     cursor: ExplorerCursor,
     catalog: &'a Catalog,
     theme: &'a Theme,
-    git_summary: Option<&ProjectGitSummary>,
+    context: RowContext<'_>,
 ) -> Element<'a, Message> {
     let lines = tree_lines(
         catalog,
@@ -395,7 +438,7 @@ pub fn view<'a, Message: 'a>(
         cursor.highlight,
         cursor.top,
         cursor.capacity,
-        git_summary,
+        context,
     );
     let rows: Vec<Element<'a, Message>> = lines
         .into_iter()
@@ -411,7 +454,7 @@ pub fn view<'a, Message: 'a>(
         .height(Length::Fill)
         .clip(true);
     let detail = container(
-        text(detail_text(catalog, tree, cursor.highlight, git_summary).unwrap_or_default())
+        text(detail_text(catalog, tree, cursor.highlight, context).unwrap_or_default())
             .size(theme.font_size_body()),
     )
     .width(Length::Fill)

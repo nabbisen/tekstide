@@ -490,10 +490,27 @@ terminal-paste-refused = { $reason ->
 # state, symlink and Git status are short and fixed; the name is the only
 # part of a row that can be arbitrarily long, so it goes last and is the part
 # that gives way.
+#
+# RFC-052 PR-052-C: **a file-type icon replaces the `[DIR]`/`[FILE]` words**
+# (D4). That is only allowed because kind is *also* carried by two other
+# channels -- where the row sits (folders first, under their parent, with a
+# `[+]`/`[-]` marker) and the name itself -- so an icon that does not render
+# (no emoji font) costs a glyph, not a fact. **Every status stays a word**,
+# and none is an icon: `(collapsed)`, `(blocked)`, `(unreadable)`,
+# `[symlink]`, the Git words, and `[open]`. **The icons are text symbols
+# (`▣ ▢ ▫`), not emoji, and that was measured, not styled**: colour-emoji
+# glyphs cost six times as much to lay out (18 ms against 3 ms for the same
+# 28-row window, PR-052-C) because each one goes through font fallback, and
+# they need a font that many machines lack. Real per-file-type icons need an
+# icon font, which is an asset and a dependency decision (RFC-054's). `[OTHER]` keeps its word: a link
+# or special entry has no other channel that says what it is. `[open]` marks
+# the file open in the editor, so the keyboard highlight (`>`) and the open
+# file are two separately readable things without colour.
 explorer-node-entry = { $kind ->
-    [directory] [DIR]
+    [directory] ▣
+    [directory-open] ▢
     [other] [OTHER]
-   *[file] [FILE]
+   *[file] ▫
 }{ $state ->
     [collapsed] {" (collapsed)"}
     [blocked] {" (blocked)"}
@@ -512,6 +529,9 @@ explorer-node-entry = { $kind ->
     [untracked] {" [untracked]"}
     [unmerged] {" [conflict]"}
    *[none] {""}
+}{ $open ->
+    [yes] {" [open]"}
+   *[no] {""}
 } { $name }
 
 # RFC-052 PR-052-B: the explorer is a tree, so there is no "go up" row.

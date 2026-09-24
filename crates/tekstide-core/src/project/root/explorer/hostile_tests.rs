@@ -305,7 +305,7 @@ fn the_control_tree_scans_as_an_ordinary_project() {
     let fixture = HostileFixture::build("control", 3);
     let control = scan(&fixture, "control").expect("scans");
     let names: Vec<&str> = control.nodes.iter().map(|n| n.name.as_str()).collect();
-    assert_eq!(names, ["README.md", "src"]);
+    assert_eq!(names, ["src", "README.md"], "folders first");
     assert!(
         control
             .nodes

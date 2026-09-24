@@ -17978,7 +17978,11 @@ fn explorer_texts(state: &State) -> Vec<String> {
         .rows()
         .iter()
         .map(|row| {
-            crate::surface::explorer::row_text(&state.catalog, row, Some(project.git_summary()))
+            crate::surface::explorer::row_text(
+                &state.catalog,
+                row,
+                crate::surface::explorer::RowContext::git(Some(project.git_summary())),
+            )
         })
         .map(|line| plain_words(&line))
         .collect()
@@ -18005,7 +18009,7 @@ fn enter_on_a_folder_expands_it_in_place_and_a_second_enter_closes_it() {
     // Directories first: src, wide, then the files.
     let src = closed.iter().position(|row| row.contains("src")).unwrap();
     assert!(
-        closed[src].trim_start().starts_with("[+] [DIR] src"),
+        closed[src].trim_start().starts_with("[+] ▣ src"),
         "{closed:?}"
     );
     assert!(!closed.iter().any(|row| row.contains("lib.rs")));
@@ -18015,10 +18019,7 @@ fn enter_on_a_folder_expands_it_in_place_and_a_second_enter_closes_it() {
     send_sidebar_key(&mut state, iced::keyboard::key::Named::Enter);
     finish_explorer_scans(&mut state);
     let open = explorer_texts(&state);
-    assert!(
-        open[src].trim_start().starts_with("[-] [DIR] src"),
-        "{open:?}"
-    );
+    assert!(open[src].trim_start().starts_with("[-] ▢ src"), "{open:?}");
     assert!(
         open[src + 1].contains("lib.rs") && open[src + 1].starts_with("      "),
         "a nested file is visible without stepping into `src`, one level in: {open:?}"

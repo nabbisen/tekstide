@@ -8443,7 +8443,13 @@ fn sidebar_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message
                     },
                     &state.catalog,
                     &state.theme,
-                    Some(project.git_summary()),
+                    crate::surface::explorer::RowContext {
+                        git_summary: Some(project.git_summary()),
+                        open_path: project
+                            .content_workspace()
+                            .active_document()
+                            .map(|document| document.target().selected_relative_path.as_path()),
+                    },
                 ),
                 None => text(sidebar_label(state)).into(),
             }

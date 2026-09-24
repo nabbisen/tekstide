@@ -27,10 +27,45 @@ fn scanner_reads_one_directory_as_sorted_read_model() {
         .expect("project root should scan");
 
     let names: Vec<_> = scan.nodes.iter().map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["Cargo.toml", "src", "tests"]);
+    // RFC-052 PR-052-C: folders first, then files.
+    assert_eq!(names, ["src", "tests", "Cargo.toml"]);
     assert!(!scan.truncated);
-    assert_eq!(scan.nodes[0].kind, ExplorerNodeKind::File);
-    assert_eq!(scan.nodes[1].kind, ExplorerNodeKind::Directory);
+    assert_eq!(scan.nodes[0].kind, ExplorerNodeKind::Directory);
+    assert_eq!(scan.nodes[2].kind, ExplorerNodeKind::File);
+}
+
+/// The order is folders first, then files, each by name **ignoring case** --
+/// so `README.md` does not sort apart from `docs` -- with the exact name as
+/// the tie-break, so the order is total.
+#[test]
+fn scanner_lists_folders_first_and_compares_names_without_case() {
+    let sandbox = TestSandbox::new("explorer-folders-first");
+    let project_dir = sandbox.create_dir("project");
+    for dir in ["Zed", "alpha", "Beta"] {
+        sandbox.create_dir(&format!("project/{dir}"));
+    }
+    for file in ["README.md", "b.txt", "A.txt", "a.txt"] {
+        sandbox.create_file(&format!("project/{file}"));
+    }
+    let root = root_handle(ProjectId::for_test(1), validate(&project_dir));
+
+    let scan = FileExplorerScanner
+        .scan_directory(&root, "", &FileExplorerScanPolicy::linux_mvp())
+        .expect("project root should scan");
+
+    let names: Vec<_> = scan.nodes.iter().map(|node| node.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "alpha",
+            "Beta",
+            "Zed",
+            "A.txt",
+            "a.txt",
+            "b.txt",
+            "README.md"
+        ]
+    );
 }
 
 #[test]

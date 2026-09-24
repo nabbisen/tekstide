@@ -72,7 +72,7 @@ fn all_lines(catalog: &Catalog, tree: &ExplorerTree, highlight: usize) -> Vec<St
         highlight,
         0,
         1000,
-        None,
+        super::RowContext::git(None),
     )
 }
 
@@ -188,8 +188,8 @@ fn every_kind_renders_a_distinct_marker() {
     assert_ne!(file, dir);
     assert_ne!(file, other);
     assert_ne!(dir, other);
-    assert!(file.contains("[FILE]"));
-    assert!(dir.contains("[DIR]"));
+    assert!(plain_words(&file).starts_with('▫'), "a file: {file:?}");
+    assert!(plain_words(&dir).starts_with('▣'), "a folder: {dir:?}");
     assert!(other.contains("[OTHER]"));
 }
 
@@ -296,7 +296,7 @@ fn the_error_status_message_is_escaped() {
         0,
         0,
         1000,
-        None,
+        super::RowContext::git(None),
     );
 
     let status_line = lines
@@ -541,10 +541,10 @@ fn a_row_is_indented_by_depth_and_marked_open_or_closed_in_characters() {
     let text: Vec<String> = lines.iter().map(|line| plain_words(line)).collect();
     // `src` is open (`[-]`), `docs` closed (`[+]`), a file has neither, and
     // `lib.rs` sits two spaces further in than the folder that holds it.
-    assert!(text[0].starts_with("  [-] [DIR] src"), "{text:?}");
-    assert!(text[1].starts_with("        [FILE] lib.rs"), "{text:?}");
-    assert!(text[2].starts_with("  [+] [DIR] docs"), "{text:?}");
-    assert!(text[3].starts_with("      [FILE] top.txt"), "{text:?}");
+    assert!(text[0].starts_with("  [-] ▢ src"), "{text:?}");
+    assert!(text[1].starts_with("        ▫ lib.rs"), "{text:?}");
+    assert!(text[2].starts_with("  [+] ▣ docs"), "{text:?}");
+    assert!(text[3].starts_with("      ▫ top.txt"), "{text:?}");
     // The two-space highlight marker precedes all of it; only one row has it.
     assert_eq!(text.iter().filter(|l| l.starts_with("> ")).count(), 0);
 }
@@ -662,7 +662,7 @@ fn a_window_narrower_than_the_tree_says_which_rows_it_is_showing() {
         30,
         0,
         10,
-        None,
+        super::RowContext::git(None),
     );
     // 10 rows and the position line; the highlight (30) is inside them.
     assert_eq!(lines.len(), 11);
@@ -680,7 +680,7 @@ fn a_window_narrower_than_the_tree_says_which_rows_it_is_showing() {
         0,
         0,
         100,
-        None,
+        super::RowContext::git(None),
     );
     assert_eq!(everything.len(), 50, "no position line when all rows fit");
 }
@@ -705,7 +705,11 @@ fn passing_the_row_bound_ends_in_a_row_naming_how_many_are_not_shown() {
         let tree = nodes(count);
         let rows = tree.rows();
         assert_eq!(rows.len(), bound + 1);
-        let last = plain_words(&row_text(&catalog, rows.last().unwrap(), None));
+        let last = plain_words(&row_text(
+            &catalog,
+            rows.last().unwrap(),
+            super::RowContext::git(None),
+        ));
         assert!(last.contains(expected), "{last:?}");
     }
 }
@@ -713,7 +717,7 @@ fn passing_the_row_bound_ends_in_a_row_naming_how_many_are_not_shown() {
 /// **A clipped line must lose the name, not the status.** The sidebar draws
 /// one row per line and clips at its edge; a status word after a long name is
 /// what the clip removes (RFC-052 PR-052-B's live capture showed
-/// `[FILE] new.md [untracke`). Kind, state, symlink status and Git status all
+/// `▫ new.md [untracke`). Kind, state, symlink status and Git status all
 /// come before the name, so the name is the only part that can be cut.
 #[test]
 fn every_status_word_comes_before_the_name_so_only_the_name_can_be_clipped() {
@@ -731,12 +735,7 @@ fn every_status_word_comes_before_the_name_so_only_the_name_can_be_clipped() {
     let line = plain_words(&node_line(&catalog, &node, false, Some(&summary)));
 
     let name_at = line.find(&node.name).expect("the name is drawn");
-    for word in [
-        "[FILE]",
-        "(blocked)",
-        "[symlink escapes root]",
-        "[modified]",
-    ] {
+    for word in ["▫", "(blocked)", "[symlink escapes root]", "[modified]"] {
         let at = line
             .find(word)
             .unwrap_or_else(|| panic!("{word} missing from {line:?}"));
@@ -768,7 +767,8 @@ fn the_detail_shows_the_highlighted_row_in_full_and_escaped() {
         plain_node("ok.txt", ExplorerNodeKind::File),
     ]));
 
-    let detail = detail_text(&catalog, &tree, 0, None).expect("a node row has detail");
+    let detail = detail_text(&catalog, &tree, 0, super::RowContext::git(None))
+        .expect("a node row has detail");
     let plain = plain_words(&detail);
     assert!(
         plain.starts_with("[OTHER] (blocked) [symlink escapes root]"),
@@ -787,9 +787,9 @@ fn the_detail_shows_the_highlighted_row_in_full_and_escaped() {
         ExplorerNodeKind::Directory,
     )]));
     loading.toggle(Path::new("d"));
-    assert!(detail_text(&catalog, &loading, 1, None).is_none());
+    assert!(detail_text(&catalog, &loading, 1, super::RowContext::git(None)).is_none());
     // And a highlight past the end has none rather than panicking.
-    assert!(detail_text(&catalog, &tree, 99, None).is_none());
+    assert!(detail_text(&catalog, &tree, 99, super::RowContext::git(None)).is_none());
 }
 
 /// The window arithmetic subtracts the detail area, or the last row would sit
@@ -879,7 +879,7 @@ fn drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame() {
             },
             catalog,
             theme,
-            None,
+            super::RowContext::git(None),
         )
     });
 
@@ -896,13 +896,21 @@ fn drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame() {
                 },
                 catalog,
                 theme,
-                None,
+                super::RowContext::git(None),
             )
         }));
     }
 
     // What building every row would cost: the alternative this rules out.
-    let lines = tree_lines(catalog, &tree, &status, 0, 0, rows, None);
+    let lines = tree_lines(
+        catalog,
+        &tree,
+        &status,
+        0,
+        0,
+        rows,
+        super::RowContext::git(None),
+    );
     let whole = build_and_layout(&renderer, || {
         iced::widget::column(
             lines
@@ -948,6 +956,170 @@ fn the_not_shown_rows_have_a_detail_because_they_are_sentences_that_get_clipped(
         ..scan_at_root(vec![plain_node("a.txt", ExplorerNodeKind::File)])
     };
     let tree = tree_with(scan);
-    let detail = detail_text(&catalog, &tree, 1, None).expect("the omitted row has a detail");
+    let detail = detail_text(&catalog, &tree, 1, super::RowContext::git(None))
+        .expect("the omitted row has a detail");
     assert_eq!(plain_words(&detail), "44 more entries not shown.");
+}
+
+// ---------------------------------------------------------------------
+// RFC-052 PR-052-C: how it reads.
+// ---------------------------------------------------------------------
+
+/// **The icons are text symbols, and that was measured.** Colour-emoji glyphs
+/// cost six times as much to lay out (18 ms against 3 ms for the same 28-row
+/// window) because each goes through font fallback, and they need a font many
+/// machines lack. A symbol from the Geometric Shapes block does neither. If a
+/// future catalog edit puts an emoji back, this fails and says why.
+#[test]
+fn the_kind_icons_are_text_symbols_not_emoji() {
+    let catalog = real_catalog();
+    for (kind, expanded) in [
+        (ExplorerNodeKind::Directory, false),
+        (ExplorerNodeKind::Directory, true),
+        (ExplorerNodeKind::File, false),
+    ] {
+        let line = node_line(&catalog, &plain_node("x", kind), expanded, None);
+        let icon = plain_words(&line).chars().next().unwrap();
+        assert!(
+            ('\u{2190}'..='\u{2BFF}').contains(&icon),
+            "{kind:?} icon {icon:?} (U+{:04X}) is outside the symbol blocks; emoji cost 6x to lay \
+             out and need a font many machines lack (PR-052-C)",
+            icon as u32
+        );
+    }
+}
+
+/// **An icon never carries meaning alone (D4).** Every status a row can carry
+/// is a *word* -- and the icon slot holds only kind, which the row's position
+/// (folders first, under their parent, `[+]`/`[-]`) and its name also carry.
+/// For each status this checks the word is there; the icon is not.
+#[test]
+fn every_status_a_row_can_carry_is_a_word_and_none_is_an_icon() {
+    let catalog = real_catalog();
+    let mut node = plain_node("thing", ExplorerNodeKind::File);
+
+    for (state, word) in [
+        (ExplorerNodeState::Collapsed, "(collapsed)"),
+        (
+            ExplorerNodeState::Blocked(
+                tekstide_core::project::root::FileAccessBlockedReason::PermissionDenied,
+            ),
+            "(blocked)",
+        ),
+        (ExplorerNodeState::Unreadable, "(unreadable)"),
+    ] {
+        node.state = state;
+        let line = plain_words(&node_line(&catalog, &node, false, None));
+        assert!(line.contains(word), "{word} missing from {line:?}");
+    }
+    node.state = ExplorerNodeState::Available;
+
+    for (symlink, word) in [
+        (FileAccessSymlinkStatus::InRootSymlink, "[symlink]"),
+        (
+            FileAccessSymlinkStatus::UnresolvedSymlink,
+            "[broken symlink]",
+        ),
+        (
+            FileAccessSymlinkStatus::EscapesRoot,
+            "[symlink escapes root]",
+        ),
+    ] {
+        node.symlink_status = symlink;
+        let line = plain_words(&node_line(&catalog, &node, false, None));
+        assert!(line.contains(word), "{word} missing from {line:?}");
+    }
+    node.symlink_status = FileAccessSymlinkStatus::NoSymlink;
+
+    for (status, word) in [
+        (FileGitStatus::Modified, "[modified]"),
+        (FileGitStatus::Added, "[added]"),
+        (FileGitStatus::Deleted, "[deleted]"),
+        (FileGitStatus::Renamed, "[renamed or copied]"),
+        (FileGitStatus::Untracked, "[untracked]"),
+        (FileGitStatus::Unmerged, "[conflict]"),
+    ] {
+        let summary = git_summary_with(&[("thing", status)]);
+        let line = plain_words(&node_line(&catalog, &node, false, Some(&summary)));
+        assert!(line.contains(word), "{word} missing from {line:?}");
+    }
+
+    // A kind with no other channel keeps its word.
+    let other = plain_words(&node_line(
+        &catalog,
+        &plain_node("x", ExplorerNodeKind::Other),
+        false,
+        None,
+    ));
+    assert!(other.starts_with("[OTHER]"), "{other:?}");
+}
+
+/// **The keyboard highlight and the open file are two separately readable
+/// things, without colour.** The highlight is `> ` on the row; the open file
+/// is the word `[open]`. They are independent: one row can have either, both,
+/// or neither.
+#[test]
+fn the_highlight_and_the_open_file_are_distinguishable_without_colour() {
+    let catalog = real_catalog();
+    let tree = tree_with(scan_at_root(vec![
+        plain_node("a.rs", ExplorerNodeKind::File),
+        plain_node("b.rs", ExplorerNodeKind::File),
+        plain_node("c.rs", ExplorerNodeKind::File),
+    ]));
+    // `b.rs` is open in the editor; the keyboard is on `a.rs`.
+    let context = super::RowContext {
+        git_summary: None,
+        open_path: Some(Path::new("b.rs")),
+    };
+    let lines: Vec<String> = tree_lines(
+        &catalog,
+        &tree,
+        &ProjectExplorerStatus::Ready,
+        0,
+        0,
+        100,
+        context,
+    )
+    .iter()
+    .map(|line| plain_words(line))
+    .collect();
+
+    assert!(
+        lines[0].starts_with("> ") && !lines[0].contains("[open]"),
+        "{lines:?}"
+    );
+    assert!(
+        !lines[1].starts_with("> ") && lines[1].contains("[open]"),
+        "{lines:?}"
+    );
+    assert!(
+        !lines[2].starts_with("> ") && !lines[2].contains("[open]"),
+        "{lines:?}"
+    );
+
+    // Moving the highlight onto the open file gives it both, still readable.
+    let both = tree_lines(
+        &catalog,
+        &tree,
+        &ProjectExplorerStatus::Ready,
+        1,
+        0,
+        100,
+        context,
+    );
+    let both = plain_words(&both[1]);
+    assert!(
+        both.starts_with("> ") && both.contains("[open]"),
+        "{both:?}"
+    );
+}
+
+/// Directories carry a different icon when open, on top of `[+]`/`[-]`.
+#[test]
+fn an_open_folder_and_a_closed_one_have_different_icons() {
+    let catalog = real_catalog();
+    let node = plain_node("d", ExplorerNodeKind::Directory);
+    let closed = node_line(&catalog, &node, false, None);
+    let open = node_line(&catalog, &node, true, None);
+    assert_ne!(closed, open);
 }

@@ -192,7 +192,16 @@ impl FileExplorerScanner {
             nodes.push(node_for_entry(root, policy, name, relative_path, entry));
         }
 
-        nodes.sort_by(|left, right| left.name.cmp(&right.name));
+        // RFC-052 PR-052-C: folders first, then files, each by name compared
+        // without regard to case (so `README.md` does not sort apart from
+        // `docs`), with the exact name as the tie-break so the order is total
+        // and stable. A capped scan sorts the subset it kept, as before.
+        nodes.sort_by(|left, right| {
+            (left.kind != ExplorerNodeKind::Directory)
+                .cmp(&(right.kind != ExplorerNodeKind::Directory))
+                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+                .then_with(|| left.name.cmp(&right.name))
+        });
 
         Ok(ExplorerDirectoryScan {
             directory,
