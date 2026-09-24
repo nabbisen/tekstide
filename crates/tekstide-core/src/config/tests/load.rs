@@ -109,11 +109,151 @@ fn a_ui_key_is_refused_because_nothing_reads_it() {
     assert!(error.message.contains("no effect yet"), "{}", error.message);
 }
 
+// --- RFC-054 PR-054-A: `[keybindings]` has a consumer, so it is read ---------
+
+fn fallback_reasons(source: &str) -> Vec<(String, crate::config::FallbackReason)> {
+    parse_and_validate(source)
+        .expect("a bad rebind is a fallback, not a refusal of the file")
+        .fallbacks
+        .into_iter()
+        .map(|fallback| (fallback.setting, fallback.reason))
+        .collect()
+}
+
 #[test]
-fn a_keybinding_override_is_refused_because_nothing_reads_it() {
-    let error = parse_and_validate("[keybindings]\nopen_help = \"ctrl+alt+h\"\n").unwrap_err();
-    assert_eq!(error.key, "keybindings.open_help");
-    assert!(error.message.contains("no effect yet"), "{}", error.message);
+fn a_keybindings_section_is_read_and_a_valid_rebind_is_kept() {
+    use crate::navigation::NavigationAction;
+    let outcome = parse_and_validate("[keybindings]\nopen_help = \"ctrl+alt+j\"\n").expect("valid");
+    assert!(outcome.fallbacks.is_empty());
+    assert!(outcome.warnings.is_empty());
+    let overrides = &outcome.document.keybindings.overrides;
+    assert_eq!(overrides.len(), 1);
+    assert_eq!(overrides[0].0, NavigationAction::OpenHelp);
+    assert_eq!(
+        overrides[0].1.to_string(),
+        "Ctrl+Alt+J",
+        "stored canonically"
+    );
+
+    // An empty section says nothing false and changes nothing.
+    let empty = parse_and_validate("[keybindings]\n").expect("valid");
+    assert!(empty.document.keybindings.overrides.is_empty());
+}
+
+/// **D4: a bad rebind falls back on its own.** The same file's `[agent]` section
+/// still applies -- a mistyped chord must not cost a user the profile they
+/// defined.
+#[test]
+fn a_bad_rebind_falls_back_by_itself_and_the_rest_of_the_file_applies() {
+    let outcome = parse_and_validate(
+        "[agent]\ntranscript_retention_days = 9\n\n[keybindings]\nopen_help = \"nonsense\"\n\
+         open_folder_browser = \"ctrl+alt+j\"\n",
+    )
+    .expect("the file is accepted");
+    assert_eq!(outcome.document.agent.transcript_retention_days, 9);
+    assert_eq!(
+        outcome.document.keybindings.overrides.len(),
+        1,
+        "the good rebind survives"
+    );
+    assert_eq!(outcome.fallbacks.len(), 1);
+    assert_eq!(outcome.fallbacks[0].setting, "keybindings.open_help");
+}
+
+#[test]
+fn every_way_a_rebind_can_be_refused_names_the_setting_and_a_typed_reason() {
+    use crate::config::FallbackReason::*;
+    use crate::navigation::{ChordError, KeybindingStatus, NavigationAction};
+
+    assert_eq!(
+        fallback_reasons("[keybindings]\nopen_help = 5\n"),
+        [("keybindings.open_help".to_string(), NotAString)]
+    );
+    assert_eq!(
+        fallback_reasons("[keybindings]\nopen_help = \"P\"\n"),
+        [(
+            "keybindings.open_help".to_string(),
+            BadChord(ChordError::NoCtrlOrAlt)
+        )]
+    );
+    assert_eq!(
+        fallback_reasons("[keybindings]\nopen_command_palette = \"ctrl+alt+j\"\n"),
+        [(
+            "keybindings.open_command_palette".to_string(),
+            NotRebindable(KeybindingStatus::Reserved)
+        )]
+    );
+    assert_eq!(
+        fallback_reasons("[keybindings]\nopen_safe_close_dialog = \"ctrl+alt+j\"\n"),
+        [(
+            "keybindings.open_safe_close_dialog".to_string(),
+            NotRebindable(KeybindingStatus::Dead)
+        )]
+    );
+    // `Ctrl+Shift+P` is held for a command palette that does not exist.
+    assert_eq!(
+        fallback_reasons("[keybindings]\nopen_help = \"Ctrl+Shift+P\"\n"),
+        [(
+            "keybindings.open_help".to_string(),
+            ReservedChord {
+                held_by: NavigationAction::OpenCommandPalette
+            }
+        )]
+    );
+    // The chord the old test used collides with `open_approval_history`'s default.
+    assert_eq!(
+        fallback_reasons("[keybindings]\nopen_help = \"ctrl+alt+h\"\n"),
+        [(
+            "keybindings.open_help".to_string(),
+            Collision {
+                with: NavigationAction::OpenApprovalHistory
+            }
+        )]
+    );
+}
+
+/// **A refused rebind leaves the default in place**, in the document that reaches
+/// the product -- not merely a diagnostic beside a rebind that applied anyway.
+#[test]
+fn a_refused_rebind_is_not_in_the_document() {
+    let outcome =
+        parse_and_validate("[keybindings]\nopen_help = \"ctrl+alt+h\"\n").expect("accepted");
+    assert_eq!(outcome.fallbacks.len(), 1);
+    assert!(outcome.document.keybindings.overrides.is_empty());
+}
+
+/// An action name this build has never heard of is a **warning** (the same
+/// forward-compatibility rule as every other section), and it is user text, so
+/// it is bounded and escaped. A refused *value* echoes nothing at all.
+#[test]
+fn an_unknown_action_warns_bounded_and_a_hostile_value_is_never_echoed() {
+    let outcome = parse_and_validate(
+        "[keybindings]\n\"open_helpp\" = \"ctrl+alt+j\"\n\"a\\u202Eb\" = \"ctrl+alt+j\"\n\
+         open_help = \"Ctrl+\\u202EX\"\n",
+    )
+    .expect("accepted");
+    let warned: Vec<&str> = outcome.warnings.iter().map(|w| w.key.as_str()).collect();
+    assert!(warned.contains(&"keybindings.open_helpp"), "{warned:?}");
+    assert!(
+        warned.iter().all(|key| !key.contains('\u{202E}')),
+        "a bidi override reached a diagnostic: {warned:?}"
+    );
+    assert!(
+        warned.iter().any(|key| key.contains("<U+202E>")),
+        "{warned:?}"
+    );
+    // The refused value's diagnostic is a typed reason with no text in it.
+    let debug = format!("{:?}", outcome.fallbacks);
+    assert!(
+        !debug.contains('\u{202E}') && !debug.contains("Ctrl+"),
+        "{debug}"
+    );
+}
+
+#[test]
+fn a_keybindings_section_that_is_not_a_table_refuses_the_file() {
+    let error = parse_and_validate("keybindings = 3\n").unwrap_err();
+    assert_eq!(error.key, "keybindings");
 }
 
 #[test]
@@ -739,4 +879,40 @@ fn a_confirmed_security_sensitive_field_can_be_applied_one_at_a_time() {
 
     store.apply_security_sensitive_field(SecuritySensitiveField::AgentProfiles, &outcome.candidate);
     assert!(store.current().agent.profiles.contains_key("codex"));
+}
+
+/// **`Reserved` stays reserved across a reload (D8)** -- the one keybinding
+/// property that is security-shaped. A file that first rebinds a chord, then on
+/// reload names a reserved chord and a reserved action, must end with the
+/// *reload's* accepted rebinds only: the reserved ones refused, nothing carried
+/// over from the parse before, and the outcome naming what was refused.
+#[test]
+fn reserved_stays_reserved_across_a_reload() {
+    use crate::navigation::NavigationAction;
+    let temp = TestDir::new("keybinding-reload");
+    fs::write(
+        temp.config_file(),
+        "[keybindings]\nopen_help = \"ctrl+alt+j\"\n",
+    )
+    .unwrap();
+    let (mut store, report) = ConfigStore::load(temp.config_file());
+    assert!(report.fallbacks.is_empty());
+    assert_eq!(store.current().keybindings.overrides.len(), 1);
+
+    fs::write(
+        temp.config_file(),
+        "[keybindings]\nopen_help = \"Ctrl+Shift+P\"\nopen_command_palette = \"ctrl+alt+j\"\n\
+         open_folder_browser = \"ctrl+alt+j\"\n",
+    )
+    .unwrap();
+    let outcome = store
+        .reload()
+        .expect("the file is accepted; the rebinds are not");
+    assert_eq!(outcome.fallbacks.len(), 2, "{:?}", outcome.fallbacks);
+    // The reload's own accepted rebind is the only one in force; the earlier
+    // parse's `open_help` rebind does not linger, and the reserved chord and
+    // action are refused.
+    let overrides = &store.current().keybindings.overrides;
+    assert_eq!(overrides.len(), 1, "{overrides:?}");
+    assert_eq!(overrides[0].0, NavigationAction::OpenFolderBrowser);
 }

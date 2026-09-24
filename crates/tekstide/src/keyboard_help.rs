@@ -30,10 +30,12 @@ use crate::i18n::Catalog;
 /// One row of help: the binding as the policy spells it, and the
 /// already-localized description of what it does.
 pub struct KeyboardHelpLine {
-    /// A `&'static str` straight from the policy (`"Ctrl+Alt+P"`) --
-    /// trusted, fixed-set text, never filesystem-derived, so it is not
-    /// routed through `text_safety::quote_untrusted`.
-    pub binding: &'static str,
+    /// A chord (`"Ctrl+Alt+P"`). Either fixed text from the policy or, when the
+    /// user rebound it, the **canonical rendering of a parsed chord** -- the
+    /// grammar admits only `Ctrl`/`Alt`/`Shift`, `+` and one `A`-`Z`/`0`-`9`,
+    /// so nothing the file wrote can reach here as text, and it is not routed
+    /// through `text_safety::quote_untrusted`.
+    pub binding: String,
     pub description: String,
 }
 
@@ -550,7 +552,7 @@ pub fn surface_action_help_lines(catalog: &Catalog) -> Vec<SurfaceHelpGroup> {
         };
         let heading = catalog.get(entry.group_key);
         let line = KeyboardHelpLine {
-            binding: entry.binding,
+            binding: entry.binding.to_owned(),
             description: catalog.get(entry.description_key),
         };
         match groups.iter_mut().find(|group| group.heading == heading) {
@@ -567,13 +569,17 @@ pub fn surface_action_help_lines(catalog: &Catalog) -> Vec<SurfaceHelpGroup> {
 /// Every live binding, described. Order follows the policy's own rule
 /// order rather than being re-sorted here, so the help reads in the
 /// order the policy declares.
-pub fn keyboard_help_lines(catalog: &Catalog) -> Vec<KeyboardHelpLine> {
-    KeybindingPolicy::linux_mvp()
+///
+/// **`policy` is the policy in force**, so a rebound chord is the chord this
+/// prints -- the Help modal cannot advertise a key that no longer works.
+/// `--help` passes the shipped defaults instead ([`usage_text`]).
+pub fn keyboard_help_lines(catalog: &Catalog, policy: &KeybindingPolicy) -> Vec<KeyboardHelpLine> {
+    policy
         .advertised_bindings()
         .into_iter()
         .filter_map(|(action, binding)| {
             action_catalog_key(action).map(|key| KeyboardHelpLine {
-                binding,
+                binding: binding.to_owned(),
                 description: catalog.get(key),
             })
         })
@@ -600,7 +606,10 @@ pub fn usage_text(catalog: &Catalog, executable: &str) -> String {
     out.push_str("    -h, --help       Print this help\n");
     out.push_str("    -V, --version    Print version\n\n");
     out.push_str("KEYBOARD:\n");
-    for line in keyboard_help_lines(catalog) {
+    // `--help` runs before the configuration is read, so it prints the chords
+    // Tekstide ships with; the Help modal (`Ctrl+Alt+K`) prints the ones in
+    // force, and `[keybindings]` in config.toml changes them.
+    for line in keyboard_help_lines(catalog, &KeybindingPolicy::linux_mvp()) {
         out.push_str(&format!("    {:<14} {}\n", line.binding, line.description));
     }
     // RFC-044 D2/PR-044-C: the same surface-grouped section

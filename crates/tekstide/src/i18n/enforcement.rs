@@ -622,6 +622,11 @@ fn generic_args() -> CatalogArgs<'static> {
         // RFC-052 PR-052-B: `explorer-omitted-entries`'s `$bound`, and
         // `explorer-rows-position`'s window.
         .trusted_symbol("bound", "exact")
+        .trusted_symbol("other", "open_help")
+        .untrusted(
+            "setting",
+            &tekstide_core::text_safety::quote_untrusted("keybindings.open_help"),
+        )
         .number("first", 1u32)
         .number("last", 1u32)
         .number("total", 1u32)

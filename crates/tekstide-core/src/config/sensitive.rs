@@ -165,5 +165,6 @@ pub fn apply_safe_fields(
             profiles: current.agent.profiles.clone(),
         },
         resources: candidate.resources.clone(),
+        keybindings: candidate.keybindings.clone(),
     }
 }

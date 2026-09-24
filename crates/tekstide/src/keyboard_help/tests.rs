@@ -56,7 +56,7 @@ fn action_catalog_key_is_some_iff_the_action_is_live() {
 #[test]
 fn every_live_binding_is_described_to_the_user() {
     let catalog = real_catalog();
-    let lines = keyboard_help_lines(&catalog);
+    let lines = keyboard_help_lines(&catalog, &KeybindingPolicy::linux_mvp());
 
     assert_eq!(
         lines.len(),
@@ -64,7 +64,10 @@ fn every_live_binding_is_described_to_the_user() {
         "expected the fifteen Candidate rules with a default binding to be described; \
          got {}: {:?}",
         lines.len(),
-        lines.iter().map(|line| line.binding).collect::<Vec<_>>()
+        lines
+            .iter()
+            .map(|line| line.binding.clone())
+            .collect::<Vec<_>>()
     );
 
     for line in &lines {
@@ -91,7 +94,7 @@ fn every_live_binding_is_described_to_the_user() {
 #[test]
 fn no_action_without_a_working_binding_is_advertised() {
     let catalog = real_catalog();
-    let advertised: Vec<&'static str> = keyboard_help_lines(&catalog)
+    let advertised: Vec<String> = keyboard_help_lines(&catalog, &KeybindingPolicy::linux_mvp())
         .into_iter()
         .map(|line| line.binding)
         .collect();
@@ -104,7 +107,7 @@ fn no_action_without_a_working_binding_is_advertised() {
         }
         if let Some(binding) = rule.default_binding() {
             assert!(
-                !advertised.contains(&binding),
+                !advertised.iter().any(|line| line == binding),
                 "{binding} is {:?}, not a live binding, and must not be offered to a user",
                 rule.status()
             );
@@ -114,7 +117,7 @@ fn no_action_without_a_working_binding_is_advertised() {
     // Named explicitly as well as derived: `Ctrl+Shift+P` is reserved so
     // nothing else claims it, and there is no command palette behind it.
     assert!(
-        !advertised.contains(&"Ctrl+Shift+P"),
+        !advertised.iter().any(|line| line == "Ctrl+Shift+P"),
         "the reserved command-palette binding must never be advertised"
     );
 
@@ -144,9 +147,9 @@ fn usage_text_lists_every_binding_the_gui_lists() {
     let catalog = real_catalog();
     let usage = usage_text(&catalog, "tekstide");
 
-    for line in keyboard_help_lines(&catalog) {
+    for line in keyboard_help_lines(&catalog, &KeybindingPolicy::linux_mvp()) {
         assert!(
-            usage.contains(line.binding),
+            usage.contains(&line.binding),
             "--help omitted {}, so the terminal and the window disagree about what \
              the product can do",
             line.binding
@@ -285,7 +288,7 @@ fn surface_action_help_lines_is_derived_from_the_registry() {
             group
                 .lines
                 .iter()
-                .map(|l| (l.binding, &l.description))
+                .map(|l| (l.binding.clone(), &l.description))
                 .collect::<Vec<_>>()
         );
     }
@@ -342,7 +345,7 @@ fn usage_text_lists_every_surface_binding_the_gui_lists() {
         );
         for line in group.lines {
             assert!(
-                usage.contains(line.binding) && usage.contains(&line.description),
+                usage.contains(&line.binding) && usage.contains(&line.description),
                 "--help omitted the surface line ({}, {:?})",
                 line.binding,
                 line.description

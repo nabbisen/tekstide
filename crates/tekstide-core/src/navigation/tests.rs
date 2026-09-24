@@ -582,3 +582,282 @@ fn the_two_dead_actions_carry_a_stated_reachability() {
     assert_eq!(palette.status(), KeybindingStatus::Reserved);
     assert!(palette.dead_reachability().is_none());
 }
+
+// --- RFC-054 PR-054-A: chords, action names, and rebinding ---------------
+
+use super::{Chord, ChordError, KeybindingResolution, RefusalReason};
+
+fn chord(spelling: &str) -> Chord {
+    Chord::parse(spelling).unwrap_or_else(|error| panic!("{spelling}: {error:?}"))
+}
+
+fn effective(resolution: &KeybindingResolution, action: NavigationAction) -> String {
+    resolution
+        .policy
+        .rule_for(action)
+        .and_then(|rule| rule.effective_binding())
+        .map(str::to_owned)
+        .unwrap_or_default()
+}
+
+/// **The file and the help can never disagree (D8′).** Every chord the policy
+/// ships -- advertised or reserved -- parses, and renders back to exactly the
+/// spelling the Help modal and `--help` print. The tekstide crate holds the
+/// other half: a real key press renders in this same shape
+/// (`input::tests::every_default_binding_in_linux_mvp_round_trips_through_format_binding`).
+#[test]
+fn every_advertised_chord_round_trips() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let mut checked = 0;
+    for rule in &policy.rules {
+        let Some(spelling) = rule.default_binding() else {
+            continue;
+        };
+        let parsed = Chord::parse(spelling).unwrap_or_else(|e| panic!("{spelling}: {e:?}"));
+        assert_eq!(parsed.to_string(), spelling, "{:?}", rule.action);
+        checked += 1;
+    }
+    assert_eq!(
+        checked, 16,
+        "sixteen chords are held (fifteen bound, one reserved)"
+    );
+}
+
+#[test]
+fn a_chord_is_case_insensitive_on_input_and_canonical_on_output() {
+    for spelling in ["ctrl+alt+p", "CTRL+ALT+P", "Alt+Ctrl+p", " Ctrl + Alt + P "] {
+        assert_eq!(chord(spelling).to_string(), "Ctrl+Alt+P", "{spelling:?}");
+    }
+    assert_eq!(chord("shift+ctrl+v").to_string(), "Ctrl+Shift+V");
+    assert_eq!(chord("ctrl+5").to_string(), "Ctrl+5");
+}
+
+/// What a chord may not be, each with its own reason and none of them carrying
+/// any of the text the user wrote.
+#[test]
+fn a_chord_that_would_steal_typing_or_never_match_is_refused() {
+    for (spelling, expected) in [
+        ("", ChordError::Empty),
+        ("   ", ChordError::Empty),
+        ("Ctrl+", ChordError::NoSingleKey),
+        ("Ctrl+Alt", ChordError::NoSingleKey),
+        ("Ctrl+A+B", ChordError::NoSingleKey),
+        ("Ctrl+Ctrl+P", ChordError::RepeatedModifier),
+        ("Ctrl+Hyper+P", ChordError::UnknownPart),
+        ("Ctrl+Enter", ChordError::UnknownPart),
+        ("Ctrl+F1", ChordError::UnknownPart),
+        ("Ctrl+-", ChordError::KeyNotRebindable),
+        ("Ctrl+é", ChordError::KeyNotRebindable),
+        // A bare letter, or Shift + letter, would take the key from typing.
+        ("P", ChordError::NoCtrlOrAlt),
+        ("Shift+P", ChordError::NoCtrlOrAlt),
+        // Shift + digit is a different character on different layouts.
+        ("Ctrl+Shift+1", ChordError::ShiftWithDigit),
+    ] {
+        assert_eq!(Chord::parse(spelling), Err(expected), "{spelling:?}");
+    }
+}
+
+/// Every action has a distinct `snake_case` name, the names round-trip, and the
+/// list of all actions is exactly the set the policy has a rule for.
+#[test]
+fn every_action_has_one_config_name_and_the_list_matches_the_policy() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let mut names = std::collections::BTreeSet::new();
+    for action in NavigationAction::ALL {
+        assert!(names.insert(action.config_name()), "duplicate {action:?}");
+        assert_eq!(
+            NavigationAction::from_config_name(action.config_name()),
+            Some(action)
+        );
+        assert!(
+            action
+                .config_name()
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c == '_'),
+            "{}",
+            action.config_name()
+        );
+        assert!(policy.rule_for(action).is_some(), "{action:?} has no rule");
+    }
+    assert_eq!(policy.rules.len(), NavigationAction::ALL.len());
+    assert_eq!(NavigationAction::from_config_name("Open_Help"), None);
+    assert_eq!(NavigationAction::from_config_name("no_such_action"), None);
+}
+
+#[test]
+fn a_plain_rebind_changes_the_effective_chord_and_the_help_and_never_the_default() {
+    let resolution = KeybindingPolicy::linux_mvp()
+        .with_overrides(&[(NavigationAction::OpenHelp, chord("Ctrl+Alt+J"))]);
+    assert!(resolution.refusals.is_empty());
+    assert_eq!(
+        effective(&resolution, NavigationAction::OpenHelp),
+        "Ctrl+Alt+J"
+    );
+    let rule = resolution
+        .policy
+        .rule_for(NavigationAction::OpenHelp)
+        .unwrap();
+    assert_eq!(
+        rule.default_binding(),
+        Some("Ctrl+Alt+K"),
+        "the shipped default is untouched"
+    );
+
+    let advertised = resolution.policy.advertised_bindings();
+    assert!(advertised.contains(&(NavigationAction::OpenHelp, "Ctrl+Alt+J")));
+    assert!(
+        !advertised.iter().any(|(_, chord)| *chord == "Ctrl+Alt+K"),
+        "the old chord is gone"
+    );
+    assert!(!resolution.policy.uses_binding("Ctrl+Alt+K"));
+    assert!(resolution.policy.uses_binding("Ctrl+Alt+J"));
+}
+
+/// **`Reserved` stays reserved.** Neither the action nor its chord can be
+/// taken, and an action that is dead has nothing to rebind.
+#[test]
+fn a_reserved_action_a_reserved_chord_and_a_dead_action_are_refused() {
+    let resolution = KeybindingPolicy::linux_mvp().with_overrides(&[
+        (NavigationAction::OpenCommandPalette, chord("Ctrl+Alt+J")),
+        (NavigationAction::OpenHelp, chord("Ctrl+Shift+P")),
+        (NavigationAction::OpenSafeCloseDialog, chord("Ctrl+Alt+Z")),
+        (
+            NavigationAction::CycleVisibleTerminalSession,
+            chord("Ctrl+Alt+Y"),
+        ),
+    ]);
+    let reason = |action| {
+        resolution
+            .refusals
+            .iter()
+            .find(|r| r.action == action)
+            .unwrap_or_else(|| panic!("{action:?} was not refused"))
+            .reason
+    };
+    assert_eq!(
+        reason(NavigationAction::OpenCommandPalette),
+        RefusalReason::NotRebindable(KeybindingStatus::Reserved)
+    );
+    assert_eq!(
+        reason(NavigationAction::OpenHelp),
+        RefusalReason::ReservedChord {
+            held_by: NavigationAction::OpenCommandPalette
+        }
+    );
+    assert_eq!(
+        reason(NavigationAction::OpenSafeCloseDialog),
+        RefusalReason::NotRebindable(KeybindingStatus::Dead)
+    );
+    assert_eq!(resolution.refusals.len(), 4);
+    // Defaults stand.
+    assert_eq!(
+        effective(&resolution, NavigationAction::OpenHelp),
+        "Ctrl+Alt+K"
+    );
+    assert_eq!(
+        effective(&resolution, NavigationAction::OpenCommandPalette),
+        "Ctrl+Shift+P"
+    );
+    assert_eq!(
+        effective(&resolution, NavigationAction::OpenSafeCloseDialog),
+        ""
+    );
+}
+
+/// A rebind colliding with another rule's chord **refuses, and the default
+/// stands** -- never last-wins. (RFC-054 acceptance criterion; the ablation is
+/// "accept last-wins".)
+#[test]
+fn a_rebind_that_collides_with_another_rules_chord_is_refused_and_the_default_stands() {
+    let resolution = KeybindingPolicy::linux_mvp()
+        .with_overrides(&[(NavigationAction::OpenHelp, chord("Ctrl+Alt+P"))]);
+    assert_eq!(resolution.refusals.len(), 1);
+    assert_eq!(
+        resolution.refusals[0].reason,
+        RefusalReason::Collision {
+            with: NavigationAction::OpenProjectBoard
+        }
+    );
+    assert_eq!(
+        effective(&resolution, NavigationAction::OpenHelp),
+        "Ctrl+Alt+K"
+    );
+    assert_eq!(
+        effective(&resolution, NavigationAction::OpenProjectBoard),
+        "Ctrl+Alt+P"
+    );
+}
+
+/// Two rebinds to the same chord: **both** are refused, and the order they were
+/// written in changes nothing -- last-wins is exactly what this must not be.
+#[test]
+fn two_rebinds_to_one_chord_are_both_refused_whatever_the_order() {
+    let a = (NavigationAction::OpenHelp, chord("Ctrl+Alt+J"));
+    let b = (NavigationAction::OpenFolderBrowser, chord("Ctrl+Alt+J"));
+    let forward = KeybindingPolicy::linux_mvp().with_overrides(&[a, b]);
+    let backward = KeybindingPolicy::linux_mvp().with_overrides(&[b, a]);
+    for resolution in [&forward, &backward] {
+        assert_eq!(resolution.refusals.len(), 2, "{:?}", resolution.refusals);
+        assert_eq!(
+            effective(resolution, NavigationAction::OpenHelp),
+            "Ctrl+Alt+K"
+        );
+        assert_eq!(
+            effective(resolution, NavigationAction::OpenFolderBrowser),
+            "Ctrl+Alt+B"
+        );
+    }
+    assert_eq!(
+        forward.policy, backward.policy,
+        "the resolved policy is order-independent"
+    );
+}
+
+/// A swap is not a collision: every chord is still unique afterwards.
+#[test]
+fn swapping_two_actions_chords_is_accepted() {
+    let resolution = KeybindingPolicy::linux_mvp().with_overrides(&[
+        (NavigationAction::OpenHelp, chord("Ctrl+Alt+B")),
+        (NavigationAction::OpenFolderBrowser, chord("Ctrl+Alt+K")),
+    ]);
+    assert!(resolution.refusals.is_empty(), "{:?}", resolution.refusals);
+    assert_eq!(
+        effective(&resolution, NavigationAction::OpenHelp),
+        "Ctrl+Alt+B"
+    );
+    assert_eq!(
+        effective(&resolution, NavigationAction::OpenFolderBrowser),
+        "Ctrl+Alt+K"
+    );
+}
+
+/// Refusing one rebind can restore a default another rebind now collides with.
+/// The resolution repeats until nothing collides, so the result never holds two
+/// actions on one chord -- whatever combination was asked for.
+#[test]
+fn refusing_one_rebind_can_refuse_another_and_the_result_never_holds_a_duplicate() {
+    // Help wants Board's chord and Board moves to Terminal's chord, which
+    // collides: Board's move is refused, restoring its default, which Help's
+    // rebind now collides with.
+    let resolution = KeybindingPolicy::linux_mvp().with_overrides(&[
+        (NavigationAction::OpenHelp, chord("Ctrl+Alt+P")),
+        (NavigationAction::OpenProjectBoard, chord("Ctrl+Alt+T")),
+    ]);
+    assert_eq!(resolution.refusals.len(), 2, "{:?}", resolution.refusals);
+    assert_eq!(
+        effective(&resolution, NavigationAction::OpenHelp),
+        "Ctrl+Alt+K"
+    );
+    assert_eq!(
+        effective(&resolution, NavigationAction::OpenProjectBoard),
+        "Ctrl+Alt+P"
+    );
+
+    let mut seen = std::collections::BTreeSet::new();
+    for rule in &resolution.policy.rules {
+        if let Some(chord) = rule.effective_binding() {
+            assert!(seen.insert(chord.to_owned()), "{chord} reaches two actions");
+        }
+    }
+}

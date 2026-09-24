@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 
 use crate::audit::AuditReference;
 use crate::config::ConfigurationDocument;
-use crate::config::model::{AgentSettings, ConfiguredAiCliProfile, ResourceSettings};
+use crate::config::model::{
+    AgentSettings, ConfiguredAiCliProfile, FallbackReason, KeybindingSettings, ResourceSettings,
+    SettingFallback,
+};
 use crate::config::sensitive::{self, SecuritySensitiveField};
 
 /// RFC-023 PR-023-C: a bounded, content-free diagnostic. `message` is
@@ -249,6 +252,9 @@ fn refuse_withdrawn_free_form_section(
 pub struct ConfigLoadOutcome {
     pub document: ConfigurationDocument,
     pub warnings: Vec<ConfigWarning>,
+    /// RFC-054 D4: settings whose value was not used, one per setting. The
+    /// rest of the file applied.
+    pub fallbacks: Vec<SettingFallback>,
 }
 
 /// The atomic pipeline's middle three stages -- parse, validate whole
@@ -289,14 +295,15 @@ pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagn
     // caller must not describe it as one.
     refuse_withdrawn_free_form_section(&mut root, "core")?;
     refuse_withdrawn_free_form_section(&mut root, "ui")?;
-    refuse_withdrawn_free_form_section(&mut root, "keybindings")?;
     refuse_withdrawn_free_form_section(&mut root, "terminal")?;
     refuse_withdrawn_free_form_section(&mut root, "projects")?;
     refuse_withdrawn_free_form_section(&mut root, "security")?;
 
+    let mut fallbacks = Vec::new();
     let document = ConfigurationDocument {
         agent: extract_agent(&mut root, &mut warnings)?,
         resources: extract_resources(&mut root, &mut warnings)?,
+        keybindings: extract_keybindings(&mut root, &mut warnings, &mut fallbacks)?,
     };
 
     validate_default_profile(&document)?;
@@ -307,7 +314,11 @@ pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagn
         });
     }
 
-    Ok(ConfigLoadOutcome { document, warnings })
+    Ok(ConfigLoadOutcome {
+        document,
+        warnings,
+        fallbacks,
+    })
 }
 
 /// RFC-045 D8: `default_profile` naming an id the file does not define
@@ -622,6 +633,85 @@ fn take_agent_run_limit(table: &mut toml::Table) -> Result<Option<u32>, ConfigDi
     Ok(Some(limit))
 }
 
+/// **RFC-054 PR-054-A.** `[keybindings]`: one `action_name = "Chord"` entry per
+/// rebind, spelled the way the Help modal prints it.
+///
+/// **A bad entry falls back on its own** (D4) -- the file's other settings and
+/// the other rebinds still apply -- which is the opposite of a bad `[agent]`
+/// key, and deliberately so: refusing the whole file for one mistyped chord
+/// would throw away a profile the user defined. What is refused, and why:
+///
+/// * a value that is not a string, or a chord that does not parse
+///   ([`FallbackReason::NotAString`], [`FallbackReason::BadChord`]);
+/// * an action that is `Reserved` or dead, a `Reserved` chord, or a collision --
+///   decided by [`crate::navigation::KeybindingPolicy::with_overrides`], the one
+///   place that knows the rules, so this parse and a live reload cannot differ.
+///
+/// An **unknown action name is a warning**, not a fallback: it is the file
+/// naming something this build has never heard of (a typo, or a newer
+/// Tekstide), the same forward-compatibility rule every other section follows,
+/// and its name is user text, so it goes through `bound_key_segment`.
+fn extract_keybindings(
+    root: &mut toml::Table,
+    warnings: &mut Vec<ConfigWarning>,
+    fallbacks: &mut Vec<SettingFallback>,
+) -> Result<KeybindingSettings, ConfigDiagnostic> {
+    use crate::navigation::{KeybindingPolicy, NavigationAction, RefusalReason};
+
+    let Some(table) = section_table(root, "keybindings")? else {
+        return Ok(KeybindingSettings::default());
+    };
+
+    let mut wanted = Vec::new();
+    for (name, value) in table {
+        let Some(action) = NavigationAction::from_config_name(&name) else {
+            warnings.push(ConfigWarning {
+                key: format!("keybindings.{}", bound_key_segment(&name)),
+            });
+            continue;
+        };
+        let setting = format!("keybindings.{}", action.config_name());
+        let toml::Value::String(spelling) = value else {
+            fallbacks.push(SettingFallback {
+                setting,
+                reason: FallbackReason::NotAString,
+            });
+            continue;
+        };
+        match crate::navigation::Chord::parse(&spelling) {
+            Ok(chord) => wanted.push((action, chord)),
+            Err(error) => fallbacks.push(SettingFallback {
+                setting,
+                reason: FallbackReason::BadChord(error),
+            }),
+        }
+    }
+
+    let resolution = KeybindingPolicy::linux_mvp().with_overrides(&wanted);
+    for refusal in &resolution.refusals {
+        fallbacks.push(SettingFallback {
+            setting: format!("keybindings.{}", refusal.action.config_name()),
+            reason: match refusal.reason {
+                RefusalReason::NotRebindable(status) => FallbackReason::NotRebindable(status),
+                RefusalReason::ReservedChord { held_by } => {
+                    FallbackReason::ReservedChord { held_by }
+                }
+                RefusalReason::Collision { with } => FallbackReason::Collision { with },
+            },
+        });
+    }
+    let overrides = wanted
+        .into_iter()
+        .filter(|(action, _)| {
+            !resolution
+                .refusals
+                .iter()
+                .any(|refusal| refusal.action == *action)
+        })
+        .collect();
+    Ok(KeybindingSettings { overrides })
+}
+
 fn extract_resources(
     root: &mut toml::Table,
     warnings: &mut Vec<ConfigWarning>,
@@ -645,6 +735,9 @@ fn extract_resources(
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConfigLoadReport {
     pub warnings: Vec<ConfigWarning>,
+    /// RFC-054 D4: settings that fell back, with the reason. Empty when the
+    /// file was refused whole (`diagnostic`) or absent.
+    pub fallbacks: Vec<SettingFallback>,
     pub diagnostic: Option<ConfigDiagnostic>,
 }
 
@@ -660,6 +753,7 @@ pub struct ConfigLoadReport {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConfigReloadOutcome {
     pub warnings: Vec<ConfigWarning>,
+    pub fallbacks: Vec<SettingFallback>,
     pub pending_security_sensitive_changes: Vec<SecuritySensitiveField>,
     /// RFC-045 PR-045-C: the freshly parsed document, **including the
     /// sensitive values that were held back**. `ConfigStore::current()`
@@ -731,6 +825,7 @@ impl ConfigStore {
                 self.current = ConfigurationDocument::default();
                 return Ok(ConfigReloadOutcome {
                     warnings: Vec::new(),
+                    fallbacks: Vec::new(),
                     pending_security_sensitive_changes: Vec::new(),
                     // Nothing is held back, so the candidate *is* what
                     // took effect -- there is no second document here
@@ -754,6 +849,7 @@ impl ConfigStore {
         self.current = sensitive::apply_safe_fields(&self.current, &outcome.document);
         Ok(ConfigReloadOutcome {
             warnings: outcome.warnings,
+            fallbacks: outcome.fallbacks,
             pending_security_sensitive_changes: pending,
             candidate: outcome.document,
         })
@@ -802,6 +898,7 @@ fn load_or_default(config_file: &Path) -> (ConfigurationDocument, ConfigLoadRepo
                 ConfigurationDocument::default(),
                 ConfigLoadReport {
                     warnings: Vec::new(),
+                    fallbacks: Vec::new(),
                     diagnostic: None,
                 },
             );
@@ -811,6 +908,7 @@ fn load_or_default(config_file: &Path) -> (ConfigurationDocument, ConfigLoadRepo
                 ConfigurationDocument::default(),
                 ConfigLoadReport {
                     warnings: Vec::new(),
+                    fallbacks: Vec::new(),
                     diagnostic: Some(
                         ConfigDiagnostic {
                             path: None,
@@ -830,6 +928,7 @@ fn load_or_default(config_file: &Path) -> (ConfigurationDocument, ConfigLoadRepo
             outcome.document,
             ConfigLoadReport {
                 warnings: outcome.warnings,
+                fallbacks: outcome.fallbacks,
                 diagnostic: None,
             },
         ),
@@ -837,6 +936,7 @@ fn load_or_default(config_file: &Path) -> (ConfigurationDocument, ConfigLoadRepo
             ConfigurationDocument::default(),
             ConfigLoadReport {
                 warnings: Vec::new(),
+                fallbacks: Vec::new(),
                 diagnostic: Some(diagnostic.with_path(config_file)),
             },
         ),

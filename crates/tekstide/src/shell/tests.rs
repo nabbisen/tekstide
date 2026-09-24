@@ -6185,7 +6185,10 @@ fn a_cleared_confirmed_set_re_arms_the_first_use_gate() {
 #[test]
 fn the_reload_configuration_command_is_advertised_in_help_and_usage_text() {
     let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
-    let lines = crate::keyboard_help::keyboard_help_lines(&catalog);
+    let lines = crate::keyboard_help::keyboard_help_lines(
+        &catalog,
+        &tekstide_core::navigation::KeybindingPolicy::linux_mvp(),
+    );
 
     let line = lines
         .iter()
@@ -11122,7 +11125,10 @@ fn opening_help_through_a_real_key_event_shows_every_live_binding() {
         "Ctrl+Alt+K must open the Help modal: {:?}",
         state.modal
     );
-    let lines = crate::keyboard_help::keyboard_help_lines(&state.catalog);
+    let lines = crate::keyboard_help::keyboard_help_lines(
+        &state.catalog,
+        &state.configuration.keybinding_policy,
+    );
     assert_eq!(
         lines.len(),
         15,
@@ -11190,7 +11196,9 @@ fn help_modal_view_reuses_the_shared_keyboard_help_derivation_not_a_second_list(
     .expect("shell.rs must be readable");
 
     assert!(
-        source.contains("crate::keyboard_help::keyboard_help_lines(&state.catalog)"),
+        source.replace([' ', '\n', ','], "").contains(
+            "crate::keyboard_help::keyboard_help_lines(&state.catalog&state.configuration.keybinding_policy)"
+        ),
         "help_modal_view must call the shared keyboard_help_lines derivation, not a \
          hand-written list"
     );
@@ -18266,4 +18274,267 @@ fn a_board_down_key_through_update_returns_the_scroll_task() {
         .expect("a freshly created directory is a valid project root");
     let mut state = state_with(app_shell);
     assert_eq!(super::update(&mut state, down()).units(), 0);
+}
+
+// --- RFC-054 PR-054-A: keybindings from the user's own file ------------------
+
+fn state_from_config(label: &str, contents: &str) -> (State, PathBuf) {
+    let (configuration, config_home) = configuration_from_file(label, contents);
+    let state = state_with_configuration(ApplicationShell::new(), configuration);
+    (state, config_home)
+}
+
+fn effective_chord(state: &State, action: tekstide_core::navigation::NavigationAction) -> String {
+    state
+        .configuration
+        .keybinding_policy
+        .rule_for(action)
+        .and_then(|rule| rule.effective_binding())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn help_bindings(state: &State) -> Vec<String> {
+    crate::keyboard_help::keyboard_help_lines(
+        &state.catalog,
+        &state.configuration.keybinding_policy,
+    )
+    .into_iter()
+    .map(|line| line.binding)
+    .collect()
+}
+
+/// **The file reaches the policy, the Help modal and the board.** One rebind
+/// that is valid and one that is not: the valid one is in force and advertised,
+/// the old chord is not advertised, and the board names the refused setting and
+/// why -- the rest of the file applying (D4).
+#[test]
+fn a_rebind_in_the_users_file_is_in_force_advertised_and_a_bad_one_is_named_on_the_board() {
+    use tekstide_core::navigation::NavigationAction::{OpenFolderBrowser, OpenHelp};
+    let (state, _home) = state_from_config(
+        "keybindings-boot",
+        "[keybindings]\nopen_help = \"ctrl+alt+j\"\nopen_folder_browser = \"nonsense\"\n",
+    );
+    assert_eq!(effective_chord(&state, OpenHelp), "Ctrl+Alt+J");
+    assert_eq!(
+        effective_chord(&state, OpenFolderBrowser),
+        "Ctrl+Alt+B",
+        "the default stands"
+    );
+
+    let advertised = help_bindings(&state);
+    assert!(
+        advertised.contains(&"Ctrl+Alt+J".to_owned()),
+        "{advertised:?}"
+    );
+    assert!(
+        !advertised.contains(&"Ctrl+Alt+K".to_owned()),
+        "the old chord is still advertised"
+    );
+
+    let lines = project_board_configuration_lines(&state);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let line = plain_words(&lines[0]);
+    assert!(
+        line.contains("keybindings.open_folder_browser was not used"),
+        "{line}"
+    );
+    assert!(line.contains("its default stands"), "{line}");
+    assert!(
+        !line.contains("nonsense"),
+        "the configured value must not be echoed: {line}"
+    );
+}
+
+/// **`Reserved` stays reserved across a reload, and a chord applies live.**
+/// `Ctrl+Alt+C` re-reads the file; a rebind takes effect and is advertised at
+/// once, and a later edit that names the reserved chord is refused and named
+/// while the previous good rebind is replaced by the file's new (accepted) ones.
+#[test]
+fn a_reload_applies_a_rebind_live_and_reserved_stays_reserved() {
+    use tekstide_core::navigation::NavigationAction::{OpenCommandPalette, OpenHelp};
+    let (mut state, home) = state_from_config("keybindings-reload", "");
+    assert_eq!(effective_chord(&state, OpenHelp), "Ctrl+Alt+K");
+
+    rewrite_config(&home, "[keybindings]\nopen_help = \"ctrl+alt+j\"\n");
+    press_reload_configuration(&mut state);
+    assert_eq!(
+        effective_chord(&state, OpenHelp),
+        "Ctrl+Alt+J",
+        "applied without a restart"
+    );
+    assert!(help_bindings(&state).contains(&"Ctrl+Alt+J".to_owned()));
+    assert!(project_board_configuration_lines(&state).is_empty());
+
+    rewrite_config(
+        &home,
+        "[keybindings]\nopen_help = \"Ctrl+Shift+P\"\nopen_command_palette = \"ctrl+alt+j\"\n",
+    );
+    press_reload_configuration(&mut state);
+    assert_eq!(effective_chord(&state, OpenCommandPalette), "Ctrl+Shift+P");
+    assert_eq!(
+        effective_chord(&state, OpenHelp),
+        "Ctrl+Alt+K",
+        "the default stands again"
+    );
+    let lines: Vec<String> = project_board_configuration_lines(&state)
+        .iter()
+        .map(|line| plain_words(line))
+        .collect();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines.iter().any(|l| l.contains("keybindings.open_help")
+            && l.contains("reserved for open_command_palette")),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("keybindings.open_command_palette")
+                && l.contains("reserved and cannot be rebound")),
+        "{lines:?}"
+    );
+}
+
+/// Each reason renders its own sentence from the catalog -- none falls through
+/// to the generic one -- and no sentence contains anything from the file.
+#[test]
+fn every_way_a_setting_falls_back_has_its_own_sentence() {
+    use tekstide_core::config::{FallbackReason, SettingFallback};
+    use tekstide_core::navigation::{ChordError, KeybindingStatus, NavigationAction};
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let reasons = [
+        FallbackReason::NotAString,
+        FallbackReason::BadChord(ChordError::Empty),
+        FallbackReason::BadChord(ChordError::UnknownPart),
+        FallbackReason::BadChord(ChordError::RepeatedModifier),
+        FallbackReason::BadChord(ChordError::NoSingleKey),
+        FallbackReason::BadChord(ChordError::KeyNotRebindable),
+        FallbackReason::BadChord(ChordError::NoCtrlOrAlt),
+        FallbackReason::BadChord(ChordError::ShiftWithDigit),
+        FallbackReason::NotRebindable(KeybindingStatus::Reserved),
+        FallbackReason::NotRebindable(KeybindingStatus::Dead),
+        FallbackReason::ReservedChord {
+            held_by: NavigationAction::OpenCommandPalette,
+        },
+        FallbackReason::Collision {
+            with: NavigationAction::OpenApprovalHistory,
+        },
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    for reason in reasons {
+        let text = plain_words(&super::configuration_fallback_text(
+            &catalog,
+            &SettingFallback {
+                setting: "keybindings.open_help".to_owned(),
+                reason,
+            },
+        ));
+        assert!(
+            text.contains("keybindings.open_help was not used"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("It could not be used."),
+            "{reason:?} fell through: {text}"
+        );
+        assert!(
+            seen.insert(text.clone()),
+            "two reasons share a sentence: {text}"
+        );
+    }
+    // The two that name another action name it.
+    let collision = plain_words(&super::configuration_fallback_text(
+        &catalog,
+        &SettingFallback {
+            setting: "keybindings.open_help".to_owned(),
+            reason: FallbackReason::Collision {
+                with: NavigationAction::OpenApprovalHistory,
+            },
+        },
+    ));
+    assert!(
+        collision.contains("already reaches open_approval_history"),
+        "{collision}"
+    );
+}
+
+/// **§1: no project-local configuration is read.** A repository carrying its own
+/// `config.toml` -- beside the project root, and in `.tekstide/` -- must not be
+/// able to rebind a key. The configuration path comes from the user's own
+/// environment (`XDG_CONFIG_HOME`/`HOME`) and nothing else; opening the project
+/// changes nothing about what is in force.
+#[test]
+fn a_config_toml_in_the_project_is_never_read() {
+    let hostile =
+        "[keybindings]\nopen_help = \"ctrl+alt+j\"\n\n[agent]\ntranscript_retention_days = 1\n";
+    let project = fresh_project_dir("project-local-config");
+    std::fs::write(project.join("config.toml"), hostile).unwrap();
+    std::fs::create_dir_all(project.join(".tekstide")).unwrap();
+    std::fs::write(project.join(".tekstide/config.toml"), hostile).unwrap();
+
+    let (configuration, _home) = configuration_from_file("no-user-config", "");
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(&project)
+        .expect("a directory is a valid project root");
+    let state = state_with_configuration(app_shell, configuration);
+
+    assert_eq!(
+        effective_chord(
+            &state,
+            tekstide_core::navigation::NavigationAction::OpenHelp
+        ),
+        "Ctrl+Alt+K",
+        "a repository rebound a key"
+    );
+    assert!(state.configuration.fallbacks.is_empty() && state.configuration.warnings.is_empty());
+    assert_eq!(
+        state.configuration.transcript_retention_days(),
+        tekstide_core::transcript::DEFAULT_TRANSCRIPT_MAX_AGE_DAYS,
+        "a repository changed a security-sensitive setting"
+    );
+    // ...and the resolved path is the user's, not the project's.
+    let file = state
+        .configuration
+        .config_file()
+        .expect("a config path resolved");
+    assert!(!file.starts_with(&project), "{file:?}");
+}
+
+/// The structural half of §1, so it holds however a test is set up: the
+/// configuration module reads a path it is **handed**, and nothing in it names
+/// the current directory, a project root or a workspace. Ablated by adding
+/// `std::env::current_dir()` (or a project-relative read) to any file here.
+#[test]
+fn the_configuration_module_has_no_way_to_look_beside_a_project() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tekstide-core/src/config");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).expect("config module directory") {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).unwrap();
+        // Only the non-test source: this test file's own patterns would match.
+        for forbidden in [
+            "current_dir",
+            "ProjectRootHandle",
+            "project_root",
+            "canonical_root_path",
+            "workspace_config",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{} mentions `{forbidden}`: configuration must come from the user's own \
+                 directory only",
+                path.display()
+            );
+        }
+        checked += 1;
+    }
+    assert!(
+        checked >= 5,
+        "the scan must actually read the module ({checked} files)"
+    );
 }

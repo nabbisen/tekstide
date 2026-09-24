@@ -1,4 +1,8 @@
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+mod chord;
+
+pub use chord::{Chord, ChordError};
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum NavigationAction {
     OpenProjectBoard,
     /// RFC-038 PR-038-B: reveals the path field on the Project Board and
@@ -91,6 +95,64 @@ pub enum NavigationAction {
     ReloadConfiguration,
 }
 
+impl NavigationAction {
+    /// Every action, in declaration order. `config_name` is an exhaustive match,
+    /// so adding an action without a name does not compile; a test holds this
+    /// list to the policy so adding one without a rule does not pass.
+    pub const ALL: [NavigationAction; 18] = [
+        Self::OpenProjectBoard,
+        Self::OpenProjectEntryField,
+        Self::SwitchActiveProject,
+        Self::ToggleProjectMode,
+        Self::LaunchTerminal,
+        Self::PasteIntoTerminal,
+        Self::SaveActiveDocument,
+        Self::CycleVisibleTerminalSession,
+        Self::LaunchAgentRun,
+        Self::OpenCurrentAgentRunDetail,
+        Self::OpenApprovalHistory,
+        Self::OpenTrustSettings,
+        Self::OpenDiffReview,
+        Self::OpenSafeCloseDialog,
+        Self::OpenCommandPalette,
+        Self::OpenHelp,
+        Self::OpenFolderBrowser,
+        Self::ReloadConfiguration,
+    ];
+
+    /// The key a `[keybindings]` entry uses for this action: the identifier in
+    /// `snake_case`. **A fixed, static string**, so a diagnostic can name the
+    /// action without echoing anything the file said.
+    pub fn config_name(self) -> &'static str {
+        match self {
+            Self::OpenProjectBoard => "open_project_board",
+            Self::OpenProjectEntryField => "open_project_entry_field",
+            Self::SwitchActiveProject => "switch_active_project",
+            Self::ToggleProjectMode => "toggle_project_mode",
+            Self::LaunchTerminal => "launch_terminal",
+            Self::PasteIntoTerminal => "paste_into_terminal",
+            Self::SaveActiveDocument => "save_active_document",
+            Self::CycleVisibleTerminalSession => "cycle_visible_terminal_session",
+            Self::LaunchAgentRun => "launch_agent_run",
+            Self::OpenCurrentAgentRunDetail => "open_current_agent_run_detail",
+            Self::OpenApprovalHistory => "open_approval_history",
+            Self::OpenTrustSettings => "open_trust_settings",
+            Self::OpenDiffReview => "open_diff_review",
+            Self::OpenSafeCloseDialog => "open_safe_close_dialog",
+            Self::OpenCommandPalette => "open_command_palette",
+            Self::OpenHelp => "open_help",
+            Self::OpenFolderBrowser => "open_folder_browser",
+            Self::ReloadConfiguration => "reload_configuration",
+        }
+    }
+
+    pub fn from_config_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|action| action.config_name() == name)
+    }
+}
+
 /// What kind of rule this is. **Derived from a [`RuleBinding`], never stored
 /// beside one**, so it cannot disagree with it.
 ///
@@ -114,20 +176,25 @@ pub enum KeybindingStatus {
 /// be both bound and dead**: there is no value of this type that has a chord
 /// and a death certificate, or neither. (RFC-054 D3′; held by the type, not by
 /// review.)
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum RuleBinding {
     /// `chord` is claimed so nothing else takes it; pressing it does nothing
     /// yet. `Ctrl+Shift+P` is held for a command palette that does not exist.
     Reserved { chord: &'static str },
-    /// `default_chord` reaches the action unless the user rebinds it.
-    Bound { default_chord: &'static str },
+    /// `default_chord` reaches the action unless the user rebinds it; `chord` is
+    /// the one that does (equal to the default until a configuration file
+    /// changes it -- see [`KeybindingPolicy::with_overrides`]).
+    Bound {
+        default_chord: &'static str,
+        chord: String,
+    },
     /// No chord reaches this action, and `reachability` states how a user
     /// reaches what it stands for -- **or that they do not.** A death
     /// certificate is a claim, so it is written out and pinned by a test.
     Dead { reachability: &'static str },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct KeybindingRule {
     pub action: NavigationAction,
     binding: RuleBinding,
@@ -144,7 +211,10 @@ impl KeybindingRule {
     pub fn bound(action: NavigationAction, default_chord: &'static str) -> Self {
         Self {
             action,
-            binding: RuleBinding::Bound { default_chord },
+            binding: RuleBinding::Bound {
+                default_chord,
+                chord: default_chord.to_owned(),
+            },
         }
     }
 
@@ -172,7 +242,19 @@ impl KeybindingRule {
     pub fn default_binding(&self) -> Option<&'static str> {
         match self.binding {
             RuleBinding::Reserved { chord } => Some(chord),
-            RuleBinding::Bound { default_chord } => Some(default_chord),
+            RuleBinding::Bound { default_chord, .. } => Some(default_chord),
+            RuleBinding::Dead { .. } => None,
+        }
+    }
+
+    /// The chord that reaches this action **now**: a `Bound` rule's current
+    /// chord (the user's, if configuration rebound it), a `Reserved` rule's
+    /// held chord, and `None` for a `Dead` rule. Routing and the Help modal use
+    /// this; [`Self::default_binding`] is what ships.
+    pub fn effective_binding(&self) -> Option<&str> {
+        match &self.binding {
+            RuleBinding::Reserved { chord } => Some(chord),
+            RuleBinding::Bound { chord, .. } => Some(chord.as_str()),
             RuleBinding::Dead { .. } => None,
         }
     }
@@ -186,7 +268,33 @@ impl KeybindingRule {
     }
 }
 
+/// Why a rebind was refused. Fixed variants carrying only actions and
+/// statuses this crate defines -- never text from the file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RefusalReason {
+    /// The action is `Reserved` or `Dead`; there is nothing to rebind.
+    NotRebindable(KeybindingStatus),
+    /// The chord is one a `Reserved` rule holds.
+    ReservedChord { held_by: NavigationAction },
+    /// The chord would reach two actions.
+    Collision { with: NavigationAction },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KeybindingRefusal {
+    pub action: NavigationAction,
+    pub chord: Chord,
+    pub reason: RefusalReason,
+}
+
+/// The effective policy and everything that was refused to produce it.
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeybindingResolution {
+    pub policy: KeybindingPolicy,
+    pub refusals: Vec<KeybindingRefusal>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct KeybindingPolicy {
     pub rules: Vec<KeybindingRule>,
 }
@@ -394,14 +502,128 @@ impl KeybindingPolicy {
     /// changes status, which is exactly the kind of state-asserting text
     /// `ARCHITECTURE.md` records this project repeatedly failing to keep
     /// current. This cannot go stale: it *is* the policy.
-    pub fn advertised_bindings(&self) -> Vec<(NavigationAction, &'static str)> {
+    pub fn advertised_bindings(&self) -> Vec<(NavigationAction, &str)> {
         self.rules
             .iter()
             .filter_map(|rule| match rule.binding() {
-                RuleBinding::Bound { default_chord } => Some((rule.action, *default_chord)),
+                RuleBinding::Bound { chord, .. } => Some((rule.action, chord.as_str())),
                 _ => None,
             })
             .collect()
+    }
+
+    /// Applies a user's rebinds and reports every one it **refused**. The
+    /// default stands for a refused rebind -- never last-wins, never a silently
+    /// unreachable action (RFC-054 §4).
+    ///
+    /// A rebind is refused when:
+    ///
+    /// * the action is `Reserved` or `Dead` -- there is nothing to rebind
+    ///   ([`RefusalReason::NotRebindable`]);
+    /// * the chord is one a `Reserved` rule holds
+    ///   ([`RefusalReason::ReservedChord`]) -- `Ctrl+Shift+P` belongs to a
+    ///   command palette that does not exist, and a user binding it would lose it
+    ///   the day the palette lands;
+    /// * the chord would reach two actions ([`RefusalReason::Collision`]).
+    ///   **Every** rebind that takes part in a collision is refused, not "the
+    ///   later one", so the outcome does not depend on the order things were
+    ///   written. Refusing one can leave another colliding with a default it
+    ///   was not before, so this repeats until nothing collides; the sequence
+    ///   is deterministic (rules in policy order).
+    ///
+    /// A swap is not a collision: rebinding A to B's default while rebinding B
+    /// elsewhere leaves every chord unique, and is accepted.
+    pub fn with_overrides(
+        mut self,
+        overrides: &[(NavigationAction, Chord)],
+    ) -> KeybindingResolution {
+        let mut refusals = Vec::new();
+        let mut wanted: Vec<(NavigationAction, Chord)> = Vec::new();
+        for (action, chord) in overrides {
+            let reason = match self.rule_for(*action).map(KeybindingRule::status) {
+                Some(KeybindingStatus::Bound) => None,
+                Some(status) => Some(RefusalReason::NotRebindable(status)),
+                None => Some(RefusalReason::NotRebindable(KeybindingStatus::Dead)),
+            };
+            let reason = reason.or_else(|| {
+                self.rules
+                    .iter()
+                    .find(|rule| {
+                        rule.status() == KeybindingStatus::Reserved
+                            && rule.default_binding() == Some(chord.to_string().as_str())
+                    })
+                    .map(|rule| RefusalReason::ReservedChord {
+                        held_by: rule.action,
+                    })
+            });
+            match reason {
+                Some(reason) => refusals.push(KeybindingRefusal {
+                    action: *action,
+                    chord: *chord,
+                    reason,
+                }),
+                None => wanted.push((*action, *chord)),
+            }
+        }
+
+        loop {
+            let effective =
+                |policy: &Self, action: NavigationAction, wanted: &[(NavigationAction, Chord)]| {
+                    wanted
+                        .iter()
+                        .find(|(candidate, _)| *candidate == action)
+                        .map(|(_, chord)| chord.to_string())
+                        .or_else(|| {
+                            policy
+                                .rule_for(action)
+                                .and_then(KeybindingRule::default_binding)
+                                .map(str::to_owned)
+                        })
+                };
+            let mut collision: Option<(NavigationAction, NavigationAction)> = None;
+            for (action, _) in &wanted {
+                let mine = effective(&self, *action, &wanted);
+                let other = self.rules.iter().find_map(|rule| {
+                    (rule.action != *action
+                        && rule.status() != KeybindingStatus::Dead
+                        && effective(&self, rule.action, &wanted) == mine)
+                        .then_some(rule.action)
+                });
+                if let Some(other) = other {
+                    collision = Some((*action, other));
+                    break;
+                }
+            }
+            let Some((action, other)) = collision else {
+                break;
+            };
+            // Refuse this rebind, and the one it collided with if that is also
+            // a rebind: neither may win because of where it sat in the file.
+            for refused in [action, other] {
+                if let Some(position) = wanted.iter().position(|(a, _)| *a == refused) {
+                    let (refused_action, chord) = wanted.remove(position);
+                    refusals.push(KeybindingRefusal {
+                        action: refused_action,
+                        chord,
+                        reason: RefusalReason::Collision {
+                            with: if refused == action { other } else { action },
+                        },
+                    });
+                }
+            }
+        }
+
+        for (action, chord) in &wanted {
+            if let Some(rule) = self.rules.iter_mut().find(|rule| rule.action == *action)
+                && let RuleBinding::Bound { chord: current, .. } = &mut rule.binding
+            {
+                *current = chord.to_string();
+            }
+        }
+        KeybindingResolution {
+            policy: self,
+            refusals,
+        }
     }
 
     pub fn rule_for(&self, action: NavigationAction) -> Option<&KeybindingRule> {
@@ -419,7 +641,7 @@ impl KeybindingPolicy {
     pub fn uses_binding(&self, binding: &str) -> bool {
         self.rules
             .iter()
-            .any(|rule| rule.default_binding() == Some(binding))
+            .any(|rule| rule.effective_binding() == Some(binding))
     }
 }
 

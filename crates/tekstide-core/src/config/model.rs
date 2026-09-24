@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::navigation::{Chord, ChordError, KeybindingStatus, NavigationAction};
+
 /// RFC-023 PR-023-B, narrowed by **RFC-045 D3'**: the typed configuration
 /// document is now exactly the set of settings that have a consumer.
 ///
@@ -21,6 +23,49 @@ use std::collections::BTreeMap;
 pub struct ConfigurationDocument {
     pub agent: AgentSettings,
     pub resources: ResourceSettings,
+    pub keybindings: KeybindingSettings,
+}
+
+/// **RFC-054 PR-054-A.** The rebinds that survived validation: only rebinds
+/// the policy accepts, so [`crate::navigation::KeybindingPolicy::with_overrides`]
+/// over them refuses nothing. A rebind that was refused is a
+/// [`SettingFallback`], not an entry here -- the default stands.
+///
+/// Not a [`super::SecuritySensitiveField`]: which chord reaches an action is
+/// not a permission. The one keybinding property that *is* security-shaped --
+/// `Reserved` stays reserved -- is enforced by the policy on every parse, so
+/// a reload cannot weaken it.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct KeybindingSettings {
+    pub overrides: Vec<(NavigationAction, Chord)>,
+}
+
+/// A setting whose configured value was **not used**, and why. RFC-054 D4: a
+/// bad value falls back per setting -- the rest of the file still applies --
+/// and the Project Board names which setting and why.
+///
+/// Deliberately not a [`super::ConfigDiagnostic`]: that type is content-free by
+/// construction (`message: &'static str`) and whole-file, which is right for a
+/// file that could not be trusted at all. A fallback needs a *number* (B: the
+/// measured contrast ratio) and an *action name*, and must still carry nothing
+/// the user wrote -- so it is a closed set of typed reasons, each rendered
+/// through the catalog.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SettingFallback {
+    /// `"keybindings.open_help"`: a section and a name this crate defines. For
+    /// a setting whose *name* is user-controlled this would need bounding and
+    /// escaping; none is, today, because an unknown name is a warning instead.
+    pub setting: String,
+    pub reason: FallbackReason,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FallbackReason {
+    NotAString,
+    BadChord(ChordError),
+    NotRebindable(KeybindingStatus),
+    ReservedChord { held_by: NavigationAction },
+    Collision { with: NavigationAction },
 }
 
 /// A configuration-defined AI CLI profile, as the config document itself

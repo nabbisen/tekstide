@@ -1073,6 +1073,15 @@ pub struct ConfigurationState {
     /// only thing standing between that and a user who believes their
     /// profile is the default.
     warnings: Vec<tekstide_core::config::ConfigWarning>,
+    /// RFC-054 D4: settings whose configured value was **not used**, one per
+    /// setting, with the reason. The rest of the file applied; the board
+    /// names each of these.
+    fallbacks: Vec<tekstide_core::config::SettingFallback>,
+    /// RFC-054 PR-054-A: the chords in force -- the shipped defaults with the
+    /// user's accepted rebinds applied. **Computed when the file is loaded or
+    /// reloaded, not per key press.** Routing, the Help modal and the
+    /// subscription all read this one value.
+    keybinding_policy: tekstide_core::navigation::KeybindingPolicy,
     /// D8: the profile the launch button runs, when the file names one.
     /// **PR-045-C consumed this and removed the `#[allow(dead_code)]`
     /// PR-045-B carried** — an allow that names its closing slice is
@@ -1136,6 +1145,8 @@ impl ConfigurationState {
             store: None,
             diagnostic: None,
             warnings: Vec::new(),
+            fallbacks: Vec::new(),
+            keybinding_policy: tekstide_core::navigation::KeybindingPolicy::linux_mvp(),
             default_profile: None,
             confirmed_config_profiles: std::collections::BTreeSet::new(),
             pending_reload: None,
@@ -6113,6 +6124,8 @@ pub(crate) fn load_configuration_at_boot(
                     message: "the configuration directory could not be resolved",
                 }),
                 warnings: Vec::new(),
+                fallbacks: Vec::new(),
+                keybinding_policy: tekstide_core::navigation::KeybindingPolicy::linux_mvp(),
                 default_profile: None,
                 confirmed_config_profiles: std::collections::BTreeSet::new(),
                 pending_reload: None,
@@ -6135,14 +6148,29 @@ pub(crate) fn load_configuration_at_boot(
                 .get(id)
                 .map(|configured| tekstide_core::config::to_ai_cli_profile(id, configured))
         });
+    let keybinding_policy = keybinding_policy_for(&store);
     ConfigurationState {
         store: Some(store),
         diagnostic: report.diagnostic,
         warnings: report.warnings,
+        fallbacks: report.fallbacks,
+        keybinding_policy,
         default_profile,
         confirmed_config_profiles: std::collections::BTreeSet::new(),
         pending_reload: None,
     }
+}
+
+/// RFC-054 PR-054-A: the policy a loaded configuration puts in force. The
+/// accepted rebinds are already validated (`parse_and_validate` ran the same
+/// `with_overrides`), so this refuses nothing; running it again is what makes a
+/// `Reserved` chord unrebindable however the document got here.
+fn keybinding_policy_for(
+    store: &tekstide_core::config::ConfigStore,
+) -> tekstide_core::navigation::KeybindingPolicy {
+    tekstide_core::navigation::KeybindingPolicy::linux_mvp()
+        .with_overrides(&store.current().keybindings.overrides)
+        .policy
 }
 
 /// RFC-045 PR-045-B, D6: the configured `agent_run_limit` reaches a
@@ -7050,10 +7078,13 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     }
 
     let routing = match input::SubscriptionMode::for_modal(&state.modal) {
-        input::SubscriptionMode::NonModal(proof) => {
-            non_modal_subscription(proof, state.focus, active_terminal_focus(state))
-                .map(Message::Input)
-        }
+        input::SubscriptionMode::NonModal(proof) => non_modal_subscription(
+            proof,
+            state.focus,
+            active_terminal_focus(state),
+            state.configuration.keybinding_policy.clone(),
+        )
+        .map(Message::Input),
         input::SubscriptionMode::Modal => modal_subscription(),
     };
 
@@ -7219,6 +7250,7 @@ fn non_modal_subscription(
     proof: input::ModalAbsent,
     focus: FocusZone,
     terminal_focus: Option<tekstide_core::domain::TerminalId>,
+    policy: KeybindingPolicy,
 ) -> Subscription<RoutedInput> {
     // `.filter_map`'s closure must be non-capturing (`iced` panics
     // otherwise: "cannot capture external variables"). `.with(...)`
@@ -7229,10 +7261,9 @@ fn non_modal_subscription(
     // `TerminalId` derives `Hash` too, so a real value here changes
     // nothing about that requirement.
     keyboard::listen()
-        .with((proof, focus, terminal_focus))
-        .filter_map(|((proof, focus, terminal_focus), event)| {
+        .with((proof, focus, terminal_focus, policy))
+        .filter_map(|((proof, focus, terminal_focus, policy), event)| {
             let press = key_press_from_event(event)?;
-            let policy = KeybindingPolicy::linux_mvp();
             Some(input::route_non_modal_input(
                 proof,
                 &policy,
@@ -8249,7 +8280,59 @@ fn project_board_configuration_notifications(state: &State) -> Vec<Notification>
         )));
     }
 
+    // RFC-054 D4: each setting that fell back, by name, with the reason. The
+    // setting name is built from names this crate defines, and is escaped
+    // anyway (§6); the reason is a closed set rendered from the catalog, so a
+    // configured value is never echoed.
+    for fallback in &state.configuration.fallbacks {
+        notifications.push(notify(configuration_fallback_text(
+            &state.catalog,
+            fallback,
+        )));
+    }
+
     notifications
+}
+
+/// One line of the board's account of a setting that fell back.
+pub(crate) fn configuration_fallback_text(
+    catalog: &Catalog,
+    fallback: &tekstide_core::config::SettingFallback,
+) -> String {
+    use tekstide_core::config::FallbackReason;
+    use tekstide_core::navigation::{ChordError, KeybindingStatus};
+
+    let (reason, other): (&'static str, Option<&'static str>) = match fallback.reason {
+        FallbackReason::NotAString => ("not-a-string", None),
+        FallbackReason::BadChord(error) => (
+            match error {
+                ChordError::Empty => "chord-empty",
+                ChordError::UnknownPart => "chord-unknown-part",
+                ChordError::RepeatedModifier => "chord-repeated-modifier",
+                ChordError::NoSingleKey => "chord-no-single-key",
+                ChordError::KeyNotRebindable => "chord-key-not-rebindable",
+                ChordError::NoCtrlOrAlt => "chord-no-ctrl-or-alt",
+                ChordError::ShiftWithDigit => "chord-shift-digit",
+            },
+            None,
+        ),
+        FallbackReason::NotRebindable(KeybindingStatus::Reserved) => {
+            ("not-rebindable-reserved", None)
+        }
+        FallbackReason::NotRebindable(_) => ("not-rebindable-dead", None),
+        FallbackReason::ReservedChord { held_by } => {
+            ("reserved-chord", Some(held_by.config_name()))
+        }
+        FallbackReason::Collision { with } => ("collision", Some(with.config_name())),
+    };
+    let setting = tekstide_core::text_safety::quote_untrusted(&fallback.setting);
+    catalog.get_with_args(
+        "project-board-configuration-fallback",
+        &CatalogArgs::new()
+            .untrusted("setting", &setting)
+            .trusted_symbol("reason", reason)
+            .trusted_symbol("other", other.unwrap_or("")),
+    )
 }
 
 #[cfg(test)]
@@ -9005,7 +9088,10 @@ fn help_modal_view(state: &State) -> Element<'_, Message> {
     // not filesystem-derived); `description` comes from the catalog --
     // the same "neither is untrusted" reasoning `board.rs`'s own
     // (now-deleted) `keyboard_help_view` stated for this exact loop.
-    for line in crate::keyboard_help::keyboard_help_lines(&state.catalog) {
+    for line in crate::keyboard_help::keyboard_help_lines(
+        &state.catalog,
+        &state.configuration.keybinding_policy,
+    ) {
         lines = lines.push(
             row![
                 text(line.binding)
@@ -9843,11 +9929,17 @@ fn reload_configuration(state: &mut State) {
             // that is the whole truth of it.
             state.configuration.diagnostic = Some(diagnostic);
             state.configuration.warnings = Vec::new();
+            state.configuration.fallbacks = Vec::new();
             return;
         }
     };
     state.configuration.diagnostic = None;
     state.configuration.warnings = outcome.warnings;
+    state.configuration.fallbacks = outcome.fallbacks;
+    // RFC-054 D8: the chords apply live. `reload` already replaced the store's
+    // keybindings (a safe field); the policy in force is rebuilt from them,
+    // through the same resolution that keeps `Reserved` reserved.
+    state.configuration.keybinding_policy = keybinding_policy_for(store);
 
     let current = store.current().clone();
     let mut increases = Vec::new();

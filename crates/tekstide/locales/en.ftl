@@ -362,6 +362,27 @@ project-board-configuration-ignored = Configuration: ignored, defaults in force.
 # with three typos is a file whose author mistyped three things.
 project-board-configuration-unknown-key = Configuration: { $key } is not a setting this version knows, and has no effect.
 
+# RFC-054 PR-054-A, D4: a setting whose configured value was **not used**, and
+# why. The rest of the file applied and the default for this one stands. `$setting`
+# is a name this build defines (escaped anyway); `$reason` is a closed set
+# chosen by the parser, so a configured string is never echoed here; `$other`
+# is another action's name, a fixed identifier, for the two reasons that name one.
+project-board-configuration-fallback = Configuration: { $setting } was not used, so its default stands. { $reason ->
+    [not-a-string] It must be a chord in quotes, such as "Ctrl+Alt+J".
+    [chord-empty] It is empty; write a chord such as "Ctrl+Alt+J".
+    [chord-unknown-part] It has a part that is not Ctrl, Alt, Shift or a single letter or digit.
+    [chord-repeated-modifier] It repeats a modifier.
+    [chord-no-single-key] It needs exactly one key after the modifiers.
+    [chord-key-not-rebindable] Only a letter A-Z or a digit 0-9 can be the key.
+    [chord-no-ctrl-or-alt] It needs Ctrl or Alt, or it would take that key away from typing.
+    [chord-shift-digit] Shift with a digit is a different character on different keyboard layouts, so it would not reliably match.
+    [not-rebindable-reserved] That action is reserved and cannot be rebound.
+    [not-rebindable-dead] That action has no key at all, so there is nothing to rebind.
+    [reserved-chord] That chord is reserved for { $other }.
+    [collision] That chord already reaches { $other }.
+   *[other] It could not be used.
+}
+
 # RFC-045 PR-045-C, D5: the `Ctrl+Alt+C` command RFC-023 §Hot Reload
 # specified and never got. Named for what it does to the file, not for
 # the dialog it may raise -- a reload that changes nothing sensitive

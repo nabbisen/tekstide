@@ -8,7 +8,10 @@ pub use load::{
     ConfigDiagnostic, ConfigLoadOutcome, ConfigLoadReport, ConfigReloadOutcome, ConfigStore,
     ConfigWarning, parse_and_validate,
 };
-pub use model::{AgentSettings, ConfigurationDocument, ConfiguredAiCliProfile, ResourceSettings};
+pub use model::{
+    AgentSettings, ConfigurationDocument, ConfiguredAiCliProfile, FallbackReason,
+    KeybindingSettings, ResourceSettings, SettingFallback,
+};
 pub use path::{
     ConfigPathError, ConfigPathErrorReason, ConfigPathProvider, ConfigPathResolver,
     ConfigStoragePath,

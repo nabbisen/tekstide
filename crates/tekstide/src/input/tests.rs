@@ -263,3 +263,86 @@ fn the_explorers_keys_arrive_as_sidebar_surface_input_and_only_when_no_binding_c
         RoutedInput::Shell(super::ShellInput(NavigationAction::OpenProjectBoard))
     );
 }
+
+// --- RFC-054 PR-054-A: routing follows the policy in force ------------------
+
+fn rebound_help_policy() -> KeybindingPolicy {
+    let chord = tekstide_core::navigation::Chord::parse("ctrl+alt+j").unwrap();
+    KeybindingPolicy::linux_mvp()
+        .with_overrides(&[(NavigationAction::OpenHelp, chord)])
+        .policy
+}
+
+/// **A rebound chord reaches its action, and the old one no longer does.** The
+/// router compares a real key press with the rule's *effective* chord, so
+/// rebinding cannot leave a key that still works and is no longer advertised, or
+/// one that is advertised and dead.
+#[test]
+fn a_rebound_chord_routes_to_its_action_and_the_old_chord_no_longer_does() {
+    let policy = rebound_help_policy();
+    let new = route_non_modal_input(
+        proof(),
+        &policy,
+        FocusZone::MainArea,
+        None,
+        character_press("j", true, true, false),
+    );
+    assert_eq!(
+        new,
+        RoutedInput::Shell(super::ShellInput(NavigationAction::OpenHelp))
+    );
+
+    let old = route_non_modal_input(
+        proof(),
+        &policy,
+        FocusZone::MainArea,
+        None,
+        character_press("k", true, true, false),
+    );
+    assert!(
+        matches!(old, RoutedInput::Surface(_)),
+        "the old chord must fall through to the surface, not still open Help: {old:?}"
+    );
+}
+
+/// The precedence model is unchanged by rebinding (D3): a global chord -- the
+/// rebound one included -- still wins over a focused terminal, and a modal still
+/// cannot reach this function at all (`ModalAbsent`).
+#[test]
+fn a_rebound_global_chord_still_wins_over_a_focused_terminal() {
+    let terminal = TerminalId::new_uuid();
+    let routed = route_non_modal_input(
+        proof(),
+        &rebound_help_policy(),
+        FocusZone::MainArea,
+        Some(&terminal),
+        character_press("j", true, true, false),
+    );
+    assert_eq!(
+        routed,
+        RoutedInput::Shell(super::ShellInput(NavigationAction::OpenHelp))
+    );
+}
+
+/// The other half of D8′'s round trip: a real key press is rendered in the
+/// grammar the file is parsed in, so `format_binding`'s output and `Chord` cannot
+/// drift apart. (`navigation::tests::every_advertised_chord_round_trips` holds
+/// the policy's own spellings to the same grammar.)
+#[test]
+fn a_real_key_press_renders_in_the_grammar_the_file_is_parsed_with() {
+    for (letter, ctrl, alt, shift, expected) in [
+        ("p", true, true, false, "Ctrl+Alt+P"),
+        ("s", true, false, false, "Ctrl+S"),
+        ("v", true, false, true, "Ctrl+Shift+V"),
+    ] {
+        let rendered = super::format_binding(&character_press(letter, ctrl, alt, shift))
+            .expect("a character key renders");
+        assert_eq!(rendered, expected);
+        assert_eq!(
+            tekstide_core::navigation::Chord::parse(&rendered)
+                .expect("what the router renders, the file parses")
+                .to_string(),
+            rendered
+        );
+    }
+}
