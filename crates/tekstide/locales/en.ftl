@@ -387,6 +387,7 @@ project-board-configuration-fallback = Configuration: { $setting } was not used,
     [low-contrast] Its contrast with { $other } is { $ratio_whole }.{ $ratio_tenths }{ $ratio_hundredths }:1, below the 4.5:1 that keeps text readable.
     [low-contrast-focus] Its contrast with { $other } is { $ratio_whole }.{ $ratio_tenths }{ $ratio_hundredths }:1, below the 3:1 that keeps the focus border visible.
     [not-a-whole-number] It must be a whole number of lines, 0 or more, such as 5000.
+    [not-a-boolean] It must be true or false, without quotes.
     [not-a-number] It must be a number, such as 14.
     [size-out-of-range] It must be between { $min } and { $max }.
     [family-empty] It is empty; write the name of an installed font family.
@@ -533,13 +534,17 @@ terminal-paste-refused = { $reason ->
 # review 413: the word must stay true for both, not just the more common
 # case.
 #
-# RFC-052 PR-052-B: **the words that say what a row *is* come before the name,
-# not after it.** The sidebar is narrow and draws each row on one line, so a
-# long name is clipped at its end -- and a status word placed after the name
-# is exactly what a clipped line loses (`[FILE] new.md [untracke`). Kind,
-# state, symlink and Git status are short and fixed; the name is the only
-# part of a row that can be arbitrarily long, so it goes last and is the part
-# that gives way.
+# RFC-055, review 432 Q1 (**reverses RFC-052 PR-052-B's ordering**): **the name
+# comes first, right after the icon, and the words that qualify it follow.**
+# RFC-052 put the words first so that only the *name* would be clipped in the
+# narrow sidebar. RFC-055 made that the wrong trade: an ignored directory reads
+# `(collapsed) [ignored] target`, and the name -- the one part of a row that
+# identifies it -- was cut to `t`, which is indistinguishable from a file named
+# `t`. A clipped *name* invents a file that does not exist; a clipped *word* is
+# visibly damaged. So the name identifies the row and the words qualify it, the
+# order `browse-node-entry` already uses (two orders for one kind of row would be
+# drift). `[OTHER]` stays where the icon would be: it is the kind of a link or
+# special entry, not a qualifier of its name.
 #
 # RFC-052 PR-052-C: **a file-type icon replaces the `[DIR]`/`[FILE]` words**
 # (D4). That is only allowed because kind is *also* carried by two other
@@ -561,7 +566,7 @@ explorer-node-entry = { $kind ->
     [directory-open] ▢
     [other] [OTHER]
    *[file] ▫
-}{ $state ->
+} { $name }{ $state ->
     [collapsed] {" (collapsed)"}
     [blocked] {" (blocked)"}
     [unreadable] {" (unreadable)"}
@@ -583,7 +588,7 @@ explorer-node-entry = { $kind ->
 }{ $open ->
     [yes] {" [open]"}
    *[no] {""}
-} { $name }
+}
 
 # RFC-052 PR-052-B: the explorer is a tree, so there is no "go up" row.
 # `explorer-empty` now labels an *expanded* empty folder too.
@@ -616,6 +621,15 @@ explorer-rows-not-shown = { $count ->
    *[other] { $count } more rows
 } not shown. Collapse a folder to see them.
 
+# RFC-055 D7 / RFC-052 D8: **nothing is hidden silently.** With
+# `explorer.show_ignored` off the entries git says are ignored are not drawn, and
+# this row says how many were left out. Short on purpose (rows are unwrapped); the
+# key is named in the book.
+explorer-ignored-hidden = { $count ->
+    [one] One ignored entry hidden
+   *[other] { $count } ignored entries hidden
+}
+
 # RFC-055, review 431 ruling 4: the status bar's Git state reads only a
 # repository at the project root. When the ignore words in the tree came from a
 # repository that is *not* the project's own -- one above it, or a checkout
@@ -626,8 +640,21 @@ explorer-rows-not-shown = { $count ->
 # above this project.") was cut off at "the Git r" in the live capture.
 explorer-ignore-rule = { $placement ->
     [above] Ignore rules: parent Git repo
-   *[below] Ignore rules: nested Git repo
+    [below] Ignore rules: nested Git repo
+    [git] Ignore rules: project's Git
+    [floor-declined] Ignore rules: built-in (home)
+    [floor-gate] Ignore rules: built-in, no Git
+    [floor-failed] Ignore rules: built-in, failed
+   *[floor-none] Ignore rules: built-in list
 }
+
+# RFC-055 D8: git's answer is as old as the scan that asked. There is no file
+# watcher until RFC-026, so a `.gitignore` edited after a folder was read is not
+# reflected until that folder is read again -- said whenever git's answer is in
+# use (the built-in list is static and has nothing to go stale). RFC-052 shipped
+# folder staleness in the book but never on screen; this is the on-screen form
+# for the ignore marks.
+explorer-ignore-age = Marks are as old as the scan
 
 # The sidebar draws only the rows that fit; this says which ones.
 explorer-rows-position = Rows { $first }–{ $last } of { $total }

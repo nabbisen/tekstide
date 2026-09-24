@@ -27,8 +27,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::root::{
-    ExplorerDirectoryScan, ExplorerNode, ExplorerNodeKind, ExplorerNodeState, ExplorerScanError,
-    FileExplorerScanPolicy, FileExplorerScanner, ProjectRootHandle,
+    ExplorerDirectoryScan, ExplorerIgnoreState, ExplorerNode, ExplorerNodeKind, ExplorerNodeState,
+    ExplorerScanError, FileExplorerScanPolicy, FileExplorerScanner, ProjectRootHandle,
 };
 
 /// The most rows the flattened tree will hold. The sidebar draws only a
@@ -134,6 +134,12 @@ pub enum ExplorerTreeRowKind<'a> {
     Omitted { count: usize, at_least: bool },
     /// The whole tree passed [`MAX_TREE_ROWS`].
     RowsNotShown { count: usize },
+    /// **RFC-055 D7, and RFC-052 D8's "nothing is hidden silently."** With
+    /// `explorer.show_ignored` off the entries git says are ignored are not drawn,
+    /// and this row, at the end of their directory, says how many were left out.
+    /// Only entries git actually answered about are counted: the cap's omitted
+    /// tail has unknown ignore state and stays in [`Self::Omitted`].
+    IgnoredHidden { count: usize },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -149,11 +155,24 @@ pub struct ExplorerTree {
     expanded: BTreeSet<PathBuf>,
     pending: BTreeMap<PathBuf, u64>,
     next_generation: u64,
+    /// RFC-055 D7 (`explorer.show_ignored`). **Defaults to `false`**: ignored
+    /// entries are left out of [`Self::rows`] and counted. Set by the shell from
+    /// the configuration.
+    show_ignored: bool,
 }
 
 impl ExplorerTree {
     pub fn root_scan(&self) -> Option<&ExplorerDirectoryScan> {
         self.loaded.get(Path::new(""))
+    }
+
+    /// Whether ignored entries are drawn (`explorer.show_ignored`).
+    pub fn show_ignored(&self) -> bool {
+        self.show_ignored
+    }
+
+    pub fn set_show_ignored(&mut self, show_ignored: bool) {
+        self.show_ignored = show_ignored;
     }
 
     /// Every directory scan the tree holds, root first. The sidebar reads which
@@ -297,7 +316,16 @@ impl ExplorerTree {
             if scan.nodes.is_empty() && !scan.truncated {
                 flatten.push(depth, ExplorerTreeRowKind::Empty);
             }
+            let mut ignored_hidden = 0usize;
             for node in &scan.nodes {
+                // D7: ignored entries only -- dotfiles and everything else git
+                // did not call ignored are untouched by this setting. A hidden
+                // directory's own contents are never reached (it is not drawn, so
+                // it is not expanded), and are not counted: only the entry is.
+                if !self.show_ignored && node.ignore == ExplorerIgnoreState::Ignored {
+                    ignored_hidden += 1;
+                    continue;
+                }
                 let expandable = is_expandable(node);
                 let expanded = expandable && self.expanded.contains(&node.relative_path);
                 flatten.push(
@@ -311,6 +339,14 @@ impl ExplorerTree {
                 if expanded {
                     self.push_directory(&node.relative_path, depth + 1, flatten);
                 }
+            }
+            if ignored_hidden > 0 {
+                flatten.push(
+                    depth,
+                    ExplorerTreeRowKind::IgnoredHidden {
+                        count: ignored_hidden,
+                    },
+                );
             }
             if scan.truncated {
                 flatten.push(

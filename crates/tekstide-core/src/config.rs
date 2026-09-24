@@ -1,4 +1,5 @@
 mod appearance;
+mod explorer;
 mod load;
 mod model;
 mod path;
@@ -12,6 +13,7 @@ pub use appearance::{
     MIN_FONT_SIZE_PX, MIN_TEXT_CONTRAST, Palette, ThemeRole, ThemeSettings, contrast_ratio,
     enforce_contrast, parse_family, relative_luminance,
 };
+pub use explorer::ExplorerSettings;
 pub use load::{
     ConfigDiagnostic, ConfigLoadOutcome, ConfigLoadReport, ConfigReloadOutcome, ConfigStore,
     ConfigWarning, parse_and_validate,

@@ -169,5 +169,6 @@ pub fn apply_safe_fields(
         theme: candidate.theme.clone(),
         font: candidate.font.clone(),
         terminal: candidate.terminal,
+        explorer: candidate.explorer,
     }
 }

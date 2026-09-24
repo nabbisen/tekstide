@@ -1373,6 +1373,14 @@ impl ProjectSession {
         self.set_mode(self.mode.toggled());
     }
 
+    /// RFC-055 D7: whether this project's explorer draws the entries git says are
+    /// ignored (`explorer.show_ignored`). Applied by the shell wherever it applies
+    /// the other configured settings to a project.
+    pub fn set_explorer_show_ignored(&mut self, show_ignored: bool) {
+        self.content_workspace
+            .set_explorer_show_ignored(show_ignored);
+    }
+
     pub fn set_resource_limits(&mut self, resource_limits: ProjectResourceLimits) {
         self.resource_limits = resource_limits;
         self.record_activity();

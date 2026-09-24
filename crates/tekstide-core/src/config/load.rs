@@ -313,6 +313,7 @@ pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagn
 
     let document = ConfigurationDocument {
         terminal,
+        explorer: extract_explorer(&mut root, &mut warnings, &mut fallbacks)?,
         agent: extract_agent(&mut root, &mut warnings)?,
         resources: extract_resources(&mut root, &mut warnings)?,
         keybindings: extract_keybindings(&mut root, &mut warnings, &mut fallbacks)?,
@@ -649,6 +650,21 @@ fn take_agent_run_limit(table: &mut toml::Table) -> Result<Option<u32>, ConfigDi
         });
     }
     Ok(Some(limit))
+}
+
+/// **RFC-055 PR-055-C.** `[explorer]`: `show_ignored`. An unknown key warns,
+/// like every live section's.
+fn extract_explorer(
+    root: &mut toml::Table,
+    warnings: &mut Vec<ConfigWarning>,
+    fallbacks: &mut Vec<SettingFallback>,
+) -> Result<super::explorer::ExplorerSettings, ConfigDiagnostic> {
+    let Some(mut table) = section_table(root, "explorer")? else {
+        return Ok(super::explorer::ExplorerSettings::default());
+    };
+    let settings = super::explorer::take_show_ignored(&mut table, fallbacks);
+    warn_unconsumed(table, "explorer", warnings);
+    Ok(settings)
 }
 
 /// **RFC-054 PR-054-C.** `[terminal]`. `scrollback_lines` is read; every other key

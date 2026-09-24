@@ -30,6 +30,7 @@ pub struct ConfigurationDocument {
     pub theme: ThemeSettings,
     pub font: FontSettings,
     pub terminal: super::terminal::TerminalSettings,
+    pub explorer: super::explorer::ExplorerSettings,
 }
 
 /// **RFC-054 PR-054-A.** The rebinds that survived validation: only rebinds
@@ -93,6 +94,8 @@ pub enum FallbackReason {
     ScrollbackAboveCap,
     /// A scrollback that is not a whole number of lines, or is negative.
     NotAWholeNumber,
+    /// **RFC-055.** A setting that is `true` or `false` and was neither.
+    NotABoolean,
     NotANumber,
     /// Outside [`super::MIN_FONT_SIZE_PX`]..=[`super::MAX_FONT_SIZE_PX`].
     SizeOutOfRange,

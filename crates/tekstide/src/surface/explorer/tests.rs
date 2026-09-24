@@ -719,17 +719,49 @@ fn passing_the_row_bound_ends_in_a_row_naming_how_many_are_not_shown() {
     }
 }
 
-/// **A clipped line must lose the name, not the status.** The sidebar draws
-/// one row per line and clips at its edge; a status word after a long name is
-/// what the clip removes (RFC-052 PR-052-B's live capture showed
-/// `▫ new.md [untracke`). Kind, state, symlink status and Git status all
-/// come before the name, so the name is the only part that can be cut.
+/// **A clipped line must not invent a file** (RFC-055, review 432 Q1 -- this test
+/// used to assert the opposite, and RFC-052's reasoning is superseded). The
+/// sidebar draws one row per line and clips at its edge. With the words first,
+/// an ignored directory read `(collapsed) [ignored] t`: a name cut to a letter
+/// is indistinguishable from an entry actually named `t`, while a clipped
+/// *word* is visibly damaged. So the icon, then the **name**, then the words
+/// that qualify it: the name identifies the row and is the last thing to go.
 #[test]
-fn every_status_word_comes_before_the_name_so_only_the_name_can_be_clipped() {
+fn the_name_comes_before_every_status_word_so_a_clip_cannot_invent_a_name() {
     let catalog = real_catalog();
     let node = ExplorerNode {
-        name: "a-very-long-file-name-that-will-be-clipped.txt".to_string(),
-        relative_path: PathBuf::from("a-very-long-file-name-that-will-be-clipped.txt"),
+        name: "target".to_string(),
+        relative_path: PathBuf::from("target"),
+        kind: ExplorerNodeKind::Directory,
+        state: ExplorerNodeState::Collapsed,
+        symlink_status: FileAccessSymlinkStatus::InRootSymlink,
+        ignore: ExplorerIgnoreState::Ignored,
+    };
+    let summary = git_summary_with(&[]);
+    let line = plain_words(&node_line(&catalog, &node, false, Some(&summary)));
+
+    let name_at = line.find("target").expect("the name is drawn");
+    for word in ["(collapsed)", "[symlink]", "[ignored]"] {
+        let at = line
+            .find(word)
+            .unwrap_or_else(|| panic!("{word} missing from {line:?}"));
+        assert!(at > name_at, "{word} comes before the name in {line:?}");
+    }
+    // The icon is the only thing ahead of the name, and it is not a word.
+    assert!(line.starts_with("▣ target"), "{line:?}");
+    // The worst row reachable, cut to the sidebar's ~33 columns, still shows the
+    // whole name of an ordinary one.
+    let clipped: String = line.chars().take(33).collect();
+    assert!(clipped.contains("target"), "{clipped:?}");
+}
+
+/// The words are in a fixed order after the name: state, symlink, Git, open.
+#[test]
+fn the_words_after_the_name_keep_one_order() {
+    let catalog = real_catalog();
+    let node = ExplorerNode {
+        name: "a.rs".to_string(),
+        relative_path: PathBuf::from("a.rs"),
         kind: ExplorerNodeKind::File,
         state: ExplorerNodeState::Blocked(
             tekstide_core::project::root::FileAccessBlockedReason::SymlinkEscape,
@@ -737,20 +769,28 @@ fn every_status_word_comes_before_the_name_so_only_the_name_can_be_clipped() {
         symlink_status: FileAccessSymlinkStatus::EscapesRoot,
         ignore: ExplorerIgnoreState::Unknown,
     };
-    let summary = git_summary_with(&[(&node.name, FileGitStatus::Modified)]);
-    let line = plain_words(&node_line(&catalog, &node, false, Some(&summary)));
-
-    let name_at = line.find(&node.name).expect("the name is drawn");
-    for word in ["▫", "(blocked)", "[symlink escapes root]", "[modified]"] {
+    let summary = git_summary_with(&[("a.rs", FileGitStatus::Modified)]);
+    let line = plain_words(&super::node_line_with(
+        &catalog,
+        &node,
+        false,
+        true,
+        Some(&summary),
+    ));
+    let mut last = 0;
+    for word in [
+        "a.rs",
+        "(blocked)",
+        "[symlink escapes root]",
+        "[modified]",
+        "[open]",
+    ] {
         let at = line
             .find(word)
-            .unwrap_or_else(|| panic!("{word} missing from {line:?}"));
-        assert!(at < name_at, "{word} comes after the name in {line:?}");
+            .unwrap_or_else(|| panic!("{word} in {line:?}"));
+        assert!(at >= last, "{word} is out of order in {line:?}");
+        last = at;
     }
-    assert!(
-        line.ends_with(&node.name),
-        "the name is the last thing on the row: {line:?}"
-    );
 }
 
 /// The detail area is where a row that the sidebar clipped is still readable
@@ -776,13 +816,14 @@ fn the_detail_shows_the_highlighted_row_in_full_and_escaped() {
     let detail = detail_text(&catalog, &tree, 0, super::RowContext::git(None))
         .expect("a node row has detail");
     let plain = plain_words(&detail);
+    assert!(plain.starts_with("[OTHER] "), "{plain:?}");
     assert!(
-        plain.starts_with("[OTHER] (blocked) [symlink escapes root]"),
-        "{plain:?}"
+        plain.ends_with("(blocked) [symlink escapes root]"),
+        "the words follow the name: {plain:?}"
     );
     assert!(plain.contains("<U+202E>") && !detail.contains('\u{202E}'));
     assert!(
-        plain.ends_with("too-long-for-a-narrow-sidebar.exe"),
+        plain.contains("too-long-for-a-narrow-sidebar.exe"),
         "whole name: {plain:?}"
     );
     assert!(!detail.starts_with(' '), "no indentation in the detail");
@@ -1173,9 +1214,8 @@ fn an_ignored_node_says_ignored_and_an_unknown_one_says_nothing() {
     node.ignore = ExplorerIgnoreState::Ignored;
     let ignored = plain_words(&node_line(&catalog, &node, false, None));
     assert!(ignored.contains("[ignored]"), "{ignored}");
-    // The word sits before the name, like every other status word, so it is the
-    // name that gets clipped in a narrow sidebar and never the status.
-    assert!(ignored.find("[ignored]").unwrap() < ignored.find("debug.log").unwrap());
+    // Like every status word it follows the name (review 432 Q1).
+    assert!(ignored.find("[ignored]").unwrap() > ignored.find("debug.log").unwrap());
 
     for state in [
         ExplorerIgnoreState::NotIgnored,
@@ -1246,10 +1286,10 @@ fn the_ignored_word_is_distinct_from_the_other_five() {
     assert_eq!(seen.len(), 7);
 }
 
-/// Review 431, ruling 4: when the ignore rule came from a repository that is not
-/// the project root's own, the sidebar says so -- from what the scan *carried*.
+/// Review 431 ruling 4, and RFC-055 D6: the sidebar says where the ignore words
+/// came from -- from what the scan *carried* -- and which rule outranks which.
 #[test]
-fn the_sidebar_says_when_the_ignore_rule_came_from_another_repository() {
+fn the_sidebar_says_where_the_ignore_rule_came_from() {
     use super::ignore_rule_line;
     let catalog = real_catalog();
     let with_rule = |rule| {
@@ -1257,39 +1297,102 @@ fn the_sidebar_says_when_the_ignore_rule_came_from_another_repository() {
         scan.ignore_rule = rule;
         tree_with(scan)
     };
+    let says = |rule| ignore_rule_line(&catalog, &with_rule(rule));
 
-    let above = with_rule(ExplorerIgnoreRule::Git {
-        repository: ExplorerRepositoryPlacement::AboveProjectRoot,
-    });
-    let line = ignore_rule_line(&catalog, &above).expect("a sentence");
-    assert!(line.contains("parent Git repo"), "{line}");
-    // ...and it is the first thing under the status line, in the drawn lines.
+    let git = |repository| ExplorerIgnoreRule::Git { repository };
+    assert!(
+        says(git(ExplorerRepositoryPlacement::AboveProjectRoot))
+            .unwrap()
+            .contains("parent Git repo")
+    );
+    assert!(
+        says(git(ExplorerRepositoryPlacement::BelowProjectRoot))
+            .unwrap()
+            .contains("nested Git repo")
+    );
+    assert!(
+        says(git(ExplorerRepositoryPlacement::AtProjectRoot))
+            .unwrap()
+            .contains("project's Git")
+    );
+
+    // The built-in list decided, and each reason git did not is its own sentence.
+    let floor = |reason| ExplorerIgnoreRule::Floor(reason);
+    let mut seen = std::collections::BTreeSet::new();
+    for (reason, word) in [
+        (ExplorerFloorReason::NotARepository, "built-in list"),
+        (ExplorerFloorReason::RepositoryDeclined, "(home)"),
+        (ExplorerFloorReason::GateRefused, "no Git"),
+        (ExplorerFloorReason::QueryFailed, "failed"),
+    ] {
+        let line = says(floor(reason)).expect("a floor rule is stated");
+        assert!(line.contains(word), "{reason:?}: {line}");
+        assert!(seen.insert(line), "{reason:?} shares a sentence");
+    }
+    // A scan never sent to git says nothing: there is no rule to state yet.
+    assert_eq!(says(floor(ExplorerFloorReason::NotAsked)), None);
+
+    // It is drawn, as a line of the tree, under the status line.
+    let above = with_rule(git(ExplorerRepositoryPlacement::AboveProjectRoot));
     let lines = all_lines(&catalog, &above, 0);
     assert!(
         lines.iter().any(|l| l.contains("parent Git repo")),
         "{lines:?}"
     );
+}
 
-    let below = with_rule(ExplorerIgnoreRule::Git {
+/// A repository above the project outranks the project's own and one inside it: it
+/// is the case where the status bar and the tree most need telling apart.
+#[test]
+fn a_repository_above_the_project_outranks_the_others_in_the_sentence() {
+    use super::ignore_rule_line;
+    let catalog = real_catalog();
+    let mut root = scan_at_root(vec![plain_node("d", ExplorerNodeKind::Directory)]);
+    root.ignore_rule = ExplorerIgnoreRule::Git {
+        repository: ExplorerRepositoryPlacement::AtProjectRoot,
+    };
+    let mut tree = tree_with(root);
+    let mut nested = scan_at_root(vec![]);
+    nested.ignore_rule = ExplorerIgnoreRule::Git {
         repository: ExplorerRepositoryPlacement::BelowProjectRoot,
-    });
+    };
+    tree.set_scan(Path::new("d"), Ok(nested));
     assert!(
-        ignore_rule_line(&catalog, &below)
+        ignore_rule_line(&catalog, &tree)
             .unwrap()
             .contains("nested Git repo")
     );
+}
 
-    // The project's own repository, the floor, and a scan never sent to git say
-    // nothing here (the floor's sentence is a later slice's).
+/// D8: the age sentence appears exactly when git's answer is in use.
+#[test]
+fn the_sidebar_says_the_marks_are_as_old_as_the_scan_when_git_answered() {
+    use super::ignore_age_line;
+    let catalog = real_catalog();
+    let with_rule = |rule| {
+        let mut scan = scan_at_root(vec![plain_node("a.txt", ExplorerNodeKind::File)]);
+        scan.ignore_rule = rule;
+        tree_with(scan)
+    };
+    let answered = with_rule(ExplorerIgnoreRule::Git {
+        repository: ExplorerRepositoryPlacement::AtProjectRoot,
+    });
+    assert!(
+        ignore_age_line(&catalog, &answered)
+            .unwrap()
+            .contains("as old as the scan")
+    );
+    assert!(
+        all_lines(&catalog, &answered, 0)
+            .iter()
+            .any(|l| l.contains("as old as the scan"))
+    );
     for quiet in [
-        ExplorerIgnoreRule::Git {
-            repository: ExplorerRepositoryPlacement::AtProjectRoot,
-        },
         ExplorerIgnoreRule::Floor(ExplorerFloorReason::NotARepository),
         ExplorerIgnoreRule::Floor(ExplorerFloorReason::NotAsked),
     ] {
         assert_eq!(
-            ignore_rule_line(&catalog, &with_rule(quiet)),
+            ignore_age_line(&catalog, &with_rule(quiet)),
             None,
             "{quiet:?}"
         );
@@ -1297,24 +1400,48 @@ fn the_sidebar_says_when_the_ignore_rule_came_from_another_repository() {
 }
 
 /// The live capture found the first wording clipped at "the Git r": tree rows are
-/// unwrapped and the sidebar holds about 33 monospace columns. A sentence longer
-/// than that is not a sentence the user can read, so its length is held.
+/// unwrapped and the sidebar holds about 33 monospace columns. Every sentence the
+/// sidebar can say about the rule is held to that, so none is clipped.
 #[test]
-fn the_ignore_rule_sentence_fits_the_sidebar() {
-    use super::ignore_rule_line;
+fn the_ignore_rule_sentences_fit_the_sidebar() {
+    use super::{ignore_age_line, ignore_rule_line};
     const SIDEBAR_COLUMNS: usize = 32;
     let catalog = real_catalog();
-    for repository in [
-        ExplorerRepositoryPlacement::AboveProjectRoot,
-        ExplorerRepositoryPlacement::BelowProjectRoot,
+    let mut rules = vec![
+        ExplorerIgnoreRule::Git {
+            repository: ExplorerRepositoryPlacement::AboveProjectRoot,
+        },
+        ExplorerIgnoreRule::Git {
+            repository: ExplorerRepositoryPlacement::BelowProjectRoot,
+        },
+        ExplorerIgnoreRule::Git {
+            repository: ExplorerRepositoryPlacement::AtProjectRoot,
+        },
+    ];
+    for reason in [
+        ExplorerFloorReason::NotARepository,
+        ExplorerFloorReason::RepositoryDeclined,
+        ExplorerFloorReason::GateRefused,
+        ExplorerFloorReason::QueryFailed,
     ] {
+        rules.push(ExplorerIgnoreRule::Floor(reason));
+    }
+    for rule in rules {
         let mut scan = scan_at_root(vec![plain_node("a.txt", ExplorerNodeKind::File)]);
-        scan.ignore_rule = ExplorerIgnoreRule::Git { repository };
-        let line = ignore_rule_line(&catalog, &tree_with(scan)).unwrap();
-        assert!(
-            line.chars().count() <= SIDEBAR_COLUMNS,
-            "{} columns is clipped in the sidebar: {line:?}",
-            line.chars().count()
-        );
+        scan.ignore_rule = rule;
+        let tree = tree_with(scan);
+        for line in [
+            ignore_rule_line(&catalog, &tree),
+            ignore_age_line(&catalog, &tree),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(
+                line.chars().count() <= SIDEBAR_COLUMNS,
+                "{} columns is clipped in the sidebar: {line:?} ({rule:?})",
+                line.chars().count()
+            );
+        }
     }
 }

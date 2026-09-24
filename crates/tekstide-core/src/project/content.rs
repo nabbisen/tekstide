@@ -39,6 +39,11 @@ impl ProjectContentWorkspace {
         &self.explorer_tree
     }
 
+    /// RFC-055 D7: `explorer.show_ignored`, applied to this project's tree.
+    pub fn set_explorer_show_ignored(&mut self, show_ignored: bool) {
+        self.explorer_tree.set_show_ignored(show_ignored);
+    }
+
     /// Marks `path` as needing a scan; a worker runs it later (see
     /// [`ExplorerScanRequest`]). A no-op if one is already in flight.
     pub fn request_explorer_scan(&mut self, path: &Path) {

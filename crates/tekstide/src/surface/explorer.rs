@@ -51,9 +51,9 @@ use iced::widget::{column, container};
 use iced::{Element, Length};
 
 use tekstide_core::project::root::{
-    BrowseNode, BrowseNodeState, DirectoryBrowseScan, ExplorerIgnoreRule, ExplorerIgnoreState,
-    ExplorerNode, ExplorerNodeKind, ExplorerNodeState, ExplorerRepositoryPlacement,
-    FileAccessSymlinkStatus,
+    BrowseNode, BrowseNodeState, DirectoryBrowseScan, ExplorerFloorReason, ExplorerIgnoreRule,
+    ExplorerIgnoreState, ExplorerNode, ExplorerNodeKind, ExplorerNodeState,
+    ExplorerRepositoryPlacement, FileAccessSymlinkStatus,
 };
 use tekstide_core::project::{
     ExplorerTree, ExplorerTreeRow, ExplorerTreeRowKind, ProjectExplorerStatus,
@@ -262,6 +262,13 @@ pub(crate) fn row_text(
                     .trusted_symbol("bound", if at_least { "at-least" } else { "exact" }),
             )
         ),
+        ExplorerTreeRowKind::IgnoredHidden { count } => format!(
+            "{indent}    {}",
+            catalog.get_with_args(
+                "explorer-ignored-hidden",
+                &CatalogArgs::new().number("count", count),
+            )
+        ),
         ExplorerTreeRowKind::RowsNotShown { count } => catalog.get_with_args(
             "explorer-rows-not-shown",
             &CatalogArgs::new().number("count", count),
@@ -340,6 +347,9 @@ pub(crate) fn tree_lines(
     if let Some(message) = ignore_rule_line(catalog, tree) {
         lines.push(message);
     }
+    if let Some(message) = ignore_age_line(catalog, tree) {
+        lines.push(message);
+    }
     let rows = tree.rows();
     if rows.is_empty() {
         lines.push(catalog.get("explorer-empty"));
@@ -364,32 +374,66 @@ pub(crate) fn tree_lines(
     lines
 }
 
-/// **RFC-055, review 431 ruling 4.** Says so when the ignore rule came from a
-/// repository that is not the project root's own -- read from what the loaded
-/// scans *carried* (`ExplorerIgnoreRule`), never guessed at draw time. A
-/// repository **above** the project outranks one inside it, because it governs
-/// the root listing. `None` when every scan that used git used the project's own
-/// repository, or none used git (the floor's own sentence is PR-055-C's).
+/// **RFC-055 D6, D8 and review 431 ruling 4: where the ignore words came from.**
+/// One line, read from what the loaded scans *carried* (`ExplorerIgnoreRule`),
+/// never guessed at draw time.
+///
+/// * A repository **above** the project outranks one **inside** it, which
+///   outranks the project's **own** -- the order in which a reader most needs to
+///   be told, because the status bar's Git state reads only a `.git` at the
+///   project root and the two must not look like one answer (ruling 4).
+/// * With no repository answering, the **built-in list** decided, and the line says
+///   why git did not (no repository, one declined at `$HOME`, `git` unusable,
+///   or no answer).
+/// * `None` when no scan has asked git yet (`NotAsked` only).
+///
+/// Short on purpose: rows are unwrapped and the sidebar holds about 33 columns
+/// (the first draft was cut off at "the Git r"), and
+/// `the_ignore_rule_sentences_fit_the_sidebar` holds every variant to 32.
 pub(crate) fn ignore_rule_line(catalog: &Catalog, tree: &ExplorerTree) -> Option<String> {
-    let mut placement = None;
+    let mut best: Option<&'static str> = None;
+    let rank = |key: &str| match key {
+        "above" => 4,
+        "below" => 3,
+        "git" => 2,
+        _ => 1,
+    };
     for scan in tree.loaded_scans() {
-        if let ExplorerIgnoreRule::Git { repository } = scan.ignore_rule {
-            match repository {
-                ExplorerRepositoryPlacement::AboveProjectRoot => {
-                    placement = Some("above");
-                    break;
-                }
-                ExplorerRepositoryPlacement::BelowProjectRoot => placement = Some("below"),
-                ExplorerRepositoryPlacement::AtProjectRoot => {}
-            }
+        let key = match scan.ignore_rule {
+            ExplorerIgnoreRule::Git { repository } => match repository {
+                ExplorerRepositoryPlacement::AboveProjectRoot => "above",
+                ExplorerRepositoryPlacement::BelowProjectRoot => "below",
+                ExplorerRepositoryPlacement::AtProjectRoot => "git",
+            },
+            ExplorerIgnoreRule::Floor(reason) => match reason {
+                ExplorerFloorReason::NotAsked => continue,
+                ExplorerFloorReason::NotARepository => "floor-none",
+                ExplorerFloorReason::RepositoryDeclined => "floor-declined",
+                ExplorerFloorReason::GateRefused => "floor-gate",
+                ExplorerFloorReason::QueryFailed => "floor-failed",
+            },
+        };
+        if best.is_none_or(|current| rank(key) > rank(current)) {
+            best = Some(key);
         }
     }
-    placement.map(|placement| {
+    best.map(|key| {
         catalog.get_with_args(
             "explorer-ignore-rule",
-            &CatalogArgs::new().trusted_symbol("placement", placement),
+            &CatalogArgs::new().trusted_symbol("placement", key),
         )
     })
+}
+
+/// **RFC-055 D8: the marks are exactly as old as the scan that produced them.**
+/// There is no file watcher until RFC-026, so a `.gitignore` edited after a
+/// folder was read is not reflected until that folder is read again. Said on
+/// screen whenever git's answer is in use; the floor list is static and has
+/// nothing to go stale.
+pub(crate) fn ignore_age_line(catalog: &Catalog, tree: &ExplorerTree) -> Option<String> {
+    tree.loaded_scans()
+        .any(|scan| matches!(scan.ignore_rule, ExplorerIgnoreRule::Git { .. }))
+        .then(|| catalog.get("explorer-ignore-age"))
 }
 
 /// Where the keyboard highlight is and which rows fit: what `view` needs
@@ -402,11 +446,11 @@ pub struct ExplorerCursor {
 }
 
 /// Lines the sidebar keeps for things that are not tree rows (the status
-/// line, the ignore-rule line and the "rows N-M of T" line), so
-/// [`rows_that_fit`] leaves room. Three since RFC-055 (was two): the rule line is
-/// reserved whether or not it is shown, so a scan finishing does not move the
-/// window.
-const RESERVED_LINES: usize = 3;
+/// line, the ignore-rule line, the age line and the "rows N-M of T" line), so
+/// [`rows_that_fit`] leaves room. Four since RFC-055 (was two): the rule and age
+/// lines are reserved whether or not they are shown, so a scan finishing does not
+/// move the window.
+const RESERVED_LINES: usize = 4;
 /// The **detail** area under the tree: the highlighted row in full, wrapped
 /// over this many lines. A row is drawn on one line and clipped at the
 /// sidebar's edge, so a long name, or a chain of status words on a nested row
@@ -461,6 +505,7 @@ pub(crate) fn detail_text(
     matches!(
         row.kind,
         ExplorerTreeRowKind::Node { .. }
+            | ExplorerTreeRowKind::IgnoredHidden { .. }
             | ExplorerTreeRowKind::Omitted { .. }
             | ExplorerTreeRowKind::RowsNotShown { .. }
     )

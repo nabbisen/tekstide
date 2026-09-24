@@ -1177,6 +1177,13 @@ impl ConfigurationState {
             })
     }
 
+    /// **RFC-055 D7.** `explorer.show_ignored`; `false` with no store or no key.
+    fn explorer_show_ignored(&self) -> bool {
+        self.store
+            .as_ref()
+            .is_some_and(|store| store.current().explorer.show_ignored)
+    }
+
     /// D9. Falls back to the compiled constant when there is no store,
     /// so a caller never has to handle "unset" -- the same totality
     /// `ConfigurationDocument`'s own defaults provide.
@@ -1239,7 +1246,7 @@ impl State {
         // place all of them are in hand before the event loop starts.
         // The three mid-session open routes apply it themselves, the
         // same division `verify_restored_trust` above already has.
-        apply_configured_resource_limits(&mut app_shell, &configuration);
+        apply_configured_project_settings(&mut app_shell, &configuration);
 
         let measurement = Measurement::from_env();
         let typing_doc = if matches!(
@@ -4573,7 +4580,7 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
             // for the same reason `verify_restored_trust` above is:
             // there is no single point every newly-opened project
             // passes through.
-            apply_configured_resource_limits(&mut state.app_shell, &state.configuration);
+            apply_configured_project_settings(&mut state.app_shell, &state.configuration);
             // RFC-050 PR-050-B: the transcripts earlier runs left for this
             // project, so purge and the figures cover what exists.
             load_earlier_transcripts_for_opened_project(state, &project_id);
@@ -5194,7 +5201,7 @@ fn attempt_open_project_from_path_field(state: &mut State) {
             // for the same reason `verify_restored_trust` above is:
             // there is no single point every newly-opened project
             // passes through.
-            apply_configured_resource_limits(&mut state.app_shell, &state.configuration);
+            apply_configured_project_settings(&mut state.app_shell, &state.configuration);
             // RFC-050 PR-050-B: the transcripts earlier runs left for this
             // project, so purge and the figures cover what exists.
             load_earlier_transcripts_for_opened_project(state, &project_id);
@@ -5337,7 +5344,7 @@ fn choose_current_browsed_directory(state: &mut State) {
             // for the same reason `verify_restored_trust` above is:
             // there is no single point every newly-opened project
             // passes through.
-            apply_configured_resource_limits(&mut state.app_shell, &state.configuration);
+            apply_configured_project_settings(&mut state.app_shell, &state.configuration);
             // RFC-050 PR-050-B: the transcripts earlier runs left for this
             // project, so purge and the figures cover what exists.
             load_earlier_transcripts_for_opened_project(state, &project_id);
@@ -6246,10 +6253,14 @@ fn keybinding_policy_for(
 /// has no key for either, and writing a whole `ProjectResourceLimits`
 /// from a document that knows one field would silently reset the other
 /// two to whatever this function happened to think they were.
-fn apply_configured_resource_limits(
+fn apply_configured_project_settings(
     app_shell: &mut ApplicationShell,
     configuration: &ConfigurationState,
 ) {
+    // RFC-055 D7: the explorer setting reaches every open project, whatever
+    // else is or is not configured -- so it is applied before the early return
+    // that the limit's absence used to be.
+    apply_show_ignored(app_shell, configuration.explorer_show_ignored());
     let Some(agent_run_limit) = configuration.agent_run_limit() else {
         return;
     };
@@ -6264,6 +6275,21 @@ fn apply_configured_resource_limits(
             let mut limits = project.resource_limits();
             limits.agent_run_limit = Some(agent_run_limit);
             project.set_resource_limits(limits);
+        }
+    }
+}
+
+/// RFC-055 D7: `explorer.show_ignored` onto every open project's explorer tree.
+fn apply_show_ignored(app_shell: &mut ApplicationShell, show_ignored: bool) {
+    let project_ids: Vec<_> = app_shell
+        .state()
+        .projects()
+        .iter()
+        .map(|project| project.id().clone())
+        .collect();
+    for project_id in project_ids {
+        if let Some(project) = app_shell.state_mut().project_mut(&project_id) {
+            project.set_explorer_show_ignored(show_ignored);
         }
     }
 }
@@ -8422,6 +8448,7 @@ pub(crate) fn configuration_fallback_text(
         ),
         FallbackReason::NotANumber => ("not-a-number", None),
         FallbackReason::NotAWholeNumber => ("not-a-whole-number", None),
+        FallbackReason::NotABoolean => ("not-a-boolean", None),
         // Reduced, not refused: these two are told with their own sentence.
         FallbackReason::ScrimTooOpaque => ("scrim-too-opaque", None),
         FallbackReason::ScrollbackAboveCap => ("scrollback-above-cap", None),
@@ -10108,6 +10135,9 @@ fn reload_configuration(state: &mut State) {
     );
     state.configuration.theme = theme;
     state.theme = theme;
+    // RFC-055 D7: `explorer.show_ignored` applies live, to projects that are
+    // already open.
+    apply_show_ignored(&mut state.app_shell, store.current().explorer.show_ignored);
     // ...and the scrollback, on panes that already hold output as well as on
     // ones launched later (PR-054-C, D7/D8).
     let scrollback = store.current().terminal.scrollback_lines();
@@ -10264,7 +10294,7 @@ fn toggle_transcript_capture_declined(state: &mut State) {
 /// anything that could be missing entries.
 /// RFC-030 PR-030-B, review 410 ruling 2 and 4: the Git-evaluation
 /// trigger, called from every project-open call site (alongside
-/// `verify_restored_trust`/`apply_configured_resource_limits`/
+/// `verify_restored_trust`/`apply_configured_project_settings`/
 /// `load_earlier_transcripts_for_opened_project` -- there is still no
 /// single point every newly-opened project passes through, the same
 /// reason those three are each their own call at every site) and again

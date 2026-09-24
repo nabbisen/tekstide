@@ -19175,3 +19175,87 @@ fn the_help_binding_column_scales_with_the_configured_body_size() {
     // 8.2 ems is the widest chord measured in the widest face measured.
     assert!(width_at(17.0) >= 8.2 * 17.0);
 }
+
+// --- RFC-055 PR-055-C: `explorer.show_ignored` --------------------------------
+
+fn shows_ignored(state: &State) -> Vec<bool> {
+    state
+        .app_shell
+        .state()
+        .projects()
+        .iter()
+        .map(|project| project.content_workspace().explorer_tree().show_ignored())
+        .collect()
+}
+
+fn state_with_a_project_and_config(label: &str, contents: &str) -> (State, PathBuf) {
+    let (configuration, home) = configuration_from_file(label, contents);
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir(&format!("{label}-project")))
+        .expect("a freshly created directory is a valid project root");
+    // `boot()`'s own call: every project that exists when the file is loaded.
+    super::apply_configured_project_settings(&mut app_shell, &configuration);
+    (state_with_configuration(app_shell, configuration), home)
+}
+
+/// D7 through the real boot and reload paths: off by default, on when the file
+/// says so, changed live by `Ctrl+Alt+C` on a project that is already open, and a
+/// non-boolean value is named on the board with the default standing.
+#[test]
+fn show_ignored_reaches_open_projects_at_boot_and_at_reload() {
+    let (mut state, home) = state_with_a_project_and_config("show-ignored-off", "");
+    assert_eq!(shows_ignored(&state), [false], "the default hides them");
+
+    rewrite_config(&home, "[explorer]\nshow_ignored = true\n");
+    press_reload_configuration(&mut state);
+    assert_eq!(shows_ignored(&state), [true], "applied live, no restart");
+    assert!(config_state_lines(&state).is_empty());
+
+    rewrite_config(&home, "[explorer]\nshow_ignored = \"yes\"\n");
+    press_reload_configuration(&mut state);
+    assert_eq!(
+        shows_ignored(&state),
+        [false],
+        "a value that is not a boolean is not used, and the default stands"
+    );
+    let lines = config_state_lines(&state);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].contains("explorer.show_ignored") && lines[0].contains("true or false"),
+        "{lines:?}"
+    );
+    assert!(
+        !lines[0].contains("yes"),
+        "the value must not be echoed: {lines:?}"
+    );
+
+    rewrite_config(&home, "");
+    press_reload_configuration(&mut state);
+    assert_eq!(shows_ignored(&state), [false]);
+}
+
+/// Boot: a file that says `true` is in force for the projects that exist when it
+/// is loaded.
+#[test]
+fn show_ignored_true_in_the_file_is_in_force_from_boot() {
+    let (state, _home) =
+        state_with_a_project_and_config("show-ignored-on", "[explorer]\nshow_ignored = true\n");
+    assert_eq!(shows_ignored(&state), [true]);
+}
+
+/// The setting reaches a project opened *after* the file was loaded, through every
+/// route that opens one -- held at the source, as `apply_configured_project_settings`
+/// always has been: it is called at boot and after each of the three mid-session
+/// open routes, and a route that forgot would open a project ignoring the setting.
+#[test]
+fn every_route_that_opens_a_project_applies_the_configured_settings() {
+    let sources = production_sources();
+    let (_, shell) = sources
+        .iter()
+        .find(|(path, _)| path.ends_with("crates/tekstide/src/shell.rs"))
+        .expect("shell.rs");
+    let calls = shell.matches("apply_configured_project_settings(").count();
+    // One definition and four call sites (boot and the three mid-session routes).
+    assert_eq!(calls, 5, "{calls}");
+}
