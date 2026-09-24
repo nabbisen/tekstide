@@ -18538,3 +18538,137 @@ fn the_configuration_module_has_no_way_to_look_beside_a_project() {
         "the scan must actually read the module ({checked} files)"
     );
 }
+
+/// Production source under `crates/*/src`: no `tests` directory, no
+/// `tests.rs`, cut at its `#[cfg(test)] mod tests`, comment lines dropped -- so a
+/// count over it is a count of *code that ships*.
+fn production_sources() -> Vec<(String, String)> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+        for entry in std::fs::read_dir(dir).expect("source directory") {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|name| name == "tests") {
+                    continue;
+                }
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs")
+                && path.file_name().is_some_and(|name| name != "tests.rs")
+            {
+                let source = std::fs::read_to_string(&path).unwrap();
+                // Cut at the test *module*, not at the first `#[cfg(test)]`: a
+                // test-only helper earlier in the file must not hide the rest.
+                let shipped = source
+                    .split("#[cfg(test)]\nmod tests")
+                    .next()
+                    .unwrap_or_default();
+                let code: String = shipped
+                    .lines()
+                    .filter(|line| !line.trim_start().starts_with("//"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                out.push((path.canonicalize().unwrap().display().to_string(), code));
+            }
+        }
+    }
+    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut out = Vec::new();
+    for krate in ["tekstide", "tekstide-core"] {
+        walk(&crates.join(krate).join("src"), &mut out);
+    }
+    out
+}
+
+/// **RFC-054 review 427, the caller half of §1.** The scan above pins the
+/// module; this pins the *path*: `ConfigStore::load` takes any `PathBuf`, so a
+/// future caller handing it something project-derived would pass both the
+/// behavioural test (which asserts today's values) and the module scan (which
+/// reads `config/`). Here the property is "the configuration comes from this
+/// path and no other": one production caller, fed `config_file()` of the path
+/// `ConfigPathResolver` derived from a provider, and one production place a
+/// provider is built from the environment. Ablated by adding a second caller,
+/// or by handing the existing one any other path.
+#[test]
+fn the_configuration_comes_from_the_resolved_user_path_and_no_other() {
+    let sources = production_sources();
+    assert!(sources.len() > 50, "the scan must read the workspace");
+
+    let mut load_calls = Vec::new();
+    let mut environment_providers = Vec::new();
+    for (path, code) in &sources {
+        for (index, _) in code.match_indices("ConfigStore::load(") {
+            load_calls.push((path.clone(), code[index..].to_owned()));
+        }
+        // The provider is built from the environment in exactly one place
+        // outside its own definition: the binary's boot.
+        if !path.ends_with("config/path.rs") {
+            for constructor in [
+                "ConfigPathProvider::linux_default(",
+                "ConfigPathProvider::linux_from_env(",
+            ] {
+                if code.contains(constructor) {
+                    environment_providers.push((path.clone(), constructor));
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        load_calls.len(),
+        1,
+        "ConfigStore::load has more than one production caller: {:?}",
+        load_calls.iter().map(|(p, _)| p).collect::<Vec<_>>()
+    );
+    let (caller, call) = &load_calls[0];
+    assert!(caller.ends_with("crates/tekstide/src/shell.rs"), "{caller}");
+    let argument_end = call.find(");").expect("the call ends");
+    let argument = call["ConfigStore::load(".len()..argument_end]
+        .split_whitespace()
+        .collect::<String>();
+    assert_eq!(
+        argument, "storage_path.config_file().to_path_buf()",
+        "the path handed to ConfigStore::load is not the one ConfigPathResolver derived"
+    );
+
+    // ...and, inside that function, `storage_path` is the resolver's output and
+    // is never rebound to anything else before it is used.
+    let (_, shell_code) = sources
+        .iter()
+        .find(|(path, _)| path.ends_with("crates/tekstide/src/shell.rs"))
+        .expect("shell.rs");
+    let start = shell_code
+        .find("fn load_configuration_at_boot(")
+        .expect("the boot loader");
+    let body: String = shell_code[start..]
+        .split("\n}\n")
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(
+        body.matches("let storage_path = ").count(),
+        2,
+        "`storage_path` is bound once from the resolver and once from its own Result"
+    );
+    assert!(
+        body.contains(
+            "let storage_path = provider.and_then(|provider| \
+             tekstide_core::config::ConfigPathResolver.resolve(&provider));"
+        ),
+        "storage_path is not derived from a ConfigPathProvider through ConfigPathResolver"
+    );
+
+    assert_eq!(
+        environment_providers.len(),
+        1,
+        "the config provider is built from the environment in more than one place: \
+         {environment_providers:?}"
+    );
+    assert!(
+        environment_providers[0]
+            .0
+            .ends_with("crates/tekstide/src/main.rs")
+            && environment_providers[0].1 == "ConfigPathProvider::linux_default(",
+        "{environment_providers:?}"
+    );
+}
