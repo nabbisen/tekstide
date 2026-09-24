@@ -1,5 +1,64 @@
 # Changelog
 
+## Unreleased
+
+### Added — the explorer asks Git what is ignored
+
+- **Inside a Git repository the explorer asks Git which entries are ignored**, about the entries the sidebar is about to
+  draw, and marks them `[ignored]`. It does not read `.gitignore` itself: negation, precedence, nested ignore files and
+  `.git/info/exclude` are Git's to decide. A repository whose `.gitignore` does not name `target/` now shows an ordinary,
+  expandable `target/`; one that does shows it collapsed and ignored.
+- **`[explorer] show_ignored`** (default `false`). Off, ignored entries are **not drawn** and the directory says how many it
+  left out (*2 ignored entries hidden*); on, they are drawn with `[ignored]`. It governs ignored entries only — `.env`,
+  `.gitignore` and every other dotfile are ordinary rows either way. A value that is not `true` or `false` is not used and the
+  Project Board says so. `Ctrl+Alt+C` applies it to open projects.
+- **The sidebar says where the rule came from and how old it is**: *project's Git*, *parent Git repo* (the project is inside a
+  repository — the status bar's Git state reads only a repository at the project root, and the two may differ), *nested Git
+  repo*, or *built-in* with why Git was not used; and *Marks are as old as the scan*.
+- **A tracked file that matches an ignore pattern is tracked, not ignored.** Git says so, and so does the explorer.
+
+### Changed
+
+- **A row is an icon, then the name, then the words.** It was the words first, so that a narrow sidebar would clip the name.
+  That made an ignored directory read `(collapsed) [ignored] t` — a name cut to a letter, indistinguishable from a file named
+  `t`. A clipped *word* is visibly damaged; a clipped *name* invents a file. A long *name* is still clipped at the sidebar's
+  right edge, without a marker.
+- **The explorer of a repository looks different by default**: ignored files and folders are no longer drawn, and a line says how
+  many. Set `show_ignored = true` to see them.
+- **`.git` stays collapsed** whichever rule decides. Git does not call it ignored, but it is not a folder to open by accident.
+- **Git's answer is asked in about 3 ms** on a 100,000-entry folder (the folder read itself, unchanged, is about 22 ms), on the
+  background thread that already reads it.
+
+### Corrected
+
+- **`0.24.0` said `.git`, `node_modules` and `target` are collapsed because they are on a fixed list, and that `.gitignore`
+  handling, an `ignored` badge and a hidden-file toggle were "the next slice".** Inside a Git repository that list no longer
+  decides: Git's answer does, so a `target/` your repository does not ignore is an ordinary folder and one it ignores is
+  collapsed. **A reader who relied on `target/` always being collapsed should look at a repository whose `.gitignore` does not
+  name it.** Outside a repository, and where Git cannot be asked, the list still decides and the sidebar says so. There is still
+  no hidden-file toggle, deliberately: **dotfiles are not hidden**, and `show_ignored` is about ignored entries only.
+- **`0.24.0` said a row says what it is before it says its name** (`[OTHER] (blocked) [symlink escapes root]` before the name).
+  It now says the name first; see *Changed*.
+
+### What this release does not do
+
+- **The marks are as old as the scan, and nothing watches the disk.** A `.gitignore` you edit is not reflected until the folder is
+  read again (close and reopen it); the sidebar says *Marks are as old as the scan*.
+- **A global ignore file named by `core.excludesFile` is not applied.** Tekstide runs Git without your personal Git configuration —
+  the restriction that keeps a repository from making it run a program — so `.gitignore` files, `.git/info/exclude` and the default
+  `$XDG_CONFIG_HOME/git/ignore` are honoured, and `core.excludesFile` is not. **For a user who sets it, Tekstide and their own
+  `git status` can disagree in both directions.**
+- **A repository whose configuration names something Tekstide does not vouch for is not asked** (for example `core.fsmonitor`:
+  `git check-ignore` would run it), nor is one rooted at your home directory (a dotfiles repository that ignores everything would
+  hide every project under it). The built-in list decides, and the sidebar says why.
+- **A long filename is clipped at the sidebar's right edge with no marker**, and a name that is only a longer name's prefix reads
+  as a different file. The line under the tree shows the highlighted row whole. This was true of `0.24.0` and is unchanged.
+- **The status bar's Git state and the explorer's ignore marks can come from different repositories** when a project sits inside a
+  repository; the sidebar's first line says when they do.
+- **A hidden folder's contents are not counted**, only the folder; and entries past the 256-per-folder cap are not asked about, so
+  they are neither hidden nor marked.
+- **Everything `0.25.0` listed still holds**, including there being **no screen-reader support**.
+
 ## 0.25.0 - The Window Takes Your Settings
 
 Status: **released on 2026-09-24.** Published to crates.io as `tekstide 0.25.0` and

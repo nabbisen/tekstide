@@ -837,3 +837,199 @@ fn the_configuration_page_states_the_scrollback_cap_and_the_other_limits() {
         "the page's example has no `scrollback_lines` line"
     );
 }
+
+/// **RFC-055 PR-055-C.** The configuration page names `explorer.show_ignored` and
+/// its default, and the default it states is the code's.
+#[test]
+fn the_configuration_page_names_the_explorer_setting_and_its_default() {
+    let page = repo_root().join("docs/src/users/configuration.md");
+    let Ok(source) = std::fs::read_to_string(&page) else {
+        eprintln!("skipped: docs/ is not packaged with this crate");
+        return;
+    };
+    let default = tekstide_core::config::ExplorerSettings::default().show_ignored;
+    assert!(
+        source
+            .lines()
+            .any(|line| line.trim_start().starts_with("show_ignored")
+                && line.contains(&format!("= {default}"))),
+        "the page's [explorer] example has no `show_ignored = {default}` line"
+    );
+    assert!(
+        source.contains("`[explorer] show_ignored` is `false` by default") && !default,
+        "the page must state the default, and it must be the code's"
+    );
+    assert!(
+        source.contains("core.excludesFile"),
+        "the page must name what is not honoured"
+    );
+}
+
+// --- RFC-055 PR-055-C: a released RFC lives in `done/` ------------------------
+
+/// Every `RFC-NNN` a **released** changelog section names, with the section's
+/// heading. A section is released when it carries a `Status: ... released` line;
+/// `## Unreleased` and a release candidate are not.
+fn rfcs_named_by_released_sections(changelog: &str) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    let mut heading = String::new();
+    let mut body = String::new();
+    let mut flush = |heading: &str, body: &str, found: &mut Vec<(String, String)>| {
+        let released = body
+            .lines()
+            .any(|line| line.starts_with("Status:") && line.to_lowercase().contains("released on"));
+        if !released {
+            return;
+        }
+        let bytes = body.as_bytes();
+        let mut index = 0;
+        while let Some(at) = body[index..].find("RFC-") {
+            let start = index + at + 4;
+            let digits: String = body[start..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            if digits.len() == 3 {
+                found.push((heading.to_owned(), digits));
+            }
+            index = start.min(bytes.len());
+        }
+    };
+    for line in changelog.lines() {
+        if line.starts_with("## ") {
+            flush(&heading, &body, &mut found);
+            heading = line.trim_start_matches("## ").to_owned();
+            body.clear();
+        } else {
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    flush(&heading, &body, &mut found);
+    found
+}
+
+/// `(id, folder)` for every RFC still in a folder that means "not yet finished".
+fn in_flight_rfcs(rfcs: &Path) -> Vec<(String, &'static str)> {
+    let mut out = Vec::new();
+    for folder in ["accepted", "proposed"] {
+        let Ok(entries) = std::fs::read_dir(rfcs.join(folder)) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some((id, _)) = name.split_once('-')
+                && id.len() == 3
+                && id.chars().all(|c| c.is_ascii_digit())
+            {
+                out.push((id.to_owned(), folder));
+            }
+        }
+    }
+    out
+}
+
+/// The violations: an RFC a released section names that is still in `accepted/` or
+/// `proposed/`. Pure, so a test can plant one.
+fn released_rfcs_still_in_flight(
+    changelog: &str,
+    in_flight: &[(String, &'static str)],
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    for (heading, id) in rfcs_named_by_released_sections(changelog) {
+        for (in_flight_id, folder) in in_flight {
+            if *in_flight_id == id {
+                let message = format!(
+                    "RFC-{id} is named by the released section `{heading}` but lives in rfcs/{folder}/ -- \
+                     an RFC that shipped is closed and moves to rfcs/done/ as part of the release"
+                );
+                if !violations.contains(&message) {
+                    violations.push(message);
+                }
+            }
+        }
+    }
+    violations
+}
+
+/// **Carried from RFC-053's closeout.** RFC-053 shipped as `0.23.0` and stayed in
+/// `accepted/` through `0.24.0` and `0.25.0`, so for three releases the index said
+/// work was in flight that had shipped; nothing related a release to a folder.
+/// This does. It passes on the repository as it is; the test below plants the
+/// violation it exists to catch.
+#[test]
+fn an_rfc_a_release_names_lives_in_done() {
+    let Some(rfcs) = rfcs_dir() else {
+        eprintln!("skipped: rfcs/ is not packaged with this crate");
+        return;
+    };
+    let Ok(changelog) = std::fs::read_to_string(repo_root().join("CHANGELOG.md")) else {
+        eprintln!("skipped: CHANGELOG.md is not packaged with this crate");
+        return;
+    };
+    assert!(
+        rfcs_named_by_released_sections(&changelog).len() > 20,
+        "the check must actually read the released sections it guards"
+    );
+    let violations = released_rfcs_still_in_flight(&changelog, &in_flight_rfcs(&rfcs));
+    assert!(violations.is_empty(), "{violations:#?}");
+}
+
+/// The check fails against a planted violation and passes without it -- and it
+/// reads *released* sections only, so an RFC an unreleased section or a release
+/// candidate names is not a violation until it ships.
+#[test]
+fn the_released_rfc_check_catches_a_planted_violation_and_nothing_else() {
+    let changelog = "\
+## Unreleased
+
+Adds things (RFC-055).
+
+## 0.26.0 - Candidate
+
+Status: release candidate; not yet published or tagged.
+
+RFC-055 is in this one.
+
+## 0.25.0 - The Window
+
+Status: **released on 2026-09-24.** Published.
+
+Re-read against what RFC-054 changed. RFC-061 is reserved.
+
+## 0.24.0 - The Tree
+
+Status: **released on 2026-09-24.** Published.
+
+RFC-052 and RFC-053.
+";
+    let in_flight = vec![
+        ("055".to_owned(), "accepted"),
+        ("061".to_owned(), "proposed"),
+    ];
+
+    // Nothing planted: the unreleased and candidate sections name RFC-055 and are
+    // not violations; RFC-061 (in `proposed/`) is named by a *released* section.
+    let found = released_rfcs_still_in_flight(changelog, &in_flight);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found[0].contains("RFC-061") && found[0].contains("0.25.0"));
+
+    // Plant the violation the check exists for: a released section names an RFC
+    // that is still in `accepted/`.
+    let planted = changelog.replace("what RFC-054 changed", "what RFC-055 changed");
+    let found = released_rfcs_still_in_flight(&planted, &in_flight);
+    assert!(
+        found
+            .iter()
+            .any(|message| message.contains("RFC-055") && message.contains("rfcs/accepted/")),
+        "{found:#?}"
+    );
+
+    // ...and finishing the RFC (moving it out of the in-flight folders) clears it.
+    let done = vec![("061".to_owned(), "proposed")];
+    assert!(
+        released_rfcs_still_in_flight(&planted, &done)
+            .iter()
+            .all(|message| !message.contains("RFC-055"))
+    );
+}

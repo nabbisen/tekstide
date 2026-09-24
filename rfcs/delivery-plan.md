@@ -28,7 +28,7 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | --- | --- | --- |
 | Project lifecycle | `REQ-PROJ-001`..`008` | Model complete, and every one of them now has a surface. **`REQ-PROJ-009` moved out of this row 2026-09-23**: a process-visible project lock does not exist — grepped, no `ProjectLock` or equivalent anywhere — and that requirement's own text says an in-memory guard is not enough |
 | Text document | `REQ-EDIT-001`, `004`..`007` | Model complete, single active document |
-| File explorer | `REQ-FILE-001` | Bounded read model **and a rendered tree with per-file Git badges** (RFC-030 PR-030-C). **`REQ-FILE-005` moved out 2026-09-23**: the scanner collapses a fixed `[.git, node_modules, target]` list, and reads no `.gitignore` at all |
+| File explorer | `REQ-FILE-001` | Bounded read model **and a rendered tree with per-file Git badges** (RFC-030 PR-030-C). **`REQ-FILE-005` was moved out 2026-09-23** (the scanner collapsed a fixed `[.git, node_modules, target]` list and read no `.gitignore` at all) **and is met by RFC-055 (2026-09-25, unreleased until `0.26.0`) with evidence it is reachable**: inside a repository the explorer asks git which entries are ignored, marks them `[ignored]`, and `explorer.show_ignored` (`REQ-FILE-006`) draws or hides them — `handoffs/055-explorer-ignore-rules/evidence/`, seven release captures. **Not complete without saying so: a global ignore file named by `core.excludesFile` is not honoured** (git runs without the user's configuration), so half of "user ignore configuration" is out of reach until that is decided |
 | Terminal sessions | `REQ-TERM-001`..`010` | Linux runtime complete; no renderer |
 | AgentRun | `REQ-AGENT-001`..`010`, `014`, `016`..`018` | Launch, lifecycle, transcript, review complete. **`011` and `015` moved out 2026-09-23**: no final report or handoff note exists (grepped: no producer, no surface), and `AgentRun` carries no run classification field at all — a user cannot mark a run as coding, review, documentation, testing, refactoring or release |
 | AI CLI profiles | `REQ-CLI-001`..`005` | Model complete; code-defined only, not user config |
@@ -48,7 +48,7 @@ Performed 2026-07-28 against `tekstide-requirements-v0.md` and the implemented s
 | Area | Requirements | Milestone |
 | --- | --- | --- |
 | **Desktop GUI** — every rendered surface | External design §3, UI/UX baseline | M8-M11 |
-| **`.gitignore` in the explorer, and an `ignored` badge** — the scanner collapses a fixed directory list; `git status` is invoked without `--ignored` | `REQ-FILE-005`, part of `002` | unscheduled (2026-09-23) |
+| **`.gitignore` in the explorer, and an `ignored` badge** — the scanner collapses a fixed directory list; `git status` is invoked without `--ignored` | `REQ-FILE-005`, part of `002` | **Built by RFC-055 (2026-09-25), awaiting review and `0.26.0`** — `REQ-FILE-005` (except `core.excludesFile`), `REQ-FILE-006` and the `ignored` category of `002` |
 | **AgentRun report/handoff note, and run classification** | `REQ-AGENT-011`, `015` | unscheduled (2026-09-23) |
 | **Process-visible project lock** — two Tekstide processes can hold the same project root with no conflict signal | `REQ-PROJ-009` | unscheduled (2026-09-23) |
 | **Syntax highlighting, a line-number gutter, undo** — the editor renders plain text with a cursor readout only | `REQ-EDIT-002` (part), `003` | M10 remainder, unscheduled |

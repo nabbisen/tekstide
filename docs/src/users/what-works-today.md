@@ -26,13 +26,26 @@ visible without stepping into `src/`; there is no "go up" row. Each folder is re
 (and again each time you reopen it), on a background thread, so opening a huge folder never freezes the
 window — the row says *Loading…* until it arrives. **Nothing is hidden silently:** a folder with more
 than 256 entries shows the first 256 and a row saying how many more there are; only the rows that fit
-the sidebar are drawn, and a line says which rows those are (*Rows 18–60 of 272*). Folders on the
-built-in list (`.git`, `node_modules`, `target`) are marked *(collapsed)* and can still be opened. A
-folder that cannot be read says so, and a link that points outside the project is marked *(blocked)*
+the sidebar are drawn, and a line says which rows those are (*Rows 18–60 of 272*). Folders that are ignored (or, outside a Git repository, on a built-in list) are marked *(collapsed)* and can still be opened (see *Ignored files* below).
+A folder that cannot be read says so, and a link that points outside the project is marked *(blocked)*
 and cannot be opened. Folders are listed first. A folder is `▣` (open: `▢`) and a file `▫`; these are text symbols, so a machine
 without those glyphs shows a blank box, and everything the row says is still in words. The file open in the
 editor is marked `[open]`; the `>` is where the keyboard is. **The tree does not watch the disk**: a file created after you opened a folder
-appears when you close and reopen it.
+appears when you close and reopen it. Each row is an icon, the **name**, and then the words that describe it
+(`(collapsed)`, `[untracked]`, `[open]`…), so a name is never cut short by its own status; in a narrow sidebar a *long* name
+is still clipped at the right edge, without a marker, and the line under the tree shows the highlighted row whole.
+
+**Ignored files.** Inside a Git repository, Tekstide asks **Git** which entries are ignored — it never reads a `.gitignore`
+itself — about the entries the sidebar is about to draw, and marks them `[ignored]`. **By default they are not drawn**, and the
+directory says how many it left out (*2 ignored entries hidden*); `explorer.show_ignored = true` in your configuration
+file draws them. Only ignored entries are affected: `.env`, `.gitignore` and every other dotfile are ordinary rows either way.
+A tracked file that matches an ignore pattern is tracked, not ignored. The first two lines of the sidebar say where the
+rule came from (*project's Git*, *parent Git repo*, *nested Git repo*, or *built-in* — with why Git was not used) and that
+**the marks are as old as the scan**: a `.gitignore` you edit is not reflected until the folder is read again. Outside a
+repository, in one Git will not be asked about, or under a repository rooted at your home directory, the built-in list
+(`.git`, `node_modules`, `target`) still applies, and says so. **Git is run without your personal Git configuration**, so a
+global ignore file you named with `core.excludesFile` is **not** applied (the default `$XDG_CONFIG_HOME/git/ignore`,
+`.git/info/exclude` and the repository's `.gitignore` files are).
 
 **The editor has no undo.** A mid-buffer edit is unrecoverable within the session past what
 `Backspace` can still reach. There is no syntax highlighting, language server, multi-cursor, or

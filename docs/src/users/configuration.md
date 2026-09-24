@@ -33,6 +33,9 @@ body_size = 16                      # pixels, 8 to 32
 
 [terminal]
 scrollback_lines = 5000             # lines of history a terminal keeps; at most 12,000
+
+[explorer]
+show_ignored = false                # draw the entries Git says are ignored; default false
 ```
 
 ## Keybindings
@@ -179,6 +182,22 @@ combining mark**, and the 64 MiB is not a promise about that.
 
 A value that is not a whole number of lines (`-1`, `2000.5`, `"lots"`) is not used, and the
 default stands.
+
+## The file explorer
+
+`[explorer] show_ignored` is `false` by default. Inside a Git repository the explorer asks Git which entries are
+ignored and, with this off, **does not draw them and says how many it left out** (*2 ignored entries hidden*);
+`true` draws them with an `[ignored]` word. It governs **ignored entries only** — `.env`, `.gitignore` and every
+other dotfile are ordinary rows whichever way it is set. A value that is not `true` or `false` is not used, the
+default stands, and the Project Board says so. `Ctrl+Alt+C` applies a change to projects that are already open.
+
+**What "ignored" means here is Git's answer**, not Tekstide's reading of a `.gitignore`: it is asked about the
+entries of each folder as it is read, so the marks are exactly as old as that read. Git is run **without your
+personal Git configuration** — the same restriction that keeps a repository from making Tekstide run a program — so
+a global ignore file named by `core.excludesFile` is not applied. A repository whose own configuration names
+something Tekstide does not vouch for (a hook-like setting such as `core.fsmonitor`) is not asked at all, and the
+built-in list decides; so does a repository rooted at your home directory, because a dotfiles repository that
+ignores everything would otherwise hide every project under it.
 
 ## Why the file is this narrow
 
