@@ -32,6 +32,7 @@ resulting pressure, each disclosed separately and each moved past:
 | `runtime::terminal::reader::tests::local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable` and `…required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it` | request 388 (2026-09-13) — **caused by PR-050-A, not load: the two tests share `/dev/full`'s lock. First attributed to load, wrongly; see the dated entry's correction. First masked by a test mutex; fixed at response 388 by locking regular files only, and the mutex removed.** |
 | `runtime::terminal::reader::tests::the_wake_notifier_wakes_when_real_pty_output_arrives` | review of request 391 (2026-09-15) — **a race inside the test; mechanism confirmed by measurement and fixed in RFC-050 PR-050-B's first commit (2026-09-16).** The test now holds `exit` back until the first wake is observed. See the dated entries. |
 | `audit::tests::purge::purge_reports_deferred_cleanup_while_wal_reader_is_active` | RFC-030 PR-030-B's wiring-layer gate, run 3 of 3 (2026-09-22) — failed once under the third of three consecutive full-workspace runs; passed immediately in isolation (`cargo test -p tekstide-core audit::tests::purge::purge_reports_deferred_cleanup_while_wal_reader_is_active`, 1 passed, 0 failed). The name names its own contention (a WAL reader held open while purge runs); not investigated further this session — flagged as a candidate for the same class of SQLite-under-parallel-load timing sensitivity this document's other rows already describe, not confirmed as the same root cause. |
+| `runtime::git::tests::every_failure_to_answer_is_unknown_and_never_none_ignored` | RFC-055 PR-055-C, one ablation run (2026-09-25) — **suspected `ETXTBSY` on a stand-in `git` script; not reproduced; mitigated in the test, see the dated section at the end** |
 
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
@@ -1154,3 +1155,23 @@ a *short* one.
 ## Recurrence, 2026-09-24 — RFC-052 PR-052-C's gate (implementer's run)
 
 Two already-registered intermittents, one in each of two runs of a three-run full-workspace gate (`625 + 9 + 902`; the middle run clean at `626 + 9 + 902`): `shell::tests::change_review_content_view_build_cost_by_line_count_measurement` (the load-sensitive timing budget, its own panic message says to check the load average) and, in the other run, `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` (**row 8**, same shape as before). Both passed in isolation. Not the slice: this response's changes are the explorer's row text, the Project Board's cards and a wider sidebar; nothing touches terminal termination or the change-review view. The gate was redone, not counted.
+
+## Recurrence, 2026-09-25 — RFC-055 PR-055-C, a new test of RFC-055 PR-055-A's own
+
+`runtime::git::tests::every_failure_to_answer_is_unknown_and_never_none_ignored` (added in PR-055-A, gated green three
+times at that slice) failed **once**, in a full-workspace ablation run (`ablate.sh`, a surface-only change that cannot touch
+it) at load ~9. Passed alone 8/8 straight after, and **40 of 40 with 24 busy-loops pushing the load average past 33** — so
+this is **not reproduced**, and the cause below is a hypothesis, not a measurement. The failure output was not captured (the
+ablation script filters it), which is itself a lesson for the script.
+
+**Hypothesis: `ETXTBSY`.** The test writes eight stand-in `git` scripts and executes each immediately. Tests in this binary
+run in parallel and fork; a child forked by another thread while this one held the script open for writing inherits that
+descriptor until it execs, and executing the script in the window fails with `Text file busy`, which the module reports as
+`NotFound` — so a case that asserts `Unknown(QueryFailed)` would see `Unknown(GateRefused)`. That is the mechanism this
+project has already met for `flock` (row `transcript::tests::a_live_writer_holds_an_exclusive_lock_until_it_is_dropped`, a
+fork-duplicated descriptor) and it fits a once-in-hundreds failure that vanishes when the tests run alone.
+
+**Mitigation, in the test:** `fake_git_with_config` now runs the script once with retries on `ETXTBSY` before handing it out
+(`wait_until_executable`). Whether that closes it can only be learned by not seeing the failure again; **if it recurs,
+capture the assertion message** (`cargo test … --no-fail-fast > file`, not through the ablation script's filter) before
+anything else. The other tests that write executable scripts (`marker_script`) have the same exposure and were not changed.

@@ -1377,6 +1377,25 @@ fn set(list: &[&str]) -> std::collections::BTreeSet<OsString> {
     list.iter().map(OsString::from).collect()
 }
 
+/// **`ETXTBSY` (`Text file busy`) on a script written a moment ago.** Tests in this
+/// binary run in parallel and each forks children; a child forked by *another*
+/// thread while this one still has the script open for writing inherits that
+/// descriptor until it execs, and executing the script in that window fails with
+/// `ETXTBSY`. The stand-in `git` would then be reported as "not found" and a
+/// refusal test would see `GateRefused` where it asserts `QueryFailed` -- one
+/// failure in a workspace run at load ~9, not reproduced (40 runs at load 33). So
+/// a stand-in is not handed out until it has been executed once successfully.
+fn wait_until_executable(path: &Path) {
+    for _ in 0..200 {
+        match Command::new(path).arg("--version").output() {
+            Err(error) if error.raw_os_error() == Some(26) => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            _ => return,
+        }
+    }
+}
+
 impl Fixture {
     /// Asks the query as production does, against this fixture's own `git`
     /// and environment.
@@ -1409,6 +1428,7 @@ impl Fixture {
         let mut permissions = fs::metadata(&path).unwrap().permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&path, permissions).unwrap();
+        wait_until_executable(&path);
         path.display().to_string()
     }
 
