@@ -98,6 +98,14 @@
 //!    `AcceptedBranchOnly` no longer names the key that triggered it, at
 //!    all -- there is nothing left for this item to bound).
 //!
+//! **RFC-055 PR-055-A** adds a second question beside [`compute_summary`]: which
+//! entries of a directory does git say are ignored ([`ignored_entries`]). It
+//! shares this module's executable resolution, environment and bounded runner,
+//! and asks the *configuration* half of the gate (`vet_configuration`) --
+//! `git check-ignore` runs a repository's `core.fsmonitor` program, so it may not
+//! be asked of a repository the gate does not accept. The gitlink check and the
+//! attributes walk are about trusting a *content* comparison and are not repeated.
+//!
 //! **PR-030-D (review 413/414)**: item 1's own text above covers *why* a
 //! fixed `/usr/bin:/bin`-only search (the original item 4, before this
 //! RFC) left `git` silently unreachable on a distribution that installs
@@ -354,8 +362,39 @@ fn evaluate_with_environment_and_walk_budget(
     forwarded_env: &[(String, String)],
     walk_budget: usize,
 ) -> GitGateOutcome {
+    if let Err(outcome) = vet_configuration(repository_root, git_executable, forwarded_env) {
+        return outcome;
+    }
+
+    if worktree_names_a_content_driver(repository_root, git_executable, forwarded_env, walk_budget)
+    {
+        GitGateOutcome::AcceptedBranchOnly
+    } else {
+        GitGateOutcome::Accepted
+    }
+}
+
+/// **The half of the gate that decides whether `git` may be run in this
+/// repository at all** (RFC-055 PR-055-A): the version check, then the
+/// repository's effective configuration against the allowlist. `Ok(())` means
+/// nothing the configuration names is a program; `Err` carries the outcome
+/// [`evaluate_with_environment_and_walk_budget`] returns for it, unchanged.
+///
+/// Split out because the *other* half -- [`worktree_names_a_content_driver`]'s
+/// gitlink check and its walk of every `.gitattributes` in the worktree -- is
+/// about whether a **content comparison** can be trusted, which the module
+/// doc says in so many words is "not a safety problem". A question that reads
+/// no content (`git check-ignore`) needs the first half and not the second,
+/// and the second is expensive: measured on this repository, the whole gate
+/// is ~115 ms warm and the walk is ~117 ms of it, against under 5 ms for the
+/// rest. RFC-055's "a few milliseconds including the gate" was the rest.
+fn vet_configuration(
+    repository_root: &Path,
+    git_executable: &str,
+    forwarded_env: &[(String, String)],
+) -> Result<(), GitGateOutcome> {
     if let Err(reason) = check_git_available(git_executable, forwarded_env) {
-        return GitGateOutcome::Refused(reason);
+        return Err(GitGateOutcome::Refused(reason));
     }
 
     let config_output = match run_bounded_git(
@@ -365,11 +404,11 @@ fn evaluate_with_environment_and_walk_budget(
         forwarded_env,
     ) {
         Ok(output) if output.status.success() => output,
-        Ok(_) => return GitGateOutcome::Refused(GitUnavailableReason::SpawnFailed),
-        Err(reason) => return GitGateOutcome::Refused(reason),
+        Ok(_) => return Err(GitGateOutcome::Refused(GitUnavailableReason::SpawnFailed)),
+        Err(reason) => return Err(GitGateOutcome::Refused(reason)),
     };
     let Some(entries) = parse_null_separated_config(&config_output.stdout) else {
-        return GitGateOutcome::Refused(GitUnavailableReason::OutputNotUtf8);
+        return Err(GitGateOutcome::Refused(GitUnavailableReason::OutputNotUtf8));
     };
 
     // R7 (review 407, amending D1'): an unrecognised key -- including
@@ -383,16 +422,10 @@ fn evaluate_with_environment_and_walk_budget(
         let lower = key.to_ascii_lowercase();
         let is_include = lower == "include.path" || lower.starts_with("includeif.");
         if is_include || !config_key_is_allowed(key) {
-            return GitGateOutcome::AcceptedBranchOnly;
+            return Err(GitGateOutcome::AcceptedBranchOnly);
         }
     }
-
-    if worktree_names_a_content_driver(repository_root, git_executable, forwarded_env, walk_budget)
-    {
-        GitGateOutcome::AcceptedBranchOnly
-    } else {
-        GitGateOutcome::Accepted
-    }
+    Ok(())
 }
 
 /// PR-030-B: the gate decides what is safe; this turns that decision into
@@ -423,6 +456,284 @@ pub fn compute_summary(repository_root: &Path) -> ProjectGitSummary {
         ),
         None => branch_only_summary(repository_root),
     }
+}
+
+/// **RFC-055 PR-055-A. What asking git which of a directory's entries are
+/// ignored produced -- three answers, never two.**
+///
+/// `NoneIgnored` and `Unknown` are different values on purpose. `git
+/// check-ignore` exits `1` when none of the batch is ignored, which *looks*
+/// like a failure and is an answer; failing to ask at all is not an answer,
+/// and drawing it as "nothing is ignored" would mark ignored files ordinary
+/// (fail open) while drawing it as "everything is ignored" would hide files
+/// from a user auditing what an agent can read (fail closed, and worse). A
+/// caller matches all three.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IgnoreAnswer {
+    /// Git answered, and these entries of the directory are ignored. Never
+    /// empty -- an empty set is [`IgnoreAnswer::NoneIgnored`]. Every entry
+    /// asked about and not in the set is **not** ignored. Names, not paths,
+    /// as raw OS strings: a filename need not be UTF-8.
+    Ignored(std::collections::BTreeSet<std::ffi::OsString>),
+    /// Git answered (exit `1`): none of the entries asked about is ignored.
+    NoneIgnored,
+    /// Git could not be asked, or did not answer. The caller falls back to
+    /// its floor and says so; it must not treat this as either of the above.
+    Unknown(IgnoreUnknown),
+}
+
+/// Why there was no answer. A closed set, carrying nothing the repository
+/// wrote -- a diagnostic built from it cannot echo a filename or a config
+/// key.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IgnoreUnknown {
+    /// No repository encloses the directory, so there is nothing to ask. Costs
+    /// no subprocess. Also the answer for a repository rooted at the user's
+    /// own home directory: see [`ignored_entries`].
+    NotARepository,
+    /// `git` could not be located, is too old, or the repository's
+    /// configuration names something the gate does not vouch for. Nothing
+    /// was run.
+    GateRefused,
+    /// `git` ran and did not give an answer: an exit other than `0`/`1`, a
+    /// timeout, a spawn failure, or output that contradicted the exit code or
+    /// named a path that was not asked about.
+    QueryFailed,
+    /// More names than one query may carry, or a name that is not a single
+    /// directory entry (empty, `.`, `..`, containing `/` or NUL, over 255
+    /// bytes). The caller bug is refused whole rather than partly answered.
+    UnusableName,
+}
+
+/// The most entries one query carries. The explorer caps a directory at 256
+/// children (`max_children_per_directory`); this is the same bound stated
+/// again where the subprocess is, so no caller can turn a scan into an
+/// unbounded write to git's standard input.
+pub const MAX_IGNORE_QUERY_ENTRIES: usize = 1_024;
+const MAX_ENTRY_NAME_BYTES: usize = 255;
+// A reply echoes only paths that were asked about, so it is never larger
+// than the request: with these bounds a reply cannot reach the pipe's byte
+// cap, and `read_bounded` truncating it (which would silently turn "ignored"
+// into "not ignored") is unreachable. Held at compile time.
+const _: () = assert!(MAX_IGNORE_QUERY_ENTRIES * (MAX_ENTRY_NAME_BYTES + 3) < MAX_OUTPUT_BYTES);
+
+/// Asks git which of `names` -- entries **of `directory`** -- are ignored.
+///
+/// The repository is the one enclosing `directory` (nearest `.git`, a
+/// directory or a pointer file, at or above it), so a project root nested
+/// inside its repository still gets the repository-root ignore rules: measured,
+/// the query from `sub/deep` applies the root `.gitignore`. Two exceptions
+/// return [`IgnoreUnknown::NotARepository`] without running anything: no
+/// repository encloses it, or the enclosing repository is rooted at the user's
+/// **home directory or above it**. A dotfiles repository at `~` whose
+/// `.gitignore` says `*` would otherwise answer "ignored" for every entry of
+/// every project under `~`, and a default that hides ignored rows would hide
+/// the user's whole tree. Tekstide's status bar already reads only a `.git` at
+/// the project root; this asks a different question of a wider place, so it
+/// declines the one repository shape that is common, deliberate and wrong here.
+///
+/// **The gate runs first, every call, and is not cached (RFC-055 D9)** -- but
+/// only [`vet_configuration`], the half that decides whether `git` may run at
+/// all. That is required, not conservative: measured, `git check-ignore` **does**
+/// run a repository's `core.fsmonitor` program (it reads the index), so a
+/// repository the gate does not accept must not be asked anything. What it
+/// does not run is a submodule's own configuration, or a clean filter -- it
+/// reads no content -- so the gitlink check and the attributes walk that guard
+/// `git status` are not repeated here (and cost ~115 ms on this repository).
+///
+/// Every entry goes to git as `./<name>` and comes back through the same
+/// type ([`IgnoreQueryInput`]), the only way to build a query, so a filename
+/// like `:(glob)evil.log` cannot abort the batch for its siblings (measured:
+/// exit 128, no answer for anything) -- and no caller can hand git a raw path.
+pub fn ignored_entries(directory: &Path, names: &[std::ffi::OsString]) -> IgnoreAnswer {
+    // The executable is located against the *repository being read* (its root
+    // is what `PATH` entries are filtered against), so the repository is
+    // found first; a directory in no repository never reaches a `PATH` search.
+    let Ok(canonical) = std::fs::canonicalize(directory) else {
+        return IgnoreAnswer::Unknown(IgnoreUnknown::QueryFailed);
+    };
+    let Some(repository_root) = enclosing_repository_root(&canonical) else {
+        return IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository);
+    };
+    let Some(git_executable) =
+        resolve_git_executable(&repository_root).and_then(|path| path.to_str().map(str::to_owned))
+    else {
+        return IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused);
+    };
+    ignored_entries_in_environment(directory, names, &git_executable, &forwarded_environment())
+}
+
+/// [`ignored_entries`] with the executable and environment supplied, so a test
+/// can substitute both without touching the real process environment.
+fn ignored_entries_in_environment(
+    directory: &Path,
+    names: &[std::ffi::OsString],
+    git_executable: &str,
+    forwarded_env: &[(String, String)],
+) -> IgnoreAnswer {
+    let Ok(directory) = std::fs::canonicalize(directory) else {
+        return IgnoreAnswer::Unknown(IgnoreUnknown::QueryFailed);
+    };
+    let Some(repository_root) = enclosing_repository_root(&directory) else {
+        return IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository);
+    };
+    ignored_entries_with_environment(
+        &repository_root,
+        &directory,
+        names,
+        git_executable,
+        forwarded_env,
+    )
+}
+
+fn ignored_entries_with_environment(
+    repository_root: &Path,
+    directory: &Path,
+    names: &[std::ffi::OsString],
+    git_executable: &str,
+    forwarded_env: &[(String, String)],
+) -> IgnoreAnswer {
+    // Before anything else, and without a subprocess: a name that is not one
+    // directory entry, or too many of them, is refused whole.
+    let input = match IgnoreQueryInput::new(names) {
+        Ok(input) => input,
+        Err(unknown) => return IgnoreAnswer::Unknown(unknown),
+    };
+    if input.is_empty() {
+        // Nothing was asked, so nothing is ignored -- a true answer that
+        // needs no repository and no process.
+        return IgnoreAnswer::NoneIgnored;
+    }
+    if repository_is_at_or_above_home(repository_root, forwarded_env) {
+        return IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository);
+    }
+    if vet_configuration(repository_root, git_executable, forwarded_env).is_err() {
+        return IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused);
+    }
+
+    let output = match run_bounded_git_with_input(
+        git_executable,
+        &["check-ignore", "-z", "--stdin"],
+        Some(directory),
+        forwarded_env,
+        input.bytes().to_vec(),
+    ) {
+        Ok(output) => output,
+        Err(_) => return IgnoreAnswer::Unknown(IgnoreUnknown::QueryFailed),
+    };
+
+    match output.status.code() {
+        // Exit 1 is an answer: none of the batch is ignored. It must also be
+        // an *empty* answer; a reply that contradicts the exit code is not one.
+        Some(1) if output.stdout.is_empty() => IgnoreAnswer::NoneIgnored,
+        Some(0) => match input.parse_reply(&output.stdout) {
+            Some(ignored) if !ignored.is_empty() => IgnoreAnswer::Ignored(ignored),
+            _ => IgnoreAnswer::Unknown(IgnoreUnknown::QueryFailed),
+        },
+        _ => IgnoreAnswer::Unknown(IgnoreUnknown::QueryFailed),
+    }
+}
+
+/// The prefix every name goes to git with, and comes back with. `./` because a
+/// path that begins with `:` is read as pathspec magic and one that begins with
+/// `./` is not (measured). Defined once; applied in [`IgnoreQueryInput::new`] and
+/// stripped in [`IgnoreQueryInput::parse_reply`], and nowhere else.
+const QUERY_PREFIX: &[u8] = b"./";
+
+/// A query git can be handed: built only from directory-entry names, with the
+/// `./` prefix applied here and nowhere else, and able to read its own reply
+/// back. There is no constructor from a path, so no call site can pass git a
+/// string that begins with pathspec magic.
+struct IgnoreQueryInput {
+    /// `./name\0` for each distinct name, in order.
+    bytes: Vec<u8>,
+    /// The names as raw bytes, for checking that a reply names only what was
+    /// asked about.
+    asked: std::collections::BTreeSet<Vec<u8>>,
+}
+
+impl IgnoreQueryInput {
+    fn new(names: &[std::ffi::OsString]) -> Result<Self, IgnoreUnknown> {
+        use std::os::unix::ffi::OsStrExt;
+        if names.len() > MAX_IGNORE_QUERY_ENTRIES {
+            return Err(IgnoreUnknown::UnusableName);
+        }
+        let mut bytes = Vec::new();
+        let mut asked = std::collections::BTreeSet::new();
+        for name in names {
+            let raw = name.as_bytes();
+            let usable = !raw.is_empty()
+                && raw.len() <= MAX_ENTRY_NAME_BYTES
+                && raw != b"."
+                && raw != b".."
+                && !raw.contains(&b'/')
+                && !raw.contains(&0);
+            if !usable {
+                return Err(IgnoreUnknown::UnusableName);
+            }
+            if asked.insert(raw.to_vec()) {
+                bytes.extend_from_slice(QUERY_PREFIX);
+                bytes.extend_from_slice(raw);
+                bytes.push(0);
+            }
+        }
+        Ok(Self { bytes, asked })
+    }
+
+    fn is_empty(&self) -> bool {
+        self.asked.is_empty()
+    }
+
+    fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// The names git echoed back, prefix stripped, as raw OS strings. `None`
+    /// when the reply is not what a well-behaved `-z` reply is: a record
+    /// without its terminating NUL, one without the prefix, or one naming
+    /// something that was not asked about.
+    fn parse_reply(&self, stdout: &[u8]) -> Option<std::collections::BTreeSet<std::ffi::OsString>> {
+        use std::os::unix::ffi::OsStringExt;
+        let body = stdout.strip_suffix(&[0u8])?;
+        let mut ignored = std::collections::BTreeSet::new();
+        for record in body.split(|byte| *byte == 0) {
+            let name = record.strip_prefix(QUERY_PREFIX)?;
+            if !self.asked.contains(name) {
+                return None;
+            }
+            ignored.insert(std::ffi::OsString::from_vec(name.to_vec()));
+        }
+        Some(ignored)
+    }
+}
+
+/// Nearest ancestor of `directory` (itself included) with a `.git` -- a
+/// directory or a pointer file -- which is what git's own discovery finds.
+/// `directory` is expected canonical, so this and git agree about symlinks.
+fn enclosing_repository_root(directory: &Path) -> Option<PathBuf> {
+    directory
+        .ancestors()
+        .find(|candidate| resolve_git_dir_from_filesystem(candidate).is_some())
+        .map(Path::to_path_buf)
+}
+
+/// True when the repository is rooted at the user's home directory or above it.
+/// `HOME` comes from the forwarded environment (Tekstide's own, never the
+/// project's); unset or unresolvable, nothing is excluded.
+fn repository_is_at_or_above_home(
+    repository_root: &Path,
+    forwarded_env: &[(String, String)],
+) -> bool {
+    let Some((_, home)) = forwarded_env.iter().find(|(var, _)| var == "HOME") else {
+        return false;
+    };
+    let Ok(home) = std::fs::canonicalize(home) else {
+        return false;
+    };
+    let Ok(repository_root) = std::fs::canonicalize(repository_root) else {
+        return false;
+    };
+    home.starts_with(&repository_root)
 }
 
 fn compute_summary_with_environment(
@@ -1123,6 +1434,22 @@ fn run_bounded_git(
     )
 }
 
+/// [`run_bounded_git`] with bytes written to the child's standard input and
+/// then closed. The write happens on its own thread, so a child that answers
+/// before it has read everything (or never reads) cannot deadlock this call,
+/// and a timeout still kills it.
+fn run_bounded_git_with_input(
+    git_executable: &str,
+    args: &[&str],
+    cwd: Option<&Path>,
+    forwarded_env: &[(String, String)],
+    input: Vec<u8>,
+) -> Result<BoundedOutput, GitUnavailableReason> {
+    let mut command = spawn_git_command(git_executable, args, cwd, forwarded_env);
+    command.stdin(Stdio::piped());
+    run_bounded_with_input(command, SUBPROCESS_TIMEOUT, MAX_OUTPUT_BYTES, Some(input))
+}
+
 /// Item 1, 2, 3, 4 and 5 of RFC-012's gate (see the module doc comment):
 /// a bare non-project-local executable name against a fixed `PATH`, a
 /// deterministic argv, no shell, and a cleared environment carrying
@@ -1173,13 +1500,31 @@ enum WaitOutcome {
 /// Item 7: bounds both wall-clock time and captured bytes on every call,
 /// regardless of what the repository or the program it names does.
 fn run_bounded(
+    command: Command,
+    timeout: Duration,
+    max_bytes: usize,
+) -> Result<BoundedOutput, GitUnavailableReason> {
+    run_bounded_with_input(command, timeout, max_bytes, None)
+}
+
+fn run_bounded_with_input(
     mut command: Command,
     timeout: Duration,
     max_bytes: usize,
+    input: Option<Vec<u8>>,
 ) -> Result<BoundedOutput, GitUnavailableReason> {
     let mut child = command
         .spawn()
         .map_err(|_| GitUnavailableReason::NotFound)?;
+    if let Some(input) = input
+        && let Some(mut stdin) = child.stdin.take()
+    {
+        thread::spawn(move || {
+            use std::io::Write;
+            let _ = stdin.write_all(&input);
+            // Dropped here: the child sees end of input.
+        });
+    }
     let mut stdout_pipe = child
         .stdout
         .take()
@@ -1201,7 +1546,11 @@ fn run_bounded(
                     let _ = child.wait();
                     break WaitOutcome::TimedOut;
                 }
-                thread::sleep(Duration::from_millis(10));
+                // 1 ms, not the 10 ms it was: every git call paid up to the poll
+                // interval on top of the process itself, so a query git answers in
+                // about a millisecond cost twenty. Measured (RFC-055 PR-055-A): the
+                // whole ignore query, gate included, 20 ms at 10 ms and 2.3 ms at 1 ms.
+                thread::sleep(Duration::from_millis(1));
             }
             Err(_) => break WaitOutcome::WaitFailed,
         }

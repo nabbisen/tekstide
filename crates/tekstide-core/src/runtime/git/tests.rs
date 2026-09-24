@@ -1364,3 +1364,470 @@ fn a_second_call_with_the_same_verified_executable_does_not_respawn_version() {
         "the second call must be served from the cache, not a second real spawn"
     );
 }
+
+// --- RFC-055 PR-055-A: which entries of a directory does git say are ignored ---
+
+use std::ffi::OsString;
+
+fn names(list: &[&str]) -> Vec<OsString> {
+    list.iter().map(OsString::from).collect()
+}
+
+fn set(list: &[&str]) -> std::collections::BTreeSet<OsString> {
+    list.iter().map(OsString::from).collect()
+}
+
+impl Fixture {
+    /// Asks the query as production does, against this fixture's own `git`
+    /// and environment.
+    fn ask(&self, directory: &Path, entries: &[OsString]) -> IgnoreAnswer {
+        ignored_entries_in_environment(directory, entries, GIT_EXECUTABLE, &self.forwarded_env)
+    }
+
+    /// A stand-in `git` that satisfies the gate (a version, an empty
+    /// configuration) and answers `check-ignore` with `body`. Every
+    /// subcommand it is run with leaves a marker, so a test can assert that
+    /// **nothing was run** when nothing should have been.
+    fn fake_git(&self, name: &str, check_ignore_body: &str) -> String {
+        let path = self.root.join(format!("{name}.sh"));
+        let markers = self.markers.display();
+        let script = format!(
+            "#!/bin/sh\ntouch '{markers}/{name}-invoked'\ncase \"$1\" in\n  --version) echo 'git version 2.43.0';;\n  config) exit 0;;\n  check-ignore) touch '{markers}/{name}-check-ignore'; cat > /dev/null; {check_ignore_body};;\n  *) exit 2;;\nesac\n"
+        );
+        fs::write(&path, script).unwrap();
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions).unwrap();
+        path.display().to_string()
+    }
+
+    fn ask_with(&self, git: &str, directory: &Path, entries: &[OsString]) -> IgnoreAnswer {
+        ignored_entries_in_environment(directory, entries, git, &self.forwarded_env)
+    }
+}
+
+/// **D3, and why it is structural.** A file named `:(glob)evil.log` beside
+/// ordinary files: **every sibling still gets an answer.**
+///
+/// Delete the `./` prefix in [`IgnoreQueryInput::new`] and this test fails: git
+/// exits **128** with `fatal: :(glob)evil.log: pathspec magic not supported by
+/// this command: 'glob'` and answers *nothing* for anyone
+/// (`a_raw_glob_named_path_aborts_the_whole_batch` shows that abort with a raw
+/// query, so this test's pass is not a fixture that never was hostile).
+#[test]
+fn a_file_named_like_pathspec_magic_does_not_silence_its_siblings() {
+    let fixture = Fixture::new("ignore-glob-name");
+    fixture.write(".gitignore", "*.log\n");
+    fixture.write(":(glob)evil.log", "x");
+    fixture.write("a.log", "x");
+    fixture.write("b.txt", "x");
+    fixture.write("c.txt", "x");
+
+    let answer = fixture.ask(
+        &fixture.repo,
+        &names(&[":(glob)evil.log", "a.log", "b.txt", "c.txt"]),
+    );
+    assert_eq!(
+        answer,
+        IgnoreAnswer::Ignored(set(&[":(glob)evil.log", "a.log"])),
+        "the hostile name must be answered, and so must every sibling"
+    );
+}
+
+/// The ablation the checklist wants before trusting the test above: a **raw**
+/// query -- the path handed to git as-is -- really does abort the batch.
+#[test]
+fn a_raw_glob_named_path_aborts_the_whole_batch() {
+    let fixture = Fixture::new("ignore-glob-raw");
+    fixture.write(".gitignore", "*.log\n");
+    fixture.write(":(glob)evil.log", "x");
+    fixture.write("a.log", "x");
+
+    let mut child = Command::new("git")
+        .args(["check-ignore", "-z", "--stdin"])
+        .current_dir(&fixture.repo)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .envs(fixture.forwarded_env.iter().cloned())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b":(glob)evil.log\0a.log\0")
+            .unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(128));
+    assert!(output.stdout.is_empty(), "a sibling was answered after all");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("pathspec magic not supported"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// D4: exit `1` is an answer. A directory with nothing ignored -- and a name
+/// that does not exist, which also exits `1` -- is [`IgnoreAnswer::NoneIgnored`],
+/// which is a different value from [`IgnoreAnswer::Unknown`] in every case
+/// below.
+#[test]
+fn nothing_ignored_is_an_answer_and_not_an_unknown() {
+    let fixture = Fixture::new("ignore-none");
+    fixture.write(".gitignore", "*.log\n");
+    fixture.write("a.txt", "x");
+
+    assert_eq!(
+        fixture.ask(&fixture.repo, &names(&["a.txt", "does-not-exist"])),
+        IgnoreAnswer::NoneIgnored
+    );
+    assert_ne!(
+        IgnoreAnswer::NoneIgnored,
+        IgnoreAnswer::Unknown(IgnoreUnknown::QueryFailed)
+    );
+    // Nothing asked, nothing ignored: an answer that needs no process.
+    assert_eq!(fixture.ask(&fixture.repo, &[]), IgnoreAnswer::NoneIgnored);
+}
+
+/// D4: a failure is unknown -- never `NoneIgnored` (fail open) and never a
+/// set (fail closed). Every way a `git` can fail to answer, and every way a
+/// reply can be wrong, lands on `Unknown`.
+#[test]
+fn every_failure_to_answer_is_unknown_and_never_none_ignored() {
+    let fixture = Fixture::new("ignore-forced-failure");
+    fixture.write("a.log", "x");
+    let entries = names(&["a.log", "b.txt"]);
+    let unknown = IgnoreAnswer::Unknown(IgnoreUnknown::QueryFailed);
+
+    let cases = [
+        ("exit-128", "echo 'fatal: boom' >&2; exit 128"),
+        ("exit-2", "exit 2"),
+        // Exit 1 must come with an empty reply.
+        ("exit-1-with-a-reply", "printf './a.log\\0'; exit 1"),
+        // Exit 0 means something was ignored: an empty reply contradicts it.
+        ("exit-0-empty", "exit 0"),
+        // A record git never terminated.
+        ("unterminated", "printf './a.log'; exit 0"),
+        // A path nobody asked about.
+        ("unasked", "printf './other.log\\0'; exit 0"),
+        // A path without the prefix this module put on it.
+        ("unprefixed", "printf 'a.log\\0'; exit 0"),
+        ("killed", "kill -9 $$"),
+    ];
+    for (name, body) in cases {
+        let git = fixture.fake_git(name, body);
+        assert_eq!(
+            fixture.ask_with(&git, &fixture.repo, &entries),
+            unknown,
+            "{name}"
+        );
+        assert!(
+            fixture.marker_exists(&format!("{name}-check-ignore")),
+            "{name}: the fake must actually have been asked"
+        );
+    }
+    // ...and the well-behaved one, through the same fake, is an answer.
+    let git = fixture.fake_git("well-behaved", "printf './a.log\\0'; exit 0");
+    assert_eq!(
+        fixture.ask_with(&git, &fixture.repo, &entries),
+        IgnoreAnswer::Ignored(set(&["a.log"]))
+    );
+}
+
+/// D5's "do not pass `--no-index`": a **tracked** file that matches a pattern
+/// is tracked, and the query says it is not ignored -- while an untracked file
+/// matching the same pattern is.
+#[test]
+fn a_tracked_file_matching_a_pattern_is_not_ignored() {
+    let fixture = Fixture::new("ignore-tracked");
+    fixture.write(".gitignore", "*.log\n");
+    fixture.write("tracked.log", "x");
+    fixture.write("untracked.log", "x");
+    fixture.setup_git(&["add", "-f", ".gitignore", "tracked.log"]);
+    fixture.setup_git(&["commit", "-q", "-m", "initial"]);
+
+    assert_eq!(
+        fixture.ask(&fixture.repo, &names(&["tracked.log", "untracked.log"])),
+        IgnoreAnswer::Ignored(set(&["untracked.log"]))
+    );
+}
+
+/// The measured requirement: a project root **two levels inside** its
+/// repository still gets the repository-root `.gitignore`, and a directory
+/// pattern (`build/`) applies to a directory asked about by name.
+#[test]
+fn a_project_root_inside_its_repository_gets_the_repository_root_rules() {
+    let fixture = Fixture::new("ignore-nested-root");
+    fixture.write(".gitignore", "*.log\nbuild/\n");
+    let deep = fixture.repo.join("sub").join("deep");
+    fs::create_dir_all(deep.join("build")).unwrap();
+    fs::write(deep.join("a.log"), "x").unwrap();
+    fs::write(deep.join("b.txt"), "x").unwrap();
+
+    assert_eq!(
+        enclosing_repository_root(&fs::canonicalize(&deep).unwrap()),
+        Some(fs::canonicalize(&fixture.repo).unwrap()),
+        "the repository is found above the directory"
+    );
+    assert_eq!(
+        fixture.ask(&deep, &names(&["a.log", "b.txt", "build"])),
+        IgnoreAnswer::Ignored(set(&["a.log", "build"]))
+    );
+}
+
+/// R6: `-z` is bytes. A filename that is not UTF-8 comes back exactly, and
+/// nothing decodes lossily on the way to the comparison.
+#[test]
+fn a_non_utf8_filename_survives_the_round_trip() {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+    let fixture = Fixture::new("ignore-non-utf8");
+    fixture.write(".gitignore", "*.log\n");
+    let odd = OsString::from_vec(b"caf\xe9.log".to_vec());
+    fs::write(fixture.repo.join(&odd), "x").unwrap();
+    fixture.write("plain.txt", "x");
+
+    let answer = fixture.ask(&fixture.repo, &[odd.clone(), OsString::from("plain.txt")]);
+    match answer {
+        IgnoreAnswer::Ignored(found) => {
+            assert_eq!(found.len(), 1);
+            assert_eq!(found.iter().next().unwrap().as_bytes(), b"caf\xe9.log");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Not a repository: unknown, with **no subprocess** -- a fake `git` that would
+/// leave a marker for any invocation sees none.
+#[test]
+fn not_a_repository_is_unknown_without_running_anything() {
+    let fixture = Fixture::new("ignore-not-a-repository");
+    let plain = fixture.root.join("plain");
+    fs::create_dir_all(&plain).unwrap();
+    fs::write(plain.join("a.log"), "x").unwrap();
+    let git = fixture.fake_git("not-a-repo", "printf './a.log\\0'; exit 0");
+
+    assert_eq!(
+        fixture.ask_with(&git, &plain, &names(&["a.log"])),
+        IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository)
+    );
+    assert!(!fixture.marker_exists("not-a-repo-invoked"));
+}
+
+/// The gate refusing, and `git` being unavailable: unknown, and the program a
+/// repository names is never run. First the hostile control -- an unprotected
+/// `git check-ignore` **does** run `core.fsmonitor` (measured; it reads the
+/// index), which is why the gate is required and not merely careful.
+#[test]
+fn a_repository_the_gate_does_not_accept_is_never_asked_anything() {
+    let fixture = Fixture::new("ignore-gate-refused");
+    fixture.write(".gitignore", "*.log\n");
+    fixture.write("a.log", "x");
+    let script = fixture.marker_script("marker-fsmonitor", "exit 0");
+    fixture.set_config("core.fsmonitor", script.to_str().unwrap());
+    fixture.clear_markers();
+
+    // The control: no gate, and the repository's program runs.
+    let unprotected = Command::new("git")
+        .args(["check-ignore", "./a.log"])
+        .current_dir(&fixture.repo)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .envs(fixture.forwarded_env.iter().cloned())
+        .output()
+        .unwrap();
+    assert!(unprotected.status.success());
+    assert!(
+        fixture.marker_exists("marker-fsmonitor"),
+        "an unprotected `git check-ignore` must run a repository-named fsmonitor, or the gate is \
+         not what this query needs"
+    );
+    fixture.clear_markers();
+
+    assert_eq!(
+        fixture.ask(&fixture.repo, &names(&["a.log"])),
+        IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused)
+    );
+    assert!(
+        !fixture.marker_exists("marker-fsmonitor"),
+        "the query ran a program the repository named"
+    );
+
+    // Git not found: the same answer, and no panic.
+    let clean = Fixture::new("ignore-no-git");
+    clean.write("a.log", "x");
+    assert_eq!(
+        ignored_entries_in_environment(
+            &clean.repo,
+            &names(&["a.log"]),
+            "tekstide-test-no-such-git",
+            &clean.forwarded_env
+        ),
+        IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused)
+    );
+}
+
+/// **D9: the gate is not cached.** The same repository is accepted, then a
+/// program is added to its configuration, then it is refused -- the second
+/// call re-reads the configuration rather than remembering the first answer.
+/// Ablated by caching the gate's verdict per repository root.
+#[test]
+fn the_gate_is_asked_again_on_every_call() {
+    let fixture = Fixture::new("ignore-gate-not-cached");
+    fixture.write(".gitignore", "*.log\n");
+    fixture.write("a.log", "x");
+    assert_eq!(
+        fixture.ask(&fixture.repo, &names(&["a.log"])),
+        IgnoreAnswer::Ignored(set(&["a.log"]))
+    );
+
+    let script = fixture.marker_script("marker-fsmonitor", "exit 0");
+    fixture.set_config("core.fsmonitor", script.to_str().unwrap());
+    fixture.clear_markers();
+    assert_eq!(
+        fixture.ask(&fixture.repo, &names(&["a.log"])),
+        IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused)
+    );
+    assert!(!fixture.marker_exists("marker-fsmonitor"));
+}
+
+/// What the query does **not** need the gate's other half for, pinned so a new
+/// `git` cannot change it silently: a poisoned submodule's own clean filter
+/// (R1, review 406 -- which `git status` in the parent *does* run) is not run by
+/// `check-ignore`, and the parent's own configuration is allowlist-clean, so
+/// the query is answered. If a future `git` starts running it, this fails.
+#[test]
+fn a_poisoned_submodule_is_not_run_by_the_query() {
+    let fixture = Fixture::new("ignore-poisoned-submodule");
+    let marker = fixture.add_poisoned_submodule();
+    fixture.write(".gitignore", "*.log\n");
+    fixture.write("a.log", "x");
+    fixture.clear_markers();
+
+    assert_eq!(
+        fixture.ask(&fixture.repo, &names(&["a.log", "sub"])),
+        IgnoreAnswer::Ignored(set(&["a.log"]))
+    );
+    assert!(
+        !fixture.marker_exists(marker),
+        "`git check-ignore` ran a submodule's own clean filter"
+    );
+}
+
+/// A repository rooted at the user's home directory -- a dotfiles repository
+/// whose `.gitignore` says `*` -- would answer "ignored" for every entry of every
+/// project beneath it. It is declined, without a subprocess; the same repository
+/// with `HOME` somewhere else answers normally.
+#[test]
+fn a_repository_at_or_above_home_is_not_asked() {
+    let fixture = Fixture::new("ignore-home-repo");
+    fixture.write(".gitignore", "*\n");
+    let project = fixture.repo.join("projects").join("mine");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("main.rs"), "x").unwrap();
+    let git = fixture.fake_git("home-repo", "printf './main.rs\\0'; exit 0");
+
+    let mut at_home = fixture.forwarded_env.clone();
+    at_home.retain(|(var, _)| var != "HOME");
+    at_home.push(("HOME".to_owned(), fixture.repo.display().to_string()));
+    assert_eq!(
+        ignored_entries_in_environment(&project, &names(&["main.rs"]), &git, &at_home),
+        IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository)
+    );
+    // Home *inside* the repository counts too: the repository is above it.
+    let mut inside = fixture.forwarded_env.clone();
+    inside.retain(|(var, _)| var != "HOME");
+    inside.push(("HOME".to_owned(), project.display().to_string()));
+    assert_eq!(
+        ignored_entries_in_environment(&project, &names(&["main.rs"]), &git, &inside),
+        IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository)
+    );
+    assert!(!fixture.marker_exists("home-repo-invoked"));
+
+    // Home elsewhere (the fixture's own): the same directory is answered.
+    assert_eq!(
+        fixture.ask(&project, &names(&["main.rs"])),
+        IgnoreAnswer::Ignored(set(&["main.rs"]))
+    );
+}
+
+/// A name that is not one directory entry, and more names than a query may
+/// carry, are refused whole and run nothing.
+#[test]
+fn a_name_that_is_not_one_entry_is_refused_before_anything_runs() {
+    let fixture = Fixture::new("ignore-unusable-names");
+    fixture.write("a.log", "x");
+    let git = fixture.fake_git("unusable", "printf './a.log\\0'; exit 0");
+    let unusable = IgnoreAnswer::Unknown(IgnoreUnknown::UnusableName);
+
+    for bad in [
+        "",
+        ".",
+        "..",
+        "a/b",
+        "/etc/passwd",
+        "../escape",
+        "./a.log",
+        &"x".repeat(256),
+        "nul\0byte",
+    ] {
+        assert_eq!(
+            fixture.ask_with(&git, &fixture.repo, &names(&["a.log", bad])),
+            unusable,
+            "{bad:?}"
+        );
+    }
+    let too_many: Vec<OsString> = (0..=MAX_IGNORE_QUERY_ENTRIES)
+        .map(|i| OsString::from(format!("f{i}")))
+        .collect();
+    assert_eq!(fixture.ask_with(&git, &fixture.repo, &too_many), unusable);
+    assert!(!fixture.marker_exists("unusable-invoked"));
+
+    // The bound itself is allowed, and a name of the longest legal length.
+    let exactly: Vec<OsString> = (0..MAX_IGNORE_QUERY_ENTRIES)
+        .map(|i| OsString::from(format!("f{i}")))
+        .collect();
+    assert_eq!(
+        fixture.ask(&fixture.repo, &exactly),
+        IgnoreAnswer::NoneIgnored
+    );
+    assert_eq!(
+        fixture.ask(&fixture.repo, &names(&[&"x".repeat(255)])),
+        IgnoreAnswer::NoneIgnored
+    );
+}
+
+/// D3's "no caller can pass a raw path" and D5's "no `--no-index`", held at the
+/// source: the only place `check-ignore` is named is the one function, which
+/// takes an [`IgnoreQueryInput`]; the stdin-writing runner has one caller; and
+/// `--no-index` appears nowhere in production code.
+#[test]
+fn check_ignore_has_one_call_site_and_never_uses_no_index() {
+    let source =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/runtime/git.rs"))
+            .unwrap();
+    let shipped = source.split("#[cfg(test)]\nmod tests;").next().unwrap();
+    let code: String = shipped
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(code.matches("\"check-ignore\"").count(), 1);
+    assert_eq!(
+        code.matches("run_bounded_git_with_input(").count(),
+        2,
+        "one definition, one call"
+    );
+    assert!(!code.contains("no-index"));
+    assert!(!code.contains("GIT_LITERAL_PATHSPECS"));
+    assert_eq!(
+        code.matches("b\"./\"").count(),
+        1,
+        "the prefix is applied in exactly one place"
+    );
+}
