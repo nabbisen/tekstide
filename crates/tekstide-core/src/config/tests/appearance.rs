@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 
 use crate::config::{
-    Colour, ColourError, ContrastRatio, FallbackReason, FamilyError, MAX_FONT_FAMILY_CHARS,
-    MIN_TEXT_CONTRAST, Palette, SettingFallback, TEXT_PAIRS, ThemeRole, contrast_ratio,
-    enforce_text_contrast, parse_and_validate,
+    CONTRAST_RULES, Colour, ColourError, ContrastFor, ContrastRatio, FallbackReason, FamilyError,
+    MAX_FONT_FAMILY_CHARS, MAX_SCRIM_ALPHA, MIN_FOCUS_CONTRAST, MIN_TEXT_CONTRAST, Palette,
+    SettingFallback, ThemeRole, contrast_ratio, enforce_contrast, parse_and_validate,
 };
 
 fn outcome(source: &str) -> crate::config::ConfigLoadOutcome {
@@ -26,7 +26,7 @@ fn ratio_of(source: &str, setting: &str) -> (u32, ThemeRole) {
         .find(|(name, _)| name == setting)
         .unwrap_or_else(|| panic!("no fallback for {setting}"));
     match found.1 {
-        FallbackReason::LowContrast { ratio, against } => (ratio.hundredths(), against),
+        FallbackReason::LowContrast { ratio, against, .. } => (ratio.hundredths(), against),
         other => panic!("{setting} fell back for {other:?}, not contrast"),
     }
 }
@@ -34,17 +34,19 @@ fn ratio_of(source: &str, setting: &str) -> (u32, ThemeRole) {
 // --- the shipped palette ----------------------------------------------------
 
 /// The validator's own precondition, and what makes its loop terminate: with
-/// nothing configured, every text pair already meets the minimum.
+/// nothing configured, every rule already holds.
 #[test]
-fn the_shipped_palette_meets_the_rule_it_enforces() {
+fn the_shipped_palette_meets_the_rules_it_enforces() {
     let palette = Palette::default();
-    for (text, surface) in TEXT_PAIRS {
-        let ratio = contrast_ratio(palette.get(text), palette.get(surface));
+    for (drawn, surface, purpose) in CONTRAST_RULES {
+        let ratio = contrast_ratio(palette.get(drawn), palette.get(surface));
         assert!(
-            ratio >= MIN_TEXT_CONTRAST,
-            "{text:?} on {surface:?} is {ratio}"
+            ratio >= purpose.minimum(),
+            "{drawn:?} on {surface:?} is {ratio}"
         );
     }
+    assert_eq!(ContrastFor::Text.minimum(), MIN_TEXT_CONTRAST);
+    assert_eq!(ContrastFor::FocusIndicator.minimum(), MIN_FOCUS_CONTRAST);
 }
 
 // --- colours ------------------------------------------------------------------
@@ -113,7 +115,7 @@ fn the_minimum_is_inclusive_at_exactly_4_5() {
     let hex = |step: u32| format!("#{step:02X}{step:02X}{step:02X}");
 
     let mut fallbacks = Vec::new();
-    let kept = enforce_text_contrast(
+    let kept = enforce_contrast(
         BTreeMap::from([
             (ThemeRole::Background, background),
             (
@@ -130,7 +132,7 @@ fn the_minimum_is_inclusive_at_exactly_4_5() {
     assert_eq!(kept.len(), 3);
 
     let mut fallbacks = Vec::new();
-    let kept = enforce_text_contrast(
+    let kept = enforce_contrast(
         BTreeMap::from([
             (ThemeRole::Background, background),
             (
@@ -148,36 +150,46 @@ fn the_minimum_is_inclusive_at_exactly_4_5() {
     assert!(!fallbacks.is_empty());
 }
 
-/// A light `background` and a dark `foreground` agree with each other, and both
-/// fail the *shipped* `surface_elevated` behind every modal. Reverting the
-/// foreground then fails the background against the shipped foreground, so the
-/// loop must run to a fixed point -- and say so for each colour it took back.
+/// A light `background`, a dark `foreground` and a dark focus border agree with
+/// one another and all fail the *shipped* dark `surface_elevated` behind every
+/// dialog. Taking those two back leaves the light `background` against the
+/// *shipped* light foreground and blue focus border, which it now fails -- so the
+/// check must run to a fixed point, and say so for each colour it took back.
 #[test]
-fn reverting_one_colour_can_fail_another_pair_so_the_check_repeats() {
-    let source = "[theme]\nbackground = \"#EEEEEE\"\nforeground = \"#111111\"\n";
+fn reverting_colours_can_fail_another_pair_so_the_check_repeats() {
+    let source = "[theme]\nbackground = \"#EEEEEE\"\nforeground = \"#111111\"\n\
+                  border_focused = \"#0050A0\"\n";
     let reverted: Vec<String> = reasons(source)
         .into_iter()
         .map(|(setting, _)| setting)
         .collect();
     assert_eq!(
         reverted,
-        ["theme.foreground", "theme.background"],
-        "the foreground fails the shipped surface; then the background fails the shipped foreground"
+        [
+            "theme.foreground",
+            "theme.border_focused",
+            "theme.background"
+        ],
+        "round one takes the two that fail the shipped surface; round two the background"
     );
     assert!(outcome(source).document.theme.overrides.is_empty());
 
-    // The user's way out, which the diagnostic makes findable: give the surface
+    // The user's way out, which the diagnostics make findable: give the surface
     // a colour too.
     let fixed = "[theme]\nbackground = \"#EEEEEE\"\nforeground = \"#111111\"\n\
-                 surface_elevated = \"#DDDDDD\"\n";
-    assert!(outcome(fixed).fallbacks.is_empty());
+                 border_focused = \"#0050A0\"\nsurface_elevated = \"#DDDDDD\"\n";
+    assert!(
+        outcome(fixed).fallbacks.is_empty(),
+        "{:?}",
+        outcome(fixed).fallbacks
+    );
 }
 
 /// The property, over input nobody chose: **whatever a file says, the palette
 /// that comes out meets D5**, every colour kept is one the user wrote, and every
 /// colour dropped was reported.
 #[test]
-fn the_palette_that_comes_out_always_meets_the_minimum() {
+fn the_palette_that_comes_out_always_meets_every_rule() {
     let mut state = 0x2545_F491_4F6C_DD1Du64;
     let mut next = || {
         state ^= state << 13;
@@ -201,13 +213,13 @@ fn the_palette_that_comes_out_always_meets_the_minimum() {
             }
         }
         let mut fallbacks: Vec<SettingFallback> = Vec::new();
-        let kept = enforce_text_contrast(wanted.clone(), &mut fallbacks);
+        let kept = enforce_contrast(wanted.clone(), &mut fallbacks);
 
         let palette = Palette::with_overrides(&kept);
-        for (text, surface) in TEXT_PAIRS {
+        for (drawn, surface, purpose) in CONTRAST_RULES {
             assert!(
-                contrast_ratio(palette.get(text), palette.get(surface)) >= MIN_TEXT_CONTRAST,
-                "{wanted:?} produced an unreadable {text:?} on {surface:?}"
+                contrast_ratio(palette.get(drawn), palette.get(surface)) >= purpose.minimum(),
+                "{wanted:?} produced an unreadable {drawn:?} on {surface:?}"
             );
         }
         for (role, colour) in &kept {
@@ -228,7 +240,7 @@ fn the_palette_that_comes_out_always_meets_the_minimum() {
 fn a_bad_colour_falls_back_alone_and_the_rest_of_the_file_applies() {
     let source = "[theme]\nbackground = \"red\"\nforeground = \"#12345\"\naccent = \"#GGGGGG\"\n\
                   border_default = \"888888\"\nborder_focused = 7\nsurface_elevated = \"#10101099\"\n\
-                  scrim = \"#000000\"\n[font]\nbody_size = 15\n";
+                  scrim = \"#00000080\"\n[font]\nbody_size = 15\n";
     let found = reasons(source);
     assert_eq!(
         found,
@@ -439,4 +451,107 @@ fn an_unknown_key_in_theme_or_font_warns_and_does_nothing() {
     let keys: Vec<&str> = outcome.warnings.iter().map(|w| w.key.as_str()).collect();
     assert_eq!(keys, ["theme.chrome", "font.weight"]);
     assert!(outcome.document.theme.overrides.is_empty());
+}
+
+// --- review 428 R1: the focus border ------------------------------------------
+
+/// A focus indicator you cannot see is a property the product claims and does
+/// not have. 3:1 against each surface it is drawn on; the fallback names the
+/// purpose so the board can say which minimum it missed.
+#[test]
+fn a_focus_border_below_3_to_1_falls_back_and_names_the_measured_ratio() {
+    let source = "[theme]\nborder_focused = \"#101014\"\n";
+    let found = reasons(source);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, "theme.border_focused");
+    match found[0].1 {
+        FallbackReason::LowContrast {
+            ratio,
+            against,
+            purpose,
+        } => {
+            assert_eq!(purpose, ContrastFor::FocusIndicator);
+            assert_eq!(against, ThemeRole::Background);
+            assert!(
+                ratio.hundredths() < 300 && ratio.hundredths() >= 100,
+                "{ratio}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(outcome(source).document.theme.overrides.is_empty());
+
+    // Exactly-at and just-under, from the arithmetic: the smallest grey that
+    // clears 3:1 on the shipped background is kept; one step darker is not.
+    let background = Palette::default().background;
+    let hex = |step: u32| format!("#{step:02X}{step:02X}{step:02X}");
+    let step = (0..=255u32)
+        .find(|step| {
+            let grey = *step as f32 / 255.0;
+            contrast_ratio(Colour::rgb(grey, grey, grey), background) >= MIN_FOCUS_CONTRAST
+                && contrast_ratio(
+                    Colour::rgb(grey, grey, grey),
+                    Palette::default().surface_elevated,
+                ) >= MIN_FOCUS_CONTRAST
+        })
+        .expect("some grey clears 3:1 on both surfaces");
+    assert!(
+        outcome(&format!("[theme]\nborder_focused = \"{}\"\n", hex(step)))
+            .fallbacks
+            .is_empty()
+    );
+    assert!(
+        !outcome(&format!(
+            "[theme]\nborder_focused = \"{}\"\n",
+            hex(step - 1)
+        ))
+        .fallbacks
+        .is_empty()
+    );
+}
+
+/// `accent` and the non-focus border are colours the user chose; they decorate,
+/// and the word or second channel is always there. Deliberately unmeasured, and
+/// said so in the book -- a decision, not an oversight.
+#[test]
+fn accent_and_the_ordinary_border_are_not_measured() {
+    let source = "[theme]\naccent = \"#0B0B0F\"\nborder_default = \"#0B0B0F\"\n";
+    let document = outcome(source);
+    assert!(document.fallbacks.is_empty(), "{:?}", document.fallbacks);
+    assert_eq!(document.document.theme.overrides.len(), 2);
+}
+
+// --- review 428 R2: the scrim stays a dimming layer ---------------------------
+
+#[test]
+fn a_scrim_more_opaque_than_the_cap_is_reduced_to_it_with_a_diagnostic() {
+    // `#000000` has no alpha digits: it is fully opaque, and is exactly the
+    // rectangle the cap exists to prevent.
+    let source = "[theme]\nscrim = \"#000000\"\n";
+    let found = outcome(source);
+    assert_eq!(
+        found.fallbacks,
+        vec![SettingFallback {
+            setting: "theme.scrim".to_owned(),
+            reason: FallbackReason::ScrimTooOpaque,
+        }]
+    );
+    let scrim = found.document.theme.overrides[&ThemeRole::Scrim];
+    assert_eq!(
+        scrim.a, MAX_SCRIM_ALPHA,
+        "in force at the limit, not dropped"
+    );
+    assert_eq!((scrim.r, scrim.g, scrim.b), (0.0, 0.0, 0.0));
+
+    // The edge, in bytes: 0xE5 = 229/255 = 0.898 is under 0.90 and kept as
+    // written; 0xE6 = 230/255 = 0.902 is over it.
+    let kept = outcome("[theme]\nscrim = \"#000000E5\"\n");
+    assert!(kept.fallbacks.is_empty());
+    assert!((kept.document.theme.overrides[&ThemeRole::Scrim].a - 229.0 / 255.0).abs() < 1e-6);
+    let over = outcome("[theme]\nscrim = \"#000000E6\"\n");
+    assert_eq!(over.fallbacks.len(), 1);
+    assert_eq!(
+        over.document.theme.overrides[&ThemeRole::Scrim].a,
+        MAX_SCRIM_ALPHA
+    );
 }

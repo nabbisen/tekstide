@@ -4,7 +4,8 @@
 //! This is the *pure* half. It owns the shipped palette and sizes (so
 //! `Theme::default` and the validator can never disagree about what "the
 //! default" is), the colour grammar, the contrast arithmetic, and the rule that
-//! a configured pair below [`MIN_TEXT_CONTRAST`] does not get used. It knows
+//! a configured pair below its minimum ([`MIN_TEXT_CONTRAST`] for text,
+//! [`MIN_FOCUS_CONTRAST`] for the focus border) does not get used. It knows
 //! nothing about `iced` and nothing about fonts on disk: whether a family is
 //! *installed* is asked of the renderer's own font database by the shell, and a
 //! family here is only ever a **name** (RFC-054 D6, §3 -- never a path).
@@ -16,6 +17,19 @@ use super::model::{FallbackReason, SettingFallback};
 
 /// WCAG AA for body text. RFC-054 D5.
 pub const MIN_TEXT_CONTRAST: f32 = 4.5;
+
+/// **RFC-054 PR-054-C, review 428 R1.** The focus border is the one unmeasured
+/// role whose loss removes a property the product claims (visible focus,
+/// `NFR-UX-002`), so it is held to WCAG's non-text minimum against the two
+/// surfaces it is drawn on -- the threshold `derived_contrast_pairs` already
+/// holds the shipped palette to.
+pub const MIN_FOCUS_CONTRAST: f32 = 3.0;
+
+/// **RFC-054 PR-054-C, review 428 R2.** The scrim exists so a dialog is drawn
+/// over content that is still faintly visible; a fully opaque one is
+/// indistinguishable from a rectangle the application did not draw. A configured
+/// alpha above this is reduced to it, with a diagnostic.
+pub const MAX_SCRIM_ALPHA: f32 = 0.90;
 
 /// RFC-054 D6: a font size outside this range falls back to the default.
 pub const MIN_FONT_SIZE_PX: f32 = 8.0;
@@ -126,13 +140,53 @@ impl ThemeRole {
     }
 }
 
-/// The text pairs D5 holds to [`MIN_TEXT_CONTRAST`]: what is drawn *on* the two
-/// surfaces text sits on. `accent`, the borders and the scrim are never text --
-/// they are restyled, and validated only as far as being colours (see the
-/// judgment call recorded in `qa-evidence.md`).
-pub const TEXT_PAIRS: [(ThemeRole, ThemeRole); 2] = [
-    (ThemeRole::Foreground, ThemeRole::Background),
-    (ThemeRole::Foreground, ThemeRole::SurfaceElevated),
+/// What a contrast rule protects, so the board can say which minimum a colour
+/// missed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContrastFor {
+    /// Text on the surface it sits on: [`MIN_TEXT_CONTRAST`].
+    Text,
+    /// The focus indicator against the surface it is drawn on:
+    /// [`MIN_FOCUS_CONTRAST`].
+    FocusIndicator,
+}
+
+impl ContrastFor {
+    pub const fn minimum(self) -> f32 {
+        match self {
+            ContrastFor::Text => MIN_TEXT_CONTRAST,
+            ContrastFor::FocusIndicator => MIN_FOCUS_CONTRAST,
+        }
+    }
+}
+
+/// The pairs D5 measures -- `(drawn, surface, what for)`. Text on the two
+/// surfaces text sits on, at 4.5:1; and the focus border on the same two, at
+/// 3:1. **`accent` and the non-focus borders are not here, deliberately:** they
+/// decorate, and the word (or the second channel) is always present, so a user
+/// may choose them freely. The scrim is bounded separately
+/// ([`MAX_SCRIM_ALPHA`]).
+pub const CONTRAST_RULES: [(ThemeRole, ThemeRole, ContrastFor); 4] = [
+    (
+        ThemeRole::Foreground,
+        ThemeRole::Background,
+        ContrastFor::Text,
+    ),
+    (
+        ThemeRole::Foreground,
+        ThemeRole::SurfaceElevated,
+        ContrastFor::Text,
+    ),
+    (
+        ThemeRole::BorderFocused,
+        ThemeRole::Background,
+        ContrastFor::FocusIndicator,
+    ),
+    (
+        ThemeRole::BorderFocused,
+        ThemeRole::SurfaceElevated,
+        ContrastFor::FocusIndicator,
+    ),
 ];
 
 /// Every role's colour. `Default` is the **shipped** palette; `Theme::default`
@@ -223,7 +277,7 @@ impl Default for FontSizes {
 /// `[theme]`: the colour overrides that **survived** validation -- a refused one
 /// is a [`SettingFallback`], not an entry here, so the palette
 /// [`Palette::with_overrides`] builds from these always satisfies
-/// [`TEXT_PAIRS`].
+/// [`CONTRAST_RULES`].
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ThemeSettings {
     pub overrides: BTreeMap<ThemeRole, Colour>,
@@ -386,7 +440,15 @@ pub(super) fn extract_theme(
             continue;
         };
         match Colour::parse_hex(&spelling, role.allows_alpha()) {
-            Ok(colour) => {
+            Ok(mut colour) => {
+                // R2: a scrim more opaque than this is not a dimming layer.
+                if role == ThemeRole::Scrim && colour.a > MAX_SCRIM_ALPHA {
+                    colour.a = MAX_SCRIM_ALPHA;
+                    fallbacks.push(SettingFallback {
+                        setting,
+                        reason: FallbackReason::ScrimTooOpaque,
+                    });
+                }
                 wanted.insert(role, colour);
             }
             Err(error) => fallbacks.push(SettingFallback {
@@ -396,35 +458,36 @@ pub(super) fn extract_theme(
         }
     }
 
-    let overrides = enforce_text_contrast(wanted, fallbacks);
+    let overrides = enforce_contrast(wanted, fallbacks);
     Ok(ThemeSettings { overrides })
 }
 
 /// The contrast half of [`extract_theme`], on its own so it can be held to its
 /// invariant over generated palettes.
-pub fn enforce_text_contrast(
+pub fn enforce_contrast(
     mut kept: BTreeMap<ThemeRole, Colour>,
     fallbacks: &mut Vec<SettingFallback>,
 ) -> BTreeMap<ThemeRole, Colour> {
     loop {
         let palette = Palette::with_overrides(&kept);
-        let failing: Vec<(ThemeRole, ThemeRole, f32)> = TEXT_PAIRS
+        let failing: Vec<(ThemeRole, ThemeRole, ContrastFor, f32)> = CONTRAST_RULES
             .iter()
-            .map(|&(text, surface)| {
+            .map(|&(drawn, surface, purpose)| {
                 (
-                    text,
+                    drawn,
                     surface,
-                    contrast_ratio(palette.get(text), palette.get(surface)),
+                    purpose,
+                    contrast_ratio(palette.get(drawn), palette.get(surface)),
                 )
             })
-            .filter(|&(_, _, ratio)| ratio < MIN_TEXT_CONTRAST)
+            .filter(|&(_, _, purpose, ratio)| ratio < purpose.minimum())
             .collect();
         if failing.is_empty() {
             return kept;
         }
         let mut reverted = false;
-        for (text, surface, ratio) in failing {
-            for (member, against) in [(text, surface), (surface, text)] {
+        for (drawn, surface, purpose, ratio) in failing {
+            for (member, against) in [(drawn, surface), (surface, drawn)] {
                 if kept.remove(&member).is_some() {
                     reverted = true;
                     fallbacks.push(SettingFallback {
@@ -432,15 +495,16 @@ pub fn enforce_text_contrast(
                         reason: FallbackReason::LowContrast {
                             ratio: ContrastRatio::from_ratio(ratio),
                             against,
+                            purpose,
                         },
                     });
                 }
             }
         }
         if !reverted {
-            // Only reachable if the *shipped* palette failed its own rule, which
-            // `the_shipped_palette_meets_the_rule_it_enforces` forbids. Returning
-            // keeps a broken build from looping forever.
+            // Only reachable if the *shipped* palette failed its own rules,
+            // which `the_shipped_palette_meets_the_rules_it_enforces` forbids.
+            // Returning keeps a broken build from looping forever.
             return kept;
         }
     }

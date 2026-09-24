@@ -168,5 +168,6 @@ pub fn apply_safe_fields(
         keybindings: candidate.keybindings.clone(),
         theme: candidate.theme.clone(),
         font: candidate.font.clone(),
+        terminal: candidate.terminal,
     }
 }

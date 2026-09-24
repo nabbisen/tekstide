@@ -15,6 +15,9 @@ mod shell;
 mod surface;
 mod theme;
 
+#[cfg(test)]
+mod alloc_probe;
+
 use std::path::{Path, PathBuf};
 
 use tekstide_core::project::recent::{AppStatePathProvider, RecentProjectStore};

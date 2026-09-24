@@ -1166,6 +1166,17 @@ impl ConfigurationState {
         self.store.as_ref()?.current().resources.agent_run_limit
     }
 
+    /// **RFC-054 PR-054-C.** How many lines of history a terminal pane keeps: the
+    /// user's `[terminal] scrollback_lines` (already capped), or the shipped
+    /// default. Total like every reader here -- no store, no setting, the default.
+    fn scrollback_lines(&self) -> usize {
+        self.store
+            .as_ref()
+            .map_or(tekstide_core::config::DEFAULT_SCROLLBACK_LINES, |store| {
+                store.current().terminal.scrollback_lines()
+            })
+    }
+
     /// D9. Falls back to the compiled constant when there is no store,
     /// so a caller never has to handle "unset" -- the same totality
     /// `ConfigurationDocument`'s own defaults provide.
@@ -1322,6 +1333,11 @@ impl State {
         };
         // RFC-054 PR-054-B: the configured family, before the first frame.
         crate::theme::set_ui_font(state.theme.font());
+        // ...and PR-054-C's scrollback, on the panes the constructor launched.
+        let scrollback = state.configuration.scrollback_lines();
+        for pane in &mut state.terminal_panes {
+            pane.set_scrollback_lines(scrollback);
+        }
         // RFC-049 D2, **inside the constructor rather than at a call site**
         // (response 397, U2). Every project open must run the cleanup, and the
         // command-line open reaches this type with its project already open --
@@ -3977,8 +3993,9 @@ fn attempt_prepared_agent_run_launch(
     };
 
     let handle = TerminalRuntimeHandle::new(terminal_id, project_id);
-    let pane = crate::surface::terminal::TerminalPane::from_launched(runtime, handle)
+    let mut pane = crate::surface::terminal::TerminalPane::from_launched(runtime, handle)
         .map_err(AgentRunLaunchRefusal::Registration)?;
+    pane.set_scrollback_lines(state.configuration.scrollback_lines());
     state.terminal_panes.push(pane);
     // Response 243's required fix: size the freshly launched pane
     // immediately from whatever geometry is already known, rather than
@@ -5467,7 +5484,7 @@ fn attempt_terminal_launch(state: &mut State) -> Result<(), TerminalLaunchRefusa
 
     let mut audit_store =
         open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health);
-    let pane = launch_terminal(
+    let mut pane = launch_terminal(
         &mut state.app_shell,
         project_id,
         "terminal",
@@ -5476,6 +5493,7 @@ fn attempt_terminal_launch(state: &mut State) -> Result<(), TerminalLaunchRefusa
         audit_store.as_mut(),
         &mut state.audit_health,
     )?;
+    pane.set_scrollback_lines(state.configuration.scrollback_lines());
     state.terminal_panes.push(pane);
     // Response 243's required fix: size the freshly launched pane
     // immediately from whatever geometry is already known, rather than
@@ -8340,7 +8358,7 @@ pub(crate) fn configuration_fallback_text(
     catalog: &Catalog,
     fallback: &tekstide_core::config::SettingFallback,
 ) -> String {
-    use tekstide_core::config::{ColourError, FallbackReason, FamilyError, ThemeRole};
+    use tekstide_core::config::{ColourError, ContrastFor, FallbackReason, FamilyError, ThemeRole};
     use tekstide_core::navigation::{ChordError, KeybindingStatus};
 
     // What kind of value the setting takes decides which sentence a
@@ -8378,8 +8396,13 @@ pub(crate) fn configuration_fallback_text(
         FallbackReason::BadColour(ColourError::AlphaNotAllowed) => {
             ("colour-alpha-not-allowed", None)
         }
-        FallbackReason::LowContrast { against, .. } => (
-            "low-contrast",
+        FallbackReason::LowContrast {
+            against, purpose, ..
+        } => (
+            match purpose {
+                ContrastFor::Text => "low-contrast",
+                ContrastFor::FocusIndicator => "low-contrast-focus",
+            },
             Some(match against {
                 ThemeRole::Background => "theme.background",
                 ThemeRole::Foreground => "theme.foreground",
@@ -8391,6 +8414,10 @@ pub(crate) fn configuration_fallback_text(
             }),
         ),
         FallbackReason::NotANumber => ("not-a-number", None),
+        FallbackReason::NotAWholeNumber => ("not-a-whole-number", None),
+        // Reduced, not refused: these two are told with their own sentence.
+        FallbackReason::ScrimTooOpaque => ("scrim-too-opaque", None),
+        FallbackReason::ScrollbackAboveCap => ("scrollback-above-cap", None),
         FallbackReason::SizeOutOfRange => ("size-out-of-range", None),
         FallbackReason::BadFamily(FamilyError::Empty) => ("family-empty", None),
         FallbackReason::BadFamily(FamilyError::TooLong) => ("family-too-long", None),
@@ -8406,8 +8433,21 @@ pub(crate) fn configuration_fallback_text(
         _ => (0, 0, 0),
     };
     let setting = tekstide_core::text_safety::quote_untrusted(&fallback.setting);
+    // A value that was **reduced to its limit** is still in force, so it does not
+    // say "its default stands"; it has its own message and its own limit.
+    let (message, limit) = match fallback.reason {
+        FallbackReason::ScrimTooOpaque => (
+            "project-board-configuration-clamped",
+            (tekstide_core::config::MAX_SCRIM_ALPHA * 100.0).round() as u32,
+        ),
+        FallbackReason::ScrollbackAboveCap => (
+            "project-board-configuration-clamped",
+            tekstide_core::config::MAX_SCROLLBACK_LINES as u32,
+        ),
+        _ => ("project-board-configuration-fallback", 0),
+    };
     catalog.get_with_args(
-        "project-board-configuration-fallback",
+        message,
         &CatalogArgs::new()
             .untrusted("setting", &setting)
             .trusted_symbol("reason", reason)
@@ -8415,6 +8455,7 @@ pub(crate) fn configuration_fallback_text(
             .number("ratio_whole", whole)
             .number("ratio_tenths", tenths)
             .number("ratio_hundredths", hundredths)
+            .number("limit", limit)
             .number("min", tekstide_core::config::MIN_FONT_SIZE_PX as u32)
             .number("max", tekstide_core::config::MAX_FONT_SIZE_PX as u32)
             .number(
@@ -10039,6 +10080,12 @@ fn reload_configuration(state: &mut State) {
     );
     state.configuration.theme = theme;
     state.theme = theme;
+    // ...and the scrollback, on panes that already hold output as well as on
+    // ones launched later (PR-054-C, D7/D8).
+    let scrollback = store.current().terminal.scrollback_lines();
+    for pane in &mut state.terminal_panes {
+        pane.set_scrollback_lines(scrollback);
+    }
     crate::theme::set_ui_font(theme.font());
 
     let current = store.current().clone();

@@ -306,12 +306,13 @@ pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagn
     // caller must not describe it as one.
     refuse_withdrawn_free_form_section(&mut root, "core")?;
     refuse_withdrawn_free_form_section(&mut root, "ui")?;
-    refuse_withdrawn_free_form_section(&mut root, "terminal")?;
+    let mut fallbacks = Vec::new();
+    let terminal = extract_terminal(&mut root, &mut fallbacks)?;
     refuse_withdrawn_free_form_section(&mut root, "projects")?;
     refuse_withdrawn_free_form_section(&mut root, "security")?;
 
-    let mut fallbacks = Vec::new();
     let document = ConfigurationDocument {
+        terminal,
         agent: extract_agent(&mut root, &mut warnings)?,
         resources: extract_resources(&mut root, &mut warnings)?,
         keybindings: extract_keybindings(&mut root, &mut warnings, &mut fallbacks)?,
@@ -648,6 +649,31 @@ fn take_agent_run_limit(table: &mut toml::Table) -> Result<Option<u32>, ConfigDi
         });
     }
     Ok(Some(limit))
+}
+
+/// **RFC-054 PR-054-C.** `[terminal]`. `scrollback_lines` is read; every other key
+/// in the section stays exactly what it was -- refused whole-file, the
+/// permanently-refused `multiline_paste_protection` first and with its own
+/// reason -- because nothing else in `[terminal]` has a consumer, and D1 makes
+/// scrollback the only thing that becomes settable here.
+fn extract_terminal(
+    root: &mut toml::Table,
+    fallbacks: &mut Vec<SettingFallback>,
+) -> Result<super::terminal::TerminalSettings, ConfigDiagnostic> {
+    let Some(mut table) = section_table(root, "terminal")? else {
+        return Ok(super::terminal::TerminalSettings::default());
+    };
+    refuse_withdrawn_keys(&table, "terminal")?;
+    let settings = super::terminal::take_scrollback(&mut table, fallbacks);
+    match table.keys().next() {
+        None => Ok(settings),
+        Some(field) => Err(ConfigDiagnostic {
+            path: None,
+            key: format!("terminal.{}", bound_key_segment(field)),
+            location: None,
+            message: NO_CONSUMER_MESSAGE,
+        }),
+    }
 }
 
 /// **RFC-054 PR-054-A.** `[keybindings]`: one `action_name = "Chord"` entry per

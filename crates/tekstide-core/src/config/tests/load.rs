@@ -263,9 +263,11 @@ fn a_keybindings_section_that_is_not_a_table_refuses_the_file() {
 }
 
 #[test]
-fn a_terminal_key_is_refused_because_nothing_reads_it() {
-    let error = parse_and_validate("[terminal]\nscrollback_lines = 50000\n").unwrap_err();
-    assert_eq!(error.key, "terminal.scrollback_lines");
+fn a_terminal_key_other_than_scrollback_is_still_refused_because_nothing_reads_it() {
+    // RFC-054 PR-054-C: `scrollback_lines` is read (see `tests/terminal.rs`);
+    // the rest of `[terminal]` is exactly what it was.
+    let error = parse_and_validate("[terminal]\nfont_size = 12\n").unwrap_err();
+    assert_eq!(error.key, "terminal.font_size");
     assert!(error.message.contains("no effect yet"), "{}", error.message);
 }
 

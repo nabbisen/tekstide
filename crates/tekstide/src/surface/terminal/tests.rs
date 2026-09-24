@@ -713,3 +713,158 @@ fn relative_to_src(path: &std::path::Path) -> String {
         .to_string_lossy()
         .replace(std::path::MAIN_SEPARATOR, "/")
 }
+
+// --- RFC-054 PR-054-C: the scrollback cap is measured, not chosen --------------
+
+/// Ordinary coloured output, one full-width line at a time: eight-cell runs, the
+/// colour changing between them, so the grid holds real attributes and not a
+/// page of blanks.
+fn ordinary_output(columns: usize, lines: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    for line in 0..lines {
+        out.extend_from_slice(b"\x1b[0m");
+        let (mut written, mut color) = (0, 31);
+        while written < columns {
+            out.extend_from_slice(format!("\x1b[{color}m").as_bytes());
+            let run = 8.min(columns - written);
+            out.extend(std::iter::repeat_n(b'a' + (line % 26) as u8, run));
+            written += run;
+            color = 31 + (color - 30) % 7;
+        }
+        out.extend_from_slice(b"\r\n");
+    }
+    out
+}
+
+/// What `Term` holds after `lines` lines of ordinary output at `columns` columns
+/// with `history` lines of scrollback allowed -- **the allocator's own count**
+/// (`alloc_probe`), not a struct size multiplied out. The output buffer is
+/// dropped before the second reading, so only the emulator is counted.
+fn measured_bytes(columns: usize, history: usize, lines: usize) -> (usize, usize) {
+    let before = crate::alloc_probe::live_bytes();
+    let mut term = Term::new(
+        super::pane_config_with(history),
+        &PaneSize {
+            rows: ROWS,
+            cols: columns,
+        },
+        VoidListener,
+    );
+    feed(&mut term, &ordinary_output(columns, lines));
+    let held = (crate::alloc_probe::live_bytes() - before) as usize;
+    (term.grid().total_lines(), held)
+}
+
+/// The cost model `MAX_SCROLLBACK_LINES` was chosen from is **never below what
+/// the allocator reports**, re-measured every run: across widths, across history
+/// sizes from a handful of lines to the cap, and at the specific sizes where the
+/// block count was seen to run ahead of `ceil(lines / 1024)` (11,016 and 10,004
+/// lines, and the exact block edges). If a dependency update makes a cell
+/// heavier or changes the block, this fails before the cap silently stops
+/// meaning 64 MB. Ablated by lowering `SCROLLBACK_BYTES_PER_CELL`, or
+/// `SCROLLBACK_BLOCK_SLACK` to 1.
+#[test]
+fn the_measured_cost_of_a_pane_never_exceeds_the_model() {
+    let mut histories: Vec<usize> = (10..=12_000).step_by(499).collect();
+    histories.extend([
+        1_000, 1_001, 1_023, 1_024, 2_024, 3_000, 4_072, 6_119, 6_120, 10_004, 11_016, 11_017,
+        12_000,
+    ]);
+    let mut closest = 0.0f64;
+    for columns in [80usize, 200, 400] {
+        for &history in &histories {
+            let (lines, held) = measured_bytes(columns, history, history + ROWS + 10);
+            assert_eq!(lines, ROWS + history, "the history must actually fill");
+            let model = tekstide_core::config::scrollback_bytes(history, columns, ROWS);
+            assert!(
+                held <= model,
+                "{columns} columns x {history} lines: measured {held} bytes, model says {model}"
+            );
+            closest = closest.max(held as f64 / model as f64);
+        }
+    }
+    eprintln!(
+        "closest the measurement came to the model: {:.1}%",
+        closest * 100.0
+    );
+}
+
+/// **D7, held to its own words:** one pane *at the cap* stays under 64 MB -- at
+/// 80 columns, at 200 (the width the cap was measured for), and at 400, where the
+/// width guard keeps fewer lines. Filled with real output through the real
+/// emulator and counted by the allocator. Ablated by raising
+/// `MAX_SCROLLBACK_LINES` or by removing the width guard.
+#[test]
+fn a_pane_at_the_cap_stays_under_the_memory_budget() {
+    use tekstide_core::config::{
+        MAX_SCROLLBACK_LINES, SCROLLBACK_BUDGET_BYTES, effective_scrollback_lines,
+    };
+    for columns in [80usize, 200, 400] {
+        let history = effective_scrollback_lines(MAX_SCROLLBACK_LINES, columns, ROWS);
+        let (lines, held) = measured_bytes(columns, history, history + ROWS + 10);
+        assert_eq!(lines, ROWS + history);
+        eprintln!(
+            "{columns} columns at {history} lines of history: {:.1} MB",
+            held as f64 / 1_048_576.0
+        );
+        assert!(
+            held <= SCROLLBACK_BUDGET_BYTES,
+            "{columns} columns x {history} lines holds {held} bytes, over the \
+             {SCROLLBACK_BUDGET_BYTES} budget"
+        );
+    }
+    // ...and the cap is the *maximum*: at the measured width it is really
+    // reached, so the test above is not passing on an under-filled pane.
+    assert_eq!(
+        effective_scrollback_lines(MAX_SCROLLBACK_LINES, 200, ROWS),
+        MAX_SCROLLBACK_LINES
+    );
+}
+
+/// The width guard on a live pane: making it wider than the budget allows at the
+/// requested history reduces what the grid keeps; making it narrower again gives
+/// the room back. Ablated by removing the call in `resize`.
+#[test]
+fn a_wider_pane_keeps_fewer_lines_and_a_narrower_one_gets_them_back() {
+    let mut scratch = ScratchPane::launch();
+    let cap = tekstide_core::config::MAX_SCROLLBACK_LINES;
+    scratch.pane.set_scrollback_lines(cap);
+    assert_eq!(scratch.pane.scrollback_in_force(), cap);
+    scratch.pane.resize(30, 400).expect("resize");
+    let wide = scratch.pane.scrollback_in_force();
+    assert!(wide < cap, "{wide}");
+    assert_eq!(
+        wide,
+        tekstide_core::config::effective_scrollback_lines(cap, 400, 30)
+    );
+    scratch.pane.resize(30, 120).expect("resize");
+    assert_eq!(scratch.pane.scrollback_in_force(), cap);
+}
+
+/// Setting the scrollback of a pane that **already holds history** trims it from
+/// the oldest end and keeps the rest; raising it again does not invent lines.
+#[test]
+fn changing_the_scrollback_of_a_pane_that_holds_output_trims_the_oldest() {
+    let mut term = Term::new(
+        super::pane_config_with(1_000),
+        &PaneSize {
+            rows: ROWS,
+            cols: COLS,
+        },
+        VoidListener,
+    );
+    let mut numbered = Vec::new();
+    for line in 0..1_500 {
+        numbered.extend_from_slice(format!("line {line:05}\r\n").as_bytes());
+    }
+    feed(&mut term, &numbered);
+    assert_eq!(term.grid().total_lines(), ROWS + 1_000);
+    term.set_options(super::pane_config_with(100));
+    assert_eq!(term.grid().total_lines(), ROWS + 100);
+    term.set_options(super::pane_config_with(1_000));
+    assert_eq!(
+        term.grid().total_lines(),
+        ROWS + 100,
+        "raising the limit keeps what is there and invents nothing"
+    );
+}

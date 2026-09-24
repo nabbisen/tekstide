@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::appearance::{
-    ColourError, ContrastRatio, FamilyError, FontSettings, ThemeRole, ThemeSettings,
+    ColourError, ContrastFor, ContrastRatio, FamilyError, FontSettings, ThemeRole, ThemeSettings,
 };
 use crate::navigation::{Chord, ChordError, KeybindingStatus, NavigationAction};
 
@@ -29,6 +29,7 @@ pub struct ConfigurationDocument {
     pub keybindings: KeybindingSettings,
     pub theme: ThemeSettings,
     pub font: FontSettings,
+    pub terminal: super::terminal::TerminalSettings,
 }
 
 /// **RFC-054 PR-054-A.** The rebinds that survived validation: only rebinds
@@ -82,7 +83,16 @@ pub enum FallbackReason {
     LowContrast {
         ratio: ContrastRatio,
         against: ThemeRole,
+        purpose: ContrastFor,
     },
+    /// **Reduced, not refused** (review 428 R2): the scrim was more opaque than
+    /// [`super::MAX_SCRIM_ALPHA`], and is in force at that limit.
+    ScrimTooOpaque,
+    /// **Reduced, not refused** (D7): `scrollback_lines` was above
+    /// [`super::MAX_SCROLLBACK_LINES`], and is in force at that limit.
+    ScrollbackAboveCap,
+    /// A scrollback that is not a whole number of lines, or is negative.
+    NotAWholeNumber,
     NotANumber,
     /// Outside [`super::MIN_FONT_SIZE_PX`]..=[`super::MAX_FONT_SIZE_PX`].
     SizeOutOfRange,

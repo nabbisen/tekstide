@@ -157,11 +157,18 @@ pub(crate) const COLS: usize = 80;
 pub(crate) const MIN_ROWS: u16 = 2;
 pub(crate) const MIN_COLS: u16 = 20;
 
-/// Chosen well below `alacritty_terminal`'s own 10,000-line default:
-/// bounded specifically so sustained adversarial output cannot grow the
-/// pane's memory use without limit, while still keeping enough history
-/// to be useful. Tested under sustained output, not merely asserted.
-const SCROLLBACK_LINES: usize = 2_000;
+/// What a pane keeps when nothing is configured -- `tekstide_core::config::
+/// DEFAULT_SCROLLBACK_LINES`, well below `alacritty_terminal`'s own 10,000-line
+/// default: bounded specifically so sustained output cannot grow the pane's
+/// memory use without limit, while still keeping enough history to be useful.
+/// Tested under sustained output, not merely asserted.
+///
+/// **RFC-054 PR-054-C: this is now the default of a setting**, not the only
+/// value. A configured value is capped at `MAX_SCROLLBACK_LINES` (measured, so
+/// one pane at the cap stays under 64 MB) and, on a pane wider than the width
+/// the measurement was made at, at what the budget allows there
+/// (`effective_scrollback_lines`) -- see [`TerminalPane::set_scrollback_lines`].
+const SCROLLBACK_LINES: usize = tekstide_core::config::DEFAULT_SCROLLBACK_LINES;
 
 /// Terminal resize handoff: was a zero-field unit struct reading the
 /// (then-fixed) global `ROWS`/`COLS` constants -- every pane shared one
@@ -189,8 +196,12 @@ impl Dimensions for PaneSize {
 }
 
 fn pane_config() -> Config {
+    pane_config_with(SCROLLBACK_LINES)
+}
+
+fn pane_config_with(scrolling_history: usize) -> Config {
     Config {
-        scrolling_history: SCROLLBACK_LINES,
+        scrolling_history,
         ..Config::default()
     }
 }
@@ -240,6 +251,14 @@ pub struct TerminalPane {
     /// together with the other two, never alone.
     rows: u16,
     cols: u16,
+    /// **RFC-054 PR-054-C.** The scrollback the user asked for (already capped by
+    /// configuration). What the grid actually keeps is this, limited by the
+    /// memory budget at this pane's *current width* -- so it is kept here, and
+    /// the effective figure is recomputed on every resize.
+    scrollback_lines: usize,
+    /// The history limit the grid was last given, so a resize that does not change
+    /// it does not touch the grid's options at all.
+    history_in_force: usize,
     /// Terminal resize handoff: test-only instrumentation counting how
     /// many times [`Self::resize`] has actually done real work (the PTY
     /// ioctl plus `Term::resize`), as opposed to hitting its no-op
@@ -329,9 +348,40 @@ impl TerminalPane {
             bytes_read_total: 0,
             rows: ROWS as u16,
             cols: COLS as u16,
+            scrollback_lines: SCROLLBACK_LINES,
+            history_in_force: SCROLLBACK_LINES,
             #[cfg(test)]
             real_resize_count: 0,
         })
+    }
+
+    /// **RFC-054 PR-054-C.** Sets how many lines of history this pane keeps --
+    /// what the configuration asked for, which `parse_and_validate` has already
+    /// capped. Applies to a pane that already holds output: history above the new
+    /// limit is dropped from the oldest end, history below it is kept. What the
+    /// grid actually keeps is also limited by the memory budget at this pane's
+    /// current width, and is recomputed on every resize.
+    pub fn set_scrollback_lines(&mut self, configured: usize) {
+        self.scrollback_lines = configured;
+        self.apply_scrollback_limit();
+    }
+
+    fn apply_scrollback_limit(&mut self) {
+        let effective = tekstide_core::config::effective_scrollback_lines(
+            self.scrollback_lines,
+            self.cols as usize,
+            self.rows as usize,
+        );
+        if effective != self.history_in_force {
+            self.term.set_options(pane_config_with(effective));
+            self.history_in_force = effective;
+        }
+    }
+
+    /// The history limit the grid is under right now.
+    #[cfg(test)]
+    pub(crate) fn scrollback_in_force(&self) -> usize {
+        self.history_in_force
     }
 
     /// Terminal resize handoff: the one function that updates the PTY
@@ -366,6 +416,9 @@ impl TerminalPane {
 
         self.rows = rows;
         self.cols = cols;
+        // A wider pane costs more per line, so the same request may now exceed
+        // the budget (RFC-054 D7); a narrower one may have room again.
+        self.apply_scrollback_limit();
         #[cfg(test)]
         {
             self.real_resize_count += 1;

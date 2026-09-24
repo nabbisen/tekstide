@@ -385,6 +385,8 @@ project-board-configuration-fallback = Configuration: { $setting } was not used,
     [colour-malformed] It is not a colour; write # and six hex digits, such as "#1E1E24".
     [colour-alpha-not-allowed] Only the scrim can be transparent; write # and six hex digits.
     [low-contrast] Its contrast with { $other } is { $ratio_whole }.{ $ratio_tenths }{ $ratio_hundredths }:1, below the 4.5:1 that keeps text readable.
+    [low-contrast-focus] Its contrast with { $other } is { $ratio_whole }.{ $ratio_tenths }{ $ratio_hundredths }:1, below the 3:1 that keeps the focus border visible.
+    [not-a-whole-number] It must be a whole number of lines, 0 or more, such as 5000.
     [not-a-number] It must be a number, such as 14.
     [size-out-of-range] It must be between { $min } and { $max }.
     [family-empty] It is empty; write the name of an installed font family.
@@ -392,6 +394,14 @@ project-board-configuration-fallback = Configuration: { $setting } was not used,
     [family-forbidden-character] A font is a family name, not a path: it cannot contain a slash, a backslash or a control character.
     [family-unavailable] No installed font family has that name.
    *[other] It could not be used.
+}
+
+# RFC-054 PR-054-C: a value that was **reduced to its limit** and is still in
+# force -- so it does not say its default stands.
+project-board-configuration-clamped = Configuration: { $setting } was reduced to { $reason ->
+    [scrim-too-opaque] { $limit }% opaque, the most it can be: a dialog's backdrop must stay translucent, or it could pass for a window this application did not draw.
+    [scrollback-above-cap] { $limit } lines, the most one terminal can keep within its memory budget.
+   *[other] its limit.
 }
 
 # RFC-045 PR-045-C, D5: the `Ctrl+Alt+C` command RFC-023 §Hot Reload

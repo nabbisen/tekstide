@@ -4,3 +4,4 @@ mod model;
 mod path;
 mod profile;
 mod sensitive;
+mod terminal;

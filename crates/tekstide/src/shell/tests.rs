@@ -18707,8 +18707,18 @@ fn every_way_an_appearance_setting_falls_back_has_its_own_sentence() {
             FallbackReason::LowContrast {
                 ratio: ContrastRatio::from_ratio(4.499),
                 against: ThemeRole::SurfaceElevated,
+                purpose: tekstide_core::config::ContrastFor::Text,
             },
         ),
+        (
+            "theme.border_focused",
+            FallbackReason::LowContrast {
+                ratio: ContrastRatio::from_ratio(2.999),
+                against: ThemeRole::Background,
+                purpose: tekstide_core::config::ContrastFor::FocusIndicator,
+            },
+        ),
+        ("terminal.scrollback_lines", FallbackReason::NotAWholeNumber),
         ("font.body_size", FallbackReason::NotANumber),
         ("font.body_size", FallbackReason::SizeOutOfRange),
         ("font.family", FallbackReason::BadFamily(FamilyError::Empty)),
@@ -18737,12 +18747,20 @@ fn every_way_an_appearance_setting_falls_back_has_its_own_sentence() {
             "{reason:?} fell through: {text}"
         );
         assert!(seen.insert(text.clone()), "two reasons share: {text}");
-        if let FallbackReason::LowContrast { .. } = reason {
-            assert!(
-                text.contains("theme.surface_elevated is 4.49:1")
-                    && text.contains("below the 4.5:1"),
-                "the measured ratio must read 4.49, never 4.50: {text}"
-            );
+        if let FallbackReason::LowContrast { purpose, .. } = reason {
+            match purpose {
+                tekstide_core::config::ContrastFor::Text => assert!(
+                    text.contains("theme.surface_elevated is 4.49:1")
+                        && text.contains("below the 4.5:1"),
+                    "the measured ratio must read 4.49, never 4.50: {text}"
+                ),
+                tekstide_core::config::ContrastFor::FocusIndicator => assert!(
+                    text.contains("theme.background is 2.99:1")
+                        && text.contains("below the 3:1")
+                        && text.contains("focus border"),
+                    "the focus minimum is 3:1 and must read 2.99, never 3.00: {text}"
+                ),
+            }
         }
     }
     assert!(
@@ -19032,4 +19050,91 @@ fn the_ui_font_is_set_at_boot_and_at_every_reload() {
     let reload_body = &shell[reload..];
     let reload_end = reload_body.find("\n}\n").expect("end of reload");
     assert!(reload_body[..reload_end].contains("crate::theme::set_ui_font("));
+}
+
+// --- RFC-054 PR-054-C: scrollback, and the two values that are reduced --------
+
+/// A value that was **reduced to its limit** is still in force, so its board
+/// line must not say "its default stands"; it names the limit.
+#[test]
+fn a_reduced_value_says_what_it_was_reduced_to_not_that_its_default_stands() {
+    use tekstide_core::config::{FallbackReason, SettingFallback};
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let line = |setting: &str, reason| {
+        plain_words(&super::configuration_fallback_text(
+            &catalog,
+            &SettingFallback {
+                setting: setting.to_owned(),
+                reason,
+            },
+        ))
+    };
+    let scrollback = line(
+        "terminal.scrollback_lines",
+        FallbackReason::ScrollbackAboveCap,
+    );
+    assert!(
+        scrollback.contains("terminal.scrollback_lines was reduced to")
+            && scrollback.contains(
+                &format!("{}", tekstide_core::config::MAX_SCROLLBACK_LINES).replace('_', "")
+            )
+            && !scrollback.contains("default stands"),
+        "{scrollback}"
+    );
+    let scrim = line("theme.scrim", FallbackReason::ScrimTooOpaque);
+    assert!(
+        scrim.contains("theme.scrim was reduced to 90% opaque")
+            && !scrim.contains("default stands"),
+        "{scrim}"
+    );
+}
+
+/// D7 and D8 together: the scrollback on a pane that **already holds output**
+/// changes at `Ctrl+Alt+C`, an over-cap request lands at the cap with the board
+/// saying so, and a pane launched afterwards starts with the configured value.
+#[test]
+fn a_reload_applies_scrollback_to_panes_that_already_exist_and_to_later_ones() {
+    let (configuration, home) = configuration_from_file("scrollback-reload", "");
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(fresh_project_dir("scrollback-reload-project"))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with_configuration(app_shell, configuration);
+    let default = tekstide_core::config::DEFAULT_SCROLLBACK_LINES;
+
+    // A real pane, launched through the real path.
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::LaunchTerminal,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+    assert_eq!(state.terminal_panes.len(), 1, "a terminal was launched");
+    assert_eq!(state.terminal_panes[0].scrollback_in_force(), default);
+
+    rewrite_config(&home, "[terminal]\nscrollback_lines = 700\n");
+    press_reload_configuration(&mut state);
+    assert_eq!(state.terminal_panes[0].scrollback_in_force(), 700);
+    assert!(config_state_lines(&state).is_empty());
+
+    rewrite_config(&home, "[terminal]\nscrollback_lines = 999999\n");
+    press_reload_configuration(&mut state);
+    assert_eq!(
+        state.terminal_panes[0].scrollback_in_force(),
+        tekstide_core::config::MAX_SCROLLBACK_LINES,
+        "reduced to the cap, and in force there"
+    );
+    let lines = config_state_lines(&state);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].contains("terminal.scrollback_lines was reduced to"),
+        "{lines:?}"
+    );
+
+    // Removing the line puts the default back.
+    rewrite_config(&home, "");
+    press_reload_configuration(&mut state);
+    assert_eq!(state.terminal_panes[0].scrollback_in_force(), default);
+    assert!(config_state_lines(&state).is_empty());
 }
