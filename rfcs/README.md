@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 055 | [Ignore Rules In The Explorer](./proposed/055-ignore-rules-in-the-explorer.md) | **Proposed 2026-09-24**, awaiting the owner. `0.26.0`. The explorer collapses a three-name array and never reads a project's `.gitignore`; `FileGitStatus` has no `Ignored`. Git becomes the oracle, asked with `check-ignore` about the rows the tree is about to draw — `--ignored=matching` returned 20 000 records for a one-line `*.log` rule, and a file named `:(glob)evil.log` aborts a `check-ignore` batch with exit 128 unless every path is prefixed `./`. `REQ-FILE-005`, `006`, `002` |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -51,7 +52,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 027 | Crash Recovery and Unsaved Buffer Persistence | M13 |
 | 028 | Cross-Platform Support | M14 |
 | 029 | Documentation, CI, and Release Automation | M14 |
-| 055 | Ignore Rules In The Explorer | M12 remainder tail |
 | 056 | AgentRun Report And Classification | agent remainder |
 | 057 | Editor Essentials | M10 remainder |
 | 058 | A Project Held By One Process | M13 tail |
