@@ -115,9 +115,15 @@ implementer's to paper over.
       Say once that the project is not open, or say nothing — `REQ-NOTIFY-003`'s rule applied to
       unknowns.
 - [ ] **B2: the nine blocked automations appear once**, not verbatim on every card.
-- [ ] **The card list following a real key press is captured** — with **content, not geometry**:
-      enough recent projects to overflow at the window's natural size. *(The reviewer must not float
-      or resize a window on this desktop; it is shared with other projects' sessions.)*
+- [ ] **B3 (review 424 addendum): the card list does not follow the keyboard — measured, and it
+      blocks `0.24.0`.** Ten recent projects, natural window size: after seven `Down` presses the
+      highlight has left the first card and the viewport has not moved.
+      **Cause:** `handle_project_board_row_key` sets `project_board_scroll_request` (`shell.rs:4458`),
+      the only consumer is the **tail of `update()`** (`shell.rs:2612`), and the key arm
+      `return`s at `shell.rs:2166` before reaching it. **The existing test asserts the request was
+      set, not that anything consumes it** — a producer with no consumer, which is the shape this
+      project keeps refusing. Fix it, and pin the *effect*: a board `Down` must produce the scroll,
+      asserted on what `update()` returns.
 - [ ] **`0.24.0`'s changelog carries a `Corrected` entry**: `0.23.0` said the board's row was "hard to
       read… later work that no scheduled RFC covers", which this slice made false.
 
