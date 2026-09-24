@@ -616,6 +616,19 @@ explorer-rows-not-shown = { $count ->
    *[other] { $count } more rows
 } not shown. Collapse a folder to see them.
 
+# RFC-055, review 431 ruling 4: the status bar's Git state reads only a
+# repository at the project root. When the ignore words in the tree came from a
+# repository that is *not* the project's own -- one above it, or a checkout
+# inside it -- the sidebar says so, so the two surfaces cannot look like two
+# answers to one question. No path: it is attacker-influenced. **Short on
+# purpose**: rows are unwrapped and the sidebar is about 33 monospace columns, so
+# the first draft of this sentence ("Ignore rules come from the Git repository
+# above this project.") was cut off at "the Git r" in the live capture.
+explorer-ignore-rule = { $placement ->
+    [above] Ignore rules: parent Git repo
+   *[below] Ignore rules: nested Git repo
+}
+
 # The sidebar draws only the rows that fit; this says which ones.
 explorer-rows-position = Rows { $first }–{ $last } of { $total }
 

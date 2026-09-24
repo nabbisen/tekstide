@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use tekstide_core::project::ProjectId;
 use tekstide_core::project::root::{
     ExplorerDirectoryScan, ExplorerFloorReason, ExplorerIgnoreRule, ExplorerIgnoreState,
-    ExplorerNode, ExplorerNodeKind, ExplorerNodeState, FileAccessContainmentStatus,
-    FileAccessSymlinkStatus, FileAccessTarget,
+    ExplorerNode, ExplorerNodeKind, ExplorerNodeState, ExplorerRepositoryPlacement,
+    FileAccessContainmentStatus, FileAccessSymlinkStatus, FileAccessTarget,
 };
 use tekstide_core::project::{ExplorerTree, ExplorerTreeRowKind, ProjectExplorerStatus};
 use tekstide_core::project::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
@@ -1244,4 +1244,77 @@ fn the_ignored_word_is_distinct_from_the_other_five() {
         );
     }
     assert_eq!(seen.len(), 7);
+}
+
+/// Review 431, ruling 4: when the ignore rule came from a repository that is not
+/// the project root's own, the sidebar says so -- from what the scan *carried*.
+#[test]
+fn the_sidebar_says_when_the_ignore_rule_came_from_another_repository() {
+    use super::ignore_rule_line;
+    let catalog = real_catalog();
+    let with_rule = |rule| {
+        let mut scan = scan_at_root(vec![plain_node("a.txt", ExplorerNodeKind::File)]);
+        scan.ignore_rule = rule;
+        tree_with(scan)
+    };
+
+    let above = with_rule(ExplorerIgnoreRule::Git {
+        repository: ExplorerRepositoryPlacement::AboveProjectRoot,
+    });
+    let line = ignore_rule_line(&catalog, &above).expect("a sentence");
+    assert!(line.contains("parent Git repo"), "{line}");
+    // ...and it is the first thing under the status line, in the drawn lines.
+    let lines = all_lines(&catalog, &above, 0);
+    assert!(
+        lines.iter().any(|l| l.contains("parent Git repo")),
+        "{lines:?}"
+    );
+
+    let below = with_rule(ExplorerIgnoreRule::Git {
+        repository: ExplorerRepositoryPlacement::BelowProjectRoot,
+    });
+    assert!(
+        ignore_rule_line(&catalog, &below)
+            .unwrap()
+            .contains("nested Git repo")
+    );
+
+    // The project's own repository, the floor, and a scan never sent to git say
+    // nothing here (the floor's sentence is a later slice's).
+    for quiet in [
+        ExplorerIgnoreRule::Git {
+            repository: ExplorerRepositoryPlacement::AtProjectRoot,
+        },
+        ExplorerIgnoreRule::Floor(ExplorerFloorReason::NotARepository),
+        ExplorerIgnoreRule::Floor(ExplorerFloorReason::NotAsked),
+    ] {
+        assert_eq!(
+            ignore_rule_line(&catalog, &with_rule(quiet)),
+            None,
+            "{quiet:?}"
+        );
+    }
+}
+
+/// The live capture found the first wording clipped at "the Git r": tree rows are
+/// unwrapped and the sidebar holds about 33 monospace columns. A sentence longer
+/// than that is not a sentence the user can read, so its length is held.
+#[test]
+fn the_ignore_rule_sentence_fits_the_sidebar() {
+    use super::ignore_rule_line;
+    const SIDEBAR_COLUMNS: usize = 32;
+    let catalog = real_catalog();
+    for repository in [
+        ExplorerRepositoryPlacement::AboveProjectRoot,
+        ExplorerRepositoryPlacement::BelowProjectRoot,
+    ] {
+        let mut scan = scan_at_root(vec![plain_node("a.txt", ExplorerNodeKind::File)]);
+        scan.ignore_rule = ExplorerIgnoreRule::Git { repository };
+        let line = ignore_rule_line(&catalog, &tree_with(scan)).unwrap();
+        assert!(
+            line.chars().count() <= SIDEBAR_COLUMNS,
+            "{} columns is clipped in the sidebar: {line:?}",
+            line.chars().count()
+        );
+    }
 }

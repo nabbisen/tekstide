@@ -156,6 +156,13 @@ impl ExplorerTree {
         self.loaded.get(Path::new(""))
     }
 
+    /// Every directory scan the tree holds, root first. The sidebar reads which
+    /// **rule** each used (`ExplorerDirectoryScan::ignore_rule`) from these, so
+    /// what it says is what the scans carried and not a guess made at draw time.
+    pub fn loaded_scans(&self) -> impl Iterator<Item = &ExplorerDirectoryScan> {
+        self.loaded.values()
+    }
+
     pub fn root_state(&self) -> ExplorerRootState {
         let root = Path::new("");
         if self.loaded.contains_key(root) {
