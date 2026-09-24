@@ -1,15 +1,15 @@
 ---
 title: "RFC-053: What The Window Says Is True — implementation handoff"
 rfc: "RFC-053"
-rfc_file: "../../accepted/053-what-the-window-says-is-true.md"
-source_rfc_status: "Accepted 2026-09-24 — M12 remainder"
+rfc_file: "../../done/053-what-the-window-says-is-true.md"
+source_rfc_status: "Implemented and closed 2026-09-24 — released as 0.23.0"
 target_milestone: "M12 remainder"
 created: "2026-09-24"
 ---
 
 # Six things the window says that are not true
 
-Source RFC: [RFC-053](../../accepted/053-what-the-window-says-is-true.md)
+Source RFC: [RFC-053](../../done/053-what-the-window-says-is-true.md)
 
 ## What this is
 

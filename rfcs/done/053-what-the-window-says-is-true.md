@@ -1,6 +1,6 @@
 # RFC-053: What The Window Says Is True
 
-Status: **Accepted 2026-09-24, through the owner's authorisation of the release schedule** — RFC-053 is its first row, and authorising a schedule whose first release is this RFC is what accepting it means. Say otherwise and it goes back to `proposed/` at no cost. **D1–D8 decided by the architect on acceptance.** Proposed 2026-09-24. First release in the 2026-09-24 schedule (`0.23.0`), from the GUI
+Status: **Implemented and closed 2026-09-24.** Released as `0.23.0` (`dfc5208`), the first release built under the authorised schedule; the six defects are fixed and the two carried items landed. Closed late — see the Closed section. **Accepted 2026-09-24, through the owner's authorisation of the release schedule** — RFC-053 is its first row, and authorising a schedule whose first release is this RFC is what accepting it means. Say otherwise and it goes back to `proposed/` at no cost. **D1–D8 decided by the architect on acceptance.** Proposed 2026-09-24. First release in the 2026-09-24 schedule (`0.23.0`), from the GUI
 audit of 2026-09-23.
 
 ## Summary
@@ -154,3 +154,33 @@ the value stops being the real one.
 **The smaller alternative was offered and declined.** Keeping the formula and adding measured inputs
 for the top bar and the two workspace rows preserves exactly the failure mode that produced this
 defect, and adds partial measurement on top of it.
+
+## Closed (2026-09-24)
+
+**Shipped as `0.23.0`** (`dfc5208`), with the candidate at `8326e07` and the slice at `ee2087d`. All
+eight decisions were implemented as accepted, plus D9's scan.
+
+**What the six defects became.** The `RFC-017` placeholder is gone and a mechanical scan keeps it
+gone — `no_catalog_string_names_an_internal_identifier`, the third check of its kind in
+`crates/tekstide/src/i18n/enforcement.rs`, with its own planted-string falsification beside it
+(`the_internal_identifier_scan_fails_on_a_planted_string_and_passes_without_it`). D3's fix is
+recorded where it lives: `crates/tekstide/src/surface/frame.rs` opens by saying `content_area_height`
+used to *reconstruct* the space available from a constant, and now derives it from the rendered bar —
+the change that had been sizing every PTY against a number the bar did not have.
+
+**The two carried items landed and were not ticked.** C1 is `5ffce5e`: `dirty file` became
+`unsaved file` in `crates/tekstide-core/src/close.rs` and the text harness, so the close dialog and
+the board name one fact the same way. C2 is `02b088f`: `ARCHITECTURE.md:253` now records that a
+catalog string's interpolated values render inside U+2068/U+2069 isolate marks, so a wording test
+must strip them — the lesson had been a comment in one test file.
+
+**Closed three releases late, and that is the finding.** RFC-053 stayed in `accepted/` through
+`0.24.0` and `0.25.0`; it was caught on 2026-09-24 while measuring for RFC-055. Nothing in the
+product was wrong — the code shipped — but for three releases the project's own index said work was
+in flight that had already been released, which is the same class of defect this RFC exists to fix,
+committed by the record rather than by the window. `rfc_docs_invariants` could not catch it:
+`accepted/` is the correct folder for an RFC being implemented, and no invariant relates a release
+to a folder. **The check that would have caught it is a new one** — an RFC the changelog names as
+released must live in `done/` — and it is carried into RFC-055's acceptance criteria, because one
+test in a file that already exists is the proportionate answer to a lapse that has now happened once
+and was invisible for three releases.

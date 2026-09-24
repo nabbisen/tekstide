@@ -1,8 +1,8 @@
 ---
 title: "RFC-053 — acceptance and QA checklist"
 rfc: "RFC-053"
-rfc_file: "../../accepted/053-what-the-window-says-is-true.md"
-source_rfc_status: "Accepted 2026-09-24 — M12 remainder"
+rfc_file: "../../done/053-what-the-window-says-is-true.md"
+source_rfc_status: "Implemented and closed 2026-09-24 — released as 0.23.0"
 target_milestone: "M12 remainder"
 created: "2026-09-24"
 ---
@@ -86,10 +86,10 @@ implementer's to paper over.
       deleted, as dead once the formula went: `window_size`, `WindowResized`, `WindowOpened`, the two
       window subscriptions and seven chrome constants. Carried items C1/C2 are **separate commits**
       (`5ffce5e`, `02b088f`).
-- [ ] **C1 (carried from review 418):** the close-project dialog says **unsaved**, like the board.
+- [x] **C1 (carried from review 418):** the close-project dialog says **unsaved**, like the board.
       After PR-053-A the product calls one fact "unsaved" in one place and "dirty" in another, and
       that inconsistency is one this RFC introduced. One string.
-- [ ] **C2 (carried from review 418):** the bidi-isolate lesson is in `ARCHITECTURE.md` — numbers
+- [x] **C2 (carried from review 418):** the bidi-isolate lesson is in `ARCHITECTURE.md` — numbers
       render inside invisible isolate marks, so `0 agent runs` is not a substring of the rendered
       line. A comment in one test file is not where the next person will look.
 
@@ -101,11 +101,11 @@ implementer's to paper over.
       staging, `rfc_docs_invariants`, and **three consecutive full-workspace runs with
       `--no-fail-fast`**, output redirected to files. — 593 + 9 + 877, all three.
 - [x] Every new intermittent failure has a dated row in `test-process-leak.md`. — none occurred.
-- [ ] Commits are pushed once the gate is green.
+- [x] Commits are pushed once the gate is green. — `0.23.0` is tagged and published; `origin/main..HEAD` is empty.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted. — **2026-09-24, at closeout.** C1 (`5ffce5e`) and C2 (`02b088f`) were written as separate commits and their boxes were never ticked; both are verified in the shipped tree (`crates/tekstide-core/src/close.rs` says `unsaved file`, `ARCHITECTURE.md:253` records the bidi-isolate lesson).
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 

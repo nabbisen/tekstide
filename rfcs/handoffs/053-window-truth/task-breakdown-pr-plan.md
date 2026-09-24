@@ -1,8 +1,8 @@
 ---
 title: "RFC-053 — task breakdown and PR plan"
 rfc: "RFC-053"
-rfc_file: "../../accepted/053-what-the-window-says-is-true.md"
-source_rfc_status: "Accepted 2026-09-24 — M12 remainder"
+rfc_file: "../../done/053-what-the-window-says-is-true.md"
+source_rfc_status: "Implemented and closed 2026-09-24 — released as 0.23.0"
 target_milestone: "M12 remainder"
 created: "2026-09-24"
 ---
