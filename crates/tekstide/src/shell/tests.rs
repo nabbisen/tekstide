@@ -19149,3 +19149,29 @@ fn a_reload_applies_scrollback_to_panes_that_already_exist_and_to_later_ones() {
     assert_eq!(state.terminal_panes[0].scrollback_in_force(), default);
     assert!(config_state_lines(&state).is_empty());
 }
+
+/// Found by the live capture: a fixed 110 px binding column let `Ctrl+Shift+V` run
+/// into its description once the size or face was configured. The column is in
+/// ems, so it grows with the configured body size.
+#[test]
+fn the_help_binding_column_scales_with_the_configured_body_size() {
+    use tekstide_core::config::{FontSettings, ThemeSettings};
+    let width_at = |size: f32| {
+        let font = FontSettings {
+            body_size: Some(size),
+            ..FontSettings::default()
+        };
+        super::help_modal_binding_column_px(&crate::theme::Theme::from_settings(
+            &ThemeSettings::default(),
+            &font,
+            None,
+        ))
+    };
+    assert_eq!(width_at(8.0) * 4.0, width_at(32.0));
+    assert!(
+        width_at(14.0) > 110.0,
+        "no narrower than the fixed column was"
+    );
+    // 8.2 ems is the widest chord measured in the widest face measured.
+    assert!(width_at(17.0) >= 8.2 * 17.0);
+}

@@ -9205,10 +9205,21 @@ fn modal_dialog_box_split<'a>(
 const MODAL_SECTION_SPACING_PX: f32 = 10.0;
 
 /// Width of the binding column, so descriptions line up -- the same
-/// number and reasoning `board.rs`'s own `KEYBOARD_HELP_BINDING_COLUMN_PX`
-/// used before this list moved here (RFC-038 PR-038-C, RFC-039's second
-/// principle: reference material does not live on a working surface).
-const HELP_MODAL_BINDING_COLUMN_PX: f32 = 110.0;
+/// reasoning `board.rs`'s own `KEYBOARD_HELP_BINDING_COLUMN_PX` used before
+/// this list moved here (RFC-038 PR-038-C, RFC-039's second principle:
+/// reference material does not live on a working surface).
+///
+/// **In ems, not pixels (RFC-054 PR-054-C).** It was a fixed 110 px, which fit
+/// `Ctrl+Shift+V` at the shipped size and shipped face and let the widest
+/// binding run into its own description the moment a user chose a larger size or
+/// a wider family -- found by the live capture, not by a test. Nine ems holds the
+/// longest chord in the widest face measured (DejaVu Serif, 8.2 ems) and scales
+/// with the configured size.
+const HELP_MODAL_BINDING_COLUMN_EMS: f32 = 9.0;
+
+fn help_modal_binding_column_px(theme: &Theme) -> f32 {
+    HELP_MODAL_BINDING_COLUMN_EMS * theme.font_size_body()
+}
 
 /// RFC-038 PR-038-C: the keyboard reference, reachable from anywhere via
 /// `Ctrl+Alt+K` -- replaces the Project Board's own former keyboard list
@@ -9237,7 +9248,7 @@ fn help_modal_view(state: &State) -> Element<'_, Message> {
             row![
                 text(line.binding)
                     .size(state.theme.font_size_body())
-                    .width(Length::Fixed(HELP_MODAL_BINDING_COLUMN_PX)),
+                    .width(Length::Fixed(help_modal_binding_column_px(&state.theme))),
                 text(line.description).size(state.theme.font_size_body()),
             ]
             .spacing(8),
@@ -9258,7 +9269,7 @@ fn help_modal_view(state: &State) -> Element<'_, Message> {
                 row![
                     text(line.binding)
                         .size(state.theme.font_size_body())
-                        .width(Length::Fixed(HELP_MODAL_BINDING_COLUMN_PX)),
+                        .width(Length::Fixed(help_modal_binding_column_px(&state.theme))),
                     text(line.description).size(state.theme.font_size_body()),
                 ]
                 .spacing(8),
