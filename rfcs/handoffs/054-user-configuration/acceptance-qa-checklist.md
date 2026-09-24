@@ -43,6 +43,23 @@ shares its fixture" — "alone" has been falsified three times by suites sharing
 - [x] No diagnostic echoes a configured string unescaped (`quote_untrusted`).
 - [x] The colour-alone and i18n completeness scans still pass.
 
+### Required at review 428
+
+- [ ] **R1: the focus border meets 3:1** against the surfaces it is drawn on — WCAG's non-text
+      minimum, the one `derived_contrast_pairs` already holds the defaults to. Accent and the
+      non-focus border stay unmeasured **and the book says so**, as a decision rather than an
+      oversight.
+- [ ] **R2: the scrim's alpha is capped**, with a diagnostic. RFC-018 wants it translucent so a
+      backdrop cannot be mistaken for a rectangle the application did not draw; no configuration may
+      produce a spoofable surface.
+- [ ] **`theme.rs`'s claim that every colour comes from a `Theme` value is corrected** — it is not
+      true of the buttons.
+- [ ] **The buttons follow the theme**, if it is routing the existing roles into their styles. If it
+      is more than that, ship with the limitation **stated** and it gets scheduled.
+- [ ] **`ARCHITECTURE.md` records the UI-font global** as the one piece of process-global UI state,
+      with the reason (iced fixes the default font at build, and a live family needs one) — so the
+      next author does not read it as permission for a second.
+
 ## PR-054-C — scrollback and the live proof
 
 - [ ] The scrollback cap is **measured**, not chosen: bytes per line at a realistic width, cap set so
