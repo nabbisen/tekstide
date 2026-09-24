@@ -874,7 +874,7 @@ fn rfcs_named_by_released_sections(changelog: &str) -> Vec<(String, String)> {
     let mut found = Vec::new();
     let mut heading = String::new();
     let mut body = String::new();
-    let mut flush = |heading: &str, body: &str, found: &mut Vec<(String, String)>| {
+    let flush = |heading: &str, body: &str, found: &mut Vec<(String, String)>| {
         let released = body
             .lines()
             .any(|line| line.starts_with("Status:") && line.to_lowercase().contains("released on"));
