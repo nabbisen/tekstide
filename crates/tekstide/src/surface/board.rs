@@ -342,18 +342,14 @@ pub(crate) fn path_field_display_text(path_field: &str) -> String {
 pub(crate) struct RowSections {
     pub(crate) name: String,
     pub(crate) path: String,
-    /// Trust, branch, attention: the state of the project.
-    pub(crate) state: String,
-    /// Terminals, agent runs, approvals, reviews, unsaved files.
-    pub(crate) counts: String,
-    /// "9 blocked automations", when there are any.
-    pub(crate) blocked: Option<String>,
+    /// Trust, branch, attention: the state of the project, one badge each.
+    pub(crate) state: Vec<String>,
+    /// Terminals, agent runs, approvals, reviews, unsaved files, and the
+    /// blocked-automation count when there is one: one badge each.
+    pub(crate) counts: Vec<String>,
     /// "blocked: automatic LSP startup, ...", when there are any.
     pub(crate) blocked_names: Option<String>,
 }
-
-/// The separator between facts on one line. Punctuation, not a status.
-const FACT_SEPARATOR: &str = "  ·  ";
 
 pub(crate) fn row_sections(row: &ProjectBoardRow, catalog: &Catalog) -> RowSections {
     let mut lines = row_lines(row, catalog).into_iter();
@@ -371,12 +367,13 @@ pub(crate) fn row_sections(row: &ProjectBoardRow, catalog: &Catalog) -> RowSecti
         1 => (None, rest.first().cloned()),
         _ => (rest.first().cloned(), rest.get(1).cloned()),
     };
+    let mut counts = counts;
+    counts.extend(blocked);
     RowSections {
         name,
         path,
-        state: [trust, branch, attention].join(FACT_SEPARATOR),
-        counts: counts.join(FACT_SEPARATOR),
-        blocked,
+        state: vec![trust, branch, attention],
+        counts,
         blocked_names,
     }
 }
@@ -386,6 +383,64 @@ fn bold() -> iced::Font {
         weight: iced::font::Weight::Bold,
         ..iced::Font::DEFAULT
     }
+}
+
+/// Anything but `Calm` is worth a second look, so it gets a heavier border --
+/// **in addition to its word** ("Risk", "Failed", "Approval needed"), never
+/// instead of it (NFR-UX-002).
+fn attention_stands_out(attention: AttentionState) -> bool {
+    attention != AttentionState::Calm
+}
+
+/// One fact as a badge: its words in a small bordered pill. **A badge is a
+/// container for a word, not a replacement for one** -- every badge's meaning
+/// is its text, so the board stays readable with no colour at all (D4). They
+/// wrap onto further lines rather than overflow a narrow window.
+///
+/// `emphasise_last` gives the final badge (attention, on the state row) a
+/// heavier border when the project needs a second look.
+fn badges<'a, Message: 'a>(
+    facts: Vec<String>,
+    theme: &'a Theme,
+    emphasise_last: bool,
+) -> Element<'a, Message> {
+    let last = facts.len().saturating_sub(1);
+    let pills: Vec<Element<'a, Message>> = facts
+        .into_iter()
+        .enumerate()
+        .map(|(index, fact)| {
+            let heavy = emphasise_last && index == last;
+            container(text(fact).size(theme.font_size_status()))
+                .padding(iced::Padding {
+                    top: 3.0,
+                    right: 9.0,
+                    bottom: 3.0,
+                    left: 9.0,
+                })
+                .style(
+                    move |_base_theme: &iced::Theme| iced::widget::container::Style {
+                        background: Some(iced::Background::Color(theme.background())),
+                        text_color: Some(theme.foreground()),
+                        border: iced::Border {
+                            color: if heavy {
+                                theme.border_focused()
+                            } else {
+                                theme.border_default()
+                            },
+                            width: if heavy { 2.0 } else { 1.0 },
+                            radius: 10.0.into(),
+                        },
+                        ..iced::widget::container::Style::default()
+                    },
+                )
+                .into()
+        })
+        .collect();
+    iced::widget::Row::with_children(pills)
+        .spacing(6)
+        .wrap()
+        .vertical_spacing(6)
+        .into()
 }
 
 fn row_view<'a, Message: 'a + Clone>(
@@ -401,17 +456,14 @@ fn row_view<'a, Message: 'a + Clone>(
     // The name is the heading: larger and bold. Everything under it is
     // smaller, so a card's first line is what a person's eye lands on.
     let mut column_items: Vec<Element<'a, Message>> = vec![
-        text(format!("{marker}{}", sections.name))
+        text(sections.name)
             .size(theme.font_size_heading())
             .font(bold())
             .into(),
         text(sections.path).size(theme.font_size_status()).into(),
-        text(sections.state).size(theme.font_size_body()).into(),
-        text(sections.counts).size(theme.font_size_status()).into(),
+        badges(sections.state, theme, attention_stands_out(row.attention)),
+        badges(sections.counts, theme, false),
     ];
-    if let Some(blocked) = sections.blocked {
-        column_items.push(text(blocked).size(theme.font_size_status()).into());
-    }
     if let Some(names) = sections.blocked_names {
         column_items.push(text(names).size(theme.font_size_status()).into());
     }
@@ -448,7 +500,15 @@ fn row_view<'a, Message: 'a + Clone>(
     } else {
         (theme.border_default(), 1.0)
     };
-    container(column(column_items).spacing(6))
+    // The marker sits in its own fixed-width column so every card's text lines
+    // up whether or not it carries the `> `.
+    let body = iced::widget::row![
+        text(marker)
+            .width(Length::Fixed(24.0))
+            .size(theme.font_size_heading()),
+        column(column_items).spacing(6).width(Length::Fill),
+    ];
+    container(body)
         .width(Length::Fill)
         .padding(12)
         .style(

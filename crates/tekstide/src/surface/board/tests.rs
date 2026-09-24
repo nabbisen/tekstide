@@ -678,9 +678,8 @@ fn a_cards_sections_say_exactly_what_its_lines_say() {
         let sections = row_sections(&row, &catalog);
 
         let mut regrouped = vec![sections.name, sections.path];
-        regrouped.extend(sections.state.split("  ·  ").map(str::to_owned));
-        regrouped.extend(sections.counts.split("  ·  ").map(str::to_owned));
-        regrouped.extend(sections.blocked);
+        regrouped.extend(sections.state);
+        regrouped.extend(sections.counts);
         regrouped.extend(sections.blocked_names);
 
         // `state` is trust, branch, attention; the counts sit between branch
@@ -702,18 +701,52 @@ fn a_card_reads_who_then_state_then_how_much() {
         sections.name,
         super::text_safety::quote_untrusted("demo-project").as_str()
     );
-    let state = plain(&sections.state);
+    // State badges: trust, branch, attention -- each its own badge.
+    let state: Vec<String> = sections.state.iter().map(|fact| plain(fact)).collect();
+    assert_eq!(state.len(), 3, "{state:?}");
+    assert_eq!(state[0], "Trusted");
+    assert_eq!(state[1], "branch: main");
+    assert_eq!(state[2], "Calm");
+    // Count badges: the five counts, then the blocked-automation count.
+    let counts: Vec<String> = sections.counts.iter().map(|fact| plain(fact)).collect();
+    assert_eq!(counts.len(), 6, "{counts:?}");
     assert!(
-        state.starts_with("Trusted") && state.contains("branch: main") && state.ends_with("Calm"),
-        "{state:?}"
-    );
-    let counts = plain(&sections.counts);
-    assert!(
-        counts.contains("2 terminals") && counts.contains("3 unsaved files"),
+        counts.contains(&"2 terminals".to_string())
+            && counts.contains(&"3 unsaved files".to_string()),
         "{counts:?}"
     );
-    // Nine lines became four groups plus the blocked-automation lines.
-    assert!(sections.blocked.is_some() && sections.blocked_names.is_some());
+    assert!(
+        counts.last().unwrap().contains("blocked automations"),
+        "{counts:?}"
+    );
+    assert!(sections.blocked_names.is_some());
+}
+
+/// **A badge is a word in a pill, never a replacement for one (D4).** Only a
+/// project that needs a second look gets the heavier border, and it still says
+/// what it needs in words.
+#[test]
+fn only_a_project_needing_attention_stands_out_and_it_says_why_in_words() {
+    use tekstide_core::project_board::AttentionState;
+    assert!(!super::attention_stands_out(AttentionState::Calm));
+    for attention in [
+        AttentionState::Risk,
+        AttentionState::ApprovalNeeded,
+        AttentionState::Review,
+        AttentionState::Failed,
+        AttentionState::Running,
+        AttentionState::Dirty,
+    ] {
+        assert!(super::attention_stands_out(attention), "{attention:?}");
+        let mut row = baseline_row();
+        row.attention = attention;
+        let sections = row_sections(&row, &real_catalog());
+        let word = plain(sections.state.last().unwrap());
+        assert_ne!(
+            word, "Calm",
+            "{attention:?} must say what it is, not only look different"
+        );
+    }
 }
 
 /// The open project's card carries no button, and the catalog has a word for
