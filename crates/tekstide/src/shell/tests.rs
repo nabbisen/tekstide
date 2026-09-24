@@ -18219,3 +18219,51 @@ fn moving_the_board_highlight_asks_the_card_list_to_follow_it() {
         "{request}"
     );
 }
+
+/// **The board's scroll is consumed on the real key path.** The earlier test
+/// asserted the request was *set*; the shipping binary never ran it, because
+/// the key-press arm of `update` returns early and the request was only turned
+/// into a `Task` at the end of the handler (review 424 addendum, measured on
+/// ten projects). This goes through `update` itself and asserts on what
+/// `update` **returns**: a `Down` on a board with several cards returns a task
+/// that does work, a `Down` on a board with nothing to scroll returns none, and
+/// no request is left behind.
+#[test]
+fn a_board_down_key_through_update_returns_the_scroll_task() {
+    let down = || {
+        Message::Input(crate::input::RoutedInput::Surface(
+            crate::input::surface_input_for_test(
+                FocusZone::MainArea,
+                press(iced::keyboard::Key::Named(
+                    iced::keyboard::key::Named::ArrowDown,
+                )),
+            ),
+        ))
+    };
+
+    let mut app_shell = ApplicationShell::new();
+    for label in ["scroll-task-a", "scroll-task-b", "scroll-task-c"] {
+        app_shell
+            .add_project_from_path(&fresh_project_dir(label))
+            .expect("a freshly created directory is a valid project root");
+    }
+    let mut state = state_with(app_shell);
+    let task = super::update(&mut state, down());
+    assert!(
+        task.units() > 0,
+        "a Down over several cards must return the snap-to-highlight task"
+    );
+    assert_eq!(state.project_board_row_highlight, 1);
+    assert!(
+        state.project_board_scroll_request.is_none(),
+        "the request must be consumed, not left for the next message"
+    );
+
+    // Nothing to scroll: a single card asks for nothing.
+    let mut app_shell = ApplicationShell::new();
+    app_shell
+        .add_project_from_path(&fresh_project_dir("scroll-task-single"))
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    assert_eq!(super::update(&mut state, down()).units(), 0);
+}

@@ -1962,6 +1962,30 @@ fn activate_current_modal(state: &mut State) {
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
+    let task = update_message(state, message);
+    // **Every** path out of the message handler comes through here, including
+    // its early `return`s. The key-press arm returns before the end of
+    // `update_message`, which is where the board's scroll request used to be
+    // consumed -- so a board `Down` set the request and nothing ever ran it
+    // (found by a live capture at review 424, and missed by a unit test that
+    // only asserted the request was set). The request becomes a `Task` in one
+    // place no `return` can skip.
+    match state.project_board_scroll_request.take() {
+        Some(y) => Task::batch([
+            task,
+            iced::widget::operation::snap_to(
+                iced::widget::Id::new(crate::surface::board::BOARD_SCROLL_ID),
+                iced::widget::scrollable::RelativeOffset {
+                    x: None,
+                    y: Some(y),
+                },
+            ),
+        ]),
+        None => task,
+    }
+}
+
+fn update_message(state: &mut State, message: Message) -> Task<Message> {
     // RFC-022 PR-022-E ("the arrival model"), response 227: a promoted
     // approval dialog briefly ignores modal input after appearing, so a
     // keystroke already in flight (typing mid-word, or dismissing a
@@ -2607,18 +2631,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             open_transcript_purge_dialog(state);
         }
     }
-    // The Project Board's cards scroll; a keyboard move of the highlight asks
-    // for the list to follow it.
-    match state.project_board_scroll_request.take() {
-        Some(y) => iced::widget::operation::snap_to(
-            iced::widget::Id::new(crate::surface::board::BOARD_SCROLL_ID),
-            iced::widget::scrollable::RelativeOffset {
-                x: None,
-                y: Some(y),
-            },
-        ),
-        None => Task::none(),
-    }
+    Task::none()
 }
 
 /// The width/height of the region `terminal_workspace_view` gives the
