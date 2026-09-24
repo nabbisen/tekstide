@@ -27,7 +27,7 @@ shares its fixture" — "alone" has been falsified three times by suites sharing
       `OpenSafeCloseDialog` are decided, each with its reachability stated.
 - [x] An action cannot be both bound and dead — held by the type, not by review.
 
-- [ ] **Required at review 427: pin the caller, not only the module.** `ConfigStore::load` takes any
+- [x] **Required at review 427: pin the caller, not only the module.** `ConfigStore::load` takes any
       `PathBuf`, so a future caller passing a project-derived path is caught by neither the
       behavioural test nor the structural scan. Pin that it has **exactly one production call site**
       and that the path it receives is the one `ConfigPaths` derived — "the configuration comes from
@@ -35,13 +35,13 @@ shares its fixture" — "alone" has been falsified three times by suites sharing
 
 ## PR-054-B — theme and fonts
 
-- [ ] A pair below **4.5:1** falls back, and the diagnostic carries the **measured ratio**.
+- [x] A pair below **4.5:1** falls back, and the diagnostic carries the **measured ratio**.
       **Ablation:** drop the check; that test fails.
-- [ ] An unavailable font family falls back and says so; a size outside **8–32 px** falls back at
+- [x] An unavailable font family falls back and says so; a size outside **8–32 px** falls back at
       each edge.
-- [ ] **A font is a name, never a path** — no configured string reaches a file open.
-- [ ] No diagnostic echoes a configured string unescaped (`quote_untrusted`).
-- [ ] The colour-alone and i18n completeness scans still pass.
+- [x] **A font is a name, never a path** — no configured string reaches a file open.
+- [x] No diagnostic echoes a configured string unescaped (`quote_untrusted`).
+- [x] The colour-alone and i18n completeness scans still pass.
 
 ## PR-054-C — scrollback and the live proof
 

@@ -732,3 +732,50 @@ fn the_configuration_page_lists_every_rebindable_action_with_its_default_chord()
     }
     assert_eq!(listed, 15, "every rebindable action is listed exactly once");
 }
+
+/// **RFC-054 PR-054-B.** The configuration page shows every colour role a user
+/// can set, every font key, and the two numbers that bound them -- derived from
+/// the code's own names and constants, so a role added to `Theme` (or a bound
+/// changed) without the page fails here rather than going stale.
+#[test]
+fn the_configuration_page_names_every_theme_role_font_key_and_bound() {
+    let page = repo_root().join("docs/src/users/configuration.md");
+    let Ok(source) = std::fs::read_to_string(&page) else {
+        eprintln!("skipped: docs/ is not packaged with this crate");
+        return;
+    };
+    for role in tekstide_core::config::ThemeRole::ALL {
+        let name = role.config_name();
+        assert!(
+            source.lines().any(|line| {
+                line.trim_start().starts_with(name)
+                    && line.trim_start()[name.len()..]
+                        .trim_start()
+                        .starts_with('=')
+            }),
+            "the page's [theme] example has no line for `{name}`"
+        );
+    }
+    for key in ["family", "body_size", "heading_size", "status_size"] {
+        assert!(
+            source.lines().any(|line| {
+                line.trim_start().starts_with(key)
+                    && line.trim_start()[key.len()..].trim_start().starts_with('=')
+            }),
+            "the page's [font] example has no line for `{key}`"
+        );
+    }
+    let minimum = tekstide_core::config::MIN_TEXT_CONTRAST;
+    assert!(
+        source.contains(&format!("**{minimum}:1**")),
+        "the page must state the {minimum}:1 minimum"
+    );
+    let (low, high) = (
+        tekstide_core::config::MIN_FONT_SIZE_PX,
+        tekstide_core::config::MAX_FONT_SIZE_PX,
+    );
+    assert!(
+        source.contains(&format!("{low}–{high} pixels")),
+        "the page must state the {low}–{high} pixel bound"
+    );
+}

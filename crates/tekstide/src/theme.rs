@@ -44,8 +44,8 @@ pub struct Theme {
     font_size_status: f32,
     /// **RFC-054 PR-054-B.** The family the interface's own text is set in.
     /// `Font::DEFAULT` unless the user named an installed family. The
-    /// terminal, the file tree and the diff keep their monospace face either
-    /// way (`explorer::TREE_FONT` and friends set it explicitly): a family
+    /// terminal and the file tree keep their monospace face either way
+    /// (`explorer::TREE_FONT` and `MONOSPACE` in the terminal set it explicitly): a family
     /// chosen for reading prose must not undo what makes a column of code line
     /// up.
     font: Font,

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added — colours, font and sizes are settings (RFC-054, PR-054-B)
+
+- **`[theme]` and `[font]` in `config.toml`.** Seven colours (`#RRGGBB`), a font family, and the three text
+  sizes. `Ctrl+Alt+C` applies them live, including the family.
+- **You cannot make the window unreadable.** Text must meet **4.5:1** against the two surfaces it sits on; a
+  colour that would break that is not used, and the Project Board says the ratio it measured. Sizes outside
+  8–32 pixels fall back. Each setting falls back on its own.
+- **A font is a name, never a path.** The family is looked up in the fonts the window is already drawn from;
+  a path is refused, an uninstalled name is named on the board, and no configured string is ever opened as a
+  font. The terminal and the file tree keep a fixed-width face.
+- **`[ui]` now says where its settings went** instead of "no effect yet".
+
 ### Added — keybindings are settings (RFC-054, PR-054-A)
 
 - **A `[keybindings]` section in `config.toml`.** One entry per action, the chord spelled exactly as the Help
