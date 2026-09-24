@@ -2,7 +2,8 @@
 
 ## 0.25.0 - The Window Takes Your Settings
 
-Status: release candidate; not yet published or tagged.
+Status: **released on 2026-09-24.** Published to crates.io as `tekstide 0.25.0` and
+`tekstide-core 0.25.0`, tagged `0.25.0` on `87e3652`.
 
 Five things became settable: the keyboard shortcuts, the colours, the font family, the text sizes and how much
 scrollback a terminal keeps. `Ctrl+Alt+C` applies a change to the running window. A bad value falls back on its
