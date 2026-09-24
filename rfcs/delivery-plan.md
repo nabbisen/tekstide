@@ -116,6 +116,19 @@ carry no dates — a release ships when its RFC closes and the gate is green thr
 | `0.33.0` | **060** Command Approval A User Can Reach | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **A 1.0 blocker**: "command approval for adapter-supported workflows" is in the 1.0 minimum list, and `to_ai_cli_profile` sets `Supervised` unconditionally, so no user can reach one |
 | `0.34.0`+ | **028**, **029**, NFR verification | `NFR-PORT-001`..`003`; docs, CI, release automation; every performance budget | M14, the 1.0 candidate band |
 
+### Two rules the release sequence now carries (2026-09-25, RFC-055 PR-055-C)
+
+**The lifecycle move is part of the release commit sequence**, beside the version bump and the
+changelog promotion — not tidying afterwards. RFC-053 shipped as `0.23.0` and sat in `accepted/`
+through two further releases because nothing related a release to a folder.
+`an_rfc_a_release_names_lives_in_done` now does.
+
+**A released changelog section may not name an RFC that still has a document in `accepted/` or
+`proposed/`** — including a forward-looking mention, and including one that only becomes a violation
+later, when someone writes that reserved number into `proposed/`. The remedy is to reword the
+released section, never to move an unshipped RFC into `done/`. A release-*candidate* section may name
+its own in-flight RFC; the check reads released sections only.
+
 ### Unplanned work, recorded so it is not invisible
 
 **The Project Board's cards (2026-09-24, `0.24.0`).** Owner-requested while testing RFC-052, outside

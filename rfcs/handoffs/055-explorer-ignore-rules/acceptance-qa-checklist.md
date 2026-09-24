@@ -96,6 +96,19 @@ number in the evidence is not ticked.**
 - [x] The `0.26.0` changelog section owns this release's own limitations in its own words, and
       corrects any predecessor it contradicts by name.
 
+### Required at review 433
+
+- [ ] **Q2:** `show_ignored = false` hides ignored **files** and counts them; an ignored
+      **directory** keeps its row, collapsed and marked `[ignored]`. Capture: a repository that
+      ignores `target/`, at `false`, showing `target (collapsed) [ignored]` and a count of the hidden
+      files. `IgnoredHidden`'s doc comment says it counts files. Hiding a place takes away the way in
+      — `0.24.0` collapsed `target/` and a user could still open it.
+- [ ] **Q3:** `released_rfcs_still_in_flight`'s message names **both** remedies — the RFC shipped, so
+      close it; or the released section only mentions it, so reword the section. As written it
+      recommends moving an unshipped RFC to `done/`, which is the lie the invariant exists to catch.
+- [ ] Not blocking: `ablate.sh`'s filter no longer hides an assertion message, the way it was already
+      widened once for compile errors.
+
 ## Whole-RFC
 
 - [x] **Review 431 R4:** `REQ-FILE-005` is not marked complete without naming that **`core.excludesFile` is not honoured**
