@@ -1150,3 +1150,7 @@ deterministically** with `Bind(SocketPathTooLong)` — the approval socket lives
 and a Unix socket path is limited to 108 bytes. That is a property of the environment, not a flake and
 not a regression; `TMPDIR=/dev/shm/…` (short) ran clean. A gate that must move its temp directory needs
 a *short* one.
+
+## Recurrence, 2026-09-24 — RFC-052 PR-052-C's gate (implementer's run)
+
+Two already-registered intermittents, one in each of two runs of a three-run full-workspace gate (`625 + 9 + 902`; the middle run clean at `626 + 9 + 902`): `shell::tests::change_review_content_view_build_cost_by_line_count_measurement` (the load-sensitive timing budget, its own panic message says to check the load average) and, in the other run, `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` (**row 8**, same shape as before). Both passed in isolation. Not the slice: this response's changes are the explorer's row text, the Project Board's cards and a wider sidebar; nothing touches terminal termination or the change-review view. The gate was redone, not counted.
