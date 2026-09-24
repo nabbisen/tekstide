@@ -1,6 +1,6 @@
 # RFC-052: A File Explorer A User Can Read
 
-Status: **Accepted by the human owner 2026-09-24.** **D1, D2, D4–D8 decided by the architect on acceptance; D3 stayed open by design; slice A decided it (D3′, below): compose our own.** Proposed 2026-09-23. Raised by the human owner, who said the sidebar "looks strange…
+Status: **Implemented and closed 2026-09-24.** The sidebar is a tree: folders expand in place, folders first, text-symbol icons, every status still a word, and a change inside `src/` is visible without stepping into `src/`. Accepted by the human owner 2026-09-24.** **D1, D2, D4–D8 decided by the architect on acceptance; D3 stayed open by design; slice A decided it (D3′, below): compose our own.** Proposed 2026-09-23. Raised by the human owner, who said the sidebar "looks strange…
 a series of lines such as `[DIR]` and `[FILE]` seems far from helpful and friendly to users", and
 named three resources already in this ecosystem: `snora`, lucide icons, and `iced-swdir-tree`.
 
@@ -227,3 +227,28 @@ Whatever the tree does not render, it says, in a row that names how many are not
 **The scan is linear in path length** — 65 ms at depth 1 500, the same for the widget and for us — so
 it crosses a frame on a deep tree. **The scan is `Task`-shaped from B's first commit**, not retrofitted
 once someone notices a stall.
+
+
+## Closed (2026-09-24)
+
+Four slices and a board follow-up nobody planned.
+
+**D3′ was decided by measurement**, not preference: the widget as shipped failed five of eight
+properties, read back from what it *draws* rather than from what its code intends. `ItemTree` was
+ruled out on a schedule argument — it hardcodes `.size(14)` and a selection colour, and RFC-054 makes
+both user-configurable in the very next release.
+
+**Three defects found by live captures, none by unit tests.** Two by the implementer's own, before
+review: a clipped row losing its Git word (fixed by putting status words *before* the name, since the
+name is the only part that can be arbitrarily long), and the escape row's own report clipped (fixed
+with a fixed-height detail area). One by the reviewer's, after: **the board's keyboard scroll request
+was set and never consumed**, because `update`'s key arm returned before the tail that ran it — and
+the test asserted the request, not the effect. *"Unit-tested, not visually verified"* now reads as
+*"not tested"*.
+
+**The suite stopped leaking fixtures** along the way: 43 000 entries under `/tmp` before, **0** after,
+measured into a fresh `TMPDIR` three runs running.
+
+**Unplanned, owner-requested, and recorded rather than absorbed**: the Project Board's cards. It is in
+the delivery plan as unplanned work, and `0.24.0` corrects `0.23.0`'s claim that board legibility was
+"later work that no scheduled RFC covers".

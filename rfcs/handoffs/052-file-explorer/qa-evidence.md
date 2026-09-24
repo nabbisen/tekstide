@@ -9,7 +9,7 @@ created: "2026-09-24"
 ## PR-052-A — the fixture, and the mechanism decision
 
 Measurement only. **No user-visible change.** The decision is recorded as **D3′** at the end of
-[RFC-052](../../accepted/052-a-file-explorer-a-user-can-read.md).
+[RFC-052](../../done/052-a-file-explorer-a-user-can-read.md).
 
 ### What was built
 

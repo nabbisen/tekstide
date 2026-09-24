@@ -1,8 +1,8 @@
 ---
 title: "RFC-052 — acceptance and QA checklist"
 rfc: "RFC-052"
-rfc_file: "../../accepted/052-a-file-explorer-a-user-can-read.md"
-source_rfc_status: "Accepted 2026-09-24 — M12 remainder"
+rfc_file: "../../done/052-a-file-explorer-a-user-can-read.md"
+source_rfc_status: "Implemented and closed 2026-09-24 — M12 remainder"
 target_milestone: "M12 remainder"
 created: "2026-09-24"
 ---
@@ -115,8 +115,8 @@ implementer's to paper over.
       Say once that the project is not open, or say nothing — `REQ-NOTIFY-003`'s rule applied to
       unknowns.
 - [x] **B2: the nine blocked automations appear once**, not verbatim on every card.
-- [ ] **B3 (review 424 addendum): the card list does not follow the keyboard — measured, and it
-      blocks `0.24.0`.** Ten recent projects, natural window size: after seven `Down` presses the
+- [x] **B3: the card list follows the keyboard.** *Re-measured by the reviewer at review 425 with the same method that found it — ten recent projects, natural window size, seven `Down` presses: the list scrolled and the highlighted card (`iota`) is in view with its marker and border. The fix consumes the request in an `update` wrapper no `return` can skip, and the new test asserts on what `update` returns, not on the flag.*
+      Original finding: Ten recent projects, natural window size: after seven `Down` presses the
       highlight has left the first card and the viewport has not moved.
       **Cause:** `handle_project_board_row_key` sets `project_board_scroll_request` (`shell.rs:4458`),
       the only consumer is the **tail of `update()`** (`shell.rs:2612`), and the key arm
@@ -141,12 +141,31 @@ implementer's to paper over.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted 2026-09-24 (reviews 421-425). RFC-052 closed. Four slices and a board follow-up nobody
+planned.
+
+What the RFC was for: the sidebar read `[DIR]`/`[FILE]` and -- measured, not assumed -- was not a
+tree at all. It is now a tree with folders first, text-symbol icons, every status still a word, and
+a change inside src/ visible without stepping into src/.
+
+D3' decided by measurement rather than preference: the widget as shipped failed five of eight
+properties, read back from what it draws. ItemTree was ruled out on a schedule argument the
+implementer could not have weighed -- it hardcodes .size(14) and a selection colour, and RFC-054
+makes both user-configurable in the very next release.
+
+Two defects the implementer's own live capture found before review: a clipped row losing its Git
+word, and the escape row's report clipped. One the reviewer's live capture found after: the board's
+keyboard scroll request was set and never consumed, because update's key arm returned before the
+tail that ran it -- and the test asserted the request, not the effect. "Unit-tested, not visually
+verified" now reads as "not tested".
+
+The suite also stopped leaking fixtures: 43,000 entries under /tmp before, 0 after, measured by the
+reviewer into a fresh TMPDIR three runs running.
 ```

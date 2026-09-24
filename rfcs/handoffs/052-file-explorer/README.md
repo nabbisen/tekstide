@@ -1,15 +1,15 @@
 ---
 title: "RFC-052: A File Explorer A User Can Read — implementation handoff"
 rfc: "RFC-052"
-rfc_file: "../../accepted/052-a-file-explorer-a-user-can-read.md"
-source_rfc_status: "Accepted 2026-09-24 — M12 remainder"
+rfc_file: "../../done/052-a-file-explorer-a-user-can-read.md"
+source_rfc_status: "Implemented and closed 2026-09-24 — M12 remainder"
 target_milestone: "M12 remainder"
 created: "2026-09-24"
 ---
 
 # The sidebar is debug text, and it is not a tree
 
-Source RFC: [RFC-052](../../accepted/052-a-file-explorer-a-user-can-read.md)
+Source RFC: [RFC-052](../../done/052-a-file-explorer-a-user-can-read.md)
 
 ## What this is
 
