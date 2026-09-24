@@ -9259,7 +9259,7 @@ fn terminal_input_policy_evaluate_has_exactly_one_production_call_site() {
 
     assert_eq!(
         enclosing_functions,
-        vec!["update"],
+        vec!["update_message"],
         "TerminalInputPolicy::evaluate must have exactly one production call site, inside \
          `update` -- any other count or location is a second classifier this crate must not \
          grow: {enclosing_functions:?}"
@@ -9347,7 +9347,7 @@ fn record_paste_blocked_has_exactly_one_production_call_site() {
 
     assert_eq!(
         enclosing_functions,
-        vec!["update"],
+        vec!["update_message"],
         "record_paste_blocked must have exactly one production call site, inside `update`: \
          {enclosing_functions:?}"
     );
@@ -9383,7 +9383,7 @@ fn write_terminal_input_has_exactly_the_three_named_production_call_sites() {
     );
     for expected in [
         "write_terminal_input",
-        "update",
+        "update_message",
         "launch_measurement_terminal_pane",
     ] {
         assert!(
@@ -18174,7 +18174,7 @@ fn handle_explorer_key_has_exactly_one_production_call_site_and_it_is_the_sideba
     let source = std::fs::read_to_string(&shell_rs_path).expect("shell.rs must be readable");
     assert_eq!(
         enclosing_functions_for_call_site(&source, "handle_explorer_key(state,"),
-        vec!["update"]
+        vec!["update_message"]
     );
     let call = source.find("handle_explorer_key(state,").unwrap();
     let arm = &source[..call];
@@ -18244,7 +18244,7 @@ fn a_board_down_key_through_update_returns_the_scroll_task() {
     let mut app_shell = ApplicationShell::new();
     for label in ["scroll-task-a", "scroll-task-b", "scroll-task-c"] {
         app_shell
-            .add_project_from_path(&fresh_project_dir(label))
+            .add_project_from_path(fresh_project_dir(label))
             .expect("a freshly created directory is a valid project root");
     }
     let mut state = state_with(app_shell);
@@ -18262,7 +18262,7 @@ fn a_board_down_key_through_update_returns_the_scroll_task() {
     // Nothing to scroll: a single card asks for nothing.
     let mut app_shell = ApplicationShell::new();
     app_shell
-        .add_project_from_path(&fresh_project_dir("scroll-task-single"))
+        .add_project_from_path(fresh_project_dir("scroll-task-single"))
         .expect("a freshly created directory is a valid project root");
     let mut state = state_with(app_shell);
     assert_eq!(super::update(&mut state, down()).units(), 0);

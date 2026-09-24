@@ -351,7 +351,28 @@ pub(crate) struct RowSections {
     pub(crate) blocked_names: Option<String>,
 }
 
-pub(crate) fn row_sections(row: &ProjectBoardRow, catalog: &Catalog) -> RowSections {
+/// Whether a count is a fact. `Unavailable`, `NotImplemented` and `Unknown`
+/// are each honest ("there is no session to count") but **carry no fact**, and
+/// as badges they were the loudest thing on a card (review 424, B1).
+fn count_is_known(count: CountDisplay) -> bool {
+    matches!(count, CountDisplay::KnownCount(_))
+}
+
+/// `highlighted` decides whether the blocked-automation **names** are shown:
+/// the list is the same for every Restricted project, which is every project
+/// by default, so it was the same sentence repeated on every card (review 424,
+/// B2). It is shown on the card the keyboard is on -- the count stays on every
+/// card -- so what is blocked is always one key press away and never silently
+/// absent (`REQ-NOTIFY-003`).
+///
+/// **A project that is not open says so once** instead of five "unknown"
+/// badges: it has no session to count, so its counts, its attention word and
+/// an unavailable branch are left out, and one badge says why.
+pub(crate) fn row_sections(
+    row: &ProjectBoardRow,
+    catalog: &Catalog,
+    highlighted: bool,
+) -> RowSections {
     let mut lines = row_lines(row, catalog).into_iter();
     let name = lines.next().unwrap_or_default();
     let path = lines.next().unwrap_or_default();
@@ -367,13 +388,52 @@ pub(crate) fn row_sections(row: &ProjectBoardRow, catalog: &Catalog) -> RowSecti
         1 => (None, rest.first().cloned()),
         _ => (rest.first().cloned(), rest.get(1).cloned()),
     };
-    let mut counts = counts;
-    counts.extend(blocked);
+    let blocked_names = blocked_names.filter(|_| highlighted);
+
+    if row.row_kind == BoardRowKind::ActiveSession {
+        let mut counts = counts;
+        counts.extend(blocked);
+        return RowSections {
+            name,
+            path,
+            state: vec![trust, branch, attention],
+            counts,
+            blocked_names,
+        };
+    }
+
+    let fields = [
+        row.terminal_count,
+        row.agent_run_count,
+        row.approval_count,
+        row.review_count,
+        row.dirty_file_count,
+    ];
+    let any_unknown = fields.iter().any(|count| !count_is_known(*count));
+    let mut shown: Vec<String> = Vec::new();
+    if any_unknown {
+        shown.push(catalog.get("project-board-not-open"));
+    }
+    shown.extend(
+        counts
+            .into_iter()
+            .zip(fields)
+            .filter(|(_, count)| count_is_known(*count))
+            .map(|(line, _)| line),
+    );
+    shown.extend(blocked);
+    let mut state = vec![trust];
+    if matches!(
+        row.branch_status,
+        BranchDisplay::Known(_) | BranchDisplay::Detached
+    ) {
+        state.push(branch);
+    }
     RowSections {
         name,
         path,
-        state: vec![trust, branch, attention],
-        counts,
+        state,
+        counts: shown,
         blocked_names,
     }
 }
@@ -450,7 +510,7 @@ fn row_view<'a, Message: 'a + Clone>(
     highlighted: bool,
     open_message: Option<Message>,
 ) -> Element<'a, Message> {
-    let sections = row_sections(row, catalog);
+    let sections = row_sections(row, catalog, highlighted);
     let marker = if highlighted { "> " } else { "  " };
 
     // The name is the heading: larger and bold. Everything under it is

@@ -158,6 +158,10 @@ project-board-recent-open-button = Open
 # rather than being the one card that looks broken.
 project-board-active-marker = Open now
 
+# A project that is not open has no session to count. One badge says so, instead
+# of five that each say "unknown" (review 424, B1).
+project-board-not-open = Not open: counts appear once it is opened
+
 # RFC-039 D1: the tab strip's own permanent leftmost entry, always
 # present -- the visible route back to the Project Board (workflow 5),
 # alongside the pre-existing `Ctrl+Alt+P` accelerator.

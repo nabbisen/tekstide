@@ -546,6 +546,9 @@ fn every_catalog_key_this_module_renders_is_enumerated_and_none_names_a_dead_act
             "project-board-empty-command-example",
             "project-board-browse-button",
             "project-board-path-field-label",
+            // Review 424, B1: one badge that says a project is not open, in
+            // place of five that each say "unknown".
+            "project-board-not-open",
             "project-board-recent-open-button",
             // PR-052-C: the open project's card says "Open now" in place of
             // the button it does not need (a card with no button beside cards
@@ -675,7 +678,7 @@ fn a_cards_sections_say_exactly_what_its_lines_say() {
     let catalog = real_catalog();
     for row in [baseline_row(), blocked_row()] {
         let lines = row_lines(&row, &catalog);
-        let sections = row_sections(&row, &catalog);
+        let sections = row_sections(&row, &catalog, true);
 
         let mut regrouped = vec![sections.name, sections.path];
         regrouped.extend(sections.state);
@@ -696,7 +699,7 @@ fn a_cards_sections_say_exactly_what_its_lines_say() {
 #[test]
 fn a_card_reads_who_then_state_then_how_much() {
     let catalog = real_catalog();
-    let sections = row_sections(&blocked_row(), &catalog);
+    let sections = row_sections(&blocked_row(), &catalog, true);
     assert_eq!(
         sections.name,
         super::text_safety::quote_untrusted("demo-project").as_str()
@@ -740,7 +743,7 @@ fn only_a_project_needing_attention_stands_out_and_it_says_why_in_words() {
         assert!(super::attention_stands_out(attention), "{attention:?}");
         let mut row = baseline_row();
         row.attention = attention;
-        let sections = row_sections(&row, &real_catalog());
+        let sections = row_sections(&row, &real_catalog(), true);
         let word = plain(sections.state.last().unwrap());
         assert_ne!(
             word, "Calm",
@@ -771,4 +774,85 @@ fn the_scroll_follows_the_highlighted_card_as_a_fraction_of_the_list() {
     assert!((scroll_fraction(7, 15).unwrap() - 0.5).abs() < 1e-6);
     assert_eq!(scroll_fraction(3, 1), None);
     assert_eq!(scroll_fraction(99, 15), Some(1.0), "clamped");
+}
+
+fn recent_row() -> ProjectBoardRow {
+    ProjectBoardRow {
+        row_kind: BoardRowKind::RecentAvailable,
+        blocked_automation_count: 9,
+        blocked_automation_labels: vec!["automatic LSP startup".to_string()],
+        ..baseline_row()
+    }
+}
+
+/// **B1: a project that is not open says so once.** It has no session to
+/// count, so five "unknown" badges carried no fact and were the loudest thing on
+/// the card. The counts, the branch it cannot read and the attention word are
+/// left out, and one badge says why.
+#[test]
+fn a_project_that_is_not_open_says_so_once_instead_of_five_unknown_badges() {
+    let catalog = real_catalog();
+    let sections = row_sections(&recent_row(), &catalog, false);
+    let counts: Vec<String> = sections.counts.iter().map(|fact| plain(fact)).collect();
+    assert_eq!(
+        counts[0], "Not open: counts appear once it is opened",
+        "{counts:?}"
+    );
+    let everything = format!("{:?} {:?}", sections.state, counts);
+    for noise in ["unknown", "not available", "Calm"] {
+        assert!(
+            !everything.contains(noise),
+            "{noise:?} still on a not-open card: {everything}"
+        );
+    }
+    // The blocked-automation count is a fact and stays.
+    assert!(
+        counts
+            .iter()
+            .any(|fact| fact.contains("blocked automations")),
+        "{counts:?}"
+    );
+    // Only the trust badge is left in the state group.
+    assert_eq!(sections.state.len(), 1);
+}
+
+/// A not-open card keeps any count it *does* know, and still says it is not
+/// open, since the others are missing.
+#[test]
+fn a_not_open_card_keeps_the_counts_it_knows() {
+    let mut row = recent_row();
+    row.terminal_count = CountDisplay::KnownCount(2);
+    row.branch_status = BranchDisplay::Known("main".to_string());
+    let sections = row_sections(&row, &real_catalog(), false);
+    let counts: Vec<String> = sections.counts.iter().map(|fact| plain(fact)).collect();
+    assert!(counts.contains(&"2 terminals".to_string()), "{counts:?}");
+    assert!(counts[0].starts_with("Not open"), "{counts:?}");
+    assert!(
+        sections
+            .state
+            .iter()
+            .any(|fact| plain(fact) == "branch: main")
+    );
+}
+
+/// **B2: the same blocked-automation sentence is not repeated on every card.**
+/// The names show on the highlighted card; the count stays on all of them.
+#[test]
+fn the_blocked_automation_names_show_only_on_the_highlighted_card() {
+    let catalog = real_catalog();
+    for row in [recent_row(), blocked_row()] {
+        let on = row_sections(&row, &catalog, true);
+        let off = row_sections(&row, &catalog, false);
+        assert!(on.blocked_names.is_some(), "highlighted shows the names");
+        assert!(
+            off.blocked_names.is_none(),
+            "an unhighlighted card does not"
+        );
+        assert!(
+            off.counts
+                .iter()
+                .any(|fact| plain(fact).contains("blocked automations")),
+            "the count stays on every card"
+        );
+    }
 }
