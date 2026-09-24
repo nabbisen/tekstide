@@ -102,12 +102,12 @@ number in the evidence is not ticked.**
       (`qa-evidence.md`); the user-facing disclosure says so in the user's words.
 - [x] `REQ-FILE-005`, `REQ-FILE-006` and the `ignored` category of `REQ-FILE-002` move to
       implemented **with evidence they are reachable by a user**, not merely parsed.
-- [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
+- [x] The colour-alone, i18n completeness and internal-identifier scans still pass.
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
       staging, `rfc_docs_invariants`, **three consecutive full-workspace runs with `--no-fail-fast`**
       to files, **0 fixture entries left** in a fresh short `TMPDIR`.
 - [x] Every new intermittent failure has a dated row in `test-process-leak.md`.
-- [ ] Commits are pushed once the gate is green.
+- [x] Commits are pushed once the gate is green.
 
 ## Final Acceptance Decision
 
