@@ -51,8 +51,8 @@ use iced::widget::{column, container};
 use iced::{Element, Length};
 
 use tekstide_core::project::root::{
-    BrowseNode, BrowseNodeState, DirectoryBrowseScan, ExplorerNode, ExplorerNodeKind,
-    ExplorerNodeState, FileAccessSymlinkStatus,
+    BrowseNode, BrowseNodeState, DirectoryBrowseScan, ExplorerIgnoreState, ExplorerNode,
+    ExplorerNodeKind, ExplorerNodeState, FileAccessSymlinkStatus,
 };
 use tekstide_core::project::{
     ExplorerTree, ExplorerTreeRow, ExplorerTreeRowKind, ProjectExplorerStatus,
@@ -103,6 +103,7 @@ fn git_status_symbol(status: Option<FileGitStatus>) -> &'static str {
         Some(FileGitStatus::Renamed) => "renamed",
         Some(FileGitStatus::Untracked) => "untracked",
         Some(FileGitStatus::Unmerged) => "unmerged",
+        Some(FileGitStatus::Ignored) => "ignored",
         None => "none",
     }
 }
@@ -148,7 +149,16 @@ pub(crate) fn node_line_with(
     git_summary: Option<&ProjectGitSummary>,
 ) -> String {
     let name = text_safety::quote_untrusted(&node.name);
-    let git_status = git_summary.and_then(|summary| summary.file_status(&node.relative_path));
+    // RFC-055: `ignored` is git's answer to the scan's own `check-ignore` query,
+    // carried on the node -- the status summary is never run with `--ignored`.
+    // A node git did not call ignored (including one it was never asked about)
+    // takes the summary's word, exactly as before; **`Unknown` is not drawn as
+    // anything**, in particular not as "not ignored" and not as "ignored".
+    let git_status = if node.ignore == ExplorerIgnoreState::Ignored {
+        Some(FileGitStatus::Ignored)
+    } else {
+        git_summary.and_then(|summary| summary.file_status(&node.relative_path))
+    };
     let state = if expanded && node.state == ExplorerNodeState::Collapsed {
         "available"
     } else {

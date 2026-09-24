@@ -307,6 +307,14 @@ pub enum FileGitStatus {
     Renamed,
     Untracked,
     Unmerged,
+    /// **RFC-055 D5.** git says the entry is ignored -- the fifth category
+    /// `REQ-FILE-002` names and the model had never carried. Never produced by
+    /// [`crate::runtime::git::compute_summary`] (`git status` is not run with
+    /// `--ignored`; RFC-055 measurement 5): it comes from the explorer's own
+    /// `git check-ignore` query, carried on the node, and is *not* passed
+    /// `--no-index`, so a tracked file that matches a pattern is tracked and is
+    /// never this. Every `match` on this type must say what it does with it.
+    Ignored,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

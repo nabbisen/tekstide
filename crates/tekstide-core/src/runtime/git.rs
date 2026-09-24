@@ -518,6 +518,20 @@ pub enum IgnoreUnknown {
     UnusableName,
 }
 
+/// What [`ignored_entries`] returns: the answer, and **where the repository
+/// is** whenever there was one -- including when it was declined or would not
+/// pass the gate, because a caller that says which rule it used (RFC-055 D6, D8)
+/// also says whether that repository is the project's own or one above it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IgnoreReport {
+    pub answer: IgnoreAnswer,
+    /// The canonical root of the repository enclosing the directory, when one
+    /// was found (a `.git` directory or pointer file at or above it). `None`
+    /// exactly when the answer is [`IgnoreUnknown::NotARepository`] or the
+    /// directory could not be resolved.
+    pub repository_root: Option<PathBuf>,
+}
+
 /// The most entries one query carries: the explorer's own per-directory cap
 /// (`FileExplorerScanPolicy::max_children_per_directory`, 256), stated again
 /// where the subprocess is so no caller can turn a scan into an unbounded write
@@ -557,45 +571,65 @@ const _: () = assert!(MAX_IGNORE_QUERY_ENTRIES * (MAX_ENTRY_NAME_BYTES + 3) < MA
 /// type ([`IgnoreQueryInput`]), the only way to build a query, so a filename
 /// like `:(glob)evil.log` cannot abort the batch for its siblings (measured:
 /// exit 128, no answer for anything) -- and no caller can hand git a raw path.
-pub fn ignored_entries(directory: &Path, names: &[std::ffi::OsString]) -> IgnoreAnswer {
+pub fn ignored_entries(directory: &Path, names: &[std::ffi::OsString]) -> IgnoreReport {
     // The executable is located against the *repository being read* (its root
     // is what `PATH` entries are filtered against), so the repository is
     // found first; a directory in no repository never reaches a `PATH` search.
     let Ok(canonical) = std::fs::canonicalize(directory) else {
-        return IgnoreAnswer::Unknown(IgnoreUnknown::QueryFailed);
+        return IgnoreReport {
+            answer: IgnoreAnswer::Unknown(IgnoreUnknown::QueryFailed),
+            repository_root: None,
+        };
     };
     let Some(repository_root) = enclosing_repository_root(&canonical) else {
-        return IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository);
+        return IgnoreReport {
+            answer: IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository),
+            repository_root: None,
+        };
     };
     let Some(git_executable) =
         resolve_git_executable(&repository_root).and_then(|path| path.to_str().map(str::to_owned))
     else {
-        return IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused);
+        return IgnoreReport {
+            answer: IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused),
+            repository_root: Some(repository_root),
+        };
     };
     ignored_entries_in_environment(directory, names, &git_executable, &forwarded_environment())
 }
 
 /// [`ignored_entries`] with the executable and environment supplied, so a test
-/// can substitute both without touching the real process environment.
-fn ignored_entries_in_environment(
+/// -- here or in the explorer -- can substitute both without touching the real
+/// process environment.
+pub(crate) fn ignored_entries_in_environment(
     directory: &Path,
     names: &[std::ffi::OsString],
     git_executable: &str,
     forwarded_env: &[(String, String)],
-) -> IgnoreAnswer {
+) -> IgnoreReport {
     let Ok(directory) = std::fs::canonicalize(directory) else {
-        return IgnoreAnswer::Unknown(IgnoreUnknown::QueryFailed);
+        return IgnoreReport {
+            answer: IgnoreAnswer::Unknown(IgnoreUnknown::QueryFailed),
+            repository_root: None,
+        };
     };
     let Some(repository_root) = enclosing_repository_root(&directory) else {
-        return IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository);
+        return IgnoreReport {
+            answer: IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository),
+            repository_root: None,
+        };
     };
-    ignored_entries_with_environment(
+    let answer = ignored_entries_with_environment(
         &repository_root,
         &directory,
         names,
         git_executable,
         forwarded_env,
-    )
+    );
+    IgnoreReport {
+        answer,
+        repository_root: Some(repository_root),
+    }
 }
 
 fn ignored_entries_with_environment(
@@ -611,16 +645,17 @@ fn ignored_entries_with_environment(
         Ok(input) => input,
         Err(unknown) => return IgnoreAnswer::Unknown(unknown),
     };
-    if input.is_empty() {
-        // Nothing was asked, so nothing is ignored -- a true answer that
-        // needs no repository and no process.
-        return IgnoreAnswer::NoneIgnored;
-    }
     if repository_is_at_or_above_home(repository_root, forwarded_env) {
         return IgnoreAnswer::Unknown(IgnoreUnknown::RepositoryDeclined);
     }
     if vet_configuration(repository_root, git_executable, forwarded_env).is_err() {
         return IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused);
+    }
+    if input.is_empty() {
+        // Nothing was asked, so nothing is ignored: no `check-ignore` process.
+        // Placed *after* the gate so that an empty directory in a repository the
+        // gate would refuse does not report "git answered".
+        return IgnoreAnswer::NoneIgnored;
     }
 
     let output = match run_bounded_git_with_input(

@@ -12,7 +12,8 @@ mod explorer;
 pub(crate) use explorer::hostile_fixture;
 pub use explorer::{
     BrowseNode, BrowseNodeState, DirectoryBrowseError, DirectoryBrowseScan, ExplorerDirectoryScan,
-    ExplorerNode, ExplorerNodeKind, ExplorerNodeState, ExplorerScanError, FileExplorerScanPolicy,
+    ExplorerFloorReason, ExplorerIgnoreRule, ExplorerIgnoreState, ExplorerNode, ExplorerNodeKind,
+    ExplorerNodeState, ExplorerRepositoryPlacement, ExplorerScanError, FileExplorerScanPolicy,
     FileExplorerScanner, OMITTED_COUNT_LIMIT, browse_directory,
 };
 

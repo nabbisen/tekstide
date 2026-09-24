@@ -578,6 +578,7 @@ explorer-node-entry = { $kind ->
     [renamed] {" [renamed or copied]"}
     [untracked] {" [untracked]"}
     [unmerged] {" [conflict]"}
+    [ignored] {" [ignored]"}
    *[none] {""}
 }{ $open ->
     [yes] {" [open]"}

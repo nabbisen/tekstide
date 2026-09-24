@@ -1382,6 +1382,7 @@ impl Fixture {
     /// and environment.
     fn ask(&self, directory: &Path, entries: &[OsString]) -> IgnoreAnswer {
         ignored_entries_in_environment(directory, entries, GIT_EXECUTABLE, &self.forwarded_env)
+            .answer
     }
 
     /// A stand-in `git` that satisfies the gate (a version, an empty
@@ -1412,7 +1413,7 @@ impl Fixture {
     }
 
     fn ask_with(&self, git: &str, directory: &Path, entries: &[OsString]) -> IgnoreAnswer {
-        ignored_entries_in_environment(directory, entries, git, &self.forwarded_env)
+        ignored_entries_in_environment(directory, entries, git, &self.forwarded_env).answer
     }
 }
 
@@ -1677,7 +1678,8 @@ fn a_repository_the_gate_does_not_accept_is_never_asked_anything() {
             &names(&["a.log"]),
             "tekstide-test-no-such-git",
             &clean.forwarded_env
-        ),
+        )
+        .answer,
         IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused)
     );
 }
@@ -1746,7 +1748,7 @@ fn a_repository_at_or_above_home_is_not_asked() {
     at_home.retain(|(var, _)| var != "HOME");
     at_home.push(("HOME".to_owned(), fixture.repo.display().to_string()));
     assert_eq!(
-        ignored_entries_in_environment(&project, &names(&["main.rs"]), &git, &at_home),
+        ignored_entries_in_environment(&project, &names(&["main.rs"]), &git, &at_home).answer,
         IgnoreAnswer::Unknown(IgnoreUnknown::RepositoryDeclined)
     );
     // Home *inside* the repository counts too: the repository is above it.
@@ -1754,7 +1756,7 @@ fn a_repository_at_or_above_home_is_not_asked() {
     inside.retain(|(var, _)| var != "HOME");
     inside.push(("HOME".to_owned(), project.display().to_string()));
     assert_eq!(
-        ignored_entries_in_environment(&project, &names(&["main.rs"]), &git, &inside),
+        ignored_entries_in_environment(&project, &names(&["main.rs"]), &git, &inside).answer,
         IgnoreAnswer::Unknown(IgnoreUnknown::RepositoryDeclined)
     );
     assert!(!fixture.marker_exists("home-repo-invoked"));
@@ -1906,4 +1908,68 @@ fn the_query_bound_is_the_explorers_per_directory_cap() {
         crate::project::root::FileExplorerScanPolicy::linux_mvp().max_children_per_directory,
         MAX_IGNORE_QUERY_ENTRIES
     );
+}
+
+/// B needs to say whether the ignore rule came from the project's own repository
+/// or one above it (review 431, ruling 4), so the report carries where the
+/// repository is -- also when it was declined or refused, and never when there
+/// is none.
+#[test]
+fn the_report_says_which_repository_answered_or_declined() {
+    let fixture = Fixture::new("ignore-report-root");
+    fixture.write(".gitignore", "*.log\n");
+    let deep = fixture.repo.join("sub").join("deep");
+    fs::create_dir_all(&deep).unwrap();
+    fs::write(deep.join("a.log"), "x").unwrap();
+    let canonical_repo = fs::canonicalize(&fixture.repo).unwrap();
+
+    let report = ignored_entries_in_environment(
+        &deep,
+        &names(&["a.log"]),
+        GIT_EXECUTABLE,
+        &fixture.forwarded_env,
+    );
+    assert_eq!(report.repository_root, Some(canonical_repo.clone()));
+
+    // Declined: the repository is still named.
+    let mut at_home = fixture.forwarded_env.clone();
+    at_home.retain(|(var, _)| var != "HOME");
+    at_home.push(("HOME".to_owned(), fixture.repo.display().to_string()));
+    let report =
+        ignored_entries_in_environment(&deep, &names(&["a.log"]), GIT_EXECUTABLE, &at_home);
+    assert_eq!(
+        report.answer,
+        IgnoreAnswer::Unknown(IgnoreUnknown::RepositoryDeclined)
+    );
+    assert_eq!(report.repository_root, Some(canonical_repo));
+
+    // No repository: none named.
+    let plain = fixture.root.join("plain");
+    fs::create_dir_all(&plain).unwrap();
+    let report = ignored_entries_in_environment(
+        &plain,
+        &names(&["a.log"]),
+        GIT_EXECUTABLE,
+        &fixture.forwarded_env,
+    );
+    assert_eq!(
+        report.answer,
+        IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository)
+    );
+    assert_eq!(report.repository_root, None);
+}
+
+/// An empty batch is answered *after* the gate: an empty directory in a
+/// repository the gate refuses is unknown, not "git answered".
+#[test]
+fn an_empty_batch_in_a_refused_repository_is_not_an_answer() {
+    let fixture = Fixture::new("ignore-empty-refused");
+    let script = fixture.marker_script("marker-fsmonitor", "exit 0");
+    fixture.set_config("core.fsmonitor", script.to_str().unwrap());
+    fixture.clear_markers();
+    assert_eq!(
+        fixture.ask(&fixture.repo, &[]),
+        IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused)
+    );
+    assert!(!fixture.marker_exists("marker-fsmonitor"));
 }

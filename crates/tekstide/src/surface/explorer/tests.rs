@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 
 use tekstide_core::project::ProjectId;
 use tekstide_core::project::root::{
-    ExplorerDirectoryScan, ExplorerNode, ExplorerNodeKind, ExplorerNodeState,
-    FileAccessContainmentStatus, FileAccessSymlinkStatus, FileAccessTarget,
+    ExplorerDirectoryScan, ExplorerFloorReason, ExplorerIgnoreRule, ExplorerIgnoreState,
+    ExplorerNode, ExplorerNodeKind, ExplorerNodeState, FileAccessContainmentStatus,
+    FileAccessSymlinkStatus, FileAccessTarget,
 };
 use tekstide_core::project::{ExplorerTree, ExplorerTreeRowKind, ProjectExplorerStatus};
 use tekstide_core::project::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
@@ -41,6 +42,7 @@ fn plain_node(name: &str, kind: ExplorerNodeKind) -> ExplorerNode {
         kind,
         state: ExplorerNodeState::Available,
         symlink_status: FileAccessSymlinkStatus::NoSymlink,
+        ignore: ExplorerIgnoreState::Unknown,
     }
 }
 
@@ -51,6 +53,7 @@ fn scan_at_root(nodes: Vec<ExplorerNode>) -> ExplorerDirectoryScan {
         truncated: false,
         omitted_entries: 0,
         omitted_is_lower_bound: false,
+        ignore_rule: ExplorerIgnoreRule::Floor(ExplorerFloorReason::NotAsked),
     }
 }
 
@@ -148,6 +151,7 @@ fn every_state_and_symlink_combination_renders_a_distinct_line() {
                 kind: ExplorerNodeKind::File,
                 state: state.clone(),
                 symlink_status: *symlink,
+                ignore: ExplorerIgnoreState::Unknown,
             };
             let line = node_line(&catalog, &node, false, None);
             assert!(
@@ -336,6 +340,7 @@ fn a_truncated_scan_names_how_many_entries_it_left_out() {
         truncated: true,
         omitted_entries: 44,
         omitted_is_lower_bound: false,
+        ignore_rule: ExplorerIgnoreRule::Floor(ExplorerFloorReason::NotAsked),
     };
     let lines = all_lines(&catalog, &tree_with(scan), 0);
     let last = plain_words(lines.last().unwrap());
@@ -730,6 +735,7 @@ fn every_status_word_comes_before_the_name_so_only_the_name_can_be_clipped() {
             tekstide_core::project::root::FileAccessBlockedReason::SymlinkEscape,
         ),
         symlink_status: FileAccessSymlinkStatus::EscapesRoot,
+        ignore: ExplorerIgnoreState::Unknown,
     };
     let summary = git_summary_with(&[(&node.name, FileGitStatus::Modified)]);
     let line = plain_words(&node_line(&catalog, &node, false, Some(&summary)));
@@ -1153,4 +1159,89 @@ fn the_tree_is_drawn_in_a_monospaced_font() {
         source.matches(".font(TREE_FONT)").count() >= 2,
         "both the rows and the detail area must use TREE_FONT"
     );
+}
+
+// --- RFC-055 PR-055-B: the `ignored` word --------------------------------------
+
+/// `ignored` is a word, in the same place as the other five, and comes from the
+/// node -- git's answer to the scan's own query -- not from the status summary.
+#[test]
+fn an_ignored_node_says_ignored_and_an_unknown_one_says_nothing() {
+    let catalog = real_catalog();
+    let mut node = plain_node("debug.log", ExplorerNodeKind::File);
+
+    node.ignore = ExplorerIgnoreState::Ignored;
+    let ignored = plain_words(&node_line(&catalog, &node, false, None));
+    assert!(ignored.contains("[ignored]"), "{ignored}");
+    // The word sits before the name, like every other status word, so it is the
+    // name that gets clipped in a narrow sidebar and never the status.
+    assert!(ignored.find("[ignored]").unwrap() < ignored.find("debug.log").unwrap());
+
+    for state in [
+        ExplorerIgnoreState::NotIgnored,
+        ExplorerIgnoreState::Unknown,
+    ] {
+        node.ignore = state;
+        let line = plain_words(&node_line(&catalog, &node, false, None));
+        assert!(!line.contains("ignored"), "{state:?}: {line}");
+    }
+}
+
+/// A node git did not call ignored takes the status summary's word exactly as it
+/// did before this slice -- an `ignored` node never hides a modification, because
+/// git does not call a tracked file ignored in the first place.
+#[test]
+fn a_node_git_did_not_call_ignored_still_shows_its_status_word() {
+    let catalog = real_catalog();
+    let mut node = plain_node("main.rs", ExplorerNodeKind::File);
+    node.ignore = ExplorerIgnoreState::NotIgnored;
+    let mut statuses = std::collections::BTreeMap::new();
+    statuses.insert(PathBuf::from("main.rs"), FileGitStatus::Modified);
+    let summary = ProjectGitSummary {
+        provider_state: ProjectProviderState::Complete,
+        branch_name: None,
+        changed_file_count: Some(1),
+        ahead_count: None,
+        behind_count: None,
+        file_statuses: Some(statuses),
+    };
+    let line = plain_words(&node_line(&catalog, &node, false, Some(&summary)));
+    assert!(
+        line.contains("[modified]") && !line.contains("ignored"),
+        "{line}"
+    );
+}
+
+/// Every status word is distinct, including the new one.
+#[test]
+fn the_ignored_word_is_distinct_from_the_other_five() {
+    let catalog = real_catalog();
+    let mut seen = std::collections::BTreeSet::new();
+    for status in [
+        FileGitStatus::Modified,
+        FileGitStatus::Added,
+        FileGitStatus::Deleted,
+        FileGitStatus::Renamed,
+        FileGitStatus::Untracked,
+        FileGitStatus::Unmerged,
+        FileGitStatus::Ignored,
+    ] {
+        let mut statuses = std::collections::BTreeMap::new();
+        statuses.insert(PathBuf::from("f"), status);
+        let summary = ProjectGitSummary {
+            provider_state: ProjectProviderState::Complete,
+            branch_name: None,
+            changed_file_count: Some(1),
+            ahead_count: None,
+            behind_count: None,
+            file_statuses: Some(statuses),
+        };
+        let node = plain_node("f", ExplorerNodeKind::File);
+        let line = plain_words(&node_line(&catalog, &node, false, Some(&summary)));
+        assert!(
+            seen.insert(line.clone()),
+            "{status:?} shares its line: {line}"
+        );
+    }
+    assert_eq!(seen.len(), 7);
 }

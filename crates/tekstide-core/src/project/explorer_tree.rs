@@ -59,9 +59,26 @@ impl ExplorerScanRequest {
         self.generation
     }
 
-    /// Reads the directory. **Blocking**: call it off the render thread.
+    /// Reads the directory **and asks git which of its entries are ignored**
+    /// (RFC-055). **Blocking** -- a directory read, then one or two `git`
+    /// subprocesses -- so call it off the render thread; the worker that already
+    /// runs it (`explorer_scan_subscription`) is that place, and nothing new
+    /// blocks the render thread. A scan that could not ask git says so in its
+    /// [`ExplorerDirectoryScan::ignore_rule`] rather than failing.
     pub fn run(self) -> ExplorerScanCompleted {
-        let result = FileExplorerScanner.scan_directory(&self.root, &self.path, &self.policy);
+        self.run_with_oracle(&crate::runtime::git::ignored_entries)
+    }
+
+    /// [`Self::run`] with the ignore oracle supplied, so a test can count what is
+    /// asked and isolate the environment.
+    pub fn run_with_oracle(
+        self,
+        oracle: &dyn Fn(&Path, &[std::ffi::OsString]) -> crate::runtime::git::IgnoreReport,
+    ) -> ExplorerScanCompleted {
+        let mut result = FileExplorerScanner.scan_directory(&self.root, &self.path, &self.policy);
+        if let Ok(scan) = result.as_mut() {
+            scan.ask_git(&self.root, oracle);
+        }
         ExplorerScanCompleted {
             path: self.path,
             generation: self.generation,

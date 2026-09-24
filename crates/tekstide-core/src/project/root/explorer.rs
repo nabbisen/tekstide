@@ -2,6 +2,8 @@ use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::runtime::git::{IgnoreAnswer, IgnoreReport, IgnoreUnknown};
+
 use super::{
     FileAccessBlockedReason, FileAccessError, FileAccessSymlinkStatus, FileAccessTarget,
     ProjectFileAccessPolicy, ProjectRootHandle,
@@ -62,6 +64,67 @@ pub enum ExplorerNodeState {
     Unreadable,
 }
 
+/// **RFC-055 D4.** What git said about one entry -- three states, never two.
+/// `NotIgnored` is a claim git made (the entry was in a batch that got an
+/// answer); `Unknown` is the absence of one, and must not be drawn or counted
+/// as either of the others. An entry the scan never asked about -- a blocked
+/// or unreadable one (the query is not a second way into the filesystem), or
+/// anything past the per-directory cap -- is `Unknown`, as is every entry when
+/// git could not answer.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ExplorerIgnoreState {
+    #[default]
+    Unknown,
+    NotIgnored,
+    Ignored,
+}
+
+/// Where the repository that answered is, relative to the project. The status
+/// bar reads only a `.git` at the project root; a project nested in a
+/// repository, or a repository nested in a project, is answered by a
+/// repository the status bar does not describe, and the sidebar says so
+/// (review 431, ruling 4).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExplorerRepositoryPlacement {
+    AtProjectRoot,
+    /// The project is inside the repository.
+    AboveProjectRoot,
+    /// The directory is inside a repository that is itself inside the project.
+    BelowProjectRoot,
+}
+
+/// Why git's answer was not used, so the floor is stated rather than guessed at.
+/// Mirrors [`crate::runtime::git::IgnoreUnknown`] plus [`Self::NotAsked`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExplorerFloorReason {
+    /// The scan was never sent to git (the pure scanner on its own).
+    NotAsked,
+    /// No repository encloses the directory.
+    NotARepository,
+    /// A repository encloses it and was declined (rooted at or above `$HOME`).
+    RepositoryDeclined,
+    /// `git` is unavailable, too old, or the repository's configuration is
+    /// not one the gate vouches for.
+    GateRefused,
+    /// `git` ran and did not answer (or a name could not be asked about).
+    QueryFailed,
+}
+
+/// **Which rule decided the ignore state and the collapsed directories of one
+/// scan -- a value the scan carries**, because the sidebar has to say it (D6) and
+/// a render-time guess would drift from what the scan did.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExplorerIgnoreRule {
+    /// Git's answer governs: a directory is collapsed when git says it is
+    /// ignored, and an entry git did not name is an ordinary one.
+    Git {
+        repository: ExplorerRepositoryPlacement,
+    },
+    /// The fixed list (`IGNORED_DIRECTORY_NAMES`) governs, and this says why git
+    /// did not.
+    Floor(ExplorerFloorReason),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplorerNode {
     pub name: String,
@@ -69,6 +132,9 @@ pub struct ExplorerNode {
     pub kind: ExplorerNodeKind,
     pub state: ExplorerNodeState,
     pub symlink_status: FileAccessSymlinkStatus,
+    /// RFC-055. `Unknown` until a scan has asked git (see
+    /// [`ExplorerDirectoryScan::ask_git`]).
+    pub ignore: ExplorerIgnoreState,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -91,6 +157,112 @@ pub struct ExplorerDirectoryScan {
     /// number is at least `omitted_entries`, and the row must say "at
     /// least" rather than state a number it did not finish counting.
     pub omitted_is_lower_bound: bool,
+    /// RFC-055 D6: which rule decided this scan's collapsed directories and
+    /// ignore states. [`ExplorerFloorReason::NotAsked`] straight from
+    /// [`FileExplorerScanner::scan_directory`]; set by [`Self::ask_git`].
+    pub ignore_rule: ExplorerIgnoreRule,
+}
+
+impl ExplorerDirectoryScan {
+    /// **RFC-055: asks git about the entries this scan is about to return.**
+    /// Blocking (a `git` subprocess or two): call it where the scan itself is
+    /// called, off the render thread -- `ExplorerScanRequest::run` is the caller.
+    ///
+    /// Only entries the access policy admitted are asked about (`Available` or
+    /// `Collapsed`) -- the query is not a second way into the filesystem -- and
+    /// only those already in `nodes`, so at most `max_children_per_directory` of
+    /// them: **the omitted tail was never in the batch and keeps unknown ignore
+    /// state**, and nothing here counts or describes it as ignored or as not.
+    /// Names come from `relative_path`, which holds the raw filename; `name` is a
+    /// lossy display string and would ask about a different file.
+    pub fn ask_git(
+        &mut self,
+        root: &ProjectRootHandle,
+        oracle: &dyn Fn(&std::path::Path, &[std::ffi::OsString]) -> IgnoreReport,
+    ) {
+        let asked: Vec<(usize, std::ffi::OsString)> = self
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| {
+                matches!(
+                    node.state,
+                    ExplorerNodeState::Available | ExplorerNodeState::Collapsed
+                )
+            })
+            .filter_map(|(index, node)| {
+                node.relative_path
+                    .file_name()
+                    .map(|name| (index, name.to_owned()))
+            })
+            .collect();
+        let names: Vec<std::ffi::OsString> = asked.iter().map(|(_, name)| name.clone()).collect();
+        let report = oracle(&self.directory.canonical_path, &names);
+        self.apply_ignore_report(&root.valid_root().canonical_path, &asked, report);
+    }
+
+    /// The pure half of [`Self::ask_git`]: what an answer does to the nodes and
+    /// to the rule. `asked` pairs each asked node's index with its raw name.
+    fn apply_ignore_report(
+        &mut self,
+        project_root: &std::path::Path,
+        asked: &[(usize, std::ffi::OsString)],
+        report: IgnoreReport,
+    ) {
+        let placement = report.repository_root.as_deref().map(|repository| {
+            if repository == project_root {
+                ExplorerRepositoryPlacement::AtProjectRoot
+            } else if project_root.starts_with(repository) {
+                ExplorerRepositoryPlacement::AboveProjectRoot
+            } else {
+                ExplorerRepositoryPlacement::BelowProjectRoot
+            }
+        });
+        let ignored = match report.answer {
+            IgnoreAnswer::Ignored(set) => Some(set),
+            IgnoreAnswer::NoneIgnored => Some(std::collections::BTreeSet::new()),
+            IgnoreAnswer::Unknown(unknown) => {
+                self.ignore_rule = ExplorerIgnoreRule::Floor(match unknown {
+                    IgnoreUnknown::NotARepository => ExplorerFloorReason::NotARepository,
+                    IgnoreUnknown::RepositoryDeclined => ExplorerFloorReason::RepositoryDeclined,
+                    IgnoreUnknown::GateRefused => ExplorerFloorReason::GateRefused,
+                    IgnoreUnknown::QueryFailed | IgnoreUnknown::UnusableName => {
+                        ExplorerFloorReason::QueryFailed
+                    }
+                });
+                None
+            }
+        };
+        let Some(ignored) = ignored else {
+            return;
+        };
+        // git answered, so a repository was found; `placement` is `Some`.
+        let Some(repository) = placement else {
+            self.ignore_rule = ExplorerIgnoreRule::Floor(ExplorerFloorReason::QueryFailed);
+            return;
+        };
+        self.ignore_rule = ExplorerIgnoreRule::Git { repository };
+        for (index, name) in asked {
+            let node = &mut self.nodes[*index];
+            node.ignore = if ignored.contains(name) {
+                ExplorerIgnoreState::Ignored
+            } else {
+                ExplorerIgnoreState::NotIgnored
+            };
+            // D6: git's answer governs what is collapsed. A directory git says
+            // is ignored is collapsed; one it does not name is an ordinary,
+            // expandable one even if it is called `target`. `.git` is version-
+            // control metadata, not something a `.gitignore` names, and stays
+            // collapsed under either rule.
+            if node.kind == ExplorerNodeKind::Directory {
+                node.state = if node.ignore == ExplorerIgnoreState::Ignored || node.name == ".git" {
+                    ExplorerNodeState::Collapsed
+                } else {
+                    ExplorerNodeState::Available
+                };
+            }
+        }
+    }
 }
 
 /// The most entries the scanner will count beyond the per-directory cap.
@@ -209,6 +381,7 @@ impl FileExplorerScanner {
             truncated,
             omitted_entries,
             omitted_is_lower_bound,
+            ignore_rule: ExplorerIgnoreRule::Floor(ExplorerFloorReason::NotAsked),
         })
     }
 }
@@ -255,6 +428,7 @@ fn node_for_entry(
                 kind,
                 state,
                 symlink_status: target.symlink_status,
+                ignore: ExplorerIgnoreState::Unknown,
             }
         }
         Err(error) => ExplorerNode {
@@ -263,6 +437,7 @@ fn node_for_entry(
             kind,
             state: ExplorerNodeState::Blocked(error.reason),
             symlink_status: blocked_symlink_status(entry_is_symlink, error.reason),
+            ignore: ExplorerIgnoreState::Unknown,
         },
     }
 }
@@ -287,6 +462,7 @@ fn unreadable_node(name: impl Into<String>, relative_path: PathBuf) -> ExplorerN
         kind: ExplorerNodeKind::Other,
         state: ExplorerNodeState::Unreadable,
         symlink_status: FileAccessSymlinkStatus::NoSymlink,
+        ignore: ExplorerIgnoreState::Unknown,
     }
 }
 
@@ -442,5 +618,7 @@ pub fn browse_directory(
 pub(crate) mod hostile_fixture;
 #[cfg(test)]
 mod hostile_tests;
+#[cfg(test)]
+mod ignore_tests;
 #[cfg(test)]
 mod tests;
