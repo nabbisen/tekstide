@@ -67,8 +67,13 @@ implementer's to paper over.
 - [x] Bounded **per level**: 256 children per directory; the collapse list unchanged (D7). *(Unchanged,
       and still openable — the judgment call in `qa-evidence.md`, which the reviewer can reverse in one
       line.)*
-- [ ] A root-escaping symlink is **reported, not followed**; a broken symlink says so; an unreadable
-      directory is a row. **Ablation:** follow the symlink; the escape test fails alone. *(All three
+- [x] A root-escaping symlink is **reported, not followed**; a broken symlink says so; an unreadable
+      directory is a row. **Ablation:** follow the symlink; **its own escape test fails, and any other
+      test sharing that fixture is named.**
+      *Corrected at review 423: the box said "fails alone". It fails the escape test and the
+      detail-area test, which legitimately uses the same escaping fixture. Third time a "fails alone"
+      box of mine has been falsified by a suite sharing fixtures properly — the wording is the error,
+      not the suite.* *(All three
       properties hold and are pinned. **The ablation's "alone" is not literally true**: following the link
       fails the tree's escape test **and** `the_detail_shows_…`, whose fixture is the same escaping row and
       which asserts the row is not marked expandable. Left unticked with the contradiction named rather
@@ -92,6 +97,10 @@ implementer's to paper over.
       `Task`.)*
 
 ## PR-052-C — how it reads
+
+- [ ] **Folders first** (ruled at review 423: ordering is "how it reads", so it lands here).
+- [ ] **Rows stay keyboard-only.** Clicking is a new interaction affordance, not a legibility fix, and
+      is out of RFC-052 entirely — `future-work.md`, not this slice (review 423).
 
 - [ ] A file-type icon replaces `[DIR]`/`[FILE]`; **every status is still a word** and the
       colour-alone scan still passes.
