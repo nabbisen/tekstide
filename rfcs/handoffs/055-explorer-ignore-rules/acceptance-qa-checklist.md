@@ -34,19 +34,19 @@ number in the evidence is not ticked.**
 
 ### Required at review 431
 
-- [ ] **R1:** a scan **inside** a submodule is pinned — expanding the poisoned submodule of the
+- [x] **R1:** a scan **inside** a submodule is pinned — expanding the poisoned submodule of the
       review-406 fixture and asking about *its* entries yields `Unknown(GateRefused)` and runs no
       marker. The existing test asks from the superproject; this is the case the dropped gitlink
       check used to cover.
-- [ ] **R2:** `vet_configuration`'s doc comment states one measurement's numbers. It currently says
+- [x] **R2:** `vet_configuration`'s doc comment states one measurement's numbers. It currently says
       the whole gate is ~115 ms and the walk is ~117 ms **of it**.
-- [ ] **R3:** the home exclusion has its own `IgnoreUnknown` variant. It is a decision to decline,
+- [x] **R3:** the home exclusion has its own `IgnoreUnknown` variant. It is a decision to decline,
       not a fact about the filesystem, and PR-055-B renders which rule it used.
 - [ ] **R4 (travels to B and C):** `core.excludesFile` is **not** honoured — `GIT_CONFIG_GLOBAL` is
       `/dev/null` (R6, and right). `.gitignore`, `.git/info/exclude` and `$XDG_CONFIG_HOME/git/ignore`
       are. `REQ-FILE-005` is not marked complete without naming this, and the user-facing disclosure
       says it. Whether to honour it is ruled at PR-055-C.
-- [ ] **R5:** `MAX_IGNORE_QUERY_ENTRIES` and its comment agree — it is `1_024`, the comment calls it
+- [x] **R5:** `MAX_IGNORE_QUERY_ENTRIES` and its comment agree — it is `1_024`, the comment calls it
       the explorer's 256 restated.
 
 ## PR-055-B — the scan carries it, and the floor keeps its job
@@ -87,6 +87,8 @@ number in the evidence is not ticked.**
 
 ## Whole-RFC
 
+- [ ] **Review 431 R4:** `REQ-FILE-005` is not marked complete without naming that **`core.excludesFile` is not honoured**
+      (`qa-evidence.md`); the user-facing disclosure says so in the user's words.
 - [ ] `REQ-FILE-005`, `REQ-FILE-006` and the `ignored` category of `REQ-FILE-002` move to
       implemented **with evidence they are reachable by a user**, not merely parsed.
 - [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.

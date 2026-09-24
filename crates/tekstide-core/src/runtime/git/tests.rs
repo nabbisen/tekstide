@@ -1747,7 +1747,7 @@ fn a_repository_at_or_above_home_is_not_asked() {
     at_home.push(("HOME".to_owned(), fixture.repo.display().to_string()));
     assert_eq!(
         ignored_entries_in_environment(&project, &names(&["main.rs"]), &git, &at_home),
-        IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository)
+        IgnoreAnswer::Unknown(IgnoreUnknown::RepositoryDeclined)
     );
     // Home *inside* the repository counts too: the repository is above it.
     let mut inside = fixture.forwarded_env.clone();
@@ -1755,7 +1755,7 @@ fn a_repository_at_or_above_home_is_not_asked() {
     inside.push(("HOME".to_owned(), project.display().to_string()));
     assert_eq!(
         ignored_entries_in_environment(&project, &names(&["main.rs"]), &git, &inside),
-        IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository)
+        IgnoreAnswer::Unknown(IgnoreUnknown::RepositoryDeclined)
     );
     assert!(!fixture.marker_exists("home-repo-invoked"));
 
@@ -1866,5 +1866,44 @@ fn a_gate_refusal_never_reaches_check_ignore() {
     assert!(
         !fixture.marker_exists("refusal-check-ignore"),
         "and the query was never made"
+    );
+}
+
+/// **Review 431 R1.** The case that matters for dropping the gitlink check: the
+/// explorer expands a submodule and asks about **the submodule's own entries**.
+/// `enclosing_repository_root` resolves the submodule's `.git` *pointer file*, so
+/// the repository is the submodule and its own configuration is what the gate
+/// vets -- where the review-406 fixture's `filter.evil.clean` is not on the
+/// allowlist. Refused, and the filter never runs.
+#[test]
+fn a_scan_inside_a_poisoned_submodule_is_refused_by_the_gate() {
+    let fixture = Fixture::new("ignore-inside-submodule");
+    let marker = fixture.add_poisoned_submodule();
+    let sub = fixture.repo.join("sub");
+    fixture.clear_markers();
+
+    assert_eq!(
+        enclosing_repository_root(&fs::canonicalize(&sub).unwrap()),
+        Some(fs::canonicalize(&sub).unwrap()),
+        "the submodule, not the superproject, is the repository for its own entries"
+    );
+    assert_eq!(
+        fixture.ask(&sub, &names(&["tracked.txt"])),
+        IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused)
+    );
+    assert!(
+        !fixture.marker_exists(marker),
+        "the submodule's own clean filter ran"
+    );
+}
+
+/// **Review 431 R5.** The query's bound is the explorer's, and a test says so:
+/// if the scan policy's cap ever moves, this fails and the two are chosen again
+/// together instead of drifting apart under a comment that says they match.
+#[test]
+fn the_query_bound_is_the_explorers_per_directory_cap() {
+    assert_eq!(
+        crate::project::root::FileExplorerScanPolicy::linux_mvp().max_children_per_directory,
+        MAX_IGNORE_QUERY_ENTRIES
     );
 }

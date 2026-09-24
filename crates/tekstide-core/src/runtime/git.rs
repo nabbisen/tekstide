@@ -385,9 +385,11 @@ fn evaluate_with_environment_and_walk_budget(
 /// about whether a **content comparison** can be trusted, which the module
 /// doc says in so many words is "not a safety problem". A question that reads
 /// no content (`git check-ignore`) needs the first half and not the second,
-/// and the second is expensive: measured on this repository, the whole gate
-/// is ~115 ms warm and the walk is ~117 ms of it, against under 5 ms for the
-/// rest. RFC-055's "a few milliseconds including the gate" was the rest.
+/// and the second is expensive. Measured in one run on this repository, warm
+/// (five runs, 1 ms polling): the whole gate **~87 ms**, this half **~1.3 ms**,
+/// so the gitlink check and the walk are **~86 ms** of it -- about 239,000
+/// entries, 96 % of them under `target/`. RFC-055's "a few milliseconds
+/// including the gate" was this half.
 fn vet_configuration(
     repository_root: &Path,
     git_executable: &str,
@@ -488,9 +490,20 @@ pub enum IgnoreAnswer {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IgnoreUnknown {
     /// No repository encloses the directory, so there is nothing to ask. Costs
-    /// no subprocess. Also the answer for a repository rooted at the user's
-    /// own home directory: see [`ignored_entries`].
+    /// no subprocess.
     NotARepository,
+    /// **A repository encloses the directory and was declined, not missing.**
+    /// It is rooted at the user's home directory or above it. A dotfiles
+    /// repository at `~` whose `.gitignore` says `*` would answer "ignored" for
+    /// every entry of every project beneath it, and a default that hides ignored
+    /// rows would then hide the user's whole tree -- the fail-closed outcome the
+    /// risk document ranks worse than the alternative. Tekstide's status bar
+    /// reads only a `.git` at the project root; this asks a different question
+    /// of a wider place, so it declines the one repository shape that is common,
+    /// deliberate and wrong here. A separate variant because the caller says
+    /// *which rule it used*, and "there is no repository" would be untrue.
+    /// Costs no subprocess.
+    RepositoryDeclined,
     /// `git` could not be located, is too old, or the repository's
     /// configuration names something the gate does not vouch for. Nothing
     /// was run.
@@ -505,11 +518,13 @@ pub enum IgnoreUnknown {
     UnusableName,
 }
 
-/// The most entries one query carries. The explorer caps a directory at 256
-/// children (`max_children_per_directory`); this is the same bound stated
-/// again where the subprocess is, so no caller can turn a scan into an
-/// unbounded write to git's standard input.
-pub const MAX_IGNORE_QUERY_ENTRIES: usize = 1_024;
+/// The most entries one query carries: the explorer's own per-directory cap
+/// (`FileExplorerScanPolicy::max_children_per_directory`, 256), stated again
+/// where the subprocess is so no caller can turn a scan into an unbounded write
+/// to git's standard input. **Equal to it, and held equal by a test**
+/// (`the_query_bound_is_the_explorers_per_directory_cap`), so the two cannot
+/// drift apart under a comment that says they match.
+pub const MAX_IGNORE_QUERY_ENTRIES: usize = 256;
 const MAX_ENTRY_NAME_BYTES: usize = 255;
 // A reply echoes only paths that were asked about, so it is never larger
 // than the request: with these bounds a reply cannot reach the pipe's byte
@@ -523,14 +538,11 @@ const _: () = assert!(MAX_IGNORE_QUERY_ENTRIES * (MAX_ENTRY_NAME_BYTES + 3) < MA
 /// directory or a pointer file, at or above it), so a project root nested
 /// inside its repository still gets the repository-root ignore rules: measured,
 /// the query from `sub/deep` applies the root `.gitignore`. Two exceptions
-/// return [`IgnoreUnknown::NotARepository`] without running anything: no
-/// repository encloses it, or the enclosing repository is rooted at the user's
-/// **home directory or above it**. A dotfiles repository at `~` whose
-/// `.gitignore` says `*` would otherwise answer "ignored" for every entry of
-/// every project under `~`, and a default that hides ignored rows would hide
-/// the user's whole tree. Tekstide's status bar already reads only a `.git` at
-/// the project root; this asks a different question of a wider place, so it
-/// declines the one repository shape that is common, deliberate and wrong here.
+/// answer without running anything: no repository encloses it
+/// ([`IgnoreUnknown::NotARepository`]), or the enclosing repository is rooted at
+/// the user's **home directory or above it**
+/// ([`IgnoreUnknown::RepositoryDeclined`], whose doc comment carries the
+/// reasoning).
 ///
 /// **The gate runs first, every call, and is not cached (RFC-055 D9)** -- but
 /// only [`vet_configuration`], the half that decides whether `git` may run at
@@ -539,7 +551,7 @@ const _: () = assert!(MAX_IGNORE_QUERY_ENTRIES * (MAX_ENTRY_NAME_BYTES + 3) < MA
 /// repository the gate does not accept must not be asked anything. What it
 /// does not run is a submodule's own configuration, or a clean filter -- it
 /// reads no content -- so the gitlink check and the attributes walk that guard
-/// `git status` are not repeated here (and cost ~115 ms on this repository).
+/// `git status` are not repeated here (~86 ms on this repository; see [`vet_configuration`]).
 ///
 /// Every entry goes to git as `./<name>` and comes back through the same
 /// type ([`IgnoreQueryInput`]), the only way to build a query, so a filename
@@ -605,7 +617,7 @@ fn ignored_entries_with_environment(
         return IgnoreAnswer::NoneIgnored;
     }
     if repository_is_at_or_above_home(repository_root, forwarded_env) {
-        return IgnoreAnswer::Unknown(IgnoreUnknown::NotARepository);
+        return IgnoreAnswer::Unknown(IgnoreUnknown::RepositoryDeclined);
     }
     if vet_configuration(repository_root, git_executable, forwarded_env).is_err() {
         return IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused);
