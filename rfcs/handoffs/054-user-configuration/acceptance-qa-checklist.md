@@ -45,35 +45,35 @@ shares its fixture" — "alone" has been falsified three times by suites sharing
 
 ### Required at review 428
 
-- [ ] **R1: the focus border meets 3:1** against the surfaces it is drawn on — WCAG's non-text
+- [x] **R1: the focus border meets 3:1** against the surfaces it is drawn on — WCAG's non-text
       minimum, the one `derived_contrast_pairs` already holds the defaults to. Accent and the
       non-focus border stay unmeasured **and the book says so**, as a decision rather than an
       oversight.
-- [ ] **R2: the scrim's alpha is capped**, with a diagnostic. RFC-018 wants it translucent so a
+- [x] **R2: the scrim's alpha is capped**, with a diagnostic. RFC-018 wants it translucent so a
       backdrop cannot be mistaken for a rectangle the application did not draw; no configuration may
       produce a spoofable surface.
-- [ ] **`theme.rs`'s claim that every colour comes from a `Theme` value is corrected** — it is not
+- [x] **`theme.rs`'s claim that every colour comes from a `Theme` value is corrected** — it is not
       true of the buttons.
-- [ ] **The buttons follow the theme**, if it is routing the existing roles into their styles. If it
+- [x] **The buttons follow the theme**, if it is routing the existing roles into their styles. If it
       is more than that, ship with the limitation **stated** and it gets scheduled.
-- [ ] **`ARCHITECTURE.md` records the UI-font global** as the one piece of process-global UI state,
+- [x] **`ARCHITECTURE.md` records the UI-font global** as the one piece of process-global UI state,
       with the reason (iced fixes the default font at build, and a live family needs one) — so the
       next author does not read it as permission for a second.
 
 ## PR-054-C — scrollback and the live proof
 
-- [ ] The scrollback cap is **measured**, not chosen: bytes per line at a realistic width, cap set so
+- [x] The scrollback cap is **measured**, not chosen: bytes per line at a realistic width, cap set so
       **one pane at the cap stays under 64 MB**, number and measurement in the book. Above it clamps
       with a diagnostic.
-- [ ] **`Ctrl+Alt+C` applies all five live**, and `Reserved` stays reserved across a reload.
-- [ ] **Live capture**: default dress → edit the file → `Ctrl+Alt+C` → the same window in the user's
+- [x] **`Ctrl+Alt+C` applies all five live**, and `Reserved` stays reserved across a reload.
+- [x] **Live capture**: default dress → edit the file → `Ctrl+Alt+C` → the same window in the user's
       colours, font and size, with a rebound chord working. A second capture: a bad value falling
       back, named on the board. Throwaway `mktemp -d` config; **no floating or resizing** — this
       desktop is shared.
 
 ## Whole-RFC
 
-- [ ] `REQ-CONFIG-006`, `REQ-CONFIG-007`, `NFR-UX-004`, `REQ-TERM-004` move to implemented **with
+- [x] `REQ-CONFIG-006`, `REQ-CONFIG-007`, `NFR-UX-004`, `REQ-TERM-004` move to implemented **with
       evidence they are reachable**, not merely parsed — the distinction the 2026-09-23 audit caught
       the plan getting wrong.
 - [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after

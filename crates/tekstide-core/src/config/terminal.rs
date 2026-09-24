@@ -31,7 +31,7 @@ pub const DEFAULT_SCROLLBACK_LINES: usize = 2_000;
 ///
 /// At 200 columns -- the widest pane an ordinary display gives a terminal --
 /// 12,000 lines of history measure 55.7 MiB, and the model (never below any
-/// measurement, and reading 61.2 MiB there) is under the 64 MiB budget. A wider
+/// measurement, and reading 62.0 MiB there) is under the 64 MiB budget. A wider
 /// pane keeps proportionally fewer lines ([`effective_scrollback_lines`]), so
 /// the budget holds at any width.
 ///
