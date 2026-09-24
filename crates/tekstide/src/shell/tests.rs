@@ -19012,3 +19012,24 @@ fn a_hostile_appearance_file_is_named_on_the_board_without_being_echoed() {
         );
     }
 }
+
+/// The process-global UI font is set in exactly the two places the look is put
+/// in force: when `State` is built and when a reload applies a new one. (A
+/// behavioural test cannot hold this without racing every other test that
+/// reloads, because the font is global -- so the live capture shows it working,
+/// and this keeps either call from being deleted unnoticed.) Ablated by
+/// removing either.
+#[test]
+fn the_ui_font_is_set_at_boot_and_at_every_reload() {
+    let sources = production_sources();
+    let (_, shell) = sources
+        .iter()
+        .find(|(path, _)| path.ends_with("crates/tekstide/src/shell.rs"))
+        .expect("shell.rs");
+    assert_eq!(shell.matches("crate::theme::set_ui_font(").count(), 2);
+    // One of the two is inside the reload function, not merely somewhere.
+    let reload = shell.find("fn reload_configuration(").expect("reload");
+    let reload_body = &shell[reload..];
+    let reload_end = reload_body.find("\n}\n").expect("end of reload");
+    assert!(reload_body[..reload_end].contains("crate::theme::set_ui_font("));
+}
