@@ -107,9 +107,14 @@ What each file can contain, and how to remove it:
 
 ## Configuration
 
-`$XDG_CONFIG_HOME/tekstide/config.toml` (or `~/.config/tekstide/config.toml`) is optional and
-deliberately narrow: four settings take effect, and nothing a configuration file defines runs without
-a deliberate act. See [Configuration](https://nabbisen.github.io/tekstide/users/configuration.html).
+`$XDG_CONFIG_HOME/tekstide/config.toml` (or `~/.config/tekstide/config.toml`) is optional. You can
+rebind the keyboard shortcuts, set the colours, the font family and sizes, and how much scrollback a
+terminal keeps; a value that would make the window unreadable, or a terminal too large, is not used,
+and the Project Board says which and why. AI CLI profiles and their limits are settable too, and
+nothing a configuration file defines runs without a deliberate act. **A project can never supply
+configuration** — only the file in your own configuration directory is read. `Ctrl+Alt+C` applies a
+change without a restart. See
+[Configuration](https://nabbisen.github.io/tekstide/users/configuration.html).
 
 ## Project
 

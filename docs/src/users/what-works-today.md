@@ -200,6 +200,15 @@ A wholly new, entirely untracked folder is marked untracked as a whole, the same
 — the files inside it are not marked individually until something inside is tracked or staged.
 Git-based change detection does not feed the Change Review surface.
 
+## Settings
+
+A configuration file in your own configuration directory sets the keyboard shortcuts, the colours,
+the font family and sizes, and how much scrollback a terminal keeps, and `Ctrl+Alt+C` applies a
+change to the running window. A colour or size that would make the window unreadable is not used, a
+font is a name and never a file, a terminal's scrollback is capped so one cannot take unbounded
+memory, and the Project Board says which setting fell back and why. A project can never supply
+configuration. See [Configuration](./configuration.md).
+
 ## Not built
 
 There is no file watcher or command palette (`Ctrl+Shift+P` is reserved and currently does

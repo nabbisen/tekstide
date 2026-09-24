@@ -1,47 +1,94 @@
 # Changelog
 
-## Unreleased
+## 0.25.0 - The Window Takes Your Settings
 
-### Added — terminal scrollback is a setting, and the theme is finished (RFC-054, PR-054-C)
+Status: release candidate; not yet published or tagged.
 
-- **`[terminal] scrollback_lines`.** The default is unchanged (2,000). **The most it can be is 12,000**, and a
-  larger number is reduced to that with a note on the Project Board — a terminal keeps its scrollback in memory
-  and one should not take more than 64 MiB. The cap is **measured** (the allocator's own count over real output),
-  not chosen; a **wider terminal keeps fewer lines** where the number asked for would pass the budget at that
-  width, and gets them back when narrowed. `Ctrl+Alt+C` applies it to terminals that are already open.
-- **The focus border cannot be made invisible.** `border_focused` is held to 3:1 against the two surfaces it is
-  drawn on, with the measured ratio on the board when it falls back.
-- **The scrim is capped at 90 % opaque**, so a dialog's backdrop can never look like a window the application did
-  not draw. Above that it is reduced, and the board says so.
-- **Buttons follow the theme.** They were the one thing in the window a configured colour did not reach.
-- The board says *reduced to* — not *its default stands* — for a value that is still in force at its limit.
+Five things became settable: the keyboard shortcuts, the colours, the font family, the text sizes and how much
+scrollback a terminal keeps. `Ctrl+Alt+C` applies a change to the running window. A bad value falls back on its
+own, the rest of the file still applies, and the Project Board names the setting and the reason. Every part of it
+was checked by running the release binary, and two things were found that way that no unit test had: a Help
+column that let a chord run into its description at a larger font, and — by measuring rather than reasoning — a
+scrollback cap that was wrong until the allocator said so.
 
-### Added — colours, font and sizes are settings (RFC-054, PR-054-B)
-
-- **`[theme]` and `[font]` in `config.toml`.** Seven colours (`#RRGGBB`), a font family, and the three text
-  sizes. `Ctrl+Alt+C` applies them live, including the family.
-- **You cannot make the window unreadable.** Text must meet **4.5:1** against the two surfaces it sits on; a
-  colour that would break that is not used, and the Project Board says the ratio it measured. Sizes outside
-  8–32 pixels fall back. Each setting falls back on its own.
-- **A font is a name, never a path.** The family is looked up in the fonts the window is already drawn from;
-  a path is refused, an uninstalled name is named on the board, and no configured string is ever opened as a
-  font. The terminal and the file tree keep a fixed-width face.
-- **`[ui]` now says where its settings went** instead of "no effect yet".
-
-### Added — keybindings are settings (RFC-054, PR-054-A)
+### Added — keybindings are settings
 
 - **A `[keybindings]` section in `config.toml`.** One entry per action, the chord spelled exactly as the Help
-  modal prints it (`open_help = "Ctrl+Alt+J"`). `Ctrl+Alt+C` applies it without a restart, and the Help modal
-  shows the chords in force.
+  modal prints it (`open_help = "Ctrl+Alt+J"`); the Help modal shows the chords in force.
 - **A bad entry falls back on its own, and the Project Board names the setting and the reason** — a chord it
   cannot read, a reserved action or chord (`Ctrl+Shift+P`), an action with no key at all, or a chord that
-  already reaches another action. The rest of the file still applies. **There is no "last one wins"**: two
-  entries for one chord are both refused.
+  already reaches another action. **There is no "last one wins"**: two entries for one chord are both refused,
+  so the result never depends on the order you wrote them in.
 - **Two actions have no key, and now say why**: `cycle_visible_terminal_session` and
-  `open_safe_close_dialog` had a status that read as "bindable" and meant "dead". A rule is now reserved,
-  bound or dead — one type, so it cannot be two — and each dead action states how a user reaches what it
-  stands for, or that they cannot.
-- **A configuration file inside a project is never read**, pinned by a test.
+  `open_safe_close_dialog` had a status that read as "bindable" and meant "dead". A rule is now reserved, bound or
+  dead — one type, so it cannot be two — and each dead action states how a user reaches what it stands for, or
+  that they cannot.
+
+### Added — colours, font and sizes are settings
+
+- **`[theme]` and `[font]`.** Seven colours (`#RRGGBB`), a font family, and the three text sizes. The family
+  applies live, without a restart.
+- **You cannot make the window unreadable.** Text must meet **4.5:1** against the two surfaces it sits on, and
+  the **focus border 3:1**; a colour that would break either is not used and the board says the ratio it
+  measured. Sizes outside 8–32 pixels fall back.
+- **The scrim is capped at 90 % opaque**, so a dialog's backdrop can never look like a window the application did
+  not draw. Above that it is *reduced*, not refused, and the board says so — in its own words, because a reduced
+  value is still in force.
+- **A font is a name, never a path.** The family is looked up in the fonts the window is already drawn from; a
+  path is refused, an uninstalled name is named on the board, and no configured string is ever opened as a font.
+  The terminal and the file tree keep a fixed-width face.
+
+### Added — terminal scrollback is a setting
+
+- **`[terminal] scrollback_lines`.** The default is unchanged (2,000). **The most it can be is 12,000**; a larger
+  number is reduced to that with a note on the board. A terminal keeps its scrollback in memory and one should not
+  take more than 64 MiB, so the cap is **measured** — the allocator's own count over real output — not chosen, and
+  **a wider terminal keeps fewer lines** where the number asked for would pass the budget at that width, and
+  gets them back when narrowed. A change applies to terminals that are already open.
+
+### Changed
+
+- **Buttons follow the theme.** They were the one thing in the window a configured colour did not reach, and they
+  were iced's default blue. **This changes the look of a window with no configuration at all**: a button is now
+  the same surface colour as the rest of the chrome, with a border, and a heavier border when the pointer is over
+  it. Every button still has its label.
+- **The Help window's key column is wider (126 px at the default size, from 110) and grows with the text size.**
+  A fixed width let the longest chord run into its description once the size or font was configured.
+- **`[ui]` says where its settings went** — `[theme]` and `[font]` — instead of "no effect yet".
+- **A configuration file inside a project is never read**, and this is now pinned by tests that look at the
+  loader's one caller, not only at the loader.
+
+### Corrected
+
+- **`0.24.0` and every release before it said the product could not be configured beyond AI CLI profiles, a
+  retention period and a run limit** — the README said "four settings take effect", and a file with a
+  `[keybindings]`, `[ui]` or `[terminal]` section was refused whole with "no effect yet". That is no longer true
+  for `[keybindings]`, `[theme]`, `[font]` and `[terminal] scrollback_lines`. **A reader who relied on the old
+  claim should look again at the Configuration page**: a file that was ignored whole because it carried one of
+  those keys now loads, and each of them now does something. (`[ui]` is still refused, with a pointer to
+  `[theme]` and `[font]`; nothing about data on disk changed.)
+
+### What this release does not do
+
+Re-read against what RFC-054 changed, not copied from `0.24.0`.
+
+- **There is no settings screen.** It is a file, read at startup and at `Ctrl+Alt+C`.
+- **Two actions cannot be rebound and `Ctrl+Shift+P` is reserved**, for a command palette that does not exist. A
+  chord is `Ctrl` and/or `Alt`, optionally `Shift`, and one letter or digit; `Tab`, arrows and function keys are
+  not rebindable. `tekstide --help` prints the shipped defaults (it runs before the file is read); the Help
+  window prints the chords in force.
+- **Contrast is measured for text and for the focus border, not for `accent` or the ordinary border**, which are
+  decoration and yours to choose. A light theme has to set `surface_elevated` and `border_focused` as well, or the
+  default dark surface and blue focus border will fail against it and *your background* is what gets taken back.
+- **A font family must be an installed family's name.** `sans-serif` and `monospace` are not names. The family
+  applies to the interface's text, including the editor's; the terminal and the file tree stay monospace.
+- **The scrollback cap is for ordinary output.** *A 12,000-line terminal at 200 columns can reach roughly 200 MB
+  if every cell carries a combining mark*, because each such cell holds its own allocation. The shipped 2,000-line
+  default already had this exposure. Bounding combining marks per cell is a change to the terminal filter and is
+  reserved as RFC-061; it will be chosen against real Devanagari, Arabic, Hebrew and Vietnamese text, not against
+  a stress string.
+- **Everything `0.24.0` listed still holds.** That includes the keyboard-only explorer, no file watcher, and
+  there being **no screen-reader support**.
 
 ## 0.24.0 - The Sidebar Is A Tree
 
