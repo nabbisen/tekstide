@@ -351,4 +351,4 @@ The Project Board, seen in the same captures: the last card's "Open" button was 
 
 ### Gate
 
-fmt, clippy `-D warnings`, `mdbook build docs`, `git diff --cached --check`, three consecutive full-workspace runs to files, fresh `TMPDIR` each: results in the review request.
+fmt, clippy `-D warnings`, `mdbook build docs`, `git diff --cached --check`, three consecutive full-workspace runs to files, fresh `TMPDIR` each: **626 + 9 + 902, green all three, 0 entries left.** An earlier attempt hit two registered intermittents under a load average of ~30 (other work on the machine); they are dated in `test-process-leak.md`, and the gate was redone when the load was under 6 rather than counted.
