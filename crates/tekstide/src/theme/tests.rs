@@ -350,3 +350,22 @@ fn a_button_is_drawn_from_the_configured_roles() {
     }
     assert!(style(&base, Status::Disabled).text_color.a < 1.0);
 }
+
+/// `iced::Element` gives a test no way to ask a button what style it carries, so
+/// the wiring is held at the source: the one function every button is built with
+/// applies [`super::button_style`]. (`a_button_is_drawn_from_the_configured_roles`
+/// holds the style itself; the scan in the shell holds that no view builds a
+/// button any other way.) Ablated by removing the `.style(..)`.
+#[test]
+fn the_theme_button_applies_the_theme_style() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/theme.rs"),
+    )
+    .expect("theme.rs");
+    let shipped = source.split("#[cfg(test)]\nmod tests").next().unwrap();
+    let flat = shipped.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        flat.contains("iced::widget::button(content).style(button_style(theme))"),
+        "`theme::button` must apply `button_style(theme)`"
+    );
+}
