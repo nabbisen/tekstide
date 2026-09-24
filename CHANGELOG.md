@@ -2,7 +2,8 @@
 
 ## 0.24.0 - The Sidebar Is A Tree
 
-Status: release candidate; not yet published or tagged.
+Status: **released on 2026-09-24.** Published to crates.io as `tekstide 0.24.0` and
+`tekstide-core 0.24.0`, tagged `0.24.0` on `5b33f5a`.
 
 The file explorer stopped being one-level debug text and became a tree you can read: folders open in place,
 a row says what it is before its name, and nothing it cannot show is hidden without a row saying so. The same
