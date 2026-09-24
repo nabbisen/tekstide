@@ -131,7 +131,10 @@ back as well, each named.
 are, the words are still there and the focus border is measured, so you may choose them freely.
 The scrim is not measured for contrast but **is capped in opacity**: it is the dimming layer
 behind a dialog, and a fully opaque one would look like a window this application did not draw,
-so anything above 90 % opaque is reduced to 90 % and the board says so. Buttons are drawn from
+so anything above 90 % opaque is reduced to 90 % and the board says so. (The number is a
+judgement: the reason for it is that a dialog's backdrop must let the window behind it show
+through faintly, or the dialog stops being distinguishable from a screen this application did not
+draw.) Buttons are drawn from
 these same colours (`surface_elevated`, `foreground`, the borders), so they follow your theme.
 
 **A size outside 8–32 pixels is not used.** The three sizes fall back independently.
@@ -170,9 +173,9 @@ to take more than **64 MiB**. The cap was measured rather than chosen:
 
 Memory is per column, so a **wider terminal keeps fewer lines** whenever the number you asked for
 would pass 64 MiB at that width — and it gets them back when you narrow it. At 200 columns (a
-full-width terminal on an ordinary display) the full 12,000 fit. These are for ordinary output;
-text that puts a combining character on every cell costs about four times as much, and the 64 MiB
-is not a promise about that.
+full-width terminal on an ordinary display) the full 12,000 fit. These figures are for ordinary
+output. **A 12,000-line terminal at 200 columns can reach roughly 200 MB if every cell carries a
+combining mark**, and the 64 MiB is not a promise about that.
 
 A value that is not a whole number of lines (`-1`, `2000.5`, `"lots"`) is not used, and the
 default stands.

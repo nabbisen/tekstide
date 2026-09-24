@@ -36,9 +36,10 @@ pub const DEFAULT_SCROLLBACK_LINES: usize = 2_000;
 /// the budget holds at any width.
 ///
 /// **What this does not cover:** output that puts a combining (zero-width)
-/// character on every cell costs about 3.8 times as much, because each such cell
-/// carries its own heap allocation. The cap is for ordinary output; the
-/// configuration page says so.
+/// character on every cell -- each such cell carries its own heap allocation --
+/// can take a 12,000-line, 200-column pane to roughly 200 MB. The cap is for
+/// ordinary output; the configuration page says so, in bytes. Bounding combining
+/// marks per cell is RFC-061's ground (the terminal filter), not this file's.
 pub const MAX_SCROLLBACK_LINES: usize = 12_000;
 
 /// RFC-054 D7: one pane at the cap stays under this.
