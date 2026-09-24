@@ -117,6 +117,16 @@ carry no dates — a release ships when its RFC closes and the gate is green thr
 | `0.33.0` | **060** Command Approval A User Can Reach | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **A 1.0 blocker**: "command approval for adapter-supported workflows" is in the 1.0 minimum list, and `to_ai_cli_profile` sets `Supervised` unconditionally, so no user can reach one |
 | `0.34.0`+ | **028**, **029**, NFR verification | `NFR-PORT-001`..`003`; docs, CI, release automation; every performance budget | M14, the 1.0 candidate band |
 
+### Unplanned work, recorded so it is not invisible
+
+**The Project Board's cards (2026-09-24, `0.24.0`).** Owner-requested while testing RFC-052, outside
+that RFC and with no RFC of its own: the cards scroll and follow the keyboard, the already-open
+project says `Open now`, and nine equal lines became a heading, a path and badges. The 2026-09-23
+audit listed board legibility as covered by nothing; it is now done except **B1** (a recent card shows
+five `unknown` badges) and **B2** (the blocked-automation list repeats on every card), both required
+at review 424. `0.23.0`'s changelog claim that this was "later work that no scheduled RFC covers" is
+corrected in `0.24.0`.
+
 ### Decisions the owner still owns
 
 - **Syntax highlighting (`REQ-EDIT-003`) is not in the 1.0 minimum list.** It is the one gap large

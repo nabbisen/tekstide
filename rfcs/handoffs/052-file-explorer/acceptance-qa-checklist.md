@@ -109,6 +109,18 @@ implementer's to paper over.
       `03-…`; the escaping row is in `01-`.)*
 - [x] Folders first (ruled at review 423 to belong here).
 
+### Required at review 424 — the Project Board work this slice also carried
+
+- [ ] **B1: no badge of ignorance.** A recent, unopened card carries five `…: unknown` pills today.
+      Say once that the project is not open, or say nothing — `REQ-NOTIFY-003`'s rule applied to
+      unknowns.
+- [ ] **B2: the nine blocked automations appear once**, not verbatim on every card.
+- [ ] **The card list following a real key press is captured** — with **content, not geometry**:
+      enough recent projects to overflow at the window's natural size. *(The reviewer must not float
+      or resize a window on this desktop; it is shared with other projects' sessions.)*
+- [ ] **`0.24.0`'s changelog carries a `Corrected` entry**: `0.23.0` said the board's row was "hard to
+      read… later work that no scheduled RFC covers", which this slice made false.
+
 ## Whole-RFC
 
 - [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
