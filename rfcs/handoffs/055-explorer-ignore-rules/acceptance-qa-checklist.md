@@ -68,6 +68,15 @@ number in the evidence is not ticked.**
       call**, not the query alone.
 - [x] Nothing new runs on the render thread; the work stays on `explorer_scan_subscription`.
 
+### Required at review 432
+
+- [ ] **Q1:** `{ $name }` moves to the front of `explorer-node-entry`, before the status selectors —
+      `browse-node-entry` already has that shape. A capture shows an ignored directory whose name is
+      whole, and a test holds the name ahead of the words. A clipped *name* invents a file that does
+      not exist (`(collapsed) [ignored] t`); a clipped *word* is visibly damaged.
+- [ ] Recorded, not required: the sidebar has no overflow marker, so a long filename still clips
+      silently. Pre-existing (RFC-052); the `0.26.0` changelog owns it as a limitation.
+
 ## PR-055-C — the setting, the badge, the words, and one invariant
 
 - [ ] `explorer.show_ignored` defaults to `false`; `true` draws ignored rows with the `ignored`
