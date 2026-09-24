@@ -70,41 +70,43 @@ number in the evidence is not ticked.**
 
 ### Required at review 432
 
-- [ ] **Q1:** `{ $name }` moves to the front of `explorer-node-entry`, before the status selectors —
+- [x] **Q1:** `{ $name }` moves to the front of `explorer-node-entry`, before the status selectors —
       `browse-node-entry` already has that shape. A capture shows an ignored directory whose name is
       whole, and a test holds the name ahead of the words. A clipped *name* invents a file that does
       not exist (`(collapsed) [ignored] t`); a clipped *word* is visibly damaged.
-- [ ] Recorded, not required: the sidebar has no overflow marker, so a long filename still clips
+- [x] Recorded, not required: the sidebar has no overflow marker, so a long filename still clips
       silently. Pre-existing (RFC-052); the `0.26.0` changelog owns it as a limitation.
 
 ## PR-055-C — the setting, the badge, the words, and one invariant
 
-- [ ] `explorer.show_ignored` defaults to `false`; `true` draws ignored rows with the `ignored`
+- [x] `explorer.show_ignored` defaults to `false`; `true` draws ignored rows with the `ignored`
       badge. Both captured.
-- [ ] An unknown or refused value for it is **named on the Project Board** and the default stands, as
+- [x] An unknown or refused value for it is **named on the Project Board** and the default stands, as
       RFC-054's mechanism already does.
-- [ ] **Dotfiles are still visible** with the setting at either value — `.gitignore`, `.env` and
+- [x] **Dotfiles are still visible** with the setting at either value — `.gitignore`, `.env` and
       `.git-exclude` appear as ordinary rows. The captures show it.
-- [ ] The sidebar says where the ignore rule came from, and the staleness sentence is RFC-052's
+- [x] The sidebar says where the ignore rule came from, and the staleness sentence is RFC-052's
       extended, not a second vocabulary for the same fact.
-- [ ] The book's configuration page names the key, and the existing page/code invariants pass.
-- [ ] **Carried from RFC-053's closeout:** `rfc_docs_invariants` gains a check that an RFC the
+      *(There was no RFC-052 staleness sentence on screen to extend — it was in the book and the changelog only —
+      so the on-screen form is new: `explorer-ignore-age`. `qa-evidence.md` says so.)*
+- [x] The book's configuration page names the key, and the existing page/code invariants pass.
+- [x] **Carried from RFC-053's closeout:** `rfc_docs_invariants` gains a check that an RFC the
       changelog names as released lives in `done/`. The evidence shows it **failing** against a
       planted violation and passing without it.
-- [ ] The `0.26.0` changelog section owns this release's own limitations in its own words, and
+- [x] The `0.26.0` changelog section owns this release's own limitations in its own words, and
       corrects any predecessor it contradicts by name.
 
 ## Whole-RFC
 
-- [ ] **Review 431 R4:** `REQ-FILE-005` is not marked complete without naming that **`core.excludesFile` is not honoured**
+- [x] **Review 431 R4:** `REQ-FILE-005` is not marked complete without naming that **`core.excludesFile` is not honoured**
       (`qa-evidence.md`); the user-facing disclosure says so in the user's words.
-- [ ] `REQ-FILE-005`, `REQ-FILE-006` and the `ignored` category of `REQ-FILE-002` move to
+- [x] `REQ-FILE-005`, `REQ-FILE-006` and the `ignored` category of `REQ-FILE-002` move to
       implemented **with evidence they are reachable by a user**, not merely parsed.
 - [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
 - [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
       staging, `rfc_docs_invariants`, **three consecutive full-workspace runs with `--no-fail-fast`**
       to files, **0 fixture entries left** in a fresh short `TMPDIR`.
-- [ ] Every new intermittent failure has a dated row in `test-process-leak.md`.
+- [x] Every new intermittent failure has a dated row in `test-process-leak.md`.
 - [ ] Commits are pushed once the gate is green.
 
 ## Final Acceptance Decision

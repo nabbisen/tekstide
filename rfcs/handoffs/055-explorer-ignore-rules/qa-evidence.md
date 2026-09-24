@@ -255,3 +255,102 @@ the rule sentence long again (2).
 ### Gate
 
 See the request.
+
+## PR-055-C — the setting, the words, the invariant, and review 432's Q1
+
+### Q1 — the name comes first (review 432)
+
+`explorer-node-entry` is now `icon`, `name`, then `(collapsed)`/`(blocked)`, the symlink word, the Git word (now including
+`[ignored]`), `[open]`. `[OTHER]` stays where the icon is: it is the kind of a link or special entry, not a qualifier of a
+name. The RFC-052 comment that argued the opposite is replaced by one that says why it was reversed and cites the row that
+prompted it (`(collapsed) [ignored] t`). `browse-node-entry` already had this shape; there is now one order for both.
+`the_name_comes_before_every_status_word_so_a_clip_cannot_invent_a_name` (an ignored, symlinked, collapsed directory: the icon is
+the only thing ahead of the name, and the row cut to 33 columns still holds `target`) and `the_words_after_the_name_keep_one_order`.
+The old test `every_status_word_comes_before_the_name…` asserted the opposite and was **rewritten, not deleted** — it is
+RFC-052's reasoning superseded, and its replacement says so. **Capture `06-`**: `target (collapsed) [ign` — the name whole, the
+qualifier visibly damaged, which is the trade the ruling chose.
+
+### D7 — `explorer.show_ignored`
+
+`[explorer] show_ignored` through RFC-054's mechanism (a `config/explorer.rs` beside `terminal.rs`): a boolean, default `false`; any
+other value is `FallbackReason::NotABoolean` — named on the board (*"explorer.show_ignored was not used, so its default stands. It must be
+true or false, without quotes."*), the value never echoed, the rest of the file applied; an unknown key in `[explorer]` warns. **There is
+no key for dotfiles**, and `there_is_no_key_for_dotfiles_and_an_unknown_key_only_warns` says a guess at one is a warning.
+
+**What `false` does, which the pack left open: ignored entries are not drawn, and the directory says how many it left out.** Read from
+RFC-052 D8 (*nothing is hidden silently*) and the README's "decides whether ignored rows are drawn at all", not from "collapses them"
+in the RFC's acceptance list: a *collapsed* ignored directory is what git's rule already does (capture `06-`), and hiding a
+file silently is exactly what D8 forbids. So `ExplorerTree::rows` skips `Ignored` nodes when the setting is off and ends the directory with
+an `ExplorerTreeRowKind::IgnoredHidden { count }` row — *"2 ignored entries hidden"* (capture `05-`). The count is of entries git
+answered about; **the omitted tail (past the 256 cap) has unknown ignore state, keeps its own row, and this setting never touches it**
+(`the_setting_leaves_the_omitted_tail_alone`). A directory of only ignored entries is *not* "empty"
+(`a_directory_of_only_ignored_entries_says_so_and_is_not_empty`). A hidden directory's expansion is remembered and returns when the
+setting is turned on.
+
+**Dotfiles stay visible at either value** (`ignored_entries_are_hidden_and_counted_unless_the_setting_shows_them`: `.env` and `.gitignore` are
+in the drawn rows with the setting off; ablated by hiding `.`-names, which fails it). Captures `05-` (`.env`, `.git-exclude`, `.gitignore`
+all drawn, `2 ignored entries hidden`) and `06-` (`show_ignored = true`: `target` and `debug.log [ignored]` drawn, the dotfiles unchanged).
+
+**Wiring.** `ExplorerTree::show_ignored` (default `false`), `ProjectSession::set_explorer_show_ignored`, applied by
+`apply_configured_project_settings` (the old `apply_configured_resource_limits`, renamed because it now carries two settings and its
+early return for "no agent run limit" would have skipped this) at boot and after each of the three mid-session open routes, and by
+`reload_configuration` to projects already open, live. `show_ignored_reaches_open_projects_at_boot_and_at_reload` runs the real boot and
+reload paths (off → on → a bad value falls back and is named, unechoed → removed); `every_route_that_opens_a_project_applies_the_configured_settings`
+counts the call sites at the source (one definition, four calls). **Ablations:** reload not applying it; boot not applying it.
+
+### D6, D8 — the sidebar says where the rule came from, and how old it is
+
+The pack said the sidebar "extends RFC-052's existing staleness sentence". **There is no such sentence on screen**: RFC-052 disclosed
+folder staleness in the book and the changelog, never in the sidebar. So this slice adds both lines, and they are the on-screen form of
+the disclosure:
+
+- `ignore_rule_line`: *"Ignore rules: project's Git"* / *"parent Git repo"* / *"nested Git repo"* (review 431 ruling 4, ranked so a repository
+  **above** the project wins, because it is the case where the status bar and the tree most need telling apart), and for the floor
+  *"built-in list"* / *"built-in (home)"* / *"built-in, no Git"* / *"built-in, failed"* — one sentence per `ExplorerFloorReason`, none shared.
+  Nothing when no scan has asked git yet.
+- `ignore_age_line`: *"Marks are as old as the scan"*, exactly when a scan used git's answer (the floor list is static).
+
+`RESERVED_LINES` 3 → 4. **Every sentence is held to 32 columns** by `the_ignore_rule_sentences_fit_the_sidebar` (the lesson of the ruling-4
+sentence that was cut at "the Git r"). Captures `05-`/`06-` show both lines above the tree.
+
+### The invariant carried from RFC-053's closeout
+
+`an_rfc_a_release_names_lives_in_done` reads every **released** changelog section (a `Status: … released on …` line; `Unreleased` and a
+release candidate are not), collects the `RFC-NNN` it names, and fails if one lives in `rfcs/accepted/` or `rfcs/proposed/`, naming the
+RFC, the section and the folder. It asserts it read more than 20 mentions, so it cannot pass by reading nothing. On the repository as it
+is it **passes** — the architect had already closed RFC-053. **The evidence that it works is a planted violation, run through
+`ablate.sh`**: `CHANGELOG.md`'s *"Re-read against what RFC-054 changed"* changed to *RFC-055* (which is in `accepted/`) — **`an_rfc_a_release_names_lives_in_done`
+fails**, and the file is restored. `the_released_rfc_check_catches_a_planted_violation_and_nothing_else` states the same in miniature: a
+synthetic changelog, the violation planted and caught, an unreleased section and a release candidate naming the same RFC not flagged, and the
+violation cleared by moving the RFC out of the in-flight folders. **A cost, stated:** a released section may not name an in-flight RFC by number
+at all (say "the next RFC"), even as a promise; this project's own changelogs did not.
+
+### `core.excludesFile` — for your decision (review 431 R4)
+
+Disclosed everywhere a user reads, in the user's words: the book's *Ignored files* paragraph and the configuration page say a global ignore
+file named by `core.excludesFile` is **not** applied and that the default `$XDG_CONFIG_HOME/git/ignore` is; the changelog's *What this release
+does not do* says Tekstide and `git status` **can disagree in both directions**; `delivery-plan.md` says `REQ-FILE-005` is not complete without it.
+The configuration page's invariant test requires the page to name it. **Nothing honours it.** My recommendation for the decision you said you
+would take: honour it **only from the user's own configuration file**, read with the same path discipline as `config.toml` (never the
+repository's), and pass it as `-c core.excludesFile=<path>` on the `check-ignore` argv — which keeps `GIT_CONFIG_GLOBAL=/dev/null` and adds a
+*path* to a file git will only read as patterns, not a program. It needs its own review because it is the first time this module would put a
+user-supplied path on git's command line. Not done here.
+
+### Predecessors corrected by name (the checklist's last box)
+
+`0.24.0` said `.git`/`node_modules`/`target` collapse because they are on a fixed list and that `.gitignore` handling, an `ignored` badge and a
+hidden-file toggle were "the next slice", and that a row says what it is before its name. The `Unreleased` section's *Corrected* names both, says
+what is true now, and tells a reader who relied on `target/` always being collapsed to look at a repository that does not ignore it.
+
+### Ablations (committed tree, `ablate.sh`) — seven
+
+Ignored entries always drawn (4 tests); hidden entries not counted (4); the setting also hiding dotfiles (1); reload not applying it (1);
+boot not applying it (1); the age line not drawn (1); the planted released-RFC violation (1).
+**One of those runs also failed `runtime::git::tests::every_failure_to_answer_is_unknown_and_never_none_ignored` — an intermittent of my own
+PR-055-A test, not caused by the ablation, not reproduced (8/8 alone, 40/40 at load > 33).** Registered in `test-process-leak.md` with a dated section and
+a suspected mechanism (`ETXTBSY` on a freshly written stand-in script); the test now executes the stand-in once, with retries, before using it.
+The ablation script's output filter hid the assertion message; if it recurs, capture it first.
+
+### Gate
+
+See the request.
