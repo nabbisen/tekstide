@@ -317,3 +317,38 @@ depth and the newline (a newline in a name must not become a second line).
 to files, into a fresh `TMPDIR` each: 615 + 9 + 901, green all three, and `0` entries left in the temp
 directory after all three.** Against `0.23.0`'s 593 + 9 + 877: +22 in `tekstide`, +24 in
 `tekstide-core`. No intermittent this time. The gate ran **before** the push (review 422's lesson).
+
+## PR-052-C — how it reads
+
+Captures: `evidence/01-…` (the tree, before C's changes to the rows), `evidence/03-…` (C: folders first, icons, `[open]`, monospaced), release binary, `mktemp -d` project under `/dev/shm`.
+
+### What changed
+
+| | Change |
+| --- | --- |
+| Order | **Folders first**, then files, each by name compared without case, exact name as the tie-break (scanner, `explorer.rs`). |
+| Icons | `▣` folder, `▢` open folder, `▫` file replace `[DIR]`/`[FILE]`. `[OTHER]` keeps its word: a link or special entry has no other channel that says what it is. |
+| Selection | `[open]` marks the file open in the editor. The keyboard highlight is `>`. Independent: a row can have either, both, or neither. |
+| Font | The tree and its detail area are **monospaced** (owner's request), and the sidebar is 300 px wide, not 220, to hold about thirty columns of it. |
+
+### Two measurements that decided design
+
+**Icons are text symbols, not emoji.** With the same 28-row window: colour-emoji glyphs cost **18 ms** to lay out (debug), symbols **3 ms** — six times — because each emoji goes through font fallback, and they need a font many machines lack. `the_kind_icons_are_text_symbols_not_emoji` fails if one comes back.
+
+**Monospace costs ~9x in layout, and is still inside a frame.** Release build, headless renderer, 28 rows (`measurement/examples/font_probe.rs`): default font **0.32 ms**, `Font::MONOSPACE` **2.8 ms** — the generic family is looked up per text. 2.8 ms is 17 % of a 16.7 ms frame, so the owner's choice stands. The in-suite test runs unoptimised (26 ms) and is bounded at 80 ms there and 8 ms in release; what it asserts independent of build is that the window is a tiny fraction of building the tree whole (~9 s scaled from a 500-row sample; the test no longer builds all 10 000, which took 9 s).
+
+### D4, checked
+
+An icon never carries meaning alone: `every_status_a_row_can_carry_is_a_word_and_none_is_an_icon` asserts every state, symlink and Git word is present for every value, and the icon slot holds only kind — which the row's position (folders first, under its parent, `[+]`/`[-]`) and its name also carry. What is **not** done: per-extension file-type icons (`.rs`, `.md`, …). They need an icon font, which is an asset and a dependency (D3 already rejected `lucide-icons` at 561 KB), so this is two icons, not a set. Named so it is not mistaken for done.
+
+### Also reported by the owner during this slice, fixed as its own commits (not RFC-052)
+
+The Project Board, seen in the same captures: the last card's "Open" button was cut through because the cards did not scroll; the open project's card had no button and said nothing; and every line of every card was the same size. Now: the cards scroll and the list follows the keyboard highlight; the open project's card says "Open now"; a card is a bold heading, a path, then **badges** — a word in a pill, never a replacement for one — for state and for each count, wrapping in a narrow window, with a heavier border *and* words for a project that needs attention. Regrouping is pinned to say exactly what the old nine lines said (`a_cards_sections_say_exactly_what_its_lines_say`). **Not verified visually:** the scroll following the highlight with a real key press; my captures of it were interrupted, and only the request is unit-tested (`moving_the_board_highlight_asks_the_card_list_to_follow_it`).
+
+### Live-capture hazard, disclosed
+
+`wtype` types into whichever window has focus, and this desktop runs other projects' apps. During C one run of keystrokes reached another project's window (`orbok`), which then showed a folder-chooser dialog. I did not touch that window. After that every key was sent through a helper that re-focuses my window and refuses if it is not focused.
+
+### Gate
+
+fmt, clippy `-D warnings`, `mdbook build docs`, `git diff --cached --check`, three consecutive full-workspace runs to files, fresh `TMPDIR` each: results in the review request.

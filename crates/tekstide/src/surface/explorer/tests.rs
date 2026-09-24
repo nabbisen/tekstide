@@ -840,7 +840,7 @@ fn build_and_layout(
     let started = std::time::Instant::now();
     let mut element = make();
     let mut tree = Tree::new(element.as_widget());
-    let limits = Limits::new(iced::Size::ZERO, iced::Size::new(188.0, 700.0));
+    let limits = Limits::new(iced::Size::ZERO, iced::Size::new(268.0, 700.0));
     let _ = element.as_widget_mut().layout(&mut tree, renderer, &limits);
     started.elapsed()
 }
@@ -902,22 +902,28 @@ fn drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame() {
     }
 
     // What building every row would cost: the alternative this rules out.
+    // Measured on a sample of 500 rows and scaled to the whole tree, because
+    // building all of them takes ~9 s unoptimised and the suite should not.
+    const SAMPLE: usize = 500;
     let lines = tree_lines(
         catalog,
         &tree,
         &status,
         0,
         0,
-        rows,
-        super::RowContext::git(None),
+        SAMPLE,
+        super::RowContext::default(),
     );
-    let whole = build_and_layout(&renderer, || {
+    let lines = &lines[..SAMPLE];
+    let sample = build_and_layout(&renderer, || {
         iced::widget::column(
             lines
-                .into_iter()
+                .iter()
+                .cloned()
                 .map(|line| {
                     iced::widget::text(line)
                         .size(theme.font_size_body())
+                        .font(super::TREE_FONT)
                         .wrapping(iced::widget::text::Wrapping::None)
                         .into()
                 })
@@ -926,14 +932,26 @@ fn drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame() {
         .spacing(2)
         .into()
     });
+    let whole = sample * (rows / SAMPLE) as u32;
 
     eprintln!(
         "PR-052-B measurement: {rows} rows; window of {capacity}: build + layout {windowed:?}; \
-         building all {rows}: {whole:?}"
+         building all {rows} (estimated from {SAMPLE}): {whole:?}"
     );
     let load = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
+    // Half a frame in a release build. This test runs unoptimised, where the
+    // monospaced font's family lookup makes the same window ~9x slower than
+    // release (26 ms here; 2.8 ms release, measured by
+    // `measurement/examples/font_probe.rs`), so the debug bound is ten times
+    // looser. The property that does not depend on the build -- the window
+    // costs a tiny fraction of building the tree whole -- is asserted below.
+    let bound = if cfg!(debug_assertions) {
+        std::time::Duration::from_millis(80)
+    } else {
+        std::time::Duration::from_millis(8)
+    };
     assert!(
-        windowed < std::time::Duration::from_millis(8),
+        windowed < bound,
         "the windowed view of a {rows}-row tree took {windowed:?} (best of 5). A number just \
          over the bound while the machine's load average ({load:?}) is well above its core count \
          points at load, not a regression: re-run when it is idle."
@@ -1122,4 +1140,17 @@ fn an_open_folder_and_a_closed_one_have_different_icons() {
     let closed = node_line(&catalog, &node, false, None);
     let open = node_line(&catalog, &node, true, None);
     assert_ne!(closed, open);
+}
+
+/// The tree is monospaced so depth, `[+]`/`[-]` and the icons line up from row
+/// to row (owner's request after PR-052-C's capture). Pinned so a refactor of
+/// the view cannot quietly go back to the proportional default.
+#[test]
+fn the_tree_is_drawn_in_a_monospaced_font() {
+    assert_eq!(super::TREE_FONT, iced::Font::MONOSPACE);
+    let source = include_str!("../explorer.rs");
+    assert!(
+        source.matches(".font(TREE_FONT)").count() >= 2,
+        "both the rows and the detail area must use TREE_FONT"
+    );
 }

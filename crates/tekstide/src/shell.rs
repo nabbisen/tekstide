@@ -8445,6 +8445,10 @@ pub(crate) fn main_area_label(state: &State, mode: Option<ProjectMode>) -> Strin
 /// explorer to show without an active project, and `Content` is the only
 /// mode this slice's scope covers (RFC-019 does not touch
 /// `TerminalImmersion`).
+/// The sidebar's width. Was 220; the explorer is monospaced (PR-052-C), which
+/// is wider per character, so it gets room for about thirty columns.
+const SIDEBAR_WIDTH: f32 = 300.0;
+
 fn sidebar_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message> {
     let focused = state.focus == FocusZone::Sidebar;
     let content: Element<'_, Message> = match mode {
@@ -8478,7 +8482,7 @@ fn sidebar_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message
     // the window holds as many rows as the layout engine says fit.
     crate::surface::frame::MeasureSize::new(
         container(content)
-            .width(Length::Fixed(220.0))
+            .width(Length::Fixed(SIDEBAR_WIDTH))
             .height(Length::Fill)
             .padding(16)
             .style(zone_style(state.theme, focused)),

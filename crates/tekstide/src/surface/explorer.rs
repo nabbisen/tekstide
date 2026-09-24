@@ -183,6 +183,13 @@ impl<'a> RowContext<'a> {
     }
 }
 
+/// **The tree is drawn in a monospaced font.** Depth is spaces and the `[+]`/`[-]`
+/// markers and icons are padded to line names up; in a proportional font those
+/// columns drift from row to row (the PR-052-C capture showed it). A fixed
+/// advance also means a row's width is a column count, which is what a narrow
+/// sidebar needs to be reasoned about.
+pub(crate) const TREE_FONT: iced::Font = iced::Font::MONOSPACE;
+
 /// Two spaces per level. Depth is also carried by where the row sits under
 /// its parent, so this is a reinforcement, not the only channel.
 const INDENT_PER_LEVEL: &str = "  ";
@@ -445,6 +452,7 @@ pub fn view<'a, Message: 'a>(
         .map(|line| {
             text(line)
                 .size(theme.font_size_body())
+                .font(TREE_FONT)
                 .wrapping(Wrapping::None)
                 .into()
         })
@@ -455,12 +463,17 @@ pub fn view<'a, Message: 'a>(
         .clip(true);
     let detail = container(
         text(detail_text(catalog, tree, cursor.highlight, context).unwrap_or_default())
-            .size(theme.font_size_body()),
+            .size(theme.font_size_body())
+            .font(TREE_FONT),
     )
     .width(Length::Fill)
     .height(Length::Fixed(detail_height(theme.font_size_body())))
+    // Right slack: a symbol drawn from a fallback font can be wider than the
+    // layout measured it (PR-052-C's capture cut `new.md` to `new.mc`), so the
+    // wrap must not use the container's last few pixels.
     .padding(iced::Padding {
         top: LINE_SPACING * 2.0,
+        right: 12.0,
         ..iced::Padding::ZERO
     })
     .clip(true);

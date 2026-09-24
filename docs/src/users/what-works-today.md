@@ -29,7 +29,9 @@ than 256 entries shows the first 256 and a row saying how many more there are; o
 the sidebar are drawn, and a line says which rows those are (*Rows 18–60 of 272*). Folders on the
 built-in list (`.git`, `node_modules`, `target`) are marked *(collapsed)* and can still be opened. A
 folder that cannot be read says so, and a link that points outside the project is marked *(blocked)*
-and cannot be opened. **The tree does not watch the disk**: a file created after you opened a folder
+and cannot be opened. Folders are listed first. A folder is `▣` (open: `▢`) and a file `▫`; these are text symbols, so a machine
+without those glyphs shows a blank box, and everything the row says is still in words. The file open in the
+editor is marked `[open]`; the `>` is where the keyboard is. **The tree does not watch the disk**: a file created after you opened a folder
 appears when you close and reopen it.
 
 **The editor has no undo.** A mid-buffer edit is unrecoverable within the session past what

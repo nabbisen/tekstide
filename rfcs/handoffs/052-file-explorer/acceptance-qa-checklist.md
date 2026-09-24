@@ -98,15 +98,16 @@ implementer's to paper over.
 
 ## PR-052-C — how it reads
 
-- [ ] **Folders first** (ruled at review 423: ordering is "how it reads", so it lands here).
-- [ ] **Rows stay keyboard-only.** Clicking is a new interaction affordance, not a legibility fix, and
-      is out of RFC-052 entirely — `future-work.md`, not this slice (review 423).
-
-- [ ] A file-type icon replaces `[DIR]`/`[FILE]`; **every status is still a word** and the
-      colour-alone scan still passes.
-- [ ] Selection and keyboard highlight are distinguishable without colour.
-- [ ] Live capture against `mktemp -d` in the release binary: icons, a Git badge, a nested change
-      visible without navigation, the escaping row safe. Throwaway state only.
+- [x] A file-type icon replaces `[DIR]`/`[FILE]`; **every status is still a word** and the
+      colour-alone scan still passes. *(Text-symbol icons, measured: colour emoji cost 6x to lay out. Only
+      two kinds of icon — a folder (closed/open) and a file — not per-extension icons, which need an icon
+      font; that is a dependency and asset decision, named in `qa-evidence.md`.)*
+- [x] Selection and keyboard highlight are distinguishable without colour. *(`>` is the keyboard; the word
+      `[open]` is the open file; independent, pinned.)*
+- [x] Live capture against `mktemp -d` in the release binary: icons, a Git badge, a nested change
+      visible without navigation, the escaping row safe. Throwaway state only. *(`evidence/01-…`,
+      `03-…`; the escaping row is in `01-`.)*
+- [x] Folders first (ruled at review 423 to belong here).
 
 ## Whole-RFC
 

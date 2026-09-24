@@ -16,6 +16,24 @@
   [untracked]`: the sidebar is narrow and clips the end of a row, and the end used to be where the Git and
   link status was. The line under the tree shows the highlighted row whole.
 - **Every name is still escaped, at every depth.**
+- **Folders are listed first**, then files, each by name without regard to case.
+- **A folder and a file have icons** (`▣ ▢` for a folder, closed and open, `▫` for a file) in place of the
+  `[DIR]`/`[FILE]` words. They are text symbols, not emoji: emoji cost six times as much to lay out and need
+  a font many machines lack. **Every status is still a word**; the icon carries only what the row's position
+  and name already say. A link or special entry keeps `[OTHER]`.
+- **The explorer is drawn in a monospaced font, and the sidebar is wider** (300 px, from 220), so depth, the
+  `[+]`/`[-]` markers and the icons line up from row to row and a row's width is a column count.
+- **The file open in the editor says `[open]`**, so the keyboard highlight (`>`) and the open file are two
+  separate, readable things without relying on colour.
+
+### Changed — the Project Board
+
+- **The cards scroll, and follow the keyboard.** With more projects than the window is tall the last card was
+  cut through — its "Open" button included — and the board said "15 projects" while showing three.
+- **The open project's card says "Open now"** instead of being the one card with no button.
+- **A card reads who, then state, then how much.** The name is a heading; trust, branch and attention, and
+  each count, are **badges** — a word in a pill, never a replacement for one — that wrap in a narrow window.
+  A project that needs attention gets a heavier border *and* says so in words.
 
 ## 0.23.0 - What The Window Says Is True
 
