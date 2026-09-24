@@ -62,11 +62,27 @@ use tekstide_core::project_board::{
 };
 use tekstide_core::text_safety;
 
-use iced::widget::{column, container, text};
+use iced::widget::{column, container, scrollable, text};
 use iced::{Element, Length};
 
 use crate::i18n::{Catalog, CatalogArgs};
 use crate::theme::Theme;
+
+/// The id of the card list's scroll area, for `shell` to snap it to the
+/// keyboard highlight.
+pub(crate) const BOARD_SCROLL_ID: &str = "project-board-cards";
+
+fn board_scroll_id() -> iced::widget::Id {
+    iced::widget::Id::new(BOARD_SCROLL_ID)
+}
+
+/// Where the scroll area should sit so that card `index` of `count` is in
+/// view: the cards are close to equal height, so the fraction of the way down
+/// the list is the fraction of the way down the scroll. `None` for a single
+/// card (nothing to scroll).
+pub(crate) fn scroll_fraction(index: usize, count: usize) -> Option<f32> {
+    (count > 1).then(|| index.min(count - 1) as f32 / (count - 1) as f32)
+}
 
 // RFC-038 PR-038-D: nine parameters -- the path-field trio
 // (PR-038-A/B/G) plus the row-highlight/reopen pair this slice adds.
@@ -113,7 +129,21 @@ pub fn view<'a, Message: 'a + Clone>(
         })
         .collect();
 
-    let mut sections: Vec<Element<'a, Message>> = vec![column(rows).spacing(12).into()];
+    // RFC-052 PR-052-C's live capture found this: with more cards than the
+    // window is tall, the column ran off the bottom -- the last card's "Open"
+    // button was cut through, and the board said "15 projects" while showing
+    // three. The cards scroll; `shell` snaps the scroll to the keyboard
+    // highlight (`BOARD_SCROLL_ID`). The path field stays pinned below.
+    let mut sections: Vec<Element<'a, Message>> = vec![
+        scrollable(container(column(rows).spacing(12)).padding(iced::Padding {
+            right: 12.0,
+            ..iced::Padding::ZERO
+        }))
+        .id(board_scroll_id())
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into(),
+    ];
 
     // RFC-038 PR-038-B: `Ctrl+Alt+O`'s own render arm -- the
     // second-project case, since the empty state's own field
@@ -303,6 +333,61 @@ pub(crate) fn path_field_display_text(path_field: &str) -> String {
     )
 }
 
+/// A card's text regrouped into the reading order a person scans in: **who**
+/// (name, then where it lives), **what state** (trust, branch, attention), and
+/// **how much** (the counts) -- instead of nine lines of the same size and
+/// weight. Built from the very same catalog strings [`row_lines`] returns, so
+/// regrouping cannot change what a card says (pinned by
+/// `a_cards_sections_say_exactly_what_its_lines_say`).
+pub(crate) struct RowSections {
+    pub(crate) name: String,
+    pub(crate) path: String,
+    /// Trust, branch, attention: the state of the project.
+    pub(crate) state: String,
+    /// Terminals, agent runs, approvals, reviews, unsaved files.
+    pub(crate) counts: String,
+    /// "9 blocked automations", when there are any.
+    pub(crate) blocked: Option<String>,
+    /// "blocked: automatic LSP startup, ...", when there are any.
+    pub(crate) blocked_names: Option<String>,
+}
+
+/// The separator between facts on one line. Punctuation, not a status.
+const FACT_SEPARATOR: &str = "  ·  ";
+
+pub(crate) fn row_sections(row: &ProjectBoardRow, catalog: &Catalog) -> RowSections {
+    let mut lines = row_lines(row, catalog).into_iter();
+    let name = lines.next().unwrap_or_default();
+    let path = lines.next().unwrap_or_default();
+    let trust = lines.next().unwrap_or_default();
+    let branch = lines.next().unwrap_or_default();
+    let counts: Vec<String> = lines.by_ref().take(5).collect();
+    let attention = lines.next().unwrap_or_default();
+    let rest: Vec<String> = lines.collect();
+    // `row_lines` appends the blocked count, then (if any) the names.
+    let (blocked, blocked_names) = match rest.len() {
+        0 => (None, None),
+        1 if row.blocked_automation_labels.is_empty() => (rest.first().cloned(), None),
+        1 => (None, rest.first().cloned()),
+        _ => (rest.first().cloned(), rest.get(1).cloned()),
+    };
+    RowSections {
+        name,
+        path,
+        state: [trust, branch, attention].join(FACT_SEPARATOR),
+        counts: counts.join(FACT_SEPARATOR),
+        blocked,
+        blocked_names,
+    }
+}
+
+fn bold() -> iced::Font {
+    iced::Font {
+        weight: iced::font::Weight::Bold,
+        ..iced::Font::DEFAULT
+    }
+}
+
 fn row_view<'a, Message: 'a + Clone>(
     row: &ProjectBoardRow,
     catalog: &'a Catalog,
@@ -310,37 +395,69 @@ fn row_view<'a, Message: 'a + Clone>(
     highlighted: bool,
     open_message: Option<Message>,
 ) -> Element<'a, Message> {
-    let mut column_items: Vec<Element<'a, Message>> =
-        highlighted_row_lines(row, catalog, highlighted)
-            .into_iter()
-            .map(|line| text(line).size(theme.font_size_status()).into())
-            .collect();
+    let sections = row_sections(row, catalog);
+    let marker = if highlighted { "> " } else { "  " };
+
+    // The name is the heading: larger and bold. Everything under it is
+    // smaller, so a card's first line is what a person's eye lands on.
+    let mut column_items: Vec<Element<'a, Message>> = vec![
+        text(format!("{marker}{}", sections.name))
+            .size(theme.font_size_heading())
+            .font(bold())
+            .into(),
+        text(sections.path).size(theme.font_size_status()).into(),
+        text(sections.state).size(theme.font_size_body()).into(),
+        text(sections.counts).size(theme.font_size_status()).into(),
+    ];
+    if let Some(blocked) = sections.blocked {
+        column_items.push(text(blocked).size(theme.font_size_status()).into());
+    }
+    if let Some(names) = sections.blocked_names {
+        column_items.push(text(names).size(theme.font_size_status()).into());
+    }
 
     // RFC-038 PR-038-D: a real, clickable "Open" button on every
     // `Recent*`-kind row -- the same `is_live`-gated shape
     // `shell::approval_history_entry_view` already uses, present
     // regardless of which row is highlighted (the highlight is a
     // keyboard cursor, not a precondition for the mouse).
-    if let Some(message) = open_message {
-        column_items.push(
+    //
+    // **The open project's card says so instead of being silent.** It has no
+    // button because it is already open, but a card with no button beside
+    // cards that have one reads as broken; it now says "Open now".
+    match open_message {
+        Some(message) => column_items.push(
             iced::widget::button(
                 text(catalog.get("project-board-recent-open-button")).size(theme.font_size_body()),
             )
             .on_press(message)
             .into(),
-        );
+        ),
+        None => column_items.push(
+            text(catalog.get("project-board-active-marker"))
+                .size(theme.font_size_body())
+                .font(bold())
+                .into(),
+        ),
     }
 
-    container(column(column_items).spacing(2))
+    // The keyboard highlight is `> ` on the name (a word-shaped channel) and,
+    // as a second channel, a thicker border in the focus colour.
+    let border = if highlighted {
+        (theme.border_focused(), 2.0)
+    } else {
+        (theme.border_default(), 1.0)
+    };
+    container(column(column_items).spacing(6))
         .width(Length::Fill)
-        .padding(8)
+        .padding(12)
         .style(
             move |_base_theme: &iced::Theme| iced::widget::container::Style {
                 background: Some(iced::Background::Color(theme.surface_elevated())),
                 text_color: Some(theme.foreground()),
                 border: iced::Border {
-                    color: theme.border_default(),
-                    width: 1.0,
+                    color: border.0,
+                    width: border.1,
                     radius: 4.0.into(),
                 },
                 ..iced::widget::container::Style::default()
@@ -424,6 +541,7 @@ pub(crate) fn row_lines(row: &ProjectBoardRow, catalog: &Catalog) -> Vec<String>
 /// Factored out
 /// from [`row_view`] for the same testability reason `row_lines` itself
 /// already is: the rendered string, not the `Element` tree.
+#[cfg(test)]
 pub(crate) fn highlighted_row_lines(
     row: &ProjectBoardRow,
     catalog: &Catalog,

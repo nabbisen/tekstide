@@ -154,6 +154,10 @@ project-board-browse-button = Browse...
 # project's own row.
 project-board-recent-open-button = Open
 
+# The open project's card has no button -- it is already open -- so it says so
+# rather than being the one card that looks broken.
+project-board-active-marker = Open now
+
 # RFC-039 D1: the tab strip's own permanent leftmost entry, always
 # present -- the visible route back to the Project Board (workflow 5),
 # alongside the pre-existing `Ctrl+Alt+P` accelerator.

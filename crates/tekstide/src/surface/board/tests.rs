@@ -5,7 +5,7 @@ use tekstide_core::project_board::{
     AttentionState, BoardRowKind, BranchDisplay, CountDisplay, ProjectBoardRow,
 };
 
-use super::{highlighted_row_lines, row_lines};
+use super::{highlighted_row_lines, row_lines, row_sections, scroll_fraction};
 use crate::i18n::{Catalog, LocalePreference};
 
 fn real_locales_dir() -> PathBuf {
@@ -547,6 +547,10 @@ fn every_catalog_key_this_module_renders_is_enumerated_and_none_names_a_dead_act
             "project-board-browse-button",
             "project-board-path-field-label",
             "project-board-recent-open-button",
+            // PR-052-C: the open project's card says "Open now" in place of
+            // the button it does not need (a card with no button beside cards
+            // with one read as broken). A word, not a dead action.
+            "project-board-active-marker",
         ],
         "board.rs's own catalog.get( keys, in source order -- a new one added here must be \
          named explicitly in this test's own doc comment and reasoned about, not merely \
@@ -642,4 +646,96 @@ fn blocked_automations_are_named_not_only_counted() {
         !unblocked.contains("blocked"),
         "nothing blocked: no line at all, {unblocked:?}"
     );
+}
+
+// --- Project Board readability (reported by the owner after PR-052-C's capture) ---
+
+fn blocked_row() -> ProjectBoardRow {
+    ProjectBoardRow {
+        terminal_count: CountDisplay::KnownCount(2),
+        agent_run_count: CountDisplay::KnownCount(1),
+        approval_count: CountDisplay::KnownCount(0),
+        review_count: CountDisplay::KnownCount(0),
+        dirty_file_count: CountDisplay::KnownCount(3),
+        branch_status: BranchDisplay::Known("main".to_string()),
+        blocked_automation_count: 2,
+        blocked_automation_labels: vec![
+            "automatic LSP startup".to_string(),
+            "plugin loading".to_string(),
+        ],
+        ..baseline_row()
+    }
+}
+
+/// **Regrouping a card cannot change what it says.** The card is drawn from
+/// [`row_sections`] (who / state / counts) instead of nine equal lines, but
+/// every fact in [`row_lines`] must still be there, once, in order.
+#[test]
+fn a_cards_sections_say_exactly_what_its_lines_say() {
+    let catalog = real_catalog();
+    for row in [baseline_row(), blocked_row()] {
+        let lines = row_lines(&row, &catalog);
+        let sections = row_sections(&row, &catalog);
+
+        let mut regrouped = vec![sections.name, sections.path];
+        regrouped.extend(sections.state.split("  ·  ").map(str::to_owned));
+        regrouped.extend(sections.counts.split("  ·  ").map(str::to_owned));
+        regrouped.extend(sections.blocked);
+        regrouped.extend(sections.blocked_names);
+
+        // `state` is trust, branch, attention; the counts sit between branch
+        // and attention in `row_lines`. Compare as multisets in card order.
+        let mut left = lines.clone();
+        let mut right = regrouped;
+        left.sort();
+        right.sort();
+        assert_eq!(left, right, "regrouping changed what the card says");
+    }
+}
+
+/// A card reads top to bottom: name, path, then state, then counts.
+#[test]
+fn a_card_reads_who_then_state_then_how_much() {
+    let catalog = real_catalog();
+    let sections = row_sections(&blocked_row(), &catalog);
+    assert_eq!(
+        sections.name,
+        super::text_safety::quote_untrusted("demo-project").as_str()
+    );
+    let state = plain(&sections.state);
+    assert!(
+        state.starts_with("Trusted") && state.contains("branch: main") && state.ends_with("Calm"),
+        "{state:?}"
+    );
+    let counts = plain(&sections.counts);
+    assert!(
+        counts.contains("2 terminals") && counts.contains("3 unsaved files"),
+        "{counts:?}"
+    );
+    // Nine lines became four groups plus the blocked-automation lines.
+    assert!(sections.blocked.is_some() && sections.blocked_names.is_some());
+}
+
+/// The open project's card carries no button, and the catalog has a word for
+/// that -- so it is not the one card that looks broken.
+#[test]
+fn the_open_projects_card_says_open_now_instead_of_being_silent() {
+    let catalog = real_catalog();
+    assert_eq!(catalog.get("project-board-active-marker"), "Open now");
+    assert_ne!(
+        catalog.get("project-board-active-marker"),
+        catalog.get("project-board-recent-open-button"),
+        "the marker is not the button's label"
+    );
+}
+
+/// The card list scrolls to the highlighted card: the fraction of the way
+/// down the list, and nothing to scroll for a single card.
+#[test]
+fn the_scroll_follows_the_highlighted_card_as_a_fraction_of_the_list() {
+    assert_eq!(scroll_fraction(0, 15), Some(0.0));
+    assert_eq!(scroll_fraction(14, 15), Some(1.0));
+    assert!((scroll_fraction(7, 15).unwrap() - 0.5).abs() < 1e-6);
+    assert_eq!(scroll_fraction(3, 1), None);
+    assert_eq!(scroll_fraction(99, 15), Some(1.0), "clamped");
 }

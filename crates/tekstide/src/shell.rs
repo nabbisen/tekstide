@@ -986,6 +986,10 @@ pub struct State {
     /// `approval_history_highlight` already carry relative to the list
     /// changing between key presses.
     project_board_row_highlight: usize,
+    /// Where to snap the Project Board's card list after a highlight move
+    /// (a fraction of the way down; see `surface::board::scroll_fraction`).
+    /// Taken by `update`, which turns it into a scroll `Task`.
+    project_board_scroll_request: Option<f32>,
     /// RFC-039 PR-039-B: the tab strip's own keyboard cursor -- the
     /// fourth of this shape (`explorer_highlight`, `approval_history_
     /// highlight`, `project_board_row_highlight` are the other three).
@@ -1289,6 +1293,7 @@ impl State {
             path_field_notice: None,
             path_field_requested: false,
             project_board_row_highlight: 0,
+            project_board_scroll_request: None,
             tab_strip_highlight: 0,
             audit_health,
             configuration,
@@ -2602,7 +2607,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             open_transcript_purge_dialog(state);
         }
     }
-    Task::none()
+    // The Project Board's cards scroll; a keyboard move of the highlight asks
+    // for the list to follow it.
+    match state.project_board_scroll_request.take() {
+        Some(y) => iced::widget::operation::snap_to(
+            iced::widget::Id::new(crate::surface::board::BOARD_SCROLL_ID),
+            iced::widget::scrollable::RelativeOffset {
+                x: None,
+                y: Some(y),
+            },
+        ),
+        None => Task::none(),
+    }
 }
 
 /// The width/height of the region `terminal_workspace_view` gives the
@@ -4439,6 +4455,8 @@ fn handle_project_board_row_key(state: &mut State, key: &input::KeyPress) {
         }
         _ => {}
     }
+    state.project_board_scroll_request =
+        crate::surface::board::scroll_fraction(state.project_board_row_highlight, row_count);
 }
 
 /// RFC-038 PR-038-D: reopens a remembered-but-not-currently-open

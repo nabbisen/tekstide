@@ -18184,3 +18184,38 @@ fn handle_explorer_key_has_exactly_one_production_call_site_and_it_is_the_sideba
         "the call must sit under the `FocusZone::Sidebar` arm"
     );
 }
+
+/// The Project Board's cards scroll, and a keyboard move of the highlight asks
+/// the list to follow it (the request `update` turns into a scroll `Task`).
+#[test]
+fn moving_the_board_highlight_asks_the_card_list_to_follow_it() {
+    let mut app_shell = ApplicationShell::new();
+    for label in ["board-scroll-a", "board-scroll-b", "board-scroll-c"] {
+        let dir = fresh_project_dir(label);
+        app_shell
+            .add_project_from_path(&dir)
+            .expect("a freshly created directory is a valid project root");
+    }
+    let mut state = state_with(app_shell);
+    assert_eq!(
+        state.app_shell.route(),
+        tekstide_core::route::AppRoute::ProjectBoard
+    );
+    let rows = state.app_shell.project_board().rows.len();
+    assert!(rows >= 3, "test precondition: {rows} rows");
+
+    super::handle_project_board_row_key(
+        &mut state,
+        &press(iced::keyboard::Key::Named(
+            iced::keyboard::key::Named::ArrowDown,
+        )),
+    );
+    assert_eq!(state.project_board_row_highlight, 1);
+    let request = state
+        .project_board_scroll_request
+        .expect("a move asks for a scroll");
+    assert!(
+        (request - 1.0 / (rows - 1) as f32).abs() < 1e-6,
+        "{request}"
+    );
+}
