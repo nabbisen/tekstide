@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.24.0 - The Sidebar Is A Tree
+
+Status: release candidate; not yet published or tagged.
+
+The file explorer stopped being one-level debug text and became a tree you can read: folders open in place,
+a row says what it is before its name, and nothing it cannot show is hidden without a row saying so. The same
+release reworks the Project Board's cards at the owner's request. Both were checked by running the release
+binary, and three defects in them were found that way and by no unit test.
 
 ### Changed — the explorer is a tree
 
@@ -43,7 +50,33 @@
 
 - **`0.23.0` said the Project Board is "hard to read" and that no scheduled RFC covers it.** That is no
   longer true: at the owner's request the board was reworked in `0.24.0` (see above), unplanned and outside
-  any RFC. `0.23.0`'s other limitations still hold.
+  any RFC. `0.23.0`'s other limitations still hold. **A reader who took that limitation as a standing fact
+  about the board should look at the board again** — its cards, badges and scrolling are different — and read
+  the *What this release does not do* section below for what it still does not do.
+
+### What this release does not do
+
+Re-read against what RFC-052 and the board rework changed, not copied from `0.23.0`.
+
+- **The explorer is keyboard-only.** `Enter` opens or closes a folder or opens a file, `Up`/`Down` move.
+  A click does not select or toggle a row, as in the explorer it replaced; that is a new interaction with its
+  own decision, recorded in `future-work.md`.
+- **The explorer does not watch the disk.** A folder is read when you open it; a file created afterwards
+  appears when you close and reopen the folder. `.gitignore` handling, an `ignored` badge and a hidden-file
+  toggle are the next slice; until then `.git`, `node_modules` and `target` are labelled *(collapsed)* and can
+  still be opened.
+- **Two icons, not a set.** A folder and a file, as text symbols. Per-file-type icons need an icon font,
+  which is an asset and a dependency decision. On a machine without a font for those symbols the icon is a
+  blank box; everything the row says is still in words.
+- **A long name is clipped in the sidebar** (the detail line under the tree shows the highlighted row whole),
+  and the tree is drawn in a monospaced font at a fixed width.
+- **The board's scroll follows the highlight approximately**: it moves to the highlighted card's fraction of
+  the way down the list, and the highlighted card is taller than the others (it shows the blocked
+  automations), so the cards below it shift as you move.
+- **The board shows the blocked-automation names on the highlighted card only**; every card shows the count.
+- **A deleted file still carries no badge in the explorer**, and the cadence rule for Git state is unchanged.
+  Both are in `0.22.0`'s entry and both still hold.
+- **Everything else `0.23.0` listed still holds.** That includes there being **no screen-reader support**.
 
 ## 0.23.0 - What The Window Says Is True
 
