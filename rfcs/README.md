@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 054 | [User Configuration Completion](./proposed/054-user-configuration-completion.md) | **Proposed 2026-09-24**, `0.25.0`, and **M12 closes with it**. Sixteen releases have added surfaces and none has added a setting. Measured: the configuration document has two sections and nothing about the UI; `Theme` is already one seam; **`KeybindingRule` already carries `Reserved \| Candidate \| Configurable`**, a seam built for this. **D2 pins that no project-local file is ever read** — a repository must not be able to rebind a key or name a font. A bad value falls back per setting with the board saying why (RFC-045's own behaviour), contrast is validated, and **a font is a name, never a path** — a font file in configuration is a parser eating user-named bytes at startup. |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
