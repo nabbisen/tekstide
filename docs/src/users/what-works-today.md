@@ -36,9 +36,10 @@ appears when you close and reopen it. Each row is an icon, the **name**, and the
 is still clipped at the right edge, without a marker, and the line under the tree shows the highlighted row whole.
 
 **Ignored files.** Inside a Git repository, Tekstide asks **Git** which entries are ignored — it never reads a `.gitignore`
-itself — about the entries the sidebar is about to draw, and marks them `[ignored]`. **By default they are not drawn**, and the
-directory says how many it left out (*2 ignored entries hidden*); `explorer.show_ignored = true` in your configuration
-file draws them. Only ignored entries are affected: `.env`, `.gitignore` and every other dotfile are ordinary rows either way.
+itself — about the entries the sidebar is about to draw, and marks them `[ignored]`. **By default ignored *files* are not drawn**, and the directory says how many it left out (*2 ignored files hidden*); an
+ignored *folder* keeps its row, collapsed and marked `[ignored]`, so it can still be opened. `explorer.show_ignored = true`
+in your configuration file draws the files too. Only ignored entries are affected: `.env`, `.gitignore` and every other
+dotfile are ordinary rows either way.
 A tracked file that matches an ignore pattern is tracked, not ignored. The first two lines of the sidebar say where the
 rule came from (*project's Git*, *parent Git repo*, *nested Git repo*, or *built-in* — with why Git was not used) and that
 **the marks are as old as the scan**: a `.gitignore` you edit is not reflected until the folder is read again. Outside a

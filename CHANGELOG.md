@@ -8,8 +8,9 @@
   draw, and marks them `[ignored]`. It does not read `.gitignore` itself: negation, precedence, nested ignore files and
   `.git/info/exclude` are Git's to decide. A repository whose `.gitignore` does not name `target/` now shows an ordinary,
   expandable `target/`; one that does shows it collapsed and ignored.
-- **`[explorer] show_ignored`** (default `false`). Off, ignored entries are **not drawn** and the directory says how many it
-  left out (*2 ignored entries hidden*); on, they are drawn with `[ignored]`. It governs ignored entries only — `.env`,
+- **`[explorer] show_ignored`** (default `false`). Off, ignored **files** are not drawn and the directory says how many it
+  left out (*2 ignored files hidden*); **an ignored folder keeps its row**, collapsed and marked `[ignored]`, so it can still be
+  opened; on, the files are drawn too, with `[ignored]`. It governs ignored entries only — `.env`,
   `.gitignore` and every other dotfile are ordinary rows either way. A value that is not `true` or `false` is not used and the
   Project Board says so. `Ctrl+Alt+C` applies it to open projects.
 - **The sidebar says where the rule came from and how old it is**: *project's Git*, *parent Git repo* (the project is inside a
@@ -23,8 +24,8 @@
   That made an ignored directory read `(collapsed) [ignored] t` — a name cut to a letter, indistinguishable from a file named
   `t`. A clipped *word* is visibly damaged; a clipped *name* invents a file. A long *name* is still clipped at the sidebar's
   right edge, without a marker.
-- **The explorer of a repository looks different by default**: ignored files and folders are no longer drawn, and a line says how
-  many. Set `show_ignored = true` to see them.
+- **The explorer of a repository looks different by default**: ignored *files* are no longer drawn, and a line says how many; an
+  ignored *folder* stays, collapsed and marked. Set `show_ignored = true` to see the files.
 - **`.git` stays collapsed** whichever rule decides. Git does not call it ignored, but it is not a folder to open by accident.
 - **Git's answer is asked in about 3 ms** on a 100,000-entry folder (the folder read itself, unchanged, is about 22 ms), on the
   background thread that already reads it.
@@ -55,8 +56,8 @@
   as a different file. The line under the tree shows the highlighted row whole. This was true of `0.24.0` and is unchanged.
 - **The status bar's Git state and the explorer's ignore marks can come from different repositories** when a project sits inside a
   repository; the sidebar's first line says when they do.
-- **A hidden folder's contents are not counted**, only the folder; and entries past the 256-per-folder cap are not asked about, so
-  they are neither hidden nor marked.
+- **Entries past the 256-per-folder cap are not asked about, so they are neither hidden nor marked** (the folder says how many
+  it left out, as it always has).
 - **Everything `0.25.0` listed still holds**, including there being **no screen-reader support**.
 
 ## 0.25.0 - The Window Takes Your Settings

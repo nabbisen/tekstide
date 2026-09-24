@@ -424,12 +424,12 @@ fn tree_of(nodes: Vec<ExplorerNode>, truncated: bool) -> ExplorerTree {
     tree
 }
 
-/// D7, both ways. **Off (the default)**: entries git called ignored are not drawn,
-/// and the directory says how many it left out -- nothing is hidden silently.
-/// **On**: they are drawn. Dotfiles and everything git did not call ignored are
-/// the same either way.
+/// D7, both ways (review 433 Q2). **Off (the default)**: ignored **files** are not
+/// drawn and the directory says how many it left out; an ignored **directory keeps
+/// its row** (the way in). **On**: the files are drawn too. Dotfiles and everything
+/// git did not call ignored are the same either way.
 #[test]
-fn ignored_entries_are_hidden_and_counted_unless_the_setting_shows_them() {
+fn ignored_files_are_hidden_and_counted_but_an_ignored_directory_keeps_its_row() {
     let nodes = || {
         vec![
             scanned_node(
@@ -458,6 +458,11 @@ fn ignored_entries_are_hidden_and_counted_unless_the_setting_shows_them() {
                 ExplorerIgnoreState::Ignored,
             ),
             scanned_node(
+                "trace.log",
+                ExplorerNodeKind::File,
+                ExplorerIgnoreState::Ignored,
+            ),
+            scanned_node(
                 "unasked",
                 ExplorerNodeKind::File,
                 ExplorerIgnoreState::Unknown,
@@ -469,26 +474,27 @@ fn ignored_entries_are_hidden_and_counted_unless_the_setting_shows_them() {
     assert_eq!(
         outline(&tree),
         [
+            "+target",
             "+src",
             ".env",
             ".gitignore",
             "unasked",
             "<ignored hidden 2>"
         ],
-        "hidden and counted; dotfiles and unknown entries stay"
+        "the ignored directory stays; the two ignored files are hidden and counted; dotfiles stay"
     );
 
     tree.set_show_ignored(true);
     let shown = outline(&tree);
     assert!(
-        shown.contains(&"+target".to_owned()) && shown.contains(&"debug.log".to_owned()),
+        shown.contains(&"debug.log".to_owned()) && shown.contains(&"trace.log".to_owned()),
         "{shown:?}"
     );
     assert!(
         !shown.iter().any(|row| row.contains("ignored hidden")),
         "{shown:?}"
     );
-    assert_eq!(shown.len(), 6);
+    assert_eq!(shown.len(), 7);
 }
 
 /// The omitted tail (the per-directory cap) has **unknown** ignore state: it is
@@ -531,11 +537,11 @@ fn a_directory_of_only_ignored_entries_says_so_and_is_not_empty() {
     assert_eq!(outline(&tree), ["<ignored hidden 1>"]);
 }
 
-/// A hidden directory is not drawn, so it cannot be expanded even if it was
-/// before: the setting governs what is drawn, and turning it on again puts the
-/// expansion back.
+/// An ignored directory is never hidden, so it stays expandable at either value of
+/// the setting -- and what is inside it is governed by the same rule one level
+/// down: its ignored files are hidden and counted there.
 #[test]
-fn a_hidden_directorys_expansion_comes_back_when_the_setting_is_turned_on() {
+fn an_ignored_directory_stays_expandable_with_the_setting_off() {
     let mut tree = tree_of(
         vec![scanned_node(
             "target",
@@ -544,14 +550,9 @@ fn a_hidden_directorys_expansion_comes_back_when_the_setting_is_turned_on() {
         )],
         false,
     );
-    tree.set_show_ignored(true);
+    assert!(!tree.show_ignored());
+    assert_eq!(outline(&tree), ["+target"]);
     assert_eq!(tree.toggle(Path::new("target")), ExplorerToggle::Expanded);
-    tree.set_show_ignored(false);
-    assert_eq!(outline(&tree), ["<ignored hidden 1>"]);
-    tree.set_show_ignored(true);
-    assert!(
-        outline(&tree)[0].starts_with("-target"),
-        "{:?}",
-        outline(&tree)
-    );
+    let expanded = outline(&tree);
+    assert!(expanded[0].starts_with("-target"), "{expanded:?}");
 }

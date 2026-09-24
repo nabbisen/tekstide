@@ -186,10 +186,12 @@ default stands.
 ## The file explorer
 
 `[explorer] show_ignored` is `false` by default. Inside a Git repository the explorer asks Git which entries are
-ignored and, with this off, **does not draw them and says how many it left out** (*2 ignored entries hidden*);
-`true` draws them with an `[ignored]` word. It governs **ignored entries only** — `.env`, `.gitignore` and every
-other dotfile are ordinary rows whichever way it is set. A value that is not `true` or `false` is not used, the
-default stands, and the Project Board says so. `Ctrl+Alt+C` applies a change to projects that are already open.
+ignored and, with this off, **does not draw ignored files and says how many it left out** (*2 ignored files hidden*).
+**An ignored folder keeps its row** — collapsed, marked `[ignored]`, and still openable — because hiding a place would
+take away the way in. `true` draws the ignored files as well, each with an `[ignored]` word. It governs **ignored
+entries only** — `.env`, `.gitignore` and every other dotfile are ordinary rows whichever way it is set. A value that
+is not `true` or `false` is not used, the default stands, and the Project Board says so. `Ctrl+Alt+C` applies a
+change to projects that are already open.
 
 **What "ignored" means here is Git's answer**, not Tekstide's reading of a `.gitignore`: it is asked about the
 entries of each folder as it is read, so the marks are exactly as old as that read. Git is run **without your

@@ -939,9 +939,19 @@ fn released_rfcs_still_in_flight(
     for (heading, id) in rfcs_named_by_released_sections(changelog) {
         for (in_flight_id, folder) in in_flight {
             if *in_flight_id == id {
+                // **Two remedies, because there are two causes** (review 433 Q3).
+                // The other cause -- someone adds an RFC to `proposed/` and an old
+                // released section that happened to name that number starts
+                // failing -- must not be "fixed" by moving an unshipped RFC to
+                // `done/`, which would make the record lie: the failure this
+                // invariant exists to prevent, caused by the invariant.
                 let message = format!(
-                    "RFC-{id} is named by the released section `{heading}` but lives in rfcs/{folder}/ -- \
-                     an RFC that shipped is closed and moves to rfcs/done/ as part of the release"
+                    "RFC-{id} is named by the released section `{heading}` but lives in rfcs/{folder}/. \
+                     Either (1) it shipped in that release -- then it is finished, so close it: \
+                     move it to rfcs/done/ as part of the release; or (2) the section only MENTIONS \
+                     it (a plan, a reservation, a number reused by a later RFC) -- then it did not \
+                     ship in that release, so reword the section and leave the RFC where it is. \
+                     Do not move an RFC that has not shipped to done/ to satisfy this check."
                 );
                 if !violations.contains(&message) {
                     violations.push(message);
@@ -1023,6 +1033,23 @@ RFC-052 and RFC-053.
             .iter()
             .any(|message| message.contains("RFC-055") && message.contains("rfcs/accepted/")),
         "{found:#?}"
+    );
+    // Review 433 Q3: the message names BOTH remedies, and forbids the wrong one.
+    let message = found
+        .iter()
+        .find(|message| message.contains("RFC-055"))
+        .expect("a message");
+    assert!(
+        message.contains("(1)") && message.contains("move it to rfcs/done/"),
+        "{message}"
+    );
+    assert!(
+        message.contains("(2)") && message.contains("reword the section"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Do not move an RFC that has not shipped"),
+        "{message}"
     );
 
     // ...and finishing the RFC (moving it out of the in-flight folders) clears it.

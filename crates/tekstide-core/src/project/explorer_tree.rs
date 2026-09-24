@@ -135,10 +135,12 @@ pub enum ExplorerTreeRowKind<'a> {
     /// The whole tree passed [`MAX_TREE_ROWS`].
     RowsNotShown { count: usize },
     /// **RFC-055 D7, and RFC-052 D8's "nothing is hidden silently."** With
-    /// `explorer.show_ignored` off the entries git says are ignored are not drawn,
-    /// and this row, at the end of their directory, says how many were left out.
-    /// Only entries git actually answered about are counted: the cap's omitted
-    /// tail has unknown ignore state and stays in [`Self::Omitted`].
+    /// `explorer.show_ignored` off the ignored **files** are not drawn, and this
+    /// row, at the end of their directory, says how many were left out. **It
+    /// counts files only**: an ignored *directory* keeps its own row (collapsed and
+    /// marked `[ignored]`), because hiding a place removes the way in (review 433
+    /// Q2). Only entries git actually answered about are counted: the cap's
+    /// omitted tail has unknown ignore state and stays in [`Self::Omitted`].
     IgnoredHidden { count: usize },
 }
 
@@ -318,11 +320,16 @@ impl ExplorerTree {
             }
             let mut ignored_hidden = 0usize;
             for node in &scan.nodes {
-                // D7: ignored entries only -- dotfiles and everything else git
-                // did not call ignored are untouched by this setting. A hidden
-                // directory's own contents are never reached (it is not drawn, so
-                // it is not expanded), and are not counted: only the entry is.
-                if !self.show_ignored && node.ignore == ExplorerIgnoreState::Ignored {
+                // D7 (review 433 Q2): ignored **files** are left out and counted;
+                // an ignored **directory keeps its row** -- collapsed and marked
+                // `[ignored]`, still expandable. Hiding a place takes away the
+                // way in (`0.24.0` collapsed `target/` and a user could still
+                // open it); hiding a file takes away noise the count discloses.
+                // Dotfiles and everything git did not call ignored are untouched.
+                if !self.show_ignored
+                    && node.ignore == ExplorerIgnoreState::Ignored
+                    && node.kind != ExplorerNodeKind::Directory
+                {
                     ignored_hidden += 1;
                     continue;
                 }

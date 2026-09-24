@@ -622,12 +622,13 @@ explorer-rows-not-shown = { $count ->
 } not shown. Collapse a folder to see them.
 
 # RFC-055 D7 / RFC-052 D8: **nothing is hidden silently.** With
-# `explorer.show_ignored` off the entries git says are ignored are not drawn, and
-# this row says how many were left out. Short on purpose (rows are unwrapped); the
+# `explorer.show_ignored` off the ignored *files* are not drawn, and this row
+# says how many were left out (an ignored folder keeps its row, collapsed and
+# marked -- review 433 Q2). Short on purpose (rows are unwrapped); the
 # key is named in the book.
 explorer-ignored-hidden = { $count ->
-    [one] One ignored entry hidden
-   *[other] { $count } ignored entries hidden
+    [one] One ignored file hidden
+   *[other] { $count } ignored files hidden
 }
 
 # RFC-055, review 431 ruling 4: the status bar's Git state reads only a
