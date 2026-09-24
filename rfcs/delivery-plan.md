@@ -126,6 +126,14 @@ five `unknown` badges) and **B2** (the blocked-automation list repeats on every 
 at review 424. `0.23.0`'s changelog claim that this was "later work that no scheduled RFC covers" is
 corrected in `0.24.0`.
 
+### Found by a measurement of the gate (2026-09-25, RFC-055 PR-055-A)
+
+**The Git gate's cost is 96 % build output.** Measured on this repository: 239,259 worktree entries,
+of which **229,384 are `target/`**. The gate's recursive `.gitattributes` walk descends all of it,
+which is ~115 ms of a ~115 ms gate, and its 1,000,000-entry fail-closed budget is being spent on a
+directory git itself ignores. The walk could skip what git ignores — using RFC-055's own query. That
+is RFC-030's ground, not RFC-055's; unscheduled, and recorded here so the number is not rediscovered.
+
 ### Found by a death certificate (2026-09-24, RFC-054 PR-054-A)
 
 **A project can hold several terminals and only the `Primary` one receives keystrokes**, with nothing

@@ -32,6 +32,23 @@ number in the evidence is not ticked.**
 - [x] A non-UTF-8 filename survives the round trip; nothing decodes lossily before a comparison.
 - [x] The gate is **not cached** (D9), and the evidence says where it is paid.
 
+### Required at review 431
+
+- [ ] **R1:** a scan **inside** a submodule is pinned — expanding the poisoned submodule of the
+      review-406 fixture and asking about *its* entries yields `Unknown(GateRefused)` and runs no
+      marker. The existing test asks from the superproject; this is the case the dropped gitlink
+      check used to cover.
+- [ ] **R2:** `vet_configuration`'s doc comment states one measurement's numbers. It currently says
+      the whole gate is ~115 ms and the walk is ~117 ms **of it**.
+- [ ] **R3:** the home exclusion has its own `IgnoreUnknown` variant. It is a decision to decline,
+      not a fact about the filesystem, and PR-055-B renders which rule it used.
+- [ ] **R4 (travels to B and C):** `core.excludesFile` is **not** honoured — `GIT_CONFIG_GLOBAL` is
+      `/dev/null` (R6, and right). `.gitignore`, `.git/info/exclude` and `$XDG_CONFIG_HOME/git/ignore`
+      are. `REQ-FILE-005` is not marked complete without naming this, and the user-facing disclosure
+      says it. Whether to honour it is ruled at PR-055-C.
+- [ ] **R5:** `MAX_IGNORE_QUERY_ENTRIES` and its comment agree — it is `1_024`, the comment calls it
+      the explorer's 256 restated.
+
 ## PR-055-B — the scan carries it, and the floor keeps its job
 
 - [ ] `FileGitStatus::Ignored` exists and **no match arm on it is a catch-all** — grepped, with the
