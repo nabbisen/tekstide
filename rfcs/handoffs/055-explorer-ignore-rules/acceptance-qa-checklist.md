@@ -15,20 +15,22 @@ number in the evidence is not ticked.**
 
 ## PR-055-A — the query, and the file that tries to silence it
 
-- [ ] A file named `:(glob)evil.log` sits in the fixture, and **every sibling of it still receives an
+- [x] A file named `:(glob)evil.log` sits in the fixture, and **every sibling of it still receives an
       ignore answer.** The test's own comment records that removing the `./` prefix makes it fail
       with exit 128.
-- [ ] **Ablation:** the `./` prefix is removed, the test above fails, and the evidence names the exit
+- [x] **Ablation:** the `./` prefix is removed, the test above fails, and the evidence names the exit
       code and the `fatal:` line. Restored with `rfcs/handoffs/ablate.sh`, which refuses a dirty tree
       — never by hand.
-- [ ] Exit `1` (nothing ignored) and *unknown* are **different values in the returned type**, and a
+- [x] Exit `1` (nothing ignored) and *unknown* are **different values in the returned type**, and a
       test would fail if they collapsed.
-- [ ] A forced failure reaches unknown. Not a repository, and a gate refusal, both reach unknown
+- [x] A forced failure reaches unknown. Not a repository, and a gate refusal, both reach unknown
       without running a subprocess to discover it.
-- [ ] A tracked file matching `*.log` comes back **not ignored** — no `--no-index` anywhere.
-- [ ] A project root two levels inside its repository gets the repository-root `.gitignore` applied.
-- [ ] A non-UTF-8 filename survives the round trip; nothing decodes lossily before a comparison.
-- [ ] The gate is **not cached** (D9), and the evidence says where it is paid.
+      *(Not a repository runs nothing at all. A gate refusal necessarily read the configuration — that is
+      the gate — and never reaches `check-ignore`; `qa-evidence.md` says which is which.)*
+- [x] A tracked file matching `*.log` comes back **not ignored** — no `--no-index` anywhere.
+- [x] A project root two levels inside its repository gets the repository-root `.gitignore` applied.
+- [x] A non-UTF-8 filename survives the round trip; nothing decodes lossily before a comparison.
+- [x] The gate is **not cached** (D9), and the evidence says where it is paid.
 
 ## PR-055-B — the scan carries it, and the floor keeps its job
 

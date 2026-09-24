@@ -1389,10 +1389,20 @@ impl Fixture {
     /// subcommand it is run with leaves a marker, so a test can assert that
     /// **nothing was run** when nothing should have been.
     fn fake_git(&self, name: &str, check_ignore_body: &str) -> String {
+        self.fake_git_with_config(name, "exit 0", check_ignore_body)
+    }
+
+    /// [`Fixture::fake_git`] whose `config --list --null` runs `config_body`.
+    fn fake_git_with_config(
+        &self,
+        name: &str,
+        config_body: &str,
+        check_ignore_body: &str,
+    ) -> String {
         let path = self.root.join(format!("{name}.sh"));
         let markers = self.markers.display();
         let script = format!(
-            "#!/bin/sh\ntouch '{markers}/{name}-invoked'\ncase \"$1\" in\n  --version) echo 'git version 2.43.0';;\n  config) exit 0;;\n  check-ignore) touch '{markers}/{name}-check-ignore'; cat > /dev/null; {check_ignore_body};;\n  *) exit 2;;\nesac\n"
+            "#!/bin/sh\ntouch '{markers}/{name}-invoked'\ncase \"$1\" in\n  --version) echo 'git version 2.43.0';;\n  config) {config_body};;\n  check-ignore) touch '{markers}/{name}-check-ignore'; cat > /dev/null; {check_ignore_body};;\n  *) exit 2;;\nesac\n"
         );
         fs::write(&path, script).unwrap();
         let mut permissions = fs::metadata(&path).unwrap().permissions();
@@ -1829,5 +1839,32 @@ fn check_ignore_has_one_call_site_and_never_uses_no_index() {
         code.matches("b\"./\"").count(),
         1,
         "the prefix is applied in exactly one place"
+    );
+}
+
+/// A gate refusal reaches unknown **without the query ever being run**: the
+/// configuration was read (that is the gate), a key outside the allowlist was
+/// found, and `check-ignore` -- the call that would run a repository's program --
+/// was never made.
+#[test]
+fn a_gate_refusal_never_reaches_check_ignore() {
+    let fixture = Fixture::new("ignore-gate-refusal-no-query");
+    fixture.write("a.log", "x");
+    let git = fixture.fake_git_with_config(
+        "refusal",
+        "printf 'core.fsmonitor\\nsomething\\0'; exit 0",
+        "printf './a.log\\0'; exit 0",
+    );
+    assert_eq!(
+        fixture.ask_with(&git, &fixture.repo, &names(&["a.log"])),
+        IgnoreAnswer::Unknown(IgnoreUnknown::GateRefused)
+    );
+    assert!(
+        fixture.marker_exists("refusal-invoked"),
+        "the gate did read the configuration"
+    );
+    assert!(
+        !fixture.marker_exists("refusal-check-ignore"),
+        "and the query was never made"
     );
 }
