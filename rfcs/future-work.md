@@ -728,6 +728,11 @@ Status: deferred after `0.1.0`.
 - Overwrite-confirmation UI for externally changed files.
 - Multi-document tabs or another explicit multi-document model.
 - Richer editor internals if `String`-backed buffers become limiting.
+- **Clickable explorer rows.** The explorer tree (RFC-052, `0.24.0`) is keyboard-only, as the one-level
+  explorer was: `Enter` opens or closes a folder, `Up`/`Down` move. A click that selects a row, opens a
+  file, or toggles a folder is a **new interaction affordance**, not a legibility fix, so RFC-052 did not
+  absorb it (review 423). It needs its own decision: what a click on the name versus the `[+]`/`[-]` marker
+  does, how it composes with the keyboard highlight, and how it interacts with a modal.
 
 ### A launch does not retain its transcript retention limits — RFC-011 amendment, reserved
 

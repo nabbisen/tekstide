@@ -27,6 +27,9 @@ for run in 1 2 3; do cargo test --workspace > "test-run-$run.log" 2>&1; done
 
 - **Three consecutive runs, with output redirected to a file.** Several tests launch real processes,
   PTYs and sockets and are sensitive to load. A run whose output is filtered cannot show a flake.
+- **Ablate with `rfcs/handoffs/ablate.sh`, on a clean tree.** It refuses to run unless `git status
+  --porcelain` is empty, so the `git checkout --` that restores the file can only discard the ablation.
+  Twice a hand-run restore discarded uncommitted work; the script makes "commit first" mechanical.
 - **Every intermittent failure you see gets a dated entry** in
   [rfcs/handoffs/test-process-leak.md](rfcs/handoffs/test-process-leak.md), even if it is already
   known. A flake mentioned and not recorded is lost.
