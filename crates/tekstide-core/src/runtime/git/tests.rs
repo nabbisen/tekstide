@@ -1387,7 +1387,7 @@ fn set(list: &[&str]) -> std::collections::BTreeSet<OsString> {
 /// a stand-in is not handed out until it has been executed once successfully.
 fn wait_until_executable(path: &Path) {
     for _ in 0..200 {
-        match Command::new(path).arg("--version").output() {
+        match Command::new(path).arg("--tekstide-warmup").output() {
             Err(error) if error.raw_os_error() == Some(26) => {
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
@@ -1422,7 +1422,7 @@ impl Fixture {
         let path = self.root.join(format!("{name}.sh"));
         let markers = self.markers.display();
         let script = format!(
-            "#!/bin/sh\ntouch '{markers}/{name}-invoked'\ncase \"$1\" in\n  --version) echo 'git version 2.43.0';;\n  config) {config_body};;\n  check-ignore) touch '{markers}/{name}-check-ignore'; cat > /dev/null; {check_ignore_body};;\n  *) exit 2;;\nesac\n"
+            "#!/bin/sh\n[ \"$1\" = --tekstide-warmup ] && exit 0\ntouch '{markers}/{name}-invoked'\ncase \"$1\" in\n  --version) echo 'git version 2.43.0';;\n  config) {config_body};;\n  check-ignore) touch '{markers}/{name}-check-ignore'; cat > /dev/null; {check_ignore_body};;\n  *) exit 2;;\nesac\n"
         );
         fs::write(&path, script).unwrap();
         let mut permissions = fs::metadata(&path).unwrap().permissions();
