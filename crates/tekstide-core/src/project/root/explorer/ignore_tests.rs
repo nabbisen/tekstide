@@ -665,3 +665,51 @@ fn the_shared_directory_list_says_its_two_readers_no_longer_mean_the_same_thing(
     assert!(flat.contains("floor"));
     assert!(flat.contains("GeneratedChangeDetectionPolicy"));
 }
+
+/// **The production entry asks git.** `ExplorerScanRequest::run` is what the
+/// worker thread calls; a test that only calls `ask_git` by hand would pass with
+/// `run` never asking. Run through the request, in a directory in no repository,
+/// the scan comes back having *asked* -- `Floor(NotARepository)`, not
+/// `Floor(NotAsked)`. Ablated by making `run` skip the query, which nothing else
+/// catches: every other test here supplies its own oracle.
+#[test]
+fn the_worker_entry_point_asks_git_and_says_what_it_learned() {
+    use crate::project::ExplorerTree;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let base = std::env::temp_dir().join(format!(
+        "tekstide-ignore-worker-{}-{nonce}",
+        std::process::id()
+    ));
+    let project = base.join("project");
+    fs::create_dir_all(project.join("target")).unwrap();
+    fs::write(project.join("a.txt"), "x").unwrap();
+    let root = ProjectRootValidator
+        .validate(&project, SymlinkPolicy::FailClosed)
+        .unwrap();
+    let session = ProjectSession::new(
+        ProjectId::for_test(1),
+        root.display_name,
+        root.selected_path,
+        root.canonical_path,
+    );
+    let handle = ProjectRootHandle::from_project_session(&session);
+
+    let mut tree = ExplorerTree::default();
+    tree.request_scan(Path::new(""));
+    let request = tree.scan_requests(&handle).pop().expect("a pending scan");
+    let completed = request.run();
+    let scan = completed.result.expect("scans");
+    assert_eq!(
+        scan.ignore_rule,
+        ExplorerIgnoreRule::Floor(ExplorerFloorReason::NotARepository),
+        "the worker's scan must have asked git (the fixture is in no repository)"
+    );
+    assert_ne!(
+        scan.ignore_rule,
+        ExplorerIgnoreRule::Floor(ExplorerFloorReason::NotAsked)
+    );
+    let _ = fs::remove_dir_all(&base);
+}
