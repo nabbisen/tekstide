@@ -76,11 +76,13 @@ shares its fixture" — "alone" has been falsified three times by suites sharing
 - [x] `REQ-CONFIG-006`, `REQ-CONFIG-007`, `NFR-UX-004`, `REQ-TERM-004` move to implemented **with
       evidence they are reachable**, not merely parsed — the distinction the 2026-09-23 audit caught
       the plan getting wrong.
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
       staging, `rfc_docs_invariants`, **three consecutive full-workspace runs with `--no-fail-fast`**
       to files, **0 fixture entries left** in a fresh `TMPDIR`.
-- [ ] Every new intermittent failure has a dated row in `test-process-leak.md`.
-- [ ] Commits are pushed once the gate is green.
+- [x] Every new intermittent failure has a dated row in `test-process-leak.md`. *(None this slice: three
+      consecutive runs green; the one failure seen, `bind_recovers_from_a_stale_socket_file` at load 11 during
+      an ablation, is the register's original row.)*
+- [x] Commits are pushed once the gate is green.
 
 ## Final Acceptance Decision
 
