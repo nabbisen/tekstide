@@ -16,16 +16,16 @@ shares its fixture" — "alone" has been falsified three times by suites sharing
 
 ## PR-054-A — keybindings and the repair
 
-- [ ] **No project-local configuration is read** (§1). Pinned by a test with a `config.toml` beside
-      the project root, and an **ablation** that makes the loader look there — the test fails.
-- [ ] Every advertised chord **round-trips**: the spelling the Help modal and `--help` print is the
+- [x] **No project-local configuration is read** (§1). Pinned by a test with a `config.toml` beside
+      the project root, and an **ablation** that makes the loader look there — the test fails. *(A behavioural test and a structural scan; the ablation trips the scan, and `qa-evidence.md` says why the behavioural test alone could not.)*
+- [x] Every advertised chord **round-trips**: the spelling the Help modal and `--help` print is the
       spelling the file accepts.
-- [ ] A rebind colliding with another rule **refuses**; a `Reserved` chord **refuses**; the default
+- [x] A rebind colliding with another rule **refuses**; a `Reserved` chord **refuses**; the default
       stands and the board says why. **Ablation:** accept last-wins; the collision test fails.
-- [ ] **D3′'s repair:** every action ends with a real default binding **or** an explicitly dead
+- [x] **D3′'s repair:** every action ends with a real default binding **or** an explicitly dead
       status, distinguishable **by the type**. `CycleVisibleTerminalSession` and
       `OpenSafeCloseDialog` are decided, each with its reachability stated.
-- [ ] An action cannot be both bound and dead — held by the type, not by review.
+- [x] An action cannot be both bound and dead — held by the type, not by review.
 
 ## PR-054-B — theme and fonts
 

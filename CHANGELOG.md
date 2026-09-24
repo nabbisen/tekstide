@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added — keybindings are settings (RFC-054, PR-054-A)
+
+- **A `[keybindings]` section in `config.toml`.** One entry per action, the chord spelled exactly as the Help
+  modal prints it (`open_help = "Ctrl+Alt+J"`). `Ctrl+Alt+C` applies it without a restart, and the Help modal
+  shows the chords in force.
+- **A bad entry falls back on its own, and the Project Board names the setting and the reason** — a chord it
+  cannot read, a reserved action or chord (`Ctrl+Shift+P`), an action with no key at all, or a chord that
+  already reaches another action. The rest of the file still applies. **There is no "last one wins"**: two
+  entries for one chord are both refused.
+- **Two actions have no key, and now say why**: `cycle_visible_terminal_session` and
+  `open_safe_close_dialog` had a status that read as "bindable" and meant "dead". A rule is now reserved,
+  bound or dead — one type, so it cannot be two — and each dead action states how a user reaches what it
+  stands for, or that they cannot.
+- **A configuration file inside a project is never read**, pinned by a test.
+
 ## 0.24.0 - The Sidebar Is A Tree
 
 Status: **released on 2026-09-24.** Published to crates.io as `tekstide 0.24.0` and

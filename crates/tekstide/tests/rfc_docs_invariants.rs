@@ -693,3 +693,41 @@ fn every_book_link_in_the_readme_names_a_page_that_exists() {
         dangling.join("\n")
     );
 }
+
+/// **The configuration page lists every rebindable action with the chord it
+/// ships with, and nothing else.** RFC-054 D8′ makes the file's spelling the
+/// Help modal's, so the page's table is the one place a user learns the action
+/// names; a hand-written table would go stale the first time a rule changed.
+/// Derived from the same policy the product reads, so it cannot.
+#[test]
+fn the_configuration_page_lists_every_rebindable_action_with_its_default_chord() {
+    let page = repo_root().join("docs/src/users/configuration.md");
+    let Ok(source) = std::fs::read_to_string(&page) else {
+        eprintln!("skipped: docs/ is not packaged with this crate");
+        return;
+    };
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let mut listed = 0;
+    for rule in &policy.rules {
+        let name = rule.action.config_name();
+        let row = source
+            .lines()
+            .find(|line| line.starts_with("| `") && line.contains(&format!("`{name}`")));
+        match rule.status() {
+            tekstide_core::navigation::KeybindingStatus::Bound => {
+                let row = row.unwrap_or_else(|| panic!("{name} is rebindable but not in the table"));
+                let chord = rule.default_binding().expect("a bound rule has a chord");
+                assert!(
+                    row.contains(&format!("`{chord}`")),
+                    "{name}'s row does not carry its default chord {chord}: {row}"
+                );
+                listed += 1;
+            }
+            _ => assert!(
+                row.is_none(),
+                "{name} is not rebindable and must not be in the table of actions to rebind"
+            ),
+        }
+    }
+    assert_eq!(listed, 15, "every rebindable action is listed exactly once");
+}

@@ -1,7 +1,10 @@
 # Keyboard reference
 
 The shell is keyboard-navigable by design. This table is the same set the application itself
-lists on the Project Board, in the Help modal (`Ctrl+Alt+K`), and in `tekstide --help`.
+lists in the Help modal (`Ctrl+Alt+K`) and in `tekstide --help`. **These are the chords Tekstide
+ships with**: any of them except `Ctrl+Shift+P` can be moved in your configuration file — see
+[Configuration](./configuration.md#keybindings). The Help modal shows the chords in force;
+`--help` runs before the file is read, so it shows the defaults.
 
 | Binding | Action |
 | --- | --- |

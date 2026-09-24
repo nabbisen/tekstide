@@ -547,6 +547,12 @@ long as it did. Recorded in full at `handoffs/derived-contrast-pairs.md`.
   shipping surfaces no one can open. A keybinding pass (RFC-023) should either give each
   action a default or mark it explicitly dead; the current state makes the two
   indistinguishable at a glance, which is exactly how both misses above happened.
+  **Repaired by RFC-054 PR-054-A (2026-09-24).** `KeybindingStatus` is now `Reserved`, `Bound` or
+  `Dead`, derived from a `RuleBinding` that is exactly one of a held chord, a default chord, or a
+  death certificate with its reachability stated — so an action cannot be both bound and dead, and
+  `Configurable` no longer exists to be misread. `CycleVisibleTerminalSession` and
+  `OpenSafeCloseDialog` are the two `Dead` rules: neither has a handler, and neither was given a chord,
+  because that would have been a new action.
 - **The `no_count_display_or_attention_label_is_called_anywhere_in_the_crate` scan matches
   only the literal substring `.label()`, so it cannot catch a hardcoded-English *free
   function* (one not called as a method).** Raised at RFC-019's own design stage (its
