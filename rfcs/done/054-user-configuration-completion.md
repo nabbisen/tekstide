@@ -1,6 +1,6 @@
 # RFC-054: User Configuration Completion
 
-Status: **Accepted by the human owner 2026-09-24.** **D1, D2, D4, D6–D9 as written; D3 corrected on acceptance — see D3′, which repairs a category error this project recorded and never fixed.** Proposed 2026-09-24. `0.25.0`, and **M12 closes with it** — M12's own scope names
+Status: **Implemented and closed 2026-09-24, and M12 closes with it.** Keybindings, theme colours, font family and size, and terminal scrollback are things a user sets; the status that meant two things is repaired. Accepted by the human owner 2026-09-24.** **D1, D2, D4, D6–D9 as written; D3 corrected on acceptance — see D3′, which repairs a category error this project recorded and never fixed.** Proposed 2026-09-24. `0.25.0`, and **M12 closes with it** — M12's own scope names
 "keybindings, theme, fonts, terminal scrollback, resource limits, and AI CLI profiles as user
 configuration", and three of those six have never shipped.
 
@@ -143,3 +143,36 @@ a cap at all; a hidden pane keeps filling.
 `Ctrl+Alt+P`; that exact spelling is what a user types in the file, round-tripped by a test over
 every advertised binding. No second grammar to learn, and no chance of the file and the help
 disagreeing.
+
+
+## Closed (2026-09-24) — and M12 with it
+
+Three slices. **The sixteenth release added surfaces; the seventeenth adds settings.**
+
+**D3′ repaired a category error the project had carried since RFC-022.** `KeybindingStatus::Configurable`
+with a `None` binding read as *bindable* and meant *dead*; two surfaces shipped unreachable because of
+it. `RuleBinding` is now a three-variant sum with a private field, so *bound and dead* is
+unrepresentable, and `Dead` carries a **written reachability claim** pinned by a test. That claim
+immediately surfaced a product fact nobody had written down: a project can hold several terminals and
+**only the `Primary` one receives keystrokes**.
+
+**The scrollback cap was measured, and the measurement was right where its author was not.** An
+allocator-counting probe found the first numbers included the feeding buffer; that rows are allocated
+in blocks of 1,024 rather than per line; and that the block count is not `ceil(lines/1024)` — a
+6,143-line pane held seven blocks. **`a_pane_at_the_cap_stays_under_the_memory_budget` failed at
+67,924,707 bytes against 67,108,864**: the measurement caught the cap, not the review. The cap is
+12,000 lines, and **a wider pane keeps fewer**, recomputed on resize, because otherwise the 64 MiB
+claim is false for anyone with a wide display.
+
+**Two defects that only a live capture could find**, continuing this project's run: the Help modal's
+binding column was a fixed 110 px and ran into its descriptions at a serif 17 px; and buttons did not
+follow the theme, which made `theme.rs`'s own claim false.
+
+**An ablation that failed nothing was treated as a finding** — `theme::button` not applying its style
+broke no test until one was written for it.
+
+**Left open, deliberately**: at 12,000 lines a pane whose output puts a combining character on every
+cell costs about four times as much, so the 64 MiB budget is about ordinary output. Ruled at review
+429: the cap stands, the book states the worst case in bytes rather than a multiplier, and **bounding
+combining marks per cell is its own slice (RFC-061)** on the terminal boundary's ground — where the
+bound must be chosen against real Devanagari, Arabic, Hebrew and Vietnamese, not against Zalgo.

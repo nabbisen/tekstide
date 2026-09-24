@@ -1,8 +1,8 @@
 ---
 title: "RFC-054 — acceptance and QA checklist"
 rfc: "RFC-054"
-rfc_file: "../../accepted/054-user-configuration-completion.md"
-source_rfc_status: "Accepted 2026-09-24 — M12 (closes it)"
+rfc_file: "../../done/054-user-configuration-completion.md"
+source_rfc_status: "Implemented and closed 2026-09-24 — M12 (closed it)"
 target_milestone: "M12"
 created: "2026-09-24"
 ---
@@ -86,12 +86,28 @@ shares its fixture" — "alone" has been falsified three times by suites sharing
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] Accepted.
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
-Pending review.
+Accepted 2026-09-24 (reviews 427-429). RFC-054 closed, and M12 with it.
+
+D3' repaired a category error carried since RFC-022: Configurable/None read as "bindable" and meant
+"dead", and two surfaces shipped unreachable because of it. Bound-and-dead is now unrepresentable,
+and a death certificate carries a reachability claim -- which immediately surfaced that only the
+Primary terminal receives keystrokes (recorded in the delivery plan; it needs a feature, not a chord).
+
+The scrollback cap was measured and the measurement caught its author three times: a feeding buffer
+counted in, rows allocated in blocks of 1,024 rather than per line, and a block count that is not
+ceil(lines/1024). a_pane_at_the_cap_stays_under_the_memory_budget failed at 67,924,707 against
+67,108,864 -- review did not find that, the allocator did.
+
+Ruled at 429: the 12,000 cap stands; the book states the combining-character worst case in bytes
+rather than as a multiplier; bounding combining marks per cell is RFC-061, on the terminal
+boundary's ground, chosen against real scripts rather than against Zalgo.
+
+Reviewer gate: 657 + 12 + 945, green three times, 0 fixture entries left.
 ```

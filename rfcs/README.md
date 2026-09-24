@@ -37,7 +37,6 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 054 | [User Configuration Completion](./accepted/054-user-configuration-completion.md) | **Accepted 2026-09-24; D3 corrected on acceptance.** `0.25.0`, and **M12 closes with it**. Keybindings, theme, font family and size, terminal scrollback become settable. **D3′ repairs a category error the project recorded and never fixed**: `KeybindingStatus::Configurable` with a `None` binding reads as "a user can bind this" and means "dead" — two surfaces shipped unreachable because of it. Rebindable is *has a default binding and is not Reserved*; every action ends with a chord or an explicitly dead status. Contrast validated at 4.5:1, a font is a name not a path, the scrollback cap is measured against a 64 MB-per-pane budget. [Handoff pack](./handoffs/054-user-configuration/README.md) |
 | 053 | [What The Window Says Is True](./accepted/053-what-the-window-says-is-true.md) | **Accepted 2026-09-24 through the schedule's authorisation; D1–D9 decided on acceptance.** Six measured defects, each one the product saying something untrue — a shipped `RFC-017` placeholder, modals clipping their own `Close` away, a status bar wrapping against the one-line invariant every PTY's height depends on, Change Review contradicting the Git state, `unknown` where zero is known, and two different facts both called dirty/changed. **D3 measures the rendered bar height rather than eliding a field**, because `REQ-NOTIFY-002` names five and eliding drops one silently. `0.23.0`. [Handoff pack](./handoffs/053-window-truth/README.md) |
 
 
@@ -61,6 +60,7 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 058 | A Project Held By One Process | M13 tail |
 | 059 | Seeing The Audit, And Redacting It | pre-1.0 |
 | 060 | Command Approval A User Can Reach | pre-1.0, **1.0 blocker** |
+| 061 | A Bound On Combining Marks Per Cell | terminal boundary |
 
 Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23. Titles are the
 audit's findings, not guesses; each row's scope is in the release schedule in
@@ -115,7 +115,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 050 | [Transcripts From Earlier Runs](./handoffs/050-transcripts-from-earlier-runs/README.md) — **M12**; load what is on disk, and never delete what something is still writing or what the loader did not recognise |
 | 025 | [Notifications](./handoffs/025-notifications/README.md) — **M12**; **implemented and closed 2026-09-22** |
 | 030 | [Git Integration](./handoffs/030-git-integration/README.md) — **M12**; **implemented and closed 2026-09-23** |
-| 054 | [User Configuration Completion](./handoffs/054-user-configuration/README.md) — **M12**; the release that adds settings |
+| 054 | [User Configuration Completion](./handoffs/054-user-configuration/README.md) — **M12**; **implemented and closed 2026-09-24, closing M12** |
 | 053 | [What The Window Says Is True](./handoffs/053-window-truth/README.md) — **M12 remainder**; six surfaces that say something untrue |
 | 052 | [A File Explorer A User Can Read](./handoffs/052-file-explorer/README.md) — **M12 remainder**; **implemented and closed 2026-09-24** |
 | 051 | [Recovering the Recent-Project List](./handoffs/051-recovering-the-recent-project-list/README.md) — **M12**; the reset that takes a user's trust decisions with it |
@@ -201,6 +201,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 025 | [Notifications](./done/025-notifications.md) | **Implemented and closed 2026-09-22.** The requirements defined a `Notification`; none existed, and four RFCs had each added their own board notice with its own lifetime. They now share one model with a closed set of two lifetimes — `until acknowledged` was refused, having no producer — and their own absent-when-false tests survived the migration **unmodified**. The status bar gained REQ-NOTIFY-002's fields and REQ-NOTIFY-003's actionable labels, read from `ProjectRuntimeSummary`; Git state says "not available" until RFC-030. Headline of `0.21.0`. [Handoff pack](./handoffs/025-notifications/README.md) |
 | 030 | [Git Integration](./done/030-git-integration.md) | **Implemented and closed 2026-09-23.** The board said "branch: not available" because nothing produced it, and reading a repository turned out to mean running whatever that repository names: **both** candidate mechanisms executed a repo-configured clean filter, measured on two independent fixtures. So the question became *which repositories we read*. A hardened `git` subprocess behind a gate that refuses any configuration key that could name a program; an unknown key costs the content answer, never the branch. Status bar branch and dirty count, explorer per-file badges, refresh at open and at each managed process's end, with the cadence disclosed. [Handoff pack](./handoffs/030-git-integration/README.md) |
 | 052 | [A File Explorer A User Can Read](./done/052-a-file-explorer-a-user-can-read.md) | **Implemented and closed 2026-09-24.** The sidebar read `[DIR]`/`[FILE]` and — measured — was not a tree at all. It is now one: folders expand in place, folders first, text-symbol icons chosen because emoji cost 6× to lay out, every status still a word, and a change inside `src/` visible without stepping into `src/`. **D3′ by measurement**: the candidate widget failed five of eight properties, read back from what it draws; `ItemTree` was ruled out because it hardcodes the font size RFC-054 is about to make configurable. Three defects found by live capture and none by unit tests — including a board scroll request that was set and never consumed. [Handoff pack](./handoffs/052-file-explorer/README.md) |
+| 054 | [User Configuration Completion](./done/054-user-configuration-completion.md) | **Implemented and closed 2026-09-24, and M12 closes with it.** Keybindings, theme colours, font family and size, terminal scrollback — set in the file, applied by `Ctrl+Alt+C`, each bad value falling back on its own with the board naming it. **D3′ repaired the `Configurable`/`None` category error** that had shipped two surfaces unreachable; `Dead` now carries a reachability claim, which immediately surfaced that only the `Primary` terminal receives keystrokes. **The scrollback cap was measured, and the measurement caught it wrong** — 12,000 lines, fewer on a wider pane. [Handoff pack](./handoffs/054-user-configuration/README.md) |
 
 ## Archive
 

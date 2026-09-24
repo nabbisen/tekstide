@@ -1,8 +1,8 @@
 ---
 title: "What configuration must not do"
 rfc: "RFC-054"
-rfc_file: "../../accepted/054-user-configuration-completion.md"
-source_rfc_status: "Accepted 2026-09-24 — M12 (closes it)"
+rfc_file: "../../done/054-user-configuration-completion.md"
+source_rfc_status: "Implemented and closed 2026-09-24 — M12 (closed it)"
 target_milestone: "M12"
 created: "2026-09-24"
 ---
