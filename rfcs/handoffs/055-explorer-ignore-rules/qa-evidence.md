@@ -277,7 +277,7 @@ other value is `FallbackReason::NotABoolean` — named on the board (*"explorer.
 true or false, without quotes."*), the value never echoed, the rest of the file applied; an unknown key in `[explorer]` warns. **There is
 no key for dotfiles**, and `there_is_no_key_for_dotfiles_and_an_unknown_key_only_warns` says a guess at one is a warning.
 
-**What `false` does, which the pack left open: ignored entries are not drawn, and the directory says how many it left out.** Read from
+**What `false` does, which the pack left open — first version, superseded by review 433 Q2 below: ignored entries are not drawn, and the directory says how many it left out.** Read from
 RFC-052 D8 (*nothing is hidden silently*) and the README's "decides whether ignored rows are drawn at all", not from "collapses them"
 in the RFC's acceptance list: a *collapsed* ignored directory is what git's rule already does (capture `06-`), and hiding a
 file silently is exactly what D8 forbids. So `ExplorerTree::rows` skips `Ignored` nodes when the setting is off and ends the directory with
@@ -289,7 +289,7 @@ setting is turned on.
 
 **Dotfiles stay visible at either value** (`ignored_entries_are_hidden_and_counted_unless_the_setting_shows_them`: `.env` and `.gitignore` are
 in the drawn rows with the setting off; ablated by hiding `.`-names, which fails it). Captures `05-` (`.env`, `.git-exclude`, `.gitignore`
-all drawn, `2 ignored entries hidden`) and `06-` (`show_ignored = true`: `target` and `debug.log [ignored]` drawn, the dotfiles unchanged).
+all drawn) and `06-` (`show_ignored = true`: `target` and `debug.log [ignored]` drawn, the dotfiles unchanged).
 
 **Wiring.** `ExplorerTree::show_ignored` (default `false`), `ProjectSession::set_explorer_show_ignored`, applied by
 `apply_configured_project_settings` (the old `apply_configured_resource_limits`, renamed because it now carries two settings and its
@@ -354,3 +354,29 @@ The ablation script's output filter hid the assertion message; if it recurs, cap
 ### Gate
 
 See the request.
+
+### Review 433
+
+- **Q2 — an ignored directory keeps its row; only files are hidden and counted.** My first reading hid every ignored entry, and your
+  comparison of my own captures showed the cost: `05-` had `.git (collapsed)` present and `target` **absent** — two folders a user
+  normally does not open, one reachable and one gone, and in `0.25.0` `target/` was on the floor list and *collapsed*, a row you could
+  still expand. The rule is now in `ExplorerTree::push_directory`: hide iff `!show_ignored && ignore == Ignored && kind != Directory`;
+  `IgnoredHidden`'s doc comment and the catalog say **files** (*"One ignored file hidden"*). **The old `05-` capture is replaced**
+  (`git rm`, not overwritten, so the history shows why): `05-ignored-files-hidden-and-counted-an-ignored-folder-stays-release.png` is a
+  repository that ignores `target/`, at `show_ignored = false`: **`target (collapsed) [ign`** present (the qualifier clipped, the name
+  and `(collapsed)` whole), **`One ignored file hidden`** (`debug.log`) beside it, dotfiles drawn. Tests:
+  `ignored_files_are_hidden_and_counted_but_an_ignored_directory_keeps_its_row` (`target` stays; two ignored files are counted; dotfiles stay) and
+  `an_ignored_directory_stays_expandable_with_the_setting_off`. **Ablation** (through the widened `ablate.sh`): hiding directories again fails
+  both, with the assertion messages printed (`left: ["<ignored hidden 1>"] right: ["+target"]`). The book, `what-works-today.md` and the
+  changelog were updated to say *files*, and the changelog's *Changed* says an ignored *folder* stays.
+- **Q3 — the invariant's message names both remedies.** *"Either (1) it shipped in that release — then close it: move it to rfcs/done/ as part
+  of the release; or (2) the section only MENTIONS it (a plan, a reservation, a number reused by a later RFC) — then reword the section and
+  leave the RFC where it is. Do not move an RFC that has not shipped to done/ to satisfy this check."* The planted-violation test asserts the
+  message carries `(1)`, `(2)` and the prohibition. **Ablation:** removing the prohibition fails that test.
+- **`ablate.sh` keeps the assertion messages.** The whole run goes to `target/ablate-last.log` first; the failing names print as before, and
+  `--- assertion messages` follows with each `panicked at` and its next lines (the values), with the log path. The output above is from
+  the new script. **Ruling B/C/D recorded:** `core.excludesFile` stays a disclosed gap and is RFC-062's; the invariant stays strict; the two sidebar
+  lines stand.
+- **Load note, not a finding:** these ablation runs were at load 13–30 (other projects' gates), and the load-sensitive tests already in the register
+  failed in them (`change_review_content_view_build_cost_by_line_count_measurement`, `drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame`'s
+  frame-time bound, `is_still_answerable_reflects_the_real_connection_state`); each says so in its own message. None is new.
