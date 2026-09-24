@@ -51,22 +51,22 @@ number in the evidence is not ticked.**
 
 ## PR-055-B — the scan carries it, and the floor keeps its job
 
-- [ ] `FileGitStatus::Ignored` exists and **no match arm on it is a catch-all** — grepped, with the
+- [x] `FileGitStatus::Ignored` exists and **no match arm on it is a catch-all** — grepped, with the
       count of sites in the evidence.
-- [ ] The query is asked about **at most `max_children_per_directory` paths per directory**, and the
+- [x] The query is asked about **at most `max_children_per_directory` paths per directory**, and the
       20 000-`*.log` fixture proves it: the number of paths asked about tracks the rows drawn, not
       the number of ignored files. **This is the test that falsifies D2 if D2 is wrong.**
-- [ ] Entries beyond the cap keep **unknown** ignore state, and nothing renders or counts them as
+- [x] Entries beyond the cap keep **unknown** ignore state, and nothing renders or counts them as
       ignored or as not ignored.
-- [ ] A repository whose `.gitignore` does **not** name `target/` shows `target/` as an ordinary
+- [x] A repository whose `.gitignore` does **not** name `target/` shows `target/` as an ordinary
       expandable directory; one that does shows it collapsed with the `ignored` badge. Both captured.
-- [ ] A project that is not a repository shows the floor list **and the scan carries that it was the
+- [x] A project that is not a repository shows the floor list **and the scan carries that it was the
       floor**, as a value, not as a render-time guess.
-- [ ] `IGNORED_DIRECTORY_NAMES`' doc comment states that its two consumers are no longer symmetrical.
-- [ ] **Budget, measured on RFC-052's 100 000-entry fixture:** expanding a directory pays the gate
+- [x] `IGNORED_DIRECTORY_NAMES`' doc comment states that its two consumers are no longer symmetrical.
+- [x] **Budget, measured on RFC-052's 100 000-entry fixture:** expanding a directory pays the gate
       plus one query and stays within the frame budget. The number in the evidence is the **whole
       call**, not the query alone.
-- [ ] Nothing new runs on the render thread; the work stays on `explorer_scan_subscription`.
+- [x] Nothing new runs on the render thread; the work stays on `explorer_scan_subscription`.
 
 ## PR-055-C — the setting, the badge, the words, and one invariant
 

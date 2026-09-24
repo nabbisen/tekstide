@@ -145,6 +145,113 @@ call is refused and the program never runs. **Ablations:** the gate not consulte
   words. Whether to honour it (reading the user's *own* config, not the repository's, and passing `-c core.excludesFile=`) is the
   architect's decision at C; nothing here does it.
 
+## PR-055-B — the scan carries it, and the floor keeps its job
+
+`project/root/explorer.rs` (the model and the answer applied to a scan), `project/explorer_tree.rs` (`ExplorerScanRequest::run`
+asks), `runtime/git.rs` (the report says where the repository is), `surface/explorer.rs` + `locales/en.ftl` (the word and the
+rule line), `project/ignored_directories.rs` (the doc comment). **No change to `shell.rs`**: the worker that already calls
+`request.run()` now asks git inside it, so nothing new runs on the render thread — and the synchronous
+`scan_explorer_directory` path stays the pure scanner and never blocks on a subprocess.
+
+### The model
+
+- `FileGitStatus::Ignored` (D5). **One `match` on `Option<FileGitStatus>` exists in production** (`surface/explorer.rs`
+  `git_status_symbol`); it has seven arms and **no catch-all**, and adding the variant was a compile error (`E0004`, pattern
+  `Some(FileGitStatus::Ignored)` not covered) until it was handled. The only other production mentions are constructors in
+  `runtime/git.rs` (`compute_summary` never produces `Ignored`; `git status` is not run with `--ignored`).
+- `ExplorerNode.ignore: ExplorerIgnoreState` — `Unknown | NotIgnored | Ignored`. `NotIgnored` is a claim git made; `Unknown` is
+  the absence of one and is never drawn as either.
+- `ExplorerDirectoryScan.ignore_rule: ExplorerIgnoreRule` — **a value the scan carries**: `Git { repository:
+  AtProjectRoot | AboveProjectRoot | BelowProjectRoot }` or `Floor(NotAsked | NotARepository | RepositoryDeclined | GateRefused |
+  QueryFailed)`. The pure scanner returns `Floor(NotAsked)`; `ask_git` sets it. Each `IgnoreUnknown` maps to its own reason
+  (`UnusableName` — unreachable for a real directory entry — to `QueryFailed`).
+- `ignored_entries` now returns an `IgnoreReport { answer, repository_root }` (A's contract, extended additively: the answer is
+  unchanged) so the scan can say whether the repository is the project's own, above it, or inside it.
+
+### D6 — git decides what is collapsed; the list is the floor
+
+Under a `Git` rule a directory is collapsed iff git says it is ignored (**or it is `.git`**); under a `Floor` rule the fixed list
+decides, exactly as before. `git_decides_whether_target_is_collapsed` runs both repositories through the real git:
+`.gitignore` = `*.log` gives an **ordinary, expandable `target/`** (`NotIgnored`), and `target/` + `*.log` gives it
+**collapsed and `Ignored`**. Captures `01-` and `02-`. `outside_a_repository_the_floor_list_decides_and_the_scan_says_so`
+and capture `03-` show the floor: `target` collapsed, `Floor(NotARepository)`, every node `Unknown`.
+**Ablation:** ignoring git's collapse decision fails `git_decides_whether_target_is_collapsed` and
+`unknown_and_not_ignored_are_different_on_the_node_and_in_the_rule`.
+
+**`.git` stays collapsed under either rule** — a judgment call. git does not call `.git` ignored (it is not something a
+`.gitignore` names), so under a strict reading `.git` becomes an ordinary expandable directory and a click opens
+the repository's internals. `dot_git_stays_collapsed_under_git_s_rule`; ablated by removing the exception.
+
+### D2's falsification, and the omitted tail
+
+`what_git_is_asked_about_tracks_the_rows_drawn_not_the_ignored_file_count`: **20,000** `*.log` files, one-line `.gitignore`. The
+scan returns 256 nodes, git was asked about **256 names in one query**, all 256 are `Ignored`, `omitted_entries` is 19,744, and
+`nodes.len() + omitted_entries == 20_000` — the omitted rows were never in the batch and the count makes no claim about
+them. **D2 holds**: it would have failed had the batch tracked the ignored-file count.
+
+### The query is not a second way into the filesystem
+
+`a_blocked_entry_is_never_asked_about_and_stays_unknown` (an escaping symlink named `escape.log`, which the pattern would
+match, is `Blocked`, absent from the batch and `Unknown`) and `only_admitted_entries_are_put_in_the_batch` (an unreadable
+placeholder row). **Ablation:** asking about every entry fails both. Names are taken from `relative_path`'s raw filename, not
+the lossy display `name` (`a_non_utf8_name_is_asked_as_its_bytes_and_the_answer_lands_on_its_row`; ablated by asking with the
+display name).
+
+### The worker entry point
+
+`the_worker_entry_point_asks_git_and_says_what_it_learned`: through `ExplorerTree::request_scan` → `scan_requests` →
+`ExplorerScanRequest::run`, in a directory in no repository, the scan is `Floor(NotARepository)`, **not** `Floor(NotAsked)`.
+**This test exists because an ablation found nothing failing**: with `run` not asking git at all, every other test still passed,
+because each supplies its own oracle. A producer with no consumer test; it now has one.
+
+### Budget — RFC-052's 100,000-entry fixture, the whole call
+
+`asking_git_adds_a_few_milliseconds_to_a_hundred_thousand_entry_scan` (the fixture project made a repository; best of 5, this
+machine): **scan alone 21.75 ms; asking git (the gate + one `check-ignore` over 256 names) 2.86 ms; whole call 24.61 ms.** The
+scan is the 100,000-entry directory read and drain, unchanged from RFC-052; git adds ~12 % to it, about a sixth of one frame, and
+none of it on the render thread. The assertion is deliberately loose (`< 250 ms`, a wall clock under load is not a property); the
+number is here. The gate is the configuration half only (A's evidence, finding 2); the full gate would have added ~87 ms.
+
+### Review 431 ruling 4 — the two surfaces may not look like one answer
+
+The status bar's Git state reads only a `.git` at the project root; a project inside a repository now gets ignore words from the
+repository above it. **When the rule came from a repository that is not the project's own, the sidebar says so**, from what the
+loaded scans carried (`ignore_rule_line`, read from `ExplorerTree::loaded_scans`): *"Ignore rules: parent Git repo"* /
+*"Ignore rules: nested Git repo"*. Capture `04-` shows a project two levels inside its repository: `[ignored] a.log` from the parent's
+`.gitignore`, the sentence above the tree, and the status bar saying **Git: not available** — two true statements, and the sidebar
+says why they differ. The pack put the words in C; the ruling put this part in B, and I followed the ruling. C still owns the
+floor's sentence and the age of the answer.
+
+**Found by the capture, not by a test:** my first wording (*"Ignore rules come from the Git repository above this project."*) was cut
+off at "the Git r" — tree rows are unwrapped and the sidebar is ~33 monospace columns. It is now 29 characters, and
+`the_ignore_rule_sentence_fits_the_sidebar` holds it to 32. `RESERVED_LINES` went from 2 to 3 for the line (reserved whether or
+not shown, so a scan finishing does not move the window).
+
+### Found by the capture: an ignored directory's row now clips its name (disclosure)
+
+Capture `02-`: `> [+] ▣ (collapsed) [ignored] t` — the row for `target` carries **two** status words and the sidebar cuts the name to
+`t`. The existing limitation (a row wider than the sidebar is clipped; the detail line under the tree shows the highlighted row
+whole) was already documented for `0.24.0`, but every ignored *directory* under git's rule now has two words, so it will be met
+constantly, not rarely. I did not fix it: options are dropping `(collapsed)` when `[ignored]` says the same thing, ordering
+the name first, or a wider sidebar — a layout decision. **It should be decided before `0.26.0`**, and the changelog says so
+either way.
+
+### Other things B does that the pack did not say
+
+- **`ExplorerTree::loaded_scans`** (new, read-only) so the sidebar reads the rules the scans carried.
+- **`run_with_oracle`** on `ExplorerScanRequest`, so a test can count and isolate; `run` passes the production oracle.
+- **A floor for an empty directory** is honest: `ignored_entries` now runs the gate *before* answering an empty batch (A's
+  follow-up), so an empty directory in a repository the gate refuses is `Floor(GateRefused)`, not "git answered".
+- **`ignored` is an ordinary status word** (`explorer-node-entry`'s `$git` selector), before the name like the other five; no
+  colour carries it. The i18n completeness scan needed `placement` in `generic_args` for the new key.
+
+### Ablations (committed tree, `ablate.sh`) — ten
+
+Asking about every entry (2 tests); the worker not asking (1, plus two registered load-sensitive shell tests that failed in that
+run and are already rows in `test-process-leak.md`); unknown collapsed into not-ignored (2); git's collapse decision ignored (2);
+`.git` no longer kept collapsed (1); the display name asked about (1); placement always `AtProjectRoot` (1); the rule line not drawn (1);
+the rule sentence long again (2).
+
 ### Gate
 
-See the request. fmt, clippy `-D warnings`, three consecutive runs, fresh `TMPDIR`.
+See the request.
