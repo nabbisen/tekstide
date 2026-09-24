@@ -127,6 +127,14 @@ five `unknown` badges) and **B2** (the blocked-automation list repeats on every 
 at review 424. `0.23.0`'s changelog claim that this was "later work that no scheduled RFC covers" is
 corrected in `0.24.0`.
 
+### Found by a death certificate (2026-09-24, RFC-054 PR-054-A)
+
+**A project can hold several terminals and only the `Primary` one receives keystrokes**, with nothing
+that switches between them (`active_terminal_focus`, a deliberate narrowing from RFC-017;
+`CycleVisibleTerminalSession` has no handler and now says so in its `Dead` certificate). The model
+meets `REQ-TERM-001`/`005`; a user meets "I can make a second terminal and cannot type into it".
+Unscheduled — it needs a feature (per-pane focus, or a cycle action with a handler), not a chord.
+
 ### Decisions the owner still owns
 
 - **Syntax highlighting (`REQ-EDIT-003`) is not in the 1.0 minimum list.** It is the one gap large
