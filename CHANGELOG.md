@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Added — an agent run survives closing the app
+
+- **A run leaves a record, `run.json`, beside its transcript**, and a project reopened later lists the run again: its profile,
+  its prompt summary, its ids, and its transcript attached to it, instead of a transcript with no run behind it. The Project
+  Board's *agent runs* count now includes them. The record is written when the run changes, not when it ends, atomically, and it
+  holds references only — ids, timestamps and the prompt summary — never what the run printed; that stays in the transcript.
+- **A run whose app was closed while it was running says it does not know when it ended.** It is not shown as finished, and
+  it is not given the time it was reopened as an ending. A restored run is a record, not a process: it is never counted as
+  running or failed, and does not count against `agent_run_limit`.
+- **A record that cannot be read is renamed with a `.corrupt` name beside its transcript and never deleted**, the same way an
+  unreadable `recent-projects.json` is; the Project Board says how many were set aside, and the run is listed as a transcript
+  with no run. A record written by a newer Tekstide is treated the same way, and named as such. The disk-usage figure counts
+  `run.json` as Tekstide's own file. An older Tekstide, which does not know it, counts it as bytes it does not recognise.
+- **Limits:** a record keeps at most 200 approval, change-set and audit-event ids each, and says when it left something out. A run started with transcript capture off, or one
+  that could not be given a transcript directory, has no record. A change to a run's status reaches its record within a second;
+  a change made to it by the user is written at once.
+
 ### Fixed — a pinned older release could not be installed
 
 - **`cargo install tekstide --version 0.25.0` (and any older release) stopped compiling the day `0.26.0` was published.** Every

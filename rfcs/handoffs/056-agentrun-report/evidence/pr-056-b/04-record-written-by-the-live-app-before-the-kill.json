@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "run_id": "agent-run-e50228af-1570-412e-8a7d-f1cdfc1f9302",
+  "project_id": "be018de6-b184-4ed0-b7e5-f7ad5385c38f",
+  "profile_id": "fakecli",
+  "prompt_summary": "Interactive Claude Code session",
+  "full_prompt_ref": null,
+  "compatibility_level": "supervised",
+  "status": "running",
+  "started_at": "2026-09-25T01:56:55Z",
+  "ending": {
+    "kind": "not_ended"
+  },
+  "classification": null,
+  "notes": null,
+  "approval_ids": [],
+  "change_set_ids": [],
+  "audit_event_ids": [],
+  "artifact_refs": [],
+  "bounds": {
+    "notes_truncated": false,
+    "classification_label_truncated": false,
+    "prompt_summary_truncated": false,
+    "omitted_approval_ids": 0,
+    "omitted_change_set_ids": 0,
+    "omitted_audit_event_ids": 0,
+    "omitted_artifact_refs": 0
+  }
+}
