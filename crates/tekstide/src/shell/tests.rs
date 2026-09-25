@@ -7376,6 +7376,408 @@ fn a_real_agent_run_launch_gets_its_record_from_the_shells_tick() {
     assert!(record.contains("\"version\": 1"), "{record}");
 }
 
+// ---- RFC-056 PR-056-D: the AgentRun Report's controls ----------------------------
+
+/// A real launch of the marker script with the report open, so every test below
+/// drives the same state a person would: a run this session launched, its
+/// transcript on disk, the surface `Ctrl+Alt+R` opens.
+fn state_with_a_launched_run_on_the_report(
+    label: &str,
+) -> (
+    State,
+    PathBuf,
+    tekstide_core::project::ProjectId,
+    tekstide_core::domain::AgentRunId,
+    PathBuf,
+) {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir(label);
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let state_root = fresh_state_root_dir();
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "transcript-marker-script",
+        "Transcript Marker Script (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: transcript_marker_script_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+    attempt_agent_run_launch_with_profile_and_state_root(
+        &mut state,
+        profile,
+        Some(state_root.clone()),
+    )
+    .expect("a resolvable Supervised profile should launch the real marker script");
+    let (project_id, run_id, terminal_id) = capture_evidence_run_identifiers(&state);
+    let run_dir = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(run_id.as_str());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline && !run_dir.join("transcript.log").is_file() {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(run_dir.join("transcript.log").is_file());
+    super::open_current_agent_run_detail(&mut state);
+    (state, state_root, project_id, run_id, run_dir)
+}
+
+fn report_press(state: &mut State, key: &str) {
+    let _ = super::run_report::handle_agent_run_report_key(
+        state,
+        &crate::input::KeyPress {
+            key: iced::keyboard::Key::Character(key.into()),
+            modifiers: iced::keyboard::Modifiers::empty(),
+        },
+    );
+}
+
+fn report_press_named(state: &mut State, key: iced::keyboard::key::Named, shift: bool) {
+    let _ = super::run_report::handle_agent_run_report_key(
+        state,
+        &crate::input::KeyPress {
+            key: iced::keyboard::Key::Named(key),
+            modifiers: if shift {
+                iced::keyboard::Modifiers::SHIFT
+            } else {
+                iced::keyboard::Modifiers::empty()
+            },
+        },
+    );
+}
+
+fn report_type(state: &mut State, text: &str) {
+    for character in text.chars() {
+        if character == ' ' {
+            report_press_named(state, iced::keyboard::key::Named::Space, false);
+        } else {
+            report_press(state, &character.to_string());
+        }
+    }
+}
+
+fn the_run<'a>(
+    state: &'a State,
+    run_id: &tekstide_core::domain::AgentRunId,
+) -> &'a tekstide_core::domain::AgentRun {
+    state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .agent_run_or_restored(run_id)
+        .unwrap()
+}
+
+/// D10, ablated: **a person can classify a run** — by key and by click, with no
+/// environment variable — and the record follows at once.
+#[test]
+fn a_person_can_classify_a_run_by_key_and_by_click_and_the_record_follows_at_once() {
+    use tekstide_core::domain::RunClassification;
+    let (mut state, _root, _pid, run_id, run_dir) =
+        state_with_a_launched_run_on_the_report("report-classify");
+
+    report_press(&mut state, "4");
+    assert_eq!(
+        the_run(&state, &run_id).classification,
+        Some(RunClassification::Testing)
+    );
+    let record = std::fs::read_to_string(run_dir.join("run.json")).unwrap();
+    assert!(
+        record.contains("\"kind\": \"testing\""),
+        "written at once, not at the next tick: {record}"
+    );
+
+    let _ = super::update(
+        &mut state,
+        Message::RunReportClassifyPressed(Some(RunClassification::Release)),
+    );
+    assert_eq!(
+        the_run(&state, &run_id).classification,
+        Some(RunClassification::Release)
+    );
+
+    report_press(&mut state, "x");
+    assert_eq!(the_run(&state, &run_id).classification, None);
+}
+
+#[test]
+fn a_custom_classification_is_typed_saved_and_a_blank_one_is_refused() {
+    use tekstide_core::domain::RunClassification;
+    let (mut state, _root, _pid, run_id, _dir) =
+        state_with_a_launched_run_on_the_report("report-custom");
+
+    report_press(&mut state, "c");
+    assert!(state.run_report_field.is_some());
+    report_type(&mut state, "   ");
+    report_press_named(&mut state, iced::keyboard::key::Named::Enter, false);
+    assert_eq!(
+        state.run_report_notice,
+        Some(super::RunReportNotice::BlankLabel)
+    );
+    assert!(
+        state.run_report_field.is_some(),
+        "nothing was decided, so the field stays"
+    );
+    assert_eq!(the_run(&state, &run_id).classification, None);
+
+    report_type(&mut state, "spike");
+    report_press_named(&mut state, iced::keyboard::key::Named::Enter, false);
+    assert_eq!(
+        the_run(&state, &run_id).classification,
+        Some(RunClassification::Custom("spike".to_owned())),
+        "the label is trimmed"
+    );
+    assert!(state.run_report_field.is_none());
+}
+
+/// D4, ablated: the notes are **what the person typed**, with Shift+Enter for a
+/// new line and Enter to save; a field swallows the shortcut keys instead of
+/// acting on them.
+#[test]
+fn notes_are_what_the_person_typed_and_a_field_swallows_the_shortcut_keys() {
+    let (mut state, _root, _pid, run_id, run_dir) =
+        state_with_a_launched_run_on_the_report("report-notes");
+
+    report_press(&mut state, "n");
+    report_type(&mut state, "4 e x c");
+    report_press_named(&mut state, iced::keyboard::key::Named::Enter, true);
+    report_type(&mut state, "> second");
+    report_press_named(&mut state, iced::keyboard::key::Named::Enter, false);
+
+    assert_eq!(the_run(&state, &run_id).notes(), Some("4 e x c\n> second"));
+    assert_eq!(
+        the_run(&state, &run_id).classification,
+        None,
+        "the typed 4 was text, not a shortcut"
+    );
+    assert!(
+        state.run_report_field.is_none(),
+        "Enter saved and closed it"
+    );
+    let record = std::fs::read_to_string(run_dir.join("run.json")).unwrap();
+    assert!(record.contains("4 e x c\\n> second"), "{record}");
+
+    // Escape cancels without applying; blank notes clear.
+    report_press(&mut state, "n");
+    report_type(&mut state, "discard me");
+    report_press_named(&mut state, iced::keyboard::key::Named::Escape, false);
+    assert_eq!(the_run(&state, &run_id).notes(), Some("4 e x c\n> second"));
+    report_press(&mut state, "n");
+    for _ in 0..40 {
+        report_press_named(&mut state, iced::keyboard::key::Named::Backspace, false);
+    }
+    report_press_named(&mut state, iced::keyboard::key::Named::Enter, false);
+    assert_eq!(the_run(&state, &run_id).notes(), None);
+}
+
+/// A modal is exclusive: neither a key nor a click reaches the report under it.
+#[test]
+fn a_modal_stops_the_report_controls_from_acting_underneath_it() {
+    let (mut state, _root, _pid, run_id, _dir) =
+        state_with_a_launched_run_on_the_report("report-modal");
+    super::open_transcript_purge_dialog(&mut state);
+    assert!(state.modal.is_some(), "precondition");
+
+    report_press(&mut state, "4");
+    report_press(&mut state, "n");
+    let _ = super::update(
+        &mut state,
+        Message::RunReportClassifyPressed(Some(tekstide_core::domain::RunClassification::Coding)),
+    );
+    let _ = super::update(
+        &mut state,
+        Message::RunReportOpenFieldPressed(super::RunReportFieldKind::Notes),
+    );
+
+    assert_eq!(the_run(&state, &run_id).classification, None);
+    assert!(state.run_report_field.is_none());
+}
+
+/// D5, ablated: the report is written **where the person asked**, as a new
+/// private file that never overwrites, and says at once what it did and that
+/// the file is now outside the product's reach.
+#[test]
+fn a_person_can_export_the_report_to_a_path_and_it_never_overwrites() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut state, root, _pid, run_id, run_dir) =
+        state_with_a_launched_run_on_the_report("report-export");
+    report_press(&mut state, "4");
+    report_press(&mut state, "n");
+    report_type(&mut state, "for the next person");
+    report_press_named(&mut state, iced::keyboard::key::Named::Enter, false);
+    let out = fresh_project_dir("report-export-out");
+    let target = out.join("report.md");
+
+    report_press(&mut state, "e");
+    let field = state
+        .run_report_field
+        .as_ref()
+        .expect("the export field opened");
+    let contents = field
+        .export_contents
+        .expect("what it will contain is known before it is written");
+    assert!(contents.has_notes && contents.has_classification);
+    report_type(&mut state, &target.display().to_string());
+    report_press_named(&mut state, iced::keyboard::key::Named::Enter, false);
+
+    let written = std::fs::read_to_string(&target).expect("the report was written");
+    assert!(written.contains("| Classification: testing"), "{written}");
+    assert!(written.contains("for the next person"));
+    assert!(written.contains(run_id.as_str()));
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert!(matches!(
+        state.run_report_notice,
+        Some(super::RunReportNotice::Exported { .. })
+    ));
+    assert!(state.run_report_field.is_none());
+    let notice =
+        super::run_report::notice_text(&state.catalog, state.run_report_notice.as_ref().unwrap());
+    assert!(
+        notice.contains("Tekstide cannot change or remove that file"),
+        "{notice}"
+    );
+
+    // Again to the same path: refused, the field stays for a corrected path,
+    // and the first file is untouched.
+    report_press(&mut state, "e");
+    report_type(&mut state, &target.display().to_string());
+    report_press_named(&mut state, iced::keyboard::key::Named::Enter, false);
+    assert_eq!(
+        state.run_report_notice,
+        Some(super::RunReportNotice::ExportRefused(
+            tekstide_core::agent::ReportExportRefusal::AlreadyExists
+        ))
+    );
+    assert!(state.run_report_field.is_some());
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), written);
+    // D5: Tekstide keeps no second copy. Everything under its own state
+    // directory is still the transcript and the record.
+    let mut kept: Vec<String> = std::fs::read_dir(&run_dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    kept.sort();
+    assert_eq!(
+        kept,
+        ["run.json", "transcript.log"],
+        "no report was stored beside the record"
+    );
+
+    // A relative path, and the state directory, are refused too.
+    report_press_named(&mut state, iced::keyboard::key::Named::Escape, false);
+    report_press(&mut state, "e");
+    report_type(&mut state, "relative.md");
+    report_press_named(&mut state, iced::keyboard::key::Named::Enter, false);
+    assert_eq!(
+        state.run_report_notice,
+        Some(super::RunReportNotice::ExportRefused(
+            tekstide_core::agent::ReportExportRefusal::NotAbsolute
+        ))
+    );
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .id()
+        .clone();
+    super::run_report::export_report(
+        &mut state,
+        &project_id,
+        &run_id,
+        &root.join("report.md").display().to_string(),
+        Some(root.clone()),
+    );
+    assert_eq!(
+        state.run_report_notice,
+        Some(super::RunReportNotice::ExportRefused(
+            tekstide_core::agent::ReportExportRefusal::InsideStateDirectory
+        ))
+    );
+}
+
+/// D4, held structurally: the notes setters are called from **one** place a
+/// person types, and the field is not writable from outside its crate. Every
+/// other caller in the workspace is a restore, a definition, or a test.
+#[test]
+fn the_notes_of_a_run_are_written_from_one_place_and_nothing_else_writes_them() {
+    fn rust_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                rust_files(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut files = Vec::new();
+    rust_files(&workspace.join("tekstide-core/src"), &mut files);
+    rust_files(&workspace.join("tekstide/src"), &mut files);
+
+    // (needle, files allowed to contain it outside test code)
+    let rules: [(&str, &[&str]); 3] = [
+        (
+            ".set_agent_run_notes(",
+            &["tekstide/src/shell/run_report.rs"],
+        ),
+        (
+            ".set_notes(",
+            &[
+                "tekstide-core/src/project/session/run_records.rs",
+                "tekstide-core/src/transcript/run_record.rs",
+            ],
+        ),
+        (".notes = ", &["tekstide-core/src/domain/agent.rs"]),
+    ];
+    let mut violations = Vec::new();
+    for path in files {
+        let relative = path
+            .strip_prefix(&workspace)
+            .unwrap()
+            .to_string_lossy()
+            .replace("/../", "/");
+        let relative = relative.trim_start_matches("./").to_owned();
+        if relative.contains("/tests/")
+            || relative.ends_with("tests.rs")
+            || relative.ends_with("_tests.rs")
+        {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).unwrap();
+        // Everything after the file's own `#[cfg(test)]` module marker is test code.
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        for (needle, allowed) in rules {
+            for line in production.lines() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") || !trimmed.contains(needle) {
+                    continue;
+                }
+                if !allowed.iter().any(|ok| relative.ends_with(ok)) {
+                    violations.push(format!("{relative}: `{needle}` in `{trimmed}`"));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "the notes are the user's words and nothing else writes them (RFC-056 D4); \
+         a new writer must be added here deliberately, naming why it is not run content: {violations:#?}"
+    );
+}
+
 /// Extracted for RFC-033 PR-033-B's own negative gate to share: both
 /// tests need the same (project id, agent run id, terminal id) triple
 /// after a real launch, to build the documented transcript path and

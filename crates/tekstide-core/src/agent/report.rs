@@ -211,7 +211,7 @@ pub fn render_run_report(sources: &RunReportSources<'_>) -> String {
                 excerpt.total_len
             ));
             let text = String::from_utf8_lossy(tail);
-            for transcript_line in text.split('\n') {
+            for transcript_line in text.split_terminator('\n') {
                 let transcript_line = transcript_line
                     .strip_suffix('\r')
                     .unwrap_or(transcript_line);
@@ -243,7 +243,9 @@ fn classification_text(classification: &RunClassification) -> String {
 fn ending_text(run: &AgentRun) -> String {
     match &run.ending {
         RunEnding::Ended(at) => at.as_str().to_owned(),
-        RunEnding::NotEnded => "not ended when this record was written".to_owned(),
+        RunEnding::NotEnded => {
+            "not ended: the run was still going when this report was made".to_owned()
+        }
         RunEnding::Unknown => "unknown: Tekstide did not see this run end".to_owned(),
     }
 }

@@ -37,11 +37,11 @@ pub(crate) enum RunReportFieldKind {
 /// nothing is applied until it is submitted.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RunReportField {
-    kind: RunReportFieldKind,
-    buffer: String,
+    pub(super) kind: RunReportFieldKind,
+    pub(super) buffer: String,
     /// For an export: what the file will contain, read **once, when the field
     /// opened**, so rendering never reads a transcript.
-    export_contents: Option<tekstide_core::agent::RunReportContents>,
+    pub(super) export_contents: Option<tekstide_core::agent::RunReportContents>,
 }
 
 /// What the last action said, shown until the next one.
@@ -604,7 +604,7 @@ fn field_view<'a>(state: &'a State, field: &'a RunReportField) -> Element<'a, Me
     for buffer_line in field.buffer.split('\n') {
         lines.push(
             text(format!(
-                "> {}",
+                "| {}",
                 tekstide_core::text_safety::quote_untrusted(buffer_line).as_str()
             ))
             .size(body)

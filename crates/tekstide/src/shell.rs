@@ -12391,11 +12391,7 @@ fn agent_run_detail_view(state: &State) -> Element<'_, Message> {
             .into();
     };
 
-    let mut lines: Vec<Element<'_, Message>> = vec![
-        text(state.catalog.get("agent-run-detail-heading"))
-            .size(state.theme.font_size_heading())
-            .into(),
-    ];
+    let mut lines: Vec<Element<'_, Message>> = Vec::new();
 
     if let Some(line) = agent_run_detail_restored_line(&state.catalog, run) {
         lines.push(text(line).size(state.theme.font_size_status()).into());
@@ -12432,6 +12428,7 @@ fn agent_run_detail_view(state: &State) -> Element<'_, Message> {
 
     // RFC-056 PR-056-D: the controls stay above the report's scrolling content.
     column![
+        text(state.catalog.get("agent-run-detail-heading")).size(state.theme.font_size_heading()),
         run_report::controls_view(state, run),
         scrollable(column(lines).spacing(12))
             .width(Length::Fill)
