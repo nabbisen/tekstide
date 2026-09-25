@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Fixed — a pinned older release could not be installed
+
+- **`cargo install tekstide --version 0.25.0` (and any older release) stopped compiling the day `0.26.0` was published.** Every
+  published `tekstide` up to `0.26.0` declared its `tekstide-core` as `version = "0"` — *any* `0.x` — which opts out of Cargo's own
+  rule that `0.26` and `0.25` are incompatible, so an older app resolved the *newest* core, and `0.26.0`'s core had added three
+  public enum variants the older app's `match`es did not cover. **From this release the app pins its core to its own version**, and
+  a test fails if the pin and the version ever disagree. **Releases already published cannot be repaired — their metadata is
+  frozen.** The documented `cargo install tekstide` (no version) always resolved the newest pair and was never affected. **To install
+  an older release, add `--locked`** — each published release's own lockfile names the core it was built with, and `cargo install
+  tekstide --version 0.25.0 --locked` builds (measured); or install the latest release, or build from that release's git tag.
+- The release procedure gained a post-publish check that resolves the release just published **and the previous one** from the
+  registry.
+
 ## 0.26.0 - The Explorer Asks Git
 
 Status: **released on 2026-09-25.** Published to crates.io (`tekstide-core` and `tekstide`) and tagged `0.26.0` at `3ae07ee`.

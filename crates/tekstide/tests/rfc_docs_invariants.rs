@@ -1060,3 +1060,57 @@ RFC-052 and RFC-053.
             .all(|message| !message.contains("RFC-055"))
     );
 }
+
+// --- RFC-056 PR-056-A: the core pin --------------------------------------------
+
+/// The value of `key = "…"` on the first line of `text` that starts with `key`.
+fn quoted_value(text: &str, key: &str) -> Option<String> {
+    text.lines()
+        .find(|line| line.trim_start().starts_with(key) && line.contains('='))
+        .and_then(|line| line.split('"').nth(1).map(str::to_owned))
+}
+
+/// **Every published `tekstide` up to `0.26.0` pinned its core as `version = "0"`** --
+/// any `0.x`, which opts out of Cargo's own rule that `0.26` and `0.25` are incompatible --
+/// so `cargo install tekstide --version 0.25.0` resolved the newest core and stopped
+/// compiling. The workspace now pins the core to **this release's own version**, and this
+/// fails if that pin and `[workspace.package] version` ever disagree: bumping the version for
+/// a release and forgetting the pin (or the reverse) is a red test, not a broken install.
+#[test]
+fn the_workspace_pins_tekstide_core_to_its_own_version() {
+    let Ok(manifest) = std::fs::read_to_string(repo_root().join("Cargo.toml")) else {
+        eprintln!("skipped: the workspace manifest is not packaged with this crate");
+        return;
+    };
+    let package = manifest
+        .split("[workspace.package]")
+        .nth(1)
+        .and_then(|rest| rest.split("\n[").next())
+        .expect("a [workspace.package] table");
+    let version = quoted_value(package, "version").expect("the workspace version");
+    let dependencies = manifest
+        .split("[workspace.dependencies]")
+        .nth(1)
+        .expect("a [workspace.dependencies] table");
+    let core_line = dependencies
+        .lines()
+        .find(|line| line.trim_start().starts_with("tekstide-core"))
+        .expect("the tekstide-core workspace dependency");
+    let pinned = core_line
+        .split("version")
+        .nth(1)
+        .and_then(|rest| rest.split('"').nth(1))
+        .expect("tekstide-core carries a version");
+    assert_ne!(
+        pinned, "0",
+        "`version = \"0\"` means any 0.x: an older tekstide would resolve a newer core"
+    );
+    assert_eq!(
+        pinned, version,
+        "the tekstide-core pin must be bumped with every release (workspace version {version})"
+    );
+    assert!(
+        core_line.contains("path"),
+        "the pin keeps its path for the workspace build"
+    );
+}

@@ -15,7 +15,12 @@ categories          = ["command-line-utilities", "development-tools"]
 keywords            = ["workspace", "developer-tools", "ai", "cli"]
 
 [workspace.dependencies]
-tekstide-core               = { version = "0", path = "crates/tekstide-core" }
+# RFC-056 PR-056-A: pinned to this release's own version, **not** `"0"`. `"0"` means any 0.x and opts out of
+# Cargo's rule that 0.26 and 0.25 are incompatible, so every published `tekstide` up to `0.26.0` resolves the
+# *newest* core: `cargo install tekstide --version 0.25.0` stopped compiling the day `0.26.0` added three public
+# enum variants. Bumped **with every release** -- `the_workspace_pins_tekstide_core_to_its_own_version` fails if
+# this and `[workspace.package] version` disagree.
+tekstide-core               = { version = "0.26.0", path = "crates/tekstide-core" }
 
 libc                        = "0.2"
 

@@ -144,6 +144,8 @@ in `[workspace.dependencies]` and bump it each release, and add two post-publish
 the new version into a temporary root, and assert the app archive's lockfile names the matching core.
 Published versions cannot be repaired; `0.27.0`'s changelog says so.
 
+**Correction, 2026-09-25 (RFC-056 PR-056-A, measured against the registry): cause B above is wrong for the *published* archives.** The app archives' lockfiles on crates.io name the **matching** core — `0.24.0` → core `0.24.0`, `0.25.0` → `0.25.0`, `0.26.0` → `0.26.0`, read with `curl` and `tar` from `static.crates.io` — and **`cargo install tekstide --version 0.25.0 --locked` builds** (`Installed package tekstide v0.25.0`), while the same command without `--locked` fails with the three `E0004`s. What named the *previous* core was the **local** `target/package` archive, which is packaged before its core is on the registry (`release-checklist.md`'s own note on why the published and local lockfiles differ). So the defect is cause A alone, and **`--locked` is a working remedy for older releases**, which the `0.27.0` changelog now says. The `--locked` install is also what the new post-publish check's lockfile step verifies.
+
 ### A budget test that measures the machine (2026-09-25, RFC-055 review 434)
 
 **`shell::tests::change_review_content_view_build_cost_by_line_count_measurement` builds 100,000

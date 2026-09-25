@@ -13,6 +13,11 @@ This checklist applies before creating a tag or package for a Tekstide release.
       two releases (`0.4.x`, `0.5.0`) without a check because this item didn't say
       which README, and it is the page crates.io actually renders for that crate.
 - [ ] Confirm crate versions match the intended tag.
+- [ ] **The `tekstide-core` pin in `[workspace.dependencies]` is this release's version, not `"0"`.**
+      Bumped with the version, every release (RFC-056 PR-056-A). `the_workspace_pins_tekstide_core_to_its_own_version`
+      fails if they disagree, so this box is a check that the test ran, not a thing to remember. **Read the
+      published-shape manifest, too:** `tar xzOf target/package/tekstide-<v>.crate tekstide-<v>/Cargo.toml | grep -A1
+      'dependencies.tekstide-core'` must say the release's own version.
 - [ ] Confirm future-work themes are preserved in the changelog or follow-up tracking.
 
 ## Corrections
@@ -240,6 +245,18 @@ Checked every release, because a watch that depends on someone remembering is no
       metadata points one commit later. **Publish from the tagged commit if you want them to
       agree**, or accept it knowingly — but do not discover it after the fact twice.
 
+- [ ] **Run `rfcs/handoffs/post-publish-check.sh <version>` for the release just published AND for the previous
+      one** (`--no-install` for the two structural checks alone; without it the script also builds the release
+      with `cargo install tekstide --version <v>` into a temporary root, which is a full build). Added by
+      RFC-056 PR-056-A. **It exists because `0.26.0`'s own verification checked only `0.26.0`**, and the defect
+      was in `0.25.0`: every published `tekstide` up to `0.26.0` pinned its core as `version = "0"` (any `0.x`),
+      so `cargo install tekstide --version 0.25.0` resolved the *newest* core and stopped compiling on three
+      non-exhaustive `match`es the day `0.26.0` was published. A new core can break an old app, and **only an old
+      app shows it** -- so the previous release is not optional. Three checks: the app's `tekstide-core`
+      requirement is this release's own version and not `"0"`; the app archive's `Cargo.lock` names the *matching*
+      core; and the install builds. **A pre-`0.27.0` release fails the first check by construction** (its metadata
+      is frozen and cannot be repaired), so for those the script's failure is the expected record of the defect,
+      not a new one.
 - [ ] `LICENSE` and `NOTICE` present in **both published** archives, and `NOTICE` names the
       versions actually shipped. Checked against the download, not the local package directory.
 
