@@ -86,6 +86,18 @@ says *measured* with no number in the evidence is not ticked.
 - [ ] The book says what the report contains, where it does not go, and that a purge does not chase
       an exported file.
 
+### Required at review 438 (land with D)
+
+- [ ] **Retention takes the transcript alone; the record survives an expiry.**
+      `transcript_retention_days` expires transcripts, and a user's notes are their own writing, not
+      captured content. A purge still takes the record (D2) — the two differ in kind.
+- [ ] **The early return on a tombstone is fixed**, so a run whose transcript is already a tombstone
+      is still purgeable. This is the hole that made the consistent reading look necessary.
+- [ ] **The purge dialog keeps its number and fixes its noun**: it removes runs, their transcripts
+      **and their records**. Trust Settings counts the same set, or says its figure counts
+      transcripts only. One thing may not have two numbers on two screens with no way to tell why.
+- [ ] The book and the changelog follow both, replacing what PR-056-C wrote about retention.
+
 ## Whole-RFC
 
 - [ ] `REQ-AGENT-011` and `REQ-AGENT-015` move to implemented **with evidence a user can reach both**

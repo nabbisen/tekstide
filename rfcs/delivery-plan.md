@@ -116,6 +116,14 @@ carry no dates — a release ships when its RFC closes and the gate is green thr
 | `0.33.0` | **060** Command Approval A User Can Reach | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **A 1.0 blocker**: "command approval for adapter-supported workflows" is in the 1.0 minimum list, and `to_ai_cli_profile` sets `Supervised` unconditionally, so no user can reach one |
 | `0.34.0`+ | **028**, **029**, NFR verification | `NFR-PORT-001`..`003`; docs, CI, release automation; every performance budget | M14, the 1.0 candidate band |
 
+### Owner-requested, unscheduled: two rows at the top of the window (2026-09-26)
+
+Relayed through the dev team at review 438, while the owner was watching a test window: split the top
+of the window into **two rows** — menus and the title logo above, the project tabs below. Nothing was
+changed for it in RFC-056; it is a frame-layout change, it invalidates every GUI capture that shows
+the top of the window, and it wants its own small slice rather than a corner of someone else's.
+Recorded here the way the Project Board's cards were, so it is not absorbed invisibly.
+
 ### Open question: does exporting a report deserve an audit record? (2026-09-25, RFC-056 D11)
 
 **Decided *not* in RFC-056, and recorded rather than dropped.** Exporting a report writes
