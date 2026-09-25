@@ -2,7 +2,7 @@
 
 ## 0.26.0 - The Explorer Asks Git
 
-Status: release candidate; not yet published or tagged.
+Status: **released on 2026-09-25.** Published to crates.io (`tekstide-core` and `tekstide`) and tagged `0.26.0` at `3ae07ee`.
 
 The file explorer stopped guessing which things are ignored from a three-name list and asks Git. Inside a repository an ignored file is
 marked, an ignored folder is collapsed, `explorer.show_ignored` decides whether the ignored files are drawn at all, and the sidebar says where
