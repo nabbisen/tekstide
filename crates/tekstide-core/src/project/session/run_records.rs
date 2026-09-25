@@ -7,6 +7,7 @@
 //! read as running or failed, or hold the close prompt open, because it is
 //! not in any collection those read.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{
@@ -14,10 +15,11 @@ use crate::domain::{
     RunClassification, TranscriptId,
 };
 use crate::transcript::{
-    RunRecord, RunRecordRead, SetAsideReason, read_run_record, write_run_record,
+    RunRecord, RunRecordRead, SetAsideReason, read_run_record, remove_run_record_files,
+    run_record_bytes, write_run_record,
 };
 
-use super::{ProjectSession, TranscriptLoadSummary};
+use super::{ProjectSession, ProjectTranscriptError, TranscriptLoadSummary};
 
 /// What writing one run's record did.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -196,7 +198,10 @@ impl ProjectSession {
                 .find(|transcript| transcript.agent_run_id() == Some(&run.id))
                 .filter(|transcript| !transcript.is_tombstone())
                 .and_then(|transcript| transcript.storage_path.parent())
-                .map(Path::to_path_buf),
+                .map(Path::to_path_buf)
+                // A run whose transcript retention removed keeps its record,
+                // and still knows where it is (review 438).
+                .or_else(|| self.record_directories_after_expiry.get(&run.id).cloned()),
             // A restored run whose transcript is purged is forgotten by the
             // purge (`forget_restored_run_of`), so one that is still here has
             // a directory whose record is live.
@@ -204,6 +209,85 @@ impl ProjectSession {
                 self.restored_run_directories.get(&run.id).cloned()
             }
         }
+    }
+
+    /// The run a transcript belongs to: launched here, or restored from the
+    /// record found beside it.
+    pub(super) fn run_id_of_transcript(&self, index: usize) -> Option<AgentRunId> {
+        let transcript = &self.transcripts[index];
+        transcript.agent_run_id().cloned().or_else(|| {
+            self.restored_agent_runs
+                .iter()
+                .find(|run| run.transcript_ref.as_ref() == Some(&transcript.id))
+                .map(|run| run.id.clone())
+        })
+    }
+
+    /// Where the record of a **tombstoned** transcript's run still is, if it
+    /// still is anywhere (review 438). Read from the session's own maps, never
+    /// from a path the tombstone no longer holds.
+    pub(super) fn record_directory_of_transcript(
+        &self,
+        index: usize,
+    ) -> Option<(AgentRunId, PathBuf)> {
+        let run_id = self.run_id_of_transcript(index)?;
+        let directory = self
+            .record_directories_after_expiry
+            .get(&run_id)
+            .or_else(|| self.restored_run_directories.get(&run_id))?
+            .clone();
+        (run_record_bytes(&directory) > 0).then_some((run_id, directory))
+    }
+
+    /// Runs whose record is on disk and whose transcript is not: a tombstone
+    /// retention left, or a record found with no transcript beside it.
+    pub(super) fn records_without_a_live_transcript(&self) -> Vec<(AgentRunId, PathBuf)> {
+        let mut found: Vec<(AgentRunId, PathBuf)> = Vec::new();
+        for index in 0..self.transcripts.len() {
+            if self.transcripts[index].is_tombstone()
+                && let Some(entry) = self.record_directory_of_transcript(index)
+                && !found.iter().any(|(id, _)| *id == entry.0)
+            {
+                found.push(entry);
+            }
+        }
+        for run in &self.restored_agent_runs {
+            let has_live_transcript = run
+                .transcript_ref
+                .as_ref()
+                .and_then(|id| self.transcripts.iter().find(|t| &t.id == id))
+                .is_some_and(|transcript| !transcript.is_tombstone());
+            if has_live_transcript || found.iter().any(|(id, _)| *id == run.id) {
+                continue;
+            }
+            if let Some(directory) = self.restored_run_directories.get(&run.id)
+                && run_record_bytes(directory) > 0
+            {
+                found.push((run.id.clone(), directory.clone()));
+            }
+        }
+        found
+    }
+
+    /// Removes a run's record files and then its directory **only if empty**,
+    /// and drops the run from the session. Returns the bytes removed.
+    pub(super) fn remove_records_of(
+        &mut self,
+        run_id: &AgentRunId,
+        directory: &Path,
+    ) -> Result<u64, ProjectTranscriptError> {
+        let removed = remove_run_record_files(directory).map_err(|_| {
+            ProjectTranscriptError::RunRecordDeleteFailed {
+                path: directory.to_path_buf(),
+            }
+        })?;
+        let _ = fs::remove_dir(directory);
+        self.restored_agent_runs.retain(|run| run.id != *run_id);
+        self.restored_run_directories.remove(run_id);
+        self.record_directories_after_expiry.remove(run_id);
+        self.run_records_written.remove(run_id);
+        self.refresh_runtime_summary_from_collections();
+        Ok(removed)
     }
 
     /// RFC-056 D2: a purged transcript takes its restored run with it. The

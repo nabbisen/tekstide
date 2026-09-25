@@ -933,35 +933,138 @@ fn a_purge_that_cannot_remove_the_record_leaves_the_transcript_and_can_be_retrie
     assert!(!run_dir.exists());
 }
 
-/// Retention deletes through the same purge, so **an expired transcript takes
-/// its run's record with it** — otherwise the retention age would leave behind
-/// exactly what a purge is not allowed to.
+fn expire_everything(project: &mut ProjectSession) -> crate::project::TranscriptRetentionCleanup {
+    let far_future =
+        crate::domain::DomainTimestamp::from_utc_string("2099-01-01T00:00:00Z").unwrap();
+    project.apply_transcript_retention(
+        crate::transcript::TranscriptRetentionLimits::new(1 << 20, 1 << 20, 1 << 20, 30),
+        0,
+        &far_future,
+    )
+}
+
+/// Review 438: **retention expires transcripts, not the user's writing.**
+/// `transcript_retention_days` cannot be expected to delete a note, so an
+/// expired transcript leaves its run's record — and the run — in place.
 #[test]
-fn a_transcript_expired_by_retention_takes_its_records_with_it() {
-    let dirs = TestDirs::new("retention-takes-record");
-    let (mut project, _, run_dir) = project_with_running_run(&dirs, 1);
+fn a_transcript_expired_by_retention_leaves_the_record_and_the_run() {
+    let dirs = TestDirs::new("retention-keeps-record");
+    let (mut project, run_id, run_dir) = project_with_running_run(&dirs, 1);
     project.persist_agent_run_records();
     drop(project);
     let mut reopened = project_session(&dirs, 1);
     reopened.load_transcripts_from_disk(&dirs.state_root);
-    let far_future =
-        crate::domain::DomainTimestamp::from_utc_string("2099-01-01T00:00:00Z").unwrap();
 
-    let cleanup = reopened.apply_transcript_retention(
-        crate::transcript::TranscriptRetentionLimits::new(1 << 20, 1 << 20, 1 << 20, 30),
-        0,
-        &far_future,
-    );
+    let cleanup = expire_everything(&mut reopened);
 
     assert_eq!(
         cleanup.expired.purged_transcripts, 1,
         "positive control: it expired"
     );
+    assert!(!run_dir.join("transcript.log").exists());
     assert!(
-        !run_dir.exists(),
-        "the record and the directory went with it"
+        run_dir.join(RUN_RECORD_FILE_NAME).exists(),
+        "the record survives an expiry"
     );
-    assert!(reopened.restored_agent_runs().is_empty());
+    assert_eq!(reopened.restored_agent_runs().len(), 1);
+    let write = reopened
+        .set_agent_run_notes(&run_id, "written after the transcript expired")
+        .unwrap();
+    assert_eq!(
+        write,
+        RunRecordWrite::Written,
+        "and it can still be annotated"
+    );
+    assert_eq!(
+        read_json(&run_dir.join(RUN_RECORD_FILE_NAME))["notes"],
+        "written after the transcript expired"
+    );
+}
+
+/// The same for a run this session launched: its tombstone's own path is
+/// empty, so the session remembers where the record is.
+#[test]
+fn a_launched_runs_record_survives_its_transcripts_expiry_and_can_still_be_written() {
+    let dirs = TestDirs::new("retention-launched");
+    let (mut project, run_id, run_dir) = project_with_running_run(&dirs, 1);
+    project
+        .agent_run_mut_for_test(&run_id)
+        .transition_to(AgentRunStatus::Completed)
+        .unwrap();
+    project.persist_agent_run_records();
+
+    let cleanup = expire_everything(&mut project);
+
+    assert_eq!(cleanup.expired.purged_transcripts, 1, "positive control");
+    assert!(run_dir.join(RUN_RECORD_FILE_NAME).exists());
+    let write = project
+        .set_agent_run_notes(&run_id, "after expiry")
+        .unwrap();
+    assert_eq!(write, RunRecordWrite::Written);
+    assert_eq!(
+        read_json(&run_dir.join(RUN_RECORD_FILE_NAME))["notes"],
+        "after expiry"
+    );
+}
+
+/// Review 438's hole, closed: a tombstone used to return early from purge, so
+/// a record retention left could never be removed by anything the user does.
+#[test]
+fn a_purge_after_retention_still_takes_the_record_and_the_directory() {
+    let dirs = TestDirs::new("purge-after-retention");
+    let (mut project, run_id, run_dir) = project_with_running_run(&dirs, 1);
+    project
+        .agent_run_mut_for_test(&run_id)
+        .transition_to(AgentRunStatus::Completed)
+        .unwrap();
+    project.persist_agent_run_records();
+    expire_everything(&mut project);
+    assert!(run_dir.join(RUN_RECORD_FILE_NAME).exists(), "precondition");
+    let record_bytes = fs::metadata(run_dir.join(RUN_RECORD_FILE_NAME))
+        .unwrap()
+        .len();
+    assert_eq!(
+        project.purgeable_run_data(),
+        (1, record_bytes),
+        "the dialog counts a run whose transcript is already gone"
+    );
+
+    let purged = project.purge_project_transcripts().unwrap();
+
+    assert_eq!(purged.bytes_removed, record_bytes);
+    assert!(!run_dir.exists());
+    assert_eq!(project.purgeable_run_data(), (0, 0));
+}
+
+/// The record with no transcript beside it — which retention now makes an
+/// ordinary state, not a corner: the next session finds the record alone.
+#[test]
+fn a_purge_takes_a_record_whose_transcript_retention_removed_in_an_earlier_session() {
+    let dirs = TestDirs::new("record-only");
+    let (mut project, _, run_dir) = project_with_running_run(&dirs, 1);
+    project.persist_agent_run_records();
+    drop(project);
+    let mut middle = project_session(&dirs, 1);
+    middle.load_transcripts_from_disk(&dirs.state_root);
+    expire_everything(&mut middle);
+    drop(middle);
+    assert!(
+        run_dir.join(RUN_RECORD_FILE_NAME).exists() && !run_dir.join("transcript.log").exists()
+    );
+
+    let mut later = project_session(&dirs, 1);
+    later.load_transcripts_from_disk(&dirs.state_root);
+    assert_eq!(
+        later.restored_agent_runs().len(),
+        1,
+        "the run is still listed"
+    );
+    assert_eq!(later.purgeable_run_data().0, 1);
+    later.purge_project_transcripts().unwrap();
+
+    assert!(!run_dir.exists());
+    assert!(later.restored_agent_runs().is_empty());
+    assert_eq!(later.runtime_summary().agent_run_count, Some(0));
 }
 
 fn tree_contains(root: &Path, needle: &[u8]) -> bool {

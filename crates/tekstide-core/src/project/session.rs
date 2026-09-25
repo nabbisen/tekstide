@@ -110,6 +110,10 @@ pub struct ProjectSession {
     run_records_written: std::collections::HashMap<AgentRunId, crate::transcript::RunRecord>,
     /// RFC-056 D7: what this session set aside, for the board to name.
     run_records_set_aside: RunRecordsSetAside,
+    /// RFC-056, review 438: where a launched run's record still is after
+    /// retention removed its transcript. The tombstone's own path is empty,
+    /// so this is how a later annotation and a later purge find the record.
+    record_directories_after_expiry: std::collections::HashMap<AgentRunId, PathBuf>,
 }
 
 mod run_records;
@@ -156,6 +160,7 @@ impl ProjectSession {
             restored_run_directories: std::collections::HashMap::new(),
             run_records_written: std::collections::HashMap::new(),
             run_records_set_aside: RunRecordsSetAside::default(),
+            record_directories_after_expiry: std::collections::HashMap::new(),
         }
     }
 
@@ -444,6 +449,22 @@ impl ProjectSession {
                 transcript_bytes + record_bytes
             })
             .sum()
+    }
+
+    /// RFC-056 D2, review 438: **runs** a purge would remove data of — the
+    /// purgeable transcripts, plus runs whose transcript retention already
+    /// removed and whose record survived. The purge dialog counts this, and
+    /// `bytes` with it: what will go, records included, never less.
+    pub fn purgeable_run_data(&self) -> (u64, u64) {
+        let survivors = self.records_without_a_live_transcript();
+        let bytes: u64 = survivors
+            .iter()
+            .map(|(_, directory)| run_record_bytes(directory))
+            .sum();
+        (
+            self.purgeable_transcript_count() + survivors.len() as u64,
+            self.purgeable_transcript_bytes() + bytes,
+        )
     }
 
     /// RFC-050 D3′: purgeable transcripts whose run, launched by this session,
@@ -1055,7 +1076,7 @@ impl ProjectSession {
             .iter()
             .position(|transcript| transcript.id == *transcript_id)
             .ok_or(ProjectTranscriptError::MissingTranscript)?;
-        self.purge_transcript_at(index)
+        self.purge_transcript_at(index, PurgeScope::UserPurge)
     }
 
     pub fn purge_agent_run_transcripts(
@@ -1083,7 +1104,14 @@ impl ProjectSession {
             .map(|transcript| transcript.id.clone())
             .collect::<Vec<_>>();
 
-        self.purge_transcripts_by_id(transcript_ids)
+        let mut summary = self.purge_transcripts_by_id(transcript_ids)?;
+        // RFC-056 D2, review 438: a record whose transcript retention already
+        // removed is still a run's data, and a purge is the user asking for
+        // it to go. Reached from the session's own maps, never from a scan.
+        for (run_id, directory) in self.records_without_a_live_transcript() {
+            summary.bytes_removed += self.remove_records_of(&run_id, &directory)?;
+        }
+        Ok(summary)
     }
 
     /// RFC-049 PR-049-B: expire, then relieve byte budgets, deleting only
@@ -1166,7 +1194,7 @@ impl ProjectSession {
             if mark_transcript_expired_if_due(&mut self.transcripts[index], limits, now) {
                 cleanup.marked_expired += 1;
             }
-            match self.purge_transcript_at(index) {
+            match self.purge_transcript_at(index, PurgeScope::Retention) {
                 Ok(summary) => cleanup.expired.merge(summary),
                 Err(error) => cleanup.failures.push(error),
             }
@@ -1177,7 +1205,7 @@ impl ProjectSession {
             if !budget_exceeded(project_bytes, retained_bytes_in_other_projects, limits) {
                 break;
             }
-            match self.purge_transcript_at(index) {
+            match self.purge_transcript_at(index, PurgeScope::Retention) {
                 Ok(summary) => cleanup.budget.merge(summary),
                 Err(error) => {
                     cleanup.failures.push(error);
@@ -1719,14 +1747,25 @@ impl ProjectSession {
     fn purge_transcript_at(
         &mut self,
         index: usize,
+        scope: PurgeScope,
     ) -> Result<ProjectTranscriptPurgeSummary, ProjectTranscriptError> {
         let transcript_id = self.transcripts[index].id.clone();
         if self.transcripts[index].is_tombstone() {
-            return Ok(ProjectTranscriptPurgeSummary {
+            let mut summary = ProjectTranscriptPurgeSummary {
                 requested_transcripts: 1,
                 tombstones_preserved: 1,
                 ..ProjectTranscriptPurgeSummary::default()
-            });
+            };
+            // RFC-056 D2, review 438: a tombstone is a transcript retention
+            // already removed, and **the run's record survived it on purpose**.
+            // A purge must still be able to take that record, or the record
+            // could never be removed by anything the user can do.
+            if scope == PurgeScope::UserPurge
+                && let Some((run_id, directory)) = self.record_directory_of_transcript(index)
+            {
+                summary.bytes_removed = self.remove_records_of(&run_id, &directory)?;
+            }
+            return Ok(summary);
         }
         // RFC-050 D3: purge obeys the lock. A found file some process was
         // still writing when the project opened is never unlinked under it.
@@ -1751,33 +1790,47 @@ impl ProjectSession {
             });
         }
 
-        // RFC-056 D2: **the run's record goes with its transcript**, or the
-        // purge is a lie -- `run.json` names the prompt summary, the ids and
-        // the user's own notes. The record files come first, so a failure
-        // leaves the transcript in place and a retry finds both. Then the
-        // transcript, as before. Then the directory, by `remove_dir`, which
-        // the operating system refuses unless the directory is empty: **a
-        // directory this purge did not find empty is never removed**, and a
-        // file in it that this product did not write is never touched.
-        // Only a directory in exactly the layout the product writes is looked
-        // at (`product_run_directory_of`); any other transcript path keeps
-        // the old behaviour, its file and nothing beside it.
+        // RFC-056 D2: **a purge takes the run's record with its transcript**,
+        // or the purge is a lie -- `run.json` names the prompt summary, the
+        // ids and the user's own notes. **Retention does not** (review 438):
+        // `transcript_retention_days` expires transcripts, and a person cannot
+        // predict from that name that it will delete what they wrote. The
+        // record files come first, so a failure leaves the transcript in
+        // place and a retry finds both. Then the transcript, as before. Then
+        // the directory, by `remove_dir`, which the operating system refuses
+        // unless the directory is empty: **a directory this purge did not find
+        // empty is never removed**, and a file in it that this product did not
+        // write is never touched. Only a directory in exactly the layout the
+        // product writes is looked at (`product_run_directory_of`); any other
+        // transcript path keeps the old behaviour, its file and nothing beside
+        // it.
         let run_directory = product_run_directory_of(&storage_path);
-        let record_bytes = match &run_directory {
-            Some(directory) => remove_run_record_files(directory).map_err(|_| {
-                ProjectTranscriptError::DeleteFailed {
+        let record_bytes = match (&run_directory, scope) {
+            (Some(directory), PurgeScope::UserPurge) => remove_run_record_files(directory)
+                .map_err(|_| ProjectTranscriptError::DeleteFailed {
                     transcript_id: transcript_id.clone(),
                     path: directory.clone(),
-                }
-            })?,
-            None => 0,
+                })?,
+            _ => 0,
         };
         let bytes_removed = remove_transcript_file(&transcript_id, &storage_path)? + record_bytes;
+        let run_of_transcript = self.run_id_of_transcript(index);
         self.transcripts[index].mark_purged();
         if let Some(directory) = &run_directory {
             let _ = fs::remove_dir(directory);
+            // A directory that is still there holds the record retention
+            // left. Remember where, since the tombstone no longer knows.
+            if scope == PurgeScope::Retention
+                && directory.is_dir()
+                && let Some(run_id) = run_of_transcript
+            {
+                self.record_directories_after_expiry
+                    .insert(run_id, directory.clone());
+            }
         }
-        self.forget_restored_run_of(&transcript_id);
+        if scope == PurgeScope::UserPurge {
+            self.forget_restored_run_of(&transcript_id);
+        }
         self.record_activity();
 
         Ok(ProjectTranscriptPurgeSummary {
@@ -2216,6 +2269,14 @@ fn other_run_temporally_overlaps_baseline(run: &AgentRun, baseline: &ReviewBasel
         .is_none_or(|ended_at| ended_at.as_str() >= baseline.captured_at.as_str())
 }
 
+/// Who is deleting a transcript. **A purge takes the run's record; retention
+/// does not** (RFC-056 D2, review 438).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PurgeScope {
+    UserPurge,
+    Retention,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ProjectTranscriptPurgeSummary {
     pub requested_transcripts: u64,
@@ -2344,6 +2405,10 @@ pub enum ProjectTranscriptError {
     },
     DeleteFailed {
         transcript_id: TranscriptId,
+        path: PathBuf,
+    },
+    /// RFC-056: a run's record could not be removed, so nothing beside it was.
+    RunRecordDeleteFailed {
         path: PathBuf,
     },
 }
