@@ -287,3 +287,9 @@ before the third session I planted `run.json.corruption-notes` (36 bytes) in run
 
 A **record with no transcript** (the user deleted `transcript.log` by hand) is not reached by purge, which walks transcripts. It cannot arise through the product
 (every product deletion goes through the function above). Named, not built.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs` (the book and the changelog changed), `rfc_docs_invariants` 16: clean.
+**Three consecutive full-workspace runs, `--no-fail-fast`, fresh `TMPDIR` (`/dev/shm/tek056g`): `671 + 16 + 1024` = 1,711 passed, 0 failed, 0 entries left after each**
+(loads at the end 7.55, 9.54, 11.37). No intermittent this time. `git diff --cached --check` clean before each commit.
