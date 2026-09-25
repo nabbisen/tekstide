@@ -116,6 +116,25 @@ carry no dates — a release ships when its RFC closes and the gate is green thr
 | `0.33.0` | **060** Command Approval A User Can Reach | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **A 1.0 blocker**: "command approval for adapter-supported workflows" is in the 1.0 minimum list, and `to_ai_cli_profile` sets `Supervised` unconditionally, so no user can reach one |
 | `0.34.0`+ | **028**, **029**, NFR verification | `NFR-PORT-001`..`003`; docs, CI, release automation; every performance budget | M14, the 1.0 candidate band |
 
+### A pinned older release no longer installs (2026-09-25, `0.26.0` post-publish)
+
+**Found by resolving a pinned *older* release during `0.26.0`'s post-publish check, not the one just
+published.** `cargo install tekstide --version 0.25.0` fails to compile: it resolves
+`tekstide-core 0.26.0` and dies on three `E0004` non-exhaustive patterns, because every published
+`tekstide` carries `[dependencies.tekstide-core] version = "0"` — *any* `0.x` — which opts out of
+Cargo's own rule that `0.26` and `0.25` are incompatible.
+
+`--locked` does not rescue it: the app archives' own lockfiles name the **previous** core
+(`0.24.0` → core `0.23.0`, `0.25.0` → core `0.24.0`), because the app was packaged before its core
+was on the registry. `0.26.0`'s lock names core `0.26.0` and is correct — `cargo publish --workspace`
+uploads core first, then re-packages the app.
+
+`0.26.0` itself installs correctly and nothing is yanked; the documented `cargo install tekstide` path
+was never affected. **Required for `0.27.0`:** pin `tekstide-core = { version = "0.27.0", path = … }`
+in `[workspace.dependencies]` and bump it each release, and add two post-publish gate steps — install
+the new version into a temporary root, and assert the app archive's lockfile names the matching core.
+Published versions cannot be repaired; `0.27.0`'s changelog says so.
+
 ### A budget test that measures the machine (2026-09-25, RFC-055 review 434)
 
 **`shell::tests::change_review_content_view_build_cost_by_line_count_measurement` builds 100,000
