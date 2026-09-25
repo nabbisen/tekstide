@@ -205,3 +205,85 @@ passed, 0 failed, 0 entries left in `TMPDIR`, after each** (loads at the end of 
 **An earlier attempt at this gate was not clean and was not counted:** in run 1, `closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`
 (the registered row 8, PTY read timing) failed with its captured message, at load 2.35; runs 2 and 3 were green. It passed in the redone gate above.
 It has a dated row in `test-process-leak.md`. It is not this slice's: nothing here touches terminal termination.
+
+## PR-056-C — purge takes it too
+
+### Order of work, as the review asked
+
+1. **Q1** (`8b4bed4`): `is_run_record_file_name` is exact — `run.json`, `run.json.tmp`, `run.json.corrupt`, or `run.json.corrupt-` followed by one or more ASCII digits.
+   Its test was written first and **failed against the prefix matcher** (`"run.json.corruption-notes" is a name this product never writes`); a second test
+   shows the same bug where it cost something in B, a lookalike file counted as *the product's own* bytes. Ablated back to `starts_with`: both fail.
+2. **The third-file test** (`fff6260`), committed **before any code that deletes a record or a directory existed**. It plants `run.json.corruption-notes` and
+   an unrelated `notes-from-a-human.txt`, purges, and asserts a positive control (the transcript is gone), that both files survive, and that the directory survives.
+3. **The deleting code** (`64d3a45`).
+
+### What purge does now
+
+`purge_transcript_at` — the one function user purge, per-run purge **and both retention passes** go through — now: (1) removes the run's record files, (2) removes
+the transcript as before, (3) `fs::remove_dir`s the run directory, which the operating system refuses unless it is empty, (4) drops a restored run from the
+session. **Only a directory in exactly the layout the product writes is looked at**: `product_run_directory_of` requires a file named `transcript.log` in a real
+directory (no symlink) named `agent-run-<lowercase hyphenated uuid>`. A transcript at any other path keeps the old behaviour — its file and nothing beside it.
+The record files are matched by the exact names above, **regular files only**: a symlink or a directory carrying one of those names is left alone.
+`remove_dir_all` is not used anywhere; a directory is never removed by anything but `remove_dir`.
+
+**The record files go first, then the transcript**, so a failed record removal leaves the transcript beside it and a retry finds both
+(`a_purge_that_cannot_remove_the_record_leaves_the_transcript_and_can_be_retried`). *That order is a decision I could not test in isolation*: making the
+directory read-only fails the transcript's removal too, so reversing the order (ablation C9) is caught only by the byte accounting, not by the retry test.
+I say so rather than claim the order is guarded.
+
+### Tests (10 new; the two B tests about a purged run's late annotation were rewritten)
+
+| Checklist box | Test |
+| --- | --- |
+| directory only if empty; the third file | `purge_never_removes_a_directory_it_did_not_find_empty_or_a_file_it_did_not_write` |
+| the record and every set-aside name go, then the empty directory | `purge_removes_the_transcript_every_record_file_and_then_the_empty_directory` (`.tmp`, `.corrupt`, `.corrupt-1`, `.corrupt-42`) |
+| regular files, exact names; a symlink or directory with a record's name survives | `purge_deletes_only_regular_files_by_exact_name_and_leaves_the_rest` (the symlink's target is checked too) |
+| only the product's layout is touched | `a_transcript_outside_the_products_layout_is_purged_alone` |
+| dialog counts and bytes removed include the records | the first test asserts `purgeable_transcript_bytes() == on disk` and `bytes_removed == on disk` |
+| **a search of the state directory** finds nothing | `after_a_purge_nothing_on_disk_names_the_prompt_or_the_notes` — unique needles in the prompt summary and the notes, found before the purge (positive control) and **not in any file or file name** after, nor the run id |
+| a restored run leaves with its record | `a_purged_restored_run_leaves_the_session_and_the_board_count`, `a_purged_restored_run_cannot_be_annotated_back_into_existence`, `a_purged_run_is_not_brought_back_by_a_late_annotation` |
+| retention takes it too | `a_transcript_expired_by_retention_takes_its_records_with_it` (a real expiry, positive control `expired.purged_transcripts == 1`) |
+| failure leaves both | the retry test above |
+
+### Ablations
+
+| # | Ablation | Failed |
+| --- | --- | --- |
+| C1 | the record files are not removed | 7 tests, including the search test and the directory test |
+| **C2** | **delete by prefix (`run.json*`)** | **`purge_never_removes_a_directory_it_did_not_find_empty_or_a_file_it_did_not_write` alone**, *"a file this product never wrote is not deleted"* |
+| C3 | `remove_dir_all` in place of `remove_dir` | the third-file test and the exact-name test |
+| C4 | symlinks removed too | the exact-name test alone |
+| C5 | the layout guard removed | `a_transcript_outside_the_products_layout_is_purged_alone` alone |
+| C6 | the dialog omits the record bytes | the first purge test alone |
+| C7 | `bytes_removed` omits the record | the same test alone |
+| C8 | a restored run is not forgotten | the two restored-run tests |
+| C9 | transcript removed before the record | the byte-accounting assertion only (see above) |
+| C10 | record removal disabled, retention path | the retention test alone |
+
+The sharp one is C2: the plan's danger, made real, is caught by exactly the file the review named.
+
+### Live walk
+
+Release binary at `64d3a45`, fixtures in `mktemp -d` under `/dev/shm`, focus-verified `wtype`, by window id. Two runs launched in two sessions, each **killed with the app**;
+before the third session I planted `run.json.corruption-notes` (36 bytes) in run 1's folder and a `run.json.corrupt` (26 bytes) in run 2's.
+
+| Step | Result | Evidence |
+| --- | --- | --- |
+| Trust Settings | *Retained locally: 2 transcripts (100 bytes)*, and **36 bytes** "belong to no project … or are files Tekstide does not recognise" — **the lookalike only**; the two `run.json` and the `.corrupt` are counted as the product's own | `01-` |
+| Purge dialog | *permanently deletes 2 transcripts **(1,706 bytes)*** = 100 + 2 × 790 (the records) + 26 (the set-aside file); the lookalike's 36 is not in it | `02-` |
+| After the purge | Trust Settings reads *0 transcripts (0 bytes)*, the 36 bytes still listed. **On disk: run 2's folder is gone; run 1's folder holds exactly `run.json.corruption-notes`** | `03-`, `04-` |
+
+### Two things I am flagging, not deciding
+
+1. **The purge dialog's sentence now says *"2 transcripts (1,706 bytes)"* while Trust Settings says *"2 transcripts (100 bytes)"*.** The dialog's figure is what will be
+   removed (D2 asks for that), so it is the honest one; but the word *transcripts* now covers run records, and the two figures on two screens disagree. I did not
+   reword either: the wording is yours, and the catalog line is `transcript-purge-*`. A one-clause change to the dialog (*"…and their run records"*) would close it.
+2. **Retention also takes the record.** D2 speaks of purge; the retention passes share the function, so an expired transcript takes its run's record — including
+   the user's notes, once D exists. The alternative (retention keeps the record) has a hole: `purge_transcript_at` returns early for a tombstone, so a record left
+   by retention could then never be purged. I took the consistent reading and said so in the book and the changelog; it is your call whether notes should outlive
+   a transcript's expiry.
+
+### Not handled
+
+A **record with no transcript** (the user deleted `transcript.log` by hand) is not reached by purge, which walks transcripts. It cannot arise through the product
+(every product deletion goes through the function above). Named, not built.
