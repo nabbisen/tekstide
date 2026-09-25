@@ -14917,6 +14917,69 @@ fn a_restored_run_says_it_does_not_know_its_ending_and_is_never_called_finished(
     );
 }
 
+/// Review 438's ruling: **one thing may not have two numbers on two screens with
+/// no way to tell why.** The purge dialog counts what will go — runs, their
+/// transcripts and their records — and Trust Settings says its figure counts
+/// transcripts only. Here the dialog is opened over a run whose transcript
+/// retention already removed, so a count of transcripts alone would say `0`.
+#[test]
+fn the_purge_dialog_counts_runs_and_records_and_trust_settings_says_what_its_figure_omits() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("purge-dialog-runs");
+    let project_id = app_shell
+        .add_project_from_path(&project_dir)
+        .unwrap()
+        .project_id()
+        .clone();
+    let state_root = fresh_project_dir("purge-dialog-runs-state");
+    let run_id = tekstide_core::domain::AgentRunId::new_uuid();
+    let run_dir = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(run_id.as_str());
+    std::fs::create_dir_all(&run_dir).unwrap();
+    let mut source = tekstide_core::domain::AgentRun::draft(
+        project_id.clone(),
+        "fake-ai-cli",
+        "a run",
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+    source.id = run_id.clone();
+    let record = tekstide_core::transcript::RunRecord::from_run(&source);
+    tekstide_core::transcript::write_run_record(&run_dir, &record).unwrap();
+    let record_bytes = std::fs::metadata(run_dir.join("run.json")).unwrap().len();
+    let mut state = state_with(app_shell);
+    state
+        .app_shell
+        .state_mut()
+        .project_mut(&project_id)
+        .unwrap()
+        .load_transcripts_from_disk(&state_root);
+
+    super::open_transcript_purge_dialog(&mut state);
+
+    let Some(ModalContent::TranscriptPurge(modal)) = &state.modal else {
+        panic!("the purge dialog should be open");
+    };
+    assert_eq!(
+        modal.transcript_count, 1,
+        "the run whose transcript is gone is counted"
+    );
+    assert_eq!(modal.retained_bytes, record_bytes);
+    let body = super::transcript_purge_dialog_body(&state.catalog, modal);
+    assert!(body.contains("transcript and run record"), "{body}");
+    let trust_line = state.catalog.get_with_args(
+        "trust-settings-retained-transcripts",
+        &super::CatalogArgs::new()
+            .number("count", 1u64)
+            .number("bytes", 10u64),
+    );
+    assert!(
+        trust_line.contains("not counting their run records"),
+        "{trust_line}"
+    );
+}
+
 /// RFC-049 D4′: **the run's detail says why it has no transcript**, and says
 /// something different from the generic "no transcript is available" — which
 /// describes what a reader could not find, not a run that was never given one.

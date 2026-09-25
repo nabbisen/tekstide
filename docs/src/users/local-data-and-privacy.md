@@ -102,10 +102,15 @@ approvals, change sets and audit events it touched — at most 200 of each, and 
 some out. It is what lets a project you reopen list its earlier runs with their transcripts attached.
 A run that was still going when Tekstide closed says it does not know when it ended.
 
-**Purging a run's transcript removes its record too**, and so does a transcript removed by the retention
-age or the size limits — the record names what the transcript's run was about, so it goes with it. The run's
-folder is removed only when nothing else is left in it: **a file Tekstide did not write is never deleted,
-and it keeps its folder.** A `run.json` Tekstide cannot read is renamed `run.json.corrupt` beside the
+**Purging removes a run's record along with its transcript. The retention age does not.**
+`transcript_retention_days` and the size limits expire *transcripts*; a run's record — and, once you write
+them, its classification and notes, which are your own words — stays, and the run is still listed. Purging
+afterwards removes it, whether or not the transcript is still there: **Purge** in Trust Settings is what
+asks for a run's stored data to go. The purge dialog counts runs and the bytes of their transcripts *and*
+records; Trust Settings' *Retained locally* figure counts transcripts only, and says so.
+
+The run's folder is removed only when nothing else is left in it: **a file Tekstide did not write is never
+deleted, and it keeps its folder.** A `run.json` Tekstide cannot read is renamed `run.json.corrupt` beside the
 transcript rather than deleted, the Project Board says so, and a purge removes that too.
 
 ### The two controls, on Trust Settings (`Ctrl+Alt+U`)

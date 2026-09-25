@@ -908,7 +908,7 @@ trust-settings-capture-allow-button = Allow Future Capture
 trust-settings-retained-transcripts = Retained locally: { $count ->
     [one] {$count} transcript
    *[other] {$count} transcripts
-} ({ $bytes } bytes)
+} ({ $bytes } bytes), not counting their run records
 trust-settings-purge-button = Purge Project Transcripts…
 # RFC-050 PR-050-C (D6′): bytes under this state directory's `transcripts/` that
 # no purge will delete. After a recent-list reset this is every transcript the
@@ -1189,10 +1189,13 @@ trust-grant-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape alw
 # purge removes every trace: a tombstone remains
 # (`purge_project_transcripts`'s own real behavior), so this message
 # says only what disappears -- the bytes -- not "all data" or similar.
-transcript-purge-dialog-title = Purge all transcripts for this project?
+# RFC-056 D2, review 438: what purge removes is a run's stored data -- its
+# transcript **and its record** -- so that is what this names. The number is the
+# bytes of both; Trust Settings' own line says it counts transcripts only.
+transcript-purge-dialog-title = Purge all runs' transcripts and records for this project?
 transcript-purge-dialog-body = This permanently deletes { $count ->
-    [one] {$count} transcript
-   *[other] {$count} transcripts
+    [one] {$count} run's transcript and run record
+   *[other] {$count} runs' transcripts and run records
 } ({ $bytes } bytes) stored locally for this project. Other projects are not affected. This cannot be undone.
 # RFC-050 D3: found files still being written when the project opened. Absent when none.
 transcript-purge-dialog-still-being-written = { $count ->

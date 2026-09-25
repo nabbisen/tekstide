@@ -10690,10 +10690,14 @@ fn open_transcript_purge_dialog(state: &mut State) {
     };
     // RFC-050 PR-050-B: the dialog counts only what purge will delete —
     // neither tombstones nor a found file still being written (response 388).
+    // RFC-056 D2, review 438: **runs**, and the bytes of their transcripts and
+    // their records — what will go, and never less. Trust Settings' own figure
+    // counts transcripts only and says so.
+    let (run_count, run_bytes) = project.purgeable_run_data();
     state.modal = Some(ModalContent::TranscriptPurge(TranscriptPurgeModal {
         project_id: project.id().clone(),
-        transcript_count: project.purgeable_transcript_count(),
-        retained_bytes: project.purgeable_transcript_bytes(),
+        transcript_count: run_count,
+        retained_bytes: run_bytes,
         still_being_written: project.transcripts_still_being_written_count(),
         running_run_transcripts: project.purgeable_transcripts_of_running_runs_count(),
         focus: TranscriptPurgeButton::Cancel,
