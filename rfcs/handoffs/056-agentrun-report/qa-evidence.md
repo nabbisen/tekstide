@@ -192,3 +192,16 @@ but it is why the fixture path in the images reads `/dev/shm/tek056-live.…`.
    cannot know.
 7. The set-aside counts are the session's own and never reset — a fact about this state directory, not about the last load.
 8. A change to a run's status reaches its record within a second, not instantly. A run killed inside that second loses that status change only.
+
+### Gate
+
+`cargo fmt --all --check` and `clippy --workspace --all-targets -D warnings`: clean. `mdbook build docs`: clean (the changelog is included into
+the book). `git diff --cached --check` after staging, before every commit: clean. `rfc_docs_invariants`: 16 passed.
+
+**Three consecutive full-workspace runs, `--no-fail-fast`, output to files, a fresh short `TMPDIR` (`/dev/shm/tek056g`): `671 + 16 + 1014` = 1,701
+passed, 0 failed, 0 entries left in `TMPDIR`, after each** (loads at the end of each run 1.54, 2.05, 4.18). The counts are the previous slice's
+`668 + 16 + 988` plus 3 shell and 26 core tests.
+
+**An earlier attempt at this gate was not clean and was not counted:** in run 1, `closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`
+(the registered row 8, PTY read timing) failed with its captured message, at load 2.35; runs 2 and 3 were green. It passed in the redone gate above.
+It has a dated row in `test-process-leak.md`. It is not this slice's: nothing here touches terminal termination.
