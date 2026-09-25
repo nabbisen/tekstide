@@ -59,8 +59,11 @@ pub struct AgentRun {
     /// RFC-056 D3: the user's classification, `None` until they choose one.
     pub classification: Option<RunClassification>,
     /// RFC-056 D4: the user's own notes, and nothing but the user writes
-    /// them. `None` when there are none.
-    pub notes: Option<String>,
+    /// them. `None` when there are none. **Not `pub`**: outside this crate the
+    /// only way in is [`Self::set_notes`] (through
+    /// `ProjectSession::set_agent_run_notes`), and a test in the app crate
+    /// holds the callers of both to the one place a person types.
+    pub(crate) notes: Option<String>,
     /// RFC-056 D8: what the run's record could not hold. Set by the setters
     /// here and by [`RunRecord`](crate::transcript::RunRecord) restoration,
     /// never by the run's own content.
@@ -257,6 +260,11 @@ impl AgentRun {
         let truncated = notes.chars().count() > RUN_NOTES_MAX_CHARS;
         self.notes = Some(notes.chars().take(RUN_NOTES_MAX_CHARS).collect());
         self.record_bounds.notes_truncated = truncated;
+    }
+
+    /// The user's notes, if they wrote any. Read-only: see the field.
+    pub fn notes(&self) -> Option<&str> {
+        self.notes.as_deref()
     }
 
     pub fn attach_terminal(&mut self, terminal: &TerminalSession) -> Result<(), OwnershipError> {

@@ -110,6 +110,37 @@ impl ProjectSession {
             .find(|run| run.id == *agent_run_id)
     }
 
+    /// RFC-056 D5: the paths changed by the change sets attributed to this run,
+    /// project-relative and in order, each once, and how many more there were
+    /// than `limit`. **Read from the change sets that still exist**; nothing is
+    /// kept for the report.
+    pub fn changed_paths_of_run(
+        &self,
+        agent_run_id: &AgentRunId,
+        limit: usize,
+    ) -> (Vec<PathBuf>, u64) {
+        let mut paths: Vec<PathBuf> = Vec::new();
+        let mut omitted: u64 = 0;
+        for change_set in self
+            .change_sets
+            .iter()
+            .filter(|change_set| change_set.agent_run_id.as_ref() == Some(agent_run_id))
+        {
+            omitted += change_set.changed_files_omitted_by_detection as u64;
+            for path in &change_set.changed_files {
+                if paths.contains(path) {
+                    continue;
+                }
+                if paths.len() < limit {
+                    paths.push(path.clone());
+                } else {
+                    omitted += 1;
+                }
+            }
+        }
+        (paths, omitted)
+    }
+
     /// RFC-056 D3. The classification is persisted **at once**, not at the
     /// next pass, so a run killed a moment later keeps it (D9).
     pub fn set_agent_run_classification(
