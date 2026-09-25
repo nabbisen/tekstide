@@ -167,6 +167,26 @@ fn a_run_that_ended_keeps_the_ending_it_was_seen_to_have() {
     assert_eq!(restored.ending, ended);
 }
 
+#[test]
+fn a_finished_run_whose_record_holds_no_ending_says_unknown_not_the_read_time() {
+    let dirs = TestDirs::new("finished-no-ending");
+    let (mut project, _, run_dir) = project_with_running_run(&dirs, 1);
+    project.persist_agent_run_records();
+    drop(project);
+    let path = run_dir.join(RUN_RECORD_FILE_NAME);
+    let mut record = read_json(&path);
+    record["status"] = "completed".into();
+    record["ending"] = serde_json::json!({ "kind": "not_ended" });
+    fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+
+    let mut reopened = project_session(&dirs, 1);
+    reopened.load_transcripts_from_disk(&dirs.state_root);
+
+    let restored = &reopened.restored_agent_runs()[0];
+    assert_eq!(restored.status, AgentRunStatus::Completed);
+    assert_eq!(restored.ending, RunEnding::Unknown);
+}
+
 /// D7, ablated: a record that cannot be read is moved aside and counted, the
 /// run appears as a transcript with no run, and nothing is invented.
 #[test]
