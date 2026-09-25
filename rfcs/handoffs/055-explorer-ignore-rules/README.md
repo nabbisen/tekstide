@@ -1,15 +1,15 @@
 ---
 title: "RFC-055: Ignore Rules In The Explorer — implementation handoff"
 rfc: "RFC-055"
-rfc_file: "../../accepted/055-ignore-rules-in-the-explorer.md"
-source_rfc_status: "Accepted 2026-09-24 — M12 remainder tail"
+rfc_file: "../../done/055-ignore-rules-in-the-explorer.md"
+source_rfc_status: "Implemented and closed 2026-09-25 — M12 remainder tail"
 target_milestone: "M12 remainder"
 created: "2026-09-24"
 ---
 
 # The explorer stops guessing what is ignored and asks git
 
-Source RFC: [RFC-055](../../accepted/055-ignore-rules-in-the-explorer.md)
+Source RFC: [RFC-055](../../done/055-ignore-rules-in-the-explorer.md)
 
 ## What this is
 
@@ -26,7 +26,7 @@ setting to see the ignored rows anyway.
 
 ## Read these first, in this order
 
-1. [The RFC](../../accepted/055-ignore-rules-in-the-explorer.md) — the eleven measurements, D1–D9,
+1. [The RFC](../../done/055-ignore-rules-in-the-explorer.md) — the eleven measurements, D1–D9,
    and *Decided on acceptance*, which corrects the per-expansion budget and forbids caching the gate.
 2. [What the explorer must not claim](./what-the-explorer-must-not-claim.md) — the risk document.
    **The three things in its first section are what this slice is actually about.**

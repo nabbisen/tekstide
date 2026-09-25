@@ -1,8 +1,8 @@
 ---
 title: "RFC-055 — acceptance and QA checklist"
 rfc: "RFC-055"
-rfc_file: "../../accepted/055-ignore-rules-in-the-explorer.md"
-source_rfc_status: "Accepted 2026-09-24 — M12 remainder tail"
+rfc_file: "../../done/055-ignore-rules-in-the-explorer.md"
+source_rfc_status: "Implemented and closed 2026-09-25 — M12 remainder tail"
 target_milestone: "M12 remainder"
 created: "2026-09-24"
 ---

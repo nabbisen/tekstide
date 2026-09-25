@@ -1,6 +1,6 @@
 # RFC-055: Ignore Rules In The Explorer
 
-Status: **Accepted by the human owner 2026-09-24.** D1–D8 as written, plus **D9** and one budget correction — see *Decided on acceptance*. Proposed 2026-09-24. `0.26.0` in the authorised schedule, directly after RFC-052's tree —
+Status: **Implemented and closed 2026-09-25.** Accepted by the human owner 2026-09-24: D1–D8 as written, plus **D9** and one budget correction — see *Decided on acceptance* and *Closed*. Proposed 2026-09-24. `0.26.0` in the authorised schedule, directly after RFC-052's tree —
 expansion is what makes RFC-052 D7's fixed collapse list load-bearing, and this is what the schedule
 said would replace it. Closes `REQ-FILE-005`, `REQ-FILE-006`, and the `ignored` category of
 `REQ-FILE-002` that the model has never carried.
@@ -176,3 +176,47 @@ option, and the RFC records this so that a later performance pass does not disco
 take it.
 
 **Ships as `0.26.0`**, after RFC-054's settings, per the authorised schedule.
+
+## Closed (2026-09-25)
+
+Three slices, a follow-up to each of the first two, and one to the third. **The explorer stopped guessing what is ignored and asks git.**
+
+**The acceptance's budget was wrong by 50×, and the implementation found it by running the code.** "A few milliseconds including the gate"
+was the sum of four subprocesses measured one at a time; nobody had run `evaluate`, which also walks every `.gitattributes` in the
+worktree — ~87 ms on this repository, 96 % of it under `target/`. That walk decides whether a *content comparison* can be trusted, which the
+module's own doc calls "not a safety problem", and `check-ignore` reads no content. So the query asks **only the configuration half of the gate**,
+split out with the full gate's behaviour unchanged. A quarter of the remainder was the runner's 10 ms poll interval; at 1 ms the whole call is ~2.3 ms.
+Measured on RFC-052's 100,000-entry fixture: scan alone 21.75 ms, git's half 2.86 ms.
+
+**`git check-ignore` runs a repository's `core.fsmonitor`.** Measurement 9 said the gate is required for this query and gave the wrong reason; the
+right one was found by a hostile control that is now permanent. It is why a repository the gate does not accept is never asked anything, and why
+`AcceptedBranchOnly` is not enough.
+
+**D2 held, and D3 is structural.** 20,000 `*.log` files produced 256 rows and one query over 256 names; the omitted tail was never in the batch and is
+counted, not classified. `IgnoreQueryInput` is the only way to build a query — names, not paths, one constant prefix applied in one place — and a
+raw query on a file named `:(glob)evil.log` is asserted to abort with exit 128, so the test is not passing on a fixture that was never hostile.
+
+**Decisions taken at review, not in the RFC:**
+
+- **Unknown is a value, twice.** `IgnoreAnswer::{Ignored, NoneIgnored, Unknown}` and `ExplorerIgnoreState::{Unknown, NotIgnored, Ignored}`, with the scan
+  carrying *which rule decided* (`ExplorerIgnoreRule`) so the sidebar says it rather than guessing at draw time.
+- **A repository at or above `$HOME` is declined** — its own `RepositoryDeclined` reason, not "not a repository" — because a dotfiles repository that ignores
+  `*` would otherwise hide every project beneath it.
+- **`.git` stays collapsed under either rule**, and **an ignored directory keeps its row at `show_ignored = false`** — only ignored *files* are hidden
+  and counted (review 433 Q2): hiding a place removes the way in, and `0.24.0` collapsed `target/` so it could be opened.
+- **The entry's name comes first** (review 432 Q1), reversing RFC-052's ordering: a clipped word is visibly damaged, a clipped name invents a file.
+- **The sidebar says where the rule came from and how old it is** — *project's Git / parent Git repo / nested Git repo / built-in…* and *Marks are as
+  old as the scan*. The acceptance said to "extend RFC-052's staleness sentence"; **none existed on screen**, so it is new.
+
+**Findings that only a live capture or an ablation produced:** the ruling-4 sentence was cut off at "the Git r"; an ignored directory's row clipped its own
+name to `t`; and with `ExplorerScanRequest::run` not asking git at all **every test still passed**, because each supplied its own oracle — the worker entry
+point is now pinned.
+
+**Carried from RFC-053's closeout, and enforced:** `rfc_docs_invariants` fails when a released changelog section names an RFC still in `accepted/` or
+`proposed/`, with a message that names both remedies — close it, or reword the section — and forbids moving an unshipped RFC to `done/`.
+
+**Left open, deliberately.** `core.excludesFile` is **not honoured**: git runs without the user's configuration (`GIT_CONFIG_GLOBAL=/dev/null`), so for a user
+who sets it Tekstide and their own `git status` can disagree in both directions. Disclosed in the book, the configuration page, the changelog and the
+delivery plan; **`REQ-FILE-005` is implemented only with that sentence attached.** The shape to accept when scheduled — ask git for the value with a read-only
+`config --get`, keep `GIT_CONFIG_GLOBAL=/dev/null` — is **RFC-062**, which wants a threat model. A long filename in the sidebar still clips with no overflow
+marker (RFC-052's, unchanged), and a marker wants its own small RFC.
