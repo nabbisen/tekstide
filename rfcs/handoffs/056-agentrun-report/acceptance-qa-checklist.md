@@ -59,6 +59,17 @@ says *measured* with no number in the evidence is not ticked.
 - [ ] After a purge, **a search of the state directory** finds nothing naming the purged run's
       prompt, changed paths or notes. Asserted against the disk, not against the code.
 
+### Required at review 437
+
+- [ ] **Q1:** `is_run_record_file_name` matches **exactly** — `run.json`, `run.json.tmp`,
+      `run.json.corrupt`, or `run.json.corrupt-` followed by digits — and nothing else. It is a
+      `starts_with` today, which in B miscounts bytes and in C would **delete files Tekstide never
+      wrote**. Lands before the code that deletes.
+- [ ] **Ruled at 437:** purge takes `run.json`, `run.json.tmp` and every aside name. D2 is a rule
+      about content, and a set-aside record holds exactly what D2 says must not outlive a purge.
+- [ ] **The third-file test plants `run.json.corruption-notes`** — a name a prefix match eats and an
+      exact match does not, so it fails against today's matcher and passes only against Q1's.
+
 ## PR-056-D — the classification, the notes, and the report
 
 - [ ] The seven classifications and no more; `custom` carries a user string, quoted **on render and
