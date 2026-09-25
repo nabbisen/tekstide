@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 056 | [AgentRun Report And Classification](./proposed/056-agentrun-report-and-classification.md) | **Proposed 2026-09-25**, awaiting the owner. `0.27.0`. The product's own pitch is *what did this run do, and what do I hand on*, and it can answer neither: no classification, no notes, no report — and underneath, **no `AgentRun` survives the process**, only the id in the directory name `agent-run-<uuid>`. A run leaves a record in the directory it already owns, purge takes it with the transcript, and the report is generated rather than stored twice. `REQ-AGENT-011`, `REQ-AGENT-015` |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 056 | [AgentRun Report And Classification](./accepted/056-agentrun-report-and-classification.md) | **Accepted 2026-09-25; D1–D8 as written, plus D9–D12.** `0.27.0`. **No `AgentRun` survives the process** — after a restart a project holds transcript files with no prompt, profile, change sets or ending, and the only surviving fact is the id in the directory name `agent-run-<uuid>`. A run leaves a record in that directory, **purge takes it with the transcript** (purge removes only the transcript file today, so a record would outlive it), and the report is generated rather than stored twice. Carries the `0.26.0` pin fix as its first slice. [Handoff pack](./handoffs/056-agentrun-report/README.md) |
 | — | *(none: nothing is currently accepted and unbuilt)* | |
 
 
@@ -114,6 +114,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 025 | [Notifications](./handoffs/025-notifications/README.md) — **M12**; **implemented and closed 2026-09-22** |
 | 030 | [Git Integration](./handoffs/030-git-integration/README.md) — **M12**; **implemented and closed 2026-09-23** |
 | 054 | [User Configuration Completion](./handoffs/054-user-configuration/README.md) — **M12**; **implemented and closed 2026-09-24, closing M12** |
+| 056 | [AgentRun Report And Classification](./handoffs/056-agentrun-report/README.md) — **agent remainder**; a run that still exists tomorrow |
 | 055 | [Ignore Rules In The Explorer](./handoffs/055-explorer-ignore-rules/README.md) — **M12 remainder tail**; **implemented and closed 2026-09-25** |
 | 053 | [What The Window Says Is True](./handoffs/053-window-truth/README.md) — **M12 remainder**; six surfaces that say something untrue. **Implemented and closed 2026-09-24; released as `0.23.0`** |
 | 052 | [A File Explorer A User Can Read](./handoffs/052-file-explorer/README.md) — **M12 remainder**; **implemented and closed 2026-09-24** |

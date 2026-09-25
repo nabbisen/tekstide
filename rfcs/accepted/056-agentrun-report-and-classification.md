@@ -1,6 +1,6 @@
 # RFC-056: AgentRun Report And Classification
 
-Status: **Proposed 2026-09-25.** `0.27.0` in the authorised schedule. Closes `REQ-AGENT-011` (a final
+Status: **Accepted by the human owner 2026-09-25.** D1–D8 as written, plus D9–D12 — see *Decided on acceptance*. Proposed 2026-09-25. `0.27.0` in the authorised schedule. Closes `REQ-AGENT-011` (a final
 report or handoff note) and `REQ-AGENT-015` (classify a run) — both of which the 2026-09-23 audit
 found **recorded as implemented and never built**.
 
@@ -136,3 +136,39 @@ is the user's decision and the product states what the file will contain before 
   `tekstide-core = { version = "0.27.0", path = "crates/tekstide-core" }` in `[workspace.dependencies]`,
   plus two post-publish gate steps — install this release into a temporary root, and assert the app
   archive's lockfile names the matching core.
+
+## Decided on acceptance (2026-09-25)
+
+**D1–D8 as written.** Four additions, each answering something the RFC left for whoever wrote the
+code to decide by accident.
+
+**D9 — the record is written when it changes, not only when the run ends.** A classification or a
+note set during a long run must survive the app being killed an hour later; a write-on-end record
+would lose exactly the annotations a user made while watching the run. The record is small and the
+write is atomic (R5), so the cost of writing it on every change is a few hundred bytes. A run still
+running when the app closed therefore has a record **and no ending**, which is D6's case and not an
+error.
+
+**D10 — it has to be reachable, and the capture is the evidence.** Measured: there are five surface
+modules (`board`, `editor`, `explorer`, `frame`, `terminal`) and Change Review is a view in
+`shell.rs`. This RFC does not say which one owns the classification control — that is the
+implementer's judgement, made against the layout that exists. What it does say is that **RFC-021's
+failure is not repeatable here**: a model that exists and no user can reach is not implemented, and
+`REQ-AGENT-011`/`015` move to implemented only on a live capture of a person doing it, with no
+environment variable involved.
+
+**D11 — no thirteenth audit family, and the question stays open rather than answered quietly.**
+Exporting a report writes project-derived paths outside the state directory. RFC-031 completed the
+twelve families and every one has a producer; adding another brings its own retention and purge
+obligations, and RFC-033's rule that a record names no path would leave the new record saying "a
+report was exported" without saying where — which is most of what would make it worth having.
+**Decided: not in this RFC, and recorded as an open question in the delivery plan**, not dropped.
+
+**D12 — "does not know its ending" uses the vocabulary the product already has.** `Unknown` here is
+genuinely unknown, which is the opposite of the defect RFC-053 fixed (`unknown` printed where zero
+was known). The restored run carries the same distinction the rest of the domain does, and the test
+that matters asserts a killed run's ending is *unknown* rather than its start time, zero, or the
+moment the record was read.
+
+**Ships as `0.27.0`**, with **PR-056-A — the `0.26.0` pin fix — first and alone**, because it is the
+one thing in this release that is repairing a live defect in published artifacts.
