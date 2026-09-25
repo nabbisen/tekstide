@@ -351,6 +351,25 @@ project-board-transcript-policy-removal = { $count ->
 # every launch and project open until it is. "Nothing could be freed" would say
 # none of that.
 project-board-transcript-policy-deletion-failed = A transcript that retention tried to remove could not be deleted. It stays on disk, and the cleanup will stop at it again until it can be removed.
+# RFC-056 D7: a run's record (`run.json`) that could not be read. The run is
+# listed as a transcript with no run, never as a run with invented fields, and
+# the record is renamed beside its transcript, never deleted.
+project-board-run-record-set-aside = { $count ->
+    [one] { $count } agent run record could not be read and was set aside under a .corrupt name beside its transcript. Its run is listed as a transcript with no run. Nothing was deleted.
+   *[other] { $count } agent run records could not be read and were set aside under a .corrupt name beside their transcripts. Their runs are listed as transcripts with no run. Nothing was deleted.
+}
+# The record names a version this Tekstide does not know: written by a newer
+# one. Renamed the same way, so a newer Tekstide can still read it.
+project-board-run-record-set-aside-newer = { $count ->
+    [one] { $count } agent run record was written by a newer Tekstide and was set aside under a .corrupt name beside its transcript, not guessed at. Its run is listed as a transcript with no run. Nothing was deleted.
+   *[other] { $count } agent run records were written by a newer Tekstide and were set aside under a .corrupt name beside their transcripts, not guessed at. Their runs are listed as transcripts with no run. Nothing was deleted.
+}
+# Could not be read and could not be renamed either: still `run.json`, met
+# again at the next open.
+project-board-run-record-left-in-place = { $count ->
+    [one] { $count } agent run record could not be read, and could not be renamed either. It stays where it was, and its run is listed as a transcript with no run.
+   *[other] { $count } agent run records could not be read, and could not be renamed either. They stay where they were, and their runs are listed as transcripts with no run.
+}
 project-board-configuration-ignored = Configuration: ignored, defaults in force. The problem is at { $key }.
 
 # §6's second state, and response 376's requirement that it name the
@@ -944,6 +963,12 @@ agent-run-detail-no-transcript = No transcript is available for this run.
 # case is the user declining capture, and neither is a failed write.
 agent-run-detail-no-transcript-writer-lock = This run has no transcript: its transcript file was already open and locked by another Tekstide when the run started, so nothing was written rather than writing over it.
 agent-run-detail-no-transcript-budget-exhausted = This run has no transcript: the transcripts already on disk were at the limit when it started, and nothing left could be removed without deleting one a run may still be writing.
+# RFC-056 D6/D12: a run restored from its record is a record, not a running
+# thing, and these replace "finished"/"still active", which say something a
+# restored run cannot know. `Unknown` is unknown: never the start, never zero,
+# never the moment the record was read.
+agent-run-detail-restored-ending-unknown = This run was restored from its record. Tekstide does not know when it ended: the app closed while it was running, or it was detached.
+agent-run-detail-restored-ended = This run was restored from its record. Tekstide saw it end at { $ended }.
 agent-run-detail-read-error = The transcript for this run could not be read.
 # D5: `Complete` vs `StillBeingWritten`, in the type -- rendered as two
 # distinct messages, never flattened into one "status" string with a

@@ -610,6 +610,11 @@ fn generic_args() -> CatalogArgs<'static> {
         .number("min", 1u32)
         .number("max", 1u32)
         .number("max_family_chars", 1u32)
+        // RFC-056: `agent-run-detail-restored-ended`'s `$ended`.
+        .untrusted(
+            "ended",
+            &tekstide_core::text_safety::quote_untrusted("2026-01-01T00:00:00Z"),
+        )
         // RFC-055: `explorer-ignore-rule`.
         .trusted_symbol("placement", "above")
         .number("line_count", 1u32)

@@ -201,6 +201,7 @@ fn a_corrupt_record_is_moved_aside_and_the_run_is_a_transcript_with_no_run() {
     let summary = reopened.load_transcripts_from_disk(&dirs.state_root);
 
     assert_eq!(summary.run_records_set_aside_unreadable, 1);
+    assert_eq!(reopened.run_records_set_aside().unreadable, 1);
     assert_eq!(summary.run_records_restored, 0);
     assert!(reopened.restored_agent_runs().is_empty());
     assert_eq!(reopened.agent_runs().len(), 0);
@@ -229,6 +230,25 @@ fn a_corrupt_record_is_moved_aside_and_the_run_is_a_transcript_with_no_run() {
         fs::read(run_dir.join("run.json.corrupt-1")).unwrap(),
         b"also not json"
     );
+}
+
+#[test]
+fn a_record_that_cannot_be_moved_is_named_as_left_in_place_not_as_set_aside() {
+    use std::os::unix::fs::PermissionsExt;
+    let dirs = TestDirs::new("cannot-move");
+    let (project, _, run_dir) = project_with_running_run(&dirs, 1);
+    drop(project);
+    fs::write(run_dir.join(RUN_RECORD_FILE_NAME), b"not json").unwrap();
+    fs::set_permissions(&run_dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let mut reopened = project_session(&dirs, 1);
+    let summary = reopened.load_transcripts_from_disk(&dirs.state_root);
+    fs::set_permissions(&run_dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert_eq!(summary.run_records_left_in_place, 1);
+    assert_eq!(summary.run_records_set_aside_unreadable, 0);
+    assert_eq!(reopened.run_records_set_aside().left_in_place, 1);
+    assert!(run_dir.join(RUN_RECORD_FILE_NAME).exists());
 }
 
 #[test]

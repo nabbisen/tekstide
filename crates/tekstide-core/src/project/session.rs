@@ -107,10 +107,14 @@ pub struct ProjectSession {
     /// RFC-056 D9: the record last written, or last read, for each run, so a
     /// pass writes only what changed.
     run_records_written: std::collections::HashMap<AgentRunId, crate::transcript::RunRecord>,
+    /// RFC-056 D7: what this session set aside, for the board to name.
+    run_records_set_aside: RunRecordsSetAside,
 }
 
 mod run_records;
-pub use run_records::{RunAnnotationError, RunRecordPersistSummary, RunRecordWrite};
+pub use run_records::{
+    RunAnnotationError, RunRecordPersistSummary, RunRecordWrite, RunRecordsSetAside,
+};
 
 impl ProjectSession {
     pub fn new(
@@ -150,6 +154,7 @@ impl ProjectSession {
             restored_agent_runs: Vec::new(),
             restored_run_directories: std::collections::HashMap::new(),
             run_records_written: std::collections::HashMap::new(),
+            run_records_set_aside: RunRecordsSetAside::default(),
         }
     }
 
@@ -371,6 +376,7 @@ impl ProjectSession {
             run_records_restored: 0,
             run_records_set_aside_unreadable: 0,
             run_records_set_aside_unknown_version: 0,
+            run_records_left_in_place: 0,
         };
         for found in scan.found {
             if self
@@ -2274,6 +2280,8 @@ pub struct TranscriptLoadSummary {
     /// because they name a version this build does not know. Never deleted.
     pub run_records_set_aside_unreadable: u64,
     pub run_records_set_aside_unknown_version: u64,
+    /// Unreadable and could not be renamed: still `run.json`.
+    pub run_records_left_in_place: u64,
 }
 
 fn transcript_is_purgeable(transcript: &Transcript) -> bool {

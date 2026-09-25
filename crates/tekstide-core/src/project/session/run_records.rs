@@ -33,6 +33,23 @@ pub enum RunRecordWrite {
     Failed,
 }
 
+/// RFC-056 D7: records this session did not restore.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RunRecordsSetAside {
+    /// Could not be read; renamed with a `.corrupt` name, never deleted.
+    pub unreadable: u64,
+    /// Written by a version this build does not know; renamed the same way.
+    pub unknown_version: u64,
+    /// Could not be read **and could not be renamed**: still `run.json`.
+    pub left_in_place: u64,
+}
+
+impl RunRecordsSetAside {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// What one pass over a project's runs wrote.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct RunRecordPersistSummary {
@@ -66,6 +83,13 @@ impl ProjectSession {
     /// change.
     pub fn restored_agent_runs(&self) -> &[AgentRun] {
         &self.restored_agent_runs
+    }
+
+    /// RFC-056 D7: what this session set aside, for the Project Board to name.
+    /// Accumulated across loads and never reset: it is a fact about this
+    /// session's state directory, not about the last call.
+    pub fn run_records_set_aside(&self) -> RunRecordsSetAside {
+        self.run_records_set_aside
     }
 
     /// The run to show as this project's latest: the last one launched here,
@@ -223,10 +247,20 @@ impl ProjectSession {
                     self.restored_agent_runs.push(run);
                     summary.run_records_restored += 1;
                 }
+                RunRecordRead::SetAside { moved_to: None, .. } => {
+                    // Not moved: it is still `run.json`, and the next open
+                    // meets it again. Said as what it is, not as "set aside".
+                    summary.run_records_left_in_place += 1;
+                    self.run_records_set_aside.left_in_place += 1;
+                }
                 RunRecordRead::SetAside { reason, .. } => match reason {
-                    SetAsideReason::Unreadable => summary.run_records_set_aside_unreadable += 1,
+                    SetAsideReason::Unreadable => {
+                        summary.run_records_set_aside_unreadable += 1;
+                        self.run_records_set_aside.unreadable += 1;
+                    }
                     SetAsideReason::UnknownVersion => {
                         summary.run_records_set_aside_unknown_version += 1;
+                        self.run_records_set_aside.unknown_version += 1;
                     }
                 },
             }

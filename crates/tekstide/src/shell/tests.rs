@@ -14754,6 +14754,112 @@ fn the_board_reports_a_failed_deletion_separately_from_what_was_removed() {
     );
 }
 
+/// RFC-056 D7, ablated: a run record that could not be read is set aside, and
+/// **the board says one was** — a run that appears as a transcript with no run
+/// is not left unexplained. Nothing is said when nothing was set aside.
+#[test]
+fn the_board_names_a_run_record_that_was_set_aside_and_is_silent_otherwise() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("run-record-board");
+    let project_id = app_shell
+        .add_project_from_path(&project_dir)
+        .unwrap()
+        .project_id()
+        .clone();
+    let state_root = fresh_project_dir("run-record-board-state");
+    let run_dir = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(tekstide_core::domain::AgentRunId::new_uuid().as_str());
+    std::fs::create_dir_all(&run_dir).unwrap();
+    std::fs::write(run_dir.join("transcript.log"), b"captured").unwrap();
+    std::fs::write(run_dir.join("run.json"), b"{ not a record").unwrap();
+    let mut state = state_with(app_shell);
+    assert!(
+        super::project_board_run_record_notifications(&state).is_empty(),
+        "nothing set aside, nothing said"
+    );
+
+    state
+        .app_shell
+        .state_mut()
+        .project_mut(&project_id)
+        .unwrap()
+        .load_transcripts_from_disk(&state_root);
+
+    let notifications = super::project_board_run_record_notifications(&state);
+    assert_eq!(notifications.len(), 1, "{notifications:?}");
+    let text = &notifications[0].text;
+    assert!(text.contains("could not be read"), "{text}");
+    assert!(text.contains("Nothing was deleted"), "{text}");
+    assert!(
+        super::project_board_notifications(&state)
+            .iter()
+            .any(|notification| notification.kind == super::NotificationKind::RunRecordSetAside),
+        "and it reaches the board's own list, not only its own producer"
+    );
+}
+
+/// RFC-056 D6/D12, ablated: a restored run whose ending was not seen **says
+/// it does not know**, and never says "finished" — which is a fact nothing
+/// recorded. A run this process launched gets no such line.
+#[test]
+fn a_restored_run_says_it_does_not_know_its_ending_and_is_never_called_finished() {
+    let state = state_with(ApplicationShell::new());
+    let mut run = tekstide_core::domain::AgentRun::draft(
+        tekstide_core::project::ProjectId::new_uuid(),
+        "fake-ai-cli",
+        "a run",
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+    assert_eq!(
+        super::agent_run_detail_restored_line(&state.catalog, &run),
+        None,
+        "a launched run's lifecycle notices already say what it is"
+    );
+
+    run.origin = tekstide_core::domain::AgentRunOrigin::RestoredFromRecord;
+    run.ending = tekstide_core::domain::RunEnding::Unknown;
+    let unknown = super::agent_run_detail_restored_line(&state.catalog, &run).unwrap();
+    assert!(unknown.contains("does not know when it ended"), "{unknown}");
+
+    run.ending = tekstide_core::domain::RunEnding::Ended(
+        tekstide_core::domain::DomainTimestamp::from_utc_string("2026-03-04T05:06:07Z").unwrap(),
+    );
+    let known = super::agent_run_detail_restored_line(&state.catalog, &run).unwrap();
+    assert!(known.contains("2026-03-04T05:06:07Z"), "{known}");
+    assert!(!known.contains("does not know"), "{known}");
+
+    let transcript = tekstide_core::domain::Transcript::metadata(
+        run.project_id.clone(),
+        tekstide_core::domain::TerminalId::new_uuid(),
+        None,
+        "/tmp/agent-run-detail-restored-fixture",
+        "found-on-disk",
+    );
+    let window = tekstide_core::transcript::TranscriptWindow::Complete {
+        content: b"hello".to_vec(),
+        requested_start: 0,
+        delivered_start: 0,
+        total_len: 5,
+    };
+    let restored =
+        super::agent_run_detail_notices_for_run(&state.catalog, &run, &transcript, &window);
+    assert!(
+        restored
+            .iter()
+            .all(|notice| !notice.contains("has finished") && !notice.contains("still active")),
+        "a restored run's transcript notices carry no lifecycle claim: {restored:?}"
+    );
+    run.origin = tekstide_core::domain::AgentRunOrigin::LaunchedHere;
+    let launched =
+        super::agent_run_detail_notices_for_run(&state.catalog, &run, &transcript, &window);
+    assert!(
+        launched[0].contains("has finished"),
+        "a launched run keeps its status notice: {launched:?}"
+    );
+}
+
 /// RFC-049 D4′: **the run's detail says why it has no transcript**, and says
 /// something different from the generic "no transcript is available" — which
 /// describes what a reader could not find, not a run that was never given one.

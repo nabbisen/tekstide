@@ -427,6 +427,11 @@ pub(crate) struct ExternalChangeModal {
 /// approval proposal is far rarer than terminal output.
 const APPROVAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
+/// RFC-056 PR-056-B: how often a launched run's record is brought up to date.
+/// A run killed inside this window loses only what changed inside it; the
+/// user's own annotations are written at once, not on this interval.
+const RUN_RECORD_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// RFC-022 PR-022-E ("the arrival model"), response 227: how long a
 /// freshly promoted approval dialog ignores modal input for -- long
 /// enough that a keystroke already in flight (typing mid-word, or
@@ -1614,6 +1619,13 @@ pub enum Message {
     /// user-perceptible delay for something the user was not expecting
     /// at that exact instant anyway.
     ApprovalPollTick,
+    /// RFC-056 PR-056-B, D9: a launched run's record follows the run. A
+    /// plain interval, offered only while some open project has a launched
+    /// run; a classification or note is written at once by its own setter
+    /// and does not wait for this. The pass derives each record from the run
+    /// and writes only the ones that differ from what was last written, so an
+    /// idle run costs a comparison.
+    RunRecordTick,
     /// Response 233: fired by a live entry's control on the
     /// `ApprovalHistory` surface. Reuses the exact same `ApprovalDialog`
     /// construction `evaluate_promotion` uses (see
@@ -1872,6 +1884,7 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::GitSummaryComputed { .. }
         | Message::TerminalPasteResolved { .. }
         | Message::ApprovalPollTick
+        | Message::RunRecordTick
         | Message::PanesRegionMeasured(_)
         | Message::ExplorerScanFinished { .. }
         | Message::ExplorerViewportMeasured(_)
@@ -2640,6 +2653,9 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::ApprovalPollTick => {
             poll_approval_channels(state);
+        }
+        Message::RunRecordTick => {
+            persist_agent_run_records(&mut state.app_shell);
         }
         Message::OpenApprovalHistoryEntry(approval_id) => {
             open_approval_history_entry(state, &approval_id);
@@ -7194,6 +7210,19 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         subscriptions
             .push(iced::time::every(APPROVAL_POLL_INTERVAL).map(|_| Message::ApprovalPollTick));
     }
+    // RFC-056 PR-056-B, D9: only while some open project has a launched
+    // run, the same "checked but usually absent" shape as the branches
+    // above. A restored run changes only through its setters, which write
+    // at once.
+    if state
+        .app_shell
+        .state()
+        .projects()
+        .iter()
+        .any(|project| !project.agent_runs().is_empty())
+    {
+        subscriptions.push(iced::time::every(RUN_RECORD_INTERVAL).map(|_| Message::RunRecordTick));
+    }
     // RFC-030 PR-030-B, review 410: one subscription per project with a
     // Git evaluation in flight -- `begin_git_summary_refresh` sets the
     // flag; this is what actually spawns the background read for it, and
@@ -7956,6 +7985,8 @@ pub(crate) enum NotificationKind {
     Configuration,
     RecentProjectListRepair,
     TranscriptRetention,
+    /// RFC-056 D7: a run's record was set aside.
+    RunRecordSetAside,
 }
 
 /// RFC-025 D1: one model for every board notification — scope, kind, the text
@@ -7997,6 +8028,7 @@ fn project_board_notifications(state: &State) -> Vec<Notification> {
     notifications.extend(project_board_configuration_notifications(state));
     notifications.extend(project_board_recent_projects_reset_notifications(state));
     notifications.extend(project_board_transcript_cleanup_notifications(state));
+    notifications.extend(project_board_run_record_notifications(state));
     ordered_by_kind(notifications)
 }
 
@@ -8301,6 +8333,49 @@ fn project_board_transcript_cleanup_notifications(state: &State) -> Vec<Notifica
             state
                 .catalog
                 .get("project-board-transcript-policy-deletion-failed"),
+        ));
+    }
+    notifications
+}
+
+/// RFC-056 D7: a run record that could not be read is moved aside and **the
+/// board says one was**, so a run that appears as a transcript with no run is
+/// not left unexplained. Read fresh from the open projects every call: the
+/// counts are this session's own and never reset, which is what makes
+/// `WhileConditionHolds` the honest tag.
+fn project_board_run_record_notifications(state: &State) -> Vec<Notification> {
+    let mut total = tekstide_core::project::RunRecordsSetAside::default();
+    for project in state.app_shell.state().projects() {
+        let counts = project.run_records_set_aside();
+        total.unreadable += counts.unreadable;
+        total.unknown_version += counts.unknown_version;
+        total.left_in_place += counts.left_in_place;
+    }
+    let notify = |key: &str, count: u64| Notification {
+        scope: None,
+        kind: NotificationKind::RunRecordSetAside,
+        text: state
+            .catalog
+            .get_with_args(key, &CatalogArgs::new().number("count", count)),
+        lifetime: NotificationLifetime::WhileConditionHolds,
+    };
+    let mut notifications = Vec::new();
+    if total.unreadable > 0 {
+        notifications.push(notify(
+            "project-board-run-record-set-aside",
+            total.unreadable,
+        ));
+    }
+    if total.unknown_version > 0 {
+        notifications.push(notify(
+            "project-board-run-record-set-aside-newer",
+            total.unknown_version,
+        ));
+    }
+    if total.left_in_place > 0 {
+        notifications.push(notify(
+            "project-board-run-record-left-in-place",
+            total.left_in_place,
         ));
     }
     notifications
@@ -10353,6 +10428,24 @@ pub(crate) fn load_earlier_transcripts(
     }
 }
 
+/// RFC-056 PR-056-B, D9: brings every open project's run records up to date.
+/// Failures are retried on the next pass, and a run with no run directory
+/// gets no record (`RunRecordWrite::NoRunDirectory`).
+pub(crate) fn persist_agent_run_records(app_shell: &mut ApplicationShell) {
+    let ids = app_shell
+        .state()
+        .projects()
+        .iter()
+        .filter(|project| !project.agent_runs().is_empty())
+        .map(|project| project.id().clone())
+        .collect::<Vec<_>>();
+    for id in ids {
+        if let Some(project) = app_shell.state_mut().project_mut(&id) {
+            let _ = project.persist_agent_run_records();
+        }
+    }
+}
+
 /// Bytes under all of `transcripts/`, claimed by the open and recent projects.
 fn transcript_disk_usage_for(
     app_shell: &ApplicationShell,
@@ -12242,7 +12335,7 @@ fn agent_run_detail_view(state: &State) -> Element<'_, Message> {
             .size(state.theme.font_size_body())
             .into();
     };
-    let Some(run) = project.agent_runs().last() else {
+    let Some(run) = project.latest_agent_run_for_display() else {
         return text(state.catalog.get("agent-run-detail-no-runs"))
             .size(state.theme.font_size_body())
             .into();
@@ -12254,9 +12347,14 @@ fn agent_run_detail_view(state: &State) -> Element<'_, Message> {
             .into(),
     ];
 
+    if let Some(line) = agent_run_detail_restored_line(&state.catalog, run) {
+        lines.push(text(line).size(state.theme.font_size_status()).into());
+    }
+
     match agent_run_transcript_window(project, run) {
         Ok((transcript, window)) => {
-            for notice in agent_run_detail_notices(&state.catalog, transcript, &window) {
+            for notice in agent_run_detail_notices_for_run(&state.catalog, run, transcript, &window)
+            {
                 lines.push(text(notice).size(state.theme.font_size_status()).into());
             }
             lines.push(
@@ -12286,6 +12384,51 @@ fn agent_run_detail_view(state: &State) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+/// RFC-056 D6/D12: what a restored run says about its ending. `None` for a
+/// run this process launched, whose lifecycle notices already say it.
+///
+/// **A restored run whose ending was not seen says so.** Rendering it as
+/// "finished" would state a fact nothing recorded, the `unknown`-versus-zero
+/// defect RFC-053 fixed in the other direction.
+fn agent_run_detail_restored_line(
+    catalog: &Catalog,
+    run: &tekstide_core::domain::AgentRun,
+) -> Option<String> {
+    use tekstide_core::domain::{AgentRunOrigin, RunEnding};
+    if run.origin != AgentRunOrigin::RestoredFromRecord {
+        return None;
+    }
+    Some(match &run.ending {
+        RunEnding::Ended(at) => catalog.get_with_args(
+            "agent-run-detail-restored-ended",
+            &CatalogArgs::new().untrusted(
+                "ended",
+                &tekstide_core::text_safety::quote_untrusted(at.as_str()),
+            ),
+        ),
+        RunEnding::Unknown | RunEnding::NotEnded => {
+            catalog.get("agent-run-detail-restored-ending-unknown")
+        }
+    })
+}
+
+/// [`agent_run_detail_notices`] for a run: a restored run's transcript notices
+/// **without** the "finished, and the transcript is complete" / "still active"
+/// status line, because a restored run's status is [`agent_run_detail_restored_line`]'s
+/// to say. The status notice is always the first.
+fn agent_run_detail_notices_for_run(
+    catalog: &Catalog,
+    run: &tekstide_core::domain::AgentRun,
+    transcript: &tekstide_core::domain::Transcript,
+    window: &tekstide_core::transcript::TranscriptWindow,
+) -> Vec<String> {
+    let mut notices = agent_run_detail_notices(catalog, transcript, window);
+    if run.origin == tekstide_core::domain::AgentRunOrigin::RestoredFromRecord {
+        notices.remove(0);
+    }
+    notices
 }
 
 /// PR-020-B: why the transcript for `run` may not be readable -- kept
