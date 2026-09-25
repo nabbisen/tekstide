@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::domain::{
     AgentRun, AgentRunId, AgentRunOrigin, BlankClassificationLabel, OwnershipError,
-    RunClassification,
+    RunClassification, TranscriptId,
 };
 use crate::transcript::{
     RunRecord, RunRecordRead, SetAsideReason, read_run_record, write_run_record,
@@ -197,19 +197,35 @@ impl ProjectSession {
                 .filter(|transcript| !transcript.is_tombstone())
                 .and_then(|transcript| transcript.storage_path.parent())
                 .map(Path::to_path_buf),
+            // A restored run whose transcript is purged is forgotten by the
+            // purge (`forget_restored_run_of`), so one that is still here has
+            // a directory whose record is live.
             AgentRunOrigin::RestoredFromRecord => {
-                let attached_transcript_purged = run
-                    .transcript_ref
-                    .as_ref()
-                    .and_then(|id| self.transcripts.iter().find(|t| &t.id == id))
-                    .is_some_and(|transcript| transcript.is_tombstone());
-                if attached_transcript_purged {
-                    None
-                } else {
-                    self.restored_run_directories.get(&run.id).cloned()
-                }
+                self.restored_run_directories.get(&run.id).cloned()
             }
         }
+    }
+
+    /// RFC-056 D2: a purged transcript takes its restored run with it. The
+    /// record is already gone from disk; the run leaves the session too, so it
+    /// is not counted, not shown and not written back.
+    pub(super) fn forget_restored_run_of(&mut self, transcript_id: &TranscriptId) {
+        let gone: Vec<AgentRunId> = self
+            .restored_agent_runs
+            .iter()
+            .filter(|run| run.transcript_ref.as_ref() == Some(transcript_id))
+            .map(|run| run.id.clone())
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        self.restored_agent_runs
+            .retain(|run| !gone.contains(&run.id));
+        for id in &gone {
+            self.restored_run_directories.remove(id);
+            self.run_records_written.remove(id);
+        }
+        self.refresh_runtime_summary_from_collections();
     }
 
     /// Restores the runs whose records the scan found, and sets aside the ones

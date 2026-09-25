@@ -82,6 +82,29 @@ pub fn is_product_run_directory_name(name: &str) -> bool {
     uuid::Uuid::parse_str(suffix).is_ok_and(|uuid| uuid.hyphenated().to_string() == suffix)
 }
 
+/// The run directory a transcript file sits in, **only when it is exactly the
+/// layout this product writes**: a file named `transcript.log`, in a real
+/// directory (`symlink_metadata`, so a symlink is not one) named
+/// `agent-run-<lowercase hyphenated uuid>`. Anything else is `None`.
+///
+/// This is what lets purge touch a run directory at all (RFC-056 D2): a
+/// transcript at any other path — a test fixture, a path the product did not
+/// build — gets the old behaviour, its file and nothing beside it.
+pub(crate) fn product_run_directory_of(transcript_file: &Path) -> Option<PathBuf> {
+    if transcript_file.file_name()? != TRANSCRIPT_FILE_NAME {
+        return None;
+    }
+    let directory = transcript_file.parent()?;
+    let named_as_ours = directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(is_product_run_directory_name);
+    if !named_as_ours {
+        return None;
+    }
+    real_directory(directory)
+}
+
 /// Enumerates `<state_root>/transcripts/<project_id>/` and probes each accepted
 /// file's lock once.
 ///

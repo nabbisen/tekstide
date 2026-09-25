@@ -452,6 +452,49 @@ pub fn write_run_record(run_directory: &Path, record: &RunRecord) -> io::Result<
     Ok(())
 }
 
+/// Bytes of the record files in `run_directory`: what a purge would remove
+/// beside the transcript, so the purge dialog never promises less than it
+/// removes (RFC-056 D2). Exact names, regular files only.
+pub fn run_record_bytes(run_directory: &Path) -> u64 {
+    record_files_in(run_directory).map(|(_, bytes)| bytes).sum()
+}
+
+/// Removes the record files in `run_directory` — `run.json`, `run.json.tmp`
+/// and every set-aside name, **matched exactly** and **regular files only** —
+/// and returns the bytes removed. Removes nothing else and never a directory:
+/// a symlink, a directory or any other name is not this product's to delete.
+pub fn remove_run_record_files(run_directory: &Path) -> io::Result<u64> {
+    let mut removed = 0;
+    for (path, bytes) in record_files_in(run_directory).collect::<Vec<_>>() {
+        match fs::remove_file(&path) {
+            Ok(()) => removed += bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(removed)
+}
+
+fn record_files_in(run_directory: &Path) -> impl Iterator<Item = (PathBuf, u64)> {
+    fs::read_dir(run_directory)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(is_run_record_file_name)
+        })
+        .filter_map(|entry| {
+            let metadata = fs::symlink_metadata(entry.path()).ok()?;
+            metadata
+                .file_type()
+                .is_file()
+                .then(|| (entry.path(), metadata.len()))
+        })
+}
+
 fn bound_text(text: &str, max_chars: usize) -> (String, bool) {
     if text.chars().count() > max_chars {
         (text.chars().take(max_chars).collect(), true)

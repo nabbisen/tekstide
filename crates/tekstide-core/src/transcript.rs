@@ -6,6 +6,7 @@ mod retention;
 mod run_record;
 mod writer;
 
+pub(crate) use loading::product_run_directory_of;
 pub use loading::{
     FoundTranscriptFile, ProjectTranscriptScan, TranscriptDiskUsage, is_product_run_directory_name,
     scan_project_transcripts, scan_transcript_disk_usage,
@@ -30,7 +31,8 @@ pub use retention::{
 };
 pub use run_record::{
     RUN_RECORD_FILE_NAME, RUN_RECORD_VERSION, RunRecord, RunRecordRead, SetAsideReason,
-    is_run_record_file_name, read_run_record, write_run_record,
+    is_run_record_file_name, read_run_record, remove_run_record_files, run_record_bytes,
+    write_run_record,
 };
 pub use writer::{
     BoundedTranscriptWriter, TranscriptWriteError, TranscriptWriteErrorReason,

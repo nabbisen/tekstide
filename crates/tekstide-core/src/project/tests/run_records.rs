@@ -574,9 +574,11 @@ fn a_purged_run_is_not_brought_back_by_a_late_annotation() {
     let dirs = TestDirs::new("late-annotation");
     let (mut project, run_id, run_dir) = project_with_running_run(&dirs, 1);
     project.persist_agent_run_records();
-    fs::remove_file(run_dir.join(RUN_RECORD_FILE_NAME)).unwrap();
     project.purge_project_transcripts().unwrap();
-    fs::remove_dir(&run_dir).unwrap();
+    assert!(
+        !run_dir.exists(),
+        "the purge took the record and the empty directory"
+    );
 
     let write = project
         .set_agent_run_notes(&run_id, "written after the purge")
@@ -587,7 +589,7 @@ fn a_purged_run_is_not_brought_back_by_a_late_annotation() {
 }
 
 #[test]
-fn a_purged_restored_run_is_not_written_back_by_a_late_annotation() {
+fn a_purged_restored_run_cannot_be_annotated_back_into_existence() {
     let dirs = TestDirs::new("late-annotation-restored");
     let (mut project, run_id, run_dir) = project_with_running_run(&dirs, 1);
     project.persist_agent_run_records();
@@ -595,16 +597,11 @@ fn a_purged_restored_run_is_not_written_back_by_a_late_annotation() {
     let mut reopened = project_session(&dirs, 1);
     reopened.load_transcripts_from_disk(&dirs.state_root);
     reopened.purge_project_transcripts().unwrap();
-    // The record is what a later slice's purge removes; here it is removed by
-    // hand, so the only thing left to prove is that nothing writes it back.
-    fs::remove_file(run_dir.join(RUN_RECORD_FILE_NAME)).unwrap();
 
-    let write = reopened
-        .set_agent_run_notes(&run_id, "written after the purge")
-        .unwrap();
+    let late = reopened.set_agent_run_notes(&run_id, "written after the purge");
 
-    assert_eq!(write, RunRecordWrite::NoRunDirectory);
-    assert!(!run_dir.join(RUN_RECORD_FILE_NAME).exists());
+    assert!(late.is_err(), "the run left the session with its record");
+    assert!(!run_dir.exists(), "and nothing wrote the directory back");
 }
 
 /// D6, ablated: a restored run is a record. It is in no collection a
@@ -762,6 +759,197 @@ fn purge_never_removes_a_directory_it_did_not_find_empty_or_a_file_it_did_not_wr
         run_dir.is_dir(),
         "the directory held files that are not ours, so it is not removed"
     );
+}
+
+#[test]
+fn purge_removes_the_transcript_every_record_file_and_then_the_empty_directory() {
+    let dirs = TestDirs::new("purge-all");
+    let (mut project, _, run_dir) = project_with_running_run(&dirs, 1);
+    project.persist_agent_run_records();
+    for name in [
+        "run.json.tmp",
+        "run.json.corrupt",
+        "run.json.corrupt-1",
+        "run.json.corrupt-42",
+    ] {
+        fs::write(run_dir.join(name), b"a set-aside or interrupted record").unwrap();
+    }
+    let on_disk: u64 = fs::read_dir(&run_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().metadata().unwrap().len())
+        .sum();
+    assert_eq!(
+        project.purgeable_transcript_bytes(),
+        on_disk,
+        "the dialog counts the record files, so it never promises less than it removes"
+    );
+
+    let purged = project.purge_project_transcripts().unwrap();
+
+    assert_eq!(purged.purged_transcripts, 1);
+    assert_eq!(
+        purged.bytes_removed, on_disk,
+        "what the purge reports removing is what was on disk"
+    );
+    assert!(
+        !run_dir.exists(),
+        "nothing was left in it, so the directory goes too"
+    );
+}
+
+/// D2's acceptance criterion, asserted against the disk, not against the code:
+/// after a purge, nothing under the state directory names the run's prompt or
+/// the user's notes.
+#[test]
+fn after_a_purge_nothing_on_disk_names_the_prompt_or_the_notes() {
+    let dirs = TestDirs::new("purge-search");
+    let (mut project, run_id, _) = project_with_running_run(&dirs, 1);
+    project.agent_run_mut_for_test(&run_id).prompt_summary =
+        "PROMPT-NEEDLE-4f1c refactor the billing module".to_owned();
+    project
+        .set_agent_run_notes(&run_id, "NOTES-NEEDLE-9b2e the user's own words")
+        .unwrap();
+    project.persist_agent_run_records();
+    assert!(
+        tree_contains(&dirs.state_root, b"PROMPT-NEEDLE-4f1c")
+            && tree_contains(&dirs.state_root, b"NOTES-NEEDLE-9b2e"),
+        "positive control: before the purge the record does name them"
+    );
+
+    project.purge_project_transcripts().unwrap();
+
+    assert!(!tree_contains(&dirs.state_root, b"PROMPT-NEEDLE-4f1c"));
+    assert!(!tree_contains(&dirs.state_root, b"NOTES-NEEDLE-9b2e"));
+    assert!(!tree_contains(&dirs.state_root, run_id.as_str().as_bytes()));
+}
+
+#[test]
+fn purge_deletes_only_regular_files_by_exact_name_and_leaves_the_rest() {
+    let dirs = TestDirs::new("purge-exact");
+    let (mut project, _, run_dir) = project_with_running_run(&dirs, 1);
+    project.persist_agent_run_records();
+    // A directory with a record's name, holding a file.
+    let dir_named_like_ours = run_dir.join("run.json.corrupt-3");
+    fs::create_dir(&dir_named_like_ours).unwrap();
+    fs::write(dir_named_like_ours.join("inside"), b"inside").unwrap();
+    // A symlink with a record's name, pointing outside the state root.
+    let outside = dirs.base.join("victim.txt");
+    fs::write(&outside, b"the user's own file").unwrap();
+    std::os::unix::fs::symlink(&outside, run_dir.join("run.json.corrupt")).unwrap();
+
+    project.purge_project_transcripts().unwrap();
+
+    assert!(dir_named_like_ours.join("inside").exists());
+    assert!(
+        run_dir
+            .join("run.json.corrupt")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read(&outside).unwrap(), b"the user's own file");
+    assert!(run_dir.exists(), "not empty, so not removed");
+    assert!(
+        !run_dir.join("run.json").exists(),
+        "the real record still went"
+    );
+}
+
+/// Only the layout the product writes is looked at. A transcript at any other
+/// path gets the old behaviour: its file, and nothing beside it.
+#[test]
+fn a_transcript_outside_the_products_layout_is_purged_alone() {
+    let dirs = TestDirs::new("purge-foreign-layout");
+    let mut project = project_session(&dirs, 1);
+    let folder = dirs.state_root.join("not-a-run-directory");
+    fs::create_dir_all(&folder).unwrap();
+    let transcript_path = fs::canonicalize(&folder).unwrap().join("transcript.log");
+    fs::write(&transcript_path, b"captured").unwrap();
+    fs::write(folder.join("run.json"), b"looks like a record").unwrap();
+    let terminal = TerminalSession::new(
+        project.id().clone(),
+        TerminalKind::Supervised,
+        "Agent",
+        &dirs.project_root,
+        "agent-cli",
+    );
+    let transcript = Transcript::metadata(
+        project.id().clone(),
+        terminal.id.clone(),
+        None,
+        transcript_path.clone(),
+        "local-bounded-agent-run",
+    );
+    project.add_terminal_session(terminal).unwrap();
+    project.add_transcript(transcript).unwrap();
+
+    project.purge_project_transcripts().unwrap();
+
+    assert!(!transcript_path.exists());
+    assert!(folder.join("run.json").exists());
+    assert!(folder.exists());
+}
+
+#[test]
+fn a_purged_restored_run_leaves_the_session_and_the_board_count() {
+    let dirs = TestDirs::new("purge-restored");
+    let (mut project, _, run_dir) = project_with_running_run(&dirs, 1);
+    project.persist_agent_run_records();
+    drop(project);
+    let mut reopened = project_session(&dirs, 1);
+    reopened.load_transcripts_from_disk(&dirs.state_root);
+    assert_eq!(reopened.restored_agent_runs().len(), 1);
+    assert_eq!(reopened.runtime_summary().agent_run_count, Some(1));
+
+    reopened.purge_project_transcripts().unwrap();
+
+    assert!(reopened.restored_agent_runs().is_empty());
+    assert_eq!(reopened.runtime_summary().agent_run_count, Some(0));
+    assert!(!run_dir.exists());
+}
+
+#[test]
+fn a_purge_that_cannot_remove_the_record_leaves_the_transcript_and_can_be_retried() {
+    use std::os::unix::fs::PermissionsExt;
+    let dirs = TestDirs::new("purge-retry");
+    let (mut project, _, run_dir) = project_with_running_run(&dirs, 1);
+    project.persist_agent_run_records();
+    fs::set_permissions(&run_dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let refused = project.purge_project_transcripts();
+    fs::set_permissions(&run_dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(
+        refused.is_err(),
+        "a record that could not be removed is an error"
+    );
+    assert!(
+        run_dir.join("transcript.log").exists() && run_dir.join("run.json").exists(),
+        "nothing was half-deleted: the transcript is still there beside its record"
+    );
+    let retried = project.purge_project_transcripts().unwrap();
+    assert_eq!(retried.purged_transcripts, 1);
+    assert!(!run_dir.exists());
+}
+
+fn tree_contains(root: &Path, needle: &[u8]) -> bool {
+    fs::read_dir(root).unwrap().flatten().any(|entry| {
+        let path = entry.path();
+        let name_matches = path
+            .to_string_lossy()
+            .as_bytes()
+            .windows(needle.len())
+            .any(|window| window == needle);
+        let metadata = fs::symlink_metadata(&path).unwrap();
+        name_matches
+            || (metadata.is_dir() && tree_contains(&path, needle))
+            || (metadata.is_file()
+                && fs::read(&path)
+                    .unwrap()
+                    .windows(needle.len())
+                    .any(|window| window == needle))
+    })
 }
 
 // ---- fixtures ---------------------------------------------------------------

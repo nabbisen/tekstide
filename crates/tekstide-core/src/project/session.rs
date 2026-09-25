@@ -9,7 +9,8 @@ use crate::runtime::terminal::{
 use crate::transcript::{
     TranscriptLocalDataSummary, TranscriptRetentionLimits, agent_run_may_still_be_writing,
     clear_stale_expired_mark, is_transcript_expired, mark_transcript_expired_if_due,
-    most_recent_activity_seconds, scan_project_transcripts,
+    most_recent_activity_seconds, product_run_directory_of, remove_run_record_files,
+    run_record_bytes, scan_project_transcripts,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -431,8 +432,17 @@ impl ProjectSession {
         self.transcripts
             .iter()
             .filter(|transcript| transcript_is_purgeable(transcript))
-            .filter_map(|transcript| fs::metadata(&transcript.storage_path).ok())
-            .map(|metadata| metadata.len())
+            .map(|transcript| {
+                let transcript_bytes = fs::metadata(&transcript.storage_path)
+                    .map(|metadata| metadata.len())
+                    .unwrap_or(0);
+                // RFC-056 D2: the record goes with the transcript, so the
+                // dialog counts it and never promises less than it removes.
+                let record_bytes = product_run_directory_of(&transcript.storage_path)
+                    .map(|directory| run_record_bytes(&directory))
+                    .unwrap_or(0);
+                transcript_bytes + record_bytes
+            })
             .sum()
     }
 
@@ -1741,8 +1751,33 @@ impl ProjectSession {
             });
         }
 
-        let bytes_removed = remove_transcript_file(&transcript_id, &storage_path)?;
+        // RFC-056 D2: **the run's record goes with its transcript**, or the
+        // purge is a lie -- `run.json` names the prompt summary, the ids and
+        // the user's own notes. The record files come first, so a failure
+        // leaves the transcript in place and a retry finds both. Then the
+        // transcript, as before. Then the directory, by `remove_dir`, which
+        // the operating system refuses unless the directory is empty: **a
+        // directory this purge did not find empty is never removed**, and a
+        // file in it that this product did not write is never touched.
+        // Only a directory in exactly the layout the product writes is looked
+        // at (`product_run_directory_of`); any other transcript path keeps
+        // the old behaviour, its file and nothing beside it.
+        let run_directory = product_run_directory_of(&storage_path);
+        let record_bytes = match &run_directory {
+            Some(directory) => remove_run_record_files(directory).map_err(|_| {
+                ProjectTranscriptError::DeleteFailed {
+                    transcript_id: transcript_id.clone(),
+                    path: directory.clone(),
+                }
+            })?,
+            None => 0,
+        };
+        let bytes_removed = remove_transcript_file(&transcript_id, &storage_path)? + record_bytes;
         self.transcripts[index].mark_purged();
+        if let Some(directory) = &run_directory {
+            let _ = fs::remove_dir(directory);
+        }
+        self.forget_restored_run_of(&transcript_id);
         self.record_activity();
 
         Ok(ProjectTranscriptPurgeSummary {
