@@ -14,13 +14,16 @@ says *measured* with no number in the evidence is not ticked.
 
 ## PR-056-A — the pin, and two gate steps
 
-- [ ] `tekstide-core = { version = "0.27.0", path = "crates/tekstide-core" }` in
+- [x] `tekstide-core = { version = "0.27.0", path = "crates/tekstide-core" }` in
       `[workspace.dependencies]`.
-- [ ] The release procedure gains both post-publish steps: **install this release into a temporary
+      *(Pinned to `"0.26.0"`, the crate's version today: `"0.27.0"` cannot resolve until the crate is `0.27.0`.
+      A test holds the pin equal to the version, so the `0.27.0` candidate's bump is red until the pin moves.
+      `qa-evidence.md` says so.)*
+- [x] The release procedure gains both post-publish steps: **install this release into a temporary
       root** and assert it builds; assert the app archive's `Cargo.lock` names the matching core.
-- [ ] The `0.27.0` changelog says older pinned installs do not build, that published metadata is
+- [x] The `0.27.0` changelog says older pinned installs do not build, that published metadata is
       frozen, and what the remedy is.
-- [ ] Evidence shows the `0.25.0` failure reproduced at least once, with the three `E0004` lines — so
+- [x] Evidence shows the `0.25.0` failure reproduced at least once, with the three `E0004` lines — so
       the fix is measured against the defect, not against a description of it.
 
 ## PR-056-B — the record
