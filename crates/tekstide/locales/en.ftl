@@ -969,6 +969,45 @@ agent-run-detail-no-transcript-budget-exhausted = This run has no transcript: th
 # never the moment the record was read.
 agent-run-detail-restored-ending-unknown = This run was restored from its record. Tekstide does not know when it ended: the app closed while it was running, or it was detached.
 agent-run-detail-restored-ended = This run was restored from its record. Tekstide saw it end at { $ended }.
+# RFC-056 PR-056-D: the classification, notes and export controls on the
+# AgentRun Report. Every button carries the key that does the same thing.
+agent-run-report-classification-heading = Your classification of this run (a label for you; nothing here is inferred from the run):
+agent-run-report-class-coding = 1 Coding
+agent-run-report-class-review = 2 Review
+agent-run-report-class-documentation = 3 Documentation
+agent-run-report-class-testing = 4 Testing
+agent-run-report-class-refactoring = 5 Refactoring
+agent-run-report-class-release = 6 Release
+agent-run-report-class-custom = c Custom…
+agent-run-report-class-clear = x Clear
+agent-run-report-classification-none = Not classified yet.
+agent-run-report-classification-custom = Custom classification: { $label }
+agent-run-report-notes-heading = Your notes (only you write these; nothing the run printed is ever put here):
+agent-run-report-notes-none = No notes yet.
+agent-run-report-notes-edit-button = n Edit notes
+agent-run-report-export-button = e Export report…
+agent-run-report-field-custom = Custom classification, up to { $max } characters:
+agent-run-report-field-notes = Notes, up to { $max } characters. Shift+Enter starts a new line:
+agent-run-report-field-export = Save this report as a new file. Type its full path:
+agent-run-report-field-save = Save
+agent-run-report-field-cancel = Cancel
+agent-run-report-field-hint = Enter saves. Escape cancels. Ctrl+V pastes.
+# Said before the file is written (D5): what it contains, and that it is then
+# outside the product's reach.
+agent-run-report-export-contains = The file will contain this run's recorded details, your classification and notes, { $count ->
+    [one] {$count} changed file path
+   *[other] {$count} changed file paths
+} and the last { $bytes } bytes of its transcript, quoted. Lines you wrote begin with "| "; lines that came from the run begin with "> ".
+agent-run-report-export-outside = Once written, the file is outside Tekstide: Tekstide cannot change or remove it, and purging this run does not remove it. It is never overwritten if it already exists.
+agent-run-report-notice-exported = Wrote { $bytes } bytes to { $path }. Tekstide cannot change or remove that file, and purging does not.
+agent-run-report-notice-not-absolute = That is not a full path. Type the whole path, starting with /.
+agent-run-report-notice-folder-missing = The folder for that file does not exist.
+agent-run-report-notice-already-exists = A file is already there. A report never replaces an existing file; choose a new name.
+agent-run-report-notice-inside-state = That is inside Tekstide's own data folder. Choose a folder of your own.
+agent-run-report-notice-write-failed = The report could not be written there. Nothing was saved.
+agent-run-report-notice-blank-label = A custom classification needs some text.
+agent-run-report-notice-not-recorded = This run has no record folder, so this is kept only until Tekstide closes.
+agent-run-report-notice-record-failed = This could not be saved to the run's record. Tekstide will try again.
 agent-run-detail-read-error = The transcript for this run could not be read.
 # D5: `Complete` vs `StillBeingWritten`, in the type -- rendered as two
 # distinct messages, never flattened into one "status" string with a

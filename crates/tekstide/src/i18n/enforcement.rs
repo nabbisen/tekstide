@@ -610,6 +610,12 @@ fn generic_args() -> CatalogArgs<'static> {
         .number("min", 1u32)
         .number("max", 1u32)
         .number("max_family_chars", 1u32)
+        // RFC-056 PR-056-D: `agent-run-report-classification-custom`'s `$label`,
+        // the user's own string, so it goes through the real `quote_untrusted`.
+        .untrusted(
+            "label",
+            &tekstide_core::text_safety::quote_untrusted("a label"),
+        )
         // RFC-056: `agent-run-detail-restored-ended`'s `$ended`.
         .untrusted(
             "ended",

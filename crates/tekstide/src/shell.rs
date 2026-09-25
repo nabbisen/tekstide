@@ -979,6 +979,12 @@ pub struct State {
     /// the empty-board case, so the two cannot independently drift about
     /// when the field is showing.
     path_field_requested: bool,
+    /// RFC-056 PR-056-D: the one open text field on the AgentRun Report
+    /// (a custom classification, the notes, or an export path), and the last
+    /// thing an action there said. Neither is stored anywhere: a field is a
+    /// buffer and a purpose, applied only when submitted.
+    run_report_field: Option<RunReportField>,
+    run_report_notice: Option<RunReportNotice>,
     /// RFC-038 PR-038-D: the Project Board's own keyboard cursor over
     /// `project_board().rows` -- the direct analogue of
     /// `approval_history_highlight` for a third, independent list.
@@ -1333,6 +1339,8 @@ impl State {
             path_field: String::new(),
             path_field_notice: None,
             path_field_requested: false,
+            run_report_field: None,
+            run_report_notice: None,
             project_board_row_highlight: 0,
             project_board_scroll_request: None,
             tab_strip_highlight: 0,
@@ -1543,6 +1551,16 @@ pub enum Message {
     /// "narrower than the domain type" idiom `ContentLifecycle` already
     /// uses ahead of `ChangeLifecycle`.
     ChangeReviewDecisionButtonPressed(ChangeReviewDecision),
+    /// RFC-056 PR-056-D: the AgentRun Report's classification buttons (`None`
+    /// clears). Not a `NavigationAction`, for the same reason the Change
+    /// Review decision buttons are not: no global chord names it.
+    RunReportClassifyPressed(Option<tekstide_core::domain::RunClassification>),
+    /// Opens the custom-classification, notes or export field.
+    RunReportOpenFieldPressed(RunReportFieldKind),
+    RunReportFieldSubmitPressed,
+    RunReportFieldCancelPressed,
+    /// The clipboard's answer to `Ctrl+V` in a report field.
+    RunReportFieldPasteResolved(Option<String>),
     /// RFC-015 PR-015-F: a synthetic measurement keystroke arrived; the
     /// `Instant` is when the measurement subscription first saw it, not
     /// when `update` gets around to handling it -- the gap between the
@@ -1837,7 +1855,13 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::ChangeReviewFileRowPressed(_)
         // RFC-034: a decision button on the same surface -- not a
         // `NavigationAction` either, for the identical reason.
-        | Message::ChangeReviewDecisionButtonPressed(_) => Some(ClickMessageKind::BackgroundControl),
+        | Message::ChangeReviewDecisionButtonPressed(_)
+        // RFC-056 PR-056-D: the AgentRun Report's own controls, the same
+        // classification as the Change Review decision buttons beside them.
+        | Message::RunReportClassifyPressed(_)
+        | Message::RunReportOpenFieldPressed(_)
+        | Message::RunReportFieldSubmitPressed
+        | Message::RunReportFieldCancelPressed => Some(ClickMessageKind::BackgroundControl),
 
         // -- modal decisions (RFC-040 PR-040-B): the destructive/
         // decision-committing half of a two-button modal, a folder
@@ -1884,6 +1908,7 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::GitSummaryComputed { .. }
         | Message::TerminalPasteResolved { .. }
         | Message::ApprovalPollTick
+        | Message::RunReportFieldPasteResolved(_)
         | Message::RunRecordTick
         | Message::PanesRegionMeasured(_)
         | Message::ExplorerScanFinished { .. }
@@ -2235,6 +2260,12 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
                 // Called before the field, not after: the field's own
                 // `return` below would otherwise skip this one entirely.
                 handle_project_board_row_key(state, surface_input.key());
+                // RFC-056 PR-056-D: the AgentRun Report's own keys, the same
+                // "checks `open_surface` itself" shape as its neighbours. It
+                // may need a clipboard `Task` (`Ctrl+V` in a field), so it is
+                // batched with the path field's rather than called bare.
+                let report_task =
+                    run_report::handle_agent_run_report_key(state, surface_input.key());
                 // RFC-038 PR-038-A: a fifth `MainArea` consumer, checking
                 // `empty_state.is_some()` in place of the other four's
                 // `active_project()`/`open_surface()` guards -- naturally
@@ -2243,7 +2274,10 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
                 // project. Returned rather than called as a statement:
                 // this is the one of the five that sometimes needs a
                 // real `Task` (`Ctrl+V`'s async clipboard read).
-                return handle_project_board_path_field_key(state, surface_input.key());
+                return Task::batch([
+                    report_task,
+                    handle_project_board_path_field_key(state, surface_input.key()),
+                ]);
             }
         }
         Message::Input(RoutedInput::Terminal(text_stream)) => {
@@ -2518,6 +2552,15 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         Message::ChangeReviewFileRowPressed(path) => select_change_review_file(state, path),
         Message::ChangeReviewDecisionButtonPressed(decision) => {
             record_change_review_decision(state, decision)
+        }
+        Message::RunReportClassifyPressed(classification) => {
+            run_report::classify(state, classification)
+        }
+        Message::RunReportOpenFieldPressed(kind) => run_report::open_field(state, kind),
+        Message::RunReportFieldSubmitPressed => run_report::field_submit(state),
+        Message::RunReportFieldCancelPressed => run_report::field_cancel(state),
+        Message::RunReportFieldPasteResolved(content) => {
+            run_report::field_paste_resolved(state, content)
         }
         Message::ModalDismiss => {
             // RFC-039 PR-039-C: Escape on a `ProjectClose` dialog is a
@@ -12003,6 +12046,9 @@ mod change_review_content {
 }
 use change_review_content::ChangeReviewContentLine;
 
+mod run_report;
+use run_report::{RunReportField, RunReportFieldKind, RunReportNotice};
+
 /// RFC-042 D2's structural half: the content preview's own render
 /// inputs, chrome and untrusted content kept in separate fields rather
 /// than merged into one `Vec<String>` the renderer used to tell apart by
@@ -12384,10 +12430,15 @@ fn agent_run_detail_view(state: &State) -> Element<'_, Message> {
         }
     }
 
-    scrollable(column(lines).spacing(12))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    // RFC-056 PR-056-D: the controls stay above the report's scrolling content.
+    column![
+        run_report::controls_view(state, run),
+        scrollable(column(lines).spacing(12))
+            .width(Length::Fill)
+            .height(Length::Fill),
+    ]
+    .spacing(12)
+    .into()
 }
 
 /// RFC-056 D6/D12: what a restored run says about its ending. `None` for a
