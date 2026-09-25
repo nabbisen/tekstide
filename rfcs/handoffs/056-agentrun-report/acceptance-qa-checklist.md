@@ -28,19 +28,27 @@ says *measured* with no number in the evidence is not ticked.
 
 ## PR-056-B — the record
 
-- [ ] `run.json` sits in `agent-run-<id>/` beside the transcript, carries a **version field**, and
+- [x] `run.json` sits in `agent-run-<id>/` beside the transcript, carries a **version field**, and
       holds references and the user's words only — no run content.
-- [ ] It is written **atomically** and **on every change**, not only at run end. Ablated: a
+- [x] It is written **atomically** and **on every change**, not only at run end. Ablated: a
       classification set mid-run survives a kill.
+      *(Ablations 1, 11, 17. A status change reaches the record within a second; the user's own change is written at once.)*
 - [ ] A restored run carries its prompt, profile, ids and classification, and **its transcript is
       attached to it** rather than orphaned. Captured live: close the app, reopen, the run is there.
-- [ ] A run whose process was killed with the app **says its ending is unknown** — not the start
+      *(Unticked, split: prompt, profile, ids and the attached transcript are tested and were captured live
+      — `evidence/pr-056-b/01`. **The classification cannot be captured live until PR-056-D gives a person a
+      way to set one**; its round trip is tested and ablated (1). D's live capture closes this box.)*
+- [x] A run whose process was killed with the app **says its ending is unknown** — not the start
       time, not zero, not the moment the record was read. Ablated.
-- [ ] A corrupt record, and a record with an unknown version, are each **moved aside and named**; the
+      *(Ablations 2, 3, 14, 15; live: `evidence/pr-056-b/01`.)*
+- [x] A corrupt record, and a record with an unknown version, are each **moved aside and named**; the
       run then appears as a transcript with no run, never as a run with invented fields.
-- [ ] The caps hold, and the record **says it was bounded**: a run with more ids than the cap and an
+      *(Ablations 4, 5, 13, 16; live for the corrupt case: `evidence/pr-056-b/03`. The unknown-version case is tested, not captured.)*
+- [x] The caps hold, and the record **says it was bounded**: a run with more ids than the cap and an
       over-long note.
-- [ ] The disk-usage figure counts the record as the product's own, not as unclaimed bytes.
+      *(Ablations 6, 7, 8.)*
+- [x] The disk-usage figure counts the record as the product's own, not as unclaimed bytes.
+      *(Ablation 9, isolated.)*
 
 ## PR-056-C — purge takes it too
 

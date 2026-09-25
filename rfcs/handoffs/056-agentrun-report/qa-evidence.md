@@ -61,3 +61,134 @@ shows a new core's break), and a scope line for the pin. Run against the publish
 | `0.25.0` | `"0"` — **fails** | `0.25.0` — ok | FAIL, as it must |
 
 The install step reproduces the `0.25.0` failure above.
+
+## PR-056-B — the record
+
+### What was built, and the four decisions the plan left to me
+
+| | |
+| --- | --- |
+| `transcript/run_record.rs` | the file layer: a versioned `RunRecord` (`version: 1`), an atomic write (temporary file in the run directory, `create_new`, `sync_all`, `rename`, directory sync), and a read that checks the **version before the shape**, so a newer Tekstide's record is recognised as newer and not as corruption |
+| `project/session/run_records.rs` | the session side: persistence, the two setters, restoration. A child module of `session`, so it reaches the collections without widening any of them |
+| `domain/agent.rs` | `AgentRun` gains `ending`, `classification`, `notes`, `record_bounds`, `origin`; the caps are constants beside it |
+
+1. **A restored run is not in `agent_runs`.** It lives in `restored_agent_runs`. Reading the code before writing any showed why: `agent_runs` is read
+   by the **launch limit** (`agent_run_limit`, so every restart would have used up a slot), by **change attribution**
+   (`agent_run_status_blocks_strong_association` and `other_run_temporally_overlaps_baseline`, where a restored `Detached` run, or a restored
+   `Completed` run with no `ended_at`, would turn every later change ambiguous), by the **running/failed counts** and the close prompt. A flag on
+   the run would have needed every one of those to remember to test it. A separate collection needs none of them to. The board's *agent runs*
+   count includes both, because the count is the thing that read `0` after a restart and was wrong.
+2. **`ended_at` is left alone; the ending is a new field.** `ended_at` is never set anywhere, and `other_run_temporally_overlaps_baseline` reads
+   `None` as "no end recorded, so conservatively overlapping". Setting it at a terminal transition would change which changes are attributed
+   strongly — a behaviour change to a feature this slice is not about. `RunEnding::{NotEnded, Ended(at), Unknown}` is set by `transition_to`
+   (`Ended` on completed/failed/cancelled, `Unknown` on detached). `started_at`, which nothing reads either, is set on entering `Running`.
+3. **The record is derived from the run every time and compared to what was last written**, rather than written from each mutation site. "On every
+   change" then holds whichever path changed the run, and an unchanged run costs a comparison. The shell calls it from a one-second tick offered
+   only while an open project has a launched run; **the user's own annotations are written by their setter at once**, not by the tick.
+4. **A record never creates a run directory.** A run with transcript capture off, or none for any other reason, has no record: there is no
+   directory, and the record does not make one. `RunRecordWrite::NoRunDirectory` says so to the caller, and the annotation stays in memory.
+
+### What is on disk, from the running app
+
+`04-record-written-by-the-live-app-before-the-kill.json`: the record the release binary wrote for a run **no setter had touched**, so it is the
+tick's write — `"status": "running"`, `"ending": {"kind": "not_ended"}`, the profile, the prompt summary, `null` classification and notes, empty id
+lists, and the `bounds` block all zero. It contains none of the transcript's text.
+
+### Tests
+
+`project/tests/run_records.rs`, 26 tests, and 3 in the shell. Every fixture is a fresh temporary state root; nothing reads the real one. "Killed" is a
+session dropped with no closing step, because the product has none to call.
+
+| Checklist box | Test(s) |
+| --- | --- |
+| beside the transcript, versioned, references only | `a_launched_run_gets_a_record_beside_its_transcript_holding_references_only` (asserts the transcript's text is absent) |
+| written when it changes, not only at the end | `a_classification_set_mid_run_survives_a_kill`, `a_run_that_ended_keeps_the_ending_it_was_seen_to_have` (the status path), `a_pass_over_an_unchanged_run_writes_nothing` |
+| atomic; nothing written through a planted name | `a_write_replaces_a_temporary_file_an_earlier_kill_left`, `a_record_is_never_written_through_a_planted_symlink` |
+| restored run carries its fields and its transcript | `a_restored_run_carries_its_prompt_profile_ids_and_its_transcript`, `a_record_beside_no_transcript_still_restores_its_run` |
+| ending unknown | `a_run_killed_with_the_app_says_its_ending_is_unknown`, `a_finished_run_whose_record_holds_no_ending_says_unknown_not_the_read_time`, and in the shell `a_restored_run_says_it_does_not_know_its_ending_and_is_never_called_finished` |
+| corrupt / unknown version / not this run's: moved aside and named | `a_corrupt_record_is_moved_aside_and_the_run_is_a_transcript_with_no_run`, `a_record_of_an_unknown_version_is_set_aside_and_named_as_such`, `records_that_are_not_this_runs_are_set_aside_and_never_guessed_at` (six wrong shapes), `a_record_over_the_size_cap_is_set_aside_unread`, `a_record_that_cannot_be_moved_is_named_as_left_in_place_not_as_set_aside`; the board in `the_board_names_a_run_record_that_was_set_aside_and_is_silent_otherwise` |
+| caps hold and the record says so | `the_caps_hold_and_the_record_says_it_was_bounded` (250 ids of each kind, a 4,100-character note; survives a restore **and a later rewrite**), `a_hand_edited_record_beyond_the_caps_is_bounded_on_the_way_in` |
+| disk-usage counts it as own | `the_disk_usage_figure_counts_the_record_as_the_products_own` |
+| a restored run is a record | `a_restored_run_is_never_running_never_failed_and_never_counts_against_a_limit`, `a_run_this_session_launched_is_not_restored_over_itself` |
+| a purged run is not written back | `a_purged_run_is_not_brought_back_by_a_late_annotation`, `a_purged_restored_run_is_not_written_back_by_a_late_annotation` |
+| the shell asks for it | `a_real_agent_run_launch_gets_its_record_from_the_shells_tick` (a real launch of the marker script; asserts **no record exists before the tick**, so it cannot pass by accident) |
+
+### Ablations (`rfcs/handoffs/ablate.sh`, clean tree each time)
+
+| # | Ablation | Failed |
+| --- | --- | --- |
+| 1 | the classification setter does not persist | `a_classification_set_mid_run_survives_a_kill` (also two more that depend on the setter's write) |
+| 2 | a killed run's ending read as the time it was read | `a_run_killed_with_the_app_says_its_ending_is_unknown`, `a_restored_run_can_be_annotated_and_the_record_follows` |
+| 3 | a finished run whose record holds no ending gets the read time | `a_finished_run_whose_record_holds_no_ending_says_unknown_not_the_read_time` **alone** (I had no test for this arm until the first ablation text did not match a test and I wrote one) |
+| 4 | a corrupt record is not moved | the corrupt test and the unknown-version test |
+| 5 | an unknown version is accepted | the unknown-version test **alone** |
+| 6 | the id cap not applied | `the_caps_hold_and_the_record_says_it_was_bounded` **alone** |
+| 7 | the omitted count not recorded | the same test, alone |
+| 8 | the note not bounded | the caps test and the hand-edited-record test |
+| 9 | the record's bytes counted as unclaimed **and nothing else changed** | `the_disk_usage_figure_counts_the_record_as_the_products_own` **alone** (my first version of this ablation stopped the loader seeing the record at all, and 16 tests failed for that reason; it proved the wrong thing, so I wrote the isolated one) |
+| 10 | a restored run pushed into `agent_runs` | 9 tests, including the isolation test's *"the launched collection stays empty"* |
+| 11 | the temporary file opened with `create` instead of `create_new` | `a_record_is_never_written_through_a_planted_symlink` **alone** |
+| 12 | a purged restored run's directory still resolved | `a_purged_restored_run_is_not_written_back_by_a_late_annotation` **alone** |
+| 13 | the board's list omits the record notice | `the_board_names_a_run_record_that_was_set_aside_and_is_silent_otherwise` **alone** |
+| 14 | a restored run gets no ending line | `a_restored_run_says_it_does_not_know_its_ending_and_is_never_called_finished` |
+| 15 | a restored run keeps the "has finished" status line | the same test |
+| 16 | the set-aside count not accumulated on the session | the board test and the corrupt test |
+| 17 | the shell's tick does nothing | `a_real_agent_run_launch_gets_its_record_from_the_shells_tick` **alone** |
+
+**Not ablated, and proven only live:** that the tick is *offered* (the `subscription()` condition — an open project has a launched run). Test 17
+proves the message does the work; the live walk below proves the message arrives, because the record it captured was written by it.
+
+### A guard I tripped and did not weaken
+
+`enumeration_confirms_only_the_closed_list_reads_full_file_content` failed on the new file, correctly: `run_record.rs` reads a whole file. The read is
+`Take`n at the size cap + 1 and a file that fills it is set aside unread, so I added the file to the list with the reason, in the same doc comment
+every other entry has, rather than widening the pattern.
+
+### Live walk
+
+Against `target/release/tekstide` at `ce11208`, with `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, the project and the configured AI CLI each in a `mktemp -d`
+(under `/dev/shm`, see the note below). The CLI is a script that prints one marker line and then sleeps, so the run is **still running when the app
+is closed**. Input was `wtype`, every send preceded by a check that the niri-focused window was mine; screenshots by window id, no window floated or
+resized.
+
+| Step | What happened | Evidence |
+| --- | --- | --- |
+| 1 | Session 1: granted trust, launched the configured CLI through the confirmation. Within three seconds `agent-run-<id>/` held `transcript.log` **and `run.json`** | `04-…json` |
+| 2 | Closed the window. The process exited; the run's script was gone; `run.json` was still there | — |
+| 3 | Session 2, same state: `Ctrl+Alt+R`. The AgentRun Report shows the run, **says it does not know when it ended**, and shows its transcript (50 bytes, the marker line) | `01-…png` |
+| 4 | The record on disk was **byte-identical** before the kill and after this session (`cmp`): restoring a run does not rewrite its record | — |
+| 5 | The Project Board reads *1 agent run*, **0 terminals, Calm** — a restored run is not counted as running or failed | `02-…png` |
+| 6 | Closed. `run.json` overwritten with half a record. Session 3: the board says *1 agent run record could not be read and was set aside under a .corrupt name beside its transcript … Nothing was deleted*, *0 agent runs*, and the directory holds `run.json.corrupt` (36 bytes, the half record, intact) and `transcript.log` | `03-…png` |
+
+**Not shown live: a run that was classified.** There is no control to classify a run until PR-056-D, and the environment-variable route D10 forbids
+is not one I will invent for evidence. The classification round trip, and the classification set mid-run surviving a kill, are the core tests above,
+ablated (1); the checklist box that says *captured live* for the classification is therefore **split**, and its live half is D's capture.
+
+**A note on the machine.** `/tmp` was 100% full during this slice — 23 GB in another project's session scratchpad, which is not mine and which I left
+alone — so the harness lost some command output and I ran every test, the gate and the fixture in `/dev/shm`. Nothing in the results depends on it,
+but it is why the fixture path in the images reads `/dev/shm/tek056-live.…`.
+
+### Things that are true now and that C must close
+
+- **Purge does not remove `run.json` yet.** Between this slice and C, a purged run's record — its prompt summary and ids — stays on disk.
+  Nothing is released in between; C is next and is the one that matters.
+- **C must decide what it does about the files beside the record.** `run.json.tmp` (a write a kill interrupted) and `run.json.corrupt[-N]` (a record
+  set aside) are counted as the product's own by name and are **not** deleted by anything. A set-aside record can hold exactly what D2 says a purge must
+  not leave behind, so I would take them under the same purge, by exact name, as regular files only, with the directory removed only when empty. That
+  is C's decision and the architect's; I have not made it.
+- The loader now recognises three more names in a run directory, so the third-file test C plants must use a name that is **none** of them.
+
+### Deviations and judgment calls, in one place
+
+1. Restored runs are a separate collection (above, decision 1).
+2. `ended_at` untouched; `RunEnding` is new (decision 2). `started_at` is now set on entering `Running` — nothing read it.
+3. `prompt_summary` is capped at 1,000 characters, with a flag. The plan caps notes and id counts; the summary is Tekstide's own fixed string today,
+   but a record read from disk is not trusted to have kept to any cap.
+4. A record that could not be read **and could not be renamed** is a third case, `left_in_place`, and the board says *"could not be renamed either"*
+   rather than *"set aside"*, which would be false. Tested by making the directory read-only.
+5. `NotificationKind::RunRecordSetAside` is new, ordered after the transcript-retention kind.
+6. The board's *agent runs* count includes restored runs; the AgentRun Report shows the latest restored run when none was launched this session, with
+   its own ending line, and **drops the "has finished / still active" status line for a restored run**, because that line says something a restored run
+   cannot know.
+7. The set-aside counts are the session's own and never reset — a fact about this state directory, not about the last load.
+8. A change to a run's status reaches its record within a second, not instantly. A run killed inside that second loses that status change only.
