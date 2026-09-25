@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 056 | [AgentRun Report And Classification](./proposed/056-agentrun-report-and-classification.md) | **Proposed 2026-09-25**, awaiting the owner. `0.27.0`. The product's own pitch is *what did this run do, and what do I hand on*, and it can answer neither: no classification, no notes, no report — and underneath, **no `AgentRun` survives the process**, only the id in the directory name `agent-run-<uuid>`. A run leaves a record in the directory it already owns, purge takes it with the transcript, and the report is generated rather than stored twice. `REQ-AGENT-011`, `REQ-AGENT-015` |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -52,7 +53,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 027 | Crash Recovery and Unsaved Buffer Persistence | M13 |
 | 028 | Cross-Platform Support | M14 |
 | 029 | Documentation, CI, and Release Automation | M14 |
-| 056 | AgentRun Report And Classification | agent remainder |
 | 057 | Editor Essentials | M10 remainder |
 | 058 | A Project Held By One Process | M13 tail |
 | 059 | Seeing The Audit, And Redacting It | pre-1.0 |
