@@ -3,6 +3,7 @@ mod path;
 mod policy;
 mod reader;
 mod retention;
+mod run_record;
 mod writer;
 
 pub use loading::{
@@ -26,6 +27,10 @@ pub use reader::{
 pub use retention::{
     agent_run_may_still_be_writing, clear_stale_expired_mark, is_transcript_expired,
     mark_transcript_expired_if_due, most_recent_activity_seconds,
+};
+pub use run_record::{
+    RUN_RECORD_FILE_NAME, RUN_RECORD_VERSION, RunRecord, RunRecordRead, SetAsideReason,
+    is_run_record_file_name, read_run_record, write_run_record,
 };
 pub use writer::{
     BoundedTranscriptWriter, TranscriptWriteError, TranscriptWriteErrorReason,

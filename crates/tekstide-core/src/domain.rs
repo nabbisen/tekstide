@@ -9,7 +9,10 @@ mod time;
 mod transcript;
 
 pub use agent::{
-    AgentCompatibilityLevel, AgentRun, AgentRunStatus, AgentRunTransitionError, TranscriptAbsence,
+    AgentCompatibilityLevel, AgentRun, AgentRunOrigin, AgentRunStatus, AgentRunTransitionError,
+    BlankClassificationLabel, RUN_CUSTOM_CLASSIFICATION_MAX_CHARS, RUN_NOTES_MAX_CHARS,
+    RUN_PROMPT_SUMMARY_MAX_CHARS, RUN_RECORD_MAX_IDS_PER_KIND, RecordBounds, RunClassification,
+    RunEnding, TranscriptAbsence,
 };
 pub use approval::{
     ApprovalDecision, ApprovalDecisionError, ApprovalRequest, RiskLevel, RiskReason,

@@ -99,7 +99,18 @@ pub struct ProjectSession {
     /// (capture stays on) by default: RFC-033 does not revisit RFC-011's
     /// capture-on default, only gives a user a way to decline it.
     transcript_capture_declined: bool,
+    /// RFC-056 D6: runs restored from their records. Kept apart from
+    /// `agent_runs` on purpose -- see `session/run_records.rs`.
+    restored_agent_runs: Vec<AgentRun>,
+    /// Where each restored run's record was found.
+    restored_run_directories: std::collections::HashMap<AgentRunId, PathBuf>,
+    /// RFC-056 D9: the record last written, or last read, for each run, so a
+    /// pass writes only what changed.
+    run_records_written: std::collections::HashMap<AgentRunId, crate::transcript::RunRecord>,
 }
+
+mod run_records;
+pub use run_records::{RunAnnotationError, RunRecordPersistSummary, RunRecordWrite};
 
 impl ProjectSession {
     pub fn new(
@@ -136,6 +147,9 @@ impl ProjectSession {
             selected_agent_run: None,
             expired_approval_ids: std::collections::HashSet::new(),
             transcript_capture_declined: false,
+            restored_agent_runs: Vec::new(),
+            restored_run_directories: std::collections::HashMap::new(),
+            run_records_written: std::collections::HashMap::new(),
         }
     }
 
@@ -354,6 +368,9 @@ impl ProjectSession {
             already_known: 0,
             skipped_entries: scan.skipped_entries,
             skipped_bytes: scan.skipped_bytes,
+            run_records_restored: 0,
+            run_records_set_aside_unreadable: 0,
+            run_records_set_aside_unknown_version: 0,
         };
         for found in scan.found {
             if self
@@ -384,7 +401,8 @@ impl ProjectSession {
             ));
             summary.loaded += 1;
         }
-        if summary.loaded > 0 {
+        self.restore_runs_from_records(&scan.record_directories, &mut summary);
+        if summary.loaded > 0 || summary.run_records_restored > 0 {
             self.refresh_runtime_summary_from_collections();
         }
         summary
@@ -1865,7 +1883,7 @@ impl ProjectSession {
 
     fn refresh_runtime_summary_from_collections(&mut self) {
         let terminal_count = len_as_u32(self.terminal_sessions.len());
-        let agent_run_count = len_as_u32(self.agent_runs.len());
+        let agent_run_count = len_as_u32(self.agent_runs.len() + self.restored_agent_runs.len());
         // RFC-022 PR-022-E: an expired request stays `decision: Pending`
         // (nobody decided) but must not keep a project in
         // `AttentionState::ApprovalNeeded` forever -- the gate's own
@@ -2250,6 +2268,12 @@ pub struct TranscriptLoadSummary {
     /// this product wrote. Never loaded and never deleted.
     pub skipped_entries: u64,
     pub skipped_bytes: u64,
+    /// RFC-056: runs restored from a `run.json` (D6).
+    pub run_records_restored: u64,
+    /// RFC-056 D7: records moved aside because they could not be read, and
+    /// because they name a version this build does not know. Never deleted.
+    pub run_records_set_aside_unreadable: u64,
+    pub run_records_set_aside_unknown_version: u64,
 }
 
 fn transcript_is_purgeable(transcript: &Transcript) -> bool {

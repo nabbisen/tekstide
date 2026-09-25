@@ -7,6 +7,7 @@ mod loading;
 mod metadata;
 mod references;
 mod retention;
+mod run_records;
 mod transcripts;
 
 fn project_session(sequence: u64) -> ProjectSession {

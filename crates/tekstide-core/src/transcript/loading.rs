@@ -20,6 +20,7 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use super::run_record::{RUN_RECORD_FILE_NAME, is_run_record_file_name};
 use crate::project::ProjectId;
 
 const TRANSCRIPTS_DIRECTORY: &str = "transcripts";
@@ -48,6 +49,11 @@ pub struct ProjectTranscriptScan {
     pub skipped_entries: u64,
     /// Their bytes, counted without following any symlink.
     pub skipped_bytes: u64,
+    /// RFC-056: run directories holding a regular `run.json`, whether or not
+    /// they hold a transcript. The record is **the product's own** and is
+    /// never in `skipped_*`, so the disk-usage figure does not call it
+    /// unclaimed (R1).
+    pub record_directories: Vec<PathBuf>,
 }
 
 /// Bytes under the whole `transcripts/` directory (RFC-050 D5, D6′).
@@ -159,7 +165,21 @@ fn scan_project_directory(
         for run_entry in run_entries.flatten() {
             let path = run_entry.path();
             let is_transcript_name = run_entry.file_name() == TRANSCRIPT_FILE_NAME;
+            let record_file_name = run_entry
+                .file_name()
+                .to_str()
+                .filter(|name| is_run_record_file_name(name))
+                .map(str::to_owned);
             match fs::symlink_metadata(&path) {
+                // RFC-056: the record, its write-in-progress file and a
+                // record set aside are the product's own, by exact name and
+                // as regular files only. Nothing here is loaded as a
+                // transcript, and nothing is deleted.
+                Ok(metadata) if record_file_name.is_some() && metadata.file_type().is_file() => {
+                    if record_file_name.as_deref() == Some(RUN_RECORD_FILE_NAME) {
+                        scan.record_directories.push(run_directory.clone());
+                    }
+                }
                 Ok(metadata) if is_transcript_name && metadata.file_type().is_file() => {
                     let modified_unix_seconds = metadata
                         .modified()

@@ -797,6 +797,12 @@ fn the_bounded_read_refuses_rather_than_truncates_when_called_directly() {
 /// only needs to know that its one call site exists and is reviewed, not
 /// re-prove exclusivity a second time.
 ///
+/// `transcript/run_record.rs` (RFC-056 PR-056-B) reads one file: a run's own
+/// `run.json` in the state directory, the product's own record and no project
+/// content. **Bounded before it is parsed**: the read is `Take`n at
+/// `RUN_RECORD_MAX_FILE_BYTES + 1`, and a file that fills it is set aside
+/// unread rather than parsed.
+///
 /// `runtime/git.rs` (RFC-030 PR-030-A/B) reads a fourth kind of content
 /// this scan's name is broad enough to catch, at **four** call sites --
 /// all disclosed here even though the scan's own pattern only matches one,
@@ -830,6 +836,7 @@ const FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT: &[&str] = &[
     "project/recent/store.rs",
     "audit/recovery.rs",
     "transcript/reader.rs",
+    "transcript/run_record.rs",
     "runtime/git.rs",
 ];
 

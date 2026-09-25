@@ -49,7 +49,103 @@ pub struct AgentRun {
     // Runtime lifecycle summary. It records Tekstide's known lifecycle state, not a process
     // handle or proof of supervision after `Detached`.
     pub status: AgentRunStatus,
+    /// RFC-056 D6/D12: whether the run's ending is known. **Separate from
+    /// `ended_at`**, which nothing sets and the change-attribution overlap
+    /// rule reads as "no end recorded, so conservatively overlapping":
+    /// setting `ended_at` at a terminal transition would change which
+    /// changes are attributed strongly, and this slice does not change
+    /// attribution.
+    pub ending: RunEnding,
+    /// RFC-056 D3: the user's classification, `None` until they choose one.
+    pub classification: Option<RunClassification>,
+    /// RFC-056 D4: the user's own notes, and nothing but the user writes
+    /// them. `None` when there are none.
+    pub notes: Option<String>,
+    /// RFC-056 D8: what the run's record could not hold. Set by the setters
+    /// here and by [`RunRecord`](crate::transcript::RunRecord) restoration,
+    /// never by the run's own content.
+    pub record_bounds: RecordBounds,
+    /// RFC-056 D6: how this run came to be in the project.
+    pub origin: AgentRunOrigin,
 }
+
+/// RFC-056 D8's caps. A run directory must not grow without limit and a
+/// runaway run must not turn the state directory into a heap; the transcript
+/// stays the only place run *content* lives.
+pub const RUN_NOTES_MAX_CHARS: usize = 4_000;
+pub const RUN_CUSTOM_CLASSIFICATION_MAX_CHARS: usize = 64;
+pub const RUN_PROMPT_SUMMARY_MAX_CHARS: usize = 1_000;
+/// Per kind: approvals, change sets, audit events and artifact references.
+pub const RUN_RECORD_MAX_IDS_PER_KIND: usize = 200;
+
+/// RFC-056 D6/D12: `Unknown` is genuinely unknown, the opposite of the defect
+/// RFC-053 fixed (`unknown` printed where zero was known). A run whose process
+/// was killed with the app has no ending, and neither its start, zero, nor the
+/// moment its record was read is one.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RunEnding {
+    /// The run this process launched has not ended yet.
+    NotEnded,
+    /// Tekstide saw the run end, at this instant.
+    Ended(DomainTimestamp),
+    /// The run began and Tekstide never saw it end: it was detached, or the
+    /// app closed while it was running.
+    Unknown,
+}
+
+/// RFC-056 D3: the seven values `REQ-AGENT-015` names, and nothing more.
+/// `Custom` carries a user string, which every surface renders through
+/// `quote_untrusted` like any other untrusted text.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RunClassification {
+    Coding,
+    Review,
+    Documentation,
+    Testing,
+    Refactoring,
+    Release,
+    Custom(String),
+}
+
+/// RFC-056 D6: a run this process launched has a lifecycle; a run restored
+/// from its record is a record and has none. Every lifecycle consumer —
+/// the launch limit, change attribution, the running and failed counts, the
+/// close prompt — reads the launched collection only, so a record can never
+/// look like a process.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AgentRunOrigin {
+    LaunchedHere,
+    RestoredFromRecord,
+}
+
+/// RFC-056 D8: everything a run's record left out or shortened, so a bounded
+/// record says it is bounded rather than reading as complete.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RecordBounds {
+    pub notes_truncated: bool,
+    pub classification_label_truncated: bool,
+    pub prompt_summary_truncated: bool,
+    pub omitted_approval_ids: u64,
+    pub omitted_change_set_ids: u64,
+    pub omitted_audit_event_ids: u64,
+    pub omitted_artifact_refs: u64,
+}
+
+impl RecordBounds {
+    pub fn is_bounded(&self) -> bool {
+        self.notes_truncated
+            || self.classification_label_truncated
+            || self.prompt_summary_truncated
+            || self.omitted_approval_ids > 0
+            || self.omitted_change_set_ids > 0
+            || self.omitted_audit_event_ids > 0
+            || self.omitted_artifact_refs > 0
+    }
+}
+
+/// A custom classification with no text says nothing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BlankClassificationLabel;
 
 /// Why a run has no transcript (RFC-050 D3; RFC-049 D4′ adds its own case).
 ///
@@ -93,12 +189,27 @@ impl AgentRun {
             artifact_refs: Vec::new(),
             audit_event_ids: Vec::new(),
             status: AgentRunStatus::Draft,
+            ending: RunEnding::NotEnded,
+            classification: None,
+            notes: None,
+            record_bounds: RecordBounds::default(),
+            origin: AgentRunOrigin::LaunchedHere,
         }
     }
 
     pub fn transition_to(&mut self, next: AgentRunStatus) -> Result<(), AgentRunTransitionError> {
         if can_transition_agent_run(self.status, next) {
             self.status = next;
+            match next {
+                AgentRunStatus::Running if self.started_at.is_none() => {
+                    self.started_at = Some(DomainTimestamp::now_utc());
+                }
+                AgentRunStatus::Completed | AgentRunStatus::Failed | AgentRunStatus::Cancelled => {
+                    self.ending = RunEnding::Ended(DomainTimestamp::now_utc());
+                }
+                AgentRunStatus::Detached => self.ending = RunEnding::Unknown,
+                _ => {}
+            }
             Ok(())
         } else {
             Err(AgentRunTransitionError {
@@ -106,6 +217,46 @@ impl AgentRun {
                 to: next,
             })
         }
+    }
+
+    /// RFC-056 D3. A custom label is trimmed and bounded, and a blank one is
+    /// refused rather than stored as a classification that says nothing.
+    pub fn set_classification(
+        &mut self,
+        classification: Option<RunClassification>,
+    ) -> Result<(), BlankClassificationLabel> {
+        let (classification, truncated) = match classification {
+            Some(RunClassification::Custom(label)) => {
+                let label = label.trim();
+                if label.is_empty() {
+                    return Err(BlankClassificationLabel);
+                }
+                let truncated = label.chars().count() > RUN_CUSTOM_CLASSIFICATION_MAX_CHARS;
+                let bounded = label
+                    .chars()
+                    .take(RUN_CUSTOM_CLASSIFICATION_MAX_CHARS)
+                    .collect();
+                (Some(RunClassification::Custom(bounded)), truncated)
+            }
+            other => (other, false),
+        };
+        self.classification = classification;
+        self.record_bounds.classification_label_truncated = truncated;
+        Ok(())
+    }
+
+    /// RFC-056 D4/D8: the user's notes, bounded. Blank notes clear them. The
+    /// truncation flag follows the notes as they are now, so shortening a note
+    /// that was cut clears it.
+    pub fn set_notes(&mut self, notes: &str) {
+        if notes.trim().is_empty() {
+            self.notes = None;
+            self.record_bounds.notes_truncated = false;
+            return;
+        }
+        let truncated = notes.chars().count() > RUN_NOTES_MAX_CHARS;
+        self.notes = Some(notes.chars().take(RUN_NOTES_MAX_CHARS).collect());
+        self.record_bounds.notes_truncated = truncated;
     }
 
     pub fn attach_terminal(&mut self, terminal: &TerminalSession) -> Result<(), OwnershipError> {
