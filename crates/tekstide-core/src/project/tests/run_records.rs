@@ -486,6 +486,27 @@ fn a_purged_run_is_not_brought_back_by_a_late_annotation() {
     assert!(!run_dir.exists());
 }
 
+#[test]
+fn a_purged_restored_run_is_not_written_back_by_a_late_annotation() {
+    let dirs = TestDirs::new("late-annotation-restored");
+    let (mut project, run_id, run_dir) = project_with_running_run(&dirs, 1);
+    project.persist_agent_run_records();
+    drop(project);
+    let mut reopened = project_session(&dirs, 1);
+    reopened.load_transcripts_from_disk(&dirs.state_root);
+    reopened.purge_project_transcripts().unwrap();
+    // The record is what a later slice's purge removes; here it is removed by
+    // hand, so the only thing left to prove is that nothing writes it back.
+    fs::remove_file(run_dir.join(RUN_RECORD_FILE_NAME)).unwrap();
+
+    let write = reopened
+        .set_agent_run_notes(&run_id, "written after the purge")
+        .unwrap();
+
+    assert_eq!(write, RunRecordWrite::NoRunDirectory);
+    assert!(!run_dir.join(RUN_RECORD_FILE_NAME).exists());
+}
+
 /// D6, ablated: a restored run is a record. It is in no collection a
 /// lifecycle consumer reads, so it cannot look like a process.
 #[test]
