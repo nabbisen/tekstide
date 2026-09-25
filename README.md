@@ -108,8 +108,8 @@ What each file can contain, and how to remove it:
 ## Configuration
 
 `$XDG_CONFIG_HOME/tekstide/config.toml` (or `~/.config/tekstide/config.toml`) is optional. You can
-rebind the keyboard shortcuts, set the colours, the font family and sizes, and how much scrollback a
-terminal keeps; a value that would make the window unreadable, or a terminal too large, is not used,
+rebind the keyboard shortcuts, set the colours, the font family and sizes, how much scrollback a
+terminal keeps, and whether the file explorer draws the files Git says are ignored; a value that would make the window unreadable, or a terminal too large, is not used,
 and the Project Board says which and why. AI CLI profiles and their limits are settable too, and
 nothing a configuration file defines runs without a deliberate act. **A project can never supply
 configuration** — only the file in your own configuration directory is read. `Ctrl+Alt+C` applies a

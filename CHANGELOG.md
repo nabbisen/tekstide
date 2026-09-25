@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.26.0 - The Explorer Asks Git
+
+Status: release candidate; not yet published or tagged.
+
+The file explorer stopped guessing which things are ignored from a three-name list and asks Git. Inside a repository an ignored file is
+marked, an ignored folder is collapsed, `explorer.show_ignored` decides whether the ignored files are drawn at all, and the sidebar says where
+its answer came from and how old it is. Checked by running the release binary, which found two things no test had: a sentence cut off in the
+sidebar, and an ignored folder's row clipping its own name to one letter — the row now leads with the name. Git could not be asked as cheaply as
+the plan said; the changelog below is where that, and what Tekstide still does not ask Git, is written down.
 
 ### Added — the explorer asks Git what is ignored
 
