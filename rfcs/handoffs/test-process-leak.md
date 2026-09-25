@@ -1175,3 +1175,7 @@ fork-duplicated descriptor) and it fits a once-in-hundreds failure that vanishes
 (`wait_until_executable`). Whether that closes it can only be learned by not seeing the failure again; **if it recurs,
 capture the assertion message** (`cargo test … --no-fail-fast > file`, not through the ablation script's filter) before
 anything else. The other tests that write executable scripts (`marker_script`) have the same exposure and were not changed.
+
+## Recurrence, 2026-09-25 — RFC-056 PR-056-B's gate (implementer's run)
+
+`shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` (**row 8**) failed once in run 1 of a three-run full-workspace gate (`670 + 16 + 1014`, load 2.35 at the start, well under the loads of the earlier recurrences). The assertion message was captured: *"the marker must be followed by a real, parseable PID"*, with the pane holding only the echoed command line `(trap '' TERM; while :; do sleep 1; done) & echo "descendant-pid:$!"; wait` and no `descendant-pid:<digits>` line yet — the same shape as every earlier row-8 recurrence. Runs 2 and 3 were clean. Not the slice: PR-056-B touches run records, the Project Board's notices and the AgentRun Report, and nothing on terminal termination. **The gate was redone, not counted.** Two things worth recording: it recurred at a *low* load, so "only under load" is no longer a safe description of this row; and the machine had a full `/tmp` throughout (another project's session scratchpad), which this test does not use (`TMPDIR` was `/dev/shm`).
