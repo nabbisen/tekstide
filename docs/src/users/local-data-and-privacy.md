@@ -96,6 +96,18 @@ byte budgets cannot be brought under their limits, the next run starts **without
 rather than deleting a live one — the launch confirmation says so before you start it, and the
 run's own AgentRun Report says why it has none.
 
+**Each run also leaves a small record, `run.json`, in the same folder as its transcript.** It holds
+references and no output: the run's id, its profile, its prompt summary, timestamps and the ids of the
+approvals, change sets and audit events it touched — at most 200 of each, and the record says when it left
+some out. It is what lets a project you reopen list its earlier runs with their transcripts attached.
+A run that was still going when Tekstide closed says it does not know when it ended.
+
+**Purging a run's transcript removes its record too**, and so does a transcript removed by the retention
+age or the size limits — the record names what the transcript's run was about, so it goes with it. The run's
+folder is removed only when nothing else is left in it: **a file Tekstide did not write is never deleted,
+and it keeps its folder.** A `run.json` Tekstide cannot read is renamed `run.json.corrupt` beside the
+transcript rather than deleted, the Project Board says so, and a purge removes that too.
+
 ### The two controls, on Trust Settings (`Ctrl+Alt+U`)
 
 - **Decline capture for future runs, per project.** `Space` toggles it. This is **forward-only**

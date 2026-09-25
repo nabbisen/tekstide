@@ -15,6 +15,11 @@
   unreadable `recent-projects.json` is; the Project Board says how many were set aside, and the run is listed as a transcript
   with no run. A record written by a newer Tekstide is treated the same way, and named as such. The disk-usage figure counts
   `run.json` as Tekstide's own file. An older Tekstide, which does not know it, counts it as bytes it does not recognise.
+- **Purging a run's transcript removes its record too**, and so does a transcript removed by the retention age or size limits.
+  The purge dialog counts the record's bytes with the transcript's. The run's folder is removed **only if nothing else is left in
+  it** — a file Tekstide did not write is never deleted and keeps its folder. Files it does write and remove are exactly
+  `run.json`, `run.json.tmp` (a write a kill interrupted) and the `run.json.corrupt` names set aside above; a name that only
+  begins like one is not Tekstide's and is left alone.
 - **Limits:** a record keeps at most 200 approval, change-set and audit-event ids each, and says when it left something out. A run started with transcript capture off, or one
   that could not be given a transcript directory, has no record. A change to a run's status reaches its record within a second;
   a change made to it by the user is written at once.

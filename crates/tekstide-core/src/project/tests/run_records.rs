@@ -933,6 +933,37 @@ fn a_purge_that_cannot_remove_the_record_leaves_the_transcript_and_can_be_retrie
     assert!(!run_dir.exists());
 }
 
+/// Retention deletes through the same purge, so **an expired transcript takes
+/// its run's record with it** — otherwise the retention age would leave behind
+/// exactly what a purge is not allowed to.
+#[test]
+fn a_transcript_expired_by_retention_takes_its_records_with_it() {
+    let dirs = TestDirs::new("retention-takes-record");
+    let (mut project, _, run_dir) = project_with_running_run(&dirs, 1);
+    project.persist_agent_run_records();
+    drop(project);
+    let mut reopened = project_session(&dirs, 1);
+    reopened.load_transcripts_from_disk(&dirs.state_root);
+    let far_future =
+        crate::domain::DomainTimestamp::from_utc_string("2099-01-01T00:00:00Z").unwrap();
+
+    let cleanup = reopened.apply_transcript_retention(
+        crate::transcript::TranscriptRetentionLimits::new(1 << 20, 1 << 20, 1 << 20, 30),
+        0,
+        &far_future,
+    );
+
+    assert_eq!(
+        cleanup.expired.purged_transcripts, 1,
+        "positive control: it expired"
+    );
+    assert!(
+        !run_dir.exists(),
+        "the record and the directory went with it"
+    );
+    assert!(reopened.restored_agent_runs().is_empty());
+}
+
 fn tree_contains(root: &Path, needle: &[u8]) -> bool {
     fs::read_dir(root).unwrap().flatten().any(|entry| {
         let path = entry.path();

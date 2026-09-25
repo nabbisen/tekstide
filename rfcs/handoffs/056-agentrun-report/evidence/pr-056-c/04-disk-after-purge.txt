@@ -1,0 +1,4 @@
+<fixture>/state/tekstide/transcripts
+<fixture>/state/tekstide/transcripts/edf479a0-236b-465a-b0c4-79b83beaec76
+<fixture>/state/tekstide/transcripts/edf479a0-236b-465a-b0c4-79b83beaec76/agent-run-0284506f-ae75-4604-bbfa-9e81a298ba9c
+<fixture>/state/tekstide/transcripts/edf479a0-236b-465a-b0c4-79b83beaec76/agent-run-0284506f-ae75-4604-bbfa-9e81a298ba9c/run.json.corruption-notes
