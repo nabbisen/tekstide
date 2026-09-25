@@ -16,7 +16,9 @@ use crate::domain::{
     RunEnding, TerminalKind, TerminalSession, Transcript,
 };
 use crate::project::{ProjectId, ProjectSession, RunAnnotationError, RunRecordWrite};
-use crate::transcript::{RUN_RECORD_FILE_NAME, RUN_RECORD_VERSION, scan_transcript_disk_usage};
+use crate::transcript::{
+    RUN_RECORD_FILE_NAME, RUN_RECORD_VERSION, is_run_record_file_name, scan_transcript_disk_usage,
+};
 
 #[test]
 fn a_launched_run_gets_a_record_beside_its_transcript_holding_references_only() {
@@ -426,6 +428,64 @@ fn the_disk_usage_figure_counts_the_record_as_the_products_own() {
         stray.len() as u64,
         "only what this product did not write is unclaimed"
     );
+}
+
+/// Review 437 Q1: the matcher is **exact**, because PR-056-C deletes by it.
+/// `move_aside` produces `run.json.corrupt` and `run.json.corrupt-<N>` and
+/// nothing else; a name that merely *begins* like one is not ours.
+#[test]
+fn only_the_names_this_product_writes_are_its_record_files() {
+    for ours in [
+        "run.json",
+        "run.json.tmp",
+        "run.json.corrupt",
+        "run.json.corrupt-1",
+        "run.json.corrupt-2",
+        "run.json.corrupt-999",
+    ] {
+        assert!(
+            is_run_record_file_name(ours),
+            "{ours} is written by this product"
+        );
+    }
+    for not_ours in [
+        "run.json.corruption-notes",
+        "run.json.corruptXYZ",
+        "run.json.corrupt-",
+        "run.json.corrupt-1a",
+        "run.json.corrupt--1",
+        "run.json.corrupt-1.bak",
+        "run.json.corrupt.bak",
+        "run.json.tmp2",
+        "run.json.bak",
+        "run.jsonx",
+        "Run.json",
+        "run.json ",
+        " run.json",
+        "notes.txt",
+        "transcript.log",
+        "",
+    ] {
+        assert!(
+            !is_run_record_file_name(not_ours),
+            "{not_ours:?} is a name this product never writes"
+        );
+    }
+}
+
+/// The same property where it costs something today: a file that only looks
+/// like a set-aside record is **unclaimed** bytes, not the product's own.
+#[test]
+fn a_file_that_only_begins_like_a_set_aside_record_is_counted_as_unclaimed() {
+    let dirs = TestDirs::new("prefix-lookalike");
+    let (mut project, _, run_dir) = project_with_running_run(&dirs, 1);
+    project.persist_agent_run_records();
+    let lookalike = b"someone's own notes about this run";
+    fs::write(run_dir.join("run.json.corruption-notes"), lookalike).unwrap();
+
+    let usage = scan_transcript_disk_usage(&dirs.state_root, &[project.id().clone()]);
+
+    assert_eq!(usage.unclaimed_bytes, lookalike.len() as u64);
 }
 
 #[test]

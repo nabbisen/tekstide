@@ -54,11 +54,24 @@ const MAX_ASIDE_SEARCH: u32 = 1_000;
 /// counts as its own: the record, the temporary file a write in progress (or
 /// a kill during one) leaves, and a record set aside. The loader uses this
 /// so the disk-usage figure never calls the product's own record unclaimed
-/// (R1).
+/// (R1), and **purge deletes by it** (RFC-056 D2), which is why it is exact.
+///
+/// The set-aside names are the two `move_aside` produces and nothing else:
+/// `run.json.corrupt`, and `run.json.corrupt-` followed by one or more ASCII
+/// digits. A name that only *begins* like one — `run.json.corruption-notes`,
+/// `run.json.corruptXYZ` — is somebody's file, and deleting it would be
+/// deleting a file this product never wrote (review 437).
 pub fn is_run_record_file_name(name: &str) -> bool {
-    name == RUN_RECORD_FILE_NAME
-        || name == RUN_RECORD_TEMP_FILE_NAME
-        || name.starts_with(RUN_RECORD_ASIDE_PREFIX)
+    if name == RUN_RECORD_FILE_NAME || name == RUN_RECORD_TEMP_FILE_NAME {
+        return true;
+    }
+    let Some(suffix) = name.strip_prefix(RUN_RECORD_ASIDE_PREFIX) else {
+        return false;
+    };
+    suffix.is_empty()
+        || suffix
+            .strip_prefix('-')
+            .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
