@@ -19,9 +19,11 @@ live in published artifacts right now.
 Found in `0.26.0`'s post-publish check: `cargo install tekstide --version 0.25.0` **fails to
 compile**. It resolves `tekstide-core 0.26.0` and dies on three `E0004`s, because every published
 `tekstide` carries `[dependencies.tekstide-core] version = "0"` — *any* `0.x` — which opts out of
-Cargo's own rule that `0.26` and `0.25` are incompatible. `--locked` does not rescue it: the app
-archives' lockfiles name the **previous** core (`0.25.0` → core `0.24.0`, which has no
-`config/appearance.rs` at all).
+Cargo's own rule that `0.26` and `0.25` are incompatible. **Corrected at review 436:** the claim that `--locked` cannot rescue it was **wrong**. It was
+read from the *local* `target/package` archives, which are packaged before their core is on the
+registry and so name the previous one. The **published** archives name the matching core
+(`0.25.0` → core `0.25.0`), and `cargo install tekstide --version 0.25.0 --locked` builds —
+measured against the registry, twice, independently. The defect is `version = "0"` alone.
 
 - `tekstide-core = { version = "0.27.0", path = "crates/tekstide-core" }` in
   `[workspace.dependencies]`, bumped with each release from now on.
