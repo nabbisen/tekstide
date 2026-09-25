@@ -729,6 +729,41 @@ fn a_restored_run_can_be_annotated_and_the_record_follows() {
     assert_eq!(record["ending"]["kind"], "unknown");
 }
 
+// ---- PR-056-C: purge takes the record, and never a directory it did not find empty ----
+
+/// **The box that matters** (RFC-056 R2), written before any code that deletes
+/// a record or a directory existed. The third file is `run.json.corruption-notes`
+/// — a name a prefix match on `run.json.corrupt` would eat and an exact match
+/// does not — beside a plain unrelated file. After a purge both must survive,
+/// and so must the directory that holds them.
+#[test]
+fn purge_never_removes_a_directory_it_did_not_find_empty_or_a_file_it_did_not_write() {
+    let dirs = TestDirs::new("third-file");
+    let (mut project, _, run_dir) = project_with_running_run(&dirs, 1);
+    project.persist_agent_run_records();
+    let lookalike = run_dir.join("run.json.corruption-notes");
+    let unrelated = run_dir.join("notes-from-a-human.txt");
+    fs::write(&lookalike, b"a person's own file, named like ours").unwrap();
+    fs::write(&unrelated, b"another one").unwrap();
+
+    let purged = project.purge_project_transcripts().unwrap();
+
+    assert_eq!(
+        purged.purged_transcripts, 1,
+        "positive control: the purge ran"
+    );
+    assert!(!run_dir.join("transcript.log").exists());
+    assert!(
+        lookalike.exists(),
+        "a file this product never wrote is not deleted"
+    );
+    assert!(unrelated.exists());
+    assert!(
+        run_dir.is_dir(),
+        "the directory held files that are not ours, so it is not removed"
+    );
+}
+
 // ---- fixtures ---------------------------------------------------------------
 
 fn project_with_running_run(
