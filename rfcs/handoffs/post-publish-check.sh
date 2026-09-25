@@ -6,8 +6,13 @@
 # Added by RFC-056 PR-056-A, after `0.26.0`'s post-publish check found -- by resolving an
 # OLDER release rather than the one just published -- that `cargo install tekstide --version
 # 0.25.0` no longer compiles: every published `tekstide` pinned its core as `version = "0"`
-# (any 0.x), and the app archives' lockfiles named the PREVIOUS core. Published metadata is
-# frozen, so this cannot repair a release; it makes the next one prove itself.
+# (any 0.x), so the older app resolved the NEWEST core, and that core had added public enum
+# variants the older app's `match`es did not cover. **The published lockfiles are fine** --
+# each names the core its release was built with (measured against the registry), so
+# `cargo install tekstide --version <v> --locked` builds. (An earlier version of this comment
+# said they named the PREVIOUS core; that was read from the local `target/package` archives,
+# which are packaged before their core is on the registry, and was wrong.) Published metadata
+# is frozen, so this cannot repair a release; it makes the next one prove itself.
 #
 # Three checks, each of which would have caught it:
 #   1. the app's `tekstide-core` requirement is THIS release's version, not "0";
