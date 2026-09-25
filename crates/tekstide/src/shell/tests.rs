@@ -7319,6 +7319,63 @@ fn a_real_agent_run_launch_writes_a_real_transcript_with_real_content() {
     );
 }
 
+/// RFC-056 D9, ablated: **a real launch's record is written by the shell's own
+/// tick**, beside the transcript the run really wrote. The core's tests prove
+/// the record follows the run; this proves something in the shell asks it to.
+#[test]
+fn a_real_agent_run_launch_gets_its_record_from_the_shells_tick() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("run-record-tick");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+    let state_root = fresh_state_root_dir();
+    let profile = tekstide_core::agent::AiCliProfile::new(
+        "transcript-marker-script",
+        "Transcript Marker Script (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: transcript_marker_script_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Supervised,
+    );
+    attempt_agent_run_launch_with_profile_and_state_root(
+        &mut state,
+        profile,
+        Some(state_root.clone()),
+    )
+    .expect("a resolvable Supervised profile should launch the real marker script");
+    let (project_id, agent_run_id, terminal_id) = capture_evidence_run_identifiers(&state);
+    let run_dir = state_root
+        .join("transcripts")
+        .join(project_id.as_str())
+        .join(agent_run_id.as_str());
+
+    // The record needs the run directory, which the writer creates: wait for
+    // the transcript, as the capture test above does.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline && !run_dir.join("transcript.log").is_file() {
+        let _ = super::update(&mut state, Message::TerminalWoke(terminal_id.clone()));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(run_dir.join("transcript.log").is_file());
+    assert!(
+        !run_dir.join("run.json").exists(),
+        "nothing has asked for a record yet, so this test cannot pass by accident"
+    );
+
+    let _ = super::update(&mut state, Message::RunRecordTick);
+
+    let record = std::fs::read_to_string(run_dir.join("run.json")).expect("a record");
+    assert!(
+        record.contains(&format!("\"run_id\": \"{}\"", agent_run_id.as_str())),
+        "{record}"
+    );
+    assert!(record.contains("\"version\": 1"), "{record}");
+}
+
 /// Extracted for RFC-033 PR-033-B's own negative gate to share: both
 /// tests need the same (project id, agent run id, terminal id) triple
 /// after a real launch, to build the documented transcript path and
