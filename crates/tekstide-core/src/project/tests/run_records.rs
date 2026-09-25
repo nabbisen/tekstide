@@ -1036,6 +1036,26 @@ fn a_purge_after_retention_still_takes_the_record_and_the_directory() {
     assert_eq!(project.purgeable_run_data(), (0, 0));
 }
 
+/// The per-run purge reaches the same record through the tombstone itself,
+/// not through the project-wide pass.
+#[test]
+fn purging_one_run_after_retention_takes_its_record_through_the_tombstone() {
+    let dirs = TestDirs::new("purge-one-after-retention");
+    let (mut project, run_id, run_dir) = project_with_running_run(&dirs, 1);
+    project
+        .agent_run_mut_for_test(&run_id)
+        .transition_to(AgentRunStatus::Completed)
+        .unwrap();
+    project.persist_agent_run_records();
+    expire_everything(&mut project);
+    assert!(run_dir.join(RUN_RECORD_FILE_NAME).exists(), "precondition");
+
+    let purged = project.purge_agent_run_transcripts(&run_id).unwrap();
+
+    assert!(purged.bytes_removed > 0, "the record's bytes are reported");
+    assert!(!run_dir.exists());
+}
+
 /// The record with no transcript beside it — which retention now makes an
 /// ordinary state, not a corner: the next session finds the record alone.
 #[test]
