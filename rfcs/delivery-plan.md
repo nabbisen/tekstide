@@ -116,6 +116,20 @@ carry no dates — a release ships when its RFC closes and the gate is green thr
 | `0.33.0` | **060** Command Approval A User Can Reach | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **A 1.0 blocker**: "command approval for adapter-supported workflows" is in the 1.0 minimum list, and `to_ai_cli_profile` sets `Supervised` unconditionally, so no user can reach one |
 | `0.34.0`+ | **028**, **029**, NFR verification | `NFR-PORT-001`..`003`; docs, CI, release automation; every performance budget | M14, the 1.0 candidate band |
 
+### A budget test that measures the machine (2026-09-25, RFC-055 review 434)
+
+**`shell::tests::change_review_content_view_build_cost_by_line_count_measurement` builds 100,000
+`iced` text elements and asserts wall-clock under 500 ms.** It has a register row from review 338 and
+it cost RFC-055's last slice three attempts at a clean triple. Measured at review 434, over three
+green runs: the load at each run's start was **3.51, 7.14, 12.39**, climbing with nothing else
+starting — **the suite's own parallelism generates most of the load the test then fails on**, so its
+own advice to "rerun on an idle machine" has no idle machine to offer once the suite is running.
+
+A test that measures the machine on a shared machine teaches its readers to read a red gate as
+weather. It should assert a **ratio against a reference workload timed in the same process**, so
+contention cancels, rather than an absolute millisecond count. Unscheduled; recorded so the next
+blocked gate is not re-diagnosed from scratch.
+
 ### Two rules the release sequence now carries (2026-09-25, RFC-055 PR-055-C)
 
 **The lifecycle move is part of the release commit sequence**, beside the version bump and the
