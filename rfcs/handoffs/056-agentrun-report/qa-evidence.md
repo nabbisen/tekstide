@@ -401,3 +401,9 @@ Release binary at the D commits, fixtures in `mktemp -d` under `/dev/shm`, focus
 5. **A `Ended:` line for a run still going** says so in words (*not ended: the run was still going when this report was made*), because a live `NotEnded` is not unknown.
 6. **`NotificationKind`/catalog/`generic_args`**: 32 new catalog lines (plus the two reworded for the purge dialog and Trust Settings) and one new placeholder (`$label`, untrusted).
 7. **The `REQ-AGENT-011` and `-015` status moves are not made here**; they belong to the RFC's closure with the release, as `REQ-FILE-005`'s did.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16 (the colour-alone, i18n-completeness and internal-identifier
+scans are among the workspace's own tests and pass): clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh `TMPDIR`: `679 + 16 + 1037` = 1,732 passed, 0 failed,
+0 entries left after each** (loads at the end 3.43, 3.03, 4.05). No intermittent this time. `git diff --cached --check` clean before each commit.
