@@ -154,3 +154,8 @@ The fixture is throwaway and was not saved.
 3. **The window is not persisted across a reload.** After an external-change reload the viewport may be past the new end until the next key settles it; `window_rows` draws nothing rather than panic, and the next cursor move brings it back.
 4. **No caret and no gutter yet** — that is C. The header still says *Line N, Column M*.
 5. The harness's module documentation still says "as it stands"; its measured code is now B's, and PR-057-A's numbers live in this file above.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `692 + 16 + 1039` = 1,747 passed, 0 failed, 0 entries left after each**
+(loads at the end 16.1, 16.6, 17.6 — other projects' suites; none of this slice's tests read a clock). No intermittent.
