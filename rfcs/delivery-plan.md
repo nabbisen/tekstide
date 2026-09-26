@@ -236,8 +236,19 @@ Unscheduled — it needs a feature (per-pane focus, or a cycle action with a han
 - **Syntax highlighting (`REQ-EDIT-003`) is not in the 1.0 minimum list.** It is the one gap large
   enough that shipping `1.0.0` without it is a product judgement, not a scheduling one. Say so before
   M14, not during it.
-- **Whether `snora` replaces our own UI layer** is an application-wide decision, deliberately outside
-  RFC-052.
+- ~~**Whether `snora` replaces our own UI layer**~~ — **decided 2026-09-26: no, and the substrate
+  stays `iced`.** Two rounds of correspondence settled it on evidence rather than preference. snora's
+  own assessment of our five requirements: accessible names **blocked at the substrate**, hardcoded
+  chrome sizes **not met**, verbatim text and bounded work *"met, but nothing asserts either"*,
+  colour-alone and both-renderer contrast *partly met*. Verified independently: `iced 0.14.0` declares
+  no accessibility feature and `accesskit` appears nowhere in the crate, so accessible names are
+  unavailable to **us**, not merely absent from snora. The owner also asked whether to leave GUI for a
+  TUI; measured, `tekstide-core` (69,243 lines) has **no `iced` dependency** and the GUI crate is
+  21,544 production lines, so the move is affordable — but it would withdraw `REQ-CONFIG-007`'s font
+  settings, make our 4.5:1 contrast assertions unverifiable (the user's terminal owns the palette),
+  drop RFC-018's scrim cap, and nest our PTY grid inside someone else's terminal. **Approved
+  2026-09-26: stay on `iced`.** The accessibility gain was the one real argument on the other side and
+  it is partial and unmeasured; RFC-014 R2's `accesskit` watch remains the instrument.
 - **Order.** This schedule puts truth before features and settings before file-layer work. Any row can
   be moved; moving one is a scope decision, and it belongs in this table rather than in a commit.
 
