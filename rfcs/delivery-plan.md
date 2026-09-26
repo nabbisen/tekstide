@@ -116,6 +116,30 @@ carry no dates — a release ships when its RFC closes and the gate is green thr
 | `0.33.0` | **060** Command Approval A User Can Reach | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **A 1.0 blocker**: "command approval for adapter-supported workflows" is in the 1.0 minimum list, and `to_ai_cli_profile` sets `Supervised` unconditionally, so no user can reach one |
 | `0.34.0`+ | **028**, **029**, NFR verification | `NFR-PORT-001`..`003`; docs, CI, release automation; every performance budget | M14, the 1.0 candidate band |
 
+### Accessible names are blocked at the substrate — and what is available instead (2026-09-26)
+
+**Measured, not taken on report.** `iced 0.14.0`'s manifest declares no accessibility feature, and
+`accesskit`/`accessib` appear **nowhere** in the crate source. snora's own migration guide says the
+same in its words: *"iced 0.14 has no accessible-name API for buttons, and snora has no accessibility
+tree."* So accessible names are unavailable to **us**, not merely absent from snora, and no component
+library can supply what the toolkit does not have. `README.md`'s standing limitation and RFC-014 R2's
+`accesskit` watch remain exactly the right instruments.
+
+**What is available, and was not being used.** `iced 0.14` ships two features this workspace does not
+enable — `selector` (→ `iced_selector 0.14.0`, already in the registry graph) and `tester`
+(→ `iced_tester`). `iced_selector` exposes `id(..)`, `is_focused()`, and
+`Target::visible_bounds() -> Option<Rectangle>`.
+
+That last one is the machine-readable form of the question RFC-053 answered by eye: a modal clipping
+its own `Close` out of reach, and a status bar wrapping against the one-line invariant every PTY's
+height depends on, were both found by taking a screenshot and looking at it. `visible_bounds()`
+returns `None` for a widget that is not visible — the same question, as a value. `is_focused()`
+answers *where does the keyboard actually go*, which is the accessibility story we do have.
+
+**Reserved as RFC-063**, to be evaluated under RFC-052 D3's rule — measured against our properties,
+adopted only if all of them hold. It serves our own verification, not users, and it is **not** a
+substitute for accessible names.
+
 ### Owner-requested, unscheduled: two rows at the top of the window (2026-09-26)
 
 Relayed through the dev team at review 438, while the owner was watching a test window: split the top

@@ -58,6 +58,7 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 060 | Command Approval A User Can Reach | pre-1.0, **1.0 blocker** |
 | 061 | A Bound On Combining Marks Per Cell | terminal boundary |
 | 062 | Honouring `core.excludesFile` | explorer ignore tail |
+| 063 | Querying The Live UI (`iced_selector`) | GUI verification |
 
 Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23. Titles are the
 audit's findings, not guesses; each row's scope is in the release schedule in
