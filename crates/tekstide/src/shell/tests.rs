@@ -1,4 +1,6 @@
 use std::os::unix::fs::PermissionsExt;
+mod editor_baseline;
+
 use std::path::{Path, PathBuf};
 
 use tekstide_core::shell::ApplicationShell;
