@@ -1087,6 +1087,54 @@ fn a_purge_takes_a_record_whose_transcript_retention_removed_in_an_earlier_sessi
     assert_eq!(later.runtime_summary().agent_run_count, Some(0));
 }
 
+/// The report's changed-file list is read from the change sets that still exist:
+/// this run's only, each path once, bounded, with the omissions counted.
+#[test]
+fn a_runs_changed_paths_come_from_its_own_change_sets_once_each_and_bounded() {
+    use crate::domain::ChangeSet;
+    use std::path::PathBuf;
+    let dirs = TestDirs::new("changed-paths");
+    let (mut project, run_id, _dir) = project_with_running_run(&dirs, 1);
+    let paths = |names: &[&str]| names.iter().map(PathBuf::from).collect::<Vec<_>>();
+    let mut first = ChangeSet::unreviewed(
+        project.id().clone(),
+        Some(run_id.clone()),
+        paths(&["a.rs", "b.rs", "c.rs"]),
+        "first",
+    );
+    first.changed_files_omitted_by_detection = 4;
+    project.add_change_set(first).unwrap();
+    project
+        .add_change_set(ChangeSet::unreviewed(
+            project.id().clone(),
+            Some(run_id.clone()),
+            paths(&["b.rs", "d.rs"]),
+            "second",
+        ))
+        .unwrap();
+    project
+        .add_change_set(ChangeSet::unreviewed(
+            project.id().clone(),
+            None,
+            paths(&["someone-elses.rs"]),
+            "not this run's",
+        ))
+        .unwrap();
+
+    let (listed, omitted) = project.changed_paths_of_run(&run_id, 3);
+
+    assert_eq!(
+        listed,
+        paths(&["a.rs", "b.rs", "c.rs"]),
+        "deduplicated, in order, this run's only"
+    );
+    assert_eq!(
+        omitted,
+        4 + 1,
+        "the detection's own omissions and the one past the limit"
+    );
+}
+
 fn tree_contains(root: &Path, needle: &[u8]) -> bool {
     fs::read_dir(root).unwrap().flatten().any(|entry| {
         let path = entry.path();

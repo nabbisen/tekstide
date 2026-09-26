@@ -7577,6 +7577,52 @@ fn notes_are_what_the_person_typed_and_a_field_swallows_the_shortcut_keys() {
     assert_eq!(the_run(&state, &run_id).notes(), None);
 }
 
+/// A paste goes through the same bounded push as typing: a line-shaped field takes
+/// no newline, the notes take one, and `\r\n` is one newline.
+#[test]
+fn a_paste_into_a_report_field_is_bounded_and_keeps_only_the_newlines_the_field_takes() {
+    let (mut state, _root, _pid, _run_id, _dir) =
+        state_with_a_launched_run_on_the_report("report-paste");
+
+    report_press(&mut state, "n");
+    let _ = super::update(
+        &mut state,
+        Message::RunReportFieldPasteResolved(Some("a\r\nb".to_owned())),
+    );
+    assert_eq!(state.run_report_field.as_ref().unwrap().buffer, "a\nb");
+    report_press_named(&mut state, iced::keyboard::key::Named::Escape, false);
+
+    report_press(&mut state, "e");
+    let _ = super::update(
+        &mut state,
+        Message::RunReportFieldPasteResolved(Some("/tmp/x\nrest".to_owned())),
+    );
+    assert_eq!(
+        state.run_report_field.as_ref().unwrap().buffer,
+        "/tmp/xrest"
+    );
+    report_press_named(&mut state, iced::keyboard::key::Named::Escape, false);
+
+    report_press(&mut state, "n");
+    let _ = super::update(
+        &mut state,
+        Message::RunReportFieldPasteResolved(Some(
+            "z".repeat(tekstide_core::domain::RUN_NOTES_MAX_CHARS + 500),
+        )),
+    );
+    assert_eq!(
+        state
+            .run_report_field
+            .as_ref()
+            .unwrap()
+            .buffer
+            .chars()
+            .count(),
+        tekstide_core::domain::RUN_NOTES_MAX_CHARS
+    );
+    let _ = super::update(&mut state, Message::RunReportFieldPasteResolved(None));
+}
+
 /// A modal is exclusive: neither a key nor a click reaches the report under it.
 #[test]
 fn a_modal_stops_the_report_controls_from_acting_underneath_it() {
