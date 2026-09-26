@@ -105,6 +105,15 @@ fn the_baseline_fixture_is_100_000_lines_under_the_editable_cap_and_deterministi
 /// Bytes and FNV-1a of [`fixture_text`], pinned.
 const FIXTURE_IDENTITY: (usize, u64) = (3_307_639, 12_832_468_849_609_611_213);
 
+/// A named keystroke scenario: its label, how many keystrokes, the key, and where
+/// the cursor starts.
+type Scenario = (
+    &'static str,
+    usize,
+    fn() -> iced::keyboard::Key,
+    tekstide_core::content::TextCursor,
+);
+
 struct Stage {
     update: std::time::Duration,
     view: std::time::Duration,
@@ -289,12 +298,7 @@ fn editor_typing_latency_baseline_100_000_lines() {
     ));
     use iced::keyboard::key::Named;
     let last_line = FIXTURE_LINES - 1;
-    let scenarios: [(
-        &str,
-        usize,
-        fn() -> iced::keyboard::Key,
-        tekstide_core::content::TextCursor,
-    ); 4] = [
+    let scenarios: [Scenario; 4] = [
         (
             "typing a character at the start of the file",
             30,
