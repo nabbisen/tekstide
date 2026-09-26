@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Changed — the editor draws only the lines that fit
+
+- **The editor draws the lines that fit the window, not the whole file, and the window follows the cursor.** Typing in a 100,000-line
+  file now takes **p95 5.3–6.8 ms and p99 5.3–6.8 ms** (down from 14.0–16.3 and 14.0–16.6 ms; painting is still not in the figure),
+  across two batches of three runs. Each keystroke still copies the document once to apply the edit; that is now most of the cost and is
+  not changed here. Arrow keys cost slightly more than before (2.8 ms against 1.8 at 100,000 lines: they now keep the window on the cursor).
+- **A line wider than the editor is clipped at its right edge, not wrapped**, and there is still no horizontal scrolling, so the end of a
+  very long line is not visible. Drawing one row per line is what makes the window exact; soft wrap is not part of this release.
+- **The window moves only by the cursor**: there is still no scrollbar and no mouse wheel, and navigation is still the four arrow keys.
+
 ### Measured — typing in a very large file
 
 - **Typing in a 100,000-line file is at the 16 ms budget with no headroom.** Measured on a release build against a 3.3 MB, 100,000-line file

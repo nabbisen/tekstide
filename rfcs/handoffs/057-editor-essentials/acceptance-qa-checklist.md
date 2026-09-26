@@ -26,19 +26,20 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
 
 ## PR-057-B — rows, bounded by the viewport
 
-- [ ] What is drawn is the viewport's window, not the file — proved by what is **built per frame**,
+- [x] What is drawn is the viewport's window, not the file — proved by what is **built per frame**,
       not by a screenshot that looks fast.
-- [ ] `TextViewport::first_visible_line` has a reader for the first time since RFC-006.
-- [ ] The viewport follows the cursor; no scrollbar, no wheel handling, navigation still four keys.
-- [ ] **One drawn line is one assertable string**, testable without `iced`.
-- [ ] A's measurement re-run, both numbers reported.
+- [x] `TextViewport::first_visible_line` has a reader for the first time since RFC-006.
+- [x] The viewport follows the cursor; no scrollbar, no wheel handling, navigation still four keys.
+- [x] **One drawn line is one assertable string**, testable without `iced`.
+- [x] A's measurement re-run, both numbers reported.
+      *(p95 14.0–16.3 ms → 5.3–6.8 ms; one run under load 11 missed the 8 ms line and is kept in `batch-1/`.)*
 
 ### Required at review 441
 
-- [ ] **Q1: the body never hands the whole file to one widget.** Measured in A: an unbounded layout
+- [x] **Q1: the body never hands the whole file to one widget.** Measured in A: an unbounded layout
       costs **~745 ms a keystroke**. A scrollable body, or anything that lets the widget see past the
       visible height, pays it. A test holds the property, with A's reference number beside it.
-- [ ] **The 8 ms rule (ruled at 441):** B re-measures. Bounding the rows should leave roughly 4.4 ms
+- [x] **The 8 ms rule (ruled at 441):** B re-measures. Bounding the rows should leave roughly 4.4 ms
       `update` plus a fraction — about 5 ms. If p95 does not land **under 8 ms**, the per-keystroke
       document copy comes into scope in this release, said at review rather than tuned around.
 

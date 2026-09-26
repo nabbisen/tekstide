@@ -1,0 +1,5 @@
+# Coarse live check, release binary, the same 100,000-line fixture; cursor at line 101 (the window scrolled to follow it)
+# Method as PR-057-A's: one 'x' by wtype, screenshots until one differs; each figure is latency PLUS up to one screenshot interval (idle screenshot ~40-50 ms).
+# PR-057-A's baseline for comparison: 85-101 ms with idle screenshots 41-48 ms.
+idle screenshot cost ms: [101, 73, 69, 76, 61] stable: True
+key->changed-screenshot ms (wtype cost in brackets): [(114, 13), (51, 6), (52, 6), (53, 6), (50, 6), (50, 6)]
