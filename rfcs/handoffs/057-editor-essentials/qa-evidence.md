@@ -70,3 +70,10 @@ no scrollbar** — the cursor at line 60,000 would be somewhere no one can see. 
 This slice ran before any rendering change, as D11 requires, and the numbers above are the baseline PR-057-B is judged against. **What they say about B:** the budget is already at its limit at 100,000 lines
 with nothing drawn but the top of the file, and the cost is O(file) in `update` (three copies) and in `layout` (the split). Bounding the *drawn* rows, as D1 proposes, addresses neither by itself: the
 `update` copies and the widget's whole-string `set_text` would remain unless the body is no longer handed to one text widget as one string. That is a decision for B with this evidence behind it.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short
+`TMPDIR`: `681 + 16 + 1037` = 1,734 passed, 0 failed, 0 entries left after each** (loads 3.7, 3.6, 5.2). The two new ordinary tests are the fixture pin and the harness smoke test; the measurement itself is
+`#[ignore]`d and asserts nothing about speed, so it cannot make the gate depend on the machine. No intermittent this time. The type-alias change clippy asked for landed after the three measurement runs and
+touches no measured code.
