@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Measured — typing in a very large file
+
+- **Typing in a 100,000-line file is at the 16 ms budget with no headroom.** Measured on a release build against a 3.3 MB, 100,000-line file
+  (`NFR-PERF-003`: p95 ≤ 16 ms, p99 ≤ 33 ms), the code Tekstide runs on a keystroke — applying the edit, building the view, laying out the
+  text — takes **p95 14.0–16.3 ms and p99 14.0–16.6 ms** over three runs; typing at the start of the file was over the 16 ms line in two of them.
+  **That is a lower bound:** painting and presenting the frame are not in it. The cost grows with the length of the file, not with the edit
+  (1,000 lines 0.4 ms, 10,000 lines 1.7 ms, 100,000 lines 15.8 ms), because each keystroke copies and re-splits the whole document. Nothing changed
+  in the editor; this is the baseline the next slices are judged against.
+- **A file of 100,000 lines can only be opened if its lines average under 42 bytes**, because the editor refuses anything over 4 MiB. A file whose
+  lines average 51 bytes (this project's first test fixture) is refused at that many lines, so the requirement's "100,000-line file" and the size cap
+  disagree for any file with longer lines. Neither has been changed.
+- **The editor shows about 48 lines of a large file and has no scrollbar**, no line numbers and no visible caret; the header says *Line N, Column M*.
+  That is unchanged in this entry and is what the next releases address.
+
 ## 0.27.0 - A Run That Still Exists Tomorrow
 
 Status: **released on 2026-09-26.** Published to crates.io (`tekstide-core` and `tekstide`) and tagged `0.27.0` at `a2e220f`. **The first release whose post-publish check passes in full**: the app pins its own core, the archive's lockfile names it, and `cargo install tekstide --version 0.27.0` builds.

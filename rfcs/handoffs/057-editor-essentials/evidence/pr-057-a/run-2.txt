@@ -1,0 +1,63 @@
+load before: 1.35 2.31 4.33
+
+fixture: 100000 lines, 3307639 bytes; body font 14 px; layout width 880 px
+typing a character at the start of the file (30 keystrokes)
+  stage           p50 ms     p95 ms     p99 ms
+  update           4.514      4.807      6.133
+  view             0.080      0.100      0.360
+  layout           9.381     10.731     11.076
+  SUM             13.937     15.435     15.764   (budget: p95 <= 16, p99 <= 33)
+typing a character at the end of the file (30 keystrokes)
+  stage           p50 ms     p95 ms     p99 ms
+  update           4.429      4.497      4.611
+  view             0.074      0.082      0.084
+  layout           9.162      9.568      9.569
+  SUM             13.676     14.036     14.039   (budget: p95 <= 16, p99 <= 33)
+Enter in the middle of the file (30 keystrokes)
+  stage           p50 ms     p95 ms     p99 ms
+  update           4.422      4.567      4.569
+  view             0.075      0.081      0.083
+  layout           9.275      9.439      9.462
+  SUM             13.762     13.980     13.991   (budget: p95 <= 16, p99 <= 33)
+an arrow key (the cursor moves; the text does not) (60 keystrokes)
+  stage           p50 ms     p95 ms     p99 ms
+  update           1.657      1.719      1.849
+  view             0.046      0.047      0.048
+  layout           0.040      0.041      0.044
+  SUM              1.743      1.806      1.937   (budget: p95 <= 16, p99 <= 33)
+REFERENCE, not the shipped editor: unbounded layout height, typing at the start (12 keystrokes)
+  stage           p50 ms     p95 ms     p99 ms
+  update           4.678     17.113     17.113
+  view             0.157      0.382      0.382
+  layout         744.068    805.586    805.586
+  SUM            748.507    821.742    821.742   (budget: p95 <= 16, p99 <= 33)
+
+scaling: typing a character at the end, by file length
+1000 lines, 31077 bytes (30 keystrokes)
+  stage           p50 ms     p95 ms     p99 ms
+  update           0.046      0.049      0.050
+  view             0.005      0.007      0.009
+  layout           0.384      0.395      0.396
+  SUM              0.435      0.445      0.449   (budget: p95 <= 16, p99 <= 33)
+10000 lines, 320764 bytes (30 keystrokes)
+  stage           p50 ms     p95 ms     p99 ms
+  update           0.437      0.451      0.498
+  view             0.020      0.026      0.029
+  layout           1.202      1.221      1.225
+  SUM              1.658      1.699      1.739   (budget: p95 <= 16, p99 <= 33)
+100000 lines, 3307639 bytes (30 keystrokes)
+  stage           p50 ms     p95 ms     p99 ms
+  update           4.644      4.715      4.718
+  view             0.112      0.122      0.129
+  layout          10.726     11.036     11.340
+  SUM             15.500     15.808     16.127   (budget: p95 <= 16, p99 <= 33)
+
+test shell::tests::editor_baseline::editor_typing_latency_baseline_100_000_lines ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 682 filtered out; finished in 13.31s
+
+
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+
+load after: 1.45 2.30 4.30

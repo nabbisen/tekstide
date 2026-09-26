@@ -14,11 +14,15 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
 
 ## PR-057-A — the baseline
 
-- [ ] A 100 000-line fixture is committed, and the measurement is repeatable by the reviewer.
-- [ ] Typing latency **p95 and p99 as numbers**, against 16 ms / 33 ms, measured on `main` before any
+- [x] A 100 000-line fixture is committed, and the measurement is repeatable by the reviewer.
+      *(Committed as a **generator** with a pinned size, line count and checksum, not as a 3.3 MB blob — a stated deviation. Command in `qa-evidence.md`.)*
+- [x] Typing latency **p95 and p99 as numbers**, against 16 ms / 33 ms, measured on `main` before any
       rendering change.
-- [ ] No product code changed in this slice.
-- [ ] The number is in the changelog whatever it says.
+      *(p95 14.0–16.3 ms, p99 14.0–16.6 ms over three runs; a lower bound, painting excluded.)*
+- [x] No product code changed in this slice.
+      *(Two files, both test code; the diff is in `qa-evidence.md`.)*
+- [x] The number is in the changelog whatever it says.
+      *(`Unreleased`, *Measured*.)*
 
 ## PR-057-B — rows, bounded by the viewport
 

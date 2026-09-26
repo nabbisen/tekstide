@@ -1,0 +1,6 @@
+# Coarse live check, release binary, the same 3.3 MB / 100,000-line fixture opened in the editor
+# Method: send one 'x' with wtype, then take window screenshots (each costs ~40-48 ms, measured idle) until one differs from the last.
+# So each figure is the true latency PLUS up to one screenshot interval, and includes the compositor and iced's paint; it is a sanity check on the headless numbers, not a measurement of them.
+# The typed characters landed: the screen showed 'xxxxxxlet // line 0' and 'Line 1, Column 7'.
+idle screenshot cost ms: [48, 42, 41, 41, 40] stable: True
+key->changed-screenshot ms (wtype cost in brackets): [(90, 6), (93, 6), (85, 6), (96, 6), (89, 6), (101, 6)]
