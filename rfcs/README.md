@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 057 | [Editor Essentials](./proposed/057-editor-essentials.md) | **Proposed 2026-09-26**, awaiting the owner. `0.28.0`. The editor draws **the whole file as one string, every frame**; the viewport field that would bound it has existed since RFC-006 and nothing reads it; every keystroke copies the whole document. No caret, no line numbers, no undo. `NFR-PERF-003` names 100 000-line typing latency and **nobody has measured it**. Carries the owner's two-row header as its own slice. `REQ-EDIT-002`, `NFR-REL-005`, `NFR-PERF-003` |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -52,7 +53,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 027 | Crash Recovery and Unsaved Buffer Persistence | M13 |
 | 028 | Cross-Platform Support | M14 |
 | 029 | Documentation, CI, and Release Automation | M14 |
-| 057 | Editor Essentials | M10 remainder |
 | 058 | A Project Held By One Process | M13 tail |
 | 059 | Seeing The Audit, And Redacting It | pre-1.0 |
 | 060 | Command Approval A User Can Reach | pre-1.0, **1.0 blocker** |
