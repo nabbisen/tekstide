@@ -91,7 +91,16 @@ Ninety seconds. Run it.
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings`
 - [ ] `cargo build --release --locked`
 - [ ] `cargo package -p tekstide-core --locked`
-- [ ] `cargo package -p tekstide --locked --no-verify` — **this step breaks for exactly one
+- [ ] **`cargo package --workspace --locked`** — the workspace package, which pairs both crates locally and verifies the app
+      against **this** release's core. **Replaces `cargo package -p tekstide --locked --no-verify`, which can no longer
+      pass for any release** (found packaging `0.27.0`): the pin (RFC-056 PR-056-A) makes `tekstide` require
+      `tekstide-core = "^<this release>"`, and packaged alone it resolves core from crates.io, where that version does not
+      exist until it is published — *"failed to select a version for the requirement `tekstide-core = \"^0.27.0\"`"*.
+      That is the pin working, not a defect, and it retires the note below about one release in which the step breaks and
+      the next in which it heals: it now breaks **every** release, so do not run it. Verify contents from the workspace
+      package's `target/package/*.crate`. (`cargo package -p tekstide-core --locked` above is unaffected.)
+- [ ] ~~`cargo package -p tekstide --locked --no-verify`~~ — retired, see the step above; the note that follows is kept for
+      the history of the arrangement it describes. **This step breaks for exactly one
       release whenever `tekstide`'s `[dev-dependencies]` starts using a `tekstide-core`
       feature that the *previously published* core does not have**, and it heals itself the
       release after. Corrected 2026-08-28: the `0.15.0` note below said it "cannot run at
@@ -125,7 +134,7 @@ Ninety seconds. Run it.
 For crates.io releases, use the workspace publish flow:
 
 1. `cargo package -p tekstide-core --locked`
-2. `cargo package -p tekstide --locked`
+2. `cargo package --workspace --locked` (not `-p tekstide` alone: the pin makes that fail until core is published)
 3. `cargo publish --workspace --dry-run --locked`
 4. Publish with `cargo publish --workspace --locked`.
 
