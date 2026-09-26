@@ -41,12 +41,18 @@ pub(super) const FIXTURE_LINES: usize = 100_000;
 /// blob: a reviewer runs the same function and gets the same bytes, and the test
 /// below pins its size, its line count and a checksum.
 pub(super) fn fixture_text() -> String {
+    fixture_prefix(FIXTURE_LINES)
+}
+
+/// The first `lines` lines of the fixture — the same bytes, cut short — for the
+/// scaling table.
+pub(super) fn fixture_prefix(lines: usize) -> String {
     const WORDS: [&str; 16] = [
         "let", "value", "return", "match", "self", "state", "buffer", "cursor", "render", "layout",
         "widget", "column", "offset", "length", "result", "option",
     ];
-    let mut text = String::with_capacity(FIXTURE_LINES * 36);
-    for line in 0..FIXTURE_LINES {
+    let mut text = String::with_capacity(lines * 36);
+    for line in 0..lines {
         // Indentation and word count vary with the line, so lines are not the
         // same width — a measurement over identical lines would flatter a cache.
         let indent = (line % 4) * 2;
@@ -59,7 +65,7 @@ pub(super) fn fixture_text() -> String {
             text.push_str(WORDS[(line * 3 + word * 5) % WORDS.len()]);
         }
         text.push_str(&format!(" // line {line}"));
-        if line + 1 < FIXTURE_LINES {
+        if line + 1 < lines {
             text.push('\n');
         }
     }
@@ -317,5 +323,36 @@ fn editor_typing_latency_baseline_100_000_lines() {
             .collect();
         out.push_str(&report(label, &samples));
     }
+    out.push_str("\nscaling: typing a character at the end, by file length\n");
+    for lines in [1_000usize, 10_000, 100_000] {
+        let text = fixture_prefix(lines);
+        let mut state = open_fixture("editor-baseline-scaling", &text);
+        let _ = state
+            .app_shell
+            .set_active_project_cursor(tekstide_core::content::TextCursor {
+                line: lines - 1,
+                column: 0,
+            });
+        for _ in 0..3 {
+            let _ = one_keystroke(&mut state, character("w"), width);
+        }
+        let samples: Vec<Stage> = (0..30)
+            .map(|_| one_keystroke(&mut state, character("x"), width))
+            .collect();
+        out.push_str(&report(
+            &format!("{lines} lines, {} bytes", text.len()),
+            &samples,
+        ));
+    }
     println!("{out}");
+}
+
+/// Writes the fixture to the path in `TEKSTIDE_BASELINE_FIXTURE_OUT`, so the
+/// live capture opens **the same bytes** the measurement used.
+#[test]
+#[ignore = "writes a file where the environment says; used by the live capture"]
+fn write_the_baseline_fixture() {
+    let path =
+        std::env::var("TEKSTIDE_BASELINE_FIXTURE_OUT").expect("set TEKSTIDE_BASELINE_FIXTURE_OUT");
+    std::fs::write(path, fixture_text()).unwrap();
 }
