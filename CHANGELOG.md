@@ -2,7 +2,7 @@
 
 ## 0.27.0 - A Run That Still Exists Tomorrow
 
-Status: release candidate; not yet published or tagged.
+Status: **released on 2026-09-26.** Published to crates.io (`tekstide-core` and `tekstide`) and tagged `0.27.0` at `a2e220f`. **The first release whose post-publish check passes in full**: the app pins its own core, the archive's lockfile names it, and `cargo install tekstide --version 0.27.0` builds.
 
 A run used to be gone the moment Tekstide closed: reopen a project and its runs were transcript files with no prompt, profile or ending behind
 them, and there was nowhere to say what a run was for or to hand on what it did. A run now leaves a small record beside its transcript, is listed
