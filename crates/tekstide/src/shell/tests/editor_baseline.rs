@@ -35,6 +35,10 @@ use iced::{Pixels, Size};
 
 pub(super) const FIXTURE_LINES: usize = 100_000;
 
+/// The height the editor's text widget is given: the content area of the
+/// 1250 x 1378 window the captures use, below the header and the chrome lines.
+const VIEWPORT_HEIGHT: f32 = 1000.0;
+
 /// The measured document: **100 000 lines**, ~3.3 MiB, ordinary source-shaped
 /// text with varying line lengths, generated from the line number alone so it is
 /// byte-identical everywhere. Committed as a generator rather than as a 3.5 MiB
@@ -124,12 +128,16 @@ fn press_key(state: &mut State, key: iced::keyboard::Key) {
 }
 
 /// The text widget's own layout of the body string: iced's `Paragraph`, given
-/// the same string, font, size, line height and width the widget is given. The
-/// height is unbounded, as it is inside the editor's column.
-fn lay_out(body: &str, size: f32, width: f32) -> usize {
+/// the same string, font, size, line height and width the widget is given, **and
+/// the height the widget is given**: the editor's column sits in a container of
+/// the window's height, so the text widget's limits are finite, and cosmic-text
+/// shapes only what that height shows. A first version of this harness passed
+/// an unbounded height and measured 0.75 s a keystroke; the live app answered
+/// in under 100 ms, which is how the mistake was found.
+fn lay_out(body: &str, size: f32, width: f32, height: f32) -> usize {
     let paragraph = iced::advanced::graphics::text::Paragraph::with_text(Text {
         content: body,
-        bounds: Size::new(width, f32::INFINITY),
+        bounds: Size::new(width, height),
         size: Pixels(size),
         line_height: LineHeight::default(),
         font: crate::theme::ui_font(),
@@ -152,6 +160,15 @@ fn active_body(state: &State) -> String {
 }
 
 fn one_keystroke(state: &mut State, key: iced::keyboard::Key, width: f32) -> Stage {
+    one_keystroke_with_height(state, key, width, VIEWPORT_HEIGHT)
+}
+
+fn one_keystroke_with_height(
+    state: &mut State,
+    key: iced::keyboard::Key,
+    width: f32,
+    height: f32,
+) -> Stage {
     // What the `text` widget compared against last frame: an unchanged body is
     // only compared, a changed one is laid out again (`Plain::update`).
     let previous_body = active_body(state);
@@ -167,7 +184,7 @@ fn one_keystroke(state: &mut State, key: iced::keyboard::Key, width: f32) -> Sta
     let body = active_body(state);
     let started = std::time::Instant::now();
     if body != previous_body {
-        let _ = lay_out(&body, state.theme.font_size_body(), width);
+        let _ = lay_out(&body, state.theme.font_size_body(), width, height);
     }
     let layout = started.elapsed();
 
@@ -322,6 +339,22 @@ fn editor_typing_latency_baseline_100_000_lines() {
             .map(|_| one_keystroke(&mut state, key(), width))
             .collect();
         out.push_str(&report(label, &samples));
+    }
+    // For reference only: the same keystroke if the text widget were laid out
+    // with **no** height bound — what a scrollable body, or any design that lets
+    // the widget see the whole file, would pay. The shipped editor does not.
+    {
+        let mut state = open_fixture("editor-baseline-unbounded", &text);
+        for _ in 0..2 {
+            let _ = one_keystroke_with_height(&mut state, character("w"), width, f32::INFINITY);
+        }
+        let samples: Vec<Stage> = (0..12)
+            .map(|_| one_keystroke_with_height(&mut state, character("x"), width, f32::INFINITY))
+            .collect();
+        out.push_str(&report(
+            "REFERENCE, not the shipped editor: unbounded layout height, typing at the start",
+            &samples,
+        ));
     }
     out.push_str("\nscaling: typing a character at the end, by file length\n");
     for lines in [1_000usize, 10_000, 100_000] {
