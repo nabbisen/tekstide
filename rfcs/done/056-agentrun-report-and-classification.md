@@ -1,6 +1,6 @@
 # RFC-056: AgentRun Report And Classification
 
-Status: **Accepted by the human owner 2026-09-25.** D1–D8 as written, plus D9–D12 — see *Decided on acceptance*. Proposed 2026-09-25. `0.27.0` in the authorised schedule. Closes `REQ-AGENT-011` (a final
+Status: **Implemented and closed 2026-09-25.** Accepted by the human owner 2026-09-25: D1–D8 as written, plus D9–D12 — see *Decided on acceptance* and *Closed*. Proposed 2026-09-25. `0.27.0` in the authorised schedule. Closes `REQ-AGENT-011` (a final
 report or handoff note) and `REQ-AGENT-015` (classify a run) — both of which the 2026-09-23 audit
 found **recorded as implemented and never built**.
 
@@ -172,3 +172,51 @@ moment the record was read.
 
 **Ships as `0.27.0`**, with **PR-056-A — the `0.26.0` pin fix — first and alone**, because it is the
 one thing in this release that is repairing a live defect in published artifacts.
+
+## Closed (2026-09-25)
+
+Four slices, a follow-up to the third, and required items at four reviews. **A run now exists tomorrow: it leaves a record, can be classified and annotated by a person,
+and hands on a report.**
+
+**A — the pin.** The slice was written from a finding that turned out to be half wrong, and **the implementer corrected it by measuring the registry**: the published app
+archives' lockfiles name the *matching* core, so `--locked` is a working remedy for an older release, and the defect is `version = "0"` alone. The pin is the release's own
+version, held by `the_workspace_pins_tekstide_core_to_its_own_version`, and the post-publish check resolves **the release and its predecessor**, because only an old app shows a
+new core's break.
+
+**B — the record.** `agent-run-<id>/run.json`, versioned, atomic (`create_new`, `sync_all`, `rename`), derived from the run every time and compared to what was last written so
+"on every change" holds whichever path changed the run. **A restored run is not in `agent_runs`**: reading who reads that collection showed the launch limit, change attribution
+(`other_run_temporally_overlaps_baseline` reads `ended_at: None` as overlapping) and the running/failed counts would each have needed to remember it. `ended_at` was left alone and
+`RunEnding::{NotEnded, Ended, Unknown}` added. **The renderer, not only the record, had to say a killed run's ending is unknown** — the existing "has finished" line would have
+called it finished.
+
+**C — purge takes it too.** The third-file test was written before any code that deletes existed, and **the review's sharper name — `run.json.corruption-notes`, which a prefix match
+eats — made it fail against the first matcher**. `is_run_record_file_name` is exact; purge removes regular files by exact name and the directory only by `remove_dir`, which the operating
+system refuses unless it is empty. `remove_dir_all` appears nowhere in production code.
+
+**D — the classification, the notes, the report.** Seven classifications (six and a custom label), notes that are the user's own words, a report assembled on demand from **borrowed**
+sources and written where the user asks — a new `0600` file, never over an existing one. **The file keeps the user's words (`| `), Tekstide's facts (plain) and the run's text (`> `)
+apart, the marker applied after escaping so no text can supply another kind's marker.** `AgentRun.notes` is not writable outside its crate, and a test holds the callers of the setters
+to the one place a person types.
+
+**Decisions taken at review, not in the RFC:**
+
+- **Retention takes the transcript alone; a purge takes the record too** (review 438). `transcript_retention_days` expires transcripts, and a person cannot predict from that name that it
+  will delete what they wrote. The hole that made the other reading look necessary — a tombstone returned early from purge — was fixed rather than answered with more deletion, and it
+  turned out to be larger: a record whose transcript retention removed in an *earlier session* is a record with no transcript, an ordinary state, so a project purge takes those too.
+- **The purge dialog names runs, transcripts and records and keeps its number; Trust Settings says its figure counts transcripts only.** One thing may not have two numbers on two screens
+  with no way to tell why.
+- **The transcript quote stays in the export by default** (review 439): informed consent, met four times — the field before saving, the file's own header, the book, a 16 KiB bound — and a
+  handoff note whose transcript is only a path is useless to a reader without Tekstide.
+- **A run without a run directory gets no record**, and the record never creates one.
+- **Set-aside records and interrupted writes** (`run.json.corrupt[-N]`, `run.json.tmp`) are the product's own by exact name and are taken by a purge.
+
+**Findings only a capture or an ablation produced:** the report's "has finished" line contradicting a restored run's unknown ending; a notes-writer scan that cut each file at its first
+`#[cfg(test)]` and never reached most of `shell.rs` (a second writer passed until ablated); a disk-usage ablation that failed sixteen tests for the wrong reason; an ordering of purge steps
+no test can distinguish, said so rather than claimed.
+
+**Reachable, and captured live with no environment variable** — RFC-021's failure is not repeated: a person classified a run with a custom label containing a bidi control, wrote notes,
+exported, closed the app with the run still going, reopened to find it classified, noted and saying it does not know when it ended, and purged it, leaving the exported file byte-identical.
+
+**Left open, deliberately.** Whether exporting a report deserves an audit record — recorded as an open question in the delivery plan (D11), not answered. A report exported **into the
+project folder** appears as an untracked file in a project Tekstide watches; the field says the file is the user's. The report's changed-files section was tested and not watched with a real
+change set, and no mouse click on its buttons was captured. A record whose transcript the user deleted by hand is reached only by a project purge.

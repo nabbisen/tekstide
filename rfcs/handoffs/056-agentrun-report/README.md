@@ -1,15 +1,15 @@
 ---
 title: "RFC-056: AgentRun Report And Classification — implementation handoff"
 rfc: "RFC-056"
-rfc_file: "../../accepted/056-agentrun-report-and-classification.md"
-source_rfc_status: "Accepted 2026-09-25 — agent remainder"
+rfc_file: "../../done/056-agentrun-report-and-classification.md"
+source_rfc_status: "Implemented and closed 2026-09-25 — agent remainder"
 target_milestone: "agent remainder"
 created: "2026-09-25"
 ---
 
 # A run that still exists tomorrow
 
-Source RFC: [RFC-056](../../accepted/056-agentrun-report-and-classification.md)
+Source RFC: [RFC-056](../../done/056-agentrun-report-and-classification.md)
 
 ## What this is
 
@@ -26,7 +26,7 @@ the transcript, and D gives the run its classification, its notes and the report
 
 ## Read these first, in this order
 
-1. [The RFC](../../accepted/056-agentrun-report-and-classification.md) — the nine measurements,
+1. [The RFC](../../done/056-agentrun-report-and-classification.md) — the nine measurements,
    D1–D8, and *Decided on acceptance* (D9–D12).
 2. [What a record and a report must not do](./what-a-record-must-not-do.md) — **the risk document.
    D2 is in it, and D2 is the one that can turn a privacy feature into a leak.**

@@ -1,8 +1,8 @@
 ---
 title: "RFC-056 — what a record and a report must not do"
 rfc: "RFC-056"
-rfc_file: "../../accepted/056-agentrun-report-and-classification.md"
-source_rfc_status: "Accepted 2026-09-25 — agent remainder"
+rfc_file: "../../done/056-agentrun-report-and-classification.md"
+source_rfc_status: "Implemented and closed 2026-09-25 — agent remainder"
 target_milestone: "agent remainder"
 created: "2026-09-25"
 ---
