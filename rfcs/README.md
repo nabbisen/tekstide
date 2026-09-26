@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 057 | [Editor Essentials](./proposed/057-editor-essentials.md) | **Proposed 2026-09-26**, awaiting the owner. `0.28.0`. The editor draws **the whole file as one string, every frame**; the viewport field that would bound it has existed since RFC-006 and nothing reads it; every keystroke copies the whole document. No caret, no line numbers, no undo. `NFR-PERF-003` names 100 000-line typing latency and **nobody has measured it**. Carries the owner's two-row header as its own slice. `REQ-EDIT-002`, `NFR-REL-005`, `NFR-PERF-003` |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 057 | [Editor Essentials](./accepted/057-editor-essentials.md) | **Accepted 2026-09-26; D1–D7 as written, plus D8–D11.** `0.28.0`. The body is `document.text().to_string()` into one `text` widget — the whole file every frame — and `TextViewport` has had **no reader since RFC-006**. **D11 measures `NFR-PERF-003` before anything changes**, because a baseline taken after the rewrite is not one. The caret is a widget, never a character. Carries the owner's two-row header as its own last slice. [Handoff pack](./handoffs/057-editor-essentials/README.md) |
 | — | *(none: nothing is currently accepted and unbuilt)* | |
 
 
@@ -113,6 +113,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 025 | [Notifications](./handoffs/025-notifications/README.md) — **M12**; **implemented and closed 2026-09-22** |
 | 030 | [Git Integration](./handoffs/030-git-integration/README.md) — **M12**; **implemented and closed 2026-09-23** |
 | 054 | [User Configuration Completion](./handoffs/054-user-configuration/README.md) — **M12**; **implemented and closed 2026-09-24, closing M12** |
+| 057 | [Editor Essentials](./handoffs/057-editor-essentials/README.md) — **M10 remainder**; the editor draws the whole file, every frame |
 | 056 | [AgentRun Report And Classification](./handoffs/056-agentrun-report/README.md) — **agent remainder**; **implemented and closed 2026-09-25** |
 | 055 | [Ignore Rules In The Explorer](./handoffs/055-explorer-ignore-rules/README.md) — **M12 remainder tail**; **implemented and closed 2026-09-25** |
 | 053 | [What The Window Says Is True](./handoffs/053-window-truth/README.md) — **M12 remainder**; six surfaces that say something untrue. **Implemented and closed 2026-09-24; released as `0.23.0`** |

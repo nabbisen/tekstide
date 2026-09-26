@@ -1,6 +1,6 @@
 # RFC-057: Editor Essentials
 
-Status: **Proposed 2026-09-26.** `0.28.0` in the authorised schedule. Finishes `REQ-EDIT-002` (line
+Status: **Accepted by the human owner 2026-09-26.** D1–D7 as written, plus D8–D11 — see *Decided on acceptance*. Proposed 2026-09-26. `0.28.0` in the authorised schedule. Finishes `REQ-EDIT-002` (line
 numbers beside the cursor position it already shows), draws a caret, and adds **undo**, which no
 requirement names and `NFR-REL-005` assumes.
 
@@ -117,3 +117,32 @@ is superseded when the header changes.
 - Gate green three times with `--no-fail-fast`, **0 fixture entries left** in a fresh short `TMPDIR`.
 - The core pin bumps with the version; `the_workspace_pins_tekstide_core_to_its_own_version` is red
   until it does.
+
+## Decided on acceptance (2026-09-26)
+
+**D1–D7 as written.** Four additions, one of which changes the order of the work.
+
+**D8 — a drawn line stays one assertable string.** RFC-052 named *losing testability* as a risk and
+answered it by keeping `node_line`: one row, one string, testable without `iced`. Rows here must do
+the same — each line is one string plus the caret element, not a scatter of widgets. If the gutter
+and the caret can only be verified by looking at a picture, the surface has become untestable and
+that is a D1 failure, not a style choice.
+
+**D9 — the viewport follows the cursor; this RFC does not invent scrolling.** Measured: navigation is
+four arrow keys and there is no scroll input at all. The window moves because the cursor moved.
+Adding a scrollbar or wheel handling is an input-vocabulary change, and measurement 9 already records
+that gap for someone else to schedule.
+
+**D10 — D7 is three lines of composition, and here is where.** `shell.rs:7520–7522` stacks
+`window_title`, `project_tab_strip`, `top_bar_actions_row` in that order. D7 makes the actions row
+carry the title and puts it **above** the tab strip. Naming it precisely keeps the slice small and
+makes the superseded capture set knowable in advance.
+
+**D11 — measure `NFR-PERF-003` before changing anything, not after.** This reverses the obvious order
+and it is the important decision. The baseline must be taken against **today's** code — the whole
+file in one `text` widget, a whole-document `String` per keystroke — or there is nothing to compare
+against and "it got faster" is unfalsifiable. Slice A measures and changes no product code. If the
+baseline already misses p95 ≤ 16 ms, that number is published whatever it implies for the rest of
+the work.
+
+**Ships as `0.28.0`.**
