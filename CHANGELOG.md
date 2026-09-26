@@ -26,6 +26,22 @@
   that could not be given a transcript directory, has no record. A change to a run's status reaches its record within a second;
   a change made to it by the user is written at once.
 
+### Added — classify a run, write notes on it, and hand on a report
+
+- **On the AgentRun Report (`Ctrl+Alt+R`) you can classify the run** — coding, review, documentation, testing, refactoring or
+  release, or a label of your own — **and write notes on it**, by button or by key (`1`–`6`, `c`, `x`, `n`). Both are saved in the
+  run's record the moment you change them, so a run killed a second later keeps them, and a reopened project lists the run with
+  them. The notes are your own words: nothing the run printed is ever put in them.
+- **`Export report…` (`e`) writes a Markdown report where you ask**, never over an existing file, readable only by you, and never
+  inside Tekstide's own data folder. It says what the file will contain before you save and that Tekstide can no longer change or
+  remove it afterwards. Tekstide keeps no copy, and **purging a run does not remove a report you exported.**
+- **The file keeps three kinds of text apart**: your words on lines beginning `| `, what Tekstide recorded as plain lines, and
+  what came from the run (changed paths, the last 16 KiB of the transcript) on lines beginning `> `. Every untrusted value is
+  escaped, so a newline or a bidi control in a label, a note, a path or the transcript cannot forge a line of another kind.
+- **Limits:** the report quotes the tail of the transcript, not all of it, and lists at most 500 changed paths, and says how many
+  it left out. A note is at most 4,000 characters and a custom label 64. A run that has no record folder (transcript capture was
+  off) can be classified and annotated, but only until Tekstide closes, and the report says so.
+
 ### Fixed — a pinned older release could not be installed
 
 - **`cargo install tekstide --version 0.25.0` (and any older release) stopped compiling the day `0.26.0` was published.** Every

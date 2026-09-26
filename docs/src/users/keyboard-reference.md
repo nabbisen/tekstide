@@ -35,6 +35,12 @@ With `Tab` focused on the sidebar in Content mode, `Up`/`Down` move the explorer
 `Enter` opens the highlighted file, or opens or closes the highlighted folder in place. The line under
 the tree always shows the highlighted row in full, because a narrow sidebar clips a long one.
 
+On the AgentRun Report (`Ctrl+Alt+R`), with focus on the main area, `1`–`6` classify the run (coding,
+review, documentation, testing, refactoring, release), `c` types a label of your own, `x` clears the
+classification, `n` edits your notes and `e` exports the report. Each has a button that does the same.
+In a text field `Enter` saves, `Shift+Enter` starts a new line in the notes, `Escape` cancels and `Ctrl+V`
+pastes; while a field is open the number and letter keys are text, not shortcuts.
+
 With focus on the main area, typing edits the open document at the real cursor position;
 `Up`/`Down`/`Left`/`Right` move the cursor without editing; `Enter` inserts a newline; and
 `Backspace` deletes the character before the cursor. There is no undo.

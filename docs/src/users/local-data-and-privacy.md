@@ -113,6 +113,30 @@ The run's folder is removed only when nothing else is left in it: **a file Tekst
 deleted, and it keeps its folder.** A `run.json` Tekstide cannot read is renamed `run.json.corrupt` beside the
 transcript rather than deleted, the Project Board says so, and a purge removes that too.
 
+### The report you export
+
+`e` on the AgentRun Report writes a Markdown file **at the path you type**. Tekstide does not keep a copy: the
+report is put together from the run's record and whatever transcript and changed-file information still exists
+at that moment, written, and forgotten. Before you save, the field says what the file will contain.
+
+The file holds three kinds of text, and **keeps them apart in the file itself**, not only on screen:
+
+- **Your words** — the classification and notes you wrote — on lines that begin with `| `.
+- **What Tekstide recorded** — the run's id, profile, prompt summary, start and end, and the counts of its
+  approvals, change sets and audit events — as plain `Name: value` lines. A run whose end was not seen says
+  *unknown*, never a time it was not.
+- **What came from the run** — the project paths it changed, and the last 16 KiB of its transcript — on lines
+  that begin with `> `. This is text an AI CLI produced, so it is quoted.
+
+Every untrusted value is escaped the way the rest of Tekstide escapes it: a newline, a control character or a
+right-to-left override in a label, a note, a path or the transcript cannot start a line of its own or borrow
+another kind's marker. A note line you typed that begins with `> ` is written `| > …`.
+
+**Once written, the file is yours and outside Tekstide's reach.** Tekstide creates it as a new file readable
+only by you, never overwrites an existing file, and refuses a path inside its own data folder. It cannot change
+or remove the file afterwards, and **purging a run does not remove a report you exported** — the report names
+project paths and quotes the run, so treat it as you would any file you made from them.
+
 ### The two controls, on Trust Settings (`Ctrl+Alt+U`)
 
 - **Decline capture for future runs, per project.** `Space` toggles it. This is **forward-only**

@@ -95,6 +95,14 @@ content, escaped at render, so a directionality override in what the AI CLI prin
 visible marker rather than an invisible reordering. Unlike change detection, this is reachable
 **while a run is still active**, and the surface says so.
 
+The same surface is where you **classify the run, write notes on it, and export the report**. The
+classification is one of coding, review, documentation, testing, refactoring or release, or a label of your
+own; the notes are your own words, and nothing the run printed is ever put in them. Both are saved in the
+run's record at once, so they are still there after Tekstide is closed and reopened — the reopened run is
+listed on the same surface, and says when it does not know how the run ended. `Export report…` writes a
+Markdown file **where you ask**; see *The report you export* in
+[Local Data and Privacy](./local-data-and-privacy.md).
+
 The window is a bounded tail (1 MiB) of the transcript, not the whole thing. If the transcript hit
 its own retention limit, that is shown as a separate, independent fact from "this is only a
 partial view" — conflating the two was the specific failure this surface was built not to repeat.
