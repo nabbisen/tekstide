@@ -109,6 +109,15 @@ says *measured* with no number in the evidence is not ticked.
 - [ ] Every new intermittent failure has a dated row in `test-process-leak.md`.
 - [ ] Commits are pushed once the gate is green.
 
+### Ruled at review 439
+
+- [x] **The transcript quote stays in the exported report by default.** `REQ-AGENT-011` says
+      *references*, and a stricter reading would be defensible — but the standard here is informed
+      consent, met four times (the field before saving, the file's own header, the book's *The report
+      you export*, and a 16 KiB bound). A handoff note whose transcript is only a path is useless to a
+      reader without Tekstide, and a toggle makes the useful artifact conditional on a decision the
+      user has to get right.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
