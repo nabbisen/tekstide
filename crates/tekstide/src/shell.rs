@@ -788,6 +788,10 @@ pub struct State {
     /// `None` until the first layout that contains it, when the window
     /// holds a default number of rows.
     explorer_viewport: Option<iced::Size>,
+    /// RFC-057 PR-057-B: the size the layout engine gave the editor's body
+    /// region, measured like `explorer_viewport` and for the same reason. `None`
+    /// until the first layout that contains it.
+    editor_viewport: Option<iced::Size>,
     /// Response 234: the `ApprovalHistory` surface's own keyboard cursor
     /// -- the direct analogue of `explorer_highlight` for a second,
     /// independent list in the same `MainArea` zone. A separate field
@@ -1326,6 +1330,7 @@ impl State {
             explorer_highlight: 0,
             explorer_top: 0,
             explorer_viewport: None,
+            editor_viewport: None,
             approval_history_highlight: 0,
             approval_coordinator: tekstide_core::approval::ApprovalCoordinator::new(),
             approval_channels: Vec::new(),
@@ -1675,6 +1680,8 @@ pub enum Message {
     /// sidebar, published by [`crate::surface::frame::MeasureSize`] when it
     /// changes.
     ExplorerViewportMeasured(iced::Size),
+    /// RFC-057 PR-057-B: the editor's body region was laid out at this size.
+    EditorViewportMeasured(iced::Size),
     /// RFC-032: fired by the `TrustSettings` surface's own "Grant"
     /// control -- opens the real confirmation dialog. No I/O here; the
     /// real grant only happens on `ModalActivate` with focus on `Grant`
@@ -1913,6 +1920,7 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::PanesRegionMeasured(_)
         | Message::ExplorerScanFinished { .. }
         | Message::ExplorerViewportMeasured(_)
+        | Message::EditorViewportMeasured(_)
         | Message::PathFieldPasteResolved(_) => None,
     }
 }
@@ -2719,6 +2727,10 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         Message::ExplorerViewportMeasured(size) => {
             state.explorer_viewport = Some(size);
             settle_explorer_highlight(state);
+        }
+        Message::EditorViewportMeasured(size) => {
+            state.editor_viewport = Some(size);
+            settle_editor_viewport(state);
         }
         Message::OpenTrustGrantDialog => {
             open_trust_grant_dialog(state);
@@ -4131,6 +4143,39 @@ fn explorer_window_capacity(state: &State) -> usize {
     )
 }
 
+/// How many lines the editor's body region can draw, from the size the layout
+/// engine last gave it.
+fn editor_window_capacity(state: &State) -> usize {
+    crate::surface::editor::rows_that_fit(
+        state.editor_viewport.map(|size| size.height),
+        state.theme.font_size_body(),
+    )
+}
+
+/// RFC-057 PR-057-B, D9: brings the active document's viewport to where the
+/// cursor is, after an edit, a cursor move or a re-measure -- the window moves
+/// only when the cursor would otherwise be off it. A no-op without a document.
+fn settle_editor_viewport(state: &mut State) {
+    let capacity = editor_window_capacity(state);
+    let Some(document) = state
+        .app_shell
+        .state()
+        .active_project()
+        .and_then(|project| project.content_workspace().active_document())
+    else {
+        return;
+    };
+    let following = crate::surface::editor::viewport_following(
+        document.text(),
+        document.cursor(),
+        document.viewport(),
+        capacity,
+    );
+    if following != document.viewport() {
+        let _ = state.app_shell.set_active_project_viewport(following);
+    }
+}
+
 /// Keeps the highlight on a row that exists and the window on the
 /// highlight, after the tree or the viewport changed under them.
 fn settle_explorer_highlight(state: &mut State) {
@@ -4282,10 +4327,12 @@ fn handle_editor_key(state: &mut State, key: &input::KeyPress) {
     if let Some(edit) = crate::surface::editor::apply_edit_key(&text, cursor, &key.key) {
         let _ = state.app_shell.replace_active_project_text(edit.text);
         let _ = state.app_shell.set_active_project_cursor(edit.cursor);
+        settle_editor_viewport(state);
         return;
     }
     if let Some(new_cursor) = crate::surface::editor::navigate_cursor(&text, cursor, &key.key) {
         let _ = state.app_shell.set_active_project_cursor(new_cursor);
+        settle_editor_viewport(state);
     }
 }
 
@@ -9055,6 +9102,8 @@ fn content_mode_editor_view(state: &State) -> Element<'_, Message> {
             &state.catalog,
             &state.theme,
             Message::SaveActiveDocumentButtonPressed,
+            editor_window_capacity(state),
+            Message::EditorViewportMeasured,
         ),
         None => text(main_area_label(state, Some(ProjectMode::Content))).into(),
     }

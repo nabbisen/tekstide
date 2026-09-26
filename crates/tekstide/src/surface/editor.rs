@@ -19,9 +19,9 @@
 
 use crate::theme::text;
 use iced::widget::{column, container};
-use iced::{Element, Length};
+use iced::{Element, Length, Size};
 
-use tekstide_core::content::{TextCursor, TextDocument, TextDocumentState};
+use tekstide_core::content::{TextCursor, TextDocument, TextDocumentState, TextViewport};
 use tekstide_core::project::ProjectContentStatus;
 use tekstide_core::text_safety;
 
@@ -101,15 +101,85 @@ pub(crate) fn empty_lines(catalog: &Catalog, status: &ProjectContentStatus) -> V
     }
 }
 
-/// The text area's own content: raw, unescaped, exactly what the file
-/// contains. **This is the one function in this crate that must never
-/// call `text_safety::quote_untrusted`** -- RFC-016's editor exception,
-/// quoted at the top of this module. Factored out so the raw-rendering
-/// property is directly testable and ablatable in the *opposite*
-/// direction from every other surface in this crate: a test asserting
-/// the escaped form appears here must fail.
-pub(crate) fn body_text(document: &TextDocument) -> String {
-    document.text().to_string()
+// ---- RFC-057 PR-057-B: the body is rows, and the viewport bounds them ------------
+//
+// **The editor never hands the whole file to one widget.** Measured in PR-057-A:
+// laid out with no height bound, a 100 000-line body costs **~745 ms a
+// keystroke** (`editor_baseline`'s labelled reference), against a 16 ms budget.
+// What is drawn is the viewport's window: one fixed-height row per visible line,
+// each row one string, and **`document.text()` is read in exactly one place in
+// this module, [`window_rows`]** -- a test scans this file for it.
+
+/// iced's default text line height, as a multiple of the font size. Rows are
+/// fixed-height containers of exactly this pitch, so how many fit is arithmetic
+/// on a **measured** height, never an estimate of wrapping.
+const LINE_HEIGHT_FACTOR: f32 = 1.3;
+/// What the window holds before the layout has been measured.
+pub(crate) const DEFAULT_WINDOW_ROWS: usize = 30;
+
+/// The height of one drawn row at `font_size`.
+pub(crate) fn row_pitch(font_size: f32) -> f32 {
+    font_size * LINE_HEIGHT_FACTOR
+}
+
+/// How many rows fit a body region of `height` pixels at `font_size`.
+pub(crate) fn rows_that_fit(height: Option<f32>, font_size: f32) -> usize {
+    let Some(height) = height else {
+        return DEFAULT_WINDOW_ROWS;
+    };
+    ((height.max(0.0) / row_pitch(font_size)).floor() as usize).max(1)
+}
+
+/// How many lines the text has, counted the way `TextCursor.line` indexes them:
+/// `"a\nb\n"` is three (the trailing empty line included).
+pub(crate) fn line_count(text: &str) -> usize {
+    text.bytes().filter(|byte| *byte == b'\n').count() + 1
+}
+
+/// **The viewport follows the cursor** (D9): the first visible line moves only
+/// when the cursor would otherwise be off screen, and as little as it must --
+/// moving the cursor inside the window does not scroll it. Nothing here scrolls
+/// for its own sake: there is no wheel and no scrollbar.
+pub(crate) fn viewport_following(
+    text: &str,
+    cursor: TextCursor,
+    viewport: TextViewport,
+    capacity: usize,
+) -> TextViewport {
+    let window = super::explorer::window_for(
+        line_count(text),
+        cursor.line,
+        viewport.first_visible_line,
+        capacity,
+    );
+    TextViewport {
+        first_visible_line: window.top,
+    }
+}
+
+/// **The rows drawn**: at most `capacity` lines of `text`, from
+/// `first_visible_line`, each **raw and unescaped** -- exactly what the file
+/// contains. This is the one function in this crate that must never call
+/// `text_safety::quote_untrusted` (RFC-016's editor exception), and **the one
+/// place the document's text is read for drawing**. One row is one string, so
+/// what the surface draws is assertable without `iced` (D8).
+pub(crate) fn window_rows(text: &str, first_visible_line: usize, capacity: usize) -> Vec<&str> {
+    text.split('\n')
+        .skip(first_visible_line)
+        .take(capacity)
+        .collect()
+}
+
+/// The rows the editor draws for `document` at `capacity` rows: its viewport's
+/// window. **What `view` builds and what the tests measure are this one value**,
+/// so a test of "what is drawn" cannot describe a different window from the one
+/// on screen.
+pub(crate) fn drawn_rows(document: &TextDocument, capacity: usize) -> Vec<&str> {
+    window_rows(
+        document.text(),
+        document.viewport().first_visible_line,
+        capacity,
+    )
 }
 
 /// The result of a real edit: both halves `replace_active_text` and
@@ -327,10 +397,38 @@ pub fn view<'a, Message: 'a + Clone>(
     catalog: &'a Catalog,
     theme: &'a Theme,
     on_save: Message,
+    capacity: usize,
+    on_body_measured: impl Fn(Size) -> Message + 'a,
 ) -> Element<'a, Message> {
     let content: Element<'a, Message> = match document {
         Some(document) => {
-            let body = text(body_text(document)).size(theme.font_size_body());
+            let pitch = row_pitch(theme.font_size_body());
+            let rows: Vec<Element<'a, Message>> = drawn_rows(document, capacity)
+                .into_iter()
+                .map(|line| {
+                    // No wrapping: one line is one row, so the window's
+                    // arithmetic is exact. A line wider than the region is
+                    // clipped at its right edge (there is no horizontal
+                    // scroll; soft wrap is a non-goal).
+                    container(
+                        text(line.to_owned())
+                            .size(theme.font_size_body())
+                            .wrapping(iced::widget::text::Wrapping::None),
+                    )
+                    .width(Length::Fill)
+                    .height(Length::Fixed(pitch))
+                    .into()
+                })
+                .collect();
+            // The body region's size is measured, not computed: the window
+            // holds as many rows as the layout engine says fit.
+            let body = crate::surface::frame::MeasureSize::new(
+                container(column(rows))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .clip(true),
+                on_body_measured,
+            );
             column![
                 text(chrome_line(catalog, document)).size(theme.font_size_body()),
                 text(cursor_line(catalog, document)).size(theme.font_size_status()),

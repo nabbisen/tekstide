@@ -11,8 +11,8 @@ use tekstide_core::project::{ProjectContentStatus, ProjectId, ProjectSession};
 use tekstide_core::content::TextCursor;
 
 use super::{
-    apply_edit_key, body_text, chrome_line, cursor_line, document_state_symbol, empty_lines,
-    navigate_cursor, open_error_line,
+    apply_edit_key, chrome_line, cursor_line, document_state_symbol, empty_lines, navigate_cursor,
+    open_error_line, rows_that_fit, viewport_following, window_rows,
 };
 use crate::i18n::{Catalog, LocalePreference};
 
@@ -87,45 +87,169 @@ fn open(sandbox: &Sandbox, relative_path: &str) -> TextDocument {
 /// show the raw character -- the opposite property from every other
 /// surface in this crate, per RFC-016's editor exception.
 #[test]
-fn body_text_preserves_a_bidi_override_character_raw() {
+fn a_drawn_row_preserves_a_bidi_override_character_raw() {
     let sandbox = Sandbox::new("raw-bidi");
     sandbox.write_file("evil.txt", "echo proj\u{202E}gpj.exe");
     let document = open(&sandbox, "evil.txt");
 
-    let body = body_text(&document);
+    let rows = window_rows(document.text(), 0, 10);
 
+    assert_eq!(rows, vec!["echo proj\u{202E}gpj.exe"]);
     assert!(
-        body.contains('\u{202E}'),
-        "the raw override character must survive unescaped, got {body:?}"
+        !rows[0].contains("<U+202E>"),
+        "the text area must never contain an escape marker, got {:?}",
+        rows[0]
     );
-    assert!(
-        !body.contains("<U+202E>"),
-        "the text area must never contain an escape marker, got {body:?}"
-    );
-    assert_eq!(body, "echo proj\u{202E}gpj.exe");
 }
 
 /// **Ablated in the opposite direction from every other surface's own
-/// bidi test**: a test asserting the escaped form appears in the text
-/// area must fail. Verified by construction here rather than by
-/// temporarily editing `body_text` -- `quote_untrusted` is simply never
-/// called by [`body_text`], so there is no code path that could produce
-/// an escape marker in its output to assert against. The manual ablation
-/// (wrapping `body_text`'s return in `quote_untrusted` and re-running
-/// [`body_text_preserves_a_bidi_override_character_raw`]) was performed
-/// once during review and reverted; recorded in `qa-evidence.md` rather
-/// than kept as a second permanent test, since a permanently-failing
-/// assertion cannot itself be part of the passing suite.
+/// bidi test**: a test asserting the escaped form appears in the text area
+/// must fail. Verified by construction: `window_rows` never calls
+/// `quote_untrusted`, so there is no path that could produce an escape marker to
+/// assert against. The scan below holds that for the whole file.
 #[test]
-fn asserting_the_escaped_form_would_fail_because_body_text_never_escapes() {
-    let sandbox = Sandbox::new("no-escape-path");
-    sandbox.write_file("evil.txt", "proj\u{202E}gpj.exe");
-    let document = open(&sandbox, "evil.txt");
-
-    let body = body_text(&document);
+fn this_module_never_escapes_the_text_it_draws() {
+    let source = include_str!("../editor.rs");
+    let production = source.split("#[cfg(test)]\nmod ").next().unwrap();
     assert!(
-        !body.contains("<U+202E>"),
-        "body_text must never produce the escape marker this crate's other surfaces do"
+        !production.lines().any(|line| {
+            let trimmed = line.trim_start();
+            !trimmed.starts_with("//")
+                && trimmed.contains("quote_untrusted(")
+                && !trimmed.contains("text_safety::quote_untrusted(")
+        }),
+        "only the chrome (path, open error) may be escaped, and those call text_safety::quote_untrusted"
+    );
+}
+
+const FIFTY_LINES: &str = "l0\nl1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\nl13\nl14\nl15\nl16\nl17\nl18\nl19\nl20\nl21\nl22\nl23\nl24\nl25\nl26\nl27\nl28\nl29\nl30\nl31\nl32\nl33\nl34\nl35\nl36\nl37\nl38\nl39\nl40\nl41\nl42\nl43\nl44\nl45\nl46\nl47\nl48\nl49";
+
+/// D1: what is drawn is the viewport's window, not the file. One row is one
+/// string, and the rows are exactly the lines `[first, first + capacity)`.
+#[test]
+fn the_rows_drawn_are_the_windows_lines_and_no_more() {
+    let rows = window_rows(FIFTY_LINES, 10, 5);
+
+    assert_eq!(rows, vec!["l10", "l11", "l12", "l13", "l14"]);
+    assert_eq!(
+        window_rows(FIFTY_LINES, 48, 10),
+        vec!["l48", "l49"],
+        "the window ends with the file"
+    );
+    assert!(
+        window_rows(FIFTY_LINES, 500, 10).is_empty(),
+        "a stale viewport past the end draws nothing, and does not panic"
+    );
+    assert_eq!(
+        window_rows("a\n", 0, 10),
+        vec!["a", ""],
+        "the empty line after a final newline is a line, as the cursor counts it"
+    );
+}
+
+/// `TextViewport::first_visible_line` finally has a reader: the window starts
+/// where the viewport says.
+#[test]
+fn the_viewports_first_visible_line_decides_where_the_window_starts() {
+    assert_eq!(window_rows(FIFTY_LINES, 0, 2), vec!["l0", "l1"]);
+    assert_eq!(window_rows(FIFTY_LINES, 30, 2), vec!["l30", "l31"]);
+}
+
+#[test]
+fn how_many_rows_fit_is_arithmetic_on_a_measured_height() {
+    assert_eq!(
+        rows_that_fit(None, 14.0),
+        super::DEFAULT_WINDOW_ROWS,
+        "before the first layout"
+    );
+    let pitch = super::row_pitch(14.0);
+    assert_eq!(rows_that_fit(Some(pitch * 10.0 + 1.0), 14.0), 10);
+    assert_eq!(
+        rows_that_fit(Some(0.0), 14.0),
+        1,
+        "a window always holds a row"
+    );
+    assert_eq!(super::line_count("a\nb\n"), 3);
+    assert_eq!(super::line_count(""), 1);
+}
+
+/// D9: the viewport follows the cursor -- and only the cursor. Moving inside the
+/// window does not scroll it; leaving it scrolls by the least that brings the
+/// cursor back; a document that shrank under a stale viewport is clamped.
+#[test]
+fn the_viewport_follows_the_cursor_by_the_least_it_must() {
+    let viewport = |first| tekstide_core::content::TextViewport {
+        first_visible_line: first,
+    };
+    let follow = |line, first, capacity| {
+        viewport_following(FIFTY_LINES, cursor(line, 0), viewport(first), capacity)
+            .first_visible_line
+    };
+
+    assert_eq!(follow(12, 10, 5), 10, "inside the window: it does not move");
+    assert_eq!(
+        follow(14, 10, 5),
+        10,
+        "the last row of the window is inside it"
+    );
+    assert_eq!(follow(15, 10, 5), 11, "one past the window: scrolls by one");
+    assert_eq!(follow(9, 10, 5), 9, "one above: scrolls by one");
+    assert_eq!(
+        follow(49, 0, 5),
+        45,
+        "the cursor at the end brings the end into the window"
+    );
+    assert_eq!(follow(0, 45, 5), 0);
+    assert_eq!(
+        follow(3, 500, 5),
+        3,
+        "a stale viewport past the end is pulled back to the cursor"
+    );
+    assert_eq!(
+        follow(2, 0, 200),
+        0,
+        "a window that holds the whole file never scrolls"
+    );
+}
+
+/// **RFC-057 Q1: the editor never hands the whole file to one widget.** PR-057-A
+/// measured what that costs -- **~745 ms a keystroke** at 100 000 lines, against
+/// a 16 ms budget (`editor_baseline`'s labelled reference). The document's text
+/// is read for drawing in exactly one place, and it goes straight into
+/// `window_rows`; no `to_string()` of it, no `body_text`, no widget built from
+/// it whole. Scanned here so a scrollable body cannot come back unnoticed.
+#[test]
+fn the_document_text_reaches_a_widget_only_through_window_rows() {
+    let source = include_str!("../editor.rs");
+    let production = source.split("#[cfg(test)]\nmod ").next().unwrap();
+    let lines: Vec<&str> = production.lines().collect();
+    let readers: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| !line.trim_start().starts_with("//") && line.contains(".text()"))
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(
+        readers.len(),
+        1,
+        "the document's text is read in one place: {readers:?}"
+    );
+    // rustfmt may put the argument on its own line; the call it belongs to is the
+    // nearest line above that opens `window_rows(`.
+    assert!(
+        lines[readers[0].saturating_sub(2)..=readers[0]]
+            .iter()
+            .any(|line| line.contains("window_rows(")),
+        "and it goes straight into `window_rows`: {:?}",
+        lines[readers[0]]
+    );
+    assert!(
+        !production.contains("fn body_text"),
+        "the whole-body function is gone"
+    );
+    assert!(
+        !production.lines().any(|line| !line.trim_start().starts_with("//") && line.contains("text().to_string()")),
+        "the whole document is never copied into a string for drawing"
     );
 }
 

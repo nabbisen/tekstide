@@ -14,7 +14,7 @@
 //! | Stage | What it is | How |
 //! | --- | --- | --- |
 //! | `update` | input arriving to the edit applied: `handle_editor_key` copies the document out, `apply_edit_key` splits it into a `Vec<String>` of every line and joins it again, `replace_text` installs the result | the real `update`, via the real router |
-//! | `view` | building the `Element` tree, which copies the whole document into the body `text` widget (`body_text`) | the real `view` |
+//! | `view` | building the `Element` tree | the real `view` |
 //! | `layout` | **the `text` widget re-shaping and laying out the whole changed string**, which iced does whenever a `text` widget's content changes | iced's own `Paragraph::with_text` (`iced_graphics`, the engine the widget calls) on the same string, font, size and width |
 //!
 //! **Not measured: painting.** Rasterising or GPU-drawing the laid-out text and
@@ -121,7 +121,10 @@ struct Stage {
 }
 
 fn open_fixture(label: &str, text: &str) -> State {
-    let (state, _dir) = state_with_an_open_document(label, text);
+    let (mut state, _dir) = state_with_an_open_document(label, text);
+    // The body region the 1250 x 1378 window gives the editor, as the layout
+    // engine would report it.
+    state.editor_viewport = Some(Size::new(880.0, VIEWPORT_HEIGHT));
     state
 }
 
@@ -158,29 +161,44 @@ fn lay_out(body: &str, size: f32, width: f32, height: f32) -> usize {
     paragraph.min_bounds().height as usize
 }
 
-fn active_body(state: &State) -> String {
+/// The whole document as one string -- what PR-057-A's baseline handed to one
+/// `text` widget, and what the editor **no longer does** (RFC-057 Q1). Kept only
+/// for the labelled reference scenario.
+fn whole_document(state: &State) -> String {
     state
         .app_shell
         .state()
         .active_project()
         .and_then(|project| project.content_workspace().active_document())
-        .map(crate::surface::editor::body_text)
+        .map(|document| document.text().to_string())
         .expect("an active document")
 }
 
-fn one_keystroke(state: &mut State, key: iced::keyboard::Key, width: f32) -> Stage {
-    one_keystroke_with_height(state, key, width, VIEWPORT_HEIGHT)
+/// The rows the editor draws right now: its window, one string per row.
+pub(super) fn drawn_rows_for_test(state: &State) -> Vec<String> {
+    drawn_rows(state)
 }
 
-fn one_keystroke_with_height(
-    state: &mut State,
-    key: iced::keyboard::Key,
-    width: f32,
-    height: f32,
-) -> Stage {
-    // What the `text` widget compared against last frame: an unchanged body is
-    // only compared, a changed one is laid out again (`Plain::update`).
-    let previous_body = active_body(state);
+fn drawn_rows(state: &State) -> Vec<String> {
+    let capacity = super::super::editor_window_capacity(state);
+    let document = state
+        .app_shell
+        .state()
+        .active_project()
+        .and_then(|project| project.content_workspace().active_document())
+        .expect("an active document");
+    crate::surface::editor::drawn_rows(document, capacity)
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// One keystroke against the editor **as built now**: rows bounded by the
+/// viewport. The `layout` stage lays out each drawn row whose string differs from
+/// the same row last frame, which is what a `text` widget does
+/// (`Plain::update`: an unchanged string is only compared).
+fn one_keystroke(state: &mut State, key: iced::keyboard::Key, width: f32) -> Stage {
+    let previous_rows = drawn_rows(state);
     let started = std::time::Instant::now();
     press_key(state, key);
     let update = started.elapsed();
@@ -190,16 +208,46 @@ fn one_keystroke_with_height(
     let view = started.elapsed();
     drop(element);
 
-    let body = active_body(state);
+    let rows = drawn_rows(state);
+    let size = state.theme.font_size_body();
+    let pitch = crate::surface::editor::row_pitch(size);
     let started = std::time::Instant::now();
-    if body != previous_body {
-        let _ = lay_out(&body, state.theme.font_size_body(), width, height);
+    for (index, row) in rows.iter().enumerate() {
+        if previous_rows.get(index) != Some(row) {
+            let _ = lay_out(row, size, width, pitch);
+        }
     }
     let layout = started.elapsed();
 
     Stage {
         update,
         view,
+        layout,
+    }
+}
+
+/// **The reference the editor must never return to** (RFC-057 Q1): the same
+/// keystroke with the whole document handed to one `text` widget laid out with no
+/// height bound -- what a scrollable body, or anything letting the widget see
+/// past the visible height, would pay. ~745 ms a keystroke at 100 000 lines.
+fn one_keystroke_whole_body_unbounded(
+    state: &mut State,
+    key: iced::keyboard::Key,
+    width: f32,
+) -> Stage {
+    let previous_body = whole_document(state);
+    let started = std::time::Instant::now();
+    press_key(state, key);
+    let update = started.elapsed();
+    let body = whole_document(state);
+    let started = std::time::Instant::now();
+    if body != previous_body {
+        let _ = lay_out(&body, state.theme.font_size_body(), width, f32::INFINITY);
+    }
+    let layout = started.elapsed();
+    Stage {
+        update,
+        view: std::time::Duration::ZERO,
         layout,
     }
 }
@@ -257,6 +305,35 @@ fn report(label: &str, samples: &[Stage]) -> String {
         percentile(&totals, 0.99),
         n = samples.len(),
     )
+}
+
+/// **RFC-057 Q1, with PR-057-A's reference number beside it.** The editor draws a
+/// window of a 100 000-line file, not the file: what reaches the text widgets per
+/// frame is a few dozen rows, a tiny fraction of the 3.3 MB document. Laid out
+/// with the whole file in one widget and no height bound, the same keystroke cost
+/// **~745 ms** (the labelled reference in the measurement below, against a 16 ms
+/// budget). Asserted on bytes, not on a clock, so it cannot depend on the machine.
+#[test]
+fn the_editor_draws_a_window_of_a_100_000_line_file_and_never_the_file() {
+    let text = fixture_text();
+    let state = open_fixture("editor-baseline-q1", &text);
+
+    let rows = drawn_rows(&state);
+    let drawn: usize = rows.iter().map(String::len).sum();
+
+    assert_eq!(rows.len(), super::super::editor_window_capacity(&state));
+    assert!(
+        rows.len() < 100,
+        "a window, not 100 000 rows: {}",
+        rows.len()
+    );
+    assert!(
+        drawn * 500 < text.len(),
+        "{drawn} bytes reach the widgets against a {}-byte document: the whole file must never be handed to a widget (~745 ms a keystroke, PR-057-A)",
+        text.len()
+    );
+    // And the view really builds from them: it does not panic on the huge document.
+    drop(super::super::view(&state));
 }
 
 /// The harness runs end to end on a small document and its figures are sane:
@@ -350,13 +427,13 @@ fn editor_typing_latency_baseline_100_000_lines() {
     {
         let mut state = open_fixture("editor-baseline-unbounded", &text);
         for _ in 0..2 {
-            let _ = one_keystroke_with_height(&mut state, character("w"), width, f32::INFINITY);
+            let _ = one_keystroke_whole_body_unbounded(&mut state, character("w"), width);
         }
         let samples: Vec<Stage> = (0..12)
-            .map(|_| one_keystroke_with_height(&mut state, character("x"), width, f32::INFINITY))
+            .map(|_| one_keystroke_whole_body_unbounded(&mut state, character("x"), width))
             .collect();
         out.push_str(&report(
-            "REFERENCE, not the shipped editor: unbounded layout height, typing at the start",
+            "REFERENCE, which the editor must never return to: the whole file in one widget, unbounded layout height, typing at the start",
             &samples,
         ));
     }
