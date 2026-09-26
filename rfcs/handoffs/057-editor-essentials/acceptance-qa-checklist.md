@@ -33,6 +33,15 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
 - [ ] **One drawn line is one assertable string**, testable without `iced`.
 - [ ] A's measurement re-run, both numbers reported.
 
+### Required at review 441
+
+- [ ] **Q1: the body never hands the whole file to one widget.** Measured in A: an unbounded layout
+      costs **~745 ms a keystroke**. A scrollable body, or anything that lets the widget see past the
+      visible height, pays it. A test holds the property, with A's reference number beside it.
+- [ ] **The 8 ms rule (ruled at 441):** B re-measures. Bounding the rows should leave roughly 4.4 ms
+      `update` plus a fraction — about 5 ms. If p95 does not land **under 8 ms**, the per-keystroke
+      document copy comes into scope in this release, said at review rather than tuned around.
+
 ## PR-057-C — the gutter and the caret
 
 - [ ] Line numbers come from the real line index, not the row's position in the window.

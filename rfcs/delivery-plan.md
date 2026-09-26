@@ -178,6 +178,14 @@ Published versions cannot be repaired; `0.27.0`'s changelog says so.
 
 **Correction, 2026-09-25 (RFC-056 PR-056-A, measured against the registry): cause B above is wrong for the *published* archives.** The app archives' lockfiles on crates.io name the **matching** core — `0.24.0` → core `0.24.0`, `0.25.0` → `0.25.0`, `0.26.0` → `0.26.0`, read with `curl` and `tar` from `static.crates.io` — and **`cargo install tekstide --version 0.25.0 --locked` builds** (`Installed package tekstide v0.25.0`), while the same command without `--locked` fails with the three `E0004`s. What named the *previous* core was the **local** `target/package` archive, which is packaged before its core is on the registry (`release-checklist.md`'s own note on why the published and local lockfiles differ). So the defect is cause A alone, and **`--locked` is a working remedy for older releases**, which the `0.27.0` changelog now says. The `--locked` install is also what the new post-publish check's lockfile step verifies.
 
+### `NFR-PERF-003` names a file the product can refuse (2026-09-26, RFC-057 PR-057-A)
+
+`NFR-PERF-003` measures typing latency in a **100,000-line file**; `DEFAULT_MAX_EDITABLE_BYTES` is
+**4 MiB**. Measured at PR-057-A: 100,000 lines fit only if the average line is **under 41.9 bytes**,
+and the implementer's first fixture — 51 bytes a line, an ordinary figure for source — was refused,
+over by 905,696 bytes. The requirement and the cap disagree for most real files. **Neither number was
+changed**; recorded for the owner, who owns whether the cap rises or the requirement is restated.
+
 ### A budget test that measures the machine (2026-09-25, RFC-055 review 434)
 
 **`shell::tests::change_review_content_view_build_cost_by_line_count_measurement` builds 100,000
@@ -191,6 +199,8 @@ A test that measures the machine on a shared machine teaches its readers to read
 weather. It should assert a **ratio against a reference workload timed in the same process**, so
 contention cancels, rather than an absolute millisecond count. Unscheduled; recorded so the next
 blocked gate is not re-diagnosed from scratch.
+
+**A worked example now exists (2026-09-26, RFC-057 PR-057-A):** `editor_typing_latency_baseline_100_000_lines` is `#[ignore]`d, prints p50/p95/p99 per stage, and **asserts nothing about speed**, so the gate cannot depend on the machine. That is the shape the change-review budget test should take.
 
 ### Two rules the release sequence now carries (2026-09-25, RFC-055 PR-055-C)
 
