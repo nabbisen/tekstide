@@ -7757,8 +7757,11 @@ fn the_notes_of_a_run_are_written_from_one_place_and_nothing_else_writes_them() 
             continue;
         }
         let source = std::fs::read_to_string(&path).unwrap();
-        // Everything after the file's own `#[cfg(test)]` module marker is test code.
-        let production = source.split("#[cfg(test)]").next().unwrap();
+        // Everything from the file's own test module on is test code. The marker
+        // is the module, not any `#[cfg(test)]` item: `shell.rs` has test-only
+        // functions long before its end, and cutting there would leave most of
+        // it unscanned.
+        let production = source.split("#[cfg(test)]\nmod ").next().unwrap();
         for (needle, allowed) in rules {
             for line in production.lines() {
                 let trimmed = line.trim_start();
