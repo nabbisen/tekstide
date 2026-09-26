@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::content::{
     ExternalChangeDecision, SaveDecision, TextCursor, TextDocument, TextDocumentEditError,
     TextDocumentOpenError, TextDocumentOpenPolicy, TextDocumentRefreshError, TextDocumentSaveError,
-    TextDocumentState,
+    TextDocumentState, TextViewport,
 };
 use crate::project::explorer_tree::{
     ExplorerScanCompleted, ExplorerScanRequest, ExplorerToggle, ExplorerTree,
@@ -260,6 +260,21 @@ impl ProjectContentWorkspace {
             return Err(ProjectContentError::NoActiveDocument);
         };
         document.set_cursor(cursor);
+        Ok(())
+    }
+
+    /// RFC-057 PR-057-B: the viewport's write path, the twin of
+    /// [`Self::set_active_cursor`] and for the same reason: the viewport takes
+    /// part in no dirty/save/conflict computation, so this never touches
+    /// `self.status`.
+    pub fn set_active_viewport(
+        &mut self,
+        viewport: TextViewport,
+    ) -> Result<(), ProjectContentError> {
+        let Some(document) = self.active_document.as_mut() else {
+            return Err(ProjectContentError::NoActiveDocument);
+        };
+        document.set_viewport(viewport);
         Ok(())
     }
 

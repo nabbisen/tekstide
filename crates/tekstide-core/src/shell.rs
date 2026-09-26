@@ -1,7 +1,7 @@
 use crate::app::{AddProjectOutcome, AppState, RemoveProjectError};
 use crate::close::CloseAssessment;
 use crate::command::AppCommand;
-use crate::content::{ExternalChangeDecision, SaveDecision, TextCursor};
+use crate::content::{ExternalChangeDecision, SaveDecision, TextCursor, TextViewport};
 use crate::navigation::{TerminalLayoutClass, TerminalPanePolicy};
 use crate::project::recent::RecentProjectState;
 use crate::project::root::ProjectRootValidationError;
@@ -175,6 +175,18 @@ impl ApplicationShell {
         cursor: TextCursor,
     ) -> Result<(), ProjectContentError> {
         let result = self.state.set_active_project_cursor(cursor);
+        if self.state.active_project().is_some() {
+            self.route = AppRoute::ActiveProjectWorkspace;
+        }
+        result
+    }
+
+    /// RFC-057 PR-057-B.
+    pub fn set_active_project_viewport(
+        &mut self,
+        viewport: TextViewport,
+    ) -> Result<(), ProjectContentError> {
+        let result = self.state.set_active_project_viewport(viewport);
         if self.state.active_project().is_some() {
             self.route = AppRoute::ActiveProjectWorkspace;
         }

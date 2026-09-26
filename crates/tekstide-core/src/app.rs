@@ -1,6 +1,6 @@
 use crate::agent::AgentRunLaunchPlan;
 use crate::close::{CloseAssessment, assess_close};
-use crate::content::{ExternalChangeDecision, SaveDecision, TextCursor};
+use crate::content::{ExternalChangeDecision, SaveDecision, TextCursor, TextViewport};
 use crate::domain::{
     AgentRunId, ChangeSetId, OwnershipError, ReviewState, TerminalId, TerminalSession, VisibleSlot,
 };
@@ -517,6 +517,18 @@ impl AppState {
         };
 
         project.set_active_cursor(cursor)
+    }
+
+    /// RFC-057 PR-057-B.
+    pub fn set_active_project_viewport(
+        &mut self,
+        viewport: TextViewport,
+    ) -> Result<(), ProjectContentError> {
+        let Some(project) = self.active_project_mut() else {
+            return Err(ProjectContentError::NoActiveProject);
+        };
+
+        project.set_active_viewport(viewport)
     }
 
     pub fn save_active_project_text_document(

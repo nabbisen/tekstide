@@ -16,7 +16,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::close::{CloseResourceProviderState, CloseResourceSummary};
-use crate::content::{ExternalChangeDecision, SaveDecision, TextCursor, TextDocumentOpenPolicy};
+use crate::content::{
+    ExternalChangeDecision, SaveDecision, TextCursor, TextDocumentOpenPolicy, TextViewport,
+};
 use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError,
     ApprovalDecision, ApprovalId, ApprovalRequest, AuditEvent, ChangeAssociationConfidence,
@@ -1574,6 +1576,16 @@ impl ProjectSession {
         let result = self.content_workspace.set_active_cursor(cursor);
         self.record_activity();
         result
+    }
+
+    /// RFC-057 PR-057-B: moves the active document's viewport. **Records no
+    /// activity**: the window follows the cursor, which already did, and a
+    /// scroll caused by typing is not a second user action.
+    pub fn set_active_viewport(
+        &mut self,
+        viewport: TextViewport,
+    ) -> Result<(), ProjectContentError> {
+        self.content_workspace.set_active_viewport(viewport)
     }
 
     pub fn save_active_text_document(&mut self) -> Result<SaveDecision, ProjectContentError> {

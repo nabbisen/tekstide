@@ -288,6 +288,63 @@ fn cursor_move_without_an_active_document_fails_without_a_document() {
     );
 }
 
+/// RFC-057 PR-057-B: the viewport is written through the same chain the cursor
+/// is, changes no rendered status, and marks nothing dirty.
+#[test]
+fn a_viewport_move_reaches_the_document_and_changes_no_status() {
+    let sandbox = TestSandbox::new("shell-viewport-move");
+    let project_dir = sandbox.create_dir("project");
+    sandbox.create_file_with_contents("project/notes.txt", b"one\ntwo\nthree\n");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+    shell
+        .open_active_project_text_document("notes.txt")
+        .expect("text document should open");
+    let rendered_before = shell.render_text();
+
+    shell
+        .set_active_project_viewport(crate::content::TextViewport {
+            first_visible_line: 2,
+        })
+        .expect("a real active document should accept a viewport move");
+
+    assert_eq!(
+        rendered_before,
+        shell.render_text(),
+        "scrolling is not an edit"
+    );
+    assert_eq!(
+        shell
+            .state()
+            .active_project()
+            .and_then(|project| project.content_workspace().active_document())
+            .map(|document| document.viewport().first_visible_line),
+        Some(2),
+        "the field that has had no writer since RFC-006 has one"
+    );
+}
+
+#[test]
+fn a_viewport_move_without_an_active_document_fails_without_a_document() {
+    let sandbox = TestSandbox::new("shell-viewport-move-no-document");
+    let project_dir = sandbox.create_dir("project");
+    let mut shell = ApplicationShell::new();
+    shell
+        .add_project_from_path(&project_dir)
+        .expect("valid project should be added");
+
+    let result = shell.set_active_project_viewport(crate::content::TextViewport {
+        first_visible_line: 1,
+    });
+
+    assert_eq!(
+        result,
+        Err(crate::project::ProjectContentError::NoActiveDocument)
+    );
+}
+
 #[test]
 fn content_workspace_renders_bounded_explorer_scan_without_file_contents() {
     let sandbox = TestSandbox::new("shell-content-explorer");
