@@ -91,16 +91,23 @@ Tekstide is local-first: **it does not send project data anywhere.** It writes u
 - **an audit store**, created the first time you open a terminal;
 - **transcripts of AI CLI runs**, containing whatever the AI CLI printed — **including anything it
   quoted from your files.** Plain terminals are not recorded. Capture is bounded: 32 MiB per
-  transcript, 256 MiB per project, 1 GiB overall.
+  transcript, 256 MiB per project, 1 GiB overall;
+- **a small record beside each transcript (`run.json`)**: the run's id, profile, prompt summary,
+  timestamps and ids, and the classification and notes you write on it — no output. It is what lets a
+  reopened project list its earlier runs.
 
 Trust Settings (`Ctrl+Alt+U`) can decline capture for a project's future runs and purge its
-transcripts, **including those from earlier runs**. Purge leaves two kinds of file in place: a
+transcripts **and their run records**, including those from earlier runs. Purge leaves two kinds of file in place: a
 transcript that was still being written when the project opened, and transcripts whose project is no
 longer in the recent list. **Deleting the `transcripts/` directory removes everything.**
 
 Transcripts are also removed **without being asked**: one past the configured retention age
 (`transcript_retention_days`, 30 by default) is deleted when you open its project or launch an AI CLI
-run in it. Nothing runs on a timer. The project board says what was removed.
+run in it. Nothing runs on a timer. The project board says what was removed. **Retention removes the
+transcript and leaves the run's record**, which holds your notes; a purge removes it.
+
+A report you **export** from the AgentRun Report is written where you say, as a new file, and is then
+outside Tekstide's reach: purging does not remove it.
 
 What each file can contain, and how to remove it:
 [Local data and privacy](https://nabbisen.github.io/tekstide/users/local-data-and-privacy.html).

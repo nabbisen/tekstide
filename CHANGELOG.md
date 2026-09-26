@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.27.0 - A Run That Still Exists Tomorrow
+
+Status: release candidate; not yet published or tagged.
+
+A run used to be gone the moment Tekstide closed: reopen a project and its runs were transcript files with no prompt, profile or ending behind
+them, and there was nowhere to say what a run was for or to hand on what it did. A run now leaves a small record beside its transcript, is listed
+again when the project reopens, and says when it does not know how it ended. On the AgentRun Report you can classify it, write notes on it and
+export a report that keeps your words apart from the run's. Checked by running the release binary: a run classified with a label containing a
+right-to-left override, noted, exported, killed with the app and reopened came back intact — and purging it left the exported file untouched.
+This release also fixes how an older release installs; see *Fixed*.
 
 ### Added — an agent run survives closing the app
 
@@ -54,6 +63,20 @@
   tekstide --version 0.25.0 --locked` builds (measured); or install the latest release, or build from that release's git tag.
 - The release procedure gained a post-publish check that resolves the release just published **and the previous one** from the
   registry.
+
+### What this release does not do
+
+- **A change to a run's status reaches its record within a second**, not instantly; a run killed inside that second loses that status
+  change and nothing else. What you write — a classification or a note — is saved the moment you make it.
+- **A run with no record folder has no record.** A run started with transcript capture off, or that could not be given a transcript
+  folder, can be classified and annotated, but only until Tekstide closes, and the report says so.
+- **A report quotes the last 16 KiB of the transcript and lists at most 500 changed paths**, and says how much it left out. It is written
+  where you choose: **a report exported into the project folder is one more untracked file in a project Tekstide watches for changes.**
+- **Exporting a report is not recorded in the audit store.** Whether it should be is an open question, not a decision.
+- **An older Tekstide does not know `run.json`** and counts it as bytes it does not recognise. It will neither read nor delete it.
+- **The report's changed-files section was tested, not watched with a real change set**, and the classification buttons were driven by key
+  and by their click message, not by a mouse.
+- **Everything `0.26.0` listed still holds**, including there being **no screen-reader support**.
 
 ## 0.26.0 - The Explorer Asks Git
 
