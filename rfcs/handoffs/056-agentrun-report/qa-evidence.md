@@ -293,3 +293,111 @@ A **record with no transcript** (the user deleted `transcript.log` by hand) is n
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs` (the book and the changelog changed), `rfc_docs_invariants` 16: clean.
 **Three consecutive full-workspace runs, `--no-fail-fast`, fresh `TMPDIR` (`/dev/shm/tek056g`): `671 + 16 + 1024` = 1,711 passed, 0 failed, 0 entries left after each**
 (loads at the end 7.55, 9.54, 11.37). No intermittent this time. `git diff --cached --check` clean before each commit.
+
+## PR-056-D — the classification, the notes, and the report
+
+### Review 438's three required items, first
+
+| Item | What changed | Test |
+| --- | --- | --- |
+| **Retention takes the transcript alone** | `purge_transcript_at` takes a scope, `UserPurge` or `Retention`; only the first touches the record files, the directory or the restored run. A launched run whose transcript retention removed remembers where its record is (`record_directories_after_expiry`), because its tombstone's own path is empty | `a_transcript_expired_by_retention_leaves_the_record_and_the_run`, `a_launched_runs_record_survives_its_transcripts_expiry_and_can_still_be_written` (the record can still be written after the expiry). **R1** — retention taking the record again — fails four tests |
+| **The tombstone hole** | a tombstone no longer returns early from a user purge: it finds its run's record through the session's maps and takes it. **And a record whose transcript retention removed in an *earlier session* is a record with no transcript** — an ordinary state now, not the corner I called unreachable at C — so a project purge also takes those (`records_without_a_live_transcript`) | `purging_one_run_after_retention_takes_its_record_through_the_tombstone` (**R2**, alone), `a_purge_after_retention_still_takes_the_record_and_the_directory`, `a_purge_takes_a_record_whose_transcript_retention_removed_in_an_earlier_session` (**R5**, alone). **R4** — a launched run forgetting where its record is — alone |
+| **One thing, one number** | the purge dialog counts **runs** and the bytes of their transcripts *and* records (`purgeable_run_data`), and names them; Trust Settings says its figure counts transcripts only | `the_purge_dialog_counts_runs_and_records_and_trust_settings_says_what_its_figure_omits` — opened over a run whose transcript is already gone, so a transcript count would say `0`. **R3** fails it alone. Live: `evidence/pr-056-d/06` reads *1 run's transcript and run record (942 bytes)*, and its Trust Settings line reads *1 transcript (50 bytes), not counting their run records* |
+
+The dialog's title is *"Purge all runs' transcripts and records for this project?"*. **The book and the changelog follow**, replacing what C wrote about retention.
+I corrected one claim of my own in the C evidence: *"a record with no transcript cannot arise through the product"* — retention now makes it the ordinary state, which
+is exactly why the tombstone fix mattered.
+
+### What was built
+
+| | |
+| --- | --- |
+| `agent/report.rs` (core) | `render_run_report`, a pure function of **borrowed** sources, so the report owns nothing the record does not; `run_report_contents`, so the export can say what it will hold **before** it is written; `write_run_report`, the one place a report leaves the product |
+| `shell/run_report.rs` | the controls: seven classification buttons and *Clear*, notes, export — each a visible button **and** a key (`1`–`6`, `c`, `x`, `n`, `e`; `Enter` saves, `Shift+Enter` a new line, `Escape` cancels, `Ctrl+V` pastes). The controls sit above the report's scrolling content |
+| `AgentRun.notes` | **no longer `pub`**: outside the core crate the only way in is `set_notes` / `ProjectSession::set_agent_run_notes` |
+
+**The file's format** (`evidence/pr-056-d/07-the-exported-report.md` is the real one). Three kinds of text, kept apart *in the file*: **your words** on lines beginning `| `,
+**what Tekstide recorded** as plain `Name: value` lines, and **what came from the run** (changed paths, the last 16 KiB of the transcript) on lines beginning `> `. The marker
+is applied *after* the text is escaped, so no text can supply it: a note line you typed as `> looks like agent output` is written `| ⁨> looks like agent output⁩`, and an agent
+line `| the agent says a person wrote this` is written `> ⁨| …⁩`. Every untrusted value — profile, prompt summary, custom label, each line of the notes, each path, each transcript
+line — goes through `quote_untrusted`, so **no raw bidi control or newline reaches the file**: in the live report the typed U+202E is the text `<U+202E>`.
+
+### Tests — 8 in the report module, 1 in core for the paths, 7 in the shell
+
+| Box | Test |
+| --- | --- |
+| notes and the run's text are marked apart, neither can supply the other's marker | `the_users_notes_and_the_runs_text_are_marked_apart_in_the_file` |
+| a custom label with a bidi control and a newline is quoted in the file | `a_custom_label_with_a_bidi_control_and_a_newline_is_quoted_in_the_file`, `hostile_untrusted_values_are_escaped_wherever_they_appear` (profile, summary, path, transcript) |
+| an unseen ending says so | `a_run_whose_ending_was_not_seen_says_so_in_the_file` |
+| a bounded record says so | `a_bounded_record_says_so_in_the_report`, `the_transcript_tail_is_bounded_and_the_report_says_how_long_the_whole_was` |
+| says what it contains before writing | `the_report_says_what_it_will_contain_before_it_is_written`; and in the shell the export field holds `export_contents` before Enter |
+| new file, private, never overwrites, refuses relative / missing folder / the state directory / a symlink | `a_report_is_written_as_a_new_private_file_and_never_overwrites` and the shell's `a_person_can_export_the_report_to_a_path_and_it_never_overwrites` |
+| **Tekstide keeps no second copy** | the same shell test lists the run's folder after an export: `["run.json", "transcript.log"]` — no report stored beside the record — and the report function takes only borrowed sources |
+| **reachable by a person, no environment variable** (D10) | `a_person_can_classify_a_run_by_key_and_by_click_and_the_record_follows_at_once`, `a_custom_classification_is_typed_saved_and_a_blank_one_is_refused`, `notes_are_what_the_person_typed_and_a_field_swallows_the_shortcut_keys` — each drives a real launch of the marker script with the report open |
+| a paste is bounded and keeps only the newlines its field takes | `a_paste_into_a_report_field_is_bounded_and_keeps_only_the_newlines_the_field_takes` |
+| a modal stops the controls | `a_modal_stops_the_report_controls_from_acting_underneath_it` |
+| **only the user writes the notes, held structurally** | `the_notes_of_a_run_are_written_from_one_place_and_nothing_else_writes_them` |
+
+**D4 is held two ways, and the second is a test, not review.** The field is not writable outside its crate, and that test scans **every non-test source file** in both
+crates for `.set_agent_run_notes(`, `.set_notes(` and `.notes = `, allowing exactly the typing handler, the two restore sites and the definitions. **My first version of it cut
+each file at its first `#[cfg(test)]`; `shell.rs` has test-only functions early, so most of it went unscanned, and ablation D7 (a second writer added to `shell.rs`) passed.**
+It now cuts at the test *module*. D7 fails it.
+
+### Ablations
+
+| # | Ablation | Failed |
+| --- | --- | --- |
+| D1 | the `4` key does not classify | the classify test alone |
+| D2 | a field does not swallow the shortcut keys | the notes test alone |
+| D3 | `Shift+Enter` saves instead of starting a line | the notes test alone |
+| D6 | the export does not know what it will contain | the export test alone |
+| D7 | **a second writer of the notes in `shell.rs`** | the scan test alone, naming the file and the line |
+| D8 | the report overwrites | the core writer test **and** the shell export test |
+| D9 | a note line is not marked `| ` | the marks test |
+| D10 | a custom label is not quoted | the bidi-and-newline test |
+| D11 | transcript lines are not marked `> ` | the marks test |
+| D12 | an unknown ending prints a time | the ending test |
+| D13 | notes are written without `quote_untrusted` | the marks test (*"`| ⁨> looks like agent output`"* absent) |
+| D14 | changed paths are not marked | the marks test |
+| D15 | changed paths are not deduplicated | the changed-paths test |
+| R1–R5 | see the retention table above | each alone except R1 (four) |
+
+**Two that did not fail, and what they mean.** **D4** and **D5** — removing the modal guard from `classify` and from `open_field` — failed nothing. The click messages are
+classified `BackgroundControl`, and `update` already refuses those while a modal is open; the guards inside the handlers repeat it, as every neighbour's do. They are defence in
+depth, and the test proves the *gate*, not the guards. I left them, because a handler that trusts a gate two frames up is how this crate's earlier modal bugs began.
+
+### Live walk
+
+Release binary at the D commits, fixtures in `mktemp -d` under `/dev/shm`, focus-verified `wtype`, no environment variable, no window floated or resized.
+
+| Step | What a person did | Result | Evidence |
+| --- | --- | --- | --- |
+| 1 | launched the configured CLI, `Ctrl+Alt+R` | the report with the heading first, the controls above the transcript, *Not classified yet* | `01-` |
+| 2 | `4`, then `c` and typed `spike` + U+202E + `gnp.exe`, `Enter` | `[x] c Custom…` and *Custom classification: spike<U+202E>gnp.exe* — **quoted on render**; the record on disk holds the raw label | `02-` |
+| 3 | `n`, typed a note ending in U+202E, `Shift+Enter`, a line beginning `> `, `Enter` | both lines shown escaped, the second **without being taken for run text** | `02-`, `05-` |
+| 4 | `e`, typed a path | the field says what the file will contain — *this run's recorded details, your classification and notes, 0 changed file paths and the last 50 bytes of its transcript, quoted* — and *once written, the file is outside Tekstide … purging this run does not remove it. It is never overwritten* | `03-` |
+| 5 | `Enter` | *Wrote 1113 bytes to …/report.md. Tekstide cannot change or remove that file, and purging does not.* The file is `-rw-------` | `04-`, `07-` |
+| 6 | closed the window (the run was still going), reopened, `Ctrl+Alt+R` | **the run is there, classified and noted, its transcript attached, and it says it does not know when it ended** — this closes the B box's live half | `05-` |
+| 7 | `Ctrl+Alt+U`, `Delete`, `Purge` | the dialog names *1 run's transcript and run record (942 bytes)*; after it the run's folder is gone and **the exported report is byte-identical** (`cmp`) | `06-` |
+
+### Not shown live, said plainly
+
+- **A run with changed files.** The fixture's CLI changes nothing, so the report's changed-paths section read *(none recorded)* live. It is exercised by the core tests
+  (marks, quoting, the 500 cap, the deduplicating gatherer), not by a person watching a real change set appear in a report.
+- **Clicking the buttons.** Every step above used keys. The buttons dispatch the same messages and the classify test sends one, but no mouse click was captured; the click is
+  the path this tooling cannot drive without a pointer.
+- **`Ctrl+V` in a field** is covered by the message the clipboard answers with, not by a real clipboard.
+- **An export into the project folder** is not prevented — the folder is the user's, and the field says the file is theirs — but it would appear as an untracked file in a
+  project Tekstide watches for changes. Named, not built.
+
+### Decisions and deviations
+
+1. **Retention leaves the record** (review 438), and a run whose transcript retention removed is still listed, still annotatable, and taken by a purge.
+2. **The dialog counts runs.** Its number changed meaning from *transcripts* to *runs whose data will go*; the catalog line, the title and the Trust Settings sentence changed
+   with it.
+3. **`AgentRun.notes` is `pub(crate)`** with a `notes()` reader. Tests in the core crate still assign it; the scan test excludes test code by design.
+4. **The report quotes the transcript's last 16 KiB and lists at most 500 paths**, both said in the file. The transcript is the one place the report copies run content out of
+   the product; the export field says *"the last N bytes of its transcript, quoted"* before the user saves.
+5. **A `Ended:` line for a run still going** says so in words (*not ended: the run was still going when this report was made*), because a live `NotEnded` is not unknown.
+6. **`NotificationKind`/catalog/`generic_args`**: 32 new catalog lines (plus the two reworded for the purge dialog and Trust Settings) and one new placeholder (`$label`, untrusted).
+7. **The `REQ-AGENT-011` and `-015` status moves are not made here**; they belong to the RFC's closure with the release, as `REQ-FILE-005`'s did.
