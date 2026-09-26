@@ -131,10 +131,29 @@ enable — `selector` (→ `iced_selector 0.14.0`, already in the registry graph
 `Target::visible_bounds() -> Option<Rectangle>`.
 
 That last one is the machine-readable form of the question RFC-053 answered by eye: a modal clipping
-its own `Close` out of reach, and a status bar wrapping against the one-line invariant every PTY's
-height depends on, were both found by taking a screenshot and looking at it. `visible_bounds()`
-returns `None` for a widget that is not visible — the same question, as a value. `is_focused()`
-answers *where does the keyboard actually go*, which is the accessibility story we do have.
+its own `Close` out of reach was found by taking a screenshot and looking at it, and
+`visible_bounds()` returns `None` for a widget an ancestor has clipped — the same question, as a
+value. `is_focused()` answers *where does the keyboard actually go*, which is the accessibility story
+we do have.
+
+**Corrected 2026-09-26, by snora, and confirmed by reading the crate.** This note first claimed
+`visible_bounds()` covered clipping generally. It does not: it catches a widget clipped **by an
+ancestor**, and **not text overflowing its own box**. snora measured the case our own letter led them
+to — a 400-character unbroken string in a toast, silently cut off, with `bounds()` and
+`visible_bounds()` both reporting 288.0 × 18.2 — and the API confirms the mechanism, since
+`iced_selector::Text` carries only `bounds` and `visible_bounds` and **no natural size**. So the
+selector cannot answer the question we actually have open: **`0.26.0` ships "a long filename is
+clipped at the sidebar's right edge with no marker"**, which is text overflowing its own box, not an
+ancestor's clip.
+
+**What does work, given to us by snora: compare the string's natural (unconstrained) size with its
+rendered size.** That turns the overflow-marker work — reserved at review 432 as wanting its own
+small RFC — from "we would need a mechanism" into "the mechanism is known", and it applies equally to
+RFC-057's data-dependent gutter width (R5). Scheduled with RFC-063 rather than separately.
+
+One loose end for RFC-063 to settle: `iced 0.14`'s manifest declares `tester = ["dep:iced_tester"]`,
+while snora refers to `iced_test::selector`. Neither crate is vendored here, so the name is
+unconfirmed — resolve it at evaluation rather than repeating either.
 
 **Reserved as RFC-063**, to be evaluated under RFC-052 D3's rule — measured against our properties,
 adopted only if all of them hold. It serves our own verification, not users, and it is **not** a
