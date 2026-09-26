@@ -100,14 +100,17 @@ says *measured* with no number in the evidence is not ticked.
 
 ## Whole-RFC
 
-- [ ] `REQ-AGENT-011` and `REQ-AGENT-015` move to implemented **with evidence a user can reach both**
+- [x] `REQ-AGENT-011` and `REQ-AGENT-015` move to implemented **with evidence a user can reach both**
       — the capture, not the fields. RFC-021 is why this box is worded that way.
-- [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
+      *(`delivery-plan.md`, in the closing commit; evidence `evidence/pr-056-d/05`, and the release's own `01-`/`02-`.)*
+- [x] The colour-alone, i18n completeness and internal-identifier scans still pass.
+      *(Workspace tests; green at every gate, including the release's.)*
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
       staging, `rfc_docs_invariants`, **three consecutive full-workspace runs with `--no-fail-fast`**
       to files, **0 fixture entries left** in a fresh short `TMPDIR`.
-- [ ] Every new intermittent failure has a dated row in `test-process-leak.md`.
-- [ ] Commits are pushed once the gate is green.
+- [x] Every new intermittent failure has a dated row in `test-process-leak.md`.
+      *(One recurrence in this RFC — row 8 at B's gate — registered. None at C, D or the release.)*
+- [x] Commits are pushed once the gate is green.
 
 ### Ruled at review 439
 
