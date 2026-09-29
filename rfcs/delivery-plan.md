@@ -219,7 +219,7 @@ weather. It should assert a **ratio against a reference workload timed in the sa
 contention cancels, rather than an absolute millisecond count. Unscheduled; recorded so the next
 blocked gate is not re-diagnosed from scratch.
 
-**A worked example now exists (2026-09-26, RFC-057 PR-057-A):** `editor_typing_latency_baseline_100_000_lines` is `#[ignore]`d, prints p50/p95/p99 per stage, and **asserts nothing about speed**, so the gate cannot depend on the machine. That is the shape the change-review budget test should take.
+**A worked example now exists (2026-09-26, RFC-057 PR-057-A):** `editor_typing_latency_baseline_100_000_lines` is `#[ignore]`d, prints p50/p95/p99 per stage, and **asserts nothing about speed**, so the gate cannot depend on the machine. That is the shape the change-review budget test should take. **And the ratio half has an outside precedent (2026-09-29): snora 0.52.0 asserts bounded work as *ten times the toasts must cost under thirty times the layout time*, in release, in CI — measured 11.6–12.0, with a deliberate quadratic edit caught at 92.** Two projects arrived at the same technique independently; ours is still unscheduled.
 
 ### Two rules the release sequence now carries (2026-09-25, RFC-055 PR-055-C)
 
@@ -278,6 +278,20 @@ Unscheduled — it needs a feature (per-pane focus, or a cycle action with a han
   drop RFC-018's scrim cap, and nest our PTY grid inside someone else's terminal. **Approved
   2026-09-26: stay on `iced`.** The accessibility gain was the one real argument on the other side and
   it is partial and unmeasured; RFC-014 R2's `accesskit` watch remains the instrument.
+
+  **Re-checked 2026-09-29 against snora 0.52.0, and the decision stands — but the reasons narrowed.**
+  Four of our six items moved: **sizes are met**, enforced by the literal-size scan we described to
+  them; **verbatim text is met**, using our own fixture (a bidi override, a newline, a control
+  character) found by exact content; **bounded work is asserted**; colour-alone is met for the states
+  snora draws. The August disqualifier — chrome whose label sizes are literals would fail a test we
+  already have — is gone. What still blocks adoption is three things, none of them taste:
+  **accessible names**, which neither project can fix on `iced 0.14`; **renderer coverage**, since
+  their CI renders tiny-skia only and we ship where the GPU path may not start; and the structural
+  one — their own caveat that the harness gives **frame hashes, not pixels**, so a conformance record
+  of theirs cannot answer RFC-052 D3's question, which is what a widget *draws*. We would still have
+  to measure that ourselves, which is most of the cost of owning the components. Nothing of ours was
+  affected by their narrowed ABDD claim: grepped, and our colour-alone rule is RFC-015/019/025's, not
+  theirs.
 - **Order.** This schedule puts truth before features and settings before file-layer work. Any row can
   be moved; moving one is a scope decision, and it belongs in this table rather than in a commit.
 
