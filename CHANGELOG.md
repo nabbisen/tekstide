@@ -33,6 +33,8 @@
   very long line is not visible. Drawing one row per line is what makes the window exact; soft wrap is not part of this release.
   **Corrected above: the editor now scrolls sideways to keep the cursor visible on a long line, and does not leave it clipped.**
 - **The window moves only by the cursor**: there is still no scrollbar and no mouse wheel, and navigation is still the four arrow keys.
+- **The top of the window is two rows, not three.** The title and the two global actions (Trust Settings, Help) now share one row;
+  the project tabs are the row below it, instead of a third row of their own underneath both.
 
 ### Measured — typing in a very large file
 

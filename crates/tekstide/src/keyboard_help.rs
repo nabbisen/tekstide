@@ -223,12 +223,13 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
             on_press_snippet: ".on_press(Message::OpenApprovalHistoryButtonPressed)",
         }),
         NavigationAction::OpenTrustSettings => Some(ControlCoverage::VisibleControl {
-            description: "the top bar's own \"Trust Settings\" button (top_bar_actions_row, \
-                          RFC-040 PR-040-C)",
+            description: "the top bar's own \"Trust Settings\" button (top_bar_title_and_actions_row, \
+                          RFC-040 PR-040-C, RFC-057 D10)",
             on_press_snippet: ".on_press(Message::OpenTrustSettingsButtonPressed)",
         }),
         NavigationAction::OpenHelp => Some(ControlCoverage::VisibleControl {
-            description: "the top bar's own \"?\" button (top_bar_actions_row, RFC-040 PR-040-C)",
+            description: "the top bar's own \"?\" button (top_bar_title_and_actions_row, \
+                          RFC-040 PR-040-C, RFC-057 D10)",
             on_press_snippet: ".on_press(Message::OpenHelpButtonPressed)",
         }),
         NavigationAction::OpenDiffReview => Some(ControlCoverage::VisibleControl {

@@ -16040,7 +16040,7 @@ fn clicking_the_top_bar_help_button_opens_the_real_help_modal() {
 /// `top_bar_offers_trust_settings`'s own context-dependent decision (D2,
 /// RFC-040 PR-040-C): "Trust Settings" is hidden with no active
 /// project, not shown-and-silently-refusing -- factored out of
-/// `top_bar_actions_row` for the same testability reason
+/// `top_bar_title_and_actions_row` for the same testability reason
 /// `main_area_label`/`sidebar_label` already are, since an `Element` is
 /// not directly inspectable.
 #[test]

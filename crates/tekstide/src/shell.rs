@@ -7668,11 +7668,16 @@ fn chrome_style(
 /// already runs in every mode, Terminal Immersion included, so nothing
 /// new needs to be threaded through that composition for the strip to
 /// survive every route/mode the title already does.
+///
+/// **RFC-057 D10 (owner-requested, relayed review 438)**: two rows, not
+/// three -- the title and the global actions share the top row
+/// ([`top_bar_title_and_actions_row`]), the project tab strip sits alone
+/// below it. `container(content)`'s own chrome (padding, background,
+/// border) is unchanged; only what `content` stacks changed.
 fn top_bar(state: &State) -> Element<'_, Message> {
     let content = column![
-        text(state.window_title()).size(state.theme.font_size_heading()),
+        top_bar_title_and_actions_row(state),
         project_tab_strip(state),
-        top_bar_actions_row(state),
     ]
     .spacing(6);
 
@@ -7697,16 +7702,25 @@ fn top_bar(state: &State) -> Element<'_, Message> {
 /// button's precondition (an active project) already always holds by
 /// construction of where it lives; this one's does not, since `top_bar`
 /// renders on every route.
-/// Factored out of [`top_bar_actions_row`] for the same testability
-/// reason [`main_area_label`]/[`sidebar_label`] already are -- an
-/// `Element` is not directly inspectable, so the decision itself is a
-/// plain function a test can call.
+/// Factored out of [`top_bar_title_and_actions_row`] for the same
+/// testability reason [`main_area_label`]/[`sidebar_label`] already are
+/// -- an `Element` is not directly inspectable, so the decision itself is
+/// a plain function a test can call.
 fn top_bar_offers_trust_settings(state: &State) -> bool {
     state.app_shell.state().active_project().is_some()
 }
 
-fn top_bar_actions_row(state: &State) -> Element<'_, Message> {
-    let mut actions: Vec<Element<'_, Message>> = Vec::new();
+/// RFC-057 D10: the title, then the same two global actions this row
+/// always carried -- **the actions row now carries the title**, per the
+/// owner's own wording for the split (review 438), rather than the title
+/// sitting in a row of its own above it. Which actions show and when is
+/// unchanged ([`top_bar_offers_trust_settings`]).
+fn top_bar_title_and_actions_row(state: &State) -> Element<'_, Message> {
+    let mut actions: Vec<Element<'_, Message>> = vec![
+        text(state.window_title())
+            .size(state.theme.font_size_heading())
+            .into(),
+    ];
     if top_bar_offers_trust_settings(state) {
         actions.push(
             crate::theme::button(

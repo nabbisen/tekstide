@@ -100,8 +100,13 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
 
 ## PR-057-E — the two-row header
 
-- [ ] The actions row carries the title and sits above the tab strip.
-- [ ] Captured, and **every superseded capture named** across the evidence packs.
+- [x] The actions row carries the title and sits above the tab strip.
+      *(`top_bar_actions_row` renamed `top_bar_title_and_actions_row`, now builds the title in as its
+      first element; `top_bar` stacks it and `project_tab_strip` alone, two rows not three.)*
+- [x] Captured, and **every superseded capture named** across the evidence packs.
+      *(`evidence/pr-057-e/01-…`/`02-…`, with-project and no-project. All eleven prior images named
+      as superseded on the header only, not on what each was actually evidence for — see
+      `qa-evidence.md` § PR-057-E.)*
 
 ### Required at review 445
 
@@ -142,15 +147,25 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
 
 ## Whole-RFC
 
-- [ ] `REQ-EDIT-002` moves to met with evidence a user can see; `NFR-REL-005` records undo;
+- [x] `REQ-EDIT-002` moves to met with evidence a user can see; `NFR-REL-005` records undo;
       `NFR-PERF-003` has a measured number for the first time.
-- [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
+      *(`REQ-EDIT-002`: PR-057-C, `02-…`. `NFR-REL-005`: PR-057-D's whole evidence section.
+      `NFR-PERF-003`: PR-057-A/B's measured p95/p99 figures, in the changelog.)*
+- [x] The colour-alone, i18n completeness and internal-identifier scans still pass.
+      *(Part of every full-workspace run this RFC's slices gated on; last confirmed in PR-057-E's own
+      three clean runs.)*
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
       staging, `rfc_docs_invariants`, **three consecutive full-workspace runs with `--no-fail-fast`**
       to files, **0 fixture entries left** in a fresh short `TMPDIR`.
-- [ ] Every new intermittent failure has a dated row in `test-process-leak.md`.
+      *(PR-057-E's own gate: clean, `712 + 16 + 1045` ×3, 0 left, no intermittent.)*
+- [x] Every new intermittent failure has a dated row in `test-process-leak.md`.
+      *(2026-09-29 entries: the sharper `SocketPathTooLong` reading, and row 1's recurrence.)*
 - [ ] The core pin bumps with the version (`the_workspace_pins_tekstide_core_to_its_own_version`).
+      *(Release-time step, not yet due — `0.28.0` has not been cut. `[workspace.dependencies]` still
+      pins `0.27.0`, correctly, until the version bump that release-checklist.md's own process owns.)*
 - [ ] Commits are pushed once the gate is green.
+      *(Every slice's own commits are pushed as they land; this box is the release's own final push,
+      not yet due for the same reason as the pin above.)*
 
 ## Final Acceptance Decision
 

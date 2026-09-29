@@ -167,6 +167,11 @@ changed for it in RFC-056; it is a frame-layout change, it invalidates every GUI
 the top of the window, and it wants its own small slice rather than a corner of someone else's.
 Recorded here the way the Project Board's cards were, so it is not absorbed invisibly.
 
+**Done, RFC-057 PR-057-E (2026-09-29).** The title and the top bar's global actions (Trust Settings,
+Help) now share one row; the project tab strip is the row below it. Every prior GUI capture in
+RFC-057's own evidence packs that shows the top of the window is named as superseded on the header
+only (`qa-evidence.md` § PR-057-E) — none were retaken, since none were evidence *for* the header.
+
 ### Owner decision needed: does the editor's font family include the body, now that it has column arithmetic? (2026-09-29, RFC-057 review 443)
 
 **Not decided in PR-057-C, and not blocking PR-057-D.** `docs/src/users/configuration.md` says the configured font family

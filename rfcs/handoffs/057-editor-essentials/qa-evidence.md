@@ -310,3 +310,28 @@ Plus the mechanical keybinding tests every new `NavigationAction` gets: `undo_ac
 ### Gate
 
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `712 + 16 + 1045` = 1,773 passed, 0 failed, 0 entries left after each.** One intermittent met along the way (row 1, `approval::tests::channel::bind_recovers_from_a_stale_socket_file`, twice back to back in redone attempts of the middle run) — passed in isolation both times, not the slice, the gate redone rather than counted; see `test-process-leak.md`'s 2026-09-29 recurrence entry, which also records a sharper reading of the `SocketPathTooLong` class found along the way (a `mktemp -d /dev/shm/…` `TMPDIR` can still be too long; a short fixed literal is the actual fix).
+
+## PR-057-E — the two-row header
+
+### What was built
+
+Owner-requested, relayed at review 438 (recorded in `delivery-plan.md`): split the single three-row top bar (`window_title`, `project_tab_strip`, `top_bar_actions_row`, each its own stacked row) into two rows. `shell.rs`'s `top_bar` now stacks `top_bar_title_and_actions_row` (the title plus the same two global actions the actions row already carried — "the actions row carries the title," the owner's own wording) and `project_tab_strip` alone below it. `top_bar_actions_row` is renamed to `top_bar_title_and_actions_row`, which now builds its `Vec<Element>` starting with the title text rather than `top_bar` composing the title as a separate `column!` entry. No other chrome changed: same `container` padding/background/border, same `top_bar_offers_trust_settings` gate deciding whether Trust Settings shows, same spacing.
+
+### Captured
+
+Two live states, a fresh `XDG_STATE_HOME` each (`mktemp -d` under `/dev/shm`, no recent-projects list to leak another session's paths):
+
+- `01-two-row-header-with-project.png`: an open project. Row 1: "Tekstide", "Trust Settings", "?". Row 2: "[Projects]", "● project ×". Trust Settings shows because a project is active — the same gate as before, now sharing a row with the title instead of sitting below the tab strip.
+- `02-two-row-header-first-run-no-project.png`: the cold-start first screen, no project open. Row 1: "Tekstide", "?" only — Trust Settings correctly absent. Row 2: "[Projects]" alone. Proves the two-row shape holds independent of which actions are showing, not merely a coincidence of the with-project state.
+
+### Every superseded capture, named
+
+**Every existing image in this RFC's evidence packs shows the old three-row header at the top of the frame** — none of them were capturing the header itself, but every one is a full-window screenshot, so all eleven carry the shape this slice replaced:
+
+`evidence/pr-057-a/live-01-baseline-100000-line-file-no-gutter-no-caret-no-scroll.png`; `evidence/pr-057-b/live-00-the-window-at-the-start.png`, `live-01-the-window-follows-the-cursor-to-line-101.png`, `live-02-a-long-line-is-clipped-not-wrapped.png`; `evidence/pr-057-c/01-caret-and-lookalike-glyph-distinguishable.png` through `07-q3-caret-invisible-at-column-81-header-still-says-81.png` (all seven).
+
+None are superseded on the property each was actually taken to show (the gutter, the caret, the horizontal window) — only the header chrome at the top of each frame is stale. Not retaken: retaking eleven images to change a part of the frame none of them were evidence for would be churn for its own sake, and this section's own two new captures already show the new header on its own terms.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `712 + 16 + 1045` = 1,773 passed, 0 failed, 0 entries left after each.** No intermittent this time.
