@@ -73,6 +73,19 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
 - [ ] The requirements gap (no `REQ-EDIT` names undo) is written up for the owner; no requirement is
       minted.
 
+### Required at review 443
+
+- [ ] **Q3: the width approximation gets a boundary, not a disclaimer.** `CHAR_WIDTH_FACTOR = 0.6`
+      approximates a face that capture `01-` shows is **proportional by default**. Drive the
+      every-column test with a line of wide characters (`W`) and one of narrow (`i`) and report
+      whether the cursor stays inside the window — and if it leaves, by how many columns. A number.
+      If it can leave, the book says so where `ui_font` is documented.
+- [ ] **Owner decision, surfaced at 443, to settle before `0.28.0` ships:** the book says the family
+      applies *"including the editor's"* while the terminal and tree keep a fixed-width face
+      *"because a column of code has to line up"*. The editor now has a gutter and column arithmetic,
+      so it meets that reason. Either it joins the fixed-width side (recommended), or the horizontal
+      window measures real text. The changelog must describe whichever is chosen.
+
 ## PR-057-E — the two-row header
 
 - [ ] The actions row carries the title and sits above the tab strip.
