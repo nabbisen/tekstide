@@ -45,22 +45,22 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
 
 ## PR-057-C — the gutter and the caret
 
-- [ ] Line numbers come from the real line index, not the row's position in the window.
-- [ ] **The caret is an element, not a character**: the fixture contains a file whose text holds the
+- [x] Line numbers come from the real line index, not the row's position in the window.
+- [x] **The caret is an element, not a character**: the fixture contains a file whose text holds the
       caret's own character, and the two are distinguishable. Ablated.
-- [ ] **One cursor, one reader**: a planted second derivation fails a test.
-- [ ] A file crossing 10 000 lines does not shift its text column while scrolling. Captured at 5 and
+- [x] **One cursor, one reader**: a planted second derivation fails a test.
+- [x] A file crossing 10 000 lines does not shift its text column while scrolling. Captured at 5 and
       6 digits.
-- [ ] `REQ-EDIT-002` met, **and its coverage row corrected** from implying it already was.
+- [x] `REQ-EDIT-002` met, **and its coverage row corrected** from implying it already was.
 
 ### Required at review 442
 
-- [ ] **Q2: a horizontal window that follows the cursor**, on the same rule as the vertical one —
+- [x] **Q2: a horizontal window that follows the cursor**, on the same rule as the vertical one —
       the least movement that keeps it on screen. **Not** soft wrap: exact one-line-one-row
       arithmetic is the property B rests on. Ruled from B's own capture, which showed *Line 1,
       Column 525* while the visible text ended near column 60 — a user typing into text they cannot
       see, and a caret that could not be visible at all on that line.
-- [ ] A capture of a long line with the cursor visible, and the changelog correcting B's "clipped at
+- [x] A capture of a long line with the cursor visible, and the changelog correcting B's "clipped at
       the right edge with no horizontal scroll" **by name**.
 
 ## PR-057-D — undo

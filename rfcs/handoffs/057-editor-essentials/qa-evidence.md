@@ -159,3 +159,61 @@ The fixture is throwaway and was not saved.
 
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `692 + 16 + 1039` = 1,747 passed, 0 failed, 0 entries left after each**
 (loads at the end 16.1, 16.6, 17.6 — other projects' suites; none of this slice's tests read a clock). No intermittent.
+
+## PR-057-C — the gutter, the caret, and the horizontal window (Q2)
+
+### What was built
+
+| | |
+| --- | --- |
+| `surface/editor.rs` | `gutter_digits`/`gutter_lines` (real line indices, sized to the whole file); `columns_that_fit`/`column_pitch` (the horizontal twin of `rows_that_fit`/`row_pitch`, the same disclosed approximation); `windowed_line` (per-row horizontal clip, char-indexed); `viewport_following` now follows **both** axes, on the cursor's own line; `caret_row_position` (where the caret is inside the drawn window, or `None`); `caret_split`/`RowPlan`/`row_plan` (the caret's placement, factored into a pure, testable decision — D8); `caret_element` (the caret itself: a coloured, fixed-size container, never a character); `EditorWindow` (rows+columns together, so `view`'s parameter count stays under clippy's own limit and a caller cannot swap them unnoticed) |
+| core | `TextViewport` gains `first_visible_column` |
+| `shell.rs` | `editor_column_capacity`, sized from the **active document's own** total line count, so the gutter reservation is correct before any row is drawn |
+
+### Q2 (review 442) — the horizontal window
+
+`viewport_following` now takes a `column_capacity` and follows the cursor's column on its own line, by the same D9 rule (least movement) the vertical axis already used, reusing `window_for` a second time. **One global horizontal position, applied to every drawn row** — the same way `first_visible_line` is one value for the whole view, not one per line.
+
+**Held two ways.** `a_cursor_anywhere_on_a_long_line_ends_up_inside_the_horizontal_window` drives every column of a 300-character line through `viewport_following` and asserts `caret_row_position` finds it, every time — this is Q2's own acceptance criterion, held in code, not only in a screenshot. Live: `04-…` and `05-…` show the cursor at column 151 and column 301 of a 400-character line, the caret visible near the window's right edge both times, the text scrolled to match. **`03-…` shows the pre-Q2 shape for comparison** — column 1, the line clipped at the window's edge — the same limitation the changelog now corrects by name.
+
+### The gutter — the acceptance criterion
+
+`gutter_digits` sizes to `line_count`, the whole file, never to what is drawn. Live: `02-…`, a 10,010-line file scrolled from line 9964 to line 10010 — **the text column does not move** as the line numbers grow from 4 digits to 5. (The scroll from the top, `git-exclude`-free capture sequence, also passed through 999→1000 without a visible shift, not kept as a separate image since the 9999→10000 capture is the stronger case the acceptance criterion names.)
+
+### The caret — D2
+
+**Structural guarantee, not only a runtime one.** `RowPlan::WithCaret { before: &str, after: &str }` holds **borrowed** slices of the row's own text; there is no `String` field to splice a synthetic character into without an allocation the type does not offer. The caret itself (`caret_element`) is a coloured `iced` container with no text content at all — it is not merely *escaped* like `chrome_line`'s path, it **contains no character**, so there is no string for an escape discipline to fail on.
+
+**Live**, `01-…`: `caret.txt` open, cursor at its default `(0,0)`. The real caret (a thin coloured bar at the very start of line 1) and the file's own look-alike glyph (a full block, mid-line 2) are both on screen at once and are visibly different marks — the acceptance criterion, met with the fixture containing the caret's own plausible character, exactly as required.
+
+**One cursor, one reader.** `caret_row_position` and `caret_split` both work in **characters**, the same unit every other position in this module uses (`clamp_cursor`, `insert_at`). `the_caret_position_is_the_real_cursor_and_nothing_independently_derived` constructs a row with a two-byte character before the caret's column and asserts the char-indexed answer; ablation C4 (below) turns `caret_split` byte-indexed and both this test and the bidi-glyph test fail — a byte-indexed derivation is exactly R2's risk (RFC-053 D3 in a new place), made concrete.
+
+### Tests (18 new, 1 widened) and the source-scan property
+
+`gutter_digits_is_sized_to_the_whole_file_not_to_what_is_on_screen`, `the_gutter_does_not_shift_the_text_column_while_scrolling_across_a_power_of_ten`, `gutter_lines_are_real_line_indices_not_window_positions`, `columns_that_fit_reserves_room_for_the_gutter_it_is_told_about`, `windowed_line_clips_by_character_not_byte_and_never_panics_past_the_end`, `the_horizontal_window_follows_the_cursor_by_the_least_it_must`, `a_cursor_anywhere_on_a_long_line_ends_up_inside_the_horizontal_window`, `the_caret_split_contributes_no_characters_and_cannot_be_confused_with_a_real_glyph`, `the_caret_position_is_the_real_cursor_and_nothing_independently_derived`, `a_caret_outside_the_drawn_window_is_none_not_a_wrong_position`, `row_plan_puts_the_caret_only_on_its_own_row_and_never_as_a_character`.
+
+`the_document_text_reaches_a_widget_only_through_window_rows` (B's Q1 guard) is **widened, not weakened**: a second legitimate reader joined the first — `gutter_digits(line_count(document.text()))`, which counts newlines and never builds a string of the file — and the test now names both allowed call sites by function, failing on any third.
+
+### Ablations (`ablate.sh`, clean tree each)
+
+| # | Ablation | Failed |
+| --- | --- | --- |
+| C1 | gutter width sized to what is on screen, not the whole file | the digits test and the crossing test |
+| C2 | gutter shows the window position, not the real line index | the real-indices test and the crossing test |
+| C3 | `row_plan` never plants the caret | `row_plan_puts_the_caret_only_on_its_own_row_and_never_as_a_character` alone |
+| C4 | `caret_split` byte-indexed, not char-indexed | the multi-byte position test and the glyph-distinguishability test |
+| C5 | the horizontal window never moves | the "every column" test and the "least movement" test |
+| C6 | `windowed_line` clips by byte, not char | the character-clip test alone |
+| C7 | `caret_row_position` ignores the row capacity | the outside-window test |
+| C8 | `caret_row_position` ignores the column capacity | the outside-window test |
+| C9 | the column capacity ignores the gutter digits | `columns_that_fit_reserves_room_for_the_gutter_it_is_told_about` alone |
+
+**C3's first version was wrong, and I caught it before running it for the record.** My first attempt replaced the whole caret-composition branch *inside `view`* — a function no test in this crate calls directly, since RFC-057 (like every other GUI surface here) tests the logic feeding a view, not the `iced::Element` tree itself. It failed nothing. I factored the decision into `row_plan`, a pure function, added a test for it, and re-ran the same shape of ablation against the new location — it now fails alone. The lesson is the same one B's own Q1 guard already taught: a property is only as testable as the function it lives in.
+
+### Live walk
+
+Release binary, fixtures in `mktemp -d` under `/dev/shm`, focus-verified `wtype` (checked against niri's own focused-window id before every send), no window floated or resized, real navigation through the real router — no test-only shortcut. `caret.txt` (a lookalike glyph), `gutter.txt` (10,010 lines), `longline.txt` (one 400-character line) — three fixtures, three properties.
+
+### Not shown live
+
+A mouse click on any control (every step was a key, matching this project's established practice for this surface). The approximate column-width factor's own accuracy was not measured against `cosmic-text`'s real shaping — it is disclosed as an approximation, the same as row height already is, not verified against the renderer.
