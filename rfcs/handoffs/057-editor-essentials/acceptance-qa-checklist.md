@@ -98,7 +98,14 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
       change it, and review 444's ~51-column caret loss stops being shipped by default. A user who
       chooses a proportional family still gets it, and inherits an approximation the book already
       discloses with its measured number.
-- [x] **To implement before the `0.28.0` candidate:** the editor body defaults to a fixed-width face
+- [x] **Implemented 2026-09-29, accepted at review 448.** the editor body defaults to a fixed-width face
+      **Reviewer, at 448:** `Theme::editor_font()` is `family.map_or(Font::MONOSPACE, Font::with_name)`
+      — the same resolution with one different fallback. `Font::MONOSPACE` measures **8.400 px/char
+      against 8.400 approximated, 0.0 % off**, asserted rather than `#[ignore]`d because it holds;
+      Q3's proportional finding stays `#[ignore]`d because it is a published defect, not a gate.
+      **The boundary rule:** anything that takes part in the body's column arithmetic shares the
+      body's face — which is why the gutter follows it and `chrome_line`, `cursor_line`, Save and the
+      empty state do not. Original wording of this box:
       while still honouring a configured `family`; `configuration.md`'s paragraph and the changelog
       say so; review 444's disclosure stays, reframed as the consequence of a choice rather than the
       default anyone gets. The original wording of this box: the book says the family
