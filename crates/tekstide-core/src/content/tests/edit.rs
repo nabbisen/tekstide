@@ -18,6 +18,7 @@ fn edit_transitions_document_to_dirty_without_saving() {
     document.set_cursor(TextCursor { line: 3, column: 5 });
     document.set_viewport(TextViewport {
         first_visible_line: 2,
+        first_visible_column: 0,
     });
     document.replace_text("changed\n").unwrap();
 
@@ -28,7 +29,8 @@ fn edit_transitions_document_to_dirty_without_saving() {
     assert_eq!(
         document.viewport(),
         TextViewport {
-            first_visible_line: 2
+            first_visible_line: 2,
+            first_visible_column: 0,
         }
     );
     assert_eq!(

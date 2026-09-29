@@ -307,6 +307,7 @@ fn a_viewport_move_reaches_the_document_and_changes_no_status() {
     shell
         .set_active_project_viewport(crate::content::TextViewport {
             first_visible_line: 2,
+            first_visible_column: 0,
         })
         .expect("a real active document should accept a viewport move");
 
@@ -337,6 +338,7 @@ fn a_viewport_move_without_an_active_document_fails_without_a_document() {
 
     let result = shell.set_active_project_viewport(crate::content::TextViewport {
         first_visible_line: 1,
+        first_visible_column: 0,
     });
 
     assert_eq!(

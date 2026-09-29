@@ -11,8 +11,9 @@ use tekstide_core::project::{ProjectContentStatus, ProjectId, ProjectSession};
 use tekstide_core::content::TextCursor;
 
 use super::{
-    apply_edit_key, chrome_line, cursor_line, document_state_symbol, empty_lines, navigate_cursor,
-    open_error_line, rows_that_fit, viewport_following, window_rows,
+    apply_edit_key, caret_row_position, caret_split, chrome_line, cursor_line,
+    document_state_symbol, empty_lines, gutter_digits, gutter_lines, navigate_cursor,
+    open_error_line, rows_that_fit, viewport_following, window_rows, windowed_line,
 };
 use crate::i18n::{Catalog, LocalePreference};
 
@@ -180,9 +181,10 @@ fn how_many_rows_fit_is_arithmetic_on_a_measured_height() {
 fn the_viewport_follows_the_cursor_by_the_least_it_must() {
     let viewport = |first| tekstide_core::content::TextViewport {
         first_visible_line: first,
+        first_visible_column: 0,
     };
     let follow = |line, first, capacity| {
-        viewport_following(FIFTY_LINES, cursor(line, 0), viewport(first), capacity)
+        viewport_following(FIFTY_LINES, cursor(line, 0), viewport(first), capacity, 80)
             .first_visible_line
     };
 
@@ -229,20 +231,28 @@ fn the_document_text_reaches_a_widget_only_through_window_rows() {
         .filter(|(_, line)| !line.trim_start().starts_with("//") && line.contains(".text()"))
         .map(|(index, _)| index)
         .collect();
+    // RFC-057 PR-057-C: a second legitimate reader joined the first --
+    // `gutter_digits(line_count(document.text()))`, which counts newlines and
+    // never builds a string of the file, let alone hands one to a widget. Every
+    // reader must go straight into one of the two functions that make that true
+    // (`window_rows`, whose contract stays what PR-057-B's own tests pin, or
+    // `line_count`); nothing else may read `.text()` at all.
     assert_eq!(
         readers.len(),
-        1,
-        "the document's text is read in one place: {readers:?}"
+        2,
+        "the document's text is read in exactly two places, both bounded: {readers:?}"
     );
     // rustfmt may put the argument on its own line; the call it belongs to is the
-    // nearest line above that opens `window_rows(`.
-    assert!(
-        lines[readers[0].saturating_sub(2)..=readers[0]]
-            .iter()
-            .any(|line| line.contains("window_rows(")),
-        "and it goes straight into `window_rows`: {:?}",
-        lines[readers[0]]
-    );
+    // nearest line above that opens the reader's own function.
+    for &reader in &readers {
+        assert!(
+            lines[reader.saturating_sub(2)..=reader]
+                .iter()
+                .any(|line| line.contains("window_rows(") || line.contains("line_count(")),
+            "goes straight into window_rows or line_count: {:?}",
+            lines[reader]
+        );
+    }
     assert!(
         !production.contains("fn body_text"),
         "the whole-body function is gone"
@@ -250,6 +260,212 @@ fn the_document_text_reaches_a_widget_only_through_window_rows() {
     assert!(
         !production.lines().any(|line| !line.trim_start().starts_with("//") && line.contains("text().to_string()")),
         "the whole document is never copied into a string for drawing"
+    );
+}
+
+// ---- RFC-057 PR-057-C: the gutter, the horizontal window, and the caret ----------
+
+#[test]
+fn gutter_digits_is_sized_to_the_whole_file_not_to_what_is_on_screen() {
+    assert_eq!(gutter_digits(1), 1);
+    assert_eq!(gutter_digits(9), 1);
+    assert_eq!(gutter_digits(10), 2);
+    assert_eq!(gutter_digits(9_999), 4);
+    assert_eq!(gutter_digits(10_000), 5);
+    assert_eq!(gutter_digits(99_999), 5);
+    assert_eq!(gutter_digits(100_000), 6);
+}
+
+/// **The acceptance criterion**: a file crossing 10,000 lines does not shift
+/// its text column while scrolling. Sized to `total_lines`, not to
+/// `drawn_row_count` -- a window of rows 9,995..10,005 (crossing the boundary)
+/// still gets the file's own digit count, the same one the window at line 1
+/// would.
+#[test]
+fn the_gutter_does_not_shift_the_text_column_while_scrolling_across_a_power_of_ten() {
+    let digits = gutter_digits(10_005);
+    assert_eq!(digits, 5);
+
+    let near_start = gutter_lines(0, 3, digits);
+    let crossing = gutter_lines(9_995, 10, digits);
+
+    for line in near_start.iter().chain(&crossing) {
+        assert_eq!(line.chars().count(), 5, "{line:?}");
+    }
+    assert_eq!(near_start, vec!["    1", "    2", "    3"]);
+    assert_eq!(crossing[3], " 9999");
+    assert_eq!(crossing[4], "10000");
+    assert_eq!(crossing[9], "10005");
+}
+
+/// Real line indices, never the row's position in the window: row 0 of a
+/// window starting at line 9,997 reads *9998*, not *1*.
+#[test]
+fn gutter_lines_are_real_line_indices_not_window_positions() {
+    let lines = gutter_lines(9_997, 4, 5);
+    assert_eq!(lines, vec![" 9998", " 9999", "10000", "10001"]);
+}
+
+#[test]
+fn windowed_line_clips_by_character_not_byte_and_never_panics_past_the_end() {
+    assert_eq!(windowed_line("hello world", 0, 5), "hello");
+    assert_eq!(windowed_line("hello world", 6, 5), "world");
+    assert_eq!(windowed_line("hello world", 6, 100), "world");
+    assert_eq!(windowed_line("hello", 100, 5), "");
+    // Multi-byte: each of these three characters is more than one byte.
+    assert_eq!(windowed_line("h\u{e9}llo w\u{f6}rld", 0, 3), "h\u{e9}l");
+    assert_eq!(windowed_line("h\u{e9}llo w\u{f6}rld", 6, 3), "w\u{f6}r");
+}
+
+/// D9, applied to the second axis: the horizontal window follows the cursor's
+/// column on its own line, by the least movement that keeps it visible --
+/// review 442's required Q2.
+#[test]
+fn the_horizontal_window_follows_the_cursor_by_the_least_it_must() {
+    let text = "short\na very much longer line than the others\nx";
+    let viewport = |line, col| tekstide_core::content::TextViewport {
+        first_visible_line: line,
+        first_visible_column: col,
+    };
+    let follow = |cursor_line: usize, cursor_col: usize, vp_col: usize| {
+        viewport_following(
+            text,
+            cursor(cursor_line, cursor_col),
+            viewport(0, vp_col),
+            10,
+            10,
+        )
+        .first_visible_column
+    };
+
+    assert_eq!(follow(1, 5, 0), 0, "inside the window: it does not move");
+    assert_eq!(follow(1, 10, 0), 1, "one past the window: scrolls by one");
+    assert_eq!(
+        follow(1, 0, 5),
+        0,
+        "one before the window: scrolls back to it"
+    );
+    // A short line's own length bounds the window even if a longer line
+    // elsewhere was scrolled past: the cursor's own line decides.
+    assert_eq!(
+        follow(0, 5, 0),
+        0,
+        "\"short\" is 5 chars; the cursor at its end needs no scroll"
+    );
+    assert_eq!(
+        follow(2, 1, 0),
+        0,
+        "the one-character line \"x\": cursor after it, still in a 10-wide window"
+    );
+}
+
+/// **Q2's own required capture, held in code, not only in a screenshot**: a
+/// cursor on a long line is always inside the horizontal window after
+/// following -- there is no column at which a user could type into text they
+/// cannot see. Checked at every column of a line much longer than the window.
+#[test]
+fn a_cursor_anywhere_on_a_long_line_ends_up_inside_the_horizontal_window() {
+    let line: String = (0..300)
+        .map(|i| char::from(b'a' + (i % 26) as u8))
+        .collect();
+    let mut viewport = tekstide_core::content::TextViewport::default();
+    for column in 0..=line.chars().count() {
+        viewport = viewport_following(&line, cursor(0, column), viewport, 10, 12);
+        assert!(
+            caret_row_position(cursor(0, column), viewport, 10, 12).is_some(),
+            "column {column} landed outside the window that followed it: {viewport:?}"
+        );
+    }
+}
+
+/// RFC-057 D2, `what-the-editor-must-not-do.md` §1: the caret is an element,
+/// never a character. The fixture holds a file whose text contains the
+/// caret's own plausible glyph (a full block, the character someone might
+/// reach for to draw a caret by hand) at a position the real cursor is not on
+/// -- `caret_split` must not conflate the two: splitting contributes **zero**
+/// characters of its own, so the block glyph the file actually contains
+/// survives untouched on whichever side of the split it falls.
+#[test]
+fn the_caret_split_contributes_no_characters_and_cannot_be_confused_with_a_real_glyph() {
+    const CARET_LOOKALIKE: char = '\u{2588}'; // a full block, a plausible hand-drawn caret
+    let row = format!("look{CARET_LOOKALIKE}here");
+    let split_before_lookalike = caret_split(&row, 4);
+    assert_eq!(split_before_lookalike, ("look", "\u{2588}here"));
+    let split_after_lookalike = caret_split(&row, 5);
+    assert_eq!(split_after_lookalike, ("look\u{2588}", "here"));
+    // Zero characters added or removed, at either split: the caret is
+    // contributed by an element the row string never contains.
+    for (before, after) in [split_before_lookalike, split_after_lookalike] {
+        assert_eq!(format!("{before}{after}"), row);
+    }
+    assert!(
+        row.contains(CARET_LOOKALIKE),
+        "the file's own glyph is preserved raw, exactly like body_text's old bidi property"
+    );
+}
+
+/// D2's other half: the caret's own row-position function agrees with the
+/// document's real cursor and no other value -- **required, ablated**: R2 says
+/// a position derived independently for drawing is the RFC-053 D3 defect in a
+/// new place. A byte-indexed derivation (a plausible mistake: `TextCursor` is
+/// char-indexed everywhere else in this module) disagrees with the real,
+/// char-indexed cursor on any row holding a multi-byte character before it.
+#[test]
+fn the_caret_position_is_the_real_cursor_and_nothing_independently_derived() {
+    let viewport = tekstide_core::content::TextViewport {
+        first_visible_line: 0,
+        first_visible_column: 0,
+    };
+    // "h\u{e9}llo": the second character is two bytes, so column 3 (after it;
+    // chars are h, that character, l) is byte index 4, not char index 3 -- a
+    // byte-based derivation would land one character short of a char-based one
+    // on the very next character, "l".
+    let row = "h\u{e9}llo";
+    assert_eq!(
+        caret_row_position(cursor(0, 3), viewport, 10, 10),
+        Some((0, 3)),
+        "column 3, in characters, whatever the byte offset of the accented letter is"
+    );
+    let (before, after) = caret_split(row, 3);
+    assert_eq!(
+        (before, after),
+        ("h\u{e9}l", "lo"),
+        "the split is at the same char-indexed 3, agreeing with the position above"
+    );
+}
+
+/// A caret outside the drawn window (a transient state; `viewport_following`
+/// always corrects it before the next frame) is `None`, never a guess.
+#[test]
+fn a_caret_outside_the_drawn_window_is_none_not_a_wrong_position() {
+    let viewport = tekstide_core::content::TextViewport {
+        first_visible_line: 5,
+        first_visible_column: 5,
+    };
+    assert_eq!(
+        caret_row_position(cursor(0, 5), viewport, 10, 10),
+        None,
+        "above the window"
+    );
+    assert_eq!(
+        caret_row_position(cursor(20, 5), viewport, 10, 10),
+        None,
+        "below the window"
+    );
+    assert_eq!(
+        caret_row_position(cursor(5, 0), viewport, 10, 10),
+        None,
+        "left of the window"
+    );
+    assert_eq!(
+        caret_row_position(cursor(5, 20), viewport, 10, 10),
+        None,
+        "right of the window"
+    );
+    assert_eq!(
+        caret_row_position(cursor(5, 5), viewport, 10, 10),
+        Some((0, 0)),
+        "the window's own corner"
     );
 }
 

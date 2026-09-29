@@ -26,6 +26,10 @@ pub struct TextCursor {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TextViewport {
     pub first_visible_line: usize,
+    /// RFC-057 PR-057-C, Q2: the horizontal twin of `first_visible_line`, on
+    /// the same D9 rule -- the least movement that keeps the cursor's column
+    /// on screen. Columns, not bytes: the same unit `TextCursor.column` uses.
+    pub first_visible_column: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

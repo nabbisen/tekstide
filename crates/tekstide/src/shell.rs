@@ -4152,11 +4152,35 @@ fn editor_window_capacity(state: &State) -> usize {
     )
 }
 
+/// RFC-057 PR-057-C, Q2: how many columns of body text the editor's region can
+/// draw, after the gutter -- sized to the **active document's own** total
+/// line count (`gutter_digits`), the same "whole file, not what is on screen"
+/// rule that keeps the text column from shifting while scrolling. `None`
+/// (no active document) reads as no gutter reserved.
+fn editor_column_capacity(state: &State) -> usize {
+    let digits = state
+        .app_shell
+        .state()
+        .active_project()
+        .and_then(|project| project.content_workspace().active_document())
+        .map_or(1, |document| {
+            crate::surface::editor::gutter_digits(crate::surface::editor::line_count(
+                document.text(),
+            ))
+        });
+    crate::surface::editor::columns_that_fit(
+        state.editor_viewport.map(|size| size.width),
+        state.theme.font_size_body(),
+        digits,
+    )
+}
+
 /// RFC-057 PR-057-B, D9: brings the active document's viewport to where the
 /// cursor is, after an edit, a cursor move or a re-measure -- the window moves
 /// only when the cursor would otherwise be off it. A no-op without a document.
 fn settle_editor_viewport(state: &mut State) {
-    let capacity = editor_window_capacity(state);
+    let row_capacity = editor_window_capacity(state);
+    let column_capacity = editor_column_capacity(state);
     let Some(document) = state
         .app_shell
         .state()
@@ -4169,7 +4193,8 @@ fn settle_editor_viewport(state: &mut State) {
         document.text(),
         document.cursor(),
         document.viewport(),
-        capacity,
+        row_capacity,
+        column_capacity,
     );
     if following != document.viewport() {
         let _ = state.app_shell.set_active_project_viewport(following);
@@ -9102,7 +9127,10 @@ fn content_mode_editor_view(state: &State) -> Element<'_, Message> {
             &state.catalog,
             &state.theme,
             Message::SaveActiveDocumentButtonPressed,
-            editor_window_capacity(state),
+            crate::surface::editor::EditorWindow {
+                rows: editor_window_capacity(state),
+                columns: editor_column_capacity(state),
+            },
             Message::EditorViewportMeasured,
         ),
         None => text(main_area_label(state, Some(ProjectMode::Content))).into(),

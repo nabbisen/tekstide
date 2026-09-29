@@ -107,8 +107,10 @@ pub(crate) fn empty_lines(catalog: &Catalog, status: &ProjectContentStatus) -> V
 // laid out with no height bound, a 100 000-line body costs **~745 ms a
 // keystroke** (`editor_baseline`'s labelled reference), against a 16 ms budget.
 // What is drawn is the viewport's window: one fixed-height row per visible line,
-// each row one string, and **`document.text()` is read in exactly one place in
-// this module, [`window_rows`]** -- a test scans this file for it.
+// each row one string, and **`document.text()` is read in exactly two places in
+// this module -- [`window_rows`], which builds the window, and `line_count`,
+// which only counts newlines for the gutter's width (PR-057-C) -- and never
+// copied whole into a string for a widget** -- a test scans this file for it.
 
 /// iced's default text line height, as a multiple of the font size. Rows are
 /// fixed-height containers of exactly this pitch, so how many fit is arithmetic
@@ -139,21 +141,44 @@ pub(crate) fn line_count(text: &str) -> usize {
 /// **The viewport follows the cursor** (D9): the first visible line moves only
 /// when the cursor would otherwise be off screen, and as little as it must --
 /// moving the cursor inside the window does not scroll it. Nothing here scrolls
-/// for its own sake: there is no wheel and no scrollbar.
+/// for its own sake: there is no wheel and no scrollbar. RFC-057 PR-057-C, Q2:
+/// the horizontal window follows the same rule, on the cursor's own line --
+/// **one global horizontal position, applied to every drawn row**, the same way
+/// `first_visible_line` is one value for the whole view rather than one per
+/// line. The line length used for the horizontal window is read once, by
+/// walking to the cursor's own line -- an `O(file)` scan, the same order of
+/// cost `navigate_cursor` and `apply_edit_key` already pay per keystroke
+/// (review 441/442: the per-keystroke copy is out of this release; this does
+/// not enlarge it, it is the same class of cost).
 pub(crate) fn viewport_following(
     text: &str,
     cursor: TextCursor,
     viewport: TextViewport,
-    capacity: usize,
+    row_capacity: usize,
+    column_capacity: usize,
 ) -> TextViewport {
-    let window = super::explorer::window_for(
+    let vertical = super::explorer::window_for(
         line_count(text),
         cursor.line,
         viewport.first_visible_line,
-        capacity,
+        row_capacity,
+    );
+    // The cursor's own line's length, in characters, plus one: a cursor may
+    // sit one past the last character (the append position), which is a real,
+    // reachable column and must count as a position `window_for` can hold.
+    let cursor_line_len = text
+        .split('\n')
+        .nth(cursor.line)
+        .map_or(0, |line| line.chars().count());
+    let horizontal = super::explorer::window_for(
+        cursor_line_len + 1,
+        cursor.column,
+        viewport.first_visible_column,
+        column_capacity,
     );
     TextViewport {
-        first_visible_line: window.top,
+        first_visible_line: vertical.top,
+        first_visible_column: horizontal.top,
     }
 }
 
@@ -162,7 +187,10 @@ pub(crate) fn viewport_following(
 /// contains. This is the one function in this crate that must never call
 /// `text_safety::quote_untrusted` (RFC-016's editor exception), and **the one
 /// place the document's text is read for drawing**. One row is one string, so
-/// what the surface draws is assertable without `iced` (D8).
+/// what the surface draws is assertable without `iced` (D8). **Not yet
+/// clipped to the horizontal window** -- [`windowed_line`] does that, kept
+/// separate so this function's own contract (and PR-057-B's tests) are
+/// unchanged by PR-057-C.
 pub(crate) fn window_rows(text: &str, first_visible_line: usize, capacity: usize) -> Vec<&str> {
     text.split('\n')
         .skip(first_visible_line)
@@ -180,6 +208,133 @@ pub(crate) fn drawn_rows(document: &TextDocument, capacity: usize) -> Vec<&str> 
         document.viewport().first_visible_line,
         capacity,
     )
+}
+
+// ---- RFC-057 PR-057-C: the gutter, the horizontal window, and the caret ----------
+
+/// How wide the font's average character is taken to be, as a fraction of the
+/// font size. `ui_font` is configurable and may be proportional (unlike the
+/// tree's and the terminal's fixed monospace face), so this is a stated
+/// approximation, the same shape [`LINE_HEIGHT_FACTOR`] already is for row
+/// height -- **measured, then disclosed as approximate**, never claimed exact.
+const CHAR_WIDTH_FACTOR: f32 = 0.6;
+/// Columns of separation reserved between the gutter and the text.
+const GUTTER_SEPARATOR_COLUMNS: usize = 1;
+/// What the horizontal window holds before the layout has been measured.
+pub(crate) const DEFAULT_WINDOW_COLUMNS: usize = 80;
+
+/// The width of one character at `font_size`, by the same approximation
+/// [`row_pitch`] uses for height.
+pub(crate) fn column_pitch(font_size: f32) -> f32 {
+    font_size * CHAR_WIDTH_FACTOR
+}
+
+/// How many gutter digits a file of `total_lines` needs: the digit count of
+/// the last line number, at least one. **Sized to the whole file, not to what
+/// is on screen** -- this is what keeps the text column from shifting as a
+/// file crosses a power of ten while scrolling (RFC-057 acceptance criterion).
+pub(crate) fn gutter_digits(total_lines: usize) -> usize {
+    total_lines.max(1).to_string().len()
+}
+
+/// How many columns of body text fit a region of `width` pixels at
+/// `font_size`, after reserving `digits` for the gutter and its separator.
+pub(crate) fn columns_that_fit(width: Option<f32>, font_size: f32, digits: usize) -> usize {
+    let Some(width) = width else {
+        return DEFAULT_WINDOW_COLUMNS;
+    };
+    let total = (width.max(0.0) / column_pitch(font_size)).floor() as usize;
+    total
+        .saturating_sub(digits + GUTTER_SEPARATOR_COLUMNS)
+        .max(1)
+}
+
+/// The gutter's own drawn lines: `drawn_row_count` numbers starting at
+/// `first_visible_line + 1` (1-indexed, the editor convention -- see
+/// [`cursor_line`]), each right-aligned to `digits` wide. Real line indices,
+/// never the row's position in the window: row 0 of a window that starts at
+/// line 9,997 reads *9998*, not *1*.
+pub(crate) fn gutter_lines(
+    first_visible_line: usize,
+    drawn_row_count: usize,
+    digits: usize,
+) -> Vec<String> {
+    (0..drawn_row_count)
+        .map(|row| format!("{:>width$}", first_visible_line + row + 1, width = digits))
+        .collect()
+}
+
+/// `line`, windowed to the horizontal region `[first_visible_column,
+/// first_visible_column + capacity)`, by **character** index -- the same unit
+/// `TextCursor.column` uses, so a caret computed in columns and a window
+/// computed in columns agree. Never panics on a window past the line's end;
+/// it draws nothing there.
+pub(crate) fn windowed_line(line: &str, first_visible_column: usize, capacity: usize) -> &str {
+    let Some((start, _)) = line.char_indices().nth(first_visible_column) else {
+        return "";
+    };
+    let remainder = &line[start..];
+    let end = remainder
+        .char_indices()
+        .nth(capacity)
+        .map_or(remainder.len(), |(index, _)| index);
+    &remainder[..end]
+}
+
+/// Where the caret lands **inside the drawn window**, in (row, column) offsets
+/// from the window's own top-left -- or `None` when the document's real cursor
+/// (RFC-057 R2: there is no second, independently derived position) is
+/// currently outside the window that is drawn. That can only be true for one
+/// frame: `viewport_following` is called after every edit, cursor move and
+/// re-measure, and always brings the cursor back inside.
+pub(crate) fn caret_row_position(
+    cursor: TextCursor,
+    viewport: TextViewport,
+    row_capacity: usize,
+    column_capacity: usize,
+) -> Option<(usize, usize)> {
+    let row = cursor.line.checked_sub(viewport.first_visible_line)?;
+    if row >= row_capacity {
+        return None;
+    }
+    let column = cursor.column.checked_sub(viewport.first_visible_column)?;
+    if column >= column_capacity {
+        return None;
+    }
+    Some((row, column))
+}
+
+/// Splits a **windowed** row at `column` characters in, for the caret to sit
+/// between the two halves. Character-indexed, like [`windowed_line`] and like
+/// every other column arithmetic in this module (`clamp_cursor`, `insert_at`)
+/// -- **the property review 442's required ablation holds**: a byte-indexed
+/// split disagrees with a char-indexed one on any row containing a multi-byte
+/// character before the caret, and a test with one catches it.
+pub(crate) fn caret_split(row: &str, column: usize) -> (&str, &str) {
+    let byte = row
+        .char_indices()
+        .nth(column)
+        .map_or(row.len(), |(index, _)| index);
+    (&row[..byte], &row[byte..])
+}
+
+/// The caret: an **element**, never a character spliced into the text (D2,
+/// `what-the-editor-must-not-do.md` §1). A fixed-width, fixed-height coloured
+/// container -- it contributes no character to any string this module
+/// produces, so it cannot be confused with real file content, however that
+/// content is inspected.
+fn caret_element<'a, Message: 'a>(theme: Theme, height: f32) -> Element<'a, Message> {
+    const CARET_WIDTH: f32 = 2.0;
+    container(iced::widget::Space::new())
+        .width(Length::Fixed(CARET_WIDTH))
+        .height(Length::Fixed(height))
+        .style(
+            move |_base_theme: &iced::Theme| iced::widget::container::Style {
+                background: Some(iced::Background::Color(theme.accent())),
+                ..iced::widget::container::Style::default()
+            },
+        )
+        .into()
 }
 
 /// The result of a real edit: both halves `replace_active_text` and
@@ -391,29 +546,87 @@ pub(crate) fn navigate_cursor(
 /// `Option<Message>`: unlike `board::row_view`'s own `open_message`,
 /// this surface's caller always has a real message to offer, so there
 /// is no `None` case to thread through.
+/// The body window's two capacities together, the same one-struct shape
+/// `explorer::ExplorerCursor` already uses to keep a growing list of
+/// positional arguments from crossing clippy's own line -- and from a caller
+/// swapping rows and columns unnoticed, which two bare `usize`s permit and a
+/// named struct does not.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct EditorWindow {
+    pub rows: usize,
+    pub columns: usize,
+}
+
 pub fn view<'a, Message: 'a + Clone>(
     document: Option<&TextDocument>,
     status: &ProjectContentStatus,
     catalog: &'a Catalog,
     theme: &'a Theme,
     on_save: Message,
-    capacity: usize,
+    window: EditorWindow,
     on_body_measured: impl Fn(Size) -> Message + 'a,
 ) -> Element<'a, Message> {
+    let EditorWindow {
+        rows: row_capacity,
+        columns: column_capacity,
+    } = window;
     let content: Element<'a, Message> = match document {
         Some(document) => {
             let pitch = row_pitch(theme.font_size_body());
-            let rows: Vec<Element<'a, Message>> = drawn_rows(document, capacity)
+            let viewport = document.viewport();
+            let cursor = document.cursor();
+            let digits = gutter_digits(line_count(document.text()));
+            let rows = drawn_rows(document, row_capacity);
+            let caret_at = caret_row_position(cursor, viewport, row_capacity, column_capacity);
+            let numbers = gutter_lines(viewport.first_visible_line, rows.len(), digits);
+            let rows: Vec<Element<'a, Message>> = rows
                 .into_iter()
-                .map(|line| {
+                .zip(numbers)
+                .enumerate()
+                .map(|(row_index, (line, number))| {
                     // No wrapping: one line is one row, so the window's
-                    // arithmetic is exact. A line wider than the region is
-                    // clipped at its right edge (there is no horizontal
-                    // scroll; soft wrap is a non-goal).
-                    container(
-                        text(line.to_owned())
+                    // arithmetic is exact. **Q2**: the row is also windowed
+                    // horizontally, by the same rule as the vertical window,
+                    // so a long line's own cursor position is never off
+                    // screen -- clipping with no horizontal window (B's
+                    // shape) left a user typing into text they could not
+                    // see (review 442).
+                    let windowed =
+                        windowed_line(line, viewport.first_visible_column, column_capacity);
+                    let row_body: Element<'a, Message> = match caret_at {
+                        Some((caret_row, caret_column)) if caret_row == row_index => {
+                            // D2: the caret is composed in, as its own
+                            // element -- the text on either side of it is
+                            // still exactly the file's own characters, never
+                            // a character standing in for the caret.
+                            let (before, after) = caret_split(windowed, caret_column);
+                            iced::widget::row![
+                                text(before.to_owned())
+                                    .size(theme.font_size_body())
+                                    .wrapping(iced::widget::text::Wrapping::None),
+                                caret_element(*theme, pitch),
+                                text(after.to_owned())
+                                    .size(theme.font_size_body())
+                                    .wrapping(iced::widget::text::Wrapping::None),
+                            ]
+                            .into()
+                        }
+                        _ => text(windowed.to_owned())
                             .size(theme.font_size_body())
-                            .wrapping(iced::widget::text::Wrapping::None),
+                            .wrapping(iced::widget::text::Wrapping::None)
+                            .into(),
+                    };
+                    container(
+                        iced::widget::row![
+                            container(
+                                text(number)
+                                    .size(theme.font_size_body())
+                                    .wrapping(iced::widget::text::Wrapping::None)
+                            )
+                            .width(Length::Shrink),
+                            row_body,
+                        ]
+                        .spacing(8),
                     )
                     .width(Length::Fill)
                     .height(Length::Fixed(pitch))
@@ -421,7 +634,7 @@ pub fn view<'a, Message: 'a + Clone>(
                 })
                 .collect();
             // The body region's size is measured, not computed: the window
-            // holds as many rows as the layout engine says fit.
+            // holds as many rows and columns as the layout engine says fit.
             let body = crate::surface::frame::MeasureSize::new(
                 container(column(rows))
                     .width(Length::Fill)
